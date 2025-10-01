@@ -1,0 +1,15 @@
+{
+  "name": "agent-brain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": { "start": "node src/server.js" },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.46.1",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "node-cron": "^3.0.3",
+    "openai": "^4.57.0"
+  }
+}

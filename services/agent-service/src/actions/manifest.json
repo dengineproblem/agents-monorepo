@@ -1,0 +1,947 @@
+[
+  {
+    "action": "PauseCampaign",
+    "level": "campaign",
+    "method": "POST",
+    "path": "/v19.0/{campaign_id}",
+    "params": {
+      "status": {
+        "type": "enum",
+        "required": true,
+        "values": ["PAUSED"],
+        "example": "PAUSED"
+      }
+    },
+    "pre_conditions": [
+      "Campaign must exist and belong to accessible Ad Account",
+      "User token must have ads_management permission and access to campaign"
+    ],
+    "effects": "Campaign and all its ad sets/ads stop delivering",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{campaign_id}",
+      "fields": ["status", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/get-started/manage-campaigns#pause",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group#Updating"
+    ]
+  },
+  {
+    "action": "ResumeCampaign",
+    "level": "campaign",
+    "method": "POST",
+    "path": "/v19.0/{campaign_id}",
+    "params": {
+      "status": {
+        "type": "enum",
+        "required": true,
+        "values": ["ACTIVE"],
+        "example": "ACTIVE"
+      }
+    },
+    "pre_conditions": [
+      "Campaign and parent Ad Account are active (not deactivated)",
+      "User has required permissions"
+    ],
+    "effects": "Campaign (and its ad sets/ads) becomes eligible to deliver (if no other pauses)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{campaign_id}",
+      "fields": ["status", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/get-started/manage-campaigns#pause", 
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group#Updating"
+    ]
+  },
+  {
+    "action": "RenameCampaign",
+    "level": "campaign",
+    "method": "POST",
+    "path": "/v19.0/{campaign_id}",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "max_length": 255,
+        "example": "Summer Sale Campaign"
+      }
+    },
+    "pre_conditions": [
+      "Campaign is not deleted",
+      "Name is non-empty and within length limits"
+    ],
+    "effects": "Changes the campaign's name (no impact on delivery)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{campaign_id}",
+      "fields": ["name"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group#Updating"
+    ]
+  },
+  {
+    "action": "UpdateCampaignDailyBudget",
+    "level": "campaign",
+    "method": "POST",
+    "path": "/v19.0/{campaign_id}",
+    "params": {
+      "daily_budget": {
+        "type": "integer",
+        "required": true,
+        "min_value": 1,
+        "unit": "minor_currency_unit",
+        "example": 10000,
+        "description": "Daily budget in cents (e.g., 10000 = $100.00)"
+      }
+    },
+    "pre_conditions": [
+      "Campaign is using daily budget (CBO enabled) or switching from lifetime (requires clearing lifetime_budget)",
+      "If campaign had lifetime_budget set, lifetime_budget should be 0 or omitted in this call"
+    ],
+    "effects": "Sets a new daily spend limit for the campaign",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{campaign_id}",
+      "fields": ["daily_budget", "lifetime_budget", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/bidding/overview/budgets#daily",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group#Updating"
+    ]
+  },
+  {
+    "action": "UpdateCampaignLifetimeBudget",
+    "level": "campaign",
+    "method": "POST",
+    "path": "/v19.0/{campaign_id}",
+    "params": {
+      "lifetime_budget": {
+        "type": "integer",
+        "required": true,
+        "min_value": 1,
+        "unit": "minor_currency_unit",
+        "example": 500000,
+        "description": "Lifetime budget in cents (e.g., 500000 = $5,000.00)"
+      },
+      "end_time": {
+        "type": "datetime",
+        "required": true,
+        "format": "ISO8601 or Unix timestamp",
+        "example": "2025-12-31T23:59:00Z",
+        "description": "Campaign end time; required when setting lifetime budget"
+      }
+    },
+    "pre_conditions": [
+      "Campaign is using lifetime budget (CBO enabled) or switching from daily (daily_budget should be 0 or omitted)",
+      "end_time must be in the future and later than campaign start_time (if set)"
+    ],
+    "effects": "Sets a new total budget and ensures the campaign will end at end_time",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{campaign_id}",
+      "fields": ["lifetime_budget", "daily_budget", "start_time", "end_time"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/bidding/overview/budgets#lifetime",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group#Updating"
+    ]
+  },
+  {
+    "action": "UpdateCampaignBidStrategy",
+    "level": "campaign",
+    "method": "POST",
+    "path": "/v19.0/{campaign_id}",
+    "params": {
+      "bid_strategy": {
+        "type": "enum",
+        "required": true,
+        "values": ["LOWEST_COST_WITHOUT_CAP", "LOWEST_COST_WITH_BID_CAP", "COST_CAP", "LOWEST_COST_WITH_MIN_ROAS"],
+        "example": "COST_CAP"
+      },
+      "bid_amount": {
+        "type": "integer",
+        "required": false,
+        "unit": "minor_currency_unit",
+        "example": 200,
+        "description": "Required if strategy is BID_CAP or COST_CAP (bid cap or target cost in cents)"
+      },
+      "target_roas": {
+        "type": "float",
+        "required": false,
+        "example": 2.0,
+        "description": "Required if strategy is LOWEST_COST_WITH_MIN_ROAS (e.g., 2.0 for 200%)"
+      }
+    },
+    "pre_conditions": [
+      "Campaign uses Advantage Campaign Budget (CBO) to apply bid strategy at campaign level",
+      "If bid_strategy requires bid_amount or target_roas, those must be provided"
+    ],
+    "effects": "Updates how Facebook bids for this campaign's delivery (could reset learning on all ad sets under it)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{campaign_id}",
+      "fields": ["bid_strategy"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/bidding/overview/bid-strategy",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-group#Updating"
+    ]
+  },
+  {
+    "action": "PauseAdSet",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "status": {
+        "type": "enum",
+        "required": true,
+        "values": ["PAUSED"],
+        "example": "PAUSED"
+      }
+    },
+    "pre_conditions": [
+      "Ad set exists and belongs to an active campaign",
+      "User has permission"
+    ],
+    "effects": "Ad set and all ads in it are paused (no delivery)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["status", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/best-practices/manage-your-ad-object-status"
+    ]
+  },
+  {
+    "action": "ResumeAdSet",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "status": {
+        "type": "enum",
+        "required": true,
+        "values": ["ACTIVE"],
+        "example": "ACTIVE"
+      }
+    },
+    "pre_conditions": [
+      "Ad set's campaign is active",
+      "Ad set not completed/end_time not passed"
+    ],
+    "effects": "Ad set becomes active (ads can deliver if ads are active)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["status", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/best-practices/manage-your-ad-object-status"
+    ]
+  },
+  {
+    "action": "RenameAdSet",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "max_length": 255,
+        "example": "Retargeting - Past Purchasers"
+      }
+    },
+    "pre_conditions": [],
+    "effects": "Changes the ad set name (no impact on delivery)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["name"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating"
+    ]
+  },
+  {
+    "action": "UpdateAdSetDailyBudget",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "daily_budget": {
+        "type": "integer",
+        "required": true,
+        "min_value": 1,
+        "unit": "minor_currency_unit",
+        "example": 2000,
+        "description": "Daily budget in cents (e.g., 2000 = $20.00)"
+      }
+    },
+    "pre_conditions": [
+      "Ad set is budgeted daily (ad set not under CBO)",
+      "If switching from lifetime to daily, ensure lifetime_budget is 0 or will be cleared"
+    ],
+    "effects": "Ad set will spend roughly this amount per day going forward",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["daily_budget", "lifetime_budget"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/bidding/overview/budgets#daily"
+    ]
+  },
+  {
+    "action": "UpdateAdSetLifetimeBudget",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "lifetime_budget": {
+        "type": "integer",
+        "required": true,
+        "min_value": 1,
+        "unit": "minor_currency_unit",
+        "example": 100000,
+        "description": "Lifetime budget in cents"
+      },
+      "end_time": {
+        "type": "datetime",
+        "required": true,
+        "format": "ISO8601 or Unix timestamp",
+        "example": "2025-10-31T23:59:00Z",
+        "description": "Required end time for lifetime budget"
+      },
+      "start_time": {
+        "type": "datetime",
+        "required": false,
+        "format": "ISO8601 or Unix timestamp",
+        "example": "2025-10-01T00:00:00Z",
+        "description": "Optional start time if scheduling future start"
+      }
+    },
+    "pre_conditions": [
+      "Ad set is using lifetime budget (or switching from daily: daily_budget should be 0)",
+      "end_time is in the future"
+    ],
+    "effects": "Sets total spend cap for ad set and enforces schedule stop at end_time",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["lifetime_budget", "daily_budget", "start_time", "end_time"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/bidding/overview/budgets#lifetime"
+    ]
+  },
+  {
+    "action": "UpdateAdSetSchedule",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "end_time": {
+        "type": "datetime",
+        "required": false,
+        "format": "ISO8601 or Unix timestamp",
+        "example": "2025-12-01T00:00:00Z",
+        "description": "New end time for the ad set"
+      },
+      "start_time": {
+        "type": "datetime",
+        "required": false,
+        "format": "ISO8601 or Unix timestamp",
+        "example": "2025-11-01T00:00:00Z",
+        "description": "New start time (if ad set not started yet or to schedule future start)"
+      },
+      "adset_schedule": {
+        "type": "JSON",
+        "required": false,
+        "example": "[{\"day\":\"MONDAY\",\"start_minute\":0,\"end_minute\":1320}, ...]",
+        "description": "Weekly schedule for ad delivery (allowed only if lifetime_budget set)"
+      }
+    },
+    "pre_conditions": [
+      "If providing adset_schedule, ad set must have lifetime_budget",
+      "New times should not conflict (e.g., start_time < end_time)"
+    ],
+    "effects": "Updates when the ad set runs (time-bound scheduling)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["start_time", "end_time", "adset_schedule"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign-schedule/"
+    ]
+  },
+  {
+    "action": "UpdateAdSetBidding",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "bid_strategy": {
+        "type": "enum",
+        "required": false,
+        "values": ["LOWEST_COST_WITHOUT_CAP", "LOWEST_COST_WITH_BID_CAP", "COST_CAP", "LOWEST_COST_WITH_MIN_ROAS"],
+        "example": "LOWEST_COST_WITH_BID_CAP"
+      },
+      "bid_amount": {
+        "type": "integer",
+        "required": false,
+        "unit": "minor_currency_unit",
+        "example": 150,
+        "description": "Manual bid or cap in cents (required if bid_strategy = BID_CAP or COST_CAP)"
+      },
+      "target_roas": {
+        "type": "float",
+        "required": false,
+        "example": 1.5,
+        "description": "Required if bid_strategy = LOWEST_COST_WITH_MIN_ROAS"
+      },
+      "billing_event": {
+        "type": "enum",
+        "required": false,
+        "values": ["IMPRESSIONS", "LINK_CLICKS", "ACTIONS", "THRUPLAY", "REACH"],
+        "example": "IMPRESSIONS",
+        "description": "What to pay for (must be compatible with optimization_goal)"
+      },
+      "optimization_goal": {
+        "type": "enum",
+        "required": false,
+        "values": ["NONE", "APP_INSTALLS", "BRAND_AWARENESS", "LEAD_GENERATION", "LINK_CLICKS", "OFFSITE_CONVERSIONS", "REACH", "VIDEO_VIEWS", "..."],
+        "example": "LINK_CLICKS",
+        "description": "Result to optimize delivery for"
+      },
+      "pacing_type": {
+        "type": "list<enum>",
+        "required": false,
+        "values": ["standard", "no_pacing"],
+        "example": ["standard"],
+        "description": "How to pace spend (usually 'standard')"
+      }
+    },
+    "pre_conditions": [
+      "Any change to bid_strategy or optimization_goal must be allowed for the ad set's campaign objective",
+      "If switching from auto to manual bidding, provide bid_amount"
+    ],
+    "effects": "Updates how the ad set bids and optimizes (may reset learning phase)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["bid_strategy", "bid_amount", "billing_event", "optimization_goal"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/bidding"
+    ]
+  },
+  {
+    "action": "UpdateAdSetAttribution",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "attribution_spec": {
+        "type": "list<JSON>",
+        "required": true,
+        "example": "[{\"event_type\":\"CLICK_THROUGH\",\"window_days\":7},{\"event_type\":\"VIEW_THROUGH\",\"window_days\":1}]",
+        "description": "Attribution window setting (click and/or view windows in days)"
+      }
+    },
+    "pre_conditions": [
+      "Ad set uses a conversion or similar optimization that supports custom attribution",
+      "Specified windows must be allowed (1 or 7 days for click, 1 day for view typically)"
+    ],
+    "effects": "Overrides the default attribution window for conversion tracking on this ad set",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["attribution_spec"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating",
+      "https://developers.facebook.com/docs/marketing-api/conversions-api/optimization-goals#attribution"
+    ]
+  },
+  {
+    "action": "UpdateAdSetTargeting",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "targeting": {
+        "type": "JSON",
+        "required": true,
+        "example": "{ \"geo_locations\": {\"countries\": [\"US\"]}, \"age_min\": 25, \"age_max\": 45, \"genders\": [1], \"flexible_spec\": [{\"interests\": [{\"id\": \"<interest_id>\", \"name\": \"<Interest Name>\"}]}] }",
+        "description": "Full targeting spec object defining the audience"
+      }
+    },
+    "pre_conditions": [
+      "If campaign is Special Ad Category, targeting must comply with restrictions (no age/gender limits, etc.)",
+      "Provided targeting JSON must be valid and all IDs (e.g., interest or custom audience IDs) accessible"
+    ],
+    "effects": "Replaces the ad set's audience targeting with the new specification",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["targeting"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/targeting-specs",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-campaign#Updating"
+    ]
+  },
+  {
+    "action": "UpdateAdSetConversionEvent",
+    "level": "adset",
+    "method": "POST",
+    "path": "/v19.0/{adset_id}",
+    "params": {
+      "promoted_object": {
+        "type": "JSON",
+        "required": true,
+        "example": "{ \"pixel_id\": \"<PIXEL_ID>\", \"custom_event_type\": \"LEAD\" }",
+        "description": "Specifies the pixel/app and conversion event this ad set optimizes for"
+      }
+    },
+    "pre_conditions": [
+      "Ad set's campaign objective allows selecting a conversion event (e.g., Conversions or Leads)",
+      "Typically can only update if ad set was not already delivering or if pixel event is in same category (often immutable)"
+    ],
+    "effects": "Attempts to change the conversion event the ad set is optimizing for (may require new learning, if allowed)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{adset_id}",
+      "fields": ["promoted_object"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-set#promoted_object",
+      "https://developers.facebook.com/docs/marketing-api/conversions-api/optimization-goals"
+    ]
+  },
+  {
+    "action": "PauseAd",
+    "level": "ad",
+    "method": "POST",
+    "path": "/v19.0/{ad_id}",
+    "params": {
+      "status": {
+        "type": "enum",
+        "required": true,
+        "values": ["PAUSED"],
+        "example": "PAUSED"
+      }
+    },
+    "pre_conditions": [
+      "Ad exists (not deleted) and user has access"
+    ],
+    "effects": "Ad is paused (no delivery) but other ads in ad set can still run",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{ad_id}",
+      "fields": ["status", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/adgroup#Updating",
+      "https://developers.facebook.com/docs/marketing-api/best-practices/manage-your-ad-object-status"
+    ]
+  },
+  {
+    "action": "ResumeAd",
+    "level": "ad",
+    "method": "POST",
+    "path": "/v19.0/{ad_id}",
+    "params": {
+      "status": {
+        "type": "enum",
+        "required": true,
+        "values": ["ACTIVE"],
+        "example": "ACTIVE"
+      }
+    },
+    "pre_conditions": [
+      "Ad set and campaign are active",
+      "Ad was not deleted or completed"
+    ],
+    "effects": "Ad becomes active (eligible to serve if its ad set and campaign are active)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{ad_id}",
+      "fields": ["status", "effective_status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/adgroup#Updating",
+      "https://developers.facebook.com/docs/marketing-api/best-practices/manage-your-ad-object-status"
+    ]
+  },
+  {
+    "action": "RenameAd",
+    "level": "ad",
+    "method": "POST",
+    "path": "/v19.0/{ad_id}",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "max_length": 255,
+        "example": "Ad 1 - Blue Background Version"
+      }
+    },
+    "pre_conditions": [],
+    "effects": "Changes the ad name label (no effect on actual ad content or delivery)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{ad_id}",
+      "fields": ["name"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/adgroup#Updating"
+    ]
+  },
+  {
+    "action": "UpdateAdCreative",
+    "level": "ad",
+    "method": "POST",
+    "path": "/v19.0/{ad_id}",
+    "params": {
+      "creative": {
+        "type": "JSON",
+        "required": true,
+        "example": "{ \"creative_id\": \"<NEW_CREATIVE_ID>\" }",
+        "description": "Reference to the new Ad Creative object"
+      }
+    },
+    "pre_conditions": [
+      "Ad is preferably PAUSED before changing creative (to satisfy API requirements)",
+      "New creative is compatible with the ad's ad set objective (e.g., correct format and Page)"
+    ],
+    "effects": "The ad will use the new creative (image, video, text, etc.), triggering a review by Facebook",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{ad_id}",
+      "fields": ["creative"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/adgroup#Updating",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-creative"
+    ]
+  },
+  {
+    "action": "UpdateAdURLParameters",
+    "level": "ad",
+    "method": "POST",
+    "path": "/v19.0/{ad_id}",
+    "params": {
+      "url_parameters": {
+        "type": "string",
+        "required": true,
+        "example": "utm_source=facebook&utm_medium=cpc&utm_campaign=summer_sale",
+        "description": "Query parameters to append to all landing page URLs of this ad"
+      }
+    },
+    "pre_conditions": [
+      "Ad format is a link ad or video ad with a link (so URL parameters apply)",
+      "Parameter string is URL-encoded properly if needed"
+    ],
+    "effects": "Adds or replaces tracking parameters on the ad's click URL (does not change the base URL)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{ad_id}",
+      "fields": ["creative{url_tags}"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/adgroup#Updating",
+      "https://developers.facebook.com/docs/marketing-api/audiences/guides/utm-parameters"
+    ]
+  },
+  {
+    "action": "UploadImage",
+    "level": "ad_account",
+    "method": "POST",
+    "path": "/v19.0/act_{ad_account_id}/adimages",
+    "params": {
+      "bytes": {
+        "type": "file",
+        "required": true,
+        "example": "<BINARY_FILE_DATA>",
+        "description": "Image file content (as multipart file upload). Alternatively provide 'bytes' as Base64 data."
+      }
+    },
+    "pre_conditions": [
+      "Image is in a supported format (JPEG, PNG) and under dimension/file size limits",
+      "Ad account has not exceeded image library limits"
+    ],
+    "effects": "Uploads the image to the ad account library; returns an image hash identifier",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/act_{ad_account_id}/adimages",
+      "fields": ["images"],
+      "query": { "hashes": "[{hash}]" }
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-image",
+      "https://developers.facebook.com/docs/marketing-api/creative#images"
+    ]
+  },
+  {
+    "action": "UploadVideo",
+    "level": "ad_account",
+    "method": "POST",
+    "path": "/v19.0/act_{ad_account_id}/advideos",
+    "params": {
+      "file_url": {
+        "type": "string",
+        "required": false,
+        "example": "https://www.example.com/video.mp4",
+        "description": "Publicly accessible URL of the video file to upload"
+      },
+      "source": {
+        "type": "file",
+        "required": false,
+        "example": "<BINARY_FILE_DATA>",
+        "description": "Video file content (use if not using file_url)"
+      },
+      "name": {
+        "type": "string",
+        "required": false,
+        "example": "Demo Video",
+        "description": "Optional name/label for the video in library"
+      }
+    },
+    "pre_conditions": [
+      "Video is in a supported format (MP4/MOV) and under 4GB/240min limits",
+      "If using file_url, URL must be reachable by Facebook"
+    ],
+    "effects": "Initiates video upload to ad account. The video will be processed asynchronously and an ID is returned",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{returned_video_id}",
+      "fields": ["status"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-account/advideos",
+      "https://developers.facebook.com/docs/marketing-api/creative#video"
+    ]
+  },
+  {
+    "action": "CreateAdCreative",
+    "level": "ad_account",
+    "method": "POST",
+    "path": "/v19.0/act_{ad_account_id}/adcreatives",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": false,
+        "example": "Creative 1 - Promo Ad",
+        "description": "Internal name for the creative"
+      },
+      "object_story_spec": {
+        "type": "JSON",
+        "required": true,
+        "example": "{ \"page_id\": \"<PAGE_ID>\", \"link_data\": { \"message\": \"<Ad Text>\", \"link\": \"<URL>\", \"headline\": \"<Headline>\", \"description\": \"<Desc>\", \"image_hash\": \"<IMG_HASH>\", \"call_to_action\": { \"type\": \"LEARN_MORE\", \"value\": { \"link\": \"<URL>\" } } } }",
+        "description": "Specifies the creative story: page, message, link, media, CTA, etc."
+      },
+      "instagram_actor_id": {
+        "type": "string",
+        "required": false,
+        "example": "<IG_ACTOR_ID>",
+        "description": "Optional Instagram account ID to use for Instagram delivery"
+      }
+    },
+    "pre_conditions": [
+      "Page ID is one that the ad account can use (page in same Business or with granted permissions)",
+      "Media (image_hash or video_id) is already uploaded and valid",
+      "object_story_spec must include all required sub-fields for chosen format (e.g., message, link, etc.)"
+    ],
+    "effects": "Creates a new Ad Creative object which can be used by ads. Does not itself deliver an ad until associated with an ad.",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{returned_creative_id}",
+      "fields": ["object_story_spec"]
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-creative#Creating",
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-creative-link-data"
+    ]
+  },
+  {
+    "action": "DeleteAdCreative",
+    "level": "ad_account",
+    "method": "DELETE",
+    "path": "/v19.0/{ad_creative_id}",
+    "params": {},
+    "pre_conditions": [
+      "Creative is not currently in use by any active or paused ad"
+    ],
+    "effects": "Permanently deletes the ad creative from the account library (cannot be undone)",
+    "verify": {
+      "method": "GET",
+      "path": "/v19.0/{ad_creative_id}",
+      "expect": "error or no data (indicates deletion)"
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/reference/ad-creative#Deleting"
+    ]
+  },
+  {
+    "action": "GetCampaignInsights",
+    "level": "campaign",
+    "method": "GET",
+    "path": "/v19.0/{campaign_id}/insights",
+    "params": {
+      "date_preset": {
+        "type": "enum",
+        "required": false,
+        "values": ["today","yesterday","last_7d","last_30d","this_month","last_month","maximum","lifetime"],
+        "example": "last_7d"
+      },
+      "time_range": {
+        "type": "JSON",
+        "required": false,
+        "example": "{ \"since\": \"2025-09-01\", \"until\": \"2025-09-30\" }",
+        "description": "Custom date range (cannot use with date_preset)"
+      },
+      "time_increment": {
+        "type": "string or integer",
+        "required": false,
+        "example": "1",
+        "description": "Granularity of data: 'daily' (or '1'), 'monthly', or number of days"
+      },
+      "fields": {
+        "type": "list<string>",
+        "required": true,
+        "example": ["campaign_name","impressions","clicks","spend","actions"],
+        "description": "Metrics and attributes to retrieve"
+      },
+      "breakdowns": {
+        "type": "list<string>",
+        "required": false,
+        "example": ["age","gender"],
+        "description": "Breakdown dimensions (e.g., age, gender, placement, device_platform)"
+      },
+      "action_breakdowns": {
+        "type": "list<string>",
+        "required": false,
+        "example": ["action_type"],
+        "description": "Use 'action_type' to break out actions by type in results"
+      }
+    },
+    "pre_conditions": [
+      "Campaign belongs to ad account accessible by token (ads_read permission required)",
+      "Metrics requested are available for the campaign's objective (e.g., app installs won't have 'lead' actions)"
+    ],
+    "effects": "Returns performance data for the campaign (read-only operation)",
+    "verify": {
+      "method": "none",
+      "description": "Data is returned in 'data' array of response; check that it contains expected metrics"
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/insights",
+      "https://developers.facebook.com/docs/marketing-api/insights/parameters"
+    ]
+  },
+  {
+    "action": "GetAdSetInsights",
+    "level": "adset",
+    "method": "GET",
+    "path": "/v19.0/{adset_id}/insights",
+    "params": {
+      "date_preset": {
+        "type": "enum",
+        "required": false,
+        "values": ["today","yesterday","last_7d","last_30d","this_month","last_month","maximum","lifetime"],
+        "example": "this_month"
+      },
+      "time_range": {
+        "type": "JSON",
+        "required": false
+      },
+      "time_increment": {
+        "type": "string or integer",
+        "required": false,
+        "example": "all_days",
+        "description": "Use 'all_days' or large number to get aggregate for whole range"
+      },
+      "fields": {
+        "type": "list<string>",
+        "required": true,
+        "example": ["adset_name","impressions","reach","spend","cpc","actions"]
+      },
+      "breakdowns": {
+        "type": "list<string>",
+        "required": false
+      },
+      "action_breakdowns": {
+        "type": "list<string>",
+        "required": false
+      }
+    },
+    "pre_conditions": [
+      "Ad set exists and token has access",
+      "Ad set had some delivery (if no delivery, metrics will be all zero or no data)"
+    ],
+    "effects": "Retrieves performance metrics for the specified ad set",
+    "verify": {
+      "method": "none"
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/insights",
+      "https://developers.facebook.com/docs/marketing-api/insights/breakdowns"
+    ]
+  },
+  {
+    "action": "GetAdInsights",
+    "level": "ad",
+    "method": "GET",
+    "path": "/v19.0/{ad_id}/insights",
+    "params": {
+      "date_preset": {
+        "type": "enum",
+        "required": false
+      },
+      "time_range": {
+        "type": "JSON",
+        "required": false
+      },
+      "fields": {
+        "type": "list<string>",
+        "required": true,
+        "example": ["ad_name","impressions","clicks","spend","action_values"]
+      },
+      "breakdowns": {
+        "type": "list<string>",
+        "required": false
+      },
+      "action_breakdowns": {
+        "type": "list<string>",
+        "required": false
+      }
+    },
+    "pre_conditions": [
+      "Ad exists (active or inactive, but not deleted) and user has ads_read scope",
+      "Data available for the ad (if ad never served, insights data will be empty)"
+    ],
+    "effects": "Provides metrics for the individual ad",
+    "verify": {
+      "method": "none"
+    },
+    "docs": [
+      "https://developers.facebook.com/docs/marketing-api/insights",
+      "https://developers.facebook.com/docs/marketing-api/insights/breakdowns"
+    ]
+  }
+]
+

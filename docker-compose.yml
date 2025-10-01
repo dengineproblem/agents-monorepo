@@ -1,0 +1,28 @@
+services:
+  agent-brain:
+    build: ./services/agent-brain
+    env_file:
+      - ./.env.brain
+    environment:
+      - BRAIN_DRY_RUN=false
+      - BRAIN_MAX_ACTIONS_PER_RUN=100
+      - BRAIN_DEBUG_LLM=true
+      - BRAIN_MODEL=gpt-5
+      - BRAIN_TEST_MODE=false
+      - AGENT_SERVICE_URL=http://agent-service:8080
+      - CRON_ENABLED=true
+      - CRON_SCHEDULE=0 8 * * *
+    ports:
+      - "7080:7080"
+    restart: unless-stopped
+
+  agent-service:
+    build: ./services/agent-service
+    env_file:
+      - ./.env.agent
+    environment:
+      - AGENT_DRY_RUN=false
+      - FB_VALIDATE_ONLY=false
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

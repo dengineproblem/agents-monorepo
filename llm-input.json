@@ -1,0 +1,3135 @@
+{
+  "userAccountId": "0f559eb0-53fa-4b6a-a51b-5d3e15e5864b",
+  "account": {
+    "timezone": "Asia/Almaty",
+    "report_date": "2025-09-29",
+    "dispatch": false
+  },
+  "limits": {
+    "min_cents": 300,
+    "max_cents": 10000,
+    "step_up": 0.3,
+    "step_down": 0.5
+  },
+  "targets": {
+    "cpl_cents": 200
+  },
+  "analysis": {
+    "hsSummary": [
+      {
+        "adset_id": "120234845741880463",
+        "name": "мемы",
+        "hs": -27.5,
+        "cls": "bad",
+        "ctr": 2.474431,
+        "cpm": 5.592214,
+        "freq": 1.105398
+      },
+      {
+        "adset_id": "120234845322690463",
+        "name": "вебинар",
+        "hs": -72,
+        "cls": "bad",
+        "ctr": 1.28,
+        "cpm": 8.821333,
+        "freq": 1.048072
+      },
+      {
+        "adset_id": "120234844633260463",
+        "name": "Заменим",
+        "hs": -35,
+        "cls": "bad",
+        "ctr": 1.618123,
+        "cpm": 5.323625,
+        "freq": 1.089563
+      },
+      {
+        "adset_id": "120234422770090463",
+        "name": "Лучшие крео | Теплая",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234422735350463",
+        "name": "Лучшие крео | Интересы",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234419946280463",
+        "name": "Верите ли вы",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234419919740463",
+        "name": "Все эти люди",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234419856720463",
+        "name": "Гормон",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386860780463",
+        "name": "Звезды Ж",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386756900463",
+        "name": "Устали бороться",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386663360463",
+        "name": "Звезды М",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386589180463",
+        "name": "Часто слышали",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386488880463",
+        "name": "Ест",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386452590463",
+        "name": "Нет времени",
+        "hs": 4,
+        "cls": "neutral",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386410600463",
+        "name": "-15",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234386229190463",
+        "name": "78%",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368547100463",
+        "name": "Подсчет калорий",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368538180463",
+        "name": "Ты знаешь",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368525350463",
+        "name": "Почему звезды",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368516110463",
+        "name": "Вы считаете",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368485190463",
+        "name": "Правда",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368401200463",
+        "name": "часто спрашивают",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368379570463",
+        "name": "Мужчины 35+",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368338880463",
+        "name": "Зачем заставлять",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      },
+      {
+        "adset_id": "120234368102890463",
+        "name": "Отзыв 3",
+        "hs": -5,
+        "cls": "neutral_low",
+        "ctr": 0,
+        "cpm": 0,
+        "freq": 0
+      }
+    ],
+    "touchedCampaignIds": [
+      "120234844633250463"
+    ],
+    "totals": {
+      "installed_daily_budget_cents_all": 62900,
+      "installed_daily_budget_cents_active": 53900
+    },
+    "campaigns": [
+      {
+        "campaign_id": "120234844633250463",
+        "name": "PRFMNT",
+        "status": "ACTIVE",
+        "daily_budget": 0,
+        "lifetime_budget": 0,
+        "windows": {
+          "yesterday": {
+            "spend": 49.94,
+            "impressions": 7996,
+            "ctr": 1.863432,
+            "cpm": 6.245623,
+            "frequency": 1.229965,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "25"
+              },
+              {
+                "action_type": "link_click",
+                "value": "52"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "16"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "12"
+              },
+              {
+                "action_type": "post",
+                "value": "42"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "23"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "104"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "25"
+              },
+              {
+                "action_type": "video_view",
+                "value": "2453"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "49"
+              }
+            ]
+          },
+          "last_3d": {
+            "spend": 49.94,
+            "impressions": 7996,
+            "ctr": 1.863432,
+            "cpm": 6.245623,
+            "frequency": 1.229965,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "25"
+              },
+              {
+                "action_type": "link_click",
+                "value": "52"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "16"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "12"
+              },
+              {
+                "action_type": "post",
+                "value": "42"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "23"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "104"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "25"
+              },
+              {
+                "action_type": "video_view",
+                "value": "2453"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "49"
+              }
+            ]
+          },
+          "last_7d": {
+            "spend": 49.94,
+            "impressions": 7996,
+            "ctr": 1.863432,
+            "cpm": 6.245623,
+            "frequency": 1.229965,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "25"
+              },
+              {
+                "action_type": "link_click",
+                "value": "52"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "16"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "12"
+              },
+              {
+                "action_type": "post",
+                "value": "42"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "23"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "104"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "25"
+              },
+              {
+                "action_type": "video_view",
+                "value": "2453"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "49"
+              }
+            ]
+          },
+          "last_30d": {
+            "spend": 49.94,
+            "impressions": 7996,
+            "ctr": 1.863432,
+            "cpm": 6.245623,
+            "frequency": 1.229965,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "25"
+              },
+              {
+                "action_type": "link_click",
+                "value": "52"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "2609"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "16"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "12"
+              },
+              {
+                "action_type": "post",
+                "value": "42"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "23"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "104"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "25"
+              },
+              {
+                "action_type": "video_view",
+                "value": "2453"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "49"
+              }
+            ]
+          },
+          "today": {
+            "spend": 9.09,
+            "impressions": 1329,
+            "ctr": 2.407825,
+            "cpm": 6.839729,
+            "frequency": 1.105657,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "19"
+              },
+              {
+                "action_type": "link_click",
+                "value": "13"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "481"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "481"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "post",
+                "value": "9"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "13"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "15"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "20"
+              },
+              {
+                "action_type": "video_view",
+                "value": "453"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "6"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "adsets": [
+      {
+        "adset_id": "120234845741880463",
+        "name": "мемы",
+        "campaign_id": "120234844633250463",
+        "daily_budget_cents": 300,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 90,
+          "max_decrease": 0
+        },
+        "windows": {
+          "yesterday": {
+            "spend": 16.95,
+            "impressions": 3031,
+            "ctr": 2.474431,
+            "cpm": 5.592214,
+            "frequency": 1.105398,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "20"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "1386"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "1386"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "26"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "81"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "1285"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "42"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_3d": {
+            "spend": 16.95,
+            "impressions": 3031,
+            "ctr": 2.474431,
+            "cpm": 5.592214,
+            "frequency": 1.105398,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "20"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "1386"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "1386"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "26"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "81"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "1285"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "42"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_7d": {
+            "spend": 16.95,
+            "impressions": 3031,
+            "ctr": 2.474431,
+            "cpm": 5.592214,
+            "frequency": 1.105398,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "20"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "1386"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "1386"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "8"
+              },
+              {
+                "action_type": "comment",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "26"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "81"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "1285"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "42"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_30d": {},
+          "today": {
+            "spend": 3.05,
+            "impressions": 575,
+            "ctr": 3.130435,
+            "cpm": 5.304348,
+            "frequency": 1.070764,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "4"
+              },
+              {
+                "action_type": "link_click",
+                "value": "7"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "256"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "256"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "post",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "4"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "9"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "5"
+              },
+              {
+                "action_type": "video_view",
+                "value": "240"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          }
+        }
+      },
+      {
+        "adset_id": "120234845322690463",
+        "name": "вебинар",
+        "campaign_id": "120234844633250463",
+        "daily_budget_cents": 300,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 90,
+          "max_decrease": 0
+        },
+        "windows": {
+          "yesterday": {
+            "spend": 16.54,
+            "impressions": 1875,
+            "ctr": 1.28,
+            "cpm": 8.821333,
+            "frequency": 1.048072,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "5"
+              },
+              {
+                "action_type": "link_click",
+                "value": "11"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "post",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "3"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "5"
+              },
+              {
+                "action_type": "video_view",
+                "value": "302"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "2"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_3d": {
+            "spend": 16.54,
+            "impressions": 1875,
+            "ctr": 1.28,
+            "cpm": 8.821333,
+            "frequency": 1.048072,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "5"
+              },
+              {
+                "action_type": "link_click",
+                "value": "11"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "post",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "3"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "5"
+              },
+              {
+                "action_type": "video_view",
+                "value": "302"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "2"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_7d": {
+            "spend": 16.54,
+            "impressions": 1875,
+            "ctr": 1.28,
+            "cpm": 8.821333,
+            "frequency": 1.048072,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "5"
+              },
+              {
+                "action_type": "link_click",
+                "value": "11"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "post",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "3"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "5"
+              },
+              {
+                "action_type": "video_view",
+                "value": "302"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "2"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_30d": {
+            "spend": 16.54,
+            "impressions": 1875,
+            "ctr": 1.28,
+            "cpm": 8.821333,
+            "frequency": 1.048072,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "5"
+              },
+              {
+                "action_type": "link_click",
+                "value": "11"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "321"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "post",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "3"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "5"
+              },
+              {
+                "action_type": "video_view",
+                "value": "302"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "2"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "today": {
+            "spend": 2.88,
+            "impressions": 227,
+            "ctr": 1.321586,
+            "cpm": 12.687225,
+            "frequency": 1.013393,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "4"
+              },
+              {
+                "action_type": "link_click",
+                "value": "2"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "60"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "60"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "4"
+              },
+              {
+                "action_type": "video_view",
+                "value": "58"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          }
+        }
+      },
+      {
+        "adset_id": "120234844633260463",
+        "name": "Заменим",
+        "campaign_id": "120234844633250463",
+        "daily_budget_cents": 300,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 90,
+          "max_decrease": 0
+        },
+        "windows": {
+          "yesterday": {
+            "spend": 16.45,
+            "impressions": 3090,
+            "ctr": 1.618123,
+            "cpm": 5.323625,
+            "frequency": 1.089563,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "21"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "10"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "15"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "866"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_3d": {
+            "spend": 16.45,
+            "impressions": 3090,
+            "ctr": 1.618123,
+            "cpm": 5.323625,
+            "frequency": 1.089563,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "21"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "10"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "15"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "866"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_7d": {
+            "spend": 16.45,
+            "impressions": 3090,
+            "ctr": 1.618123,
+            "cpm": 5.323625,
+            "frequency": 1.089563,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "21"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "10"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "15"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "866"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "last_30d": {
+            "spend": 16.45,
+            "impressions": 3090,
+            "ctr": 1.618123,
+            "cpm": 5.323625,
+            "frequency": 1.089563,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "21"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "902"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "10"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "10"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "15"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "866"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          },
+          "today": {
+            "spend": 3.16,
+            "impressions": 527,
+            "ctr": 2.087287,
+            "cpm": 5.996205,
+            "frequency": 1.013462,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "11"
+              },
+              {
+                "action_type": "link_click",
+                "value": "4"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "165"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "165"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "post",
+                "value": "5"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "5"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "11"
+              },
+              {
+                "action_type": "video_view",
+                "value": "155"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234844633250463"
+          }
+        }
+      },
+      {
+        "adset_id": "120234422770090463",
+        "name": "Лучшие крео | Теплая",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 23.02,
+            "impressions": 1205,
+            "ctr": 1.493776,
+            "cpm": 19.103734,
+            "frequency": 1.110599,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "2"
+              },
+              {
+                "action_type": "link_click",
+                "value": "12"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "292"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "292"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "2"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "3"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "2"
+              },
+              {
+                "action_type": "video_view",
+                "value": "277"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "3"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234422735350463",
+        "name": "Лучшие крео | Интересы",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 18.16,
+            "impressions": 1953,
+            "ctr": 1.126472,
+            "cpm": 9.298515,
+            "frequency": 1.03883,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "2"
+              },
+              {
+                "action_type": "link_click",
+                "value": "6"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "599"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "599"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "post",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "2"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "2"
+              },
+              {
+                "action_type": "video_view",
+                "value": "585"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "3"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234419946280463",
+        "name": "Верите ли вы",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2500,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 750,
+          "max_decrease": 1250
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 11.46,
+            "impressions": 939,
+            "ctr": 1.277955,
+            "cpm": 12.204473,
+            "frequency": 1.020652,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "2"
+              },
+              {
+                "action_type": "link_click",
+                "value": "4"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "343"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "343"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "1"
+              },
+              {
+                "action_type": "post",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "2"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "2"
+              },
+              {
+                "action_type": "video_view",
+                "value": "332"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234419919740463",
+        "name": "Все эти люди",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2500,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 750,
+          "max_decrease": 1250
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {},
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234419856720463",
+        "name": "Гормон",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2500,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 750,
+          "max_decrease": 1250
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 13.54,
+            "impressions": 1212,
+            "ctr": 1.40264,
+            "cpm": 11.171617,
+            "frequency": 1.052083,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "4"
+              },
+              {
+                "action_type": "link_click",
+                "value": "11"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "312"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "312"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "4"
+              },
+              {
+                "action_type": "post",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "4"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "4"
+              },
+              {
+                "action_type": "video_view",
+                "value": "295"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "4"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386860780463",
+        "name": "Звезды Ж",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 32.92,
+            "impressions": 4216,
+            "ctr": 1.328273,
+            "cpm": 7.808349,
+            "frequency": 1.015659,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "8"
+              },
+              {
+                "action_type": "link_click",
+                "value": "30"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "1551"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "1551"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "post",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "7"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "25"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "7"
+              },
+              {
+                "action_type": "video_view",
+                "value": "1496"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "19"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386756900463",
+        "name": "Устали бороться",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 10.5,
+            "impressions": 1170,
+            "ctr": 1.111111,
+            "cpm": 8.974359,
+            "frequency": 1.052158,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "2"
+              },
+              {
+                "action_type": "link_click",
+                "value": "5"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "273"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "273"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "1"
+              },
+              {
+                "action_type": "post",
+                "value": "1"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "1"
+              },
+              {
+                "action_type": "video_view",
+                "value": "266"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386663360463",
+        "name": "Звезды М",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 58.63,
+            "impressions": 6559,
+            "ctr": 1.128221,
+            "cpm": 8.938863,
+            "frequency": 1.061327,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "17"
+              },
+              {
+                "action_type": "link_click",
+                "value": "41"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "2610"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "2610"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "1"
+              },
+              {
+                "action_type": "comment",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "12"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "8"
+              },
+              {
+                "action_type": "post",
+                "value": "8"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "14"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "29"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "15"
+              },
+              {
+                "action_type": "video_view",
+                "value": "2540"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "19"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386589180463",
+        "name": "Часто слышали",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 32.4,
+            "impressions": 4123,
+            "ctr": 1.139947,
+            "cpm": 7.858356,
+            "frequency": 1.050178,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "10"
+              },
+              {
+                "action_type": "link_click",
+                "value": "24"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "785"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "785"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "5"
+              },
+              {
+                "action_type": "post",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "8"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "20"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "10"
+              },
+              {
+                "action_type": "video_view",
+                "value": "741"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "14"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386488880463",
+        "name": "Ест",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 14.02,
+            "impressions": 2188,
+            "ctr": 1.096892,
+            "cpm": 6.407678,
+            "frequency": 1.04689,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "4"
+              },
+              {
+                "action_type": "link_click",
+                "value": "15"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "757"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "757"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "post",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "3"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "4"
+              },
+              {
+                "action_type": "video_view",
+                "value": "735"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386452590463",
+        "name": "Нет времени",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 600,
+          "max_decrease": 1000
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {
+            "spend": 0,
+            "impressions": 0,
+            "ctr": 0,
+            "cpm": 0,
+            "frequency": 0,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "last_30d": {
+            "spend": 23.21,
+            "impressions": 2698,
+            "ctr": 1.000741,
+            "cpm": 8.602669,
+            "frequency": 1.042907,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "6"
+              },
+              {
+                "action_type": "link_click",
+                "value": "13"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "645"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "645"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "post",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "5"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "9"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "6"
+              },
+              {
+                "action_type": "video_view",
+                "value": "623"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "5"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386410600463",
+        "name": "-15",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2500,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 750,
+          "max_decrease": 1250
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 54.16,
+            "impressions": 5914,
+            "ctr": 1.285086,
+            "cpm": 9.15793,
+            "frequency": 1.050817,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "15"
+              },
+              {
+                "action_type": "link_click",
+                "value": "34"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "1587"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "1587"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "5"
+              },
+              {
+                "action_type": "comment",
+                "value": "6"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "12"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "11"
+              },
+              {
+                "action_type": "post",
+                "value": "12"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "9"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "44"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "13"
+              },
+              {
+                "action_type": "video_view",
+                "value": "1509"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "21"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234386229190463",
+        "name": "78%",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 8.59,
+            "impressions": 1132,
+            "ctr": 0.618375,
+            "cpm": 7.588339,
+            "frequency": 1.021661,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "2"
+              },
+              {
+                "action_type": "link_click",
+                "value": "5"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "302"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "302"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "1"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "2"
+              },
+              {
+                "action_type": "video_view",
+                "value": "296"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368547100463",
+        "name": "Подсчет калорий",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 2.25,
+            "impressions": 393,
+            "ctr": 0.763359,
+            "cpm": 5.725191,
+            "frequency": 1.065041,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "link_click",
+                "value": "4"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "52"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "52"
+              },
+              {
+                "action_type": "video_view",
+                "value": "48"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368538180463",
+        "name": "Ты знаешь",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 600,
+          "max_decrease": 1000
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 4.32,
+            "impressions": 487,
+            "ctr": 0.410678,
+            "cpm": 8.870637,
+            "frequency": 1.051836,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "link_click",
+                "value": "1"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "96"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "96"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "1"
+              },
+              {
+                "action_type": "video_view",
+                "value": "94"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368525350463",
+        "name": "Почему звезды",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 67.98,
+            "impressions": 9802,
+            "ctr": 1.061008,
+            "cpm": 6.935319,
+            "frequency": 1.052055,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "25"
+              },
+              {
+                "action_type": "link_click",
+                "value": "63"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "3068"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "3068"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "2"
+              },
+              {
+                "action_type": "comment",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "20"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "17"
+              },
+              {
+                "action_type": "post",
+                "value": "14"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "20"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "38"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "24"
+              },
+              {
+                "action_type": "video_view",
+                "value": "2967"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "18"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368516110463",
+        "name": "Вы считаете",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 2.33,
+            "impressions": 253,
+            "ctr": 0.395257,
+            "cpm": 9.209486,
+            "frequency": 1.041152,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "page_engagement",
+                "value": "57"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "57"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "1"
+              },
+              {
+                "action_type": "video_view",
+                "value": "56"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368485190463",
+        "name": "Правда",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 5000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1500,
+          "max_decrease": 2500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 70.12,
+            "impressions": 11364,
+            "ctr": 0.985568,
+            "cpm": 6.170363,
+            "frequency": 1.066542,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "25"
+              },
+              {
+                "action_type": "link_click",
+                "value": "49"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "3748"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "3747"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "1"
+              },
+              {
+                "action_type": "comment",
+                "value": "3"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "20"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "15"
+              },
+              {
+                "action_type": "post",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "17"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "51"
+              },
+              {
+                "action_type": "like",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "25"
+              },
+              {
+                "action_type": "video_view",
+                "value": "3647"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "43"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368401200463",
+        "name": "часто спрашивают",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 2.22,
+            "impressions": 225,
+            "ctr": 0,
+            "cpm": 9.866667,
+            "frequency": 1.004464,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "page_engagement",
+                "value": "77"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "77"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "1"
+              },
+              {
+                "action_type": "video_view",
+                "value": "76"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "1"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368379570463",
+        "name": "Мужчины 35+",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 1000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 300,
+          "max_decrease": 500
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 3.23,
+            "impressions": 436,
+            "ctr": 0.917431,
+            "cpm": 7.408257,
+            "frequency": 1.050602,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "1"
+              },
+              {
+                "action_type": "link_click",
+                "value": "2"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "102"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "102"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "1"
+              },
+              {
+                "action_type": "video_view",
+                "value": "100"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368338880463",
+        "name": "Зачем заставлять",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 4000,
+        "status": "ACTIVE",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 1200,
+          "max_decrease": 2000
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 54.79,
+            "impressions": 7059,
+            "ctr": 1.062473,
+            "cpm": 7.761723,
+            "frequency": 1.096799,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "15"
+              },
+              {
+                "action_type": "link_click",
+                "value": "43"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "1406"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "1406"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "1"
+              },
+              {
+                "action_type": "comment",
+                "value": "4"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "7"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "6"
+              },
+              {
+                "action_type": "post",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "13"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "28"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "15"
+              },
+              {
+                "action_type": "video_view",
+                "value": "1335"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "21"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      },
+      {
+        "adset_id": "120234368102890463",
+        "name": "Отзыв 3",
+        "campaign_id": "120234367651490463",
+        "daily_budget_cents": 2000,
+        "status": "PAUSED",
+        "step_constraints": {
+          "step_up_max_pct": 0.3,
+          "step_down_max_pct": 0.5
+        },
+        "step_bounds_cents": {
+          "max_increase": 600,
+          "max_decrease": 1000
+        },
+        "windows": {
+          "yesterday": {},
+          "last_3d": {},
+          "last_7d": {},
+          "last_30d": {
+            "spend": 19.24,
+            "impressions": 2978,
+            "ctr": 1.074547,
+            "cpm": 6.460712,
+            "frequency": 1.028315,
+            "samples": 0,
+            "actions": [
+              {
+                "action_type": "onsite_conversion.total_messaging_connection",
+                "value": "3"
+              },
+              {
+                "action_type": "link_click",
+                "value": "13"
+              },
+              {
+                "action_type": "page_engagement",
+                "value": "922"
+              },
+              {
+                "action_type": "post_engagement",
+                "value": "922"
+              },
+              {
+                "action_type": "onsite_conversion.post_save",
+                "value": "2"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+                "value": "3"
+              },
+              {
+                "action_type": "post",
+                "value": "1"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_first_reply",
+                "value": "3"
+              },
+              {
+                "action_type": "post_interaction_gross",
+                "value": "11"
+              },
+              {
+                "action_type": "onsite_conversion.messaging_conversation_started_7d",
+                "value": "3"
+              },
+              {
+                "action_type": "video_view",
+                "value": "898"
+              },
+              {
+                "action_type": "post_reaction",
+                "value": "8"
+              }
+            ],
+            "campaign_id": "120234367651490463"
+          },
+          "today": {}
+        }
+      }
+    ]
+  },
+  "report": {
+    "report_date": "2025-09-29",
+    "timezone": "Asia/Almaty",
+    "dispatch": false,
+    "yesterday_totals": {
+      "spend_usd": "49.94",
+      "leads_total": 25,
+      "leads_quality": 16
+    },
+    "header_first_lines": "📅 Дата отчета: 2025-09-29\n\n🏢 Статус рекламного кабинета: Активен\n\n📈 Общая сводка:\n- Общие затраты по всем кампаниям: 49.94 USD\n- Общее количество полученных лидов: 25\n- Общий CPL (стоимость за лид): 2.00 USD\n- Общее количество качественных лидов: 16\n- Общий CPL качественного лида: 3.12 USD",
+    "campaigns_yesterday": [
+      {
+        "id": "120234844633250463",
+        "name": "PRFMNT",
+        "status": "ACTIVE",
+        "spend_usd": "49.94",
+        "leads": 25,
+        "leads_quality": 16
+      }
+    ],
+    "report_template": "📅 Дата отчета: <YYYY-MM-DD>\n\n🏢 Статус рекламного кабинета: <Активен|Неактивен>\n\n📈 Общая сводка:\n- Общие затраты по всем кампаниям: <amount> USD\n- Общее количество полученных лидов: <int>\n- Общий CPL (стоимость за лид): <amount> USD\n- Общее количество качественных лидов: <int>\n- Общий CPL качественного лида: <amount> USD\n\n📊 Сводка по отдельным кампаниям:\n<n>. Кампания \"<name>\" (ID: <id>)\n   - Статус: <Активна|Неактивна>\n   - Затраты: <amount> USD\n   - Лидов: <int>\n   - CPL: <amount> USD\n   - Качественных лидов: <int>\n   - CPL качественного лида: <amount> USD\n\n📊 Качество лидов:\n- \"<name>\": <percent>% качественных лидов\n\n✅ Выполненные действия:\n1. Кампания \"<name>\":\n   - <краткая причина/действие>\n\n📊 Аналитика в динамике:\n- <наблюдение 1>\n- <наблюдение 2>\n\nДля дальнейшей оптимизации обращаем внимание на:\n- <рекомендация 1>\n- <рекомендация 2>"
+  }
+}
