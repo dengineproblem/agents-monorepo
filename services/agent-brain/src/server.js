@@ -3,6 +3,7 @@ import 'dotenv/config';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import cron from 'node-cron';
+import { runScoringAgent } from './scoring.js';
 
 const fastify = Fastify({ logger: true });
 async function responsesCreate(payload) {
@@ -81,6 +82,158 @@ fastify.get('/api/brain/llm-ping', async (request, reply) => {
   }
 });
 
+// Test endpoint: run ONLY scoring agent (without main brain)
+fastify.post('/api/brain/test-scoring', async (request, reply) => {
+  try {
+    const { userAccountId } = request.body;
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId required' });
+    }
+    
+    fastify.log.info({ where: 'test_scoring', userAccountId });
+    
+    // Get user account
+    const { data: ua, error: uaError } = await supabase
+      .from('user_accounts')
+      .select('*')
+      .eq('id', userAccountId)
+      .single();
+    
+    if (uaError || !ua) {
+      return reply.code(404).send({ error: 'User account not found' });
+    }
+    
+    // Run scoring agent
+    const scoringOutput = await runScoringAgent(ua, {
+      supabase,
+      logger: fastify.log,
+      useLLM: true,
+      responsesCreate,
+      minImpressions: SCORING_MIN_IMPRESSIONS,
+      predictionDays: SCORING_PREDICTION_DAYS
+    });
+    
+    return reply.send({
+      success: true,
+      userAccountId,
+      model: MODEL,
+      scoring: scoringOutput
+    });
+    
+  } catch (e) {
+    fastify.log.error({ where: 'test_scoring', error: String(e), stack: e.stack });
+    return reply.code(500).send({ 
+      error: String(e),
+      stack: e.stack
+    });
+  }
+});
+
+// Test endpoint: test Smart Merger (Health Score + Scoring data)
+fastify.post('/api/brain/test-merger', async (request, reply) => {
+  try {
+    const { userAccountId } = request.body;
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId required' });
+    }
+    
+    fastify.log.info({ where: 'test_merger', userAccountId });
+    
+    const ua = await getUserAccount(userAccountId);
+    
+    // 1. Run Scoring Agent
+    const scoringData = await runScoringAgent(ua, {
+      supabase,
+      logger: fastify.log,
+      responsesCreate,
+      saveExecution: false
+    });
+    
+    // 2. Fetch FB data and calculate Health Score
+    const [adsets, yRows, d3Rows, d7Rows, d30Rows, todayRows] = await Promise.all([
+      fetchAdsets(ua.ad_account_id, ua.access_token).catch(e => ({ error: String(e) })),
+      fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'yesterday').then(r => r.data || []).catch(() => []),
+      fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'last_3d').then(r => r.data || []).catch(() => []),
+      fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'last_7d').then(r => r.data || []).catch(() => []),
+      fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'last_30d').then(r => r.data || []).catch(() => []),
+      fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'today').then(r => r.data || []).catch(() => [])
+    ]);
+    
+    const byY = indexByAdset(yRows);
+    const by3 = indexByAdset(d3Rows);
+    const by7 = indexByAdset(d7Rows);
+    const by30 = indexByAdset(d30Rows);
+    const byToday = indexByAdset(todayRows);
+    
+    // Calculate peers
+    const allCpm = yRows.map(r => parseFloat(r.cpm || 0)).filter(x => x > 0);
+    const peers = { cpm: allCpm };
+    
+    // Weights & classes & targets (from config)
+    const weights = { cpl_gap: 15, trend: 10, ctr_penalty: 5, cpm_penalty: 5, freq_penalty: 5 };
+    const classes = { very_good: 20, good: 10, neutral_low: -10, bad: -20 };
+    const targets = { cpl_cents: 200 };
+    
+    // 3. Calculate Health Score + apply Smart Merger for each adset
+    const unifiedAssessments = [];
+    const adsetList = Array.isArray(adsets?.data) ? adsets.data : [];
+    const activeAdsets = adsetList.filter(as => as.effective_status === 'ACTIVE');
+    
+    for (const as of activeAdsets) {
+      const id = as.id;
+      const windows = {
+        y: byY.get(id) || {},
+        d3: by3.get(id) || {},
+        d7: by7.get(id) || {},
+        d30: by30.get(id) || {},
+        today: byToday.get(id) || {}
+      };
+      
+      const hs = computeHealthScoreForAdset({ weights, classes, targets, windows, peers });
+      
+      // Smart Merger!
+      const unified = mergeHealthAndScoring({
+        healthScore: hs,
+        scoringData: scoringData,
+        adsetId: id
+      });
+      
+      unifiedAssessments.push({
+        adset_id: id,
+        adset_name: as.name,
+        health_score: {
+          score: hs.score,
+          cls: hs.cls,
+          eCplY: hs.eCplY,
+          ctr: hs.ctr,
+          cpm: hs.cpm,
+          freq: hs.freq
+        },
+        scoring_data: scoringData.adsets.find(s => s.adset_id === id),
+        unified: unified
+      });
+    }
+    
+    return reply.send({
+      success: true,
+      userAccountId,
+      stats: {
+        total_adsets: adsetList.length,
+        active_adsets: activeAdsets.length,
+        ready_creatives: scoringData.ready_creatives?.length || 0
+      },
+      unified_assessments: unifiedAssessments
+    });
+    
+  } catch (e) {
+    fastify.log.error({ where: 'test_merger', error: String(e), stack: e.stack });
+    return reply.code(500).send({
+      error: String(e),
+      stack: e.stack
+    });
+  }
+});
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -94,6 +247,11 @@ const AGENT_URL = (process.env.AGENT_SERVICE_URL || '').replace(/\/+$/,'') + '/a
 const BRAIN_DRY_RUN = String(process.env.BRAIN_DRY_RUN || 'false').toLowerCase() === 'true';
 const BRAIN_MAX_ACTIONS_PER_RUN = Number(process.env.BRAIN_MAX_ACTIONS_PER_RUN || '5');
 const BRAIN_DEBUG_LLM = String(process.env.BRAIN_DEBUG_LLM || 'false').toLowerCase() === 'true';
+
+// Scoring Agent configuration
+const SCORING_ENABLED = String(process.env.SCORING_ENABLED || 'true').toLowerCase() === 'true';
+const SCORING_MIN_IMPRESSIONS = Number(process.env.SCORING_MIN_IMPRESSIONS || '1000');
+const SCORING_PREDICTION_DAYS = Number(process.env.SCORING_PREDICTION_DAYS || '3');
 
 const ALLOWED_TYPES = new Set([
   'GetCampaignStatus',
@@ -155,7 +313,7 @@ async function fetchAccountStatus(adAccountId, accessToken) {
 }
 async function fetchAdsets(adAccountId, accessToken) {
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adsets`);
-  url.searchParams.set('fields','id,name,campaign_id,daily_budget,lifetime_budget,status');
+  url.searchParams.set('fields','id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status');
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -376,6 +534,213 @@ function decideBudgetChange(currentCents, hsCls, bounds) {
   return target;
 }
 
+/**
+ * Smart Merger: объединяет Health Score и Scoring данные
+ * Возвращает unified assessment с детерминистичными правилами
+ */
+function mergeHealthAndScoring(opts) {
+  const { healthScore, scoringData, adsetId } = opts;
+  
+  const hs = healthScore; // { score, cls, eCplY, ctr, cpm, freq }
+  
+  // Если нет scoring данных - используем только Health Score
+  if (!scoringData || !scoringData.adsets || !scoringData.adsets.length) {
+    return {
+      unified_level: hs.cls,
+      alert: null,
+      action_hint: null,
+      reasoning: `Health Score: ${hs.cls} (score ${hs.score})`,
+      scoring_available: false
+    };
+  }
+  
+  const scoring = scoringData.adsets.find(a => a.adset_id === adsetId);
+  
+  if (!scoring) {
+    return {
+      unified_level: hs.cls,
+      alert: null,
+      action_hint: null,
+      reasoning: `Health Score: ${hs.cls} (score ${hs.score})`,
+      scoring_available: false
+    };
+  }
+  
+  // ========================================
+  // АВТОМАТИЧЕСКИЕ ПРАВИЛА (детерминистичные)
+  // ========================================
+  
+  const trends = scoring.trends || {};
+  const d1 = trends.d1 || {};
+  const d3 = trends.d3 || {};
+  const d7 = trends.d7 || {};
+  
+  // ПРОВЕРКА ВАЛИДНОСТИ ДАННЫХ (для WhatsApp кампаний)
+  if (scoring.data_valid === false) {
+    return {
+      unified_level: hs.cls,
+      alert: 'warning',
+      action_hint: null,
+      reasoning: `⚠️ ${scoring.data_validity_reason || 'Данные невалидны, ожидается прогрузка лидов'}. Health Score: ${hs.cls} (score ${hs.score})`,
+      scoring_flags: { data_invalid: true },
+      scoring_available: true,
+      whatsapp_metrics: scoring.whatsapp_metrics
+    };
+  }
+  
+  // 1. КРИТИЧНЫЕ СИГНАЛЫ от Scoring (HIGH PRIORITY)
+  const hasCriticalRanking = 
+    scoring.diagnostics?.quality_ranking?.includes('below_average_10') ||
+    scoring.diagnostics?.engagement_rate_ranking?.includes('below_average_10') ||
+    scoring.diagnostics?.conversion_rate_ranking?.includes('below_average_10');
+  
+  // Проверяем тренды на разных уровнях:
+  // - d1 (1 день): резкое изменение >25% CPM или >20% CTR падение
+  // - d3 (3 дня): устойчивое ухудшение >15%
+  // - d7 (7 дней): долгосрочная проблема >10%
+  const hasSevereDecline = 
+    (d1.cpm_change_pct > 25 || d1.ctr_change_pct < -20) || // резкий скачок за 1 день
+    (d3.cpm_change_pct > 15 || d3.ctr_change_pct < -15) || // устойчивый тренд 3 дня
+    (d7.cpm_change_pct > 10 || d7.ctr_change_pct < -10);   // долгосрочный тренд 7 дней
+  
+  const hasHighFrequency = scoring.metrics_last_7d?.frequency > 2.2;
+  
+  // 2. СРЕДНИЕ СИГНАЛЫ
+  const hasMediumRanking = 
+    scoring.diagnostics?.quality_ranking?.includes('below_average') ||
+    scoring.diagnostics?.engagement_rate_ranking?.includes('below_average') ||
+    scoring.diagnostics?.conversion_rate_ranking?.includes('below_average');
+  
+  // Умеренные тренды:
+  // - d3: 7-15% ухудшение
+  // - d7: 5-10% ухудшение
+  const hasModerateDecline = 
+    (d3.cpm_change_pct > 7 && d3.cpm_change_pct <= 15) ||
+    (d3.ctr_change_pct < -10 && d3.ctr_change_pct >= -15) ||
+    (d7.cpm_change_pct > 5 && d7.cpm_change_pct <= 10) ||
+    (d7.ctr_change_pct < -7 && d7.ctr_change_pct >= -10);
+  
+  const hasModerateFrequency = 
+    scoring.metrics_last_7d?.frequency > 1.8 && 
+    scoring.metrics_last_7d?.frequency <= 2.2;
+  
+  // 3. ПОЗИТИВНЫЕ СИГНАЛЫ
+  // Стабильность на всех уровнях + низкая frequency
+  const isStable = 
+    Math.abs(d1.cpm_change_pct || 0) < 10 &&
+    Math.abs(d3.cpm_change_pct || 0) < 7 &&
+    Math.abs(d7.cpm_change_pct || 0) < 5 &&
+    (scoring.metrics_last_7d?.frequency || 0) < 1.8;
+  
+  const hasGoodRankings = 
+    (scoring.diagnostics?.quality_ranking === 'average' || scoring.diagnostics?.quality_ranking === 'above_average') &&
+    (scoring.diagnostics?.engagement_rate_ranking === 'average' || scoring.diagnostics?.engagement_rate_ranking === 'above_average') &&
+    (scoring.diagnostics?.conversion_rate_ranking === 'average' || scoring.diagnostics?.conversion_rate_ranking === 'above_average');
+  
+  // ========================================
+  // ЛОГИКА ОБЪЕДИНЕНИЯ
+  // ========================================
+  
+  // СЛУЧАЙ 1: КРИТИЧНЫЕ СИГНАЛЫ от Scoring
+  if (hasCriticalRanking || hasSevereDecline || hasHighFrequency) {
+    const criticalFlags = [];
+    if (hasCriticalRanking) criticalFlags.push('rankings критичны');
+    
+    // Показываем какой тренд сработал
+    if (hasSevereDecline) {
+      const trendParts = [];
+      if (d1.cpm_change_pct > 25 || d1.ctr_change_pct < -20) {
+        trendParts.push(`1d: CPM ${d1.cpm_change_pct > 0 ? '+' : ''}${d1.cpm_change_pct.toFixed(1)}%, CTR ${d1.ctr_change_pct > 0 ? '+' : ''}${d1.ctr_change_pct.toFixed(1)}%`);
+      }
+      if (d3.cpm_change_pct > 15 || d3.ctr_change_pct < -15) {
+        trendParts.push(`3d: CPM ${d3.cpm_change_pct > 0 ? '+' : ''}${d3.cpm_change_pct.toFixed(1)}%, CTR ${d3.ctr_change_pct > 0 ? '+' : ''}${d3.ctr_change_pct.toFixed(1)}%`);
+      }
+      if (d7.cpm_change_pct > 10 || d7.ctr_change_pct < -10) {
+        trendParts.push(`7d: CPM ${d7.cpm_change_pct > 0 ? '+' : ''}${d7.cpm_change_pct.toFixed(1)}%, CTR ${d7.ctr_change_pct > 0 ? '+' : ''}${d7.ctr_change_pct.toFixed(1)}%`);
+      }
+      if (trendParts.length > 0) {
+        criticalFlags.push(`тренды: ${trendParts.join('; ')}`);
+      }
+    }
+    
+    if (hasHighFrequency) criticalFlags.push(`frequency ${scoring.metrics_last_7d.frequency.toFixed(2)}`);
+    
+    if (hs.cls === 'good' || hs.cls === 'very_good') {
+      // ПРЕВЕНТИВНАЯ логика: Health Score хороший, но Scoring видит ПРЕДВЕСТНИКИ
+      return {
+        unified_level: 'high_risk_preventive',
+        alert: 'warning',
+        action_hint: 'reduce_budget_30',
+        reasoning: `Health Score хороший (${hs.cls}), НО Scoring видит критичные сигналы: ${criticalFlags.join(', ')} → ПРЕВЕНТИВНОЕ снижение бюджета`,
+        scoring_flags: { hasCriticalRanking, hasSevereDecline, hasHighFrequency },
+        scoring_available: true
+      };
+    } else {
+      // Health Score уже плохой + Scoring подтверждает
+      return {
+        unified_level: 'critical',
+        alert: 'critical',
+        action_hint: 'reduce_budget_50',
+        reasoning: `Health Score плохой (${hs.cls}) + Scoring подтверждает критичность: ${criticalFlags.join(', ')}`,
+        scoring_flags: { hasCriticalRanking, hasSevereDecline, hasHighFrequency },
+        scoring_available: true
+      };
+    }
+  }
+  
+  // СЛУЧАЙ 2: СРЕДНИЕ СИГНАЛЫ
+  if (hasMediumRanking || hasModerateDecline || hasModerateFrequency) {
+    const mediumFlags = [];
+    if (hasMediumRanking) mediumFlags.push('rankings снижены');
+    
+    if (hasModerateDecline) {
+      const trendParts = [];
+      if (d3.cpm_change_pct > 7 || d3.ctr_change_pct < -10) {
+        trendParts.push(`3d: CPM ${d3.cpm_change_pct > 0 ? '+' : ''}${d3.cpm_change_pct.toFixed(1)}%, CTR ${d3.ctr_change_pct > 0 ? '+' : ''}${d3.ctr_change_pct.toFixed(1)}%`);
+      }
+      if (d7.cpm_change_pct > 5 || d7.ctr_change_pct < -7) {
+        trendParts.push(`7d: CPM ${d7.cpm_change_pct > 0 ? '+' : ''}${d7.cpm_change_pct.toFixed(1)}%, CTR ${d7.ctr_change_pct > 0 ? '+' : ''}${d7.ctr_change_pct.toFixed(1)}%`);
+      }
+      if (trendParts.length > 0) {
+        mediumFlags.push(`тренды: ${trendParts.join('; ')}`);
+      }
+    }
+    
+    if (hasModerateFrequency) mediumFlags.push(`frequency ${scoring.metrics_last_7d.frequency.toFixed(2)}`);
+    
+    return {
+      unified_level: hs.cls === 'bad' ? 'bad' : 'medium_risk',
+      alert: 'info',
+      action_hint: 'freeze_growth',
+      reasoning: `Health Score: ${hs.cls}, Scoring: умеренные сигналы (${mediumFlags.join(', ')}) → заморозить рост`,
+      scoring_flags: { hasMediumRanking, hasModerateDecline, hasModerateFrequency },
+      scoring_available: true
+    };
+  }
+  
+  // СЛУЧАЙ 3: ВСЁ ХОРОШО - усиление позитива
+  if ((hs.cls === 'very_good' || hs.cls === 'good') && isStable && hasGoodRankings) {
+    return {
+      unified_level: 'excellent',
+      alert: null,
+      action_hint: 'scale_up_30',
+      reasoning: `Health Score: ${hs.cls} + Scoring: стабильные тренды + хорошие rankings → безопасное масштабирование`,
+      scoring_flags: { isStable, hasGoodRankings },
+      scoring_available: true
+    };
+  }
+  
+  // СЛУЧАЙ 4: DEFAULT - Health Score главный
+  return {
+    unified_level: hs.cls,
+    alert: null,
+    action_hint: null,
+    reasoning: `Health Score: ${hs.cls} (score ${hs.score}), Scoring: нейтральные сигналы`,
+    scoring_flags: {},
+    scoring_available: true
+  };
+}
+
 const SYSTEM_PROMPT = (clientPrompt) => [
   (clientPrompt || '').trim(),
   '',
@@ -392,7 +757,8 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   'Ты — таргетолог-агент. На вход подаётся агрегированный анализ (Health Score, метрики по окнам yesterday/today/3d/7d/30d, списки ad set и кампаний, статусы аккаунта/кампаний, планы бюджетов по аккаунту и направлениям). Твоя задача — выдать строго валидный JSON-план действий, соблюдая правила и ограничения ниже.',
   '',
   'КОНТЕКСТ УПРАВЛЕНИЯ (НЕИЗМЕННО)',
-  '- Работай ТОЛЬКО с активными кампаниями/ad set (или явно помеченными к активации пользователем). Включать кампании НЕЛЬЗЯ.',
+  '- Работай ТОЛЬКО с активными (status="ACTIVE") кампаниями/ad set. Включать кампании НЕЛЬЗЯ.',
+  '- В данных показаны только ad set с результатами за вчера (spend > 0 или leads > 0). Среди них могут быть неактивные (status="PAUSED") - управлять ими ЗАПРЕЩЕНО, они только для отчетности.',
   '- Кампании с CBO и ad set с lifetime_budget НЕ трогаем.',
   '- Управление бюджетами ТОЛЬКО на уровне ad set (daily_budget).',
   '- Разрешено ПАУЗИТЬ кампанию (PauseCampaign), ad set (через бюджет до минимума/отключение в бизнес-логике) и отдельные объявления (PauseAd).',
@@ -419,6 +785,26 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '- Окна анализа: yesterday (50%), last_3d (25%), last_7d (15%), last_30d (10%).',
   '- Today-компенсация: если impr_today≥300 и eCPL_today ≤ 0.7×eCPL_yesterday — смягчи вчерашние штрафы.',
   '- Минимальная база для надёжных выводов: ≥1000 показов на уровне ad set в референсном окне; при меньших объёмах понижай доверие и избегай резких шагов.',
+  '',
+  '🔮 ДАННЫЕ ОТ SCORING AGENT (ПРЕДИКШЕН И РИСКИ)',
+  '- ПЕРЕД тобой запускается специализированный Scoring Agent, который анализирует риски роста CPL и дает предикшн на 3 дня.',
+  '- Во входных данных ты получаешь поле `scoring` со следующей структурой:',
+  '  • summary: общая статистика (high/medium/low risk count, overall_trend, alert_level)',
+  '  • items: массив объектов (campaigns/adsets/ads) с риск-скорами (0-100), уровнем риска (Low/Medium/High), трендом (improving/stable/declining), предикшеном CPL и рекомендациями',
+  '  • active_creatives_ready: список АКТИВНЫХ креативов из базы user_creatives, готовых к использованию (is_active=true, status=ready), с их скорингом',
+  '  • recommendations_for_brain: список рекомендаций для тебя от Scoring Agent',
+  '',
+  'КАК ИСПОЛЬЗОВАТЬ SCORING DATA:',
+  '1. **Приоритет**: если scoring agent дал High risk для кампании/adset — это ПРИОРИТЕТ. Даже если твой Health Score показывает neutral/good, УЧИТЫВАЙ предикшн от scoring.',
+  '2. **Предикшен CPL**: если scoring показывает, что CPL вырастет на >30% в ближайшие 3 дня → принимай превентивные меры (снижение бюджета, ротация креативов).',
+  '3. **Активные креативы**: scoring agent подскажет, какие креативы из user_creatives готовы к использованию и имеют хороший скоринг. Рекомендуй их в planNote/reportText.',
+  '4. **Recommendations for brain**: это конкретные советы от scoring LLM. Интегрируй их в свои решения, но окончательный выбор actions — за тобой.',
+  '5. **Тренды**: improving → можно масштабировать; declining → осторожность, возможно снижение бюджета; stable → держать курс.',
+  '',
+  'ПРИМЕРЫ ИНТЕГРАЦИИ SCORING:',
+  '• Scoring показал High risk (score 52) для кампании X с предикшеном CPL +35% → ты генерируешь action снизить бюджет на 40-50%, даже если HS neutral.',
+  '• Scoring предложил включить креативы Y и Z (score 12, 18) → ты упоминаешь это в recommendations и planNote.',
+  '• Scoring показал общий alert_level=critical → ты приоритизируешь защитные меры по всем кампаниям.',
   '',
   'HEALTH SCORE (HS) — КАК СОБИРАЕМ',
   '- HS ∈ [-100; +100] — сумма «плюсов/минусов» по компонентам с учётом объёма и today-компенсации:',
@@ -485,6 +871,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   'ЖЁСТКИЕ ОГРАНИЧЕНИЯ ДЛЯ ДЕЙСТВИЙ',
   '- Бюджеты в центах; допустимый дневной диапазон: 300..10000 (т.е. $3..$100).',
   '- Повышение за шаг ≤ +30%; снижение за шаг до −50%.',
+  '- КРИТИЧЕСКИ ВАЖНО: Генерируй actions ТОЛЬКО для ad set со status="ACTIVE". Если status="PAUSED" или любой другой — ПРОПУСКАЙ этот ad set полностью. Неактивные ad set показаны только для отчётности.',
   '- Перед любым Update*/Pause* по объектам внутри кампании ДОБАВЬ GetCampaignStatus этой кампании (первым действием для данного блока изменений).',
   '- Никогда не добавляй неразрешённые типы действий. Если по логике нужен «дубль» — опиши в planNote/reportText как рекомендацию, но не включай несуществующий action.',
   '',
@@ -898,6 +1285,48 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }
 
     const ua = await getUserAccount(userAccountId);
+    
+    // ========================================
+    // 1. SCORING AGENT - запускается ПЕРВЫМ
+    // ========================================
+    let scoringOutput = null;
+    if (SCORING_ENABLED) {
+      try {
+        fastify.log.info({ where: 'brain_run', phase: 'scoring_start', userId: userAccountId });
+        scoringOutput = await runScoringAgent(ua, {
+          supabase,
+          logger: fastify.log,
+          useLLM: CAN_USE_LLM,
+          responsesCreate,
+          minImpressions: SCORING_MIN_IMPRESSIONS,
+          predictionDays: SCORING_PREDICTION_DAYS
+        });
+        fastify.log.info({ 
+          where: 'brain_run', 
+          phase: 'scoring_complete', 
+          userId: userAccountId,
+          summary: scoringOutput?.summary 
+        });
+      } catch (err) {
+        fastify.log.warn({ 
+          where: 'brain_run', 
+          phase: 'scoring_failed', 
+          userId: userAccountId, 
+          error: String(err) 
+        });
+        // Продолжаем работу без scoring данных
+        scoringOutput = {
+          summary: { high_risk_count: 0, medium_risk_count: 0, low_risk_count: 0, overall_trend: 'unknown', alert_level: 'none' },
+          items: [],
+          active_creatives_ready: [],
+          recommendations_for_brain: []
+        };
+      }
+    }
+    
+    // ========================================
+    // 2. Сбор данных из Facebook API
+    // ========================================
     const [accountStatus, adsets, insights] = await Promise.all([
       fetchAccountStatus(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) })),
       fetchAdsets(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) })),
@@ -967,8 +1396,13 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const traceAdsets = [];
     const touchedCampaignIds = new Set();
     const adsetList = Array.isArray(adsets?.data) ? adsets.data : [];
+    const adsetsWithYesterdayResults = adsetList.filter(as => {
+      const yesterdayData = byY.get(as.id)||{};
+      const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
+      return hasResults;
+    });
     
-    for (const as of adsetList) {
+    for (const as of adsetsWithYesterdayResults) {
       const id = as.id;
       const windows = { y: byY.get(id)||{}, d3: by3.get(id)||{}, d7: by7.get(id)||{}, d30: by30.get(id)||{}, today: byToday.get(id)||{} };
       const hs = computeHealthScoreForAdset({ weights, classes, targets, windows, peers });
@@ -1039,6 +1473,10 @@ fastify.post('/api/brain/run', async (request, reply) => {
       },
       limits: { min_cents: bounds.minCents, max_cents: bounds.maxCents, step_up: 0.30, step_down: 0.50 },
       targets,
+      // ========================================
+      // SCORING DATA - от scoring agent
+      // ========================================
+      scoring: scoringOutput || null,
       analysis: {
         hsSummary,
         touchedCampaignIds: Array.from(touchedCampaignIds),
@@ -1060,7 +1498,13 @@ fastify.post('/api/brain/run', async (request, reply) => {
             today: byCT.get(c.id)||{}
           }
         })),
-        adsets: (adsetList||[]).map(as=>{
+        adsets: (adsetList||[])
+          .filter(as => {
+            const yesterdayData = byY.get(as.id)||{};
+            const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
+            return hasResults;
+          })
+          .map(as=>{
           const current = toInt(as.daily_budget)||0;
           const maxUp = Math.max(0, Math.min(bounds.maxCents, Math.round(current*1.3)) - current);
           const maxDown = Math.max(0, current - Math.max(bounds.minCents, Math.round(current*0.5)));

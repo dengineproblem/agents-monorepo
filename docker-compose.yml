@@ -10,7 +10,7 @@ services:
       - BRAIN_MODEL=gpt-5
       - BRAIN_TEST_MODE=false
       - AGENT_SERVICE_URL=http://agent-service:8080
-      - CRON_ENABLED=true
+      - CRON_ENABLED=false
       - CRON_SCHEDULE=0 8 * * *
     ports:
       - "7080:7080"
