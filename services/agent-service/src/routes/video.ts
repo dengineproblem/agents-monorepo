@@ -1,0 +1,279 @@
+import { FastifyPluginAsync } from 'fastify';
+import multipart from '@fastify/multipart';
+import { promises as fs } from 'fs';
+import { randomUUID } from 'crypto';
+import path from 'path';
+import { z } from 'zod';
+import { supabase } from '../lib/supabase.js';
+import { processVideoTranscription } from '../lib/transcription.js';
+import {
+  uploadVideo,
+  createWhatsAppCreative,
+  createInstagramCreative,
+  createWebsiteLeadsCreative
+} from '../adapters/facebook.js';
+
+// Схема валидации тела запроса (только user_id обязателен)
+const ProcessVideoSchema = z.object({
+  user_id: z.string().uuid(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  language: z.string().default('ru'),
+  client_question: z.string().optional(),
+  site_url: z.string().url().optional(),
+  utm: z.string().optional()
+});
+
+type ProcessVideoBody = z.infer<typeof ProcessVideoSchema>;
+
+// Нормализация ad_account_id (добавляет act_ если нет)
+function normalizeAdAccountId(adAccountId: string): string {
+  if (!adAccountId) return '';
+  const id = String(adAccountId).trim();
+  return id.startsWith('act_') ? id : `act_${id}`;
+}
+
+export const videoRoutes: FastifyPluginAsync = async (app) => {
+  // Регистрируем multipart для загрузки файлов
+  await app.register(multipart, {
+    limits: {
+      fileSize: 500 * 1024 * 1024, // 500 MB максимум для видео
+    }
+  });
+
+  /**
+   * POST /process-video
+   * Принимает видео файл и метаданные, обрабатывает видео:
+   * 1. Сохраняет видео
+   * 2. Транскрибирует аудио
+   * 3. Загружает видео в Facebook
+   * 4. Создает 3 креатива (WhatsApp, Instagram, Website)
+   * 5. Сохраняет данные в Supabase
+   */
+  app.post('/process-video', async (request, reply) => {
+    let videoPath: string | null = null;
+
+    try {
+      // Получаем данные из multipart
+      const parts = request.parts();
+      
+      let videoBuffer: Buffer | null = null;
+      let bodyData: Partial<ProcessVideoBody> = {};
+
+      for await (const part of parts) {
+        if (part.type === 'file' && part.fieldname === 'video') {
+          // Получаем видео файл
+          videoBuffer = await part.toBuffer();
+        } else if (part.type === 'field') {
+          // Собираем поля формы
+          (bodyData as any)[part.fieldname] = part.value;
+        }
+      }
+
+      if (!videoBuffer) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Video file is required'
+        });
+      }
+
+      // Валидируем данные
+      const body = ProcessVideoSchema.parse(bodyData);
+
+      // Получаем данные пользователя из user_accounts
+      app.log.info(`Fetching user account data for user_id: ${body.user_id}`);
+      
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username')
+        .eq('id', body.user_id)
+        .single();
+
+      if (userError || !userAccount) {
+        return reply.status(404).send({
+          success: false,
+          error: 'User account not found',
+          details: userError?.message
+        });
+      }
+
+      // Проверяем обязательные поля
+      if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+        return reply.status(400).send({
+          success: false,
+          error: 'User account incomplete',
+          message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+        });
+      }
+
+      // Нормализуем ad_account_id
+      const normalizedAdAccountId = normalizeAdAccountId(userAccount.ad_account_id);
+
+      app.log.info({
+        user_id: body.user_id,
+        ad_account_id: userAccount.ad_account_id,
+        normalized_ad_account_id: normalizedAdAccountId,
+        has_instagram: !!userAccount.instagram_id,
+        token_preview: userAccount.access_token.substring(0, 30)
+      });
+
+      // Сохраняем видео во временный файл
+      videoPath = path.join('/tmp', `video_${randomUUID()}.mp4`);
+      await fs.writeFile(videoPath, videoBuffer);
+
+      app.log.info('Video file saved, starting transcription...');
+
+      // Транскрибируем видео
+      const transcription = await processVideoTranscription(videoPath, body.language);
+
+      app.log.info('Transcription completed, creating creative record...');
+
+      // Создаем запись креатива в БД
+      const { data: creative, error: creativeError } = await supabase
+        .from('user_creatives')
+        .insert({
+          user_id: body.user_id,
+          title: body.title || 'Untitled Creative',
+          status: 'processing'
+        })
+        .select()
+        .single();
+
+      if (creativeError || !creative) {
+        throw new Error(`Failed to create creative record: ${creativeError?.message}`);
+      }
+
+      app.log.info(`Creative record created: ${creative.id}, uploading video to Facebook...`);
+
+      // Загружаем видео в Facebook (используем нормализованный ID)
+      const fbVideo = await uploadVideo(normalizedAdAccountId, userAccount.access_token, videoBuffer);
+
+      app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, creating creatives...`);
+
+      // Создаем три креатива параллельно
+      const description = body.description || 'Видео креатив';
+      
+      const [whatsappCreative, instagramCreative, websiteCreative] = await Promise.all([
+        // WhatsApp креатив
+        createWhatsAppCreative(normalizedAdAccountId, userAccount.access_token, {
+          videoId: fbVideo.id,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+          message: description,
+          clientQuestion: body.client_question || 'Здравствуйте! Интересует ваше предложение.'
+        }),
+
+        // Instagram креатив
+        createInstagramCreative(normalizedAdAccountId, userAccount.access_token, {
+          videoId: fbVideo.id,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+          instagramUsername: userAccount.instagram_username || '',
+          message: description
+        }),
+
+        // Website Leads креатив
+        body.site_url ? createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
+          videoId: fbVideo.id,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+          message: description,
+          siteUrl: body.site_url,
+          utm: body.utm
+        }) : Promise.resolve({ id: '' })
+      ]);
+
+      app.log.info('All creatives created, saving transcription...');
+
+      // Сохраняем транскрипцию
+      const { error: transcriptError } = await supabase
+        .from('creative_transcripts')
+        .insert({
+          creative_id: creative.id,
+          lang: body.language,
+          source: 'whisper',
+          text: transcription.text,
+          duration_sec: transcription.duration ? Math.round(transcription.duration) : null,
+          status: 'ready'
+        });
+
+      if (transcriptError) {
+        app.log.error(`Failed to save transcription: ${transcriptError.message}`);
+      }
+
+      // Обновляем запись креатива со всеми ID
+      const { error: updateError } = await supabase
+        .from('user_creatives')
+        .update({
+          fb_video_id: fbVideo.id,
+          fb_creative_id_whatsapp: whatsappCreative.id,
+          fb_creative_id_instagram_traffic: instagramCreative.id,
+          fb_creative_id_site_leads: websiteCreative.id || null,
+          status: 'ready'
+        })
+        .eq('id', creative.id);
+
+      if (updateError) {
+        throw new Error(`Failed to update creative record: ${updateError.message}`);
+      }
+
+      app.log.info('Video processing completed successfully');
+
+      // Возвращаем успешный ответ
+      return reply.send({
+        success: true,
+        message: 'Video processed and creatives created successfully',
+        data: {
+          creative_id: creative.id,
+          fb_video_id: fbVideo.id,
+          fb_creative_id_whatsapp: whatsappCreative.id,
+          fb_creative_id_instagram_traffic: instagramCreative.id,
+          fb_creative_id_site_leads: websiteCreative.id || null,
+          transcription: {
+            text: transcription.text,
+            language: transcription.language,
+            source: 'whisper',
+            duration_sec: transcription.duration ? Math.round(transcription.duration) : null
+          }
+        }
+      });
+
+    } catch (error: any) {
+      app.log.error('Error processing video:', error);
+
+      // Проверяем, есть ли специфичная информация об ошибке Facebook
+      if (error.fb) {
+        return reply.status(500).send({
+          success: false,
+          error: error.message,
+          facebook_error: error.fb
+        });
+      }
+
+      // Проверяем ошибки валидации Zod
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Validation error',
+          details: error.errors
+        });
+      }
+
+      return reply.status(500).send({
+        success: false,
+        error: error.message || 'Internal server error'
+      });
+
+    } finally {
+      // Очищаем временный видео файл
+      if (videoPath) {
+        try {
+          await fs.unlink(videoPath);
+          app.log.info('Temporary video file deleted');
+        } catch (err: any) {
+          app.log.error('Failed to delete video file:', err?.message || err);
+        }
+      }
+    }
+  });
+};

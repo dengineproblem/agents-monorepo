@@ -1,4 +1,10 @@
 import crypto from 'node:crypto';
+import FormData from 'form-data';
+import { Readable } from 'stream';
+import fs from 'fs';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import axios from 'axios';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
@@ -43,6 +49,175 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
     throw err;
   }
   return json;
+}
+
+/**
+ * Загружает видео в Facebook Ad Account
+ */
+export async function uploadVideo(adAccountId: string, token: string, videoBuffer: Buffer): Promise<{ id: string }> {
+  // Сохраняем во временный файл
+  const tmpPath = path.join('/tmp', `fb_video_${randomUUID()}.mp4`);
+  fs.writeFileSync(tmpPath, videoBuffer);
+  
+  try {
+    const formData = new FormData();
+    formData.append('source', fs.createReadStream(tmpPath));
+
+    const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
+    
+    // Используем axios
+    const response = await axios.post(url, formData, {
+      headers: formData.getHeaders(),
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
+    });
+    
+    // Удаляем временный файл
+    fs.unlinkSync(tmpPath);
+    
+    return response.data;
+  } catch (error: any) {
+    // Удаляем временный файл в случае ошибки
+    if (fs.existsSync(tmpPath)) {
+      fs.unlinkSync(tmpPath);
+    }
+    
+    const g = error?.response?.data?.error || {};
+    const err: any = new Error(g?.message || error.message);
+    err.fb = {
+      status: error?.response?.status,
+      method: 'POST',
+      path: `${adAccountId}/advideos`,
+      type: g?.type,
+      code: g?.code,
+      error_subcode: g?.error_subcode,
+      fbtrace_id: g?.fbtrace_id
+    };
+    throw err;
+  }
+}
+
+/**
+ * Создает креатив для WhatsApp (Click to WhatsApp)
+ */
+export async function createWhatsAppCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    clientQuestion: string;
+  }
+): Promise<{ id: string }> {
+  const pageWelcomeMessage = JSON.stringify({
+    type: "VISUAL_EDITOR",
+    version: 2,
+    landing_screen_type: "welcome_message",
+    media_type: "text",
+    text_format: {
+      customer_action_type: "autofill_message",
+      message: {
+        autofill_message: { content: params.clientQuestion },
+        text: "Здравствуйте! Чем можем помочь?"
+      }
+    }
+  });
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    video_data: {
+      video_id: params.videoId,
+      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
+      message: params.message,
+      call_to_action: { type: "WHATSAPP_MESSAGE" },
+      page_welcome_message: pageWelcomeMessage
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Video CTWA – WhatsApp",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
+}
+
+/**
+ * Создает креатив для Instagram профиля
+ */
+export async function createInstagramCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    instagramUsername: string;
+    message: string;
+  }
+): Promise<{ id: string }> {
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    video_data: {
+      video_id: params.videoId,
+      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
+      message: params.message,
+      call_to_action: {
+        type: "LEARN_MORE",
+        value: {
+          link: `https://www.instagram.com/${params.instagramUsername}`
+        }
+      }
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Instagram Profile Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
+}
+
+/**
+ * Создает креатив для лидов на сайт
+ */
+export async function createWebsiteLeadsCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    siteUrl: string;
+    utm?: string;
+  }
+): Promise<{ id: string }> {
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    video_data: {
+      video_id: params.videoId,
+      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
+      message: params.message,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: { link: params.siteUrl }
+      }
+    }
+  };
+
+  const payload: any = {
+    name: "Website Leads Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  if (params.utm) {
+    payload.url_tags = params.utm;
+  }
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 
 export const fb = {

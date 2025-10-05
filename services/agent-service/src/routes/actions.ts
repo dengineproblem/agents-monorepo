@@ -5,6 +5,7 @@ import { fb, graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { executeByManifest, getActionSpec } from '../actions/engine.js';
 import { workflowDuplicateAndPauseOriginal, workflowDuplicateKeepOriginalActive, workflowDuplicateAdsetWithAudience } from '../workflows/campaignDuplicate.js';
+import { workflowCreateCampaignWithCreative } from '../workflows/createCampaignWithCreative.js';
 
 const AuthHeader = z.string().startsWith('Bearer ').optional();
 
@@ -83,11 +84,20 @@ export async function actionsRoutes(app: FastifyInstance) {
           let result: any;
           // Force manual handler for PauseAd (accepts ad_id/adId)
           if (act.type === 'PauseAd') {
-            result = await handleAction(act as any, accessToken, { pageId: tokenInfo.pageId });
+            result = await handleAction(act as any, accessToken, { 
+              pageId: tokenInfo.pageId,
+              userAccountId: account.userAccountId,
+              adAccountId: resolvedAdAccountId ?? undefined
+            });
           } else if (spec) {
             result = await executeByManifest(act.type, act.params as any, accessToken);
           } else {
-            result = await handleAction(act as any, accessToken, { pageId: tokenInfo.pageId });
+            result = await handleAction(act as any, accessToken, { 
+              pageId: tokenInfo.pageId,
+              userAccountId: account.userAccountId,
+              adAccountId: resolvedAdAccountId ?? undefined,
+              instagramId: tokenInfo.instagramId
+            });
           }
 
           await supabase.from('agent_actions')
@@ -125,7 +135,7 @@ export async function actionsRoutes(app: FastifyInstance) {
   });
 }
 
-type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string };
+type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string };
 type ResolveErr = { ok: false; message: string };
 
 async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; }): Promise<ResolveOk | ResolveErr> {
@@ -147,11 +157,12 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
     ok: true,
     accessToken: data.access_token as string,
     adAccountId: (data as any).ad_account_id || account.adAccountId,
-    pageId: (data as any).page_id || undefined
+    pageId: (data as any).page_id || undefined,
+    instagramId: (data as any).instagram_id || undefined
   };
 }
 
-async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string }) {
+async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string }) {
   switch ((action as any).type) {
     case 'GetCampaignStatus': {
       const p = (action as any).params as { campaign_id: string };
@@ -177,6 +188,35 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       const p = (action as any).params as { source_adset_id: string; audience_id: string; daily_budget?: number; name_suffix?: string };
       if (!p.source_adset_id || !p.audience_id) throw new Error('Audience.DuplicateAdSetWithAudience: source_adset_id and audience_id required');
       return workflowDuplicateAdsetWithAudience(p, token);
+    }
+    case 'CreateCampaignWithCreative': {
+      const p = (action as any).params as {
+        user_creative_id: string;
+        objective: 'WhatsApp' | 'Instagram' | 'SiteLeads';
+        campaign_name: string;
+        adset_name?: string;
+        ad_name?: string;
+        daily_budget_cents: number;
+        targeting?: any;
+      };
+      if (!p.user_creative_id || !p.objective || !p.campaign_name || !p.daily_budget_cents) {
+        throw new Error('CreateCampaignWithCreative: user_creative_id, objective, campaign_name, daily_budget_cents required');
+      }
+      if (!ctx?.userAccountId || !ctx?.adAccountId) {
+        throw new Error('CreateCampaignWithCreative: userAccountId and adAccountId required in context');
+      }
+      return workflowCreateCampaignWithCreative(
+        {
+          ...p,
+          page_id: ctx.pageId,
+          instagram_id: ctx.instagramId,
+        },
+        {
+          user_account_id: ctx.userAccountId,
+          ad_account_id: ctx.adAccountId,
+        },
+        token
+      );
     }
   }
 }
@@ -215,6 +255,16 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
       case 'SetAdsetBudget': {
         if (!params.adsetId) issues.push('SetAdsetBudget: adsetId required');
         if (typeof params.dailyBudgetUsd !== 'number') issues.push('SetAdsetBudget: dailyBudgetUsd number required');
+        break;
+      }
+      case 'CreateCampaignWithCreative': {
+        if (!params.user_creative_id) issues.push('CreateCampaignWithCreative: user_creative_id required');
+        if (!params.objective) issues.push('CreateCampaignWithCreative: objective required');
+        if (!params.campaign_name) issues.push('CreateCampaignWithCreative: campaign_name required');
+        if (typeof params.daily_budget_cents !== 'number') issues.push('CreateCampaignWithCreative: daily_budget_cents number required');
+        if (!['WhatsApp', 'Instagram', 'SiteLeads'].includes(params.objective)) {
+          issues.push('CreateCampaignWithCreative: objective must be WhatsApp, Instagram, or SiteLeads');
+        }
         break;
       }
     }

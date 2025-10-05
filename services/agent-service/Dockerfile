@@ -1,4 +1,8 @@
 FROM node:20-alpine
+
+# Установка FFmpeg для обработки видео
+RUN apk add --no-cache ffmpeg
+
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci || npm i

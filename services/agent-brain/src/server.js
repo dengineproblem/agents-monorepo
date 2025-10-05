@@ -262,7 +262,9 @@ const ALLOWED_TYPES = new Set([
   'Workflow.DuplicateAndPauseOriginal',
   'Workflow.DuplicateKeepOriginalActive',
   // Audience tools
-  'Audience.DuplicateAdSetWithAudience'
+  'Audience.DuplicateAdSetWithAudience',
+  // Creative-based campaign creation
+  'CreateCampaignWithCreative'
 ]);
 
 function genIdem() {
@@ -883,6 +885,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '- Workflow.DuplicateAndPauseOriginal {"campaign_id","name?"} — дублирует кампанию и паузит оригинал (используется для реанимации)',
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
   '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+.',
+  '- CreateCampaignWithCreative {"user_creative_id","objective","campaign_name","daily_budget_cents","adset_name?","ad_name?","targeting?"} — создает НОВУЮ кампанию с креативом из базы user_creatives. Креативы берутся из поля scoring.ready_creatives (с их скорингом). Objective: "WhatsApp"/"Instagram"/"SiteLeads". Кампания создается на ПАУЗЕ (status=PAUSED), чтобы ты мог потом запустить её через ResumeAdSet/ResumeCampaign. ИСПОЛЬЗУЙ только если Scoring Agent рекомендует конкретный креатив с высоким скорингом (Low risk, score <20).',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
   '- Выведи ОДИН JSON-объект: { "planNote": string, "actions": Action[], "reportText": string } — и больше НИЧЕГО.',
@@ -991,6 +994,9 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '',
   'ПРИМЕР 2 (снижение бюджета и пауза «пожирателя»)',
   'Example JSON:\n{\n  "planNote": "HS bad → down -50%, pause top-spend ad; дублирование рекомендовано (см. reportText), но не включено в actions",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "<ADSET_ID>", "daily_budget": 1000 } },\n    { "type": "PauseAd", "params": { "ad_id": "<AD_ID>", "status": "PAUSED" } }\n  ],\n  "reportText": "<здесь итоговый отчёт по шаблону>"\n}',
+  '',
+  'ПРИМЕР 3 (создание новой кампании с высокоскоринговым креативом из Scoring Agent)',
+  'Example JSON:\n{\n  "planNote": "Scoring agent рекомендует креатив <UUID> (score 12, Low risk) для WhatsApp кампании. Создаём новую кампанию на паузе с бюджетом $20/день.",\n  "actions": [\n    { "type": "CreateCampaignWithCreative", "params": { "user_creative_id": "<UUID_FROM_SCORING>", "objective": "WhatsApp", "campaign_name": "Новая кампания — мемы WhatsApp", "daily_budget_cents": 2000, "adset_name": "Основной adset", "ad_name": "Объявление 1" } }\n  ],\n  "reportText": "<здесь итоговый отчёт по шаблону с упоминанием создания новой кампании>"\n}',
   '',
   'Тул: SendActions',
   `- POST ${AGENT_URL}`,
