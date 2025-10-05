@@ -453,7 +453,7 @@ async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, opt
 async function getActiveCreatives(supabase, userAccountId) {
   const { data, error } = await supabase
     .from('user_creatives')
-    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, is_active, status')
+    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, is_active, status, created_at')
     .eq('user_id', userAccountId)
     .eq('is_active', true)
     .eq('status', 'ready');
@@ -461,6 +461,38 @@ async function getActiveCreatives(supabase, userAccountId) {
   if (error) throw new Error(`Failed to get active creatives: ${error.message}`);
   
   return data || [];
+}
+
+/**
+ * Получить все creative_id из активных ads в Facebook
+ */
+async function getActiveCreativeIds(adAccountId, accessToken) {
+  const fields = 'id,name,status,effective_status,creative{id}';
+  const url = `https://graph.facebook.com/${FB_API_VERSION}/${normalizeAdAccountId(adAccountId)}/ads`;
+  
+  try {
+    const response = await fetch(`${url}?access_token=${accessToken}&fields=${fields}&limit=500`);
+    const result = await response.json();
+    
+    if (!response.ok || result.error) {
+      throw new Error(result.error?.message || 'Failed to fetch ads');
+    }
+    
+    // Фильтруем только ACTIVE ads
+    const activeAds = (result.data || []).filter(ad => 
+      ad.status === 'ACTIVE' && ad.effective_status === 'ACTIVE'
+    );
+    
+    // Извлекаем creative IDs
+    const creativeIds = activeAds
+      .map(ad => ad.creative?.id)
+      .filter(id => id);
+    
+    return new Set(creativeIds);
+  } catch (error) {
+    console.error('Failed to fetch active creative IDs:', error.message);
+    return new Set();
+  }
 }
 
 /**
@@ -586,7 +618,15 @@ export async function runScoringAgent(userAccount, options = {}) {
     
     const userCreatives = await getActiveCreatives(supabase, userAccountId);
     
-    logger.info({ where: 'scoring_agent', phase: 'creatives_fetched', count: userCreatives.length });
+    // Получаем список creative_id которые используются в активных ads
+    const activeCreativeIds = await getActiveCreativeIds(ad_account_id, access_token);
+    
+    logger.info({ 
+      where: 'scoring_agent', 
+      phase: 'creatives_fetched', 
+      total_creatives: userCreatives.length,
+      active_in_ads: activeCreativeIds.size
+    });
     
     const readyCreatives = [];
     
@@ -663,13 +703,57 @@ export async function runScoringAgent(userAccount, options = {}) {
     });
     
     // ========================================
+    // ОПРЕДЕЛЯЕМ НЕИСПОЛЬЗОВАННЫЕ КРЕАТИВЫ
+    // ========================================
+    
+    const unusedCreatives = [];
+    
+    for (const uc of userCreatives) {
+      // Проверяем все fb_creative_id этого креатива
+      const creativeIds = [
+        uc.fb_creative_id_whatsapp,
+        uc.fb_creative_id_instagram_traffic,
+        uc.fb_creative_id_site_leads
+      ].filter(id => id);
+      
+      // Если НИ ОДИН из creative_id не используется в активных ads
+      const isUnused = creativeIds.length > 0 && 
+                       !creativeIds.some(id => activeCreativeIds.has(id));
+      
+      if (isUnused) {
+        // Определяем рекомендуемый objective на основе наличия креативов
+        let recommendedObjective = 'WhatsApp'; // По умолчанию
+        if (uc.fb_creative_id_whatsapp) recommendedObjective = 'WhatsApp';
+        else if (uc.fb_creative_id_instagram_traffic) recommendedObjective = 'Instagram';
+        else if (uc.fb_creative_id_site_leads) recommendedObjective = 'SiteLeads';
+        
+        unusedCreatives.push({
+          id: uc.id,
+          title: uc.title,
+          fb_creative_id_whatsapp: uc.fb_creative_id_whatsapp,
+          fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
+          fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
+          recommended_objective: recommendedObjective,
+          created_at: uc.created_at
+        });
+      }
+    }
+    
+    logger.info({ 
+      where: 'scoring_agent', 
+      phase: 'unused_creatives_identified',
+      count: unusedCreatives.length
+    });
+    
+    // ========================================
     // ЧАСТЬ 3: ФОРМИРОВАНИЕ RAW OUTPUT (БЕЗ LLM!)
     // ========================================
     
     // Возвращаем только RAW данные, без LLM анализа
     const scoringRawData = {
       adsets: adsetsWithTrends,
-      ready_creatives: readyCreatives
+      ready_creatives: readyCreatives,
+      unused_creatives: unusedCreatives  // НОВОЕ!
     };
     
     logger.info({ 

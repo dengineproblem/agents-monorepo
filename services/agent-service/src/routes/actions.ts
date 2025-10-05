@@ -191,23 +191,43 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
     }
     case 'CreateCampaignWithCreative': {
       const p = (action as any).params as {
-        user_creative_id: string;
+        user_creative_id?: string; // Backward compatibility: single creative
+        user_creative_ids?: string[]; // New: multiple creatives
         objective: 'WhatsApp' | 'Instagram' | 'SiteLeads';
         campaign_name: string;
         adset_name?: string;
-        ad_name?: string;
         daily_budget_cents: number;
         targeting?: any;
+        use_default_settings?: boolean;
+        auto_activate?: boolean;
       };
-      if (!p.user_creative_id || !p.objective || !p.campaign_name || !p.daily_budget_cents) {
-        throw new Error('CreateCampaignWithCreative: user_creative_id, objective, campaign_name, daily_budget_cents required');
+      
+      // Поддержка обоих форматов: user_creative_id (старый) и user_creative_ids (новый)
+      let creative_ids: string[];
+      if (p.user_creative_ids && Array.isArray(p.user_creative_ids)) {
+        creative_ids = p.user_creative_ids;
+      } else if (p.user_creative_id) {
+        creative_ids = [p.user_creative_id]; // Backward compatibility
+      } else {
+        throw new Error('CreateCampaignWithCreative: user_creative_id or user_creative_ids required');
+      }
+      
+      if (!p.objective || !p.campaign_name || !p.daily_budget_cents) {
+        throw new Error('CreateCampaignWithCreative: objective, campaign_name, daily_budget_cents required');
       }
       if (!ctx?.userAccountId || !ctx?.adAccountId) {
         throw new Error('CreateCampaignWithCreative: userAccountId and adAccountId required in context');
       }
       return workflowCreateCampaignWithCreative(
         {
-          ...p,
+          user_creative_ids: creative_ids,
+          objective: p.objective,
+          campaign_name: p.campaign_name,
+          adset_name: p.adset_name,
+          daily_budget_cents: p.daily_budget_cents,
+          targeting: p.targeting,
+          use_default_settings: p.use_default_settings,
+          auto_activate: p.auto_activate,
           page_id: ctx.pageId,
           instagram_id: ctx.instagramId,
         },
@@ -258,7 +278,12 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
         break;
       }
       case 'CreateCampaignWithCreative': {
-        if (!params.user_creative_id) issues.push('CreateCampaignWithCreative: user_creative_id required');
+        if (!params.user_creative_id && !params.user_creative_ids) {
+          issues.push('CreateCampaignWithCreative: user_creative_id or user_creative_ids required');
+        }
+        if (params.user_creative_ids && !Array.isArray(params.user_creative_ids)) {
+          issues.push('CreateCampaignWithCreative: user_creative_ids must be an array');
+        }
         if (!params.objective) issues.push('CreateCampaignWithCreative: objective required');
         if (!params.campaign_name) issues.push('CreateCampaignWithCreative: campaign_name required');
         if (typeof params.daily_budget_cents !== 'number') issues.push('CreateCampaignWithCreative: daily_budget_cents number required');

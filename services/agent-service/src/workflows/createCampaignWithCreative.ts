@@ -1,18 +1,24 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
+import { 
+  getDefaultAdSettingsWithFallback, 
+  convertToFacebookTargeting,
+  type CampaignGoal 
+} from '../lib/defaultSettings.js';
 
 type ObjectiveType = 'WhatsApp' | 'Instagram' | 'SiteLeads';
 
 type CreateCampaignParams = {
-  user_creative_id: string;
+  user_creative_ids: string[]; // МАССИВ креативов для создания нескольких ads в одном adset
   objective: ObjectiveType;
   campaign_name: string;
   adset_name?: string;
-  ad_name?: string;
   daily_budget_cents: number;
-  targeting?: any;
+  targeting?: any; // Если указан - переопределяет дефолтные настройки
   page_id?: string;
   instagram_id?: string;
+  use_default_settings?: boolean; // По умолчанию true
+  auto_activate?: boolean; // Если true - сразу активирует кампанию (по умолчанию false - создается в PAUSED)
 };
 
 type CreateCampaignContext = {
@@ -48,68 +54,71 @@ export async function workflowCreateCampaignWithCreative(
   accessToken: string
 ) {
   const {
-    user_creative_id,
+    user_creative_ids,
     objective,
     campaign_name,
     adset_name,
-    ad_name,
     daily_budget_cents,
     targeting,
     page_id,
-    instagram_id
+    instagram_id,
+    use_default_settings = true
   } = params;
 
   const { user_account_id, ad_account_id } = context;
 
   console.log('[CreateCampaignWithCreative] Starting workflow:', {
-    user_creative_id,
+    user_creative_ids_count: user_creative_ids.length,
+    user_creative_ids,
     objective,
     campaign_name,
-    daily_budget_cents
+    daily_budget_cents,
+    use_default_settings
   });
 
   // ===================================================
-  // STEP 1: Получаем креатив из Supabase
+  // STEP 1: Получаем ВСЕ креативы из Supabase
   // ===================================================
-  const { data: creative, error: creativeError } = await supabase
+  const { data: creatives, error: creativesError } = await supabase
     .from('user_creatives')
     .select('*')
-    .eq('id', user_creative_id)
+    .in('id', user_creative_ids)
     .eq('user_id', user_account_id)
-    .eq('status', 'ready')
-    .single();
+    .eq('status', 'ready');
 
-  if (creativeError || !creative) {
-    throw new Error(`Creative not found or not ready: ${user_creative_id}`);
+  if (creativesError || !creatives || creatives.length === 0) {
+    throw new Error(`Creatives not found or not ready: ${user_creative_ids.join(', ')}`);
   }
 
-  console.log('[CreateCampaignWithCreative] Creative found:', {
-    id: creative.id,
-    title: creative.title
+  if (creatives.length !== user_creative_ids.length) {
+    console.warn('[CreateCampaignWithCreative] Some creatives not found:', {
+      requested: user_creative_ids.length,
+      found: creatives.length
+    });
+  }
+
+  console.log('[CreateCampaignWithCreative] Creatives found:', {
+    count: creatives.length,
+    ids: creatives.map(c => c.id),
+    titles: creatives.map(c => c.title)
   });
 
   // ===================================================
-  // STEP 2: Определяем fb_creative_id и objective
+  // STEP 2: Определяем fb_creative_id для КАЖДОГО креатива
   // ===================================================
-  let fb_creative_id: string | null = null;
   let fb_objective: string = 'OUTCOME_ENGAGEMENT';
   let optimization_goal: string = 'REACH';
-  let destination_type: string | undefined = undefined;
-
+  
   switch (objective) {
     case 'WhatsApp':
-      fb_creative_id = creative.fb_creative_id_whatsapp;
       fb_objective = 'OUTCOME_ENGAGEMENT';
       optimization_goal = 'CONVERSATIONS';
-      destination_type = 'WHATSAPP';
       break;
     case 'Instagram':
-      fb_creative_id = creative.fb_creative_id_instagram_traffic;
       fb_objective = 'OUTCOME_TRAFFIC';
       optimization_goal = 'LINK_CLICKS';
       break;
     case 'SiteLeads':
-      fb_creative_id = creative.fb_creative_id_site_leads;
       fb_objective = 'OUTCOME_LEADS';
       optimization_goal = 'LEAD_GENERATION';
       break;
@@ -117,11 +126,38 @@ export async function workflowCreateCampaignWithCreative(
       throw new Error(`Unknown objective: ${objective}`);
   }
 
-  if (!fb_creative_id) {
-    throw new Error(`Creative ${user_creative_id} does not have fb_creative_id for ${objective}`);
-  }
+  // Для каждого креатива извлекаем соответствующий fb_creative_id
+  const creative_data = creatives.map((creative, index) => {
+    let fb_creative_id: string | null = null;
+    
+    switch (objective) {
+      case 'WhatsApp':
+        fb_creative_id = creative.fb_creative_id_whatsapp;
+        break;
+      case 'Instagram':
+        fb_creative_id = creative.fb_creative_id_instagram_traffic;
+        break;
+      case 'SiteLeads':
+        fb_creative_id = creative.fb_creative_id_site_leads;
+        break;
+    }
 
-  console.log('[CreateCampaignWithCreative] Using creative_id:', fb_creative_id);
+    if (!fb_creative_id) {
+      throw new Error(`Creative ${creative.id} does not have fb_creative_id for ${objective}`);
+    }
+
+    return {
+      user_creative_id: creative.id,
+      fb_creative_id,
+      title: creative.title,
+      ad_name: `${campaign_name} - Ad ${index + 1}`
+    };
+  });
+
+  console.log('[CreateCampaignWithCreative] Prepared creative data:', {
+    count: creative_data.length,
+    creatives: creative_data.map(c => ({ id: c.user_creative_id, fb_id: c.fb_creative_id }))
+  });
 
   // Нормализуем ad_account_id
   const normalized_ad_account_id = ad_account_id.startsWith('act_')
@@ -135,7 +171,7 @@ export async function workflowCreateCampaignWithCreative(
     name: campaign_name,
     objective: fb_objective,
     special_ad_categories: [], // Требуется Facebook, даже если пустой
-    status: 'PAUSED'
+    status: params.auto_activate ? 'ACTIVE' : 'PAUSED'
   };
 
   console.log('[CreateCampaignWithCreative] Creating campaign:', campaignBody);
@@ -154,15 +190,68 @@ export async function workflowCreateCampaignWithCreative(
   console.log('[CreateCampaignWithCreative] Campaign created:', campaign_id);
 
   // ===================================================
-  // STEP 4: Создаем AdSet (КАК В ДУБЛИРОВАНИИ)
+  // STEP 3.5: Получаем дефолтные настройки из Supabase
   // ===================================================
-  const finalTargeting = targeting || getDefaultTargeting();
+  let defaultSettings = null;
+  // Используем description из первого креатива как fallback
+  let finalDescription = creatives[0]?.description || 'Узнайте подробности';
+  
+  if (use_default_settings) {
+    // Преобразуем ObjectiveType в CampaignGoal
+    let campaignGoal: CampaignGoal = 'whatsapp';
+    if (objective === 'WhatsApp') campaignGoal = 'whatsapp';
+    else if (objective === 'Instagram') campaignGoal = 'instagram_traffic';
+    else if (objective === 'SiteLeads') campaignGoal = 'site_leads';
+
+    try {
+      defaultSettings = await getDefaultAdSettingsWithFallback(user_account_id, campaignGoal);
+      console.log('[CreateCampaignWithCreative] Default settings loaded:', {
+        campaign_goal: defaultSettings.campaign_goal,
+        age_min: defaultSettings.age_min,
+        age_max: defaultSettings.age_max,
+        cities: defaultSettings.cities?.length || 0
+      });
+      
+      // Используем description из дефолтных настроек
+      if (defaultSettings.description) {
+        finalDescription = defaultSettings.description;
+      }
+    } catch (error: any) {
+      console.warn('[CreateCampaignWithCreative] Failed to load default settings:', error.message);
+      // Продолжаем без дефолтных настроек
+    }
+  }
+
+  // ===================================================
+  // STEP 4: Создаем AdSet с таргетингом из дефолтных настроек
+  // ===================================================
+  let finalTargeting: any;
+  
+  if (targeting) {
+    // Если таргетинг передан явно - используем его
+    finalTargeting = targeting;
+    console.log('[CreateCampaignWithCreative] Using provided targeting');
+  } else if (defaultSettings) {
+    // Используем таргетинг из дефолтных настроек
+    finalTargeting = convertToFacebookTargeting(defaultSettings);
+    console.log('[CreateCampaignWithCreative] Using targeting from default settings:', finalTargeting);
+  } else {
+    // Фолбек на базовый таргетинг
+    finalTargeting = getDefaultTargeting();
+    console.log('[CreateCampaignWithCreative] Using fallback targeting');
+  }
+  
   const finalAdsetName = adset_name || `${campaign_name} - AdSet 1`;
 
+  // Время работы AdSet:
+  // - НЕ указываем start_time и end_time при daily_budget
+  // - Это значит: начинается СРАЗУ при активации, работает БЕССРОЧНО
+  // - Именно так работает дублирование кампаний!
+  
   const adsetBody: any = {
     name: finalAdsetName,
     campaign_id,
-    status: 'PAUSED',
+    status: params.auto_activate ? 'ACTIVE' : 'PAUSED',
     billing_event: 'IMPRESSIONS',
     optimization_goal,
     daily_budget: daily_budget_cents,
@@ -199,34 +288,54 @@ export async function workflowCreateCampaignWithCreative(
   console.log('[CreateCampaignWithCreative] AdSet created:', adset_id);
 
   // ===================================================
-  // STEP 5: Создаем Ad (КАК В ДУБЛИРОВАНИИ)
+  // STEP 5: Создаем НЕСКОЛЬКО Ads (по одному для каждого креатива)
   // ===================================================
-  const finalAdName = ad_name || `${campaign_name} - Ad 1`;
+  const created_ads: Array<{ ad_id: string; user_creative_id: string; fb_creative_id: string }> = [];
 
-  const adBody: any = {
-    name: finalAdName,
-    adset_id,
-    status: 'PAUSED',
-    creative: { creative_id: fb_creative_id }
-  };
+  for (const creative of creative_data) {
+    const adBody: any = {
+      name: creative.ad_name,
+      adset_id,
+      status: params.auto_activate ? 'ACTIVE' : 'PAUSED',
+      creative: { creative_id: creative.fb_creative_id }
+    };
 
-  console.log('[CreateCampaignWithCreative] Creating ad:', {
-    adset_id,
-    fb_creative_id
-  });
+    console.log('[CreateCampaignWithCreative] Creating ad:', {
+      ad_name: creative.ad_name,
+      adset_id,
+      fb_creative_id: creative.fb_creative_id
+    });
 
-  const adResult = await withStep(
-    'create_ad',
-    { payload: adBody },
-    () => graph('POST', `${normalized_ad_account_id}/ads`, accessToken, toParams(adBody))
-  );
+    const adResult = await withStep(
+      'create_ad',
+      { payload: adBody },
+      () => graph('POST', `${normalized_ad_account_id}/ads`, accessToken, toParams(adBody))
+    );
 
-  const ad_id = adResult?.id;
-  if (!ad_id) {
-    throw Object.assign(new Error('create_ad_failed'), { step: 'create_ad_no_id' });
+    const ad_id = adResult?.id;
+    if (!ad_id) {
+      throw Object.assign(new Error('create_ad_failed'), { 
+        step: 'create_ad_no_id',
+        creative_id: creative.user_creative_id
+      });
+    }
+
+    console.log('[CreateCampaignWithCreative] Ad created:', {
+      ad_id,
+      creative_id: creative.user_creative_id
+    });
+
+    created_ads.push({
+      ad_id,
+      user_creative_id: creative.user_creative_id,
+      fb_creative_id: creative.fb_creative_id
+    });
   }
 
-  console.log('[CreateCampaignWithCreative] Ad created:', ad_id);
+  console.log('[CreateCampaignWithCreative] All ads created:', {
+    count: created_ads.length,
+    ads: created_ads
+  });
 
   // ===================================================
   // RETURN
@@ -235,10 +344,10 @@ export async function workflowCreateCampaignWithCreative(
     success: true,
     campaign_id: String(campaign_id),
     adset_id: String(adset_id),
-    ad_id: String(ad_id),
-    fb_creative_id,
+    ads: created_ads,
+    ads_count: created_ads.length,
     objective,
-    message: `Campaign "${campaign_name}" created successfully with adset and ad (all PAUSED)`,
+    message: `Campaign "${campaign_name}" created successfully with ${created_ads.length} ad(s) in one adset (status: ${params.auto_activate ? 'ACTIVE' : 'PAUSED'})`,
   };
 }
 
