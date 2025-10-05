@@ -1402,6 +1402,57 @@ fastify.post('/api/brain/run', async (request, reply) => {
       return hasResults;
     });
     
+    // ========================================
+    // ПРОВЕРКА: Если вчера не было затрат - не вызываем LLM
+    // ========================================
+    if (adsetsWithYesterdayResults.length === 0) {
+      fastify.log.info({ 
+        where: 'brain_run', 
+        phase: 'no_spend_yesterday', 
+        userId: userAccountId,
+        message: 'Вчера не было активных кампаний с затратами, пропускаем LLM'
+      });
+      
+      const reportText = [
+        `📊 Отчёт за ${date}`,
+        ``,
+        `⚠️ Вчера не было активных рекламных кампаний с затратами.`,
+        ``,
+        `Рекламный кабинет работает, но кампании не запущены или были на паузе.`,
+        ``,
+        `🚀 Запустите рекламу, и я продолжу давать вам ежедневные отчёты с рекомендациями!`,
+        ``,
+        `Статус аккаунта: ${accountStatus?.account_status === 1 ? '✅ Активен' : '⚠️ Проверьте статус'}`,
+        `Всего ad sets: ${adsetList.length}`,
+        `Активных ad sets: ${adsetList.filter(a => a.status === 'ACTIVE').length}`,
+      ].join('\n');
+      
+      // Отправляем в Telegram (если dispatch=true)
+      let telegramSent = false;
+      if (inputs?.dispatch && ua.telegram_chat_id && process.env.TELEGRAM_BOT_TOKEN) {
+        try {
+          await sendTelegramReport(ua.telegram_chat_id, process.env.TELEGRAM_BOT_TOKEN, reportText);
+          telegramSent = true;
+          fastify.log.info({ where: 'brain_run', phase: 'telegram_sent', userId: userAccountId });
+        } catch (err) {
+          fastify.log.warn({ where: 'brain_run', phase: 'telegram_failed', userId: userAccountId, error: String(err) });
+        }
+      }
+      
+      return reply.send({
+        idempotencyKey: idem,
+        planNote: 'no_spend_yesterday',
+        actions: [],
+        dispatched: false,
+        telegramSent,
+        reportText,
+        timing: {
+          total_ms: Date.now() - started,
+          scoring_ms: scoringOutput ? 0 : null
+        }
+      });
+    }
+    
     for (const as of adsetsWithYesterdayResults) {
       const id = as.id;
       const windows = { y: byY.get(id)||{}, d3: by3.get(id)||{}, d7: by7.get(id)||{}, d30: by30.get(id)||{}, today: byToday.get(id)||{} };
