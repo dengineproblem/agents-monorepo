@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase.js';
 import { executeByManifest, getActionSpec } from '../actions/engine.js';
 import { workflowDuplicateAndPauseOriginal, workflowDuplicateKeepOriginalActive, workflowDuplicateAdsetWithAudience } from '../workflows/campaignDuplicate.js';
 import { workflowCreateCampaignWithCreative } from '../workflows/createCampaignWithCreative.js';
+import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
 
 const AuthHeader = z.string().startsWith('Bearer ').optional();
 
@@ -238,6 +239,33 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         token
       );
     }
+    
+    case 'StartCreativeTest': {
+      const p = (action as any).params as {
+        user_creative_id: string;
+      };
+      
+      if (!p.user_creative_id) {
+        throw new Error('StartCreativeTest: user_creative_id required');
+      }
+      
+      if (!ctx?.userAccountId || !ctx?.adAccountId) {
+        throw new Error('StartCreativeTest: userAccountId and adAccountId required from context');
+      }
+      
+      return workflowStartCreativeTest(
+        {
+          user_creative_id: p.user_creative_id,
+          user_id: ctx.userAccountId
+        },
+        {
+          ad_account_id: ctx.adAccountId,
+          page_id: ctx.pageId,
+          instagram_id: ctx.instagramId
+        },
+        token
+      );
+    }
   }
 }
 
@@ -289,6 +317,12 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
         if (typeof params.daily_budget_cents !== 'number') issues.push('CreateCampaignWithCreative: daily_budget_cents number required');
         if (!['WhatsApp', 'Instagram', 'SiteLeads'].includes(params.objective)) {
           issues.push('CreateCampaignWithCreative: objective must be WhatsApp, Instagram, or SiteLeads');
+        }
+        break;
+      }
+      case 'StartCreativeTest': {
+        if (!params.user_creative_id) {
+          issues.push('StartCreativeTest: user_creative_id required');
         }
         break;
       }

@@ -942,6 +942,42 @@
       "https://developers.facebook.com/docs/marketing-api/insights",
       "https://developers.facebook.com/docs/marketing-api/insights/breakdowns"
     ]
+  },
+  {
+    "action": "StartCreativeTest",
+    "level": "workflow",
+    "method": "WORKFLOW",
+    "path": "INTERNAL",
+    "params": {
+      "user_creative_id": {
+        "type": "string",
+        "required": true,
+        "example": "uuid",
+        "description": "ID креатива из user_creatives для тестирования"
+      }
+    },
+    "pre_conditions": [
+      "Креатив существует в user_creatives со status='ready'",
+      "Креатив еще не тестировался (нет записи в creative_tests)",
+      "Креатив имеет fb_creative_id_whatsapp"
+    ],
+    "effects": "Создает тестовую кампанию с 1 adset ($20/день), 1 ad, Facebook Auto Rule (отключение при 1000 показах). Сохраняет в creative_tests со status='running'",
+    "workflow_steps": [
+      "1. Проверка существования креатива",
+      "2. Создание Campaign с objective=OUTCOME_ENGAGEMENT",
+      "3. Создание AdSet с daily_budget=2000 центов ($20)",
+      "4. Создание Ad с креативом",
+      "5. Создание Facebook Auto Rule (stop at 1000 impressions)",
+      "6. Сохранение в creative_tests"
+    ],
+    "verify": {
+      "method": "SELECT",
+      "table": "creative_tests",
+      "where": "user_creative_id = {user_creative_id} AND status = 'running'"
+    },
+    "docs": [
+      "Internal workflow - see CREATIVE_TESTING.md"
+    ]
   }
 ]
 
