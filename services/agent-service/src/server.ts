@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { actionsRoutes } from './routes/actions.js';
 import { videoRoutes } from './routes/video.js';
 import { creativeTestRoutes } from './routes/creativeTest.js';
+import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 
 // Load env from Docker path or local path
@@ -23,6 +24,7 @@ app.register(cors, {
 app.register(actionsRoutes);
 app.register(videoRoutes);
 app.register(creativeTestRoutes);
+app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app);

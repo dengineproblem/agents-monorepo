@@ -88,7 +88,8 @@ export async function actionsRoutes(app: FastifyInstance) {
             result = await handleAction(act as any, accessToken, { 
               pageId: tokenInfo.pageId,
               userAccountId: account.userAccountId,
-              adAccountId: resolvedAdAccountId ?? undefined
+              adAccountId: resolvedAdAccountId ?? undefined,
+              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber
             });
           } else if (spec) {
             result = await executeByManifest(act.type, act.params as any, accessToken);
@@ -97,7 +98,8 @@ export async function actionsRoutes(app: FastifyInstance) {
               pageId: tokenInfo.pageId,
               userAccountId: account.userAccountId,
               adAccountId: resolvedAdAccountId ?? undefined,
-              instagramId: tokenInfo.instagramId
+              instagramId: tokenInfo.instagramId,
+              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber
             });
           }
 
@@ -136,19 +138,19 @@ export async function actionsRoutes(app: FastifyInstance) {
   });
 }
 
-type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string };
+type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string };
 type ResolveErr = { ok: false; message: string };
 
-async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; }): Promise<ResolveOk | ResolveErr> {
+async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string }): Promise<ResolveOk | ResolveErr> {
   if (account.accessToken && account.accessToken.length >= 10) {
-    return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId };
+    return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId, whatsappPhoneNumber: account.whatsappPhoneNumber };
   }
   if (!account.userAccountId) {
     return { ok: false, message: 'Provide accessToken or userAccountId' };
   }
   const { data, error } = await supabase
     .from('user_accounts')
-    .select('access_token, ad_account_id, page_id, instagram_id')
+    .select('access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
     .eq('id', account.userAccountId)
     .maybeSingle();
 
@@ -159,11 +161,12 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
     accessToken: data.access_token as string,
     adAccountId: (data as any).ad_account_id || account.adAccountId,
     pageId: (data as any).page_id || undefined,
-    instagramId: (data as any).instagram_id || undefined
+    instagramId: (data as any).instagram_id || undefined,
+    whatsappPhoneNumber: account.whatsappPhoneNumber || (data as any).whatsapp_phone_number || undefined
   };
 }
 
-async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string }) {
+async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string }) {
   switch ((action as any).type) {
     case 'GetCampaignStatus': {
       const p = (action as any).params as { campaign_id: string };
@@ -235,6 +238,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         {
           user_account_id: ctx.userAccountId,
           ad_account_id: ctx.adAccountId,
+          whatsapp_phone_number: ctx.whatsappPhoneNumber,
         },
         token
       );

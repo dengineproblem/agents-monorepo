@@ -278,7 +278,7 @@ async function getUserAccount(userAccountId) {
   if (!supabase) throw new Error('supabase not configured');
   const { data, error } = await supabase
     .from('user_accounts')
-    .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents')
+    .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number')
     .eq('id', userAccountId)
     .single();
   if (error) throw error;
@@ -501,14 +501,24 @@ function computeHealthScoreForAdset(opts) {
   const freq = y.frequency || 0;
   if (freq > 2) diag -= weights.freq_penalty;
 
-  // Сегодняшняя компенсация
+  // Сегодняшняя компенсация (усиленная логика)
   let todayAdj = 0;
   if ((today.impressions||0) >= 300) {
     const Ld = computeLeadsFromActions(today);
     const dd = (isWA && Ld.qualityLeads >= 3) ? Ld.qualityLeads : Ld.leads;
     const eToday = dd>0 ? (today.spend*100)/dd : Infinity;
-    if (Number.isFinite(eCplY) && Number.isFinite(eToday) && eToday <= 0.7*eCplY) {
-      todayAdj = Math.min(10, weights.cpl_gap/3);
+    if (Number.isFinite(eCplY) && Number.isFinite(eToday)) {
+      // Сильная компенсация: если сегодня CPL намного лучше вчерашнего
+      if (eToday <= 0.5*eCplY) {
+        // Отличные результаты сегодня (в 2 раза лучше) - полная компенсация
+        todayAdj = Math.abs(Math.min(0, cplScore)) + 15; // Нейтрализуем вчерашний CPL штраф + бонус
+      } else if (eToday <= 0.7*eCplY) {
+        // Хорошие результаты (на 30% лучше) - частичная компенсация
+        todayAdj = Math.round(Math.abs(Math.min(0, cplScore)) * 0.6) + 10;
+      } else if (eToday <= 0.9*eCplY) {
+        // Небольшое улучшение - легкая компенсация
+        todayAdj = 5;
+      }
     }
   }
 
@@ -760,7 +770,8 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '',
   'КОНТЕКСТ УПРАВЛЕНИЯ (НЕИЗМЕННО)',
   '- Работай ТОЛЬКО с активными (status="ACTIVE") кампаниями/ad set. Включать кампании НЕЛЬЗЯ.',
-  '- В данных показаны только ad set с результатами за вчера (spend > 0 или leads > 0). Среди них могут быть неактивные (status="PAUSED") - управлять ими ЗАПРЕЩЕНО, они только для отчетности.',
+  '- ✅ В данных показаны ТОЛЬКО АКТИВНЫЕ ad set с результатами за вчера (effective_status="ACTIVE" И (spend > 0 ИЛИ leads > 0)).',
+  '- Неактивные/паузированные ad set уже отфильтрованы и НЕ попадают в данные. Все ad set в данных можно безопасно модифицировать.',
   '',
   '⚠️ ТЕСТОВЫЕ КАМПАНИИ (КРИТИЧНО! НЕ ТРОГАТЬ!)',
   '- Кампании с названием начинающимся на "ТЕСТ |" — это АВТОМАТИЧЕСКИЕ ТЕСТЫ КРЕАТИВОВ, которые управляются ОТДЕЛЬНЫМ агентом.',
@@ -798,7 +809,11 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '',
   'ТАЙМФРЕЙМЫ И ВЕСА',
   '- Окна анализа: yesterday (50%), last_3d (25%), last_7d (15%), last_30d (10%).',
-  '- Today-компенсация: если impr_today≥300 и eCPL_today ≤ 0.7×eCPL_yesterday — смягчи вчерашние штрафы.',
+  '- Today-компенсация (УСИЛЕННАЯ): если impr_today≥300 и eCPL_today значительно лучше eCPL_yesterday:',
+  '  • eCPL_today ≤ 0.5×eCPL_yesterday (в 2 раза лучше) → ПОЛНАЯ компенсация вчерашних штрафов + бонус',
+  '  • eCPL_today ≤ 0.7×eCPL_yesterday (на 30% лучше) → частичная компенсация 60% штрафов',
+  '  • eCPL_today ≤ 0.9×eCPL_yesterday (легкое улучшение) → небольшая компенсация +5',
+  '  ⚠️ ВАЖНО: Хорошие результаты СЕГОДНЯ должны перевешивать плохие результаты ВЧЕРА!',
   '- Минимальная база для надёжных выводов: ≥1000 показов на уровне ad set в референсном окне; при меньших объёмах понижай доверие и избегай резких шагов.',
   '',
   '🔮 ДАННЫЕ ОТ SCORING AGENT (ПРЕДИКШЕН И РИСКИ)',
@@ -830,7 +845,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '  3) Диагностика (до −30 суммарно): CTR_all<1% → −8; CPM выше медианы «пиров» кампании на ≥30% → −12; Frequency_30d>2 → −10.',
   '  4) Новизна (<48ч) — мягчитель: максимум −10 и/или множитель 0.7.',
   '  5) Объём — множитель доверия 0.6…1.0 (при impr<1000 ближе к 0.6).',
-  '  6) Today-компенсация — уменьшает вчерашние штрафы, если сегодня явное улучшение.',
+  '  6) Today-компенсация (УСИЛЕННАЯ) — НЕЙТРАЛИЗУЕТ вчерашние CPL штрафы, если сегодня CPL в 2 раза лучше. Может поднять HS с "bad" до "good"!',
   '- Классы HS: ≥+25=very_good; +5..+24=good; −5..+4=neutral; −25..−6=slightly_bad; ≤−25=bad.',
   '',
   'СТРУКТУРА ДАННЫХ ПО ОБЪЯВЛЕНИЯМ (ADS)',
@@ -904,7 +919,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   'ЖЁСТКИЕ ОГРАНИЧЕНИЯ ДЛЯ ДЕЙСТВИЙ',
   '- Бюджеты в центах; допустимый дневной диапазон: 300..10000 (т.е. $3..$100).',
   '- Повышение за шаг ≤ +30%; снижение за шаг до −50%.',
-  '- КРИТИЧЕСКИ ВАЖНО: Генерируй actions ТОЛЬКО для ad set со status="ACTIVE". Если status="PAUSED" или любой другой — ПРОПУСКАЙ этот ad set полностью. Неактивные ad set показаны только для отчётности.',
+  '- ✅ ВСЕ ad set в данных уже АКТИВНЫЕ (effective_status="ACTIVE") - неактивные отфильтрованы автоматически. Можешь безопасно генерировать actions для любого ad set из списка.',
   '- Перед любым Update*/Pause* по объектам внутри кампании ДОБАВЬ GetCampaignStatus этой кампании (первым действием для данного блока изменений).',
   '- Никогда не добавляй неразрешённые типы действий. Если по логике нужен «дубль» — опиши в planNote/reportText как рекомендацию, но не включай несуществующий action.',
   '',
@@ -1110,14 +1125,17 @@ function validateAndNormalizeActions(actions) {
   return cleaned;
 }
 
-async function sendActionsBatch(idem, userAccountId, actions) {
+async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumber) {
   const res = await fetch(AGENT_URL, {
     method: 'POST',
     headers: { 'content-type':'application/json' },
     body: JSON.stringify({
       idempotencyKey: idem,
       source: 'brain',
-      account: { userAccountId },
+      account: { 
+        userAccountId,
+        ...(whatsappPhoneNumber && { whatsappPhoneNumber })
+      },
       actions
     })
   });
@@ -1307,7 +1325,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       const actions = validateAndNormalizeActions(actionsDraft);
       let agentResponse = null;
       if (inputs?.dispatch) {
-        agentResponse = await sendActionsBatch(idem, userAccountId, actions);
+        agentResponse = await sendActionsBatch(idem, userAccountId, actions, null);
       }
       const date = new Date().toISOString().slice(0,10);
       const reportText = buildReport({
@@ -1442,9 +1460,21 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const touchedCampaignIds = new Set();
     const adsetList = Array.isArray(adsets?.data) ? adsets.data : [];
     const adsetsWithYesterdayResults = adsetList.filter(as => {
+      // Только АКТИВНЫЕ adsets с затратами вчера
+      if (as.effective_status !== 'ACTIVE') return false;
       const yesterdayData = byY.get(as.id)||{};
       const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
       return hasResults;
+    });
+    
+    fastify.log.info({
+      where: 'brain_run',
+      phase: 'adsets_filtered',
+      userId: userAccountId,
+      total_adsets: adsetList.length,
+      active_adsets: adsetList.filter(a => a.effective_status === 'ACTIVE').length,
+      with_yesterday_results: adsetsWithYesterdayResults.length,
+      filtered_out: adsetList.length - adsetsWithYesterdayResults.length
     });
     
     // ========================================
@@ -1596,6 +1626,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
         })),
         adsets: (adsetList||[])
           .filter(as => {
+            // Только АКТИВНЫЕ adsets с затратами вчера (для LLM)
+            if (as.effective_status !== 'ACTIVE') return false;
             const yesterdayData = byY.get(as.id)||{};
             const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
             return hasResults;
@@ -1726,7 +1758,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
 
     let agentResponse = null;
     if (inputs?.dispatch) {
-      agentResponse = await sendActionsBatch(idem, userAccountId, actions);
+      agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number);
     }
 
     const reportTextRaw = reportTextFromLLM && reportTextFromLLM.trim() ? reportTextFromLLM : buildReport({

@@ -24,6 +24,7 @@ type CreateCampaignParams = {
 type CreateCampaignContext = {
   user_account_id: string;
   ad_account_id: string;
+  whatsapp_phone_number?: string; // Номер WhatsApp из Supabase (если есть)
 };
 
 // Helpers from campaignDuplicate
@@ -263,7 +264,8 @@ export async function workflowCreateCampaignWithCreative(
   if (objective === 'WhatsApp' && page_id) {
     adsetBody.destination_type = 'WHATSAPP';
     adsetBody.promoted_object = {
-      page_id: String(page_id)
+      page_id: String(page_id),
+      ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
     };
   }
 
@@ -271,7 +273,9 @@ export async function workflowCreateCampaignWithCreative(
     campaign_id,
     name: finalAdsetName,
     optimization_goal,
-    destination_type: adsetBody.destination_type
+    destination_type: adsetBody.destination_type,
+    promoted_object: adsetBody.promoted_object,
+    has_whatsapp_number: !!context.whatsapp_phone_number
   });
 
   const adsetResult = await withStep(

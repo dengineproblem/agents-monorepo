@@ -4,6 +4,7 @@ export const AccountSchema = z.object({
   userAccountId: z.string().uuid().optional(),
   adAccountId: z.string().min(5).optional(),
   accessToken: z.string().min(10).optional(),
+  whatsappPhoneNumber: z.string().optional(), // WhatsApp phone number from Supabase
 }).refine(
   (data) => Boolean(data.accessToken || data.userAccountId),
   { message: 'Either accessToken or userAccountId must be provided' }

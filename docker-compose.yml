@@ -23,6 +23,7 @@ services:
     environment:
       - AGENT_DRY_RUN=false
       - FB_VALIDATE_ONLY=false
+      - CAMPAIGN_BUILDER_MODEL=gpt-4o
     ports:
       - "8080:8080"
     restart: unless-stopped
