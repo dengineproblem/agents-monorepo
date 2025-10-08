@@ -20,6 +20,8 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   if (FB_APP_SECRET) usp.set('appsecret_proof', appsecret_proof(token));
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) usp.set(k, String(v));
   if (FB_VALIDATE_ONLY && (method === 'POST' || method === 'DELETE')) {
+    // Validate-only mode: ask FB to validate without applying changes
+    // Many endpoints accept execution_options=["validate_only"]
     usp.set('execution_options', '["validate_only"]');
   }
 
@@ -49,7 +51,11 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   return json;
 }
 
+/**
+ * Загружает видео в Facebook Ad Account
+ */
 export async function uploadVideo(adAccountId: string, token: string, videoBuffer: Buffer): Promise<{ id: string }> {
+  // Сохраняем во временный файл
   const tmpPath = path.join('/tmp', `fb_video_${randomUUID()}.mp4`);
   fs.writeFileSync(tmpPath, videoBuffer);
   
@@ -59,16 +65,19 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
 
     const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
     
+    // Используем axios
     const response = await axios.post(url, formData, {
       headers: formData.getHeaders(),
       maxBodyLength: Infinity,
       maxContentLength: Infinity
     });
     
+    // Удаляем временный файл
     fs.unlinkSync(tmpPath);
     
     return response.data;
   } catch (error: any) {
+    // Удаляем временный файл в случае ошибки
     if (fs.existsSync(tmpPath)) {
       fs.unlinkSync(tmpPath);
     }
@@ -88,6 +97,9 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
   }
 }
 
+/**
+ * Создает креатив для WhatsApp (Click to WhatsApp)
+ */
 export async function createWhatsAppCreative(
   adAccountId: string,
   token: string,
@@ -121,7 +133,6 @@ export async function createWhatsAppCreative(
     };
   }
 
-  console.log("[WhatsApp Creative] callToAction:", JSON.stringify(callToAction));
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
@@ -139,7 +150,12 @@ export async function createWhatsAppCreative(
     object_story_spec: JSON.stringify(objectStorySpec)
   });
 }
+  });
+}
 
+/**
+ * Создает креатив для Instagram профиля
+ */
 export async function createInstagramCreative(
   adAccountId: string,
   token: string,
@@ -173,6 +189,9 @@ export async function createInstagramCreative(
   });
 }
 
+/**
+ * Создает креатив для лидов на сайт
+ */
 export async function createWebsiteLeadsCreative(
   adAccountId: string,
   token: string,

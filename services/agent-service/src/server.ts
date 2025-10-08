@@ -1,4 +1,5 @@
 import fastify from 'fastify';
+import cors from "@fastify/cors";
 import dotenv from 'dotenv';
 import { actionsRoutes } from './routes/actions.js';
 import { videoRoutes } from './routes/video.js';
@@ -10,9 +11,15 @@ dotenv.config({ path: '/root/.env.agent' });
 dotenv.config({ path: '../../.env.agent' });
 
 const app = fastify({ logger: true });
-const PORT = Number(process.env.PORT || 8080);
+const PORT = Number(process.env.PORT || 8082);
 
 app.get('/health', async () => ({ ok: true }));
+app.register(cors, {
+  origin: true,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+});
 app.register(actionsRoutes);
 app.register(videoRoutes);
 app.register(creativeTestRoutes);

@@ -60,7 +60,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       return reply.send(result);
       
     } catch (error: any) {
-      app.log.error('Creative test start error:', error);
+      app.log.error({ message: error.message, stack: error.stack, fb: error.fb }, 'Creative test start error');
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to start creative test'

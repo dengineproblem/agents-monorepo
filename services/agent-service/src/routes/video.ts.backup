@@ -42,29 +42,43 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
     let videoPath: string | null = null;
 
     try {
+      app.log.info('=== START: process-video endpoint hit ===');
+      
       const parts = request.parts();
+      app.log.info('=== STEP 1: Got parts iterator ===');
       
       let videoBuffer: Buffer | null = null;
       let bodyData: Partial<ProcessVideoBody> = {};
+      let partCount = 0;
 
       for await (const part of parts) {
+        partCount++;
+        app.log.info(`=== STEP 2.${partCount}: Processing part - type: ${part.type}, fieldname: ${(part as any).fieldname || 'N/A'} ===`);
+        
         if (part.type === 'file' && part.fieldname === 'file') {
+          app.log.info('=== STEP 3: Found video file, converting to buffer... ===');
           videoBuffer = await part.toBuffer();
+          app.log.info(`=== STEP 4: Video buffer ready, size: ${videoBuffer.length} bytes (${(videoBuffer.length / 1024 / 1024).toFixed(2)} MB) ===`);
         } else if (part.type === 'field') {
           (bodyData as any)[part.fieldname] = part.value;
+          app.log.info(`=== STEP 3: Field collected - ${part.fieldname}: ${part.value} ===`);
         }
       }
 
+      app.log.info(`=== STEP 5: All parts processed (total: ${partCount}) ===`);
+
       if (!videoBuffer) {
+        app.log.error('=== ERROR: No video buffer found ===');
         return reply.status(400).send({
           success: false,
           error: 'Video file is required'
         });
       }
 
+      app.log.info('=== STEP 6: Validating body data ===');
       const body = ProcessVideoSchema.parse(bodyData);
 
-      app.log.info(`Fetching user account data for user_id: ${body.user_id}`);
+      app.log.info(`=== STEP 7: Fetching user account data for user_id: ${body.user_id} ===`);
       
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
@@ -73,6 +87,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         .single();
 
       if (userError || !userAccount) {
+        app.log.error({ userError }, 'User account lookup failed');
         return reply.status(404).send({
           success: false,
           error: 'User account not found',
@@ -80,137 +95,118 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
-        return reply.status(400).send({
-          success: false,
-          error: 'User account incomplete',
-          message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
-        });
-      }
+      const token_preview = userAccount.access_token.substring(0, 20) + '...';
+      app.log.info('User account found. Token: ' + token_preview);
 
       const normalizedAdAccountId = normalizeAdAccountId(userAccount.ad_account_id);
 
-      app.log.info({
-        user_id: body.user_id,
-        ad_account_id: userAccount.ad_account_id,
-        normalized_ad_account_id: normalizedAdAccountId,
-        has_instagram: !!userAccount.instagram_id,
-        token_preview: userAccount.access_token.substring(0, 30)
-      });
+      const tempVideoPath = path.join('/tmp', randomUUID() + '.mp4');
+      await fs.writeFile(tempVideoPath, videoBuffer);
+      videoPath = tempVideoPath;
 
-      videoPath = path.join('/tmp', `video_${randomUUID()}.mp4`);
-      await fs.writeFile(videoPath, videoBuffer);
+      app.log.info('Starting video transcription...');
+      const transcript = await processVideoTranscription(tempVideoPath, body.language);
+      app.log.info('Transcription completed: ' + transcript.text.substring(0, 100) + '...');
 
-      app.log.info('Video file saved, starting transcription...');
+      app.log.info('Uploading video to Facebook...');
+      const fbVideoResult = await uploadVideo(
+        normalizedAdAccountId,
+        userAccount.access_token,
+        videoBuffer
+      );
+      const fbVideoId = fbVideoResult.id;
+      app.log.info('Video uploaded to Facebook: ' + fbVideoId);
 
-      const transcription = await processVideoTranscription(videoPath, body.language);
+      app.log.info('Creating creatives...');
+      
+      const whatsappCreative = await createWhatsAppCreative(
+        normalizedAdAccountId,
+        userAccount.access_token,
+        {
+          videoId: fbVideoId,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+          message: body.description || transcript.text.substring(0, 100),
+          clientQuestion: body.client_question || 'Здравствуйте! Интересует ваше предложение.',,
+          whatsappPhoneNumber: userAccount.whatsapp_phone_number || undefined
+        }
+      );
 
-      app.log.info('Transcription completed, creating creative record...');
+      const instagramCreative = await createInstagramCreative(
+        normalizedAdAccountId,
+        userAccount.access_token,
+        {
+          videoId: fbVideoId,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+          instagramUsername: userAccount.instagram_username || '',
+          message: body.description || transcript.text.substring(0, 100)
+        }
+      );
 
-      const { data: creative, error: creativeError } = await supabase
+      const websiteCreative = await createWebsiteLeadsCreative(
+        normalizedAdAccountId,
+        userAccount.access_token,
+        {
+          videoId: fbVideoId,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+          message: body.description || transcript.text.substring(0, 100),
+          siteUrl: body.site_url || 'https://example.com',
+          utm: body.utm
+        }
+      );
+
+      const { data: creativeRecord, error: creativeError } = await supabase
         .from('user_creatives')
         .insert({
           user_id: body.user_id,
-          title: body.title || 'Untitled Creative',
-          status: 'processing'
+          title: body.title || 'Untitled',
+          fb_video_id: fbVideoId,
+          fb_creative_id_whatsapp: whatsappCreative.id,
+          fb_creative_id_instagram_traffic: instagramCreative.id,
+          fb_creative_id_site_leads: websiteCreative.id,
+          status: 'ready'
         })
         .select()
         .single();
 
-      if (creativeError || !creative) {
-        throw new Error(`Failed to create creative record: ${creativeError?.message}`);
+      if (creativeError) {
+        throw new Error('Failed to save creative: ' + creativeError.message);
       }
-
-      app.log.info(`Creative record created: ${creative.id}, uploading video to Facebook...`);
-
-      const fbVideo = await uploadVideo(normalizedAdAccountId, userAccount.access_token, videoBuffer);
-
-      app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, creating creatives...`);
-
-      const description = body.description || 'Видео креатив';
-      
-      const [whatsappCreative, instagramCreative, websiteCreative] = await Promise.all([
-        createWhatsAppCreative(normalizedAdAccountId, userAccount.access_token, {
-          videoId: fbVideo.id,
-          pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
-          message: description,
-          clientQuestion: body.client_question || 'Здравствуйте! Интересует ваше предложение.',
-          whatsappPhoneNumber: userAccount.whatsapp_phone_number || undefined
-        }),
-
-        createInstagramCreative(normalizedAdAccountId, userAccount.access_token, {
-          videoId: fbVideo.id,
-          pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
-          instagramUsername: userAccount.instagram_username || '',
-          message: description
-        }),
-
-        body.site_url ? createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
-          videoId: fbVideo.id,
-          pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
-          message: description,
-          siteUrl: body.site_url,
-          utm: body.utm
-        }) : Promise.resolve({ id: '' })
-      ]);
-
-      app.log.info('All creatives created, saving transcription...');
 
       const { error: transcriptError } = await supabase
         .from('creative_transcripts')
         .insert({
-          creative_id: creative.id,
+          creative_id: creativeRecord.id,
           lang: body.language,
           source: 'whisper',
-          text: transcription.text,
-          duration_sec: transcription.duration ? Math.round(transcription.duration) : null,
+          text: transcript.text,
+          duration_sec: transcript.duration ? Math.round(transcript.duration) : null,
           status: 'ready'
         });
 
       if (transcriptError) {
-        app.log.error(`Failed to save transcription: ${transcriptError.message}`);
-      }
-
-      const { error: updateError } = await supabase
-        .from('user_creatives')
-        .update({
-          fb_video_id: fbVideo.id,
-          fb_creative_id_whatsapp: whatsappCreative.id,
-          fb_creative_id_instagram_traffic: instagramCreative.id,
-          fb_creative_id_site_leads: websiteCreative.id || null,
-          status: 'ready'
-        })
-        .eq('id', creative.id);
-
-      if (updateError) {
-        throw new Error(`Failed to update creative record: ${updateError.message}`);
+        app.log.warn('Failed to save transcript: ' + transcriptError.message);
       }
 
       app.log.info('Video processing completed successfully');
 
       return reply.send({
         success: true,
-        message: 'Video processed and creatives created successfully',
+        message: 'Video processed successfully',
         data: {
-          creative_id: creative.id,
-          fb_video_id: fbVideo.id,
+          creative_id: creativeRecord.id,
+          fb_video_id: fbVideoId,
           fb_creative_id_whatsapp: whatsappCreative.id,
           fb_creative_id_instagram_traffic: instagramCreative.id,
-          fb_creative_id_site_leads: websiteCreative.id || null,
-          transcription: {
-            text: transcription.text,
-            language: transcription.language,
-            source: 'whisper',
-            duration_sec: transcription.duration ? Math.round(transcription.duration) : null
-          }
+          fb_creative_id_site_leads: websiteCreative.id,
+          transcript: transcript.text
         }
       });
 
     } catch (error: any) {
-      app.log.error('Error processing video:', error);
+      app.log.error({ error: error, stack: error?.stack, message: error?.message }, 'Error processing video');
 
       if (error.fb) {
         return reply.status(500).send({
@@ -230,7 +226,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       return reply.status(500).send({
         success: false,
-        error: error.message || 'Internal server error'
+          error: error.message || 'Internal server error'
       });
 
     } finally {

@@ -240,7 +240,7 @@ const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_
   : null;
 
 const FB_API_VERSION = 'v20.0';
-const MODEL = process.env.BRAIN_MODEL || 'gpt-4.1';
+const MODEL = process.env.BRAIN_MODEL || 'gpt-5';
 const USE_LLM = String(process.env.BRAIN_USE_LLM || 'true').toLowerCase() === 'true';
 const CAN_USE_LLM = USE_LLM && Boolean(process.env.OPENAI_API_KEY);
 const AGENT_URL = (process.env.AGENT_SERVICE_URL || '').replace(/\/+$/,'') + '/api/agent/actions';
