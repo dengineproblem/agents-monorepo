@@ -149,7 +149,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       // Получаем тест
       const { data: test, error: testError } = await supabase
         .from('creative_tests')
-        .select('*, user_accounts!inner(access_token)')
+        .select('*')
         .eq('id', test_id)
         .single();
 
@@ -168,7 +168,21 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      const accessToken = (test.user_accounts as any).access_token;
+      // Получаем access_token отдельно
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('access_token')
+        .eq('id', test.user_id)
+        .single();
+
+      if (userError || !userAccount) {
+        return reply.status(404).send({
+          success: false,
+          error: 'User account not found'
+        });
+      }
+
+      const accessToken = userAccount.access_token;
 
       // Получаем insights
       const insights = await fetchCreativeTestInsights(test.ad_id, accessToken);
