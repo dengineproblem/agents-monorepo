@@ -272,7 +272,8 @@ export async function fetchCreativeTestInsights(
   const url = `${ad_id}/insights`;
 
   const result = await graph('GET', url, accessToken, {
-    fields
+    fields,
+    date_preset: 'today'
   });
 
   if (!result?.data || result.data.length === 0) {
