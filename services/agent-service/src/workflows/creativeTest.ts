@@ -22,6 +22,7 @@ type CreativeTestContext = {
   ad_account_id: string;
   page_id?: string;
   instagram_id?: string;
+  whatsapp_phone_number?: string;
 };
 
 /**
@@ -147,7 +148,8 @@ export async function workflowStartCreativeTest(
     targeting,
     destination_type: 'WHATSAPP',
     promoted_object: {
-      page_id: String(page_id)
+      page_id: String(page_id),
+      ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
     }
   };
 

@@ -35,7 +35,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       // Получаем данные пользователя
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, access_token, ad_account_id, page_id, instagram_id')
+        .select('id, access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
         .eq('id', user_id)
         .single();
 
@@ -52,7 +52,8 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         {
           ad_account_id: userAccount.ad_account_id,
           page_id: userAccount.page_id,
-          instagram_id: userAccount.instagram_id
+          instagram_id: userAccount.instagram_id,
+          whatsapp_phone_number: userAccount.whatsapp_phone_number
         },
         userAccount.access_token
       );
