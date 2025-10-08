@@ -276,7 +276,27 @@ export async function fetchCreativeTestInsights(
   });
 
   if (!result?.data || result.data.length === 0) {
-    throw new Error('No insights data available yet');
+    // Данных ещё нет - возвращаем нули
+    return {
+      impressions: 0,
+      reach: 0,
+      frequency: null,
+      clicks: 0,
+      link_clicks: 0,
+      ctr: null,
+      link_ctr: null,
+      leads: 0,
+      spend_cents: 0,
+      cpm_cents: null,
+      cpc_cents: null,
+      cpl_cents: null,
+      video_views: 0,
+      video_views_25_percent: 0,
+      video_views_50_percent: 0,
+      video_views_75_percent: 0,
+      video_views_95_percent: 0,
+      video_avg_watch_time_sec: null
+    };
   }
 
   const insights = result.data[0];
