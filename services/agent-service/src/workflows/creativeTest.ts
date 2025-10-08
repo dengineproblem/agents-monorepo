@@ -269,9 +269,11 @@ export async function fetchCreativeTestInsights(
     'video_p95_watched_actions'
   ].join(',');
 
-  const url = `${ad_id}/insights?fields=${fields}&date_preset=lifetime`;
+  const url = `${ad_id}/insights`;
 
-  const result = await graph('GET', url, accessToken);
+  const result = await graph('GET', url, accessToken, {
+    fields
+  });
 
   if (!result?.data || result.data.length === 0) {
     throw new Error('No insights data available yet');
