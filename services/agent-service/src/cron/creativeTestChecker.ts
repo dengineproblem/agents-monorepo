@@ -100,7 +100,12 @@ export function startCreativeTestCron(app: FastifyInstance) {
           }
           
         } catch (testError: any) {
-          app.log.error(`[Cron] Error checking test ${test.id}:`, testError.message);
+          app.log.error({ 
+            message: `[Cron] Error checking test ${test.id}`,
+            error: testError.message,
+            stack: testError.stack,
+            test_id: test.id
+          });
         }
       }
       
