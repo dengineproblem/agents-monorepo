@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { fetchCreativeTestInsights } from '../workflows/creativeTest.js';
-import * as fb from '../adapters/facebook.js';
+import { fb } from '../adapters/facebook.js';
 import axios from 'axios';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
@@ -50,7 +50,7 @@ export function startCreativeTestCron(app: FastifyInstance) {
           
           // Проверяем что ad_id есть
           if (!test.ad_id) {
-            app.log.error(`[Cron] Test ${test.id} has no ad_id! Test data:`, test);
+            app.log.error({ test }, `[Cron] Test ${test.id} has no ad_id!`);
             continue;
           }
           
@@ -85,14 +85,14 @@ export function startCreativeTestCron(app: FastifyInstance) {
               
               const pauseResponse = await fb.pauseCampaign(test.campaign_id, userAccount.access_token);
               
-              app.log.info(`[Cron] Campaign ${test.campaign_id} paused successfully`, pauseResponse);
+              app.log.info({ pauseResponse }, `[Cron] Campaign ${test.campaign_id} paused successfully`);
               campaignPaused = true;
             } catch (pauseError: any) {
-              app.log.error(`[Cron] Failed to pause Campaign ${test.campaign_id}:`, {
+              app.log.error({
                 message: pauseError.message,
                 response: pauseError.response?.data,
                 status: pauseError.response?.status
-              });
+              }, `[Cron] Failed to pause Campaign ${test.campaign_id}`);
             }
             
             // ВЫЗЫВАЕМ ANALYZER
@@ -108,15 +108,15 @@ export function startCreativeTestCron(app: FastifyInstance) {
                 }
               });
               
-              app.log.info(`[Cron] Test ${test.id} analyzed successfully:`, analyzerResponse.data);
+              app.log.info({ result: analyzerResponse.data }, `[Cron] Test ${test.id} analyzed successfully`);
               analyzerSuccess = true;
             } catch (analyzerError: any) {
-              app.log.error(`[Cron] Failed to analyze test ${test.id}:`, {
+              app.log.error({
                 message: analyzerError.message,
                 response: analyzerError.response?.data,
                 status: analyzerError.response?.status,
                 code: analyzerError.code
-              });
+              }, `[Cron] Failed to analyze test ${test.id}`);
             }
             
             // ВСЕГДА помечаем тест как completed после достижения лимита
