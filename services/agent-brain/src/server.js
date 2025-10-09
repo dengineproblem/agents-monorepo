@@ -1852,14 +1852,14 @@ async function getActiveUsers() {
       .from('user_accounts')
       .select('id, username, telegram_id, telegram_bot_token, account_timezone')
       .eq('active', true)
-      .eq('optimization', 'Agent 2');
+      .eq('optimization', 'agent2');
     
     if (error) {
       fastify.log.error({ where: 'getActiveUsers', error });
       return [];
     }
     
-    fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'optimization=Agent 2' });
+    fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'optimization=agent2' });
     
     return data || [];
   } catch (err) {
