@@ -217,7 +217,7 @@ export async function workflowStartCreativeTest(
       ad_id,
       rule_id,
       test_budget_cents: 2000,
-      test_impressions_limit: 1000,
+      test_impressions_limit: 10,  // Для тестирования (обычно 1000)
       objective: 'WhatsApp',
       status: 'running',
       started_at: new Date().toISOString()
@@ -312,8 +312,14 @@ export async function fetchCreativeTestInsights(
   const insights = result.data[0];
 
   // Извлекаем leads из actions
+  // Для WhatsApp кампаний используем правильные action_type
   const actions = insights.actions || [];
-  const leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+  const messaging_connection = actions.find((a: any) => a.action_type === 'onsite_conversion.total_messaging_connection')?.value || 0;
+  const quality_leads = actions.find((a: any) => a.action_type === 'onsite_conversion.messaging_user_depth_2_message_send')?.value || 0;
+  const legacy_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+  
+  // Для WhatsApp берем messaging_connection, для остальных - legacy leads
+  const leads = messaging_connection || legacy_leads;
   const link_clicks = actions.find((a: any) => a.action_type === 'link_click')?.value || 0;
 
   // Video metrics
