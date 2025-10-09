@@ -37,5 +37,5 @@ services:
       - CAMPAIGN_BUILDER_MODEL=gpt-4o
       - ANALYZER_URL=http://creative-analyzer:7081
     ports:
-      - "8080:8082"
+      - "8082:8082"
     restart: unless-stopped
