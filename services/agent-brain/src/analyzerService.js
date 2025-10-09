@@ -60,7 +60,7 @@ fastify.post('/api/analyzer/analyze-test', async (request, reply) => {
           id,
           title,
           user_id,
-          transcript
+          fb_video_id
         )
       `)
       .eq('id', test_id)
@@ -71,9 +71,10 @@ fastify.post('/api/analyzer/analyze-test', async (request, reply) => {
       return reply.code(404).send({ error: 'Test not found' });
     }
 
-    if (test.status !== 'running') {
+    // Можем анализировать как running так и completed тесты
+    if (test.status !== 'running' && test.status !== 'completed') {
       return reply.code(400).send({ 
-        error: 'Test is not in running state', 
+        error: 'Test must be in running or completed state', 
         current_status: test.status 
       });
     }
