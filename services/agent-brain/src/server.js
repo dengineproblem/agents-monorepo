@@ -1675,6 +1675,16 @@ fastify.post('/api/brain/run', async (request, reply) => {
             .filter(c => String(c.status||c.effective_status||'').includes('ACTIVE'))
             .map(c=>({ c, y: byCY.get(c.id)||{} }))
             .filter(({y})=> (Number(y.spend)||0) > 0 || (computeLeadsFromActions(y).leads||0) > 0);
+          
+          // DEBUG LOGGING
+          fastify.log.info({
+            where: 'yesterday_totals',
+            total_campaigns: (campList||[]).length,
+            active_campaigns: (campList||[]).filter(c => String(c.status||c.effective_status||'').includes('ACTIVE')).length,
+            active_with_yesterday_data: activeWithResults.length,
+            campaign_ids: activeWithResults.map(({c,y}) => ({ id: c.id, name: c.name, spend: y.spend, leads: computeLeadsFromActions(y).leads }))
+          });
+          
           const spend = activeWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
           const leads = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
           const ql = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
