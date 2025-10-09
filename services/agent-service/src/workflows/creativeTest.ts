@@ -250,31 +250,40 @@ export async function fetchCreativeTestInsights(
   ad_id: string,
   accessToken: string
 ) {
-  const fields = [
-    'impressions',
-    'reach',
-    'frequency',
-    'clicks',
-    'actions',
-    'action_values',
-    'spend',
-    'cpm',
-    'cpc',
-    'ctr',
-    'video_play_actions',
-    'video_avg_time_watched_actions',
-    'video_p25_watched_actions',
-    'video_p50_watched_actions',
-    'video_p75_watched_actions',
-    'video_p95_watched_actions'
-  ].join(',');
+  try {
+    const fields = [
+      'impressions',
+      'reach',
+      'frequency',
+      'clicks',
+      'actions',
+      'action_values',
+      'spend',
+      'cpm',
+      'cpc',
+      'ctr',
+      'video_play_actions',
+      'video_avg_time_watched_actions',
+      'video_p25_watched_actions',
+      'video_p50_watched_actions',
+      'video_p75_watched_actions',
+      'video_p95_watched_actions'
+    ].join(',');
 
-  const url = `${ad_id}/insights`;
+    const url = `${ad_id}/insights`;
 
-  const result = await graph('GET', url, accessToken, {
-    fields,
-    date_preset: 'today'
-  });
+    console.log(`[CreativeTest] Fetching insights for ad ${ad_id} with date_preset=today`);
+
+    const result = await graph('GET', url, accessToken, {
+      fields,
+      date_preset: 'today'
+    });
+    
+    console.log(`[CreativeTest] Insights response:`, {
+      hasData: !!result?.data,
+      dataLength: result?.data?.length || 0,
+      firstItem: result?.data?.[0]
+    });
 
   if (!result?.data || result.data.length === 0) {
     // Данных ещё нет - возвращаем нули
@@ -344,4 +353,12 @@ export async function fetchCreativeTestInsights(
     video_views_95_percent: parseInt(video95),
     video_avg_watch_time_sec: parseFloat(videoAvgTime)
   };
+  } catch (error: any) {
+    console.error('[CreativeTest] Error fetching insights:', {
+      ad_id,
+      error: error.message,
+      response: error.response?.data
+    });
+    throw error;
+  }
 }

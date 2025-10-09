@@ -16,6 +16,17 @@ services:
       - "7080:7080"
     restart: unless-stopped
 
+  creative-analyzer:
+    build: ./services/agent-brain
+    env_file:
+      - ./.env.brain
+    environment:
+      - ANALYZER_PORT=7081
+    command: node src/analyzerService.js
+    ports:
+      - "7081:7081"
+    restart: unless-stopped
+
   agent-service:
     build: ./services/agent-service
     env_file:
@@ -24,6 +35,7 @@ services:
       - AGENT_DRY_RUN=false
       - FB_VALIDATE_ONLY=false
       - CAMPAIGN_BUILDER_MODEL=gpt-4o
+      - ANALYZER_URL=http://creative-analyzer:7081
     ports:
       - "8080:8080"
     restart: unless-stopped

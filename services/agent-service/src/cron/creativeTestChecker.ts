@@ -2,11 +2,14 @@ import cron from 'node-cron';
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { fetchCreativeTestInsights } from '../workflows/creativeTest.js';
+import * as fb from '../adapters/facebook.js';
 import axios from 'axios';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
 export function startCreativeTestCron(app: FastifyInstance) {
+  app.log.info(`📅 Creative test cron started (runs every 5 minutes). ANALYZER_URL: ${ANALYZER_URL}`);
+  
   // Каждые 5 минут проверяем running тесты
   cron.schedule('*/5 * * * *', async () => {
     try {
@@ -45,6 +48,14 @@ export function startCreativeTestCron(app: FastifyInstance) {
             continue;
           }
           
+          // Проверяем что ad_id есть
+          if (!test.ad_id) {
+            app.log.error(`[Cron] Test ${test.id} has no ad_id! Test data:`, test);
+            continue;
+          }
+          
+          app.log.info(`[Cron] Fetching insights for ad_id: ${test.ad_id}`);
+          
           // Получаем метрики из Facebook
           const insights = await fetchCreativeTestInsights(
             test.ad_id,
@@ -61,34 +72,56 @@ export function startCreativeTestCron(app: FastifyInstance) {
           
           // Проверяем условие завершения
           if (insights.impressions >= test.test_impressions_limit) {
-            app.log.info(`[Cron] Test ${test.id} reached limit, pausing AdSet and triggering analyzer`);
+            app.log.info(`[Cron] Test ${test.id} reached limit (${insights.impressions}/${test.test_impressions_limit}), pausing Campaign and triggering analyzer`);
             
-            // ПАУЗИМ ADSET
+            let campaignPaused = false;
+            let analyzerSuccess = false;
+            
+            // ПАУЗИМ CAMPAIGN (не adset, а всю кампанию!)
             try {
-              const pauseUrl = `https://graph.facebook.com/v20.0/${test.adset_id}`;
-              await axios.post(pauseUrl, new URLSearchParams({
-                access_token: userAccount.access_token,
-                status: 'PAUSED'
-              }));
+              if (!test.campaign_id) {
+                throw new Error('Test has no campaign_id');
+              }
               
-              app.log.info(`[Cron] AdSet ${test.adset_id} paused successfully`);
+              const pauseResponse = await fb.pauseCampaign(test.campaign_id, userAccount.access_token);
+              
+              app.log.info(`[Cron] Campaign ${test.campaign_id} paused successfully`, pauseResponse);
+              campaignPaused = true;
             } catch (pauseError: any) {
-              app.log.error(`[Cron] Failed to pause AdSet ${test.adset_id}:`, pauseError.message);
+              app.log.error(`[Cron] Failed to pause Campaign ${test.campaign_id}:`, {
+                message: pauseError.message,
+                response: pauseError.response?.data,
+                status: pauseError.response?.status
+              });
             }
             
             // ВЫЗЫВАЕМ ANALYZER
             try {
+              app.log.info(`[Cron] Calling analyzer at ${ANALYZER_URL}/api/analyzer/analyze-test for test ${test.id}`);
+              
               const analyzerResponse = await axios.post(`${ANALYZER_URL}/api/analyzer/analyze-test`, {
                 test_id: test.id
               }, {
-                timeout: 30000 // 30 секунд
+                timeout: 60000, // 60 секунд
+                headers: {
+                  'Content-Type': 'application/json'
+                }
               });
               
               app.log.info(`[Cron] Test ${test.id} analyzed successfully:`, analyzerResponse.data);
+              analyzerSuccess = true;
             } catch (analyzerError: any) {
-              app.log.error(`[Cron] Failed to analyze test ${test.id}:`, analyzerError.message);
-              
-              // Помечаем тест как completed даже если анализ не удался
+              app.log.error(`[Cron] Failed to analyze test ${test.id}:`, {
+                message: analyzerError.message,
+                response: analyzerError.response?.data,
+                status: analyzerError.response?.status,
+                code: analyzerError.code
+              });
+            }
+            
+            // ВСЕГДА помечаем тест как completed после достижения лимита
+            // (независимо от того, успешно ли остановили AdSet или провели анализ)
+            try {
               await supabase
                 .from('creative_tests')
                 .update({
@@ -96,15 +129,21 @@ export function startCreativeTestCron(app: FastifyInstance) {
                   completed_at: new Date().toISOString()
                 })
                 .eq('id', test.id);
+              
+              app.log.info(`[Cron] Test ${test.id} marked as completed. Campaign paused: ${campaignPaused}, Analyzer success: ${analyzerSuccess}`);
+            } catch (updateError: any) {
+              app.log.error(`[Cron] Failed to update test status:`, updateError);
             }
           }
           
         } catch (testError: any) {
+          app.log.error(`[Cron] Error checking test ${test.id}: ${testError.message}`);
           app.log.error({ 
-            message: `[Cron] Error checking test ${test.id}`,
+            message: `[Cron] Full error details for test ${test.id}`,
             error: testError.message,
             stack: testError.stack,
-            test_id: test.id
+            test_id: test.id,
+            response: testError.response?.data
           });
         }
       }
@@ -115,7 +154,5 @@ export function startCreativeTestCron(app: FastifyInstance) {
       app.log.error('[Cron] Creative test checker error:', error);
     }
   });
-  
-  app.log.info('📅 Creative test cron started (runs every 5 minutes)');
 }
 
