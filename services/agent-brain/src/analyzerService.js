@@ -59,8 +59,8 @@ fastify.post('/api/analyzer/analyze-test', async (request, reply) => {
         user_creatives (
           id,
           title,
-          description,
-          user_id
+          user_id,
+          transcript
         )
       `)
       .eq('id', test_id)
