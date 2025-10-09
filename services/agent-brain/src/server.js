@@ -1912,7 +1912,20 @@ async function processUser(user) {
   
   try {
     // Вызываем основной эндпоинт /api/brain/run с dispatch=true
-    const result = await runBrain(user.id, { dispatch: true });
+    const response = await fetch('http://localhost:7080/api/brain/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAccountId: user.id,
+        inputs: { dispatch: true }
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Brain run failed: ${response.status}`);
+    }
+    
+    const result = await response.json();
     
     // Отправляем отчет в Telegram
     let telegramResult = null;
