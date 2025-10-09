@@ -332,9 +332,12 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
       effective_status: c.effective_status
     })));
 
-    // Фильтруем только активные (ACTIVE)
+    // Фильтруем только активные (любые статусы содержащие ACTIVE)
     const activeCampaigns = campaigns.filter(
-      (c: any) => c.effective_status === 'ACTIVE' || c.status === 'ACTIVE'
+      (c: any) => {
+        const statusStr = String(c.status || c.effective_status || '');
+        return statusStr.includes('ACTIVE');
+      }
     );
 
     console.log('[CampaignBuilder] Found active campaigns:', {
