@@ -2046,6 +2046,26 @@ async function processDailyBatch() {
   }
 }
 
+// Эндпоинт для проверки выборки пользователей (без обработки)
+fastify.get('/api/brain/cron/check-users', async (request, reply) => {
+  try {
+    const users = await getActiveUsers();
+    return reply.send({
+      success: true,
+      usersCount: users.length,
+      users: users.map(u => ({
+        id: u.id,
+        username: u.username,
+        has_telegram: !!(u.telegram_id && u.telegram_bot_token),
+        timezone: u.account_timezone
+      }))
+    });
+  } catch (err) {
+    fastify.log.error(err);
+    return reply.code(500).send({ error: 'check_failed', details: String(err?.message || err) });
+  }
+});
+
 // Эндпоинт для ручного запуска batch-обработки
 fastify.post('/api/brain/cron/run-batch', async (request, reply) => {
   try {
