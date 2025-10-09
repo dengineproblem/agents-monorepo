@@ -325,7 +325,7 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
     const campaigns = data.data || [];
 
     // Логируем статусы всех кампаний для отладки
-    console.log('[CampaignBuilder] All campaigns statuses:', campaigns.slice(0, 5).map((c: any) => ({
+    console.log('[CampaignBuilder] All campaigns statuses:', campaigns.map((c: any) => ({
       id: c.id,
       name: c.name,
       status: c.status,
