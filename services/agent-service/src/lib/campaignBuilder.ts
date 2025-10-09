@@ -324,6 +324,14 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
     const data = await response.json();
     const campaigns = data.data || [];
 
+    // Логируем статусы всех кампаний для отладки
+    console.log('[CampaignBuilder] All campaigns statuses:', campaigns.slice(0, 5).map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      effective_status: c.effective_status
+    })));
+
     // Фильтруем только активные (ACTIVE)
     const activeCampaigns = campaigns.filter(
       (c: any) => c.effective_status === 'ACTIVE' || c.status === 'ACTIVE'
