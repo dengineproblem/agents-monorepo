@@ -314,7 +314,7 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
 
   try {
     const response = await fetch(
-      `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/campaigns?fields=id,name,status,effective_status,daily_budget,created_time&access_token=${accessToken}`
+      `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/campaigns?fields=id,name,status,effective_status,daily_budget,created_time&limit=500&access_token=${accessToken}`
     );
 
     if (!response.ok) {
