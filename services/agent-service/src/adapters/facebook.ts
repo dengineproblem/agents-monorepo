@@ -73,6 +73,15 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fs.unlinkSync(tmpPath);
     }
     
+    // Подробное логирование ошибки от Facebook
+    console.error('[uploadVideo] Facebook API Error:', {
+      status: error?.response?.status,
+      statusText: error?.response?.statusText,
+      data: error?.response?.data,
+      headers: error?.response?.headers,
+      message: error?.message
+    });
+    
     const g = error?.response?.data?.error || {};
     const err: any = new Error(g?.message || error.message);
     err.fb = {
