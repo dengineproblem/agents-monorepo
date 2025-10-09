@@ -9,7 +9,7 @@ services:
       - BRAIN_DEBUG_LLM=true
       - BRAIN_MODEL=gpt-5
       - BRAIN_TEST_MODE=false
-      - AGENT_SERVICE_URL=http://agent-service:8080
+      - AGENT_SERVICE_URL=http://agent-service:8082
       - CRON_ENABLED=false
       - CRON_SCHEDULE=0 8 * * *
     ports:
@@ -37,5 +37,5 @@ services:
       - CAMPAIGN_BUILDER_MODEL=gpt-4o
       - ANALYZER_URL=http://creative-analyzer:7081
     ports:
-      - "8080:8080"
+      - "8080:8082"
     restart: unless-stopped
