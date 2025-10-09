@@ -1851,7 +1851,7 @@ async function getActiveUsers() {
     const { data, error } = await supabase
       .from('user_accounts')
       .select('id, username, telegram_id, telegram_bot_token, account_timezone')
-      .eq('active', true)
+      .eq('is_active', true)
       .eq('optimization', 'agent2');
     
     if (error) {
