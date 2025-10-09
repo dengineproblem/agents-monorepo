@@ -210,7 +210,12 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       });
 
     } catch (error: any) {
-      app.log.error('Error processing video:', error);
+      app.log.error({
+        message: error.message,
+        stack: error.stack,
+        fb_error: error.response?.data,
+        status: error.response?.status
+      }, 'Error processing video');
 
       if (error.fb) {
         return reply.status(500).send({
