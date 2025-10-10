@@ -1467,6 +1467,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // ИСТОРИЯ ДЕЙСТВИЙ ЗА ПОСЛЕДНИЕ 3 ДНЯ
     // ========================================
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    // ВАЖНО: В базе ad_account_id хранится с префиксом "act_", поэтому используем его напрямую
+    const adAccountIdWithPrefix = `act_${normalizeAdAccountId(adAccountId)}`;
     const { data: recentExecutions, error: historyError } = await supabase
       .from('agent_executions')
       .select(`
@@ -1485,29 +1487,38 @@ fastify.post('/api/brain/run', async (request, reply) => {
           finished_at
         )
       `)
-      .eq('ad_account_id', normalizeAdAccountId(adAccountId))
+      .eq('ad_account_id', adAccountIdWithPrefix)
       .in('source', ['brain', 'campaign-builder'])
       .gte('created_at', threeDaysAgo)
       .order('created_at', { ascending: false })
       .limit(10); // Последние 10 запусков
 
+    let actionHistory = [];
     if (historyError) {
-      fastify.log.warn({ historyError }, 'Failed to fetch action history');
+      fastify.log.warn({ historyError }, 'Failed to fetch action history - continuing without it');
+    } else if (recentExecutions && recentExecutions.length > 0) {
+      try {
+        actionHistory = recentExecutions.map(exec => ({
+          execution_id: exec.id,
+          date: exec.created_at.split('T')[0], // YYYY-MM-DD
+          source: exec.source,
+          status: exec.status,
+          actions: (exec.agent_actions || []).map(a => ({
+            type: a.type,
+            params: a.params_json,
+            status: a.status,
+            result: a.result_json || null,
+            error: a.error_json || null
+          }))
+        }));
+        fastify.log.info({ actionHistoryCount: actionHistory.length }, 'Action history loaded successfully');
+      } catch (mapError) {
+        fastify.log.warn({ mapError }, 'Failed to map action history - continuing without it');
+        actionHistory = [];
+      }
+    } else {
+      fastify.log.info('No action history found for last 3 days - agent will work without context');
     }
-
-    const actionHistory = (recentExecutions || []).map(exec => ({
-      execution_id: exec.id,
-      date: exec.created_at.split('T')[0], // YYYY-MM-DD
-      source: exec.source,
-      status: exec.status,
-      actions: (exec.agent_actions || []).map(a => ({
-        type: a.type,
-        params: a.params_json,
-        status: a.status,
-        result: a.result_json || null,
-        error: a.error_json || null
-      }))
-    }));
 
     // ТЕСТОВЫЙ РЕЖИМ: подмена CPL для провокации LLM (только если BRAIN_TEST_MODE=true)
     if (process.env.BRAIN_TEST_MODE === 'true' && inputs?.overrideCPL?.length > 0) {
