@@ -1,7 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import multipart from '@fastify/multipart';
-import { promises as fs } from 'fs';
+import { createWriteStream, promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
+import { pipeline } from 'stream/promises';
 import path from 'path';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
@@ -44,18 +45,26 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
     try {
       const parts = request.parts();
       
-      let videoBuffer: Buffer | null = null;
       let bodyData: Partial<ProcessVideoBody> = {};
 
+      // ИСПРАВЛЕНИЕ: Пишем файл на диск потоком, НЕ загружая в память!
       for await (const part of parts) {
         if (part.type === 'file' && part.fieldname === 'file') {
-          videoBuffer = await part.toBuffer();
+          // Используем /var/tmp вместо /tmp (обычно это реальный диск, а не tmpfs)
+          videoPath = path.join('/var/tmp', `video_${randomUUID()}.mp4`);
+          
+          app.log.info(`Streaming video to disk: ${videoPath}`);
+          
+          // Потоковая запись на диск (без загрузки в память!)
+          await pipeline(part.file, createWriteStream(videoPath));
+          
+          app.log.info(`Video saved to disk: ${videoPath}`);
         } else if (part.type === 'field') {
           (bodyData as any)[part.fieldname] = part.value;
         }
       }
 
-      if (!videoBuffer) {
+      if (!videoPath) {
         return reply.status(400).send({
           success: false,
           error: 'Video file is required'
@@ -98,10 +107,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         token_preview: userAccount.access_token.substring(0, 30)
       });
 
-      videoPath = path.join('/tmp', `video_${randomUUID()}.mp4`);
-      await fs.writeFile(videoPath, videoBuffer);
-
-      app.log.info('Video file saved, starting transcription...');
+      app.log.info('Starting transcription...');
 
       const transcription = await processVideoTranscription(videoPath, body.language);
 
@@ -121,7 +127,13 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         throw new Error(`Failed to create creative record: ${creativeError?.message}`);
       }
 
-      app.log.info(`Creative record created: ${creative.id}, uploading video to Facebook...`);
+      app.log.info(`Creative record created: ${creative.id}, reading video file for upload...`);
+
+      // Читаем файл с диска в буфер ТОЛЬКО для загрузки в Facebook
+      // (Facebook API требует buffer/stream, но это уже после сохранения на диск)
+      const videoBuffer = await fs.readFile(videoPath);
+
+      app.log.info(`Video file read (${Math.round(videoBuffer.length / 1024 / 1024)}MB), uploading to Facebook...`);
 
       const fbVideo = await uploadVideo(normalizedAdAccountId, userAccount.access_token, videoBuffer);
 
