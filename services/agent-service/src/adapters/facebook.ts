@@ -50,7 +50,9 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
 }
 
 export async function uploadVideo(adAccountId: string, token: string, videoBuffer: Buffer): Promise<{ id: string }> {
-  const tmpPath = path.join('/tmp', `fb_video_${randomUUID()}.mp4`);
+  const tmpPath = path.join('/var/tmp', `fb_video_${randomUUID()}.mp4`);
+  
+  console.log(`[uploadVideo] Writing ${Math.round(videoBuffer.length / 1024 / 1024)}MB to ${tmpPath}`);
   fs.writeFileSync(tmpPath, videoBuffer);
   
   try {
@@ -59,11 +61,14 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
 
     const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
     
+    console.log(`[uploadVideo] Starting upload to Facebook API...`);
     const response = await axios.post(url, formData, {
       headers: formData.getHeaders(),
       maxBodyLength: Infinity,
       maxContentLength: Infinity
     });
+    
+    console.log(`[uploadVideo] Upload successful, video ID: ${response.data.id}`);
     
     fs.unlinkSync(tmpPath);
     
