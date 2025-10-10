@@ -465,9 +465,10 @@ async function getActiveCreatives(supabase, userAccountId) {
 
 /**
  * Получить все creative_id из активных ads в Facebook
+ * Возвращает: { creativeIdsSet: Set<string>, creativeToAdsMap: Map<creativeId, [{ad_id, ad_name, adset_id}]> }
  */
 async function getActiveCreativeIds(adAccountId, accessToken) {
-  const fields = 'id,name,status,effective_status,creative{id}';
+  const fields = 'id,name,status,effective_status,adset_id,creative{id}';
   const url = `https://graph.facebook.com/${FB_API_VERSION}/${normalizeAdAccountId(adAccountId)}/ads`;
   
   try {
@@ -483,15 +484,32 @@ async function getActiveCreativeIds(adAccountId, accessToken) {
       ad.status === 'ACTIVE' && ad.effective_status === 'ACTIVE'
     );
     
-    // Извлекаем creative IDs
-    const creativeIds = activeAds
-      .map(ad => ad.creative?.id)
-      .filter(id => id);
+    // Строим Set с creative IDs для быстрого поиска
+    const creativeIdsSet = new Set();
+    // И Map для детальной информации: creative_id -> [{ad_id, ad_name, adset_id}]
+    const creativeToAdsMap = new Map();
     
-    return new Set(creativeIds);
+    for (const ad of activeAds) {
+      const creativeId = ad.creative?.id;
+      if (!creativeId) continue;
+      
+      creativeIdsSet.add(creativeId);
+      
+      if (!creativeToAdsMap.has(creativeId)) {
+        creativeToAdsMap.set(creativeId, []);
+      }
+      
+      creativeToAdsMap.get(creativeId).push({
+        ad_id: ad.id,
+        ad_name: ad.name,
+        adset_id: ad.adset_id
+      });
+    }
+    
+    return { creativeIdsSet, creativeToAdsMap };
   } catch (error) {
     console.error('Failed to fetch active creative IDs:', error.message);
-    return new Set();
+    return { creativeIdsSet: new Set(), creativeToAdsMap: new Map() };
   }
 }
 

@@ -924,7 +924,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '  • CPL_ratio ≥ 2.0 на yesterday ИЛИ last_3d',
   '  • impr_yesterday ≥ 1000 ИЛИ impr_last_3d ≥ 1500',
   '- Бюджет дубля: min(original_daily_budget, $10), в пределах [300..10000] центов',
-  '- Экшен: Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id":"test_lal_ig_365d","daily_budget"<=1000,"name_suffix":"LAL3"}',
+  '- Экшен: Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id":"use_lal_from_settings","daily_budget"<=1000,"name_suffix":"LAL3"}',
   '',
   'РЕБАЛАНС БЮДЖЕТА (АККАУНТ → НАПРАВЛЕНИЯ → AD SET)',
   '- Цель: выйти ровно на плановые суммы (аккаунт и направления).',
@@ -1071,7 +1071,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   'Example JSON:\n{\n  "planNote": "HS bad, unused_creatives=[] но ready_creatives=[2]. Ротация лучших креативов в новой кампании.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "<ADSET_ID>", "daily_budget": 2500 } },\n    { "type": "CreateCampaignWithCreative", "params": { "user_creative_ids": ["uuid-5", "uuid-7"], "objective": "WhatsApp", "campaign_name": "Ротация — Лучшие креативы", "daily_budget_cents": 2500, "use_default_settings": true, "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты. Новых креативов нет, но есть проверенные креативы с хорошей historical performance (CPL $3.20 и $4.10). Снижаем бюджет плохого adset на 50% и запускаем ротацию 2 лучших креативов в новой кампании — свежая связка Campaign+AdSet даст шанс на улучшение результатов."\n}',
   '',
   'ПРИМЕР 5 (фолбэк на LAL дубль если нет креативов вообще)',
-  'Example JSON:\n{\n  "planNote": "HS bad, unused_creatives=[], ready_creatives=[]. Фолбэк: LAL дубль т.к. нет креативов для ротации.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "Audience.DuplicateAdSetWithAudience", "params": { "source_adset_id": "<ADSET_ID>", "audience_id": "test_lal_ig_365d", "daily_budget": 1000, "name_suffix": "LAL3" } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты. Креативов для ротации нет, поэтому создаем дубль с новой аудиторией (LAL 3% Instagram Engagers). Бюджет $10/день."\n}',
+  'Example JSON:\n{\n  "planNote": "HS bad, unused_creatives=[], ready_creatives=[]. Фолбэк: LAL дубль т.к. нет креативов для ротации.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "Audience.DuplicateAdSetWithAudience", "params": { "source_adset_id": "<ADSET_ID>", "audience_id": "use_lal_from_settings", "daily_budget": 1000, "name_suffix": "LAL3" } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты. Креативов для ротации нет, поэтому создаем дубль с LAL аудиторией из настроек. Бюджет $10/день."\n}',
   '',
   'Тул: SendActions',
   `- POST ${AGENT_URL}`,
@@ -1263,7 +1263,7 @@ const TEST_SYSTEM_PROMPT = `
    - GetCampaignStatus для найденной кампании
    - Audience.DuplicateAdSetWithAudience для найденного ad set с параметрами:
      * source_adset_id: ID найденного ad set
-     * audience_id: "test_lal_ig_365d" (тестовая аудитория)
+     * audience_id: "use_lal_from_settings" (использует готовую LAL аудиторию из настроек юзера)
      * daily_budget: 1000 (в центах, т.е. $10)
      * name_suffix: "TEST DUP"
 
@@ -1272,9 +1272,9 @@ const TEST_SYSTEM_PROMPT = `
   "planNote": "TEST: проверка Audience.DuplicateAdSetWithAudience",
   "actions": [
     { "type": "GetCampaignStatus", "params": { "campaign_id": "..." } },
-    { "type": "Audience.DuplicateAdSetWithAudience", "params": { "source_adset_id": "...", "audience_id": "test_lal_ig_365d", "daily_budget": 1000, "name_suffix": "TEST DUP" } }
+    { "type": "Audience.DuplicateAdSetWithAudience", "params": { "source_adset_id": "...", "audience_id": "use_lal_from_settings", "daily_budget": 1000, "name_suffix": "TEST DUP" } }
   ],
-  "reportText": "📅 Тестовый отчёт\\n\\nВыполнена проверка инструментов дублирования.\\nСоздан дубль ad set с тестовой аудиторией."
+  "reportText": "📅 Тестовый отчёт\\n\\nВыполнена проверка инструментов дублирования.\\nСоздан дубль ad set с LAL аудиторией."
 }
 
 Замени "..." на реальные ID из входных данных.

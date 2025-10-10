@@ -220,6 +220,38 @@ export async function createWebsiteLeadsCreative(
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 
+/**
+ * Создает Lookalike Audience 3% от seed аудитории
+ * @param adAccountId - ID рекламного аккаунта (без act_ префикса)
+ * @param seedAudienceId - ID исходной Custom Audience (например, IG Engagers 365d)
+ * @param country - Код страны (например, 'KZ')
+ * @param token - Access token
+ * @returns { id: string } - ID созданной LAL аудитории
+ */
+export async function createLookalikeAudience(
+  adAccountId: string,
+  seedAudienceId: string,
+  country: string,
+  token: string
+): Promise<{ id: string }> {
+  const normalizedAccountId = adAccountId.startsWith('act_') 
+    ? adAccountId.slice(4) 
+    : adAccountId;
+
+  const lookalike_spec = {
+    country: country.toUpperCase(),
+    ratio: 0.03 // 3%
+  };
+
+  const params = {
+    name: `LAL 3% ${country.toUpperCase()} - ${Date.now()}`,
+    origin_audience_id: seedAudienceId,
+    lookalike_spec: JSON.stringify(lookalike_spec)
+  };
+
+  return await graph('POST', `act_${normalizedAccountId}/customaudiences`, token, params);
+}
+
 export const fb = {
   pauseCampaign: (id: string, t: string) => graph('POST', `${id}`, t, { status: 'PAUSED' }),
   resumeCampaign:(id: string, t: string) => graph('POST', `${id}`, t, { status: 'ACTIVE' }),
@@ -231,4 +263,5 @@ export const fb = {
     const cents = Math.max(0, Math.round(usd * 100));
     return graph('POST', `${adsetId}`, t, { daily_budget: cents });
   },
+  // createLookalikeAudience - оставлена в коде выше на будущее, но не экспортируем
 };

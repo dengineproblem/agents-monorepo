@@ -1,5 +1,5 @@
-import { graph } from '../adapters/facebook.js';
-import { fb } from '../adapters/facebook.js';
+import { graph, fb } from '../adapters/facebook.js';
+import { supabase } from '../lib/supabase.js';
 
 type CampaignInfo = { id:string; account_id:string; name:string; objective?:string; special_ad_categories?:string[]; daily_budget?:any; lifetime_budget?:any; };
 type AdsetInfo = {
@@ -14,7 +14,13 @@ type AdsetInfo = {
 };
 type AdInfo = { id:string; name:string; status?:string; creative?: any; url_parameters?:string|null };
 type DupParams = { campaign_id:string; name?:string; page_id?:string };
-type DupAdsetWithAudienceParams = { source_adset_id: string; audience_id: string; daily_budget?: number; name_suffix?: string; };
+type DupAdsetWithAudienceParams = { 
+  source_adset_id: string; 
+  audience_id: string; 
+  daily_budget?: number; 
+  name_suffix?: string;
+  user_account_id?: string; // Для получения ig_seed_audience_id
+};
 
 function toParams(p:Record<string,any>){const o:Record<string,any>={};for(const[k,v]of Object.entries(p)) if(v!==undefined&&v!==null) o[k]=typeof v==='object'?JSON.stringify(v):v;return o;}
 function withStep(step:string,payload:Record<string,any>,fn:()=>Promise<any>){return fn().catch((e:any)=>{e.step=step;e.payload=payload;throw e;});}
@@ -146,11 +152,47 @@ export async function workflowDuplicateAdsetWithAudience(p:DupAdsetWithAudienceP
   const accountId = String(srcCamp.account_id);
   const isCbo = Boolean(srcCamp.daily_budget || srcCamp.lifetime_budget);
 
+  // Определяем финальный audience_id
+  let finalAudienceId = p.audience_id;
+
+  // Если audience_id === "use_lal_from_settings", берем готовый LAL ID из настроек
+  if (p.audience_id === 'use_lal_from_settings') {
+    if (!p.user_account_id) {
+      throw new Error('user_account_id required for use_lal_from_settings');
+    }
+
+    // Получаем ig_seed_audience_id (на самом деле это ID готовой LAL аудитории) из Supabase
+    const { data: userAccount, error } = await supabase
+      .from('user_accounts')
+      .select('ig_seed_audience_id')
+      .eq('id', p.user_account_id)
+      .single();
+
+    if (error || !userAccount?.ig_seed_audience_id) {
+      throw new Error(`ig_seed_audience_id not found for user ${p.user_account_id}. Please create LAL audience in Ads Manager and save ID to user_accounts.ig_seed_audience_id`);
+    }
+
+    finalAudienceId = userAccount.ig_seed_audience_id;
+    console.log(`[DuplicateAdsetWithAudience] Using LAL audience from settings: ${finalAudienceId}`);
+  }
+
   // Targeting override: include specified audience id
   const baseTargeting:any = srcAs.targeting ? JSON.parse(JSON.stringify(srcAs.targeting)) : {};
-  baseTargeting.custom_audiences = [{ id: String(p.audience_id) }];
-  // Keep Advantage+ placements (ель/Advantage+) нет явного булева в API; сохраняем placements/advantage прямиком из исходного таргетинга
-  // Ничего не отключаем: сохраняем placement настройки как есть
+  baseTargeting.custom_audiences = [{ id: String(finalAudienceId) }];
+  
+  // ВАЖНО: Удаляем publisher_platforms и positions для активации Advantage+ Placements
+  // Когда эти поля НЕ указаны - Facebook автоматически использует Advantage+ (расширяет аудиторию и плейсменты)
+  delete baseTargeting.publisher_platforms;
+  delete baseTargeting.facebook_positions;
+  delete baseTargeting.instagram_positions;
+  delete baseTargeting.messenger_positions;
+  delete baseTargeting.audience_network_positions;
+  delete baseTargeting.device_platforms;
+  
+  // ВКЛЮЧАЕМ Advantage+ Audience - targeting_automation ВНУТРИ targeting
+  baseTargeting.targeting_automation = {
+    advantage_audience: 1
+  };
 
   // Budget selection
   const budget:any = {};
@@ -178,7 +220,7 @@ export async function workflowDuplicateAdsetWithAudience(p:DupAdsetWithAudienceP
     optimization_goal: srcAs.optimization_goal || (isWA ? 'CONVERSATIONS' : undefined),
     destination_type: srcAs.destination_type || undefined,
     promoted_object: srcAs.promoted_object ? JSON.stringify(srcAs.promoted_object) : undefined,
-    targeting: JSON.stringify(baseTargeting),
+    targeting: JSON.stringify(baseTargeting), // targeting_automation уже внутри baseTargeting
     ...budget,
     ...bid,
     campaign_id: (srcAs as any).campaign_id,

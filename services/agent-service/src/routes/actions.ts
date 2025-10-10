@@ -191,7 +191,8 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
     case 'Audience.DuplicateAdSetWithAudience': {
       const p = (action as any).params as { source_adset_id: string; audience_id: string; daily_budget?: number; name_suffix?: string };
       if (!p.source_adset_id || !p.audience_id) throw new Error('Audience.DuplicateAdSetWithAudience: source_adset_id and audience_id required');
-      return workflowDuplicateAdsetWithAudience(p, token);
+      // Передаем user_account_id для автоматического создания LAL из seed
+      return workflowDuplicateAdsetWithAudience({ ...p, user_account_id: ctx?.userAccountId }, token);
     }
     case 'CreateCampaignWithCreative': {
       const p = (action as any).params as {
