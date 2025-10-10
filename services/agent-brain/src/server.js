@@ -335,6 +335,7 @@ async function fetchInsightsPreset(adAccountId, accessToken, datePreset) {
   url.searchParams.set('date_preset', datePreset);
   url.searchParams.set('level','adset');
   url.searchParams.set('action_breakdowns','action_type');
+  url.searchParams.set('limit', '500'); // Ensure we get all adsets
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -345,6 +346,7 @@ async function fetchAdLevelInsightsPreset(adAccountId, accessToken, datePreset) 
   url.searchParams.set('date_preset', datePreset);
   url.searchParams.set('level','ad');
   url.searchParams.set('action_breakdowns','action_type');
+  url.searchParams.set('limit', '500'); // Ensure we get all ads
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -355,6 +357,7 @@ async function fetchCampaignInsightsPreset(adAccountId, accessToken, datePreset)
   url.searchParams.set('date_preset', datePreset);
   url.searchParams.set('level','campaign');
   url.searchParams.set('action_breakdowns','action_type');
+  url.searchParams.set('limit', '500'); // Ensure we get all campaigns
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -362,6 +365,7 @@ async function fetchCampaignInsightsPreset(adAccountId, accessToken, datePreset)
 async function fetchCampaigns(adAccountId, accessToken) {
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/campaigns`);
   url.searchParams.set('fields','id,name,status,effective_status,daily_budget,lifetime_budget');
+  url.searchParams.set('limit', '500'); // Ensure we get all campaigns
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -1675,16 +1679,6 @@ fastify.post('/api/brain/run', async (request, reply) => {
             .filter(c => String(c.status||c.effective_status||'').includes('ACTIVE'))
             .map(c=>({ c, y: byCY.get(c.id)||{} }))
             .filter(({y})=> (Number(y.spend)||0) > 0 || (computeLeadsFromActions(y).leads||0) > 0);
-          
-          // DEBUG LOGGING
-          fastify.log.info({
-            where: 'yesterday_totals',
-            total_campaigns: (campList||[]).length,
-            active_campaigns: (campList||[]).filter(c => String(c.status||c.effective_status||'').includes('ACTIVE')).length,
-            active_with_yesterday_data: activeWithResults.length,
-            campaign_ids: activeWithResults.map(({c,y}) => ({ id: c.id, name: c.name, spend: y.spend, leads: computeLeadsFromActions(y).leads }))
-          });
-          
           const spend = activeWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
           const leads = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
           const ql = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
