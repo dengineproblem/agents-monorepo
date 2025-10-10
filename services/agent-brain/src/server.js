@@ -1476,7 +1476,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     // ВАЖНО: В базе ad_account_id хранится с префиксом "act_"
     // normalizeAdAccountId() уже добавляет префикс если его нет
-    const normalizedAccountId = normalizeAdAccountId(adAccountId);
+    const normalizedAccountId = normalizeAdAccountId(ua.ad_account_id);
     const { data: recentExecutions, error: historyError } = await supabase
       .from('agent_executions')
       .select(`
