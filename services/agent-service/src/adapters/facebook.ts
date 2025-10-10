@@ -49,19 +49,34 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   return json;
 }
 
+/**
+ * Загрузка видео в Facebook Ad Account с поддержкой больших файлов (>100 МБ)
+ * Использует chunked upload через graph-video.facebook.com
+ */
 export async function uploadVideo(adAccountId: string, token: string, videoBuffer: Buffer): Promise<{ id: string }> {
   const tmpPath = path.join('/var/tmp', `fb_video_${randomUUID()}.mp4`);
+  const fileSize = videoBuffer.length;
+  const fileSizeMB = Math.round(fileSize / 1024 / 1024);
   
-  console.log(`[uploadVideo] Writing ${Math.round(videoBuffer.length / 1024 / 1024)}MB to ${tmpPath}`);
+  console.log(`[uploadVideo] Writing ${fileSizeMB}MB to ${tmpPath}`);
   fs.writeFileSync(tmpPath, videoBuffer);
   
   try {
+    // Для файлов >50 МБ используем chunked upload через graph-video
+    if (fileSize > 50 * 1024 * 1024) {
+      console.log(`[uploadVideo] File size ${fileSizeMB}MB > 50MB, using chunked upload`);
+      const videoId = await uploadVideoChunked(adAccountId, token, tmpPath, fileSize);
+      fs.unlinkSync(tmpPath);
+      return { id: videoId };
+    }
+    
+    // Для маленьких файлов используем простой upload
+    console.log(`[uploadVideo] Using simple upload for ${fileSizeMB}MB file`);
     const formData = new FormData();
     formData.append('source', fs.createReadStream(tmpPath));
 
-    const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
+    const url = `https://graph-video.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
     
-    console.log(`[uploadVideo] Starting upload to Facebook API...`);
     const response = await axios.post(url, formData, {
       headers: formData.getHeaders(),
       maxBodyLength: Infinity,
@@ -69,7 +84,6 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
     });
     
     console.log(`[uploadVideo] Upload successful, video ID: ${response.data.id}`);
-    
     fs.unlinkSync(tmpPath);
     
     return response.data;
@@ -78,12 +92,10 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fs.unlinkSync(tmpPath);
     }
     
-    // Подробное логирование ошибки от Facebook
     console.error('[uploadVideo] Facebook API Error:', {
       status: error?.response?.status,
       statusText: error?.response?.statusText,
       data: error?.response?.data,
-      headers: error?.response?.headers,
       message: error?.message
     });
     
@@ -100,6 +112,88 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
     };
     throw err;
   }
+}
+
+/**
+ * Chunked upload для больших видео
+ * Протокол: start → transfer (loop) → finish
+ */
+async function uploadVideoChunked(adAccountId: string, token: string, filePath: string, fileSize: number): Promise<string> {
+  const base = `https://graph-video.facebook.com/${FB_API_VERSION}`;
+  const url = `${base}/${adAccountId}/advideos`;
+  
+  console.log(`[uploadVideoChunked] Starting chunked upload for ${Math.round(fileSize / 1024 / 1024)}MB file`);
+  
+  // 1) START phase
+  const startFormData = new FormData();
+  startFormData.append('access_token', token);
+  startFormData.append('upload_phase', 'start');
+  startFormData.append('file_size', String(fileSize));
+  
+  const startRes = await axios.post(url, startFormData, {
+    headers: startFormData.getHeaders()
+  });
+  
+  let { upload_session_id, start_offset, end_offset, video_id } = startRes.data;
+  console.log(`[uploadVideoChunked] Session started: ${upload_session_id}, initial range: ${start_offset}-${end_offset}`);
+  
+  // 2) TRANSFER phase (loop)
+  let chunkNumber = 0;
+  while (start_offset !== end_offset) {
+    chunkNumber++;
+    const start = parseInt(start_offset, 10);
+    const end = parseInt(end_offset, 10);
+    const chunkSize = end - start;
+    
+    console.log(`[uploadVideoChunked] Uploading chunk #${chunkNumber}: ${start}-${end} (${Math.round(chunkSize / 1024 / 1024)}MB)`);
+    
+    // Читаем chunk из файла
+    const chunk = fs.createReadStream(filePath, { 
+      start, 
+      end: end - 1  // end - 1 потому что end_offset не включается
+    });
+    
+    const transferFormData = new FormData();
+    transferFormData.append('access_token', token);
+    transferFormData.append('upload_phase', 'transfer');
+    transferFormData.append('upload_session_id', upload_session_id);
+    transferFormData.append('start_offset', String(start));
+    transferFormData.append('video_file_chunk', chunk, {
+      filename: path.basename(filePath),
+      contentType: 'application/octet-stream',
+      knownLength: chunkSize
+    });
+    
+    const transferRes = await axios.post(url, transferFormData, {
+      headers: transferFormData.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
+    
+    // Сервер возвращает следующий диапазон
+    start_offset = transferRes.data.start_offset;
+    end_offset = transferRes.data.end_offset;
+    
+    const progress = Math.round((start / fileSize) * 100);
+    console.log(`[uploadVideoChunked] Chunk #${chunkNumber} uploaded, progress: ${progress}%`);
+  }
+  
+  console.log(`[uploadVideoChunked] All chunks uploaded, finishing...`);
+  
+  // 3) FINISH phase
+  const finishFormData = new FormData();
+  finishFormData.append('access_token', token);
+  finishFormData.append('upload_phase', 'finish');
+  finishFormData.append('upload_session_id', upload_session_id);
+  
+  const finishRes = await axios.post(url, finishFormData, {
+    headers: finishFormData.getHeaders()
+  });
+  
+  const finalVideoId = finishRes.data.video_id || video_id;
+  console.log(`[uploadVideoChunked] Upload completed, video ID: ${finalVideoId}`);
+  
+  return finalVideoId;
 }
 
 export async function createWhatsAppCreative(
