@@ -253,6 +253,13 @@ const SCORING_ENABLED = String(process.env.SCORING_ENABLED || 'true').toLowerCas
 const SCORING_MIN_IMPRESSIONS = Number(process.env.SCORING_MIN_IMPRESSIONS || '1000');
 const SCORING_PREDICTION_DAYS = Number(process.env.SCORING_PREDICTION_DAYS || '3');
 
+// Helper function to normalize ad account ID (ensures 'act_' prefix)
+function normalizeAdAccountId(adAccountId) {
+  if (!adAccountId) return '';
+  const id = String(adAccountId).trim();
+  return id.startsWith('act_') ? id : `act_${id}`;
+}
+
 const ALLOWED_TYPES = new Set([
   'GetCampaignStatus',
   'PauseCampaign',
@@ -1467,8 +1474,9 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // ИСТОРИЯ ДЕЙСТВИЙ ЗА ПОСЛЕДНИЕ 3 ДНЯ
     // ========================================
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
-    // ВАЖНО: В базе ad_account_id хранится с префиксом "act_", поэтому используем его напрямую
-    const adAccountIdWithPrefix = `act_${normalizeAdAccountId(adAccountId)}`;
+    // ВАЖНО: В базе ad_account_id хранится с префиксом "act_"
+    // normalizeAdAccountId() уже добавляет префикс если его нет
+    const normalizedAccountId = normalizeAdAccountId(adAccountId);
     const { data: recentExecutions, error: historyError } = await supabase
       .from('agent_executions')
       .select(`
@@ -1487,7 +1495,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
           finished_at
         )
       `)
-      .eq('ad_account_id', adAccountIdWithPrefix)
+      .eq('ad_account_id', normalizedAccountId)
       .in('source', ['brain', 'campaign-builder'])
       .gte('created_at', threeDaysAgo)
       .order('created_at', { ascending: false })
