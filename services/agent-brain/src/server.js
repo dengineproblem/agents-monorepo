@@ -2112,7 +2112,7 @@ async function processUser(user) {
 }
 
 /**
- * Batch-обработка всех активных пользователей (поочередно)
+ * Batch-обработка всех активных пользователей (параллельно с ограничением concurrency)
  */
 async function processDailyBatch() {
   const batchStartTime = Date.now();
@@ -2128,16 +2128,29 @@ async function processDailyBatch() {
     
     fastify.log.info({ where: 'processDailyBatch', usersCount: users.length });
     
+    // Параллельная обработка с ограничением concurrency
+    const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5'); // 5 пользователей одновременно
     const results = [];
     
-    // Обрабатываем пользователей поочередно (не параллельно)
-    for (const user of users) {
-      const result = await processUser(user);
-      results.push(result);
+    // Разбиваем на батчи по BATCH_CONCURRENCY
+    for (let i = 0; i < users.length; i += BATCH_CONCURRENCY) {
+      const batch = users.slice(i, i + BATCH_CONCURRENCY);
+      fastify.log.info({ 
+        where: 'processDailyBatch', 
+        batchNumber: Math.floor(i / BATCH_CONCURRENCY) + 1,
+        batchSize: batch.length,
+        totalBatches: Math.ceil(users.length / BATCH_CONCURRENCY)
+      });
       
-      // Небольшая пауза между пользователями (опционально)
-      if (users.indexOf(user) < users.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      // Обрабатываем батч параллельно
+      const batchResults = await Promise.all(
+        batch.map(user => processUser(user))
+      );
+      results.push(...batchResults);
+      
+      // Небольшая пауза между батчами (не между пользователями!)
+      if (i + BATCH_CONCURRENCY < users.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 секунды между батчами
       }
     }
     
