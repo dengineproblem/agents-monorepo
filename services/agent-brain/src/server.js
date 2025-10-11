@@ -1227,11 +1227,14 @@ async function sendTelegram(chatId, text, token) {
   }
   parts.push(remaining);
 
+  const telegramUrl = `https://api.telegram.org/bot${bot.slice(0, 10)}***/sendMessage`;
+  
   fastify.log.info({ 
     where: 'sendTelegram', 
     chatId, 
     textLength: text?.length || 0, 
-    parts: parts.length 
+    parts: parts.length,
+    url: telegramUrl
   });
 
   try {
@@ -1239,32 +1242,75 @@ async function sendTelegram(chatId, text, token) {
       const part = parts[i];
       fastify.log.info({ where: 'sendTelegram', part: i + 1, of: parts.length, length: part.length });
       
-      const r = await fetch(`https://api.telegram.org/bot${bot}/sendMessage`, {
-        method: 'POST',
-        headers: { 'content-type':'application/json' },
-        // без parse_mode для надёжности (Markdown может ломаться)
-        body: JSON.stringify({ chat_id: String(chatId), text: part, disable_web_page_preview: true })
-      });
+      const fullUrl = `https://api.telegram.org/bot${bot}/sendMessage`;
       
-      if (!r.ok) {
-        const errText = await r.text().catch(()=> '');
-        fastify.log.error({ 
-          where: 'sendTelegram', 
-          part: i + 1, 
-          status: r.status, 
-          errText,
-          textPreview: part.slice(0, 100)
+      // Создаём AbortController для таймаута
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаут
+      
+      try {
+        const r = await fetch(fullUrl, {
+          method: 'POST',
+          headers: { 'content-type':'application/json' },
+          // без parse_mode для надёжности (Markdown может ломаться)
+          body: JSON.stringify({ chat_id: String(chatId), text: part, disable_web_page_preview: true }),
+          signal: controller.signal
         });
-        return false;
+        clearTimeout(timeoutId);
+        
+        if (!r.ok) {
+          const errText = await r.text().catch(()=> '');
+          fastify.log.error({ 
+            where: 'sendTelegram', 
+            part: i + 1, 
+            status: r.status, 
+            errText,
+            textPreview: part.slice(0, 100)
+          });
+          return false;
+        }
+      } catch (fetchErr) {
+        clearTimeout(timeoutId);
+        // Логируем fetch ошибку с деталями
+        fastify.log.error({
+          where: 'sendTelegram',
+          phase: 'fetch_failed',
+          part: i + 1,
+          error: String(fetchErr?.message || fetchErr),
+          name: fetchErr?.name,
+          code: fetchErr?.code,
+          isAbortError: fetchErr?.name === 'AbortError'
+        });
+        throw fetchErr; // пробрасываем для обработки в основном catch
       }
     }
     return true;
   } catch (err) {
+    // Рекурсивно извлекаем все вложенные причины
+    const causes = [];
+    let currentErr = err;
+    while (currentErr) {
+      if (currentErr.cause) {
+        causes.push({
+          message: String(currentErr.cause?.message || currentErr.cause),
+          code: currentErr.cause?.code,
+          errno: currentErr.cause?.errno,
+          syscall: currentErr.cause?.syscall
+        });
+        currentErr = currentErr.cause;
+      } else {
+        break;
+      }
+    }
+    
     fastify.log.error({ 
       where: 'sendTelegram', 
       error: String(err?.message || err),
       code: err?.code,
-      cause: err?.cause ? String(err.cause) : null
+      errno: err?.errno,
+      syscall: err?.syscall,
+      causes: causes,
+      stack: err?.stack
     });
     throw err; // пробрасываем ошибку наверх
   }
