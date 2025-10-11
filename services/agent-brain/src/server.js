@@ -2001,8 +2001,37 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }
 
     let agentResponse = null;
+    
+    fastify.log.info({
+      where: 'before_actions_dispatch',
+      dispatch_requested: !!inputs?.dispatch,
+      actions_count: actions?.length || 0,
+      actions_preview: actions?.slice(0, 3).map(a => a.type) || []
+    });
+    
     if (inputs?.dispatch) {
-      agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number);
+      try {
+        fastify.log.info({
+          where: 'dispatching_actions',
+          actions_count: actions?.length || 0,
+          idem
+        });
+        
+        agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number);
+        
+        fastify.log.info({
+          where: 'actions_dispatched',
+          success: !!agentResponse,
+          response_preview: JSON.stringify(agentResponse).slice(0, 200)
+        });
+      } catch (dispatchErr) {
+        fastify.log.error({
+          where: 'actions_dispatch_failed',
+          error: String(dispatchErr?.message || dispatchErr),
+          stack: dispatchErr?.stack
+        });
+        // Не пробрасываем ошибку, чтобы отчёт всё равно сформировался
+      }
     }
 
     const reportTextRaw = reportTextFromLLM && reportTextFromLLM.trim() ? reportTextFromLLM : buildReport({
@@ -2050,8 +2079,13 @@ fastify.post('/api/brain/run', async (request, reply) => {
       }
     }
 
-    // Send Telegram (по умолчанию включено, отключается через sendReport: false)
-    const shouldSendTelegram = inputs?.sendReport !== false;
+    // Send Telegram
+    // - По умолчанию отправляется только при dispatch=true (реальные действия)
+    // - Можно явно включить через sendReport: true даже при dispatch=false
+    // - Можно явно отключить через sendReport: false
+    const shouldSendTelegram = inputs?.sendReport !== undefined 
+      ? inputs.sendReport 
+      : (inputs?.dispatch === true);
     
     fastify.log.info({
       where: 'before_telegram_send',
