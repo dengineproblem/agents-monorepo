@@ -26,7 +26,18 @@ async function responsesCreate(payload) {
     body: JSON.stringify(safeBody)
   });
   const text = await res.text();
-  try { fastify.log.info({ where:'responsesCreate', request: safeBody, status: res.status, body: text.slice(0, 500) }); } catch {}
+  
+  // Логируем полный ответ для диагностики
+  try { 
+    fastify.log.info({ 
+      where:'responsesCreate', 
+      status: res.status, 
+      bodyPreview: text.slice(0, 500),
+      bodyLength: text.length,
+      fullBody: text  // ПОЛНЫЙ ответ
+    }); 
+  } catch {}
+  
   if (!res.ok) {
     const err = new Error(`${res.status} ${text}`);
     err._requestBody = safeBody;
@@ -836,7 +847,7 @@ const SYSTEM_PROMPT = (clientPrompt) => [
   '  • unused_creatives: список креативов которые готовы к использованию но НЕ ИСПОЛЬЗУЮТСЯ в активных ads сейчас (с рекомендуемым objective). ПРИОРИТЕТ для новых кампаний!',
   '  • recommendations_for_brain: список рекомендаций для тебя от Scoring Agent',
   '',
-  '📜 ИСТОРИЯ ТВОИХ ДЕЙСТВИЙ ЗА ПОСЛЕДНИЕ 3 ДНЯ',
+          '📜 ИСТОРИЯ ТВОИХ ДЕЙСТВИЙ ЗА ПОСЛЕДНИЕ 3 ДНЯ',
   '- Во входных данных ты получаешь поле `action_history` - массив последних 10 запусков (твоих и campaign-builder) за 3 дня.',
   '- Каждый запуск содержит: execution_id, date (YYYY-MM-DD), source (brain/campaign-builder), status (success/failed), actions (type, params, status, result, error).',
   '- ЗАЧЕМ ЭТО НУЖНО:',
@@ -1197,9 +1208,15 @@ async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumbe
 }
 
 async function sendTelegram(chatId, text, token) {
-  if (!chatId) return false;
+  if (!chatId) {
+    fastify.log.warn({ where: 'sendTelegram', error: 'no_chat_id' });
+    return false;
+  }
   const bot = token || process.env.TELEGRAM_FALLBACK_BOT_TOKEN;
-  if (!bot) return false;
+  if (!bot) {
+    fastify.log.warn({ where: 'sendTelegram', error: 'no_bot_token' });
+    return false;
+  }
 
   const MAX_PART = 3800; // запас по лимиту 4096
   const parts = [];
@@ -1210,20 +1227,47 @@ async function sendTelegram(chatId, text, token) {
   }
   parts.push(remaining);
 
-  for (const part of parts) {
-  const r = await fetch(`https://api.telegram.org/bot${bot}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type':'application/json' },
-      // без parse_mode для надёжности (Markdown может ломаться)
-      body: JSON.stringify({ chat_id: String(chatId), text: part, disable_web_page_preview: true })
-    });
-    if (!r.ok) {
-      const errText = await r.text().catch(()=> '');
-      fastify.log.warn({ msg: 'telegram_send_failed', status: r.status, errText });
-      return false;
+  fastify.log.info({ 
+    where: 'sendTelegram', 
+    chatId, 
+    textLength: text?.length || 0, 
+    parts: parts.length 
+  });
+
+  try {
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      fastify.log.info({ where: 'sendTelegram', part: i + 1, of: parts.length, length: part.length });
+      
+      const r = await fetch(`https://api.telegram.org/bot${bot}/sendMessage`, {
+        method: 'POST',
+        headers: { 'content-type':'application/json' },
+        // без parse_mode для надёжности (Markdown может ломаться)
+        body: JSON.stringify({ chat_id: String(chatId), text: part, disable_web_page_preview: true })
+      });
+      
+      if (!r.ok) {
+        const errText = await r.text().catch(()=> '');
+        fastify.log.error({ 
+          where: 'sendTelegram', 
+          part: i + 1, 
+          status: r.status, 
+          errText,
+          textPreview: part.slice(0, 100)
+        });
+        return false;
+      }
     }
+    return true;
+  } catch (err) {
+    fastify.log.error({ 
+      where: 'sendTelegram', 
+      error: String(err?.message || err),
+      code: err?.code,
+      cause: err?.cause ? String(err.cause) : null
+    });
+    throw err; // пробрасываем ошибку наверх
   }
-  return true;
 }
 
 function finalizeReportText(raw, { adAccountId, dateStr }) {
@@ -1868,6 +1912,19 @@ fastify.post('/api/brain/run', async (request, reply) => {
         const system = (process.env.BRAIN_TEST_MODE === 'true') ? TEST_SYSTEM_PROMPT : SYSTEM_PROMPT(ua?.prompt3 || '');
         const { parsed, rawText, parseError } = await llmPlan(system, llmInput);
         planLLMRaw = { rawText, parseError, parsed };
+        
+        // Логируем результат парсинга LLM
+        fastify.log.info({
+          where: 'llm_plan_result',
+          parsed_ok: !!parsed,
+          has_actions: Array.isArray(parsed?.actions),
+          actions_count: parsed?.actions?.length || 0,
+          has_reportText: !!parsed?.reportText,
+          parseError: parseError,
+          rawTextLength: rawText?.length || 0,
+          rawTextPreview: rawText?.slice(0, 200)
+        });
+        
         if (!parsed || !Array.isArray(parsed.actions)) throw new Error(parseError || 'LLM invalid output');
         actions = validateAndNormalizeActions(parsed.actions);
         planNote = parsed.planNote || 'llm_plan_v1.2';
@@ -1875,6 +1932,14 @@ fastify.post('/api/brain/run', async (request, reply) => {
           reportTextFromLLM = parsed.reportText.trim();
         }
       } catch (e) {
+        // КРИТИЧНО: логируем ошибку LLM!
+        fastify.log.error({
+          where: 'llm_plan_failed',
+          error: String(e?.message || e),
+          stack: e?.stack,
+          fallback_to_deterministic: true
+        });
+        
         const limited = Array.isArray(decisions) ? decisions.slice(0, Math.max(0, BRAIN_MAX_ACTIONS_PER_RUN)) : [];
         for (const cid of Array.from(touchedCampaignIds)) limited.unshift({ type:'GetCampaignStatus', params:{ campaign_id: cid } });
         const planFb = { planNote:'deterministic_fallback_v1.2', actions: limited };
@@ -1899,6 +1964,15 @@ fastify.post('/api/brain/run', async (request, reply) => {
       lastReports: []
     });
     const reportText = finalizeReportText(reportTextRaw, { adAccountId: ua?.ad_account_id, dateStr: date });
+
+    // Логируем сформированный отчёт
+    fastify.log.info({
+      where: 'report_generated',
+      reportTextLength: reportText?.length || 0,
+      reportTextPreview: reportText?.slice(0, 300),
+      fromLLM: !!reportTextFromLLM,
+      actions_count: actions?.length || 0
+    });
 
     // Собираем plan для сохранения
     const plan = { planNote, actions, reportText: reportTextFromLLM || null };
@@ -1932,7 +2006,28 @@ fastify.post('/api/brain/run', async (request, reply) => {
 
     // Send Telegram (по умолчанию включено, отключается через sendReport: false)
     const shouldSendTelegram = inputs?.sendReport !== false;
-    const sent = shouldSendTelegram ? await sendTelegram(ua.telegram_id, reportText, ua.telegram_bot_token) : false;
+    
+    fastify.log.info({
+      where: 'before_telegram_send',
+      shouldSendTelegram,
+      has_telegram_id: !!ua.telegram_id,
+      has_bot_token: !!ua.telegram_bot_token,
+      reportLength: reportText?.length || 0
+    });
+    
+    let sent = false;
+    if (shouldSendTelegram) {
+      try {
+        sent = await sendTelegram(ua.telegram_id, reportText, ua.telegram_bot_token);
+        fastify.log.info({ where: 'telegram_send_result', success: sent });
+      } catch (err) {
+        fastify.log.error({ 
+          where: 'telegram_send_error', 
+          error: String(err?.message || err),
+          stack: err?.stack 
+        });
+      }
+    }
 
     return reply.send({
       idempotencyKey: idem,
