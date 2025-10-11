@@ -465,10 +465,9 @@ async function getActiveCreatives(supabase, userAccountId) {
 
 /**
  * Получить все creative_id из активных ads в Facebook
- * Возвращает: { creativeIdsSet: Set<string>, creativeToAdsMap: Map<creativeId, [{ad_id, ad_name, adset_id}]> }
  */
 async function getActiveCreativeIds(adAccountId, accessToken) {
-  const fields = 'id,name,status,effective_status,adset_id,creative{id}';
+  const fields = 'id,name,status,effective_status,creative{id}';
   const url = `https://graph.facebook.com/${FB_API_VERSION}/${normalizeAdAccountId(adAccountId)}/ads`;
   
   try {
@@ -484,32 +483,15 @@ async function getActiveCreativeIds(adAccountId, accessToken) {
       ad.status === 'ACTIVE' && ad.effective_status === 'ACTIVE'
     );
     
-    // Строим Set с creative IDs для быстрого поиска
-    const creativeIdsSet = new Set();
-    // И Map для детальной информации: creative_id -> [{ad_id, ad_name, adset_id}]
-    const creativeToAdsMap = new Map();
+    // Извлекаем creative IDs
+    const creativeIds = activeAds
+      .map(ad => ad.creative?.id)
+      .filter(id => id);
     
-    for (const ad of activeAds) {
-      const creativeId = ad.creative?.id;
-      if (!creativeId) continue;
-      
-      creativeIdsSet.add(creativeId);
-      
-      if (!creativeToAdsMap.has(creativeId)) {
-        creativeToAdsMap.set(creativeId, []);
-      }
-      
-      creativeToAdsMap.get(creativeId).push({
-        ad_id: ad.id,
-        ad_name: ad.name,
-        adset_id: ad.adset_id
-      });
-    }
-    
-    return { creativeIdsSet, creativeToAdsMap };
+    return new Set(creativeIds);
   } catch (error) {
     console.error('Failed to fetch active creative IDs:', error.message);
-    return { creativeIdsSet: new Set(), creativeToAdsMap: new Map() };
+    return new Set();
   }
 }
 
@@ -643,7 +625,7 @@ export async function runScoringAgent(userAccount, options = {}) {
       where: 'scoring_agent', 
       phase: 'creatives_fetched', 
       total_creatives: userCreatives.length,
-      active_in_ads: activeCreativeIds.size
+      active_in_ads: activeCreativeIds.creativeIdsSet.size
     });
     
     const readyCreatives = [];
@@ -736,7 +718,7 @@ export async function runScoringAgent(userAccount, options = {}) {
       
       // Если НИ ОДИН из creative_id не используется в активных ads
       const isUnused = creativeIds.length > 0 && 
-                       !creativeIds.some(id => activeCreativeIds.has(id));
+                       !creativeIds.some(id => activeCreativeIds.creativeIdsSet.has(id));
       
       if (isUnused) {
         // Определяем рекомендуемый objective на основе наличия креативов
