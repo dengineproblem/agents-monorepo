@@ -431,29 +431,64 @@ export async function pauseActiveCampaigns(
  */
 export async function getAvailableCreatives(
   userAccountId: string,
-  objective?: CampaignObjective
+  objective?: CampaignObjective,
+  directionId?: string
 ): Promise<AvailableCreative[]> {
-  console.log('[CampaignBuilder] Fetching available creatives for user:', userAccountId);
+  console.log('[CampaignBuilder] Fetching available creatives for user:', userAccountId, 'direction:', directionId);
 
-  // Получаем готовые креативы
-  const { data: creatives, error: creativesError } = await supabase
-    .from('user_creatives')
-    .select('*')
-    .eq('user_id', userAccountId)
-    .eq('status', 'ready')
-    .order('created_at', { ascending: false });
+  let creatives: any[];
 
-  if (creativesError) {
-    console.error('[CampaignBuilder] Error fetching creatives:', creativesError);
-    throw new Error(`Failed to fetch creatives: ${creativesError.message}`);
+  // Если указано направление - фильтруем креативы по нему
+  if (directionId) {
+    const { data, error: creativesError } = await supabase
+      .from('user_creatives')
+      .select(`
+        *,
+        account_directions!inner(is_active)
+      `)
+      .eq('user_id', userAccountId)
+      .eq('direction_id', directionId)
+      .eq('status', 'ready')
+      .eq('account_directions.is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (creativesError) {
+      console.error('[CampaignBuilder] Error fetching direction creatives:', creativesError);
+      throw new Error(`Failed to fetch creatives: ${creativesError.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      console.warn('[CampaignBuilder] No ready creatives found for direction');
+      return [];
+    }
+
+    console.log('[CampaignBuilder] Found', data.length, 'ready creatives for direction');
+    creatives = data;
+  } else {
+    // Legacy: получаем все креативы пользователя без фильтра по направлению
+    const { data, error: creativesError } = await supabase
+      .from('user_creatives')
+      .select('*')
+      .eq('user_id', userAccountId)
+      .eq('status', 'ready')
+      .is('direction_id', null)  // Только креативы БЕЗ направления
+      .order('created_at', { ascending: false });
+
+    if (creativesError) {
+      console.error('[CampaignBuilder] Error fetching creatives:', creativesError);
+      throw new Error(`Failed to fetch creatives: ${creativesError.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      console.warn('[CampaignBuilder] No ready creatives found for user');
+      return [];
+    }
+
+    console.log('[CampaignBuilder] Found', data.length, 'ready creatives (legacy)');
+    creatives = data;
   }
 
-  if (!creatives || creatives.length === 0) {
-    console.warn('[CampaignBuilder] No ready creatives found for user');
-    return [];
-  }
-
-  console.log('[CampaignBuilder] Found', creatives.length, 'ready creatives');
+  // Общая обработка для обоих случаев (с направлением и без)
 
   // Фильтруем по objective (если указан)
   let filteredCreatives = creatives;
@@ -540,9 +575,46 @@ export async function getAvailableCreatives(
 /**
  * Получить бюджетные ограничения пользователя
  */
-export async function getBudgetConstraints(userAccountId: string): Promise<BudgetConstraints> {
-  console.log('[CampaignBuilder] Fetching budget constraints for user:', userAccountId);
+export async function getBudgetConstraints(
+  userAccountId: string, 
+  directionId?: string
+): Promise<BudgetConstraints> {
+  console.log('[CampaignBuilder] Fetching budget constraints for user:', userAccountId, 'direction:', directionId);
 
+  // Если указано направление - берём бюджет и CPL из него
+  if (directionId) {
+    const { data: direction, error: directionError } = await supabase
+      .from('account_directions')
+      .select('daily_budget_cents, target_cpl_cents')
+      .eq('id', directionId)
+      .single();
+
+    if (directionError || !direction) {
+      console.error('[CampaignBuilder] Error fetching direction:', directionError);
+      throw new Error(`Failed to fetch direction: ${directionError?.message || 'not found'}`);
+    }
+
+    const planDailyBudget = direction.daily_budget_cents;
+    const targetCpl = direction.target_cpl_cents;
+
+    const constraints: BudgetConstraints = {
+      plan_daily_budget_cents: planDailyBudget,
+      available_budget_cents: planDailyBudget,
+      default_cpl_target_cents: targetCpl,
+      min_budget_per_campaign_cents: 1000, // $10/день минимум
+      max_budget_per_campaign_cents: Math.min(30000, planDailyBudget),
+    };
+
+    console.log('[CampaignBuilder] Direction budget constraints:', {
+      direction_id: directionId,
+      plan_daily: `$${planDailyBudget / 100}`,
+      target_cpl: `$${targetCpl / 100}`,
+    });
+
+    return constraints;
+  }
+
+  // Legacy: берём из user_accounts (если направление не указано)
   const { data: userAccount, error } = await supabase
     .from('user_accounts')
     .select('plan_daily_budget_cents, default_cpl_target_cents')
@@ -596,8 +668,8 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
   });
 
   // Собираем данные
-  const availableCreatives = await getAvailableCreatives(user_account_id, objective);
-  const budgetConstraints = await getBudgetConstraints(user_account_id);
+  const availableCreatives = await getAvailableCreatives(user_account_id, objective, direction_id);
+  const budgetConstraints = await getBudgetConstraints(user_account_id, direction_id);
 
   if (availableCreatives.length === 0) {
     throw new Error('No ready creatives available for this objective');
