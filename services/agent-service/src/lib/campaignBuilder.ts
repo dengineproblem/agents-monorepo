@@ -57,6 +57,7 @@ export type BudgetConstraints = {
 export type CampaignBuilderInput = {
   user_account_id: string;
   objective: CampaignObjective;
+  direction_id?: string; // UUID направления (если указан - работаем в рамках направления)
   campaign_name?: string;
   requested_budget_cents?: number;
   additional_context?: string;

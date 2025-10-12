@@ -318,6 +318,40 @@ async function getLastReports(telegramId) {
   return data || [];
 }
 
+// ========================================
+// DIRECTIONS (Направления бизнеса)
+// ========================================
+
+async function getUserDirections(userAccountId) {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('account_directions')
+    .select('*')
+    .eq('user_account_id', userAccountId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+  
+  if (error) {
+    fastify.log.warn({ msg: 'load_directions_failed', error });
+    return [];
+  }
+  return data || [];
+}
+
+async function getDirectionByCampaignId(campaignId) {
+  if (!supabase || !campaignId) return null;
+  const { data, error } = await supabase
+    .from('account_directions')
+    .select('*')
+    .eq('fb_campaign_id', campaignId)
+    .single();
+  
+  if (error) {
+    return null; // Кампания может не иметь направления (legacy)
+  }
+  return data;
+}
+
 async function fbGet(url) {
   const res = await fetch(url);
   const text = await res.text();
@@ -334,6 +368,7 @@ async function fetchAccountStatus(adAccountId, accessToken) {
 async function fetchAdsets(adAccountId, accessToken) {
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adsets`);
   url.searchParams.set('fields','id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status');
+  url.searchParams.set('limit', '500'); // Get all adsets, not just first 25
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -343,6 +378,7 @@ async function fetchYesterdayInsights(adAccountId, accessToken) {
   url.searchParams.set('date_preset','yesterday');
   url.searchParams.set('level','adset');
   url.searchParams.set('action_breakdowns','action_type');
+  url.searchParams.set('limit', '500'); // Get all adsets, not just first 25
   url.searchParams.set('access_token', accessToken);
   return fbGet(url.toString());
 }
@@ -775,12 +811,64 @@ function mergeHealthAndScoring(opts) {
   };
 }
 
-const SYSTEM_PROMPT = (clientPrompt) => [
+const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false) => [
   (clientPrompt || '').trim(),
   '',
+  ...(reportOnlyMode ? [
+    '🔴 ВАЖНО: РЕЖИМ "ТОЛЬКО ОТЧЕТ" (REPORT-ONLY MODE)',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '⚠️ СИТУАЦИЯ: За вчера были затраты по рекламе, НО все кампании НЕАКТИВНЫ (выключены пользователем).',
+    '',
+    '📋 ТВОЯ ЗАДАЧА В ЭТОМ РЕЖИМЕ:',
+    '  1. ✅ СОЗДАТЬ ПОЛНЫЙ ОТЧЕТ о затратах, лидах, CPL и QCPL за вчера',
+    '  2. ✅ ПРОАНАЛИЗИРОВАТЬ статистику по всем кампаниям (включая неактивные)',
+    '  3. ❌ НЕ ПРЕДЛАГАТЬ НИКАКИХ ДЕЙСТВИЙ с кампаниями/adsets/ads',
+    '  4. ❌ НЕ РЕКОМЕНДОВАТЬ изменение бюджетов',
+    '  5. ❌ actions массив должен быть ПУСТЫМ: []',
+    '',
+    '💡 ОБЪЯСНЕНИЕ ПОЛЬЗОВАТЕЛЮ:',
+    '  • Упомяни в отчете, что все кампании были НЕАКТИВНЫ на момент проверки',
+    '  • Предоставь статистику за вчера (когда были затраты)',
+    '  • Порекомендуй включить кампании, если нужна реклама',
+    '',
+    '⚠️ КРИТИЧНО: actions ДОЛЖЕН БЫТЬ ПУСТЫМ МАССИВОМ []',
+    'planNote должен содержать: "report_only_mode_inactive_campaigns"',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+  ] : []),
   'ОБЩИЙ КОНТЕКСТ (ЗАЧЕМ И КАК РАБОТАЕМ)',
   '- Ты — таргетолог-агент, управляющий рекламой в Facebook Ads Manager через Aggregated Insights и Graph API.',
-  '- Бизнес-цель: (1) строго выдерживать общий суточный бюджет аккаунта и бюджеты по направлениям; (2) достигать планового CPL, а для WhatsApp — планового QCPL (стоимость качественного лида ≥2 сообщений).',
+  '- Бизнес-цель: (1) строго выдерживать общий суточный бюджет аккаунта и бюджеты по направлениям; (2) достигать планового CPL по каждому направлению, а для WhatsApp — планового QCPL (стоимость качественного лида ≥2 сообщений).',
+  '',
+  '📊 НАПРАВЛЕНИЯ БИЗНЕСА (КРИТИЧНО!)',
+  '- У клиента могут быть несколько НАПРАВЛЕНИЙ (например: "Имплантация", "Виниры", "Брекеты").',
+  '- Каждое направление = отдельная Facebook Campaign с фиксированным ID.',
+  '- Каждое направление имеет СВОЙ суточный бюджет (daily_budget_cents) и СВОЙ целевой CPL (target_cpl_cents).',
+  '- Внутри кампании направления могут быть МНОЖЕСТВО ad sets (группы объявлений).',
+  '- ⚠️ ВАЖНО: Бюджеты направлений НЕ суммируются! Каждое направление управляется ОТДЕЛЬНО.',
+  '- ⚠️ ВАЖНО: При изменении бюджетов ad sets в рамках направления, СУММА бюджетов всех активных ad sets НЕ ДОЛЖНА превышать daily_budget_cents направления.',
+  '- ⚠️ ВАЖНО: Целевой CPL берется из direction_target_cpl_cents для каждой кампании, а НЕ из глобального targets.cpl_cents.',
+  '',
+  'КАК РАБОТАТЬ С НАПРАВЛЕНИЯМИ:',
+  '1. В данных (llmInput) ты видишь:',
+  '   - directions[] — список направлений с их бюджетами и целевыми CPL',
+  '   - analysis.campaigns[] — кампании, где КАЖДАЯ кампания имеет direction_id, direction_name, direction_daily_budget_cents, direction_target_cpl_cents',
+  '   - analysis.adsets[] — ad sets, где каждый принадлежит кампании (и соответственно направлению через campaign_id)',
+  '2. Для КАЖДОГО направления отдельно:',
+  '   - Определи все ad sets этого направления (через campaign_id → direction_id)',
+  '   - Посчитай текущую сумму бюджетов всех активных ad sets этого направления',
+  '   - Убедись, что сумма НЕ превышает direction_daily_budget_cents',
+  '   - Оценивай CPL относительно direction_target_cpl_cents (а не глобального targets.cpl_cents)',
+  '3. При формировании действий (actions):',
+  '   - Если меняешь бюджеты ad sets, проверяй что итоговая сумма по направлению в лимите',
+  '   - Если создаешь новые ad sets, они должны добавляться в существующую кампанию направления',
+  '4. В отчете (reportText):',
+  '   - Группируй результаты ПО НАПРАВЛЕНИЯМ (например: "🎯 Имплантация: 3 заявки, CPL $2.10")',
+  '   - Указывай для каждого направления: текущий бюджет, факт расхода, целевой vs фактический CPL',
+  '5. Если у кампании НЕТ direction_id (legacy кампании):',
+  '   - Используй глобальные targets.cpl_cents и targets.daily_budget_cents',
+  '   - В отчете выделяй их отдельно как "Legacy кампании"',
+  '',
   '- Почему такие решения: Facebook допускает колебания фактических трат и задержки атрибуции (особенно в переписках WA). Поэтому мы опираемся на «плановые» дневные бюджеты и анализируем несколько таймфреймов (yesterday/today/3d/7d/30d), где today смягчает «ложно-плохое» вчера.',
   '- Почему нельзя резко поднимать бюджет: резкие апы ломают стадию обучения, расширяют аудиторию слишком быстро и повышают риск роста CPL. Поэтому ап ≤ +30%/шаг; даун до −50% допустим – это безопаснее для стоимости заявки.',
   '- Почему учитываем CTR/CPM/Frequency: CTR<1% указывает на слабую связку оффер/креатив; CPM выше медианы пиров на ≥30% — сигнал дорогого аукциона/креатива; Frequency>2 (30д) — выгорание. Эти диагностики включаются, если по CPL/QCPL нет однозначности.',
@@ -1183,7 +1271,8 @@ function validateAndNormalizeActions(actions) {
     }
     cleaned.push({ type, params });
   }
-  if (!cleaned.length) throw new Error('No valid actions');
+  // В режиме reportOnlyMode пустой массив actions допустим
+  // if (!cleaned.length) throw new Error('No valid actions');
   return cleaned;
 }
 
@@ -1490,6 +1579,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const ua = await getUserAccount(userAccountId);
     
     // ========================================
+    // DIRECTIONS - Получаем направления бизнеса
+    // ========================================
+    const directions = await getUserDirections(userAccountId);
+    fastify.log.info({ 
+      where: 'brain_run', 
+      phase: 'directions_loaded', 
+      userId: userAccountId,
+      count: directions.length 
+    });
+    
+    // ========================================
     // 1. SCORING AGENT - запускается ПЕРВЫМ
     // ========================================
     let scoringOutput = null;
@@ -1658,9 +1758,33 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const traceAdsets = [];
     const touchedCampaignIds = new Set();
     const adsetList = Array.isArray(adsets?.data) ? adsets.data : [];
+    
+    // ========================================
+    // ПРОВЕРКА 1: Были ли вообще затраты за вчера (включая неактивные кампании)
+    // ========================================
+    // Считаем затраты на уровне КАМПАНИЙ (более надежно, чем adsets)
+    const totalYesterdaySpendCampaigns = Array.from(byCY.values()).reduce((sum, data) => {
+      return sum + (Number(data.spend) || 0);
+    }, 0);
+    
+    // Также считаем на уровне adsets (для детализации)
+    const totalYesterdaySpendAdsets = Array.from(byY.values()).reduce((sum, data) => {
+      return sum + (Number(data.spend) || 0);
+    }, 0);
+    
+    // Берем максимум (на случай если на одном уровне данные есть, на другом нет)
+    const totalYesterdaySpend = Math.max(totalYesterdaySpendCampaigns, totalYesterdaySpendAdsets);
+    
     const adsetsWithYesterdayResults = adsetList.filter(as => {
       // Только АКТИВНЫЕ adsets с затратами вчера
       if (as.effective_status !== 'ACTIVE') return false;
+      const yesterdayData = byY.get(as.id)||{};
+      const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
+      return hasResults;
+    });
+    
+    // Все adsets с затратами за вчера (независимо от статуса) - для отчета
+    const allAdsetsWithYesterdaySpend = adsetList.filter(as => {
       const yesterdayData = byY.get(as.id)||{};
       const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
       return hasResults;
@@ -1673,24 +1797,28 @@ fastify.post('/api/brain/run', async (request, reply) => {
       total_adsets: adsetList.length,
       active_adsets: adsetList.filter(a => a.effective_status === 'ACTIVE').length,
       with_yesterday_results: adsetsWithYesterdayResults.length,
+      all_with_spend: allAdsetsWithYesterdaySpend.length,
+      total_yesterday_spend_campaigns: totalYesterdaySpendCampaigns,
+      total_yesterday_spend_adsets: totalYesterdaySpendAdsets,
+      total_yesterday_spend: totalYesterdaySpend,
       filtered_out: adsetList.length - adsetsWithYesterdayResults.length
     });
     
     // ========================================
-    // ПРОВЕРКА: Если вчера не было затрат - не вызываем LLM
+    // ПРОВЕРКА 2: Если вчера не было затрат ВООБЩЕ - не вызываем LLM
     // ========================================
-    if (adsetsWithYesterdayResults.length === 0) {
+    if (totalYesterdaySpend === 0) {
       fastify.log.info({ 
         where: 'brain_run', 
-        phase: 'no_spend_yesterday', 
+        phase: 'no_spend_at_all', 
         userId: userAccountId,
-        message: 'Вчера не было активных кампаний с затратами, пропускаем LLM'
+        message: 'Вчера не было затрат вообще, пропускаем LLM'
       });
       
       const reportText = [
         `📊 Отчёт за ${date}`,
         ``,
-        `⚠️ Вчера не было активных рекламных кампаний с затратами.`,
+        `⚠️ Вчера не было затрат по рекламным кампаниям.`,
         ``,
         `Рекламный кабинет работает, но кампании не запущены или были на паузе.`,
         ``,
@@ -1724,6 +1852,21 @@ fastify.post('/api/brain/run', async (request, reply) => {
           total_ms: Date.now() - started,
           scoring_ms: scoringOutput ? 0 : null
         }
+      });
+    }
+    
+    // ========================================
+    // ПРОВЕРКА 3: Были затраты, но нет активных кампаний
+    // ========================================
+    // Если были затраты (на уровне кампаний или adsets), но нет активных adsets с результатами
+    const reportOnlyMode = adsetsWithYesterdayResults.length === 0 && totalYesterdaySpend > 0;
+    
+    if (reportOnlyMode) {
+      fastify.log.info({ 
+        where: 'brain_run', 
+        phase: 'report_only_mode', 
+        userId: userAccountId,
+        message: 'Были затраты за вчера, но все кампании неактивны. Генерируем только отчет без действий.'
       });
     }
     
@@ -1787,6 +1930,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
       decisions.unshift({ type:'GetCampaignStatus', params:{ campaign_id: cid } });
     }
 
+    // В режиме reportOnlyMode очищаем decisions
+    if (reportOnlyMode) {
+      decisions.length = 0;
+      touchedCampaignIds.clear();
+      fastify.log.info({ 
+        where: 'brain_run', 
+        phase: 'report_only_mode_decisions_cleared', 
+        userId: userAccountId 
+      });
+    }
+    
     // Подготовка данных для LLM и фолбэк на детерминистический план
     const llmInput = {
       userAccountId,
@@ -1794,10 +1948,24 @@ fastify.post('/api/brain/run', async (request, reply) => {
       account: {
         timezone: ua?.account_timezone || 'Asia/Almaty',
         report_date: date,
-        dispatch: !!inputs?.dispatch
+        dispatch: !!inputs?.dispatch,
+        report_only_mode: reportOnlyMode
       },
       limits: { min_cents: bounds.minCents, max_cents: bounds.maxCents, step_up: 0.30, step_down: 0.50 },
       targets,
+      // ========================================
+      // НАПРАВЛЕНИЯ БИЗНЕСА
+      // ========================================
+      directions: directions.map(d => ({
+        id: d.id,
+        name: d.name,
+        objective: d.objective,
+        fb_campaign_id: d.fb_campaign_id,
+        campaign_status: d.campaign_status,
+        daily_budget_cents: d.daily_budget_cents,
+        target_cpl_cents: d.target_cpl_cents,
+        // Статистика по этому направлению будет в campaigns секции
+      })),
       // ========================================
       // SCORING DATA - от scoring agent
       // ========================================
@@ -1809,27 +1977,45 @@ fastify.post('/api/brain/run', async (request, reply) => {
           installed_daily_budget_cents_all: (adsetList||[]).reduce((s,a)=>s + (toInt(a.daily_budget)||0), 0),
           installed_daily_budget_cents_active: (adsetList||[]).filter(a=>String(a.status||'')==='ACTIVE').reduce((s,a)=>s + (toInt(a.daily_budget)||0), 0)
         },
-        campaigns: (campList||[]).filter(c=>String(c.status||c.effective_status||'').includes('ACTIVE')).map(c=>({
-          campaign_id: c.id,
-          name: c.name,
-          status: c.status,
-          daily_budget: toInt(c.daily_budget)||0,
-          lifetime_budget: toInt(c.lifetime_budget)||0,
-          windows: {
-            yesterday: byCY.get(c.id)||{},
-            last_3d: byC3.get(c.id)||{},
-            last_7d: byC7.get(c.id)||{},
-            last_30d: byC30.get(c.id)||{},
-            today: byCT.get(c.id)||{}
-          }
-        })),
+        campaigns: (campList||[]).filter(c=>String(c.status||c.effective_status||'').includes('ACTIVE')).map(c=>{
+          // Найти направление для этой кампании
+          const direction = directions.find(d => d.fb_campaign_id === c.id);
+          
+          return {
+            campaign_id: c.id,
+            name: c.name,
+            status: c.status,
+            daily_budget: toInt(c.daily_budget)||0,
+            lifetime_budget: toInt(c.lifetime_budget)||0,
+            // Данные направления
+            direction_id: direction?.id || null,
+            direction_name: direction?.name || null,
+            direction_daily_budget_cents: direction?.daily_budget_cents || null,
+            direction_target_cpl_cents: direction?.target_cpl_cents || null,
+            windows: {
+              yesterday: byCY.get(c.id)||{},
+              last_3d: byC3.get(c.id)||{},
+              last_7d: byC7.get(c.id)||{},
+              last_30d: byC30.get(c.id)||{},
+              today: byCT.get(c.id)||{}
+            }
+          };
+        }),
         adsets: (adsetList||[])
           .filter(as => {
-            // Только АКТИВНЫЕ adsets с затратами вчера (для LLM)
-            if (as.effective_status !== 'ACTIVE') return false;
+            // В режиме reportOnlyMode - все adsets с затратами
+            // В обычном режиме - только АКТИВНЫЕ adsets с затратами вчера
             const yesterdayData = byY.get(as.id)||{};
             const hasResults = (Number(yesterdayData.spend)||0) > 0 || (computeLeadsFromActions(yesterdayData).leads||0) > 0;
-            return hasResults;
+            
+            if (reportOnlyMode) {
+              // Режим "только отчет": включаем все adsets с затратами
+              return hasResults;
+            } else {
+              // Обычный режим: только активные
+              if (as.effective_status !== 'ACTIVE') return false;
+              return hasResults;
+            }
           })
           .map(as=>{
           const current = toInt(as.daily_budget)||0;
@@ -1868,15 +2054,15 @@ fastify.post('/api/brain/run', async (request, reply) => {
         report_date: date,
         timezone: ua?.account_timezone || 'Asia/Almaty',
         dispatch: !!inputs?.dispatch,
-        // учитывать только активные кампании с результатом
+        // В reportOnlyMode учитывать все кампании с результатом, иначе только активные
         yesterday_totals: (()=>{
-          const activeWithResults = (campList||[])
-            .filter(c => String(c.status||c.effective_status||'').includes('ACTIVE'))
+          const campaignsWithResults = (campList||[])
+            .filter(c => reportOnlyMode ? true : String(c.status||c.effective_status||'').includes('ACTIVE'))
             .map(c=>({ c, y: byCY.get(c.id)||{} }))
             .filter(({y})=> (Number(y.spend)||0) > 0 || (computeLeadsFromActions(y).leads||0) > 0);
-          const spend = activeWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
-          const leads = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
-          const ql = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
+          const spend = campaignsWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
+          const leads = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
+          const ql = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
           return {
             spend_usd: spend.toFixed(2),
             leads_total: leads,
@@ -1885,13 +2071,13 @@ fastify.post('/api/brain/run', async (request, reply) => {
         })(),
         header_first_lines: (()=>{
           const d = date;
-          const activeWithResults = (campList||[])
-            .filter(c => String(c.status||c.effective_status||'').includes('ACTIVE'))
+          const campaignsWithResults = (campList||[])
+            .filter(c => reportOnlyMode ? true : String(c.status||c.effective_status||'').includes('ACTIVE'))
             .map(c=>({ c, y: byCY.get(c.id)||{} }))
             .filter(({y})=> (Number(y.spend)||0) > 0 || (computeLeadsFromActions(y).leads||0) > 0);
-          const spend = activeWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
-          const Ltot = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
-          const Lq = activeWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
+          const spend = campaignsWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
+          const Ltot = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
+          const Lq = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
           const cpl = Ltot>0 ? (spend / Ltot) : null;
           const qcpl = Lq>0 ? (spend / Lq) : null;
           const status = (accountStatus?.account_status === 1) ? 'Активен' : 'Неактивен';
@@ -1955,7 +2141,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
     if (CAN_USE_LLM) {
       try {
         // Используем тестовый промт если включен BRAIN_TEST_MODE
-        const system = (process.env.BRAIN_TEST_MODE === 'true') ? TEST_SYSTEM_PROMPT : SYSTEM_PROMPT(ua?.prompt3 || '');
+        const system = (process.env.BRAIN_TEST_MODE === 'true') ? TEST_SYSTEM_PROMPT : SYSTEM_PROMPT(ua?.prompt3 || '', reportOnlyMode);
         const { parsed, rawText, parseError } = await llmPlan(system, llmInput);
         planLLMRaw = { rawText, parseError, parsed };
         

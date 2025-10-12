@@ -451,16 +451,44 @@ async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, opt
  * Получить активные креативы пользователя из user_creatives
  */
 async function getActiveCreatives(supabase, userAccountId) {
+  // ========================================
+  // ФИЛЬТРУЕМ КРЕАТИВЫ ПО АКТИВНЫМ НАПРАВЛЕНИЯМ
+  // ========================================
+  // Получаем креативы с информацией о направлении (только из активных направлений)
   const { data, error } = await supabase
     .from('user_creatives')
-    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, is_active, status, created_at')
+    .select(`
+      id, 
+      title, 
+      fb_video_id, 
+      fb_creative_id_whatsapp, 
+      fb_creative_id_instagram_traffic, 
+      fb_creative_id_site_leads, 
+      is_active, 
+      status, 
+      created_at,
+      direction_id,
+      account_directions!inner(is_active)
+    `)
     .eq('user_id', userAccountId)
     .eq('is_active', true)
-    .eq('status', 'ready');
+    .eq('status', 'ready')
+    .eq('account_directions.is_active', true); // ТОЛЬКО из активных направлений!
   
   if (error) throw new Error(`Failed to get active creatives: ${error.message}`);
   
-  return data || [];
+  // Также включаем креативы БЕЗ направления (legacy)
+  const { data: legacyCreatives, error: legacyError } = await supabase
+    .from('user_creatives')
+    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, is_active, status, created_at, direction_id')
+    .eq('user_id', userAccountId)
+    .eq('is_active', true)
+    .eq('status', 'ready')
+    .is('direction_id', null); // Креативы без направления (legacy)
+  
+  if (legacyError) throw new Error(`Failed to get legacy creatives: ${legacyError.message}`);
+  
+  return [...(data || []), ...(legacyCreatives || [])];
 }
 
 /**
