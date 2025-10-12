@@ -266,7 +266,7 @@ fetch('http://localhost:3000/api/directions?userAccountId=YOUR_UUID')
       "name": "Имплантация",
       "objective": "whatsapp",
       "fb_campaign_id": "123456789",
-      "campaign_status": "PAUSED",
+      "campaign_status": "ACTIVE",
       "daily_budget_cents": 5000,
       "target_cpl_cents": 200,
       "is_active": true,
@@ -306,6 +306,8 @@ fetch('http://localhost:3000/api/directions?userAccountId=YOUR_UUID')
 
 Создать новое направление.
 
+⚠️ **ВАЖНО:** При создании направления автоматически создаётся Facebook Campaign в статусе **ACTIVE** (включена). Это означает что направление сразу готово к работе, как только пользователь добавит креативы.
+
 **Request:**
 ```javascript
 fetch('http://localhost:3000/api/directions', {
@@ -330,7 +332,7 @@ fetch('http://localhost:3000/api/directions', {
     "name": "Имплантация",
     "objective": "whatsapp",
     "fb_campaign_id": "123456789",
-    "campaign_status": "PAUSED",
+    "campaign_status": "ACTIVE",
     "daily_budget_cents": 5000,
     "target_cpl_cents": 200,
     "is_active": true,

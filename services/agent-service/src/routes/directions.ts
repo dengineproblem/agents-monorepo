@@ -79,7 +79,7 @@ async function createFacebookCampaign(
         body: JSON.stringify({
           name: campaignName,
           objective: fbObjective,
-          status: 'PAUSED', // создаем в паузе до добавления ad sets
+          status: 'ACTIVE', // создаем в активном состоянии сразу
           special_ad_categories: [],
           access_token: accessToken,
         }),
@@ -101,7 +101,7 @@ async function createFacebookCampaign(
 
     return {
       campaign_id: data.id,
-      status: 'PAUSED',
+      status: 'ACTIVE',
     };
   } catch (error: any) {
     console.error('[Directions] Failed to create Facebook campaign:', error);
