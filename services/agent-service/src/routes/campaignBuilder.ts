@@ -235,9 +235,19 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           }
         }
 
+        // Проверяем, есть ли хотя бы один успешный запуск
+        const hasSuccess = results.some(r => r.status === 'success');
+        const allFailed = results.every(r => r.status === 'failed' || r.skipped);
+
         return reply.send({
-          success: true,
+          success: hasSuccess,
           results,
+          summary: {
+            total: results.length,
+            successful: results.filter(r => r.status === 'success').length,
+            failed: results.filter(r => r.status === 'failed').length,
+            skipped: results.filter(r => r.skipped).length,
+          },
         });
       } catch (error: any) {
         console.error('[CampaignBuilder V2] Error:', error);
