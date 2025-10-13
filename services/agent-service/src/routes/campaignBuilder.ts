@@ -12,6 +12,12 @@ import {
   getActiveCampaigns,
   pauseActiveCampaigns,
   getAvailableCreatives,
+  getDefaultSettings,
+  buildTargeting,
+  getOptimizationGoal,
+  getBillingEvent,
+  createAdSetInCampaign,
+  createAdsInAdSet,
   type CampaignBuilderInput,
   type CampaignObjective,
 } from '../lib/campaignBuilder.js';
@@ -158,16 +164,82 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
           console.log('[CampaignBuilder V2] Found', creatives.length, 'creative(s) for direction:', direction.name);
 
-          // TODO: Создать ad sets в существующей кампании direction.fb_campaign_id
-          // Пока заглушка
-          results.push({
-            direction_id: direction.id,
-            direction_name: direction.name,
-            campaign_id: direction.fb_campaign_id,
-            daily_budget_cents: direction.daily_budget_cents,
-            creatives_count: creatives.length,
-            status: 'pending_implementation',
-          });
+          try {
+            // Получаем дефолтные настройки направления
+            const defaultSettings = await getDefaultSettings(direction.id);
+            console.log('[CampaignBuilder V2] Default settings:', defaultSettings ? 'found' : 'not found');
+
+            // Строим таргетинг
+            const targeting = buildTargeting(defaultSettings, objective);
+
+            // Получаем optimization_goal и billing_event
+            const optimization_goal = getOptimizationGoal(objective);
+            const billing_event = getBillingEvent(objective);
+
+            // Формируем promoted_object для WhatsApp
+            let promoted_object;
+            if (objective === 'whatsapp' && userAccount.whatsapp_phone_number) {
+              promoted_object = {
+                whatsapp_phone_number: userAccount.whatsapp_phone_number,
+              };
+            } else if (objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
+              promoted_object = {
+                link: defaultSettings.instagram_url,
+              };
+            } else if (objective === 'site_leads' && defaultSettings?.site_url) {
+              promoted_object = {
+                link: defaultSettings.site_url,
+                ...(defaultSettings.pixel_id && { pixel_id: defaultSettings.pixel_id }),
+              };
+            }
+
+            // Создаём Ad Set в существующей кампании
+            const adset = await createAdSetInCampaign({
+              campaignId: direction.fb_campaign_id,
+              adAccountId: userAccount.ad_account_id,
+              accessToken: userAccount.access_token,
+              name: `${direction.name} - ${new Date().toISOString().split('T')[0]}`,
+              dailyBudget: direction.daily_budget_cents,
+              targeting,
+              optimization_goal,
+              billing_event,
+              promoted_object,
+            });
+
+            console.log('[CampaignBuilder V2] Ad set created:', adset.id);
+
+            // Создаём Ads с креативами (максимум 5)
+            const creativesToUse = creatives.slice(0, 5);
+            const ads = await createAdsInAdSet({
+              adsetId: adset.id,
+              creatives: creativesToUse,
+              accessToken: userAccount.access_token,
+              objective,
+            });
+
+            console.log('[CampaignBuilder V2] Created', ads.length, 'ads');
+
+            results.push({
+              direction_id: direction.id,
+              direction_name: direction.name,
+              campaign_id: direction.fb_campaign_id,
+              adset_id: adset.id,
+              adset_name: adset.name || `${direction.name} - Ad Set`,
+              daily_budget_cents: direction.daily_budget_cents,
+              ads_created: ads.length,
+              creatives_used: creativesToUse.map(c => c.user_creative_id),
+              status: 'success',
+            });
+          } catch (error: any) {
+            console.error('[CampaignBuilder V2] Error creating ad set for direction:', direction.name, error);
+            results.push({
+              direction_id: direction.id,
+              direction_name: direction.name,
+              campaign_id: direction.fb_campaign_id,
+              error: error.message,
+              status: 'failed',
+            });
+          }
         }
 
         return reply.send({

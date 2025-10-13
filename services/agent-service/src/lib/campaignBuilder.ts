@@ -914,3 +914,227 @@ export function convertActionToEnvelope(
   throw new Error('Invalid action type for envelope conversion');
 }
 
+// ========================================
+// ФУНКЦИИ ДЛЯ AUTO-LAUNCH-V2 (РАБОТА С НАПРАВЛЕНИЯМИ)
+// ========================================
+
+/**
+ * Получить дефолтные настройки для направления
+ */
+export async function getDefaultSettings(directionId: string) {
+  const { data, error } = await supabase
+    .from('default_ad_settings')
+    .select('*')
+    .eq('direction_id', directionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[CampaignBuilder] Error fetching default settings:', error);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Построить таргетинг из дефолтных настроек
+ */
+export function buildTargeting(defaultSettings: any, objective: CampaignObjective) {
+  if (!defaultSettings) {
+    // Дефолтный таргетинг если настроек нет
+    return {
+      geo_locations: { countries: ['RU'] },
+      age_min: 18,
+      age_max: 65,
+    };
+  }
+
+  const targeting: any = {
+    age_min: defaultSettings.age_min || 18,
+    age_max: defaultSettings.age_max || 65,
+  };
+
+  // Пол
+  if (defaultSettings.gender && defaultSettings.gender !== 'all') {
+    targeting.genders = defaultSettings.gender === 'male' ? [1] : [2];
+  }
+
+  // Города (geo_locations)
+  if (defaultSettings.cities && defaultSettings.cities.length > 0) {
+    targeting.geo_locations = {
+      cities: defaultSettings.cities.map((cityId: string) => ({
+        key: cityId,
+      })),
+    };
+  } else {
+    targeting.geo_locations = { countries: ['RU'] };
+  }
+
+  return targeting;
+}
+
+/**
+ * Получить optimization_goal для objective
+ */
+export function getOptimizationGoal(objective: CampaignObjective): string {
+  switch (objective) {
+    case 'whatsapp':
+      return 'CONVERSATIONS';
+    case 'instagram_traffic':
+      return 'LINK_CLICKS';
+    case 'site_leads':
+      return 'LEAD_GENERATION';
+    default:
+      return 'CONVERSATIONS';
+  }
+}
+
+/**
+ * Получить billing_event для objective
+ */
+export function getBillingEvent(objective: CampaignObjective): string {
+  switch (objective) {
+    case 'whatsapp':
+      return 'IMPRESSIONS';
+    case 'instagram_traffic':
+      return 'IMPRESSIONS';
+    case 'site_leads':
+      return 'IMPRESSIONS';
+    default:
+      return 'IMPRESSIONS';
+  }
+}
+
+/**
+ * Создать Ad Set в существующей кампании
+ */
+export async function createAdSetInCampaign(params: {
+  campaignId: string;
+  adAccountId: string;
+  accessToken: string;
+  name: string;
+  dailyBudget: number;
+  targeting: any;
+  optimization_goal: string;
+  billing_event: string;
+  promoted_object?: any;
+}) {
+  const { campaignId, adAccountId, accessToken, name, dailyBudget, targeting, optimization_goal, billing_event, promoted_object } = params;
+
+  const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+  console.log('[CampaignBuilder] Creating ad set:', {
+    campaign_id: campaignId,
+    name,
+    daily_budget: dailyBudget,
+    optimization_goal,
+  });
+
+  const body: any = {
+    access_token: accessToken,
+    name,
+    campaign_id: campaignId,
+    daily_budget: dailyBudget,
+    billing_event,
+    optimization_goal,
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    targeting,
+    status: 'ACTIVE',
+  };
+
+  if (promoted_object) {
+    body.promoted_object = promoted_object;
+  }
+
+  const response = await fetch(
+    `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/adsets`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    console.error('[CampaignBuilder] Failed to create ad set:', error);
+    throw new Error(`Failed to create ad set: ${JSON.stringify(error)}`);
+  }
+
+  const result = await response.json();
+  console.log('[CampaignBuilder] Ad set created:', result.id);
+  return result;
+}
+
+/**
+ * Получить creative ID для objective
+ */
+export function getCreativeIdForObjective(creative: AvailableCreative, objective: CampaignObjective): string | null {
+  switch (objective) {
+    case 'whatsapp':
+      return creative.fb_creative_id_whatsapp;
+    case 'instagram_traffic':
+      return creative.fb_creative_id_instagram_traffic;
+    case 'site_leads':
+      return creative.fb_creative_id_site_leads;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Создать Ads в Ad Set
+ */
+export async function createAdsInAdSet(params: {
+  adsetId: string;
+  creatives: AvailableCreative[];
+  accessToken: string;
+  objective: CampaignObjective;
+}) {
+  const { adsetId, creatives, accessToken, objective } = params;
+
+  console.log('[CampaignBuilder] Creating', creatives.length, 'ads in ad set:', adsetId);
+
+  const ads = [];
+
+  for (const creative of creatives) {
+    const creativeId = getCreativeIdForObjective(creative, objective);
+    
+    if (!creativeId) {
+      console.warn('[CampaignBuilder] No creative ID for creative:', creative.user_creative_id, 'objective:', objective);
+      continue;
+    }
+
+    try {
+      const response = await fetch(
+        `https://graph.facebook.com/v20.0/${adsetId}/ads`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            access_token: accessToken,
+            name: `Ad - ${creative.title}`,
+            adset_id: adsetId,
+            creative: { creative_id: creativeId },
+            status: 'ACTIVE',
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        console.error('[CampaignBuilder] Failed to create ad:', error);
+        continue;
+      }
+
+      const ad = await response.json();
+      console.log('[CampaignBuilder] Ad created:', ad.id);
+      ads.push(ad);
+    } catch (error: any) {
+      console.error('[CampaignBuilder] Error creating ad:', error);
+    }
+  }
+
+  return ads;
+}
+
