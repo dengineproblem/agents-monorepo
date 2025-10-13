@@ -11,6 +11,7 @@ import {
   convertActionToEnvelope,
   getActiveCampaigns,
   pauseActiveCampaigns,
+  getAvailableCreatives,
   type CampaignBuilderInput,
   type CampaignObjective,
 } from '../lib/campaignBuilder.js';
@@ -43,7 +44,148 @@ const autoLaunchRequestSchema = {
 
 export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
   /**
-   * POST /api/campaign-builder/auto-launch
+   * POST /api/campaign-builder/auto-launch-v2
+   * 
+   * Автоматический запуск рекламы для всех активных направлений:
+   * 1. Находит все активные направления с указанным objective
+   * 2. Для каждого направления создаёт ad sets в существующей кампании
+   * 3. Использует креативы и бюджет направления
+   * 
+   * @returns { success: true, results: [...] }
+   */
+  fastify.post(
+    '/auto-launch-v2',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['objective'],
+          properties: {
+            user_account_id: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+            objective: { type: 'string', enum: ['whatsapp', 'instagram_traffic', 'site_leads'] },
+          },
+          anyOf: [
+            { required: ['user_account_id'] },
+            { required: ['userId'] }
+          ]
+        }
+      }
+    },
+    async (request, reply) => {
+      const body = request.body as {
+        user_account_id?: string;
+        userId?: string;
+        objective: CampaignObjective;
+      };
+
+      const user_account_id = body.user_account_id || body.userId;
+      
+      if (!user_account_id) {
+        return reply.status(400).send({
+          success: false,
+          error: 'user_account_id or userId is required',
+        });
+      }
+
+      const { objective } = body;
+
+      console.log('[CampaignBuilder V2] Auto-launch request:', {
+        user_account_id,
+        objective,
+      });
+
+      try {
+        // Получаем данные пользователя
+        const { data: userAccount, error: userError } = await supabase
+          .from('user_accounts')
+          .select('*')
+          .eq('id', user_account_id)
+          .single();
+
+        if (userError || !userAccount) {
+          return reply.status(404).send({
+            success: false,
+            error: 'User account not found',
+          });
+        }
+
+        // Находим все активные направления с этим objective
+        const { data: directions, error: directionsError } = await supabase
+          .from('account_directions')
+          .select('*')
+          .eq('user_account_id', user_account_id)
+          .eq('objective', objective)
+          .eq('is_active', true);
+
+        if (directionsError) {
+          console.error('[CampaignBuilder V2] Error fetching directions:', directionsError);
+          return reply.status(500).send({
+            success: false,
+            error: 'Failed to fetch directions',
+          });
+        }
+
+        if (!directions || directions.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: `No active directions found with objective: ${objective}`,
+            hint: 'Create a direction first or check that directions are active',
+          });
+        }
+
+        console.log('[CampaignBuilder V2] Found', directions.length, 'active direction(s)');
+
+        const results = [];
+
+        // Обрабатываем каждое направление
+        for (const direction of directions) {
+          console.log('[CampaignBuilder V2] Processing direction:', direction.name);
+
+          // Получаем креативы для этого направления
+          const creatives = await getAvailableCreatives(user_account_id, objective, direction.id);
+
+          if (creatives.length === 0) {
+            console.warn('[CampaignBuilder V2] No creatives for direction:', direction.name);
+            results.push({
+              direction_id: direction.id,
+              direction_name: direction.name,
+              skipped: true,
+              reason: 'No ready creatives for this direction',
+            });
+            continue;
+          }
+
+          console.log('[CampaignBuilder V2] Found', creatives.length, 'creative(s) for direction:', direction.name);
+
+          // TODO: Создать ad sets в существующей кампании direction.fb_campaign_id
+          // Пока заглушка
+          results.push({
+            direction_id: direction.id,
+            direction_name: direction.name,
+            campaign_id: direction.fb_campaign_id,
+            daily_budget_cents: direction.daily_budget_cents,
+            creatives_count: creatives.length,
+            status: 'pending_implementation',
+          });
+        }
+
+        return reply.send({
+          success: true,
+          results,
+        });
+      } catch (error: any) {
+        console.error('[CampaignBuilder V2] Error:', error);
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Internal server error',
+        });
+      }
+    }
+  );
+
+  /**
+   * POST /api/campaign-builder/auto-launch (LEGACY)
    * 
    * Автоматический запуск рекламной кампании:
    * 1. LLM анализирует доступные креативы с их скорингом
