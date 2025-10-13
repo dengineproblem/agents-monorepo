@@ -959,12 +959,12 @@ export function buildTargeting(defaultSettings: any, objective: CampaignObjectiv
     targeting.genders = defaultSettings.gender === 'male' ? [1] : [2];
   }
 
-  // Гео-локации
-  if (defaultSettings.geo_locations && Array.isArray(defaultSettings.geo_locations) && defaultSettings.geo_locations.length > 0) {
+  // Гео-локации (читаем из поля cities в БД)
+  if (defaultSettings.cities && Array.isArray(defaultSettings.cities) && defaultSettings.cities.length > 0) {
     const countries: string[] = [];
     const cities: string[] = [];
     
-    for (const item of defaultSettings.geo_locations) {
+    for (const item of defaultSettings.cities) {
       if (typeof item === 'string' && item.length === 2 && item === item.toUpperCase()) {
         // 2 заглавные буквы = код страны (RU, KZ, BY, US)
         countries.push(item);
