@@ -173,6 +173,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             let promoted_object;
             if (direction.objective === 'whatsapp' && userAccount.whatsapp_phone_number) {
               promoted_object = {
+                page_id: userAccount.page_id,
                 whatsapp_phone_number: userAccount.whatsapp_phone_number,
               };
             } else if (direction.objective === 'instagram_traffic' && defaultSettings?.instagram_url) {

@@ -448,6 +448,7 @@ export async function getAvailableCreatives(
       `)
       .eq('user_id', userAccountId)
       .eq('direction_id', directionId)
+      .eq('is_active', true)  // ТОЛЬКО активные креативы!
       .eq('status', 'ready')
       .eq('account_directions.is_active', true)
       .order('created_at', { ascending: false });
@@ -1066,6 +1067,11 @@ export async function createAdSetInCampaign(params: {
     targeting,
     status: 'ACTIVE',
   };
+
+  // Для WhatsApp добавляем destination_type
+  if (optimization_goal === 'CONVERSATIONS' && promoted_object?.whatsapp_phone_number) {
+    body.destination_type = 'WHATSAPP';
+  }
 
   if (promoted_object) {
     body.promoted_object = promoted_object;
