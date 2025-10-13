@@ -225,11 +225,28 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             });
           } catch (error: any) {
             console.error('[CampaignBuilder V2] Error creating ad set for direction:', direction.name, error);
+            
+            // Парсим ошибку Facebook API для более понятного сообщения
+            let errorMessage = error.message;
+            let errorDetails = null;
+            
+            if (error.message && error.message.includes('locations that are currently restricted')) {
+              errorMessage = 'Выбранные гео-локации заблокированы для вашего рекламного аккаунта';
+              errorDetails = 'Проверьте настройки таргетинга в разделе "Настройки рекламы" для этого направления';
+            } else if (error.message && error.message.includes('Invalid parameter')) {
+              errorMessage = 'Некорректные параметры таргетинга';
+              errorDetails = error.message;
+            } else if (error.message && error.message.includes('Unauthorized')) {
+              errorMessage = 'Ошибка авторизации Facebook';
+              errorDetails = 'Проверьте токен доступа в настройках аккаунта';
+            }
+            
             results.push({
               direction_id: direction.id,
               direction_name: direction.name,
               campaign_id: direction.fb_campaign_id,
-              error: error.message,
+              error: errorMessage,
+              error_details: errorDetails,
               status: 'failed',
             });
           }
@@ -237,16 +254,31 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         // Проверяем, есть ли хотя бы один успешный запуск
         const hasSuccess = results.some(r => r.status === 'success');
-        const allFailed = results.every(r => r.status === 'failed' || r.skipped);
+        const successfulCount = results.filter(r => r.status === 'success').length;
+        const failedCount = results.filter(r => r.status === 'failed').length;
+        const skippedCount = results.filter(r => r.skipped).length;
+
+        // Формируем человекочитаемое сообщение
+        let message = '';
+        if (successfulCount > 0 && failedCount === 0 && skippedCount === 0) {
+          message = `Реклама успешно запущена по ${successfulCount} направлениям`;
+        } else if (successfulCount > 0 && (failedCount > 0 || skippedCount > 0)) {
+          message = `Реклама запущена по ${successfulCount} из ${results.length} направлений`;
+        } else if (failedCount > 0 && successfulCount === 0) {
+          message = `Не удалось запустить рекламу. Проверьте настройки направлений`;
+        } else if (skippedCount === results.length) {
+          message = `Нет готовых креативов для запуска рекламы`;
+        }
 
         return reply.send({
           success: hasSuccess,
+          message,
           results,
           summary: {
             total: results.length,
-            successful: results.filter(r => r.status === 'success').length,
-            failed: results.filter(r => r.status === 'failed').length,
-            skipped: results.filter(r => r.skipped).length,
+            successful: successfulCount,
+            failed: failedCount,
+            skipped: skippedCount,
           },
         });
       } catch (error: any) {
