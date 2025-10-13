@@ -52,10 +52,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /api/campaign-builder/auto-launch-v2
    * 
-   * Автоматический запуск рекламы для всех активных направлений:
-   * 1. Находит все активные направления с указанным objective
+   * Автоматический запуск рекламы для ВСЕХ активных направлений:
+   * 1. Находит ВСЕ активные направления пользователя
    * 2. Для каждого направления создаёт ad sets в существующей кампании
-   * 3. Использует креативы и бюджет направления
+   * 3. Использует креативы, бюджет и objective направления
    * 
    * @returns { success: true, results: [...] }
    */
@@ -65,11 +65,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         body: {
           type: 'object',
-          required: ['objective'],
           properties: {
             user_account_id: { type: 'string', format: 'uuid' },
             userId: { type: 'string', format: 'uuid' },
-            objective: { type: 'string', enum: ['whatsapp', 'instagram_traffic', 'site_leads'] },
           },
           anyOf: [
             { required: ['user_account_id'] },
@@ -82,7 +80,6 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       const body = request.body as {
         user_account_id?: string;
         userId?: string;
-        objective: CampaignObjective;
       };
 
       const user_account_id = body.user_account_id || body.userId;
@@ -94,11 +91,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const { objective } = body;
-
-      console.log('[CampaignBuilder V2] Auto-launch request:', {
+      console.log('[CampaignBuilder V2] Auto-launch request for ALL directions:', {
         user_account_id,
-        objective,
       });
 
       try {
@@ -116,12 +110,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        // Находим все активные направления с этим objective
+        // Находим ВСЕ активные направления пользователя
         const { data: directions, error: directionsError } = await supabase
           .from('account_directions')
           .select('*')
           .eq('user_account_id', user_account_id)
-          .eq('objective', objective)
           .eq('is_active', true);
 
         if (directionsError) {
@@ -135,7 +128,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         if (!directions || directions.length === 0) {
           return reply.status(400).send({
             success: false,
-            error: `No active directions found with objective: ${objective}`,
+            error: 'No active directions found',
             hint: 'Create a direction first or check that directions are active',
           });
         }
@@ -146,10 +139,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         // Обрабатываем каждое направление
         for (const direction of directions) {
-          console.log('[CampaignBuilder V2] Processing direction:', direction.name);
+          console.log('[CampaignBuilder V2] Processing direction:', direction.name, 'objective:', direction.objective);
 
-          // Получаем креативы для этого направления
-          const creatives = await getAvailableCreatives(user_account_id, objective, direction.id);
+          // Получаем креативы для этого направления (используем objective направления)
+          const creatives = await getAvailableCreatives(user_account_id, direction.objective, direction.id);
 
           if (creatives.length === 0) {
             console.warn('[CampaignBuilder V2] No creatives for direction:', direction.name);
@@ -169,24 +162,24 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             const defaultSettings = await getDefaultSettings(direction.id);
             console.log('[CampaignBuilder V2] Default settings:', defaultSettings ? 'found' : 'not found');
 
-            // Строим таргетинг
-            const targeting = buildTargeting(defaultSettings, objective);
+            // Строим таргетинг (используем objective направления)
+            const targeting = buildTargeting(defaultSettings, direction.objective);
 
-            // Получаем optimization_goal и billing_event
-            const optimization_goal = getOptimizationGoal(objective);
-            const billing_event = getBillingEvent(objective);
+            // Получаем optimization_goal и billing_event (используем objective направления)
+            const optimization_goal = getOptimizationGoal(direction.objective);
+            const billing_event = getBillingEvent(direction.objective);
 
-            // Формируем promoted_object для WhatsApp
+            // Формируем promoted_object в зависимости от objective направления
             let promoted_object;
-            if (objective === 'whatsapp' && userAccount.whatsapp_phone_number) {
+            if (direction.objective === 'whatsapp' && userAccount.whatsapp_phone_number) {
               promoted_object = {
                 whatsapp_phone_number: userAccount.whatsapp_phone_number,
               };
-            } else if (objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
+            } else if (direction.objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
               promoted_object = {
                 link: defaultSettings.instagram_url,
               };
-            } else if (objective === 'site_leads' && defaultSettings?.site_url) {
+            } else if (direction.objective === 'site_leads' && defaultSettings?.site_url) {
               promoted_object = {
                 link: defaultSettings.site_url,
                 ...(defaultSettings.pixel_id && { pixel_id: defaultSettings.pixel_id }),
@@ -214,7 +207,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               adsetId: adset.id,
               creatives: creativesToUse,
               accessToken: userAccount.access_token,
-              objective,
+              objective: direction.objective, // Используем objective направления
             });
 
             console.log('[CampaignBuilder V2] Created', ads.length, 'ads');
