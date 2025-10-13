@@ -1831,11 +1831,14 @@ fastify.post('/api/brain/run', async (request, reply) => {
       
       // Отправляем в Telegram (если dispatch=true)
       let telegramSent = false;
-      if (inputs?.dispatch && ua.telegram_chat_id && process.env.TELEGRAM_BOT_TOKEN) {
+      const shouldSendTelegram = inputs?.sendReport !== undefined 
+        ? inputs.sendReport 
+        : (inputs?.dispatch === true);
+      
+      if (shouldSendTelegram && ua.telegram_id) {
         try {
-          await sendTelegramReport(ua.telegram_chat_id, process.env.TELEGRAM_BOT_TOKEN, reportText);
-          telegramSent = true;
-          fastify.log.info({ where: 'brain_run', phase: 'telegram_sent', userId: userAccountId });
+          telegramSent = await sendTelegram(ua.telegram_id, reportText, ua.telegram_bot_token);
+          fastify.log.info({ where: 'brain_run', phase: 'telegram_sent', userId: userAccountId, success: telegramSent });
         } catch (err) {
           fastify.log.warn({ where: 'brain_run', phase: 'telegram_failed', userId: userAccountId, error: String(err) });
         }
@@ -2421,15 +2424,8 @@ async function processUser(user) {
     
     const result = await response.json();
     
-    // Отправляем отчет в Telegram
-    let telegramResult = null;
-    if (result.reportText && user.telegram_id && user.telegram_bot_token) {
-      telegramResult = await sendTelegramReport(
-        user.telegram_id,
-        user.telegram_bot_token,
-        result.reportText
-      );
-    }
+    // Telegram уже отправлен внутри /api/brain/run, не дублируем отправку
+    // (telegramSent уже есть в result)
     
     const duration = Date.now() - startTime;
     fastify.log.info({
@@ -2440,7 +2436,7 @@ async function processUser(user) {
       duration,
       actionsCount: result.actions?.length || 0,
       dispatched: result.dispatched,
-      telegramSent: telegramResult?.success || false
+      telegramSent: result.telegramSent || false
     });
     
     return {
@@ -2448,7 +2444,7 @@ async function processUser(user) {
       username: user.username,
       success: true,
       actionsCount: result.actions?.length || 0,
-      telegramSent: telegramResult?.success || false,
+      telegramSent: result.telegramSent || false,
       duration
     };
   } catch (err) {

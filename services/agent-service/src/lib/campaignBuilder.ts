@@ -959,14 +959,39 @@ export function buildTargeting(defaultSettings: any, objective: CampaignObjectiv
     targeting.genders = defaultSettings.gender === 'male' ? [1] : [2];
   }
 
-  // Города (geo_locations)
-  if (defaultSettings.cities && defaultSettings.cities.length > 0) {
-    targeting.geo_locations = {
-      cities: defaultSettings.cities.map((cityId: string) => ({
+  // Гео-локации
+  if (defaultSettings.geo_locations && Array.isArray(defaultSettings.geo_locations) && defaultSettings.geo_locations.length > 0) {
+    const countries: string[] = [];
+    const cities: string[] = [];
+    
+    for (const item of defaultSettings.geo_locations) {
+      if (typeof item === 'string' && item.length === 2 && item === item.toUpperCase()) {
+        // 2 заглавные буквы = код страны (RU, KZ, BY, US)
+        countries.push(item);
+      } else {
+        // Все остальное = ID города
+        cities.push(item);
+      }
+    }
+    
+    targeting.geo_locations = {};
+    
+    if (countries.length > 0) {
+      targeting.geo_locations.countries = countries;
+    }
+    
+    if (cities.length > 0) {
+      targeting.geo_locations.cities = cities.map((cityId: string) => ({
         key: cityId,
-      })),
-    };
+      }));
+    }
+    
+    // Если ничего не распознано - по умолчанию Россия
+    if (countries.length === 0 && cities.length === 0) {
+      targeting.geo_locations.countries = ['RU'];
+    }
   } else {
+    // Default: таргетинг на Россию
     targeting.geo_locations = { countries: ['RU'] };
   }
 
