@@ -21,15 +21,20 @@ import {
 
 const autoLaunchRequestSchema = {
   type: 'object',
-  required: ['user_account_id', 'objective'],
+  required: ['objective'],
   properties: {
     user_account_id: { type: 'string', format: 'uuid' },
+    userId: { type: 'string', format: 'uuid' }, // Алиас для обратной совместимости
     objective: { type: 'string', enum: ['whatsapp', 'instagram_traffic', 'site_leads'] },
     campaign_name: { type: 'string' },
     requested_budget_cents: { type: 'number', minimum: 500 }, // Минимум $5
     additional_context: { type: 'string' },
     auto_activate: { type: 'boolean', default: false },
   },
+  anyOf: [
+    { required: ['user_account_id'] },
+    { required: ['userId'] }
+  ]
 };
 
 // ========================================
@@ -56,7 +61,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const body = request.body as {
-        user_account_id: string;
+        user_account_id?: string;
+        userId?: string; // Алиас для обратной совместимости
         objective: CampaignObjective;
         campaign_name?: string;
         requested_budget_cents?: number;
@@ -64,8 +70,17 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         auto_activate?: boolean;
       };
 
-      const { user_account_id, objective, campaign_name, requested_budget_cents, additional_context, auto_activate } =
-        body;
+      // Поддержка обоих вариантов: user_account_id и userId
+      const user_account_id = body.user_account_id || body.userId;
+      
+      if (!user_account_id) {
+        return reply.status(400).send({
+          success: false,
+          error: 'user_account_id or userId is required',
+        });
+      }
+
+      const { objective, campaign_name, requested_budget_cents, additional_context, auto_activate } = body;
 
       console.log('[CampaignBuilder API] Auto-launch request:', {
         user_account_id,
