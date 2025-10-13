@@ -21,7 +21,8 @@ const ProcessVideoSchema = z.object({
   language: z.string().default('ru'),
   client_question: z.string().optional(),
   site_url: z.string().url().optional(),
-  utm: z.string().optional()
+  utm: z.string().optional(),
+  direction_id: z.string().uuid().optional() // Направление бизнеса (опционально для legacy)
 });
 
 type ProcessVideoBody = z.infer<typeof ProcessVideoSchema>;
@@ -73,6 +74,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       const body = ProcessVideoSchema.parse(bodyData);
 
+      app.log.info(`Processing video for user_id: ${body.user_id}, direction_id: ${body.direction_id || 'null (legacy)'}`);
       app.log.info(`Fetching user account data for user_id: ${body.user_id}`);
       
       const { data: userAccount, error: userError } = await supabase
@@ -118,7 +120,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         .insert({
           user_id: body.user_id,
           title: body.title || 'Untitled Creative',
-          status: 'processing'
+          status: 'processing',
+          direction_id: body.direction_id || null // Сохраняем direction_id (null для legacy)
         })
         .select()
         .single();
