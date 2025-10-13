@@ -306,9 +306,11 @@ fetch('http://localhost:3000/api/directions?userAccountId=YOUR_UUID')
 
 Создать новое направление.
 
-⚠️ **ВАЖНО:** При создании направления автоматически создаётся Facebook Campaign в статусе **ACTIVE** (включена). Это означает что направление сразу готово к работе, как только пользователь добавит креативы.
+⚠️ **ВАЖНО:** 
+- При создании направления автоматически создаётся Facebook Campaign в статусе **ACTIVE** (включена). Это означает что направление сразу готово к работе, как только пользователь добавит креативы.
+- **ОПЦИОНАЛЬНО** можно сразу передать `default_settings` для создания дефолтных настроек рекламы вместе с направлением (один запрос вместо двух!)
 
-**Request:**
+**Request (минимальный - без default_settings):**
 ```javascript
 fetch('http://localhost:3000/api/directions', {
   method: 'POST',
@@ -323,7 +325,36 @@ fetch('http://localhost:3000/api/directions', {
 })
 ```
 
-**Response 201:**
+**Request (расширенный - с default_settings):**
+```javascript
+fetch('http://localhost:3000/api/directions', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    userAccountId: "YOUR_UUID",
+    name: "Имплантация",
+    objective: "whatsapp",
+    daily_budget_cents: 5000,
+    target_cpl_cents: 200,
+    // Опциональные дефолтные настройки рекламы (создаются вместе с направлением)
+    default_settings: {
+      cities: ["Москва", "Санкт-Петербург"],
+      age_min: 25,
+      age_max: 55,
+      gender: "all",                    // "all" | "male" | "female"
+      description: "Имплантация зубов под ключ",
+      // Поля в зависимости от objective:
+      client_question: "Сколько стоит имплантация?",  // для whatsapp
+      instagram_url: "https://instagram.com/...",    // для instagram_traffic
+      site_url: "https://site.com",                  // для site_leads
+      pixel_id: "123456",                            // для site_leads
+      utm_tag: "implant_ad"                          // для site_leads
+    }
+  })
+})
+```
+
+**Response 201 (без default_settings):**
 ```json
 {
   "success": true,
@@ -336,6 +367,39 @@ fetch('http://localhost:3000/api/directions', {
     "daily_budget_cents": 5000,
     "target_cpl_cents": 200,
     "is_active": true,
+    "created_at": "2025-10-12T12:00:00Z",
+    "updated_at": "2025-10-12T12:00:00Z"
+  },
+  "default_settings": null
+}
+```
+
+**Response 201 (с default_settings):**
+```json
+{
+  "success": true,
+  "direction": {
+    "id": "uuid",
+    "name": "Имплантация",
+    "objective": "whatsapp",
+    "fb_campaign_id": "123456789",
+    "campaign_status": "ACTIVE",
+    "daily_budget_cents": 5000,
+    "target_cpl_cents": 200,
+    "is_active": true,
+    "created_at": "2025-10-12T12:00:00Z",
+    "updated_at": "2025-10-12T12:00:00Z"
+  },
+  "default_settings": {
+    "id": "uuid-settings",
+    "direction_id": "uuid",
+    "campaign_goal": "whatsapp",
+    "cities": ["Москва", "Санкт-Петербург"],
+    "age_min": 25,
+    "age_max": 55,
+    "gender": "all",
+    "description": "Имплантация зубов под ключ",
+    "client_question": "Сколько стоит имплантация?",
     "created_at": "2025-10-12T12:00:00Z",
     "updated_at": "2025-10-12T12:00:00Z"
   }
@@ -370,13 +434,21 @@ fetch('http://localhost:3000/api/directions', {
 **Обработка в UI:**
 - При успехе (201):
   - Закрыть модалку
-  - Показать уведомление: "Направление создано!"
+  - Показать уведомление: "Направление создано!" (+ "Настройки рекламы сохранены!" если были переданы)
   - Обновить список направлений
   - Автоматически создана кампания в Facebook с названием `[Имплантация] WhatsApp`
+  - Если были переданы `default_settings` — они созданы и связаны с направлением
   
 - При ошибке (400, 500):
   - Показать сообщение об ошибке над кнопкой "Создать"
   - Не закрывать модалку
+
+**Рекомендация для фронтенда:**
+Используйте **расширенный запрос с `default_settings`** в форме создания направления, чтобы пользователь сразу заполнил:
+1. Основные параметры направления (название, бюджет, CPL)
+2. Дефолтные настройки рекламы (города, возраст, пол, описание, специфичные поля)
+
+Это улучшит UX — пользователю не нужно будет делать два отдельных действия.
 
 ---
 

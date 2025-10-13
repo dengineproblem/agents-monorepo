@@ -658,11 +658,12 @@ export async function getBudgetConstraints(
  * Вызов LLM для формирования action для создания кампании
  */
 export async function buildCampaignAction(input: CampaignBuilderInput): Promise<CampaignAction> {
-  const { user_account_id, objective, campaign_name, requested_budget_cents, additional_context } = input;
+  const { user_account_id, objective, direction_id, campaign_name, requested_budget_cents, additional_context } = input;
 
   console.log('[CampaignBuilder] Building campaign action:', {
     user_account_id,
     objective,
+    direction_id,
     campaign_name,
     requested_budget_cents,
   });

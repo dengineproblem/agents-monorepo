@@ -12,6 +12,22 @@ const CreateDirectionSchema = z.object({
   objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']),
   daily_budget_cents: z.number().int().min(1000), // минимум $10
   target_cpl_cents: z.number().int().min(50), // минимум $0.50
+  // Опциональные дефолтные настройки рекламы
+  default_settings: z.object({
+    cities: z.array(z.string()).optional(),
+    age_min: z.number().int().min(18).max(65).optional(),
+    age_max: z.number().int().min(18).max(65).optional(),
+    gender: z.enum(['all', 'male', 'female']).optional(),
+    description: z.string().optional(),
+    // WhatsApp specific
+    client_question: z.string().optional(),
+    // Instagram specific
+    instagram_url: z.string().url().optional(),
+    // Site Leads specific
+    site_url: z.string().url().optional(),
+    pixel_id: z.string().optional(),
+    utm_tag: z.string().optional(),
+  }).optional(),
 });
 
 const UpdateDirectionSchema = z.object({
@@ -338,9 +354,43 @@ export async function directionsRoutes(app: FastifyInstance) {
         fb_campaign_id: fbCampaign.campaign_id,
       });
 
+      // Создаём дефолтные настройки, если они переданы
+      let defaultSettings = null;
+      if (input.default_settings) {
+        console.log('[Directions] Creating default settings for direction:', direction.id);
+        
+        const { data: settings, error: settingsError } = await supabase
+          .from('default_ad_settings')
+          .insert({
+            direction_id: direction.id,
+            campaign_goal: input.objective, // используем objective направления
+            cities: input.default_settings.cities,
+            age_min: input.default_settings.age_min,
+            age_max: input.default_settings.age_max,
+            gender: input.default_settings.gender || 'all',
+            description: input.default_settings.description,
+            client_question: input.default_settings.client_question,
+            instagram_url: input.default_settings.instagram_url,
+            site_url: input.default_settings.site_url,
+            pixel_id: input.default_settings.pixel_id,
+            utm_tag: input.default_settings.utm_tag,
+          })
+          .select()
+          .single();
+
+        if (settingsError) {
+          console.error('[Directions] Error creating default settings:', settingsError);
+          // Не падаем, просто логируем — направление уже создано
+        } else {
+          defaultSettings = settings;
+          console.log('[Directions] Default settings created successfully');
+        }
+      }
+
       return reply.code(201).send({
         success: true,
         direction: direction,
+        default_settings: defaultSettings, // возвращаем созданные настройки (или null)
       });
     } catch (error: any) {
       console.error('[Directions] Error:', error);
