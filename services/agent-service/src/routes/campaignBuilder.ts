@@ -205,6 +205,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             const creativesToUse = creatives.slice(0, 5);
             const ads = await createAdsInAdSet({
               adsetId: adset.id,
+              adAccountId: userAccount.ad_account_id,
               creatives: creativesToUse,
               accessToken: userAccount.access_token,
               objective: direction.objective, // Используем objective направления

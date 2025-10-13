@@ -1112,11 +1112,14 @@ export function getCreativeIdForObjective(creative: AvailableCreative, objective
  */
 export async function createAdsInAdSet(params: {
   adsetId: string;
+  adAccountId: string;
   creatives: AvailableCreative[];
   accessToken: string;
   objective: CampaignObjective;
 }) {
-  const { adsetId, creatives, accessToken, objective } = params;
+  const { adsetId, adAccountId, creatives, accessToken, objective } = params;
+
+  const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
   console.log('[CampaignBuilder] Creating', creatives.length, 'ads in ad set:', adsetId);
 
@@ -1132,7 +1135,7 @@ export async function createAdsInAdSet(params: {
 
     try {
       const response = await fetch(
-        `https://graph.facebook.com/v20.0/${adsetId}/ads`,
+        `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/ads`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
