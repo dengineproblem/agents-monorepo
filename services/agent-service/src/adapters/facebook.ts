@@ -327,6 +327,189 @@ export async function createWebsiteLeadsCreative(
  * @param token - Access token
  * @returns { id: string } - ID созданной LAL аудитории
  */
+/**
+ * Загрузка изображения в Facebook Ad Account
+ * @returns { hash: string } - Hash изображения для использования в креативах
+ */
+export async function uploadImage(adAccountId: string, token: string, imageBuffer: Buffer): Promise<{ hash: string }> {
+  // Multipart загрузка как в n8n: поле 'filename' с бинарным файлом
+  const tmpPath = path.join('/var/tmp', `fb_image_${randomUUID()}.jpg`);
+  fs.writeFileSync(tmpPath, imageBuffer);
+  try {
+    const formData = new FormData();
+    formData.append('filename', fs.createReadStream(tmpPath), {
+      filename: path.basename(tmpPath),
+      contentType: 'image/jpeg'
+    });
+
+    const url = `https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/adimages`;
+
+    const response = await axios.post(url, formData, {
+      headers: {
+        ...formData.getHeaders(),
+        Authorization: `Bearer ${token}`
+      },
+      maxBodyLength: Infinity,
+      maxContentLength: Infinity
+    });
+
+    const images = (response.data && response.data.images) || {};
+    const firstKey = Object.keys(images)[0];
+    const hash = firstKey ? images[firstKey]?.hash : undefined;
+    if (!hash) throw new Error('No image hash returned from Facebook API');
+    console.log('[uploadImage] Upload successful (multipart filename), hash:', hash);
+    return { hash };
+  } catch (error: any) {
+    console.error('[uploadImage] Facebook API Error (multipart):', {
+      status: error?.response?.status,
+      statusText: error?.response?.statusText,
+      data: error?.response?.data,
+      message: error?.message
+    });
+    const g = error?.response?.data?.error || {};
+    const err: any = new Error(g?.message || error.message);
+    err.fb = {
+      status: error?.response?.status,
+      method: 'POST',
+      path: `${adAccountId}/adimages`,
+      type: g?.type,
+      code: g?.code,
+      error_subcode: g?.error_subcode,
+      fbtrace_id: g?.fbtrace_id
+    };
+    throw err;
+  } finally {
+    if (fs.existsSync(tmpPath)) {
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
+  }
+}
+
+/**
+ * Создает WhatsApp креатив с изображением
+ */
+export async function createWhatsAppImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    clientQuestion: string;
+  }
+): Promise<{ id: string }> {
+  const pageWelcomeMessage = JSON.stringify({
+    type: "VISUAL_EDITOR",
+    version: 2,
+    landing_screen_type: "welcome_message",
+    media_type: "text",
+    text_format: {
+      customer_action_type: "autofill_message",
+      message: {
+        autofill_message: { content: params.clientQuestion },
+        text: "Здравствуйте! Чем можем помочь?"
+      }
+    }
+  });
+
+  const callToAction: any = { type: "WHATSAPP_MESSAGE" };
+
+  console.log("[WhatsApp Image Creative] callToAction:", JSON.stringify(callToAction));
+  
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash,
+      link: "https://dummyimage.com/1200x628/ffffff/ffffff.png", // Заглушка для валидации
+      message: params.message,
+      call_to_action: callToAction,
+      page_welcome_message: pageWelcomeMessage
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Image CTWA – WhatsApp",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
+}
+
+/**
+ * Создает Instagram Traffic креатив с изображением
+ */
+export async function createInstagramImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    instagramUsername: string;
+    message: string;
+  }
+): Promise<{ id: string }> {
+  const landingLink = `https://www.instagram.com/${params.instagramUsername}`;
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash,
+      message: params.message,
+      link: landingLink,
+      call_to_action: {
+        type: "LEARN_MORE",
+        value: { link: landingLink }
+      }
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, {
+    name: "Instagram Profile Image Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  });
+}
+
+/**
+ * Создает Website Leads креатив с изображением
+ */
+export async function createWebsiteLeadsImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    siteUrl: string;
+    utm?: string;
+  }
+): Promise<{ id: string }> {
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash,
+      message: params.message,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: { link: params.siteUrl }
+      }
+    }
+  };
+
+  const payload: any = {
+    name: "Website Leads Image Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  if (params.utm) {
+    payload.url_tags = params.utm;
+  }
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
 export async function createLookalikeAudience(
   adAccountId: string,
   seedAudienceId: string,

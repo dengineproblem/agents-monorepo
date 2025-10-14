@@ -7,6 +7,7 @@ import { executeByManifest, getActionSpec } from '../actions/engine.js';
 import { workflowDuplicateAndPauseOriginal, workflowDuplicateKeepOriginalActive, workflowDuplicateAdsetWithAudience } from '../workflows/campaignDuplicate.js';
 import { workflowCreateCampaignWithCreative } from '../workflows/createCampaignWithCreative.js';
 import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
+import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 
 const AuthHeader = z.string().startsWith('Bearer ').optional();
 
@@ -271,6 +272,43 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         token
       );
     }
+
+    case 'Direction.CreateAdSetWithCreatives': {
+      const p = (action as any).params as {
+        direction_id: string;
+        user_creative_ids: string[];
+        daily_budget_cents?: number;
+        adset_name?: string;
+        auto_activate?: boolean;
+      };
+      
+      if (!p.direction_id) {
+        throw new Error('Direction.CreateAdSetWithCreatives: direction_id required');
+      }
+      
+      if (!p.user_creative_ids || !Array.isArray(p.user_creative_ids) || p.user_creative_ids.length === 0) {
+        throw new Error('Direction.CreateAdSetWithCreatives: user_creative_ids array required (at least 1 creative)');
+      }
+      
+      if (!ctx?.userAccountId || !ctx?.adAccountId) {
+        throw new Error('Direction.CreateAdSetWithCreatives: userAccountId and adAccountId required from context');
+      }
+      
+      return workflowCreateAdSetInDirection(
+        {
+          direction_id: p.direction_id,
+          user_creative_ids: p.user_creative_ids,
+          daily_budget_cents: p.daily_budget_cents,
+          adset_name: p.adset_name,
+          auto_activate: p.auto_activate || false
+        },
+        {
+          user_account_id: ctx.userAccountId,
+          ad_account_id: ctx.adAccountId
+        },
+        token
+      );
+    }
   }
 }
 
@@ -328,6 +366,24 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
       case 'StartCreativeTest': {
         if (!params.user_creative_id) {
           issues.push('StartCreativeTest: user_creative_id required');
+        }
+        break;
+      }
+      case 'Direction.CreateAdSetWithCreatives': {
+        if (!params.direction_id) {
+          issues.push('Direction.CreateAdSetWithCreatives: direction_id required');
+        }
+        if (!params.user_creative_ids) {
+          issues.push('Direction.CreateAdSetWithCreatives: user_creative_ids required');
+        }
+        if (params.user_creative_ids && !Array.isArray(params.user_creative_ids)) {
+          issues.push('Direction.CreateAdSetWithCreatives: user_creative_ids must be an array');
+        }
+        if (params.user_creative_ids && Array.isArray(params.user_creative_ids) && params.user_creative_ids.length === 0) {
+          issues.push('Direction.CreateAdSetWithCreatives: user_creative_ids must have at least 1 creative');
+        }
+        if (params.daily_budget_cents && typeof params.daily_budget_cents !== 'number') {
+          issues.push('Direction.CreateAdSetWithCreatives: daily_budget_cents must be a number');
         }
         break;
       }

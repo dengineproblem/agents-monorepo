@@ -282,7 +282,9 @@ const ALLOWED_TYPES = new Set([
   // Audience tools
   'Audience.DuplicateAdSetWithAudience',
   // Creative-based campaign creation
-  'CreateCampaignWithCreative'
+  'CreateCampaignWithCreative',
+  // Direction-based adset creation (use existing campaign from direction)
+  'Direction.CreateAdSetWithCreatives'
 ]);
 
 function genIdem() {
@@ -1077,6 +1079,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false) => [
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
   '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+.',
   '- CreateCampaignWithCreative {"user_creative_ids":["uuid1","uuid2","uuid3"],"objective","campaign_name","daily_budget_cents","adset_name?","use_default_settings?","auto_activate?"} — создает НОВУЮ кампанию с НЕСКОЛЬКИМИ креативами в ОДНОМ adset. ПРИОРИТЕТНЫЙ инструмент для реанимации! ВАЖНО: use_default_settings=true автоматически применяет таргетинг из default_ad_settings. auto_activate=true сразу запускает (рекомендуется!). Работает СРАЗУ и БЕССРОЧНО (daily_budget). ПАРАМЕТР user_creative_ids — МАССИВ! Передавай ВСЕ unused_creatives (1-3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном adset. КОГДА: (1) ВСЕГДА если есть unused_creatives при slightly_bad/bad; (2) если нужно масштабирование но текущие кампании в обучении. BACKWARD COMPATIBILITY: можно передать user_creative_id (одиночный) для одного креатива.',
+  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — СОЗДАТЬ ТОЛЬКО AD SET внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ (кампания = направление). Используй, когда направление уже создано и нужно добавить группу объявлений с выбранными креативами без создания новой кампании. Следи за суммой бюджетов ad sets в пределах daily_budget_cents направления.',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
   '- Выведи ОДИН JSON-объект: { "planNote": string, "actions": Action[], "reportText": string } — и больше НИЧЕГО.',
@@ -1200,6 +1203,9 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false) => [
   '',
   'ПРИМЕР 6 (фолбэк на LAL дубль если нет креативов вообще)',
   'Example JSON:\n{\n  "planNote": "HS bad, unused_creatives=[], ready_creatives=[]. Фолбэк: LAL дубль т.к. нет креативов для ротации.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "Audience.DuplicateAdSetWithAudience", "params": { "source_adset_id": "<ADSET_ID>", "audience_id": "use_lal_from_settings", "daily_budget": 1000, "name_suffix": "LAL3" } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты. Креативов для ротации нет, поэтому создаем дубль с LAL аудиторией из настроек. Бюджет $10/день."\n}',
+  '',
+  'ПРИМЕР 7 (направление: добавить ad set в СУЩЕСТВУЮЩУЮ кампанию направления)',
+  'Example JSON:\n{\n  "planNote": "Направление \"Имплантация\": есть 2 готовых креатива. Добавляем новый ad set внутри существующей кампании направления без создания новой кампании.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<FB_CAMPAIGN_ID_ИЗ_НАПРАВЛЕНИЯ>" } },\n    { "type": "Direction.CreateAdSetWithCreatives", "params": { "direction_id": "<DIRECTION_UUID>", "user_creative_ids": ["uuid-1","uuid-2"], "daily_budget_cents": 2000, "adset_name": "Тест креативов #1", "auto_activate": false } }\n  ],\n  "reportText": "📊 Отчет\\n\\nПо направлению \"Имплантация\" запускаем тест двух креативов в новой группе объявлений внутри существующей кампании. Бюджет $20/день, статус — на паузе для проверки."\n}',
   '',
   'Тул: SendActions',
   `- POST ${AGENT_URL}`,

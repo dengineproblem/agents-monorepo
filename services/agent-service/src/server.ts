@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import dotenv from 'dotenv';
 import { actionsRoutes } from './routes/actions.js';
 import { videoRoutes } from './routes/video.js';
+import { imageRoutes } from './routes/image.js';
 import { creativeTestRoutes } from './routes/creativeTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { directionsRoutes } from './routes/directions.js';
@@ -25,6 +26,7 @@ app.register(cors, {
 });
 app.register(actionsRoutes);
 app.register(videoRoutes);
+app.register(imageRoutes);
 app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes);
