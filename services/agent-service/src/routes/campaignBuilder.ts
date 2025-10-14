@@ -294,6 +294,211 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
   );
 
   /**
+   * POST /api/campaign-builder/manual-launch
+   * 
+   * Ручной запуск рекламы с выбранными креативами и настройками:
+   * 1. Пользователь выбирает направление
+   * 2. Пользователь выбирает креативы (один или несколько)
+   * 3. Опционально переопределяет настройки (бюджет, таргетинг)
+   * 4. Система создает Ad Set в существующей Campaign направления
+   * 
+   * @body {
+   *   user_account_id: string,
+   *   direction_id: string,
+   *   creative_ids: string[],  // Массив ID креативов из user_creatives
+   *   daily_budget_cents?: number,  // Опционально, иначе из направления
+   *   targeting?: object  // Опционально, иначе из default_ad_settings
+   * }
+   * @returns { success: true, adset_id, ads_created, ads: [...] }
+   */
+  fastify.post(
+    '/manual-launch',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['user_account_id', 'direction_id', 'creative_ids'],
+          properties: {
+            user_account_id: { type: 'string', format: 'uuid' },
+            direction_id: { type: 'string', format: 'uuid' },
+            creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
+            daily_budget_cents: { type: 'number', minimum: 1000 },
+            targeting: { type: 'object' },
+          },
+        },
+      },
+    },
+    async (request: any, reply: any) => {
+      const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting } = request.body;
+
+      console.log('[CampaignBuilder Manual] Manual launch request:', {
+        user_account_id,
+        direction_id,
+        creative_ids_count: creative_ids.length,
+        daily_budget_cents,
+      });
+
+      try {
+        // Получаем данные пользователя
+        const { data: userAccount, error: userError } = await supabase
+          .from('user_accounts')
+          .select('*')
+          .eq('id', user_account_id)
+          .single();
+
+        if (userError || !userAccount) {
+          return reply.status(404).send({
+            success: false,
+            error: 'User account not found',
+          });
+        }
+
+        // Получаем направление
+        const { data: direction, error: directionError } = await supabase
+          .from('account_directions')
+          .select('*')
+          .eq('id', direction_id)
+          .eq('user_account_id', user_account_id)
+          .eq('is_active', true)
+          .single();
+
+        if (directionError || !direction) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Direction not found or inactive',
+          });
+        }
+
+        // Проверяем, что у направления есть fb_campaign_id
+        if (!direction.fb_campaign_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Direction does not have associated Facebook Campaign',
+          });
+        }
+
+        // Получаем выбранные креативы
+        const { data: creatives, error: creativesError } = await supabase
+          .from('user_creatives')
+          .select('*')
+          .in('id', creative_ids)
+          .eq('user_id', user_account_id)
+          .eq('direction_id', direction_id)
+          .eq('is_active', true)
+          .eq('status', 'ready');
+
+        if (creativesError || !creatives || creatives.length === 0) {
+          return reply.status(400).send({
+            success: false,
+            error: 'No valid creatives found',
+          });
+        }
+
+        if (creatives.length !== creative_ids.length) {
+          console.warn('[CampaignBuilder Manual] Some creatives not found or inactive:', {
+            requested: creative_ids.length,
+            found: creatives.length,
+          });
+        }
+
+        console.log('[CampaignBuilder Manual] Found', creatives.length, 'creatives');
+
+        // Получаем дефолтные настройки направления (если не переопределены)
+        const defaultSettings = await getDefaultSettings(direction_id);
+        const finalBudget = daily_budget_cents || direction.daily_budget_cents;
+        const finalTargeting = targeting || buildTargeting(defaultSettings, direction.objective);
+
+        // Получаем optimization_goal и billing_event
+        const optimization_goal = getOptimizationGoal(direction.objective);
+        const billing_event = getBillingEvent(direction.objective);
+
+        // Формируем promoted_object
+        let promoted_object;
+        if (direction.objective === 'whatsapp' && userAccount.whatsapp_phone_number) {
+          promoted_object = {
+            page_id: userAccount.page_id,
+            whatsapp_phone_number: userAccount.whatsapp_phone_number,
+          };
+        } else if (direction.objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
+          promoted_object = {
+            link: defaultSettings.instagram_url,
+          };
+        } else if (direction.objective === 'site_leads' && defaultSettings?.site_url) {
+          promoted_object = {
+            link: defaultSettings.site_url,
+            ...(defaultSettings.pixel_id && { pixel_id: defaultSettings.pixel_id }),
+          };
+        }
+
+        // Создаём Ad Set
+        const adset = await createAdSetInCampaign({
+          campaignId: direction.fb_campaign_id,
+          adAccountId: userAccount.ad_account_id,
+          accessToken: userAccount.access_token,
+          name: `${direction.name} - Ручной запуск - ${new Date().toISOString().split('T')[0]}`,
+          dailyBudget: finalBudget,
+          targeting: finalTargeting,
+          optimization_goal,
+          billing_event,
+          promoted_object,
+        });
+
+        console.log('[CampaignBuilder Manual] Ad set created:', adset.id);
+
+        // Создаём Ads с выбранными креативами
+        const creativesForAds = creatives.map(c => ({
+          user_creative_id: c.id,
+          title: c.title,
+          fb_creative_id_whatsapp: c.fb_creative_id_whatsapp,
+          fb_creative_id_instagram_traffic: c.fb_creative_id_instagram_traffic,
+          fb_creative_id_site_leads: c.fb_creative_id_site_leads,
+        }));
+
+        const ads = await createAdsInAdSet({
+          adsetId: adset.id,
+          adAccountId: userAccount.ad_account_id,
+          creatives: creativesForAds,
+          accessToken: userAccount.access_token,
+          objective: direction.objective,
+        });
+
+        console.log('[CampaignBuilder Manual] Created', ads.length, 'ads');
+
+        return reply.send({
+          success: true,
+          message: `Реклама запущена: создано ${ads.length} объявлений`,
+          direction_id: direction.id,
+          direction_name: direction.name,
+          campaign_id: direction.fb_campaign_id,
+          adset_id: adset.id,
+          adset_name: adset.name || `${direction.name} - Ad Set`,
+          ads_created: ads.length,
+          ads: ads.map(ad => ({
+            ad_id: ad.id,
+            name: ad.name,
+          })),
+        });
+      } catch (error: any) {
+        console.error('[CampaignBuilder Manual] Error:', error);
+        
+        // Парсим ошибку для понятного сообщения
+        let errorMessage = error.message;
+        if (error.message && error.message.includes('locations that are currently restricted')) {
+          errorMessage = 'Выбранные гео-локации заблокированы для вашего рекламного аккаунта';
+        } else if (error.message && error.message.includes('Invalid parameter')) {
+          errorMessage = 'Некорректные параметры таргетинга или настроек';
+        }
+        
+        return reply.status(500).send({
+          success: false,
+          error: errorMessage,
+          error_details: error.message,
+        });
+      }
+    }
+  );
+
+  /**
    * POST /api/campaign-builder/auto-launch (LEGACY)
    * 
    * Автоматический запуск рекламной кампании:
