@@ -281,8 +281,6 @@ const ALLOWED_TYPES = new Set([
   'Workflow.DuplicateKeepOriginalActive',
   // Audience tools
   'Audience.DuplicateAdSetWithAudience',
-  // Creative-based campaign creation
-  'CreateCampaignWithCreative',
   // Direction-based adset creation (use existing campaign from direction)
   'Direction.CreateAdSetWithCreatives'
 ]);

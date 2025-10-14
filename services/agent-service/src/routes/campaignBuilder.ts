@@ -198,6 +198,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               optimization_goal,
               billing_event,
               promoted_object,
+              start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
             });
 
             console.log('[CampaignBuilder V2] Ad set created:', adset.id);

@@ -1044,6 +1044,7 @@ export async function createAdSetInCampaign(params: {
   optimization_goal: string;
   billing_event: string;
   promoted_object?: any;
+  start_mode?: 'now' | 'midnight_almaty';
 }) {
   const { campaignId, adAccountId, accessToken, name, dailyBudget, targeting, optimization_goal, billing_event, promoted_object } = params;
 
@@ -1056,6 +1057,29 @@ export async function createAdSetInCampaign(params: {
     optimization_goal,
   });
 
+  // Ближайшая полночь Asia/Almaty (+05:00)
+  function formatWithOffset(date: Date, offsetMin: number) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    const ss = pad(date.getSeconds());
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const abs = Math.abs(offsetMin);
+    const oh = pad(Math.floor(abs / 60));
+    const om = pad(abs % 60);
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
+  }
+  const tzOffsetMin = 5 * 60;
+  const nowUtcMs = Date.now() + (new Date().getTimezoneOffset() * 60000);
+  const localNow = new Date(nowUtcMs + tzOffsetMin * 60000);
+  let m = new Date(localNow);
+  m.setHours(0, 0, 0, 0);
+  if (m <= localNow) m = new Date(m.getTime() + 24 * 60 * 60 * 1000);
+  const start_time = formatWithOffset(m, tzOffsetMin);
+
   const body: any = {
     access_token: accessToken,
     name,
@@ -1067,6 +1091,10 @@ export async function createAdSetInCampaign(params: {
     targeting,
     status: 'ACTIVE',
   };
+
+  if ((params.start_mode || 'midnight_almaty') === 'midnight_almaty') {
+    body.start_time = start_time;
+  }
 
   // Для WhatsApp добавляем destination_type
   if (optimization_goal === 'CONVERSATIONS' && promoted_object?.whatsapp_phone_number) {

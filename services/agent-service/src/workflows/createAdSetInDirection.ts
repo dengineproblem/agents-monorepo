@@ -7,6 +7,7 @@ type CreateAdSetInDirectionParams = {
   daily_budget_cents?: number; // Опционально - переопределяет бюджет из direction
   adset_name?: string; // Опционально - название adset
   auto_activate?: boolean; // Если true - сразу активирует adset (по умолчанию false)
+  start_mode?: 'now' | 'midnight_almaty'; // Когда запускать: сейчас или с ближайшей полуночи (UTC+5)
 };
 
 type CreateAdSetInDirectionContext = {
@@ -49,7 +50,8 @@ export async function workflowCreateAdSetInDirection(
     user_creative_ids,
     daily_budget_cents,
     adset_name,
-    auto_activate = false
+    auto_activate = false,
+    start_mode = 'now'
   } = params;
 
   const { user_account_id, ad_account_id } = context;
@@ -234,6 +236,29 @@ export async function workflowCreateAdSetInDirection(
   const budget = daily_budget_cents || direction.daily_budget_cents;
   const final_adset_name = adset_name || `${direction.name} - AdSet ${new Date().toISOString().split('T')[0]}`;
 
+  // Вычисляем ближайшую полночь по Asia/Almaty (UTC+5)
+  function formatWithOffset(date: Date, offsetMin: number) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    const ss = pad(date.getSeconds());
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const abs = Math.abs(offsetMin);
+    const oh = pad(Math.floor(abs / 60));
+    const om = pad(abs % 60);
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
+  }
+  const tzOffsetMin = 5 * 60; // Asia/Almaty UTC+5
+  const nowUtcMs = Date.now() + (new Date().getTimezoneOffset() * 60000);
+  const localNow = new Date(nowUtcMs + tzOffsetMin * 60000);
+  let m = new Date(localNow);
+  m.setHours(0, 0, 0, 0);
+  if (m <= localNow) m = new Date(m.getTime() + 24 * 60 * 60 * 1000);
+  const start_time = formatWithOffset(m, tzOffsetMin);
+
   const adsetBody: any = {
     name: final_adset_name,
     campaign_id: direction.fb_campaign_id, // КЛЮЧЕВОЕ: используем Campaign из Direction
@@ -244,6 +269,10 @@ export async function workflowCreateAdSetInDirection(
     targeting: targeting,
     status: auto_activate ? 'ACTIVE' : 'PAUSED'
   };
+
+  if (start_mode === 'midnight_almaty') {
+    adsetBody.start_time = start_time;
+  }
 
   // Добавляем destination_type и promoted_object для WhatsApp
   if (destination_type) {

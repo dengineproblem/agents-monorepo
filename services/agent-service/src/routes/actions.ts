@@ -300,7 +300,8 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           user_creative_ids: p.user_creative_ids,
           daily_budget_cents: p.daily_budget_cents,
           adset_name: p.adset_name,
-          auto_activate: p.auto_activate || false
+          auto_activate: p.auto_activate || false,
+          start_mode: (action as any).params?.start_mode || 'midnight_almaty'
         },
         {
           user_account_id: ctx.userAccountId,
