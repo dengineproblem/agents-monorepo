@@ -103,7 +103,8 @@ docker compose ps
 
 5. **API-сценарии** — выполняем ручные проверки:
    - `/api/campaign-builder/manual-launch`
-   - `/api/creative-test/start`
+   - `/api/creative-test/start` (при необходимости передать `force:true`)
+   - `/api/creative-test/<creative_id>?user_id=<uuid>` — сброс теста
 
 6. **Cron** — дождаться следующего цикла или инициировать вручную, если требуется.
 

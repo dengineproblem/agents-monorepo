@@ -8,7 +8,8 @@ const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
 const StartTestSchema = z.object({
   user_creative_id: z.string().uuid(),
-  user_id: z.string().uuid()
+  user_id: z.string().uuid(),
+  force: z.boolean().optional()
 });
 
 export async function creativeTestRoutes(app: FastifyInstance) {
@@ -30,7 +31,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      const { user_creative_id, user_id } = parsed.data;
+      const { user_creative_id, user_id, force = false } = parsed.data;
 
       // Получаем данные пользователя
       const { data: userAccount, error: userError } = await supabase
@@ -44,6 +45,34 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           success: false,
           error: 'User account not found'
         });
+      }
+
+      // Проверяем, не запускался ли тест ранее
+      const { data: existingTests, error: existingError } = await supabase
+        .from('creative_tests')
+        .select('id, status, adset_id, ad_id, started_at')
+        .eq('user_creative_id', user_creative_id)
+        .eq('user_id', user_id);
+
+      if (!existingError && existingTests && existingTests.length > 0) {
+        const runningTests = existingTests.filter((t: any) => t.status === 'running');
+        if (runningTests.length > 0) {
+          if (!force) {
+            return reply.status(409).send({
+              success: false,
+              error: 'Test already running for this creative',
+              tests: runningTests,
+              can_force: true
+            });
+          }
+        }
+
+        await supabase
+          .from('creative_tests')
+          .delete()
+          .eq('user_creative_id', user_creative_id)
+          .eq('user_id', user_id)
+          .in('status', ['completed', 'cancelled', 'failed', 'running']);
       }
 
       // Запускаем тест
@@ -255,6 +284,43 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to check test'
+      });
+    }
+  });
+
+  /**
+   * DELETE /api/creative-test/:user_creative_id
+   * 
+   * Сбрасывает результаты теста креатива
+   */
+  app.delete('/api/creative-test/:user_creative_id', async (req, reply) => {
+    try {
+      const { user_creative_id } = req.params as { user_creative_id: string };
+      const user_id = (req.query as any)?.user_id;
+
+      if (!user_id) {
+        return reply.status(400).send({
+          success: false,
+          error: 'user_id query parameter is required'
+        });
+      }
+
+      const { error } = await supabase
+        .from('creative_tests')
+        .delete()
+        .eq('user_creative_id', user_creative_id)
+        .eq('user_id', String(user_id));
+
+      if (error) {
+        throw error;
+      }
+
+      return reply.send({ success: true });
+    } catch (error: any) {
+      app.log.error({ message: error.message, stack: error.stack }, 'Creative test reset error');
+      return reply.status(500).send({
+        success: false,
+        error: error.message || 'Failed to reset creative test'
       });
     }
   });

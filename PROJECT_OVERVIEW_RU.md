@@ -341,10 +341,12 @@ CRON_SCHEDULE="0 8 * * *"        # изменить расписание (cron s
 - **Cron включен по умолчанию** — запускается в 08:00 ежедневно
 - **Для отключения cron**: установите `CRON_ENABLED=false`
 - **Ручной запуск batch**: `POST /api/brain/cron/run-batch`
-- Валидация FB: включайте FB_VALIDATE_ONLY=true до «боевого» запуска
+- Валидация FB: включайте `FB_VALIDATE_ONLY=true` до «боевого» запуска; для реальных креатив-тестов проверьте, что в прод `.env.agent` стоит `FB_VALIDATE_ONLY=false`
 - Для репорта в Telegram нужны telegram_bot_token/telegram_id в user_accounts
 - Отчёт — строго по активным кампаниям с результатом, за предыдущий день, один блок
 - **Активация пользователя**: установите `active = true` в Supabase user_accounts
+- Автозапуск игнорирует тестовые кампании и паузит только ad set'ы активных направлений.
+- Креатив-тесты: `/api/creative-test/start` принимает `force: true`, а `DELETE /api/creative-test/:id?user_id` сбрасывает тест.
 
 ### Тестирование системы
 

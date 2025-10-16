@@ -32,7 +32,7 @@
 - `fbtrace_id`
 - `resolution.short` и `resolution.hint`
 
-Эти же поля используются при формировании Telegram-уведомлений.
+Эти же поля используются при оформлении Telegram-уведомлений. Для креатив-тестов теперь добавлено логирование `force=true` и ручного удаления тестов (`DELETE /api/creative-test/:id`).
 
 ## 3. Переменные окружения
 
@@ -95,7 +95,7 @@ curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",l
 
 Процесс:
 
-1. Воркерв `agent-brain` каждые `LOG_ALERT_POLL_INTERVAL_MS` запрашивает Loki (уровень error).
+1. Воркер `agent-brain` каждые `LOG_ALERT_POLL_INTERVAL_MS` запрашивает Loki (уровень error).
 2. Фильтрует по `environment`.
 3. Дедуплицирует события и отправляет сообщение в Telegram (MarkdownV2).
 

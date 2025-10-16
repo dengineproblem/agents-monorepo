@@ -59,18 +59,27 @@ export async function workflowStartCreativeTest(
   // ===================================================
   // STEP 1: Проверка существующих тестов
   // ===================================================
-  const { data: existingTest } = await supabase
+  const { data: existingTests } = await supabase
     .from('creative_tests')
     .select('id, status')
     .eq('user_creative_id', user_creative_id)
-    .single();
+    .eq('user_id', user_id);
 
-  if (existingTest) {
-    if (existingTest.status === 'running') {
+  if (existingTests && existingTests.length > 0) {
+    const running = existingTests.filter((t: any) => t.status === 'running');
+    const completed = existingTests.filter((t: any) => t.status === 'completed');
+
+    if (running.length > 0) {
       throw new Error('Test already running for this creative');
     }
-    if (existingTest.status === 'completed') {
-      throw new Error('Creative already tested. Check results in creative_tests table');
+
+    if (completed.length > 0) {
+      await supabase
+        .from('creative_tests')
+        .delete()
+        .eq('user_creative_id', user_creative_id)
+        .eq('user_id', user_id)
+        .in('status', ['completed', 'cancelled', 'running']);
     }
   }
 
@@ -228,7 +237,7 @@ export async function workflowStartCreativeTest(
       ad_id,
       rule_id,
       test_budget_cents: 2000,
-      test_impressions_limit: 10,  // Для тестирования (обычно 1000)
+      test_impressions_limit: 1000,
       objective: 'WhatsApp',
       status: 'running',
       started_at: new Date().toISOString()
