@@ -5,10 +5,13 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import axios from 'axios';
+import { createLogger } from '../lib/logger.js';
+import { resolveFacebookError } from '../lib/facebookErrors.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const FB_VALIDATE_ONLY = String(process.env.FB_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
+const log = createLogger({ module: 'facebookAdapter' });
 
 function appsecret_proof(token: string) {
   return crypto.createHmac('sha256', FB_APP_SECRET).update(token).digest('hex');
@@ -44,6 +47,9 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
       params: params,
       type: g?.type, code: g?.code, error_subcode: g?.error_subcode, fbtrace_id: g?.fbtrace_id
     };
+    const resolution = resolveFacebookError(err.fb);
+    log.error({ meta: err.fb, resolution }, 'Graph API request failed');
+    err.resolution = resolution;
     throw err;
   }
   return json;
@@ -58,20 +64,20 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
   const fileSize = videoBuffer.length;
   const fileSizeMB = Math.round(fileSize / 1024 / 1024);
   
-  console.log(`[uploadVideo] Writing ${fileSizeMB}MB to ${tmpPath}`);
+  log.info({ adAccountId, fileSizeMB, tmpPath }, 'Writing video to temporary file');
   fs.writeFileSync(tmpPath, videoBuffer);
   
   try {
     // Для файлов >50 МБ используем chunked upload через graph-video
     if (fileSize > 50 * 1024 * 1024) {
-      console.log(`[uploadVideo] File size ${fileSizeMB}MB > 50MB, using chunked upload`);
+      log.info({ adAccountId, fileSizeMB }, 'Using chunked upload for large video');
       const videoId = await uploadVideoChunked(adAccountId, token, tmpPath, fileSize);
       fs.unlinkSync(tmpPath);
       return { id: videoId };
     }
     
     // Для маленьких файлов используем простой upload
-    console.log(`[uploadVideo] Using simple upload for ${fileSizeMB}MB file`);
+    log.info({ adAccountId, fileSizeMB }, 'Using simple upload for video');
     const formData = new FormData();
     formData.append('source', fs.createReadStream(tmpPath));
 
@@ -83,7 +89,7 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       maxContentLength: Infinity
     });
     
-    console.log(`[uploadVideo] Upload successful, video ID: ${response.data.id}`);
+    log.info({ adAccountId, videoId: response.data.id }, 'Video uploaded successfully');
     fs.unlinkSync(tmpPath);
     
     return response.data;
@@ -92,12 +98,13 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fs.unlinkSync(tmpPath);
     }
     
-    console.error('[uploadVideo] Facebook API Error:', {
+    log.error({
+      adAccountId,
       status: error?.response?.status,
       statusText: error?.response?.statusText,
       data: error?.response?.data,
       message: error?.message
-    });
+    }, 'Facebook API error during video upload');
     
     const g = error?.response?.data?.error || {};
     const err: any = new Error(g?.message || error.message);
@@ -110,6 +117,7 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       error_subcode: g?.error_subcode,
       fbtrace_id: g?.fbtrace_id
     };
+    err.resolution = resolveFacebookError(err.fb);
     throw err;
   }
 }
@@ -122,7 +130,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
   const base = `https://graph-video.facebook.com/${FB_API_VERSION}`;
   const url = `${base}/${adAccountId}/advideos`;
   
-  console.log(`[uploadVideoChunked] Starting chunked upload for ${Math.round(fileSize / 1024 / 1024)}MB file`);
+  log.info({ adAccountId, fileSizeMB: Math.round(fileSize / 1024 / 1024) }, 'Starting chunked video upload');
   
   // 1) START phase
   const startFormData = new FormData();
@@ -135,7 +143,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
   });
   
   let { upload_session_id, start_offset, end_offset, video_id } = startRes.data;
-  console.log(`[uploadVideoChunked] Session started: ${upload_session_id}, initial range: ${start_offset}-${end_offset}`);
+  log.debug({ uploadSessionId: upload_session_id, start_offset, end_offset }, 'Chunked upload session started');
   
   // 2) TRANSFER phase (loop)
   let chunkNumber = 0;
@@ -145,7 +153,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
     const end = parseInt(end_offset, 10);
     const chunkSize = end - start;
     
-    console.log(`[uploadVideoChunked] Uploading chunk #${chunkNumber}: ${start}-${end} (${Math.round(chunkSize / 1024 / 1024)}MB)`);
+    log.debug({ chunkNumber, start, end, chunkSizeMB: Math.round(chunkSize / 1024 / 1024) }, 'Uploading video chunk');
     
     // Читаем chunk из файла
     const chunk = fs.createReadStream(filePath, { 
@@ -175,10 +183,10 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
     end_offset = transferRes.data.end_offset;
     
     const progress = Math.round((start / fileSize) * 100);
-    console.log(`[uploadVideoChunked] Chunk #${chunkNumber} uploaded, progress: ${progress}%`);
+    log.debug({ chunkNumber, progress }, 'Chunk uploaded');
   }
   
-  console.log(`[uploadVideoChunked] All chunks uploaded, finishing...`);
+  log.info({ uploadSessionId: upload_session_id }, 'All video chunks uploaded, finishing');
   
   // 3) FINISH phase
   const finishFormData = new FormData();
@@ -191,7 +199,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
   });
   
   const finalVideoId = finishRes.data.video_id || video_id;
-  console.log(`[uploadVideoChunked] Upload completed, video ID: ${finalVideoId}`);
+  log.info({ adAccountId, videoId: finalVideoId }, 'Chunked video upload completed');
   
   return finalVideoId;
 }
@@ -229,7 +237,7 @@ export async function createWhatsAppCreative(
     };
   }
 
-  console.log("[WhatsApp Creative] callToAction:", JSON.stringify(callToAction));
+  log.debug({ adAccountId, callToAction }, 'WhatsApp creative callToAction');
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
@@ -357,7 +365,7 @@ export async function uploadImage(adAccountId: string, token: string, imageBuffe
     const firstKey = Object.keys(images)[0];
     const hash = firstKey ? images[firstKey]?.hash : undefined;
     if (!hash) throw new Error('No image hash returned from Facebook API');
-    console.log('[uploadImage] Upload successful (multipart filename), hash:', hash);
+    log.info({ adAccountId, hash }, 'Image uploaded successfully');
     return { hash };
   } catch (error: any) {
     console.error('[uploadImage] Facebook API Error (multipart):', {
@@ -377,6 +385,7 @@ export async function uploadImage(adAccountId: string, token: string, imageBuffe
       error_subcode: g?.error_subcode,
       fbtrace_id: g?.fbtrace_id
     };
+    err.resolution = resolveFacebookError(err.fb);
     throw err;
   } finally {
     if (fs.existsSync(tmpPath)) {
@@ -415,7 +424,7 @@ export async function createWhatsAppImageCreative(
 
   const callToAction: any = { type: "WHATSAPP_MESSAGE" };
 
-  console.log("[WhatsApp Image Creative] callToAction:", JSON.stringify(callToAction));
+  log.debug({ adAccountId, callToAction }, 'WhatsApp image creative callToAction');
   
   const objectStorySpec = {
     page_id: params.pageId,

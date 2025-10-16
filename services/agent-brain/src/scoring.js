@@ -219,10 +219,7 @@ async function fetchAdsetsActions(adAccountId, accessToken, datePreset = 'last_7
   // Логируем actions для отладки
   if (json.data && json.data.length > 0) {
     const sample = json.data[0];
-    console.log('[fetchAdsetsActions] Sample actions:', JSON.stringify({
-      adset_id: sample.adset_id,
-      action_types: sample.actions ? sample.actions.map(a => a.action_type) : null
-    }));
+    logger.debug({ sampleAdsetsActions: sample }, '[fetchAdsetsActions] Sample actions');
   }
   
   return json.data || [];
@@ -532,7 +529,7 @@ async function getActiveCreativeIds(adAccountId, accessToken) {
     
     return { creativeIdsSet, creativeToAdsMap };
   } catch (error) {
-    console.error('Failed to fetch active creative IDs:', error.message);
+    logger.error({ err: error, message: error.message }, 'Failed to fetch active creative IDs');
     return { creativeIdsSet: new Set(), creativeToAdsMap: new Map() };
   }
 }
@@ -575,7 +572,7 @@ export async function runScoringAgent(userAccount, options = {}) {
   
   const supabase = options.supabase || createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE
   );
   
   const logger = options.logger || console;

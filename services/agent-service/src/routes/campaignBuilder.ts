@@ -21,6 +21,10 @@ import {
   type CampaignBuilderInput,
   type CampaignObjective,
 } from '../lib/campaignBuilder.js';
+import { createLogger } from '../lib/logger.js';
+import { resolveFacebookError } from '../lib/facebookErrors.js';
+
+const log = createLogger({ module: 'campaignBuilderRoutes' });
 
 // ========================================
 // REQUEST SCHEMAS
@@ -91,9 +95,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      console.log('[CampaignBuilder V2] Auto-launch request for ALL directions:', {
-        user_account_id,
-      });
+      log.info({ userAccountId: user_account_id }, 'Auto-launch request for all directions');
 
       try {
         // Получаем данные пользователя
@@ -104,6 +106,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .single();
 
         if (userError || !userAccount) {
+          log.warn({ userAccountId: user_account_id, err: userError }, 'User account not found for auto-launch');
           return reply.status(404).send({
             success: false,
             error: 'User account not found',
@@ -118,7 +121,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .eq('is_active', true);
 
         if (directionsError) {
-          console.error('[CampaignBuilder V2] Error fetching directions:', directionsError);
+          log.error({ err: directionsError, userAccountId: user_account_id }, 'Failed to fetch directions');
           return reply.status(500).send({
             success: false,
             error: 'Failed to fetch directions',
@@ -126,6 +129,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         if (!directions || directions.length === 0) {
+          log.warn({ userAccountId: user_account_id }, 'No active directions found');
           return reply.status(400).send({
             success: false,
             error: 'No active directions found',
@@ -133,19 +137,25 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        console.log('[CampaignBuilder V2] Found', directions.length, 'active direction(s)');
+        log.info({ userAccountId: user_account_id, directionCount: directions.length }, 'Found active directions');
 
         const results = [];
 
         // Обрабатываем каждое направление
         for (const direction of directions) {
-          console.log('[CampaignBuilder V2] Processing direction:', direction.name, 'objective:', direction.objective);
+          log.info({
+            directionId: direction.id,
+            directionName: direction.name,
+            objective: direction.objective,
+            userAccountId: user_account_id,
+            userAccountName: userAccount.username
+          }, 'Processing direction');
 
           // Получаем креативы для этого направления (используем objective направления)
           const creatives = await getAvailableCreatives(user_account_id, direction.objective, direction.id);
 
           if (creatives.length === 0) {
-            console.warn('[CampaignBuilder V2] No creatives for direction:', direction.name);
+            log.warn({ directionId: direction.id, directionName: direction.name }, 'No creatives for direction');
             results.push({
               direction_id: direction.id,
               direction_name: direction.name,
@@ -155,12 +165,17 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             continue;
           }
 
-          console.log('[CampaignBuilder V2] Found', creatives.length, 'creative(s) for direction:', direction.name);
+          log.info({ directionId: direction.id, creativeCount: creatives.length }, 'Found creatives for direction');
 
           try {
             // Получаем дефолтные настройки направления
             const defaultSettings = await getDefaultSettings(direction.id);
-            console.log('[CampaignBuilder V2] Default settings:', defaultSettings ? 'found' : 'not found');
+            log.info({
+              directionId: direction.id,
+              hasDefaultSettings: Boolean(defaultSettings),
+              userAccountId: user_account_id,
+            userAccountName: userAccount.username
+            }, 'Default settings status');
 
             // Строим таргетинг (используем objective направления)
             const targeting = buildTargeting(defaultSettings, direction.objective);
@@ -201,7 +216,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
             });
 
-            console.log('[CampaignBuilder V2] Ad set created:', adset.id);
+            log.info({ directionId: direction.id, adsetId: adset.id, userAccountId: user_account_id, userAccountName: userAccount.username }, 'Ad set created for direction');
 
             // Создаём Ads с креативами (максимум 5)
             const creativesToUse = creatives.slice(0, 5);
@@ -213,7 +228,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               objective: direction.objective, // Используем objective направления
             });
 
-            console.log('[CampaignBuilder V2] Created', ads.length, 'ads');
+            log.info({ directionId: direction.id, adsetId: adset.id, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
 
             results.push({
               direction_id: direction.id,
@@ -227,7 +242,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               status: 'success',
             });
           } catch (error: any) {
-            console.error('[CampaignBuilder V2] Error creating ad set for direction:', direction.name, error);
+            const resolution = error?.fb ? resolveFacebookError(error.fb) : undefined;
+            log.error({ err: error, directionId: direction.id, directionName: direction.name, resolution }, 'Failed to create ad set for direction');
             
             // Парсим ошибку Facebook API для более понятного сообщения
             let errorMessage = error.message;
@@ -285,7 +301,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           },
         });
       } catch (error: any) {
-        console.error('[CampaignBuilder V2] Error:', error);
+        const resolution = error?.fb ? resolveFacebookError(error.fb) : undefined;
+        log.error({ err: error, userAccountId: user_account_id, resolution }, 'Auto-launch error');
         return reply.status(500).send({
           success: false,
           error: error.message || 'Internal server error',
@@ -332,12 +349,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
     async (request: any, reply: any) => {
       const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting } = request.body;
 
-      console.log('[CampaignBuilder Manual] Manual launch request:', {
-        user_account_id,
-        direction_id,
-        creative_ids_count: creative_ids.length,
-        daily_budget_cents,
-      });
+      log.info({
+        userAccountId: user_account_id,
+        objective: request.body?.objective,
+        adAccountId: request.body?.ad_account_id,
+        campaignId: request.body?.campaign_id,
+        directionId: request.body?.direction_id,
+      }, 'Manual launch request');
 
       try {
         // Получаем данные пользователя
@@ -396,13 +414,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         if (creatives.length !== creative_ids.length) {
-          console.warn('[CampaignBuilder Manual] Some creatives not found or inactive:', {
-            requested: creative_ids.length,
-            found: creatives.length,
-          });
+          log.warn({ missingCreatives: creative_ids.length - creatives.length }, 'Some creatives not found or inactive');
         }
 
-        console.log('[CampaignBuilder Manual] Found', creatives.length, 'creatives');
+        log.info({ creativeCount: creatives.length }, 'Found creatives for manual launch');
 
         // Получаем дефолтные настройки направления (если не переопределены)
         const defaultSettings = await getDefaultSettings(direction_id);
@@ -444,7 +459,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           promoted_object,
         });
 
-        console.log('[CampaignBuilder Manual] Ad set created:', adset.id);
+        log.info({ adsetId: adset.id }, 'Manual launch ad set created');
 
         // Создаём Ads с выбранными креативами
         const creativesForAds = creatives.map(c => ({
@@ -464,7 +479,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           objective: direction.objective,
         });
 
-        console.log('[CampaignBuilder Manual] Created', ads.length, 'ads');
+        log.info({ adsCount: ads.length }, 'Manual launch ads created');
 
         return reply.send({
           success: true,
@@ -481,7 +496,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           })),
         });
       } catch (error: any) {
-        console.error('[CampaignBuilder Manual] Error:', error);
+        log.error({ err: error, userAccountId: request.body?.user_account_id }, 'Manual launch failed');
         
         // Парсим ошибку для понятного сообщения
         let errorMessage = error.message;
@@ -540,12 +555,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { objective, campaign_name, requested_budget_cents, additional_context, auto_activate } = body;
 
-      console.log('[CampaignBuilder API] Auto-launch request:', {
-        user_account_id,
+      log.info({
+        userAccountId: user_account_id,
         objective,
         campaign_name,
         requested_budget_cents,
-      });
+      }, 'Campaign Builder API auto-launch request');
 
       try {
         // ===================================================
@@ -574,7 +589,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // ===================================================
         // STEP 2: Проверяем и останавливаем активные кампании
         // ===================================================
-        console.log('[CampaignBuilder API] Checking for active campaigns...');
+        log.info({ userAccountId: userAccount.id }, 'Checking for active campaigns...');
 
         let pausedCampaigns: any[] = [];
         try {
@@ -584,30 +599,28 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           );
 
           if (activeCampaigns.length > 0) {
-            console.log('[CampaignBuilder API] Found', activeCampaigns.length, 'active campaigns. Pausing...');
+            log.info({ count: activeCampaigns.length }, 'Found active campaigns to pause');
             
             const pauseResults = await pauseActiveCampaigns(activeCampaigns, userAccount.access_token);
             pausedCampaigns = pauseResults;
 
             const successCount = pauseResults.filter((r) => r.success).length;
-            console.log('[CampaignBuilder API] Paused campaigns:', {
-              total: activeCampaigns.length,
-              success: successCount,
-              failed: activeCampaigns.length - successCount,
-            });
+            log.info({ pauseResults }, 'Paused campaigns summary');
           } else {
-            console.log('[CampaignBuilder API] No active campaigns found');
+            log.info('No active campaigns found');
           }
         } catch (error: any) {
-          console.error('[CampaignBuilder API] Error managing active campaigns:', error);
-          // Не фейлим весь запрос, продолжаем создание новой кампании
-          // но логируем ошибку
+        log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Error managing active campaigns');
+          return reply.status(500).send({
+            success: false,
+            error: 'Failed to manage active campaigns',
+          });
         }
 
         // ===================================================
         // STEP 3: Запускаем Campaign Builder LLM
         // ===================================================
-        console.log('[CampaignBuilder API] Building campaign action...');
+        log.info({ userAccountId: userAccount.id, objective }, 'Building campaign action...');
         
         const input: CampaignBuilderInput = {
           user_account_id,
@@ -624,7 +637,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           // Применяем auto_activate из запроса
           action.params.auto_activate = auto_activate || false;
         } catch (error: any) {
-          console.error('[CampaignBuilder API] Failed to build action:', error);
+        log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Failed to build campaign action');
           return reply.status(400).send({
             success: false,
             error: error.message || 'Failed to build campaign action',
@@ -632,18 +645,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        console.log('[CampaignBuilder API] Action created:', {
-          type: action.type,
-          campaign_name: action.params.campaign_name,
-          daily_budget: action.params.daily_budget_cents ? `$${action.params.daily_budget_cents / 100}` : 'N/A',
-          creatives_count: action.params.user_creative_ids?.length || action.params.adsets?.length || 0,
-          confidence: action.confidence,
-        });
+        log.info({ action }, 'Action created from LLM');
 
         // ===================================================
         // STEP 4: Выполняем action через систему actions
         // ===================================================
-        console.log('[CampaignBuilder API] Executing action through actions system...');
+        log.info({ userAccountId: userAccount.id }, 'Executing action through actions system...');
 
         const envelope = convertActionToEnvelope(action, user_account_id, objective, userAccount.whatsapp_phone_number);
         
@@ -661,9 +668,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           }
 
           executionResult = JSON.parse(actionsResponse.body);
-          console.log('[CampaignBuilder API] Action executed:', executionResult);
+          log.info({ executionResult }, 'Action executed successfully');
         } catch (error: any) {
-          console.error('[CampaignBuilder API] Failed to execute action:', error);
+          log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Failed to execute action');
           return reply.status(500).send({
             success: false,
             error: error.message || 'Failed to execute action',
@@ -703,21 +710,19 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           attempts++;
         }
 
-        console.log('[CampaignBuilder API] Execution result:', {
-          execution_id: executionId,
-          status: execution?.status,
-          has_response: !!execution?.response_json,
-          response_length: execution?.response_json?.length,
-          attempts,
-        });
+        log.info({
+          campaignId: executionResult.campaign_id,
+          adsetId: executionResult.adset_id,
+          adsCreated: executionResult.ads?.length,
+        }, 'Execution result summary');
 
         const campaignResult = execution?.response_json?.[0] || {};
 
-        console.log('[CampaignBuilder API] Campaign created:', {
-          execution_id: executionId,
-          campaign_id: campaignResult.campaign_id,
-          adset_id: campaignResult.adset_id,
-        });
+        log.info({
+          campaignId: executionResult.campaign_id,
+          name: executionResult.action?.campaign_name,
+          status: executionResult.status,
+        }, 'Campaign created');
 
         // ===================================================
         // STEP 6: Возвращаем результат
@@ -749,7 +754,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           message: campaignResult.message || `Campaign created successfully`,
         });
       } catch (error: any) {
-        console.error('[CampaignBuilder API] Unexpected error:', error);
+        log.error({ err: error, userAccountId: user_account_id }, 'Unexpected error in auto-launch API');
         return reply.status(500).send({
           success: false,
           error: error.message || 'Internal server error',
@@ -777,10 +782,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const body = request.body as CampaignBuilderInput;
 
-      console.log('[CampaignBuilder API] Preview request:', {
-        user_account_id: body.user_account_id,
+      log.info({
+        userAccountId: body.user_account_id,
         objective: body.objective,
-      });
+      }, 'Preview request');
 
       try {
         const action = await buildCampaignAction(body);
@@ -801,7 +806,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           },
         });
       } catch (error: any) {
-        console.error('[CampaignBuilder API] Preview error:', error);
+        log.error({ err: error, userAccountId: body.user_account_id }, 'Preview error');
         return reply.status(400).send({
           success: false,
           error: error.message || 'Failed to generate preview',
@@ -842,7 +847,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         count: creatives.length,
       });
     } catch (error: any) {
-      console.error('[CampaignBuilder API] Error fetching creatives:', error);
+      log.error({ err: error, userAccountId: user_account_id }, 'Error fetching creatives for preview');
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to fetch creatives',
@@ -887,7 +892,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         },
       });
     } catch (error: any) {
-      console.error('[CampaignBuilder API] Error fetching budget:', error);
+      log.error({ err: error, userAccountId: user_account_id }, 'Error fetching budget for preview');
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to fetch budget constraints',

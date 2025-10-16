@@ -1,0 +1,34 @@
+{
+  "id": null,
+  "title": "Campaign Builder Errors",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Errors by Service",
+      "targets": [
+        {
+          "expr": "count_over_time({level=\"error\"}[5m])",
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Recent Facebook Errors",
+      "targets": [
+        {
+          "expr": "{module=\"campaignBuilderRoutes\"} |= \"fb\" | logfmt"
+        }
+      ],
+      "span": 12
+    }
+  ],
+  "schemaVersion": 38,
+  "version": 1
+}
+

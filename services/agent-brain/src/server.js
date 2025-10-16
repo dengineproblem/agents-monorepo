@@ -3,9 +3,23 @@ import 'dotenv/config';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import cron from 'node-cron';
+import { randomUUID } from 'node:crypto';
+import { logger as baseLogger } from './lib/logger.js';
 import { runScoringAgent } from './scoring.js';
+import { startLogAlertsWorker } from './lib/logAlerts.js';
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({
+  logger: baseLogger,
+  genReqId: () => randomUUID()
+});
+
+fastify.addHook('onRequest', (request, _reply, done) => {
+  request.log = baseLogger.child({ requestId: request.id });
+  done();
+});
+
+startLogAlertsWorker(fastify.log).catch((err) => fastify.log.error({ err }, 'Log alerts worker crashed'));
+
 async function responsesCreate(payload) {
   // Строго фильтруем параметры, чтобы не уехать с max_tokens/max_output_tokens
   const { model, input, reasoning, temperature, top_p, metadata } = payload || {};
@@ -246,8 +260,9 @@ fastify.post('/api/brain/test-merger', async (request, reply) => {
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const supabase = (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY)
-  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE;
+const supabase = (process.env.SUPABASE_URL && supabaseServiceKey)
+  ? createClient(process.env.SUPABASE_URL, supabaseServiceKey)
   : null;
 
 const FB_API_VERSION = 'v20.0';
@@ -2138,7 +2153,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         analysis_campaigns_count: llmInput.analysis?.campaigns?.length || 0,
         analysis_adsets_count: llmInput.analysis?.adsets?.length || 0
       }, null, 2));
-      console.log('🐛 DEBUG: LLM input written to /tmp/llm_input_debug.json');
+      fastify.log.debug('🐛 DEBUG: LLM input written to /tmp/llm_input_debug.json');
     }
 
     let actions;

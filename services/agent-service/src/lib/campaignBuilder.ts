@@ -7,6 +7,10 @@
  */
 
 import { supabase } from './supabase.js';
+import { createLogger } from './logger.js';
+import { resolveFacebookError } from './facebookErrors.js';
+
+const log = createLogger({ module: 'campaignBuilder' });
 
 // ========================================
 // TYPES
@@ -309,7 +313,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
  * Получить активные кампании пользователя из Facebook API
  */
 export async function getActiveCampaigns(adAccountId: string, accessToken: string) {
-  console.log('[CampaignBuilder] Fetching active campaigns for ad account:', adAccountId);
+  log.info({ adAccountId }, 'Fetching active campaigns for ad account');
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -326,12 +330,12 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
     const campaigns = data.data || [];
 
     // Логируем статусы всех кампаний для отладки
-    console.log('[CampaignBuilder] All campaigns statuses:', campaigns.map((c: any) => ({
+    log.debug({ campaigns: campaigns.map((c: any) => ({
       id: c.id,
       name: c.name,
       status: c.status,
       effective_status: c.effective_status
-    })));
+    })) }, 'Fetched campaigns statuses');
 
     // Фильтруем только активные (любые статусы содержащие ACTIVE)
     const activeCampaigns = campaigns.filter(
@@ -341,11 +345,11 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
       }
     );
 
-    console.log('[CampaignBuilder] Found active campaigns:', {
+    log.info({
       total: campaigns.length,
       active: activeCampaigns.length,
-      campaign_ids: activeCampaigns.map((c: any) => c.id),
-    });
+      campaignIds: activeCampaigns.map((c: any) => c.id),
+    }, 'Found active campaigns');
 
     return activeCampaigns.map((c: any) => ({
       campaign_id: c.id,
@@ -356,7 +360,7 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
       created_time: c.created_time,
     }));
   } catch (error: any) {
-    console.error('[CampaignBuilder] Error fetching campaigns:', error);
+    log.error({ err: error, adAccountId }, 'Error fetching campaigns');
     throw new Error(`Failed to fetch campaigns: ${error.message}`);
   }
 }
@@ -368,7 +372,7 @@ export async function pauseActiveCampaigns(
   campaigns: Array<{ campaign_id: string; name: string }>,
   accessToken: string
 ) {
-  console.log('[CampaignBuilder] Pausing', campaigns.length, 'active campaigns');
+  log.info({ campaignCount: campaigns.length }, 'Pausing active campaigns');
 
   const results = [];
 
@@ -394,11 +398,10 @@ export async function pauseActiveCampaigns(
 
       const data = await response.json();
 
-      console.log('[CampaignBuilder] Paused campaign:', {
-        campaign_id: campaign.campaign_id,
-        name: campaign.name,
-        success: data.success,
-      });
+      log.info({
+        campaignId: campaign.campaign_id,
+        newStatus: data.success,
+      }, 'Paused campaign');
 
       results.push({
         campaign_id: campaign.campaign_id,
@@ -406,7 +409,7 @@ export async function pauseActiveCampaigns(
         success: true,
       });
     } catch (error: any) {
-      console.error('[CampaignBuilder] Failed to pause campaign:', campaign.campaign_id, error);
+      log.error({ err: error, campaignId: campaign.campaign_id }, 'Failed to pause campaign');
       results.push({
         campaign_id: campaign.campaign_id,
         name: campaign.name,
@@ -417,11 +420,11 @@ export async function pauseActiveCampaigns(
   }
 
   const successCount = results.filter((r) => r.success).length;
-  console.log('[CampaignBuilder] Paused campaigns result:', {
+  log.info({
     total: campaigns.length,
     success: successCount,
     failed: campaigns.length - successCount,
-  });
+  }, 'Paused campaigns result');
 
   return results;
 }
@@ -434,7 +437,7 @@ export async function getAvailableCreatives(
   objective?: CampaignObjective,
   directionId?: string
 ): Promise<AvailableCreative[]> {
-  console.log('[CampaignBuilder] Fetching available creatives for user:', userAccountId, 'direction:', directionId);
+  log.info({ userAccountId, directionId }, 'Fetching available creatives for direction');
 
   let creatives: any[];
 
@@ -443,27 +446,38 @@ export async function getAvailableCreatives(
     const { data, error: creativesError } = await supabase
       .from('user_creatives')
       .select(`
-        *,
-        account_directions!inner(is_active)
+        id,
+        user_id,
+        title,
+        fb_video_id,
+        fb_creative_id_whatsapp,
+        fb_creative_id_instagram_traffic,
+        fb_creative_id_site_leads,
+        status,
+        is_active,
+        created_at,
+        updated_at,
+        direction_id,
+        media_type,
+        fb_image_hash
       `)
       .eq('user_id', userAccountId)
       .eq('direction_id', directionId)
-      .eq('is_active', true)  // ТОЛЬКО активные креативы!
       .eq('status', 'ready')
-      .eq('account_directions.is_active', true)
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (creativesError) {
-      console.error('[CampaignBuilder] Error fetching direction creatives:', creativesError);
+      log.error({ err: creativesError, userAccountId, directionId, objective }, 'Error fetching direction creatives');
       throw new Error(`Failed to fetch creatives: ${creativesError.message}`);
     }
 
     if (!data || data.length === 0) {
-      console.warn('[CampaignBuilder] No ready creatives found for direction');
+      log.warn({ userAccountId, directionId, objective }, 'No ready creatives found for direction');
       return [];
     }
 
-    console.log('[CampaignBuilder] Found', data.length, 'ready creatives for direction');
+    log.info({ userAccountId, directionId, count: data.length }, 'Found ready creatives for direction');
     creatives = data;
   } else {
     // Legacy: получаем все креативы пользователя без фильтра по направлению
@@ -476,16 +490,16 @@ export async function getAvailableCreatives(
       .order('created_at', { ascending: false });
 
     if (creativesError) {
-      console.error('[CampaignBuilder] Error fetching creatives:', creativesError);
+      log.error({ err: creativesError, userAccountId, objective }, 'Error fetching creatives');
       throw new Error(`Failed to fetch creatives: ${creativesError.message}`);
     }
 
     if (!data || data.length === 0) {
-      console.warn('[CampaignBuilder] No ready creatives found for user');
+      log.warn({ userAccountId, objective }, 'No ready creatives found for user');
       return [];
     }
 
-    console.log('[CampaignBuilder] Found', data.length, 'ready creatives (legacy)');
+    log.info({ userAccountId, objective, count: data.length }, 'Found ready creatives (legacy)');
     creatives = data;
   }
 
@@ -506,7 +520,7 @@ export async function getAvailableCreatives(
           return false;
       }
     });
-    console.log('[CampaignBuilder] Filtered to', filteredCreatives.length, 'creatives for objective:', objective);
+    log.info({ count: filteredCreatives.length, objective }, 'Filtered creatives for objective');
   }
 
   // Получаем скоры для креативов (если есть)
@@ -532,7 +546,7 @@ export async function getAvailableCreatives(
     .order('date', { ascending: false });
 
   if (scoresError) {
-    console.warn('[CampaignBuilder] Error fetching scores:', scoresError.message);
+    log.warn({ err: scoresError, userAccountId }, 'Error fetching scores');
   }
 
   // Объединяем креативы со скорами
@@ -569,7 +583,7 @@ export async function getAvailableCreatives(
     };
   });
 
-  console.log('[CampaignBuilder] Prepared', result.length, 'creatives with scoring');
+  log.info({ count: result.length }, 'Prepared creatives with scoring data');
   return result;
 }
 
@@ -580,7 +594,7 @@ export async function getBudgetConstraints(
   userAccountId: string, 
   directionId?: string
 ): Promise<BudgetConstraints> {
-  console.log('[CampaignBuilder] Fetching budget constraints for user:', userAccountId, 'direction:', directionId);
+  log.info({ userAccountId, directionId }, 'Fetching budget constraints');
 
   // Если указано направление - берём бюджет и CPL из него
   if (directionId) {
@@ -591,7 +605,7 @@ export async function getBudgetConstraints(
       .single();
 
     if (directionError || !direction) {
-      console.error('[CampaignBuilder] Error fetching direction:', directionError);
+      log.error({ err: directionError, directionId }, 'Error fetching direction budget constraints');
       throw new Error(`Failed to fetch direction: ${directionError?.message || 'not found'}`);
     }
 
@@ -606,11 +620,11 @@ export async function getBudgetConstraints(
       max_budget_per_campaign_cents: Math.min(30000, planDailyBudget),
     };
 
-    console.log('[CampaignBuilder] Direction budget constraints:', {
-      direction_id: directionId,
-      plan_daily: `$${planDailyBudget / 100}`,
-      target_cpl: `$${targetCpl / 100}`,
-    });
+    log.info({
+      directionId,
+      dailyBudgetCents: direction.daily_budget_cents,
+      targetCplCents: direction.target_cpl_cents,
+    }, 'Direction budget constraints loaded');
 
     return constraints;
   }
@@ -623,7 +637,7 @@ export async function getBudgetConstraints(
     .single();
 
   if (error || !userAccount) {
-    console.error('[CampaignBuilder] Error fetching user account:', error);
+    log.error({ err: error, userAccountId }, 'Error fetching user account for budget constraints');
     throw new Error(`Failed to fetch user account: ${error?.message || 'not found'}`);
   }
 
@@ -642,11 +656,7 @@ export async function getBudgetConstraints(
     max_budget_per_campaign_cents: Math.min(30000, planDailyBudget), // Максимум $300 или план
   };
 
-  console.log('[CampaignBuilder] Budget constraints:', {
-    plan_daily: `$${planDailyBudget / 100}`,
-    available: `$${availableBudget / 100}`,
-    target_cpl: `$${targetCpl / 100}`,
-  });
+  log.info({ constraints: constraints }, 'Budget constraints resolved');
 
   return constraints;
 }
@@ -661,15 +671,12 @@ export async function getBudgetConstraints(
 export async function buildCampaignAction(input: CampaignBuilderInput): Promise<CampaignAction> {
   const { user_account_id, objective, direction_id, campaign_name, requested_budget_cents, additional_context } = input;
 
-  console.log('[CampaignBuilder] Building campaign action:', {
-    user_account_id,
-    objective,
-    direction_id,
-    campaign_name,
-    requested_budget_cents,
-  });
+  const { data: userAccountProfile } = await supabase
+    .from('user_accounts')
+    .select('username')
+    .eq('id', user_account_id)
+    .single();
 
-  // Собираем данные
   const availableCreatives = await getAvailableCreatives(user_account_id, objective, direction_id);
   const budgetConstraints = await getBudgetConstraints(user_account_id, direction_id);
 
@@ -677,7 +684,15 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
     throw new Error('No ready creatives available for this objective');
   }
 
-  // Формируем input для LLM
+  log.info({
+    userAccountId: user_account_id,
+    userAccountName: userAccountProfile?.username,
+    objective,
+    directionId: direction_id,
+    creativeCount: availableCreatives.length,
+    requestedBudgetCents: requested_budget_cents,
+  }, 'Building campaign action');
+
   const llmInput = {
     available_creatives: availableCreatives.map((c) => ({
       user_creative_id: c.user_creative_id,
@@ -699,17 +714,16 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
       target_cpl_cents: budgetConstraints.default_cpl_target_cents,
       target_cpl_usd: budgetConstraints.default_cpl_target_cents / 100,
     },
-    objective: objectiveToLLMFormat(objective), // Конвертируем в формат для LLM
+    objective: objectiveToLLMFormat(objective),
     requested_campaign_name: campaign_name,
     requested_budget_cents,
     user_context: additional_context,
   };
 
-  console.log('[CampaignBuilder] LLM input prepared:', {
-    creatives_count: availableCreatives.length,
-    objective,
-    budget_available: `$${budgetConstraints.available_budget_cents / 100}`,
-  });
+  log.debug({
+    creativesCount: llmInput.available_creatives.length,
+    budgetConstraints: llmInput.budget_constraints,
+  }, 'LLM input prepared');
 
   // Вызов OpenAI API
   const openaiApiKey = process.env.OPENAI_API_KEY;
@@ -719,7 +733,7 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
 
   const model = process.env.CAMPAIGN_BUILDER_MODEL || 'gpt-4o';
 
-  console.log('[CampaignBuilder] Calling OpenAI API with model:', model);
+  log.info({ model }, 'Calling OpenAI API');
 
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -749,12 +763,12 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[CampaignBuilder] OpenAI API error:', response.status, errorText);
+    log.error({ status: response.status, body: errorText, resolution: resolveFacebookError({ status: response.status }) }, 'OpenAI API error');
     throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
   }
 
   const apiResponse = await response.json();
-  console.log('[CampaignBuilder] OpenAI API response received');
+  log.info('OpenAI API response received');
 
   // Извлекаем текст из Responses API
   const message = apiResponse.output?.find((o: any) => o.type === 'message');
@@ -762,11 +776,11 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
   const rawText = textContent?.text || '';
 
   if (!rawText) {
-    console.error('[CampaignBuilder] Empty response from LLM');
+    log.error('Empty response from LLM');
     throw new Error('Empty response from LLM');
   }
 
-  console.log('[CampaignBuilder] LLM response:', rawText.substring(0, 500));
+  log.debug({ preview: rawText.substring(0, 500) }, 'LLM response preview');
 
   // Парсим JSON
   let action: any;
@@ -778,31 +792,31 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
     }
     action = JSON.parse(jsonMatch[0]);
   } catch (parseError: any) {
-    console.error('[CampaignBuilder] Failed to parse LLM response:', parseError);
+    log.error({ err: parseError }, 'Failed to parse LLM response');
     throw new Error(`Failed to parse LLM response: ${parseError.message}`);
   }
 
   // Проверяем на ошибку
   if (action.error) {
-    console.warn('[CampaignBuilder] LLM returned error:', action.error);
+    log.warn({ llmError: action.error }, 'LLM returned error');
     throw new Error(`Campaign Builder: ${action.error}`);
   }
 
   // Валидация action
   if (action.type !== 'CreateCampaignWithCreative' && action.type !== 'CreateMultipleAdSets') {
-    console.error('[CampaignBuilder] Invalid action type:', action.type);
+    log.error({ action }, 'Invalid action type from LLM');
     throw new Error('LLM returned invalid action type');
   }
 
   if (!action.params || !action.params.campaign_name) {
-    console.error('[CampaignBuilder] Invalid action structure:', action);
+    log.error({ action }, 'Invalid action structure from LLM');
     throw new Error('Invalid action structure from LLM');
   }
 
   // Валидация для single adset
   if (action.type === 'CreateCampaignWithCreative') {
     if (!action.params.user_creative_ids || !action.params.objective || !action.params.daily_budget_cents) {
-      console.error('[CampaignBuilder] Invalid single adset params:', action.params);
+      log.error({ params: action.params }, 'Invalid single adset params');
       throw new Error('Invalid single adset params from LLM');
     }
     if (action.params.user_creative_ids.length === 0) {
@@ -831,23 +845,9 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
   }
 
   if (action.type === 'CreateCampaignWithCreative') {
-    console.log('[CampaignBuilder] Campaign action created (single adset):', {
-      type: action.type,
-      campaign_name: action.params.campaign_name,
-      objective: action.params.objective,
-      daily_budget: `$${action.params.daily_budget_cents! / 100}`,
-      creatives_count: action.params.user_creative_ids!.length,
-      confidence: action.confidence,
-    });
+    log.info({ adsetCount: action.params.adsets?.length || 0 }, 'Campaign action created (single adset)');
   } else {
-    console.log('[CampaignBuilder] Campaign action created (multiple adsets):', {
-      type: action.type,
-      campaign_name: action.params.campaign_name,
-      adsets_count: action.params.adsets!.length,
-      total_budget: `$${action.params.adsets!.reduce((sum: number, a: any) => sum + a.daily_budget_cents, 0) / 100}`,
-      total_creatives: action.params.adsets!.reduce((sum: number, a: any) => sum + a.user_creative_ids.length, 0),
-      confidence: action.confidence,
-    });
+    log.info({ adsetCount: action.params.adsets?.length || 0 }, 'Campaign action created (multiple adsets)');
   }
 
   return action as CampaignAction;
@@ -930,7 +930,7 @@ export async function getDefaultSettings(directionId: string) {
     .maybeSingle();
 
   if (error) {
-    console.error('[CampaignBuilder] Error fetching default settings:', error);
+    log.error({ err: error, directionId }, 'Error fetching default settings');
     return null;
   }
 
@@ -1050,12 +1050,7 @@ export async function createAdSetInCampaign(params: {
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
-  console.log('[CampaignBuilder] Creating ad set:', {
-    campaign_id: campaignId,
-    name,
-    daily_budget: dailyBudget,
-    optimization_goal,
-  });
+  log.info({ campaignId, name, dailyBudget, optimizationGoal: optimization_goal }, 'Creating ad set in campaign');
 
   // Ближайшая полночь Asia/Almaty (+05:00)
   function formatWithOffset(date: Date, offsetMin: number) {
@@ -1116,12 +1111,12 @@ export async function createAdSetInCampaign(params: {
 
   if (!response.ok) {
     const error = await response.json();
-    console.error('[CampaignBuilder] Failed to create ad set:', error);
+    log.error({ err: error, campaignId, name }, 'Failed to create ad set');
     throw new Error(`Failed to create ad set: ${JSON.stringify(error)}`);
   }
 
   const result = await response.json();
-  console.log('[CampaignBuilder] Ad set created:', result.id);
+  log.info({ adsetId: result.id }, 'Ad set created successfully');
   return result;
 }
 
@@ -1155,7 +1150,7 @@ export async function createAdsInAdSet(params: {
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
-  console.log('[CampaignBuilder] Creating', creatives.length, 'ads in ad set:', adsetId);
+  log.info({ adsetId, creativeCount: creatives.length }, 'Creating ads in ad set');
 
   const ads = [];
 
@@ -1163,7 +1158,7 @@ export async function createAdsInAdSet(params: {
     const creativeId = getCreativeIdForObjective(creative, objective);
     
     if (!creativeId) {
-      console.warn('[CampaignBuilder] No creative ID for creative:', creative.user_creative_id, 'objective:', objective);
+      log.warn({ creativeId: creative.user_creative_id, objective }, 'No Facebook creative ID for creative');
       continue;
     }
 
@@ -1185,15 +1180,15 @@ export async function createAdsInAdSet(params: {
 
       if (!response.ok) {
         const error = await response.json();
-        console.error('[CampaignBuilder] Failed to create ad:', error);
+        log.error({ err: error, creativeId: creative.user_creative_id }, 'Failed to create ad');
         continue;
       }
 
       const ad = await response.json();
-      console.log('[CampaignBuilder] Ad created:', ad.id);
+      log.info({ adId: ad.id, creativeId: creative.user_creative_id }, 'Ad created successfully');
       ads.push(ad);
     } catch (error: any) {
-      console.error('[CampaignBuilder] Error creating ad:', error);
+      log.error({ err: error, adsetId, creativeId: creative.user_creative_id }, 'Error creating ad');
     }
   }
 

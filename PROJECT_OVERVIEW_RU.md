@@ -5,7 +5,7 @@
 ### Архитектура монорепо
 - Два сервиса:
   - services/agent-brain — «мозг» (Node.js, Fastify, JS). Файл входа: src/server.js
-    - **НОВОЕ:** Scoring Agent (src/scoring.js) — предикшен и оценка рисков роста CPL
+    - Scoring Agent (src/scoring.js) — предикшен и оценка рисков роста CPL
   - services/agent-service — «исполнитель» (TypeScript, Fastify). Работает с Facebook Graph API и оркеструет workflow'ы
 - docker-compose.yml поднимает оба сервиса и прокидывает окружение
 
@@ -15,7 +15,7 @@
   - POST /api/brain/run — основной запуск анализа/плана (inputs.dispatch=false для dry-запуска)
   - POST /api/brain/cron/run-batch — ручной запуск batch-обработки всех активных пользователей
 - Ключевые функции/логика в src/server.js:
-  - **Cron-планировщик (новое!)**: автоматический запуск в 08:00 каждый день (Asia/Almaty)
+  - Cron-планировщик: автоматический запуск в 08:00 каждый день (Asia/Almaty)
     - Получает всех активных пользователей из Supabase (WHERE active = true)
     - Обрабатывает пользователей поочередно (не параллельно)
     - Для каждого: собирает данные → выполняет действия → отправляет отчет в Telegram

@@ -1,6 +1,10 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import { createLogger } from '../lib/logger.js';
+import { resolveFacebookError } from '../lib/facebookErrors.js';
+
+const log = createLogger({ module: 'directionsRoutes' });
 
 // ========================================
 // VALIDATION SCHEMAS
@@ -78,11 +82,11 @@ async function createFacebookCampaign(
 
   const campaignName = `[${directionName}] ${objectiveReadable}`;
 
-  console.log('[Directions] Creating Facebook campaign:', {
-    ad_account: normalizedAdAccountId,
-    name: campaignName,
-    objective: fbObjective,
-  });
+  log.info({
+    adAccount: normalizedAdAccountId,
+    campaignName,
+    fbObjective,
+  }, 'Creating Facebook campaign');
 
   try {
     const response = await fetch(
@@ -104,23 +108,28 @@ async function createFacebookCampaign(
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('[Directions] Facebook API error:', errorData);
+      const fbMeta = {
+        status: response.status,
+        method: 'POST',
+        path: `${normalizedAdAccountId}/campaigns`,
+        code: errorData?.error?.code,
+        error_subcode: errorData?.error?.error_subcode,
+        fbtrace_id: errorData?.error?.fbtrace_id,
+      };
+      log.error({ err: errorData, meta: fbMeta, resolution: resolveFacebookError(fbMeta), adAccount: normalizedAdAccountId }, 'Facebook API error while creating campaign');
       throw new Error(`Facebook API error: ${JSON.stringify(errorData)}`);
     }
 
     const data = await response.json();
 
-    console.log('[Directions] Facebook campaign created:', {
-      campaign_id: data.id,
-      name: campaignName,
-    });
+    log.info({ campaignId: data.id, campaignName }, 'Facebook campaign created');
 
     return {
       campaign_id: data.id,
       status: 'ACTIVE',
     };
   } catch (error: any) {
-    console.error('[Directions] Failed to create Facebook campaign:', error);
+    log.error({ err: error, adAccount: normalizedAdAccountId }, 'Failed to create Facebook campaign');
     throw new Error(`Failed to create Facebook campaign: ${error.message}`);
   }
 }
@@ -133,7 +142,7 @@ async function updateFacebookCampaignStatus(
   accessToken: string,
   status: 'ACTIVE' | 'PAUSED'
 ): Promise<void> {
-  console.log('[Directions] Updating Facebook campaign status:', { campaign_id: campaignId, status });
+  log.info({ campaignId, status }, 'Updating Facebook campaign status');
 
   try {
     const response = await fetch(
@@ -152,13 +161,21 @@ async function updateFacebookCampaignStatus(
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('[Directions] Facebook API error:', errorData);
+      const fbMeta = {
+        status: response.status,
+        method: 'POST',
+        path: campaignId,
+        code: errorData?.error?.code,
+        error_subcode: errorData?.error?.error_subcode,
+        fbtrace_id: errorData?.error?.fbtrace_id,
+      };
+      log.error({ err: errorData, meta: fbMeta, resolution: resolveFacebookError(fbMeta), campaignId }, 'Facebook API error while updating campaign status');
       throw new Error(`Facebook API error: ${JSON.stringify(errorData)}`);
     }
 
-    console.log('[Directions] Facebook campaign status updated');
+    log.info({ campaignId, status }, 'Facebook campaign status updated');
   } catch (error: any) {
-    console.error('[Directions] Failed to update Facebook campaign status:', error);
+    log.error({ err: error, campaignId }, 'Failed to update Facebook campaign status');
     throw new Error(`Failed to update Facebook campaign status: ${error.message}`);
   }
 }
@@ -170,7 +187,7 @@ async function archiveFacebookCampaign(
   campaignId: string,
   accessToken: string
 ): Promise<void> {
-  console.log('[Directions] Archiving Facebook campaign:', { campaign_id: campaignId });
+  log.info({ campaignId }, 'Archiving Facebook campaign');
 
   try {
     const response = await fetch(
@@ -189,13 +206,21 @@ async function archiveFacebookCampaign(
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('[Directions] Facebook API error:', errorData);
-      console.warn('[Directions] Failed to archive campaign, continuing...');
+      const fbMeta = {
+        status: response.status,
+        method: 'POST',
+        path: campaignId,
+        code: errorData?.error?.code,
+        error_subcode: errorData?.error?.error_subcode,
+        fbtrace_id: errorData?.error?.fbtrace_id,
+      };
+      log.error({ err: errorData, meta: fbMeta, resolution: resolveFacebookError(fbMeta), campaignId }, 'Facebook API error while archiving campaign');
+      log.warn({ campaignId }, 'Failed to archive campaign, continuing');
     } else {
-      console.log('[Directions] Facebook campaign archived');
+      log.info({ campaignId }, 'Facebook campaign archived');
     }
   } catch (error: any) {
-    console.error('[Directions] Failed to archive Facebook campaign:', error);
+    log.error({ err: error, campaignId }, 'Failed to archive Facebook campaign');
   }
 }
 
@@ -219,7 +244,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      console.log('[Directions] Fetching directions for user:', userAccountId);
+      log.info({ userAccountId }, 'Fetching directions for user');
 
       const { data: directions, error } = await supabase
         .from('account_directions')
@@ -228,7 +253,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('[Directions] Error fetching directions:', error);
+        log.error({ err: error, userAccountId }, 'Error fetching directions');
         return reply.code(500).send({
           success: false,
           error: error.message,
@@ -240,7 +265,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         directions: directions || [],
       });
     } catch (error: any) {
-      console.error('[Directions] Error:', error);
+      log.error({ err: error }, 'Error fetching directions list');
       return reply.code(500).send({
         success: false,
         error: error.message,
@@ -276,28 +301,31 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       const input: CreateDirectionInput = validationResult.data;
 
-      console.log('[Directions] Creating direction:', {
-        user_account_id: userAccountId,
-        name: input.name,
-        objective: input.objective,
-        daily_budget: `$${input.daily_budget_cents / 100}`,
-        target_cpl: `$${input.target_cpl_cents / 100}`,
-      });
-
       // Получаем user_account для доступа к Facebook API
       const { data: userAccount, error: userAccountError } = await supabase
         .from('user_accounts')
-        .select('ad_account_id, access_token')
+        .select('ad_account_id, access_token, username, institution_name, email')
         .eq('id', userAccountId)
         .single();
 
       if (userAccountError || !userAccount) {
-        console.error('[Directions] User account not found:', userAccountError);
+        log.error({ userAccountId }, 'User account not found');
         return reply.code(404).send({
           success: false,
           error: 'User account not found',
         });
       }
+
+      const userAccountName = userAccount.username || userAccount.institution_name || userAccount.email || undefined;
+
+      log.info({
+        user_account_id: userAccountId,
+        name: input.name,
+        objective: input.objective,
+        daily_budget: `$${input.daily_budget_cents / 100}`,
+        target_cpl: `$${input.target_cpl_cents / 100}`,
+        userAccountName
+      }, 'Creating direction');
 
       // Создаём Facebook Campaign
       let fbCampaign;
@@ -309,7 +337,7 @@ export async function directionsRoutes(app: FastifyInstance) {
           input.objective
         );
       } catch (fbError: any) {
-        console.error('[Directions] Failed to create Facebook campaign:', fbError);
+        log.error({ err: fbError, userAccountId }, 'Failed to create Facebook campaign during direction creation');
         return reply.code(500).send({
           success: false,
           error: 'Failed to create Facebook campaign',
@@ -317,47 +345,51 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      // Сохраняем направление в базу
-      const { data: direction, error: directionError } = await supabase
-        .from('account_directions')
-        .insert({
-          user_account_id: userAccountId,
-          name: input.name,
-          objective: input.objective,
-          daily_budget_cents: input.daily_budget_cents,
-          target_cpl_cents: input.target_cpl_cents,
-          fb_campaign_id: fbCampaign.campaign_id,
-          campaign_status: fbCampaign.status,
-          is_active: true,
-        })
-        .select()
-        .single();
+      let direction;
+      try {
+        const insertResult = await supabase
+          .from('account_directions')
+          .insert({
+            user_account_id: userAccountId,
+            name: input.name,
+            objective: input.objective,
+            daily_budget_cents: input.daily_budget_cents,
+            target_cpl_cents: input.target_cpl_cents,
+            fb_campaign_id: fbCampaign.campaign_id,
+            campaign_status: fbCampaign.status,
+            is_active: true,
+          })
+          .select()
+          .single();
 
-      if (directionError) {
-        console.error('[Directions] Error creating direction:', directionError);
-        
-        // Пытаемся откатить создание кампании в Facebook
+        direction = insertResult.data;
+        if (insertResult.error || !direction) {
+          throw insertResult.error || new Error('Direction insert failed');
+        }
+      } catch (directionError: any) {
+        log.error({ err: directionError }, 'Error creating direction');
+
         try {
           await archiveFacebookCampaign(fbCampaign.campaign_id, userAccount.access_token);
-        } catch (rollbackError) {
-          console.error('[Directions] Failed to rollback Facebook campaign:', rollbackError);
+        } catch (rollbackError: any) {
+          log.error({ err: rollbackError, fbCampaignId: fbCampaign.campaign_id }, 'Failed to roll back direction after FB error');
         }
 
         return reply.code(500).send({
           success: false,
-          error: directionError.message,
+          error: directionError?.message || 'Failed to create direction',
         });
       }
 
-      console.log('[Directions] Direction created successfully:', {
+      log.info({
         direction_id: direction.id,
         fb_campaign_id: fbCampaign.campaign_id,
-      });
+      }, 'Direction created successfully');
 
       // Создаём дефолтные настройки, если они переданы
       let defaultSettings = null;
       if (input.default_settings) {
-        console.log('[Directions] Creating default settings for direction:', direction.id);
+        log.info({ directionId: direction.id }, 'Creating default settings for direction');
         
         const { data: settings, error: settingsError } = await supabase
           .from('default_ad_settings')
@@ -379,11 +411,11 @@ export async function directionsRoutes(app: FastifyInstance) {
           .single();
 
         if (settingsError) {
-          console.error('[Directions] Error creating default settings:', settingsError);
+          log.error({ err: settingsError }, 'Error creating default settings');
           // Не падаем, просто логируем — направление уже создано
         } else {
           defaultSettings = settings;
-          console.log('[Directions] Default settings created successfully');
+          log.info('Default settings created successfully');
         }
       }
 
@@ -393,7 +425,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         default_settings: defaultSettings, // возвращаем созданные настройки (или null)
       });
     } catch (error: any) {
-      console.error('[Directions] Error:', error);
+      log.error({ err: error }, 'Error creating direction');
       return reply.code(500).send({
         success: false,
         error: error.message,
@@ -422,7 +454,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       const input: UpdateDirectionInput = validationResult.data;
 
-      console.log('[Directions] Updating direction:', { id, updates: input });
+      log.info({ id, updates: input }, 'Updating direction');
 
       // Получаем текущее направление
       const { data: existingDirection, error: fetchError } = await supabase
@@ -447,21 +479,21 @@ export async function directionsRoutes(app: FastifyInstance) {
         .single();
 
       if (updateError) {
-        console.error('[Directions] Error updating direction:', updateError);
+        log.error({ err: updateError, directionId: id }, 'Error updating direction');
         return reply.code(500).send({
           success: false,
           error: updateError.message,
         });
       }
 
-      console.log('[Directions] Direction updated successfully');
+      log.info({ directionId: id }, 'Direction updated successfully');
 
       return reply.send({
         success: true,
         direction: updatedDirection,
       });
     } catch (error: any) {
-      console.error('[Directions] Error:', error);
+      log.error({ err: error }, 'Error updating direction');
       return reply.code(500).send({
         success: false,
         error: error.message,
@@ -477,7 +509,7 @@ export async function directionsRoutes(app: FastifyInstance) {
     try {
       const { id } = request.params as { id: string };
 
-      console.log('[Directions] Deleting direction:', id);
+      log.info({ id }, 'Deleting direction');
 
       // Получаем направление с access_token
       const { data: direction, error: fetchError } = await supabase
@@ -501,7 +533,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             (direction.user_accounts as any).access_token
           );
         } catch (fbError) {
-          console.error('[Directions] Failed to archive Facebook campaign:', fbError);
+          log.error({ err: fbError, campaignId: direction.fb_campaign_id }, 'Failed to archive Facebook campaign');
           // Продолжаем удаление даже если не удалось заархивировать
         }
       }
@@ -513,20 +545,20 @@ export async function directionsRoutes(app: FastifyInstance) {
         .eq('id', id);
 
       if (deleteError) {
-        console.error('[Directions] Error deleting direction:', deleteError);
+        log.error({ err: deleteError, directionId: id }, 'Error deleting direction');
         return reply.code(500).send({
           success: false,
           error: deleteError.message,
         });
       }
 
-      console.log('[Directions] Direction deleted successfully');
+      log.info({ directionId: id }, 'Direction deleted successfully');
 
       return reply.send({
         success: true,
       });
     } catch (error: any) {
-      console.error('[Directions] Error:', error);
+      log.error({ err: error }, 'Error deleting direction');
       return reply.code(500).send({
         success: false,
         error: error.message,

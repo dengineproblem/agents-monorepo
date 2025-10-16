@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "main": "src/server.js",
-  "scripts": { 
+  "scripts": {
     "start": "node src/server.js",
     "start:analyzer": "node src/analyzerService.js"
   },
@@ -13,6 +13,7 @@
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
     "node-cron": "^3.0.3",
-    "openai": "^4.57.0"
+    "openai": "^4.57.0",
+    "pino": "^10.0.0"
   }
 }

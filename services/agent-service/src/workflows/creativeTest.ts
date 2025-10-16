@@ -1,6 +1,9 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { getDefaultAdSettingsWithFallback, convertToFacebookTargeting } from '../lib/defaultSettings.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger({ module: 'creativeTestWorkflow' });
 
 // Вспомогательные функции (как в CreateCampaignWithCreative)
 function toParams(p: Record<string, any>) {
@@ -40,11 +43,18 @@ export async function workflowStartCreativeTest(
   const { user_creative_id, user_id } = params;
   const { ad_account_id, page_id, instagram_id } = context;
 
-  console.log('[CreativeTest] Starting quick test:', {
+  const { data: userAccountProfile } = await supabase
+    .from('user_accounts')
+    .select('username')
+    .eq('id', user_id)
+    .single();
+
+  log.info({
     user_creative_id,
     user_id,
-    ad_account_id
-  });
+    ad_account_id,
+    userAccountName: userAccountProfile?.username
+  }, 'Starting quick test workflow');
 
   // ===================================================
   // STEP 1: Проверка существующих тестов
@@ -84,11 +94,12 @@ export async function workflowStartCreativeTest(
     throw new Error('Creative does not have WhatsApp creative ID');
   }
 
-  console.log('[CreativeTest] Creative found:', {
-    id: creative.id,
+  log.info({
+    creative_id: creative.id,
     title: creative.title,
-    fb_creative_id
-  });
+    status: creative.status,
+    media_type: creative.media_type
+  }, 'Creative found for test');
 
   // ===================================================
   // STEP 3: Получаем дефолтные настройки таргетинга
@@ -96,7 +107,7 @@ export async function workflowStartCreativeTest(
   const defaultSettings = await getDefaultAdSettingsWithFallback(user_id, 'whatsapp');
   const targeting = convertToFacebookTargeting(defaultSettings);
 
-  console.log('[CreativeTest] Using default targeting');
+  log.info('Using default targeting for creative test');
 
   // Нормализуем ad_account_id
   const normalized_ad_account_id = ad_account_id.startsWith('act_')
@@ -118,7 +129,7 @@ export async function workflowStartCreativeTest(
     status: 'ACTIVE'  // Сразу активируем
   };
 
-  console.log('[CreativeTest] Creating campaign:', campaign_name);
+  log.info({ campaign_name }, 'Creating campaign for creative test');
 
   const campaignResult = await graph(
     'POST',
@@ -132,7 +143,7 @@ export async function workflowStartCreativeTest(
     throw new Error('Failed to create campaign');
   }
 
-  console.log('[CreativeTest] Campaign created:', campaign_id);
+  log.info({ campaign_id }, 'Creative test campaign created');
 
   // ===================================================
   // STEP 5: Создаем AdSet ($20/день)
@@ -153,7 +164,7 @@ export async function workflowStartCreativeTest(
     }
   };
 
-  console.log('[CreativeTest] Creating adset');
+  log.info({ campaign_id }, 'Creating ad set for creative test');
 
   const adsetResult = await graph(
     'POST',
@@ -167,7 +178,7 @@ export async function workflowStartCreativeTest(
     throw new Error('Failed to create adset');
   }
 
-  console.log('[CreativeTest] AdSet created:', adset_id);
+  log.info({ adset_id }, 'Creative test ad set created');
 
   // ===================================================
   // STEP 6: Создаем Ad
@@ -179,7 +190,7 @@ export async function workflowStartCreativeTest(
     creative: { creative_id: fb_creative_id }
   };
 
-  console.log('[CreativeTest] Creating ad');
+  log.info({ adset_id }, 'Creating ad for creative test');
 
   const adResult = await graph(
     'POST',
@@ -193,7 +204,7 @@ export async function workflowStartCreativeTest(
     throw new Error('Failed to create ad');
   }
 
-  console.log('[CreativeTest] Ad created:', ad_id);
+  log.info({ ad_id }, 'Creative test ad created');
 
   // ===================================================
   // STEP 7: НЕ используем Facebook Auto Rules
@@ -202,7 +213,7 @@ export async function workflowStartCreativeTest(
   // Вместо этого используем cron который будет проверять impressions и паузить AdSet вручную
   const rule_id = null;
 
-  console.log('[CreativeTest] Skipping Auto Rule - will use cron instead');
+  log.info('Skipping auto rule (using cron instead)');
 
   // ===================================================
   // STEP 8: Сохраняем в creative_tests
@@ -226,11 +237,11 @@ export async function workflowStartCreativeTest(
     .single();
 
   if (testError) {
-    console.error('[CreativeTest] Failed to save test record:', testError);
+    log.error({ err: testError }, 'Failed to save creative test record');
     throw new Error('Failed to save test record to database');
   }
 
-  console.log('[CreativeTest] Test started successfully:', testRecord.id);
+  log.info({ testId: testRecord.id }, 'Creative test started successfully');
 
   return {
     success: true,
@@ -272,18 +283,14 @@ export async function fetchCreativeTestInsights(
 
     const url = `${ad_id}/insights`;
 
-    console.log(`[CreativeTest] Fetching insights for ad ${ad_id} with date_preset=today`);
+    log.info({ ad_id }, 'Fetching insights for creative test ad');
 
     const result = await graph('GET', url, accessToken, {
       fields,
       date_preset: 'today'
     });
     
-    console.log(`[CreativeTest] Insights response:`, {
-      hasData: !!result?.data,
-      dataLength: result?.data?.length || 0,
-      firstItem: result?.data?.[0]
-    });
+    log.debug({ ad_id, insights: result?.data }, 'Insights response for creative test');
 
   if (!result?.data || result.data.length === 0) {
     // Данных ещё нет - возвращаем нули
@@ -360,11 +367,7 @@ export async function fetchCreativeTestInsights(
     video_avg_watch_time_sec: parseFloat(videoAvgTime)
   };
   } catch (error: any) {
-    console.error('[CreativeTest] Error fetching insights:', {
-      ad_id,
-      error: error.message,
-      response: error.response?.data
-    });
+    log.error({ err: error, ad_id }, 'Error fetching insights for creative test');
     throw error;
   }
 }

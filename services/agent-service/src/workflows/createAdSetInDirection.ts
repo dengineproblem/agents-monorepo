@@ -1,5 +1,8 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
+import { createLogger } from '../lib/logger.js';
+
+const log = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
 type CreateAdSetInDirectionParams = {
   direction_id: string;
@@ -56,13 +59,21 @@ export async function workflowCreateAdSetInDirection(
 
   const { user_account_id, ad_account_id } = context;
 
-  console.log('[CreateAdSetInDirection] Starting workflow:', {
+  const { data: userAccountProfile } = await supabase
+    .from('user_accounts')
+    .select('username')
+    .eq('id', user_account_id)
+    .single();
+
+  log.info({
     direction_id,
     user_creative_ids_count: user_creative_ids.length,
     user_creative_ids,
     daily_budget_cents,
-    auto_activate
-  });
+    auto_activate,
+    userAccountId: user_account_id,
+    userAccountName: userAccountProfile?.username
+  }, 'Starting createAdSetInDirection workflow');
 
   // ===================================================
   // STEP 1: Получаем Direction из Supabase
@@ -82,13 +93,15 @@ export async function workflowCreateAdSetInDirection(
     throw new Error(`Direction ${direction_id} does not have fb_campaign_id (Campaign not created)`);
   }
 
-  console.log('[CreateAdSetInDirection] Direction found:', {
+  log.info({
     id: direction.id,
     name: direction.name,
     objective: direction.objective,
     fb_campaign_id: direction.fb_campaign_id,
-    daily_budget_cents: direction.daily_budget_cents
-  });
+    daily_budget_cents: direction.daily_budget_cents,
+    userAccountId: user_account_id,
+    userAccountName: userAccountProfile?.username
+  }, 'Direction found');
 
   // ===================================================
   // STEP 2: Получаем креативы из Supabase
@@ -107,19 +120,19 @@ export async function workflowCreateAdSetInDirection(
   // Проверяем что креативы связаны с этим direction
   const invalidCreatives = creatives.filter(c => c.direction_id !== direction_id);
   if (invalidCreatives.length > 0) {
-    console.warn('[CreateAdSetInDirection] Some creatives not linked to direction:', {
+    log.warn({
       direction_id,
       invalid_creatives: invalidCreatives.map(c => c.id)
-    });
+    }, 'Some creatives not linked to direction');
     // Не блокируем, но логируем предупреждение
   }
 
-  console.log('[CreateAdSetInDirection] Creatives found:', {
+  log.info({
     count: creatives.length,
     ids: creatives.map(c => c.id),
     titles: creatives.map(c => c.title),
     media_types: creatives.map(c => c.media_type)
-  });
+  }, 'Creatives loaded for direction');
 
   // ===================================================
   // STEP 3: Определяем fb_creative_id для КАЖДОГО креатива
@@ -175,14 +188,14 @@ export async function workflowCreateAdSetInDirection(
     };
   });
 
-  console.log('[CreateAdSetInDirection] Prepared creative data:', {
+  log.info({
     count: creative_data.length,
     creatives: creative_data.map(c => ({ 
       id: c.user_creative_id, 
       fb_id: c.fb_creative_id, 
       media_type: c.media_type 
     }))
-  });
+  }, 'Prepared creative data for ads');
 
   // Нормализуем ad_account_id
   const normalized_ad_account_id = ad_account_id.startsWith('act_')
@@ -228,7 +241,7 @@ export async function workflowCreateAdSetInDirection(
     }
   }
 
-  console.log('[CreateAdSetInDirection] Using targeting:', targeting);
+  log.debug({ targeting }, 'Using targeting for ad set');
 
   // ===================================================
   // STEP 5: Создаём AdSet в существующей Campaign
@@ -290,13 +303,16 @@ export async function workflowCreateAdSetInDirection(
     adsetBody.promoted_object = { page_id: userAccount.page_id };
   }
 
-  console.log('[CreateAdSetInDirection] Creating adset:', {
+  log.info({
     name: final_adset_name,
     campaign_id: direction.fb_campaign_id,
     daily_budget: budget,
     optimization_goal,
-    destination_type
-  });
+    destination_type,
+    userAccountId: user_account_id,
+    userAccountName: userAccountProfile?.username,
+    directionName: direction.name
+  }, 'Creating ad set for direction');
 
   const adsetResult = await graph(
     'POST',
@@ -310,7 +326,7 @@ export async function workflowCreateAdSetInDirection(
     throw new Error('Failed to create adset');
   }
 
-  console.log('[CreateAdSetInDirection] AdSet created:', adset_id);
+  log.info({ adsetId: adset_id }, 'Ad set created successfully');
 
   // ===================================================
   // STEP 6: Создаём Ads для каждого креатива
@@ -330,12 +346,12 @@ export async function workflowCreateAdSetInDirection(
       creative: { creative_id: creative.fb_creative_id }
     };
 
-    console.log('[CreateAdSetInDirection] Creating ad:', {
+    log.info({
       ad_name: creative.ad_name,
       adset_id,
       fb_creative_id: creative.fb_creative_id,
       media_type: creative.media_type
-    });
+    }, 'Creating ad in direction');
 
     const adResult = await graph(
       'POST',
@@ -349,11 +365,11 @@ export async function workflowCreateAdSetInDirection(
       throw new Error(`Failed to create ad for creative ${creative.user_creative_id}`);
     }
 
-    console.log('[CreateAdSetInDirection] Ad created:', {
+    log.info({
       ad_id,
       creative_id: creative.user_creative_id,
       media_type: creative.media_type
-    });
+    }, 'Ad created successfully');
 
     created_ads.push({
       ad_id,
@@ -363,10 +379,10 @@ export async function workflowCreateAdSetInDirection(
     });
   }
 
-  console.log('[CreateAdSetInDirection] All ads created:', {
+  log.info({
     count: created_ads.length,
     ads: created_ads
-  });
+  }, 'All ads created for direction');
 
   // ===================================================
   // STEP 7: Сохраняем связь AdSet с Direction (опционально)
@@ -381,7 +397,7 @@ export async function workflowCreateAdSetInDirection(
     });
 
   if (assetError) {
-    console.warn('[CreateAdSetInDirection] Failed to link adset to direction:', assetError.message);
+    log.warn({ err: assetError, adsetId: adset_id, direction_id }, 'Failed to link adset to direction');
     // Не блокируем, просто логируем
   }
 

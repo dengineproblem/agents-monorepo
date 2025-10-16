@@ -12,6 +12,10 @@ services:
       - AGENT_SERVICE_URL=http://agent-service:8082
       - CRON_ENABLED=true
       - CRON_SCHEDULE=0 8 * * *
+      - LOG_ALERT_TELEGRAM_BOT_TOKEN=7892027011:AAESp4liXox67dJptKeMxNZRaBx7ecK3QJg
+      - LOG_ALERT_TELEGRAM_CHAT_ID=313145981
+      - LOKI_URL=http://loki:3100
+      - LOG_ALERT_LOKI_ENVIRONMENT=development
     ports:
       - "7080:7080"
     restart: unless-stopped
@@ -39,3 +43,48 @@ services:
     ports:
       - "8082:8082"
     restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.9.1
+    command: ["-config.file=/etc/loki/local-config.yml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./logging/loki-config.yml:/etc/loki/local-config.yml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:2.9.1
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    environment:
+      - ENVIRONMENT=development
+    volumes:
+      - ./logging/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_DATAPROXY_LOGGING=true
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./logging/grafana-provisioning:/etc/grafana/provisioning
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+volumes:
+  loki-data:
+  grafana-data:

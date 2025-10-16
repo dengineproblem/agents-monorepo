@@ -150,7 +150,7 @@ async function analyzeCreativeTest(testData, transcript) {
     return analysis;
     
   } catch (parseError) {
-    console.error('Failed to parse LLM response:', jsonStr);
+    fastify.log.error({ json: jsonStr }, 'Failed to parse LLM response');
     throw new Error(`Failed to parse LLM response: ${parseError.message}`);
   }
 }
