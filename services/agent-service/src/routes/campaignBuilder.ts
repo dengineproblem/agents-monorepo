@@ -129,7 +129,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        if (!directions || directions.length === 0) {
+        const activeDirections = directions || [];
+
+        if (activeDirections.length === 0) {
           log.warn({ userAccountId: user_account_id }, 'No active directions found');
           return reply.status(400).send({
             success: false,
@@ -138,12 +140,50 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        log.info({ userAccountId: user_account_id, directionCount: directions.length }, 'Found active directions');
+        log.info({ userAccountId: user_account_id, directionCount: activeDirections.length }, 'Found active directions');
 
-        const results = [];
+        // ===================================================
+        // STEP 2: Пауза активных ad set'ов направлений (игнорируем тестовые кампании)
+        // ===================================================
+        log.info({ userAccountId: userAccount.id }, 'Pausing active ad sets for directions...');
+
+        try {
+          const activeCampaigns = await getActiveCampaigns(
+            userAccount.ad_account_id,
+            userAccount.access_token
+          );
+
+          const directionCampaigns = activeDirections
+            .map((direction: any) => direction.fb_campaign_id)
+            .filter((campaignId: string | null) => Boolean(campaignId));
+
+          const campaignIdsForDirections = new Set(directionCampaigns);
+
+          const campaignIdsToPause = activeCampaigns
+            .filter((campaign: any) => campaignIdsForDirections.has(campaign.campaign_id))
+            .map((campaign: any) => campaign.campaign_id);
+
+          if (campaignIdsToPause.length > 0) {
+            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
+            for (const campaignId of campaignIdsToPause) {
+              try {
+                await pauseAdSetsForCampaign(campaignId, userAccount.access_token);
+                log.info({ campaignId }, 'Paused ad sets for campaign');
+              } catch (pauseError: any) {
+                log.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
+              }
+            }
+          } else {
+            log.info('No campaigns found for pausing');
+          }
+        } catch (error: any) {
+          log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Error pausing ad sets');
+        }
+
+        const results: any[] = [];
 
         // Обрабатываем каждое направление
-        for (const direction of directions) {
+        for (const direction of activeDirections) {
           log.info({
             directionId: direction.id,
             directionName: direction.name,
@@ -272,38 +312,18 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           }
         }
 
-        // Проверяем, есть ли хотя бы один успешный запуск
-        const hasSuccess = results.some(r => r.status === 'success');
-        const successfulCount = results.filter(r => r.status === 'success').length;
-        const failedCount = results.filter(r => r.status === 'failed').length;
-        const skippedCount = results.filter(r => r.skipped).length;
-
-        // Формируем человекочитаемое сообщение
-        let message = '';
-        if (successfulCount > 0 && failedCount === 0 && skippedCount === 0) {
-          message = `Реклама успешно запущена по ${successfulCount} направлениям`;
-        } else if (successfulCount > 0 && (failedCount > 0 || skippedCount > 0)) {
-          message = `Реклама запущена по ${successfulCount} из ${results.length} направлений`;
-        } else if (failedCount > 0 && successfulCount === 0) {
-          message = `Не удалось запустить рекламу. Проверьте настройки направлений`;
-        } else if (skippedCount === results.length) {
-          message = `Нет готовых креативов для запуска рекламы`;
-        }
+        // ===================================================
+        // STEP 3: Возвращаем результаты
+        // ===================================================
+        log.info({ userAccountId: user_account_id, totalDirections: results.length }, 'Auto-launch-v2 completed');
 
         return reply.send({
-          success: hasSuccess,
-          message,
+          success: true,
+          message: `Processed ${results.length} direction(s)`,
           results,
-          summary: {
-            total: results.length,
-            successful: successfulCount,
-            failed: failedCount,
-            skipped: skippedCount,
-          },
         });
       } catch (error: any) {
-        const resolution = error?.fb ? resolveFacebookError(error.fb) : undefined;
-        log.error({ err: error, userAccountId: user_account_id, resolution }, 'Auto-launch error');
+        log.error({ err: error, userAccountId: user_account_id }, 'Unexpected error in auto-launch-v2');
         return reply.status(500).send({
           success: false,
           error: error.message || 'Internal server error',
@@ -593,16 +613,28 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         log.info({ userAccountId: userAccount.id }, 'Pausing active ad sets for directions...');
 
         try {
+          // Получаем все активные направления пользователя
+          const { data: activeDirections, error: directionsError } = await supabase
+            .from('account_directions')
+            .select('*')
+            .eq('user_account_id', user_account_id)
+            .eq('is_active', true);
+
+          if (directionsError) {
+            log.error({ err: directionsError, userAccountId: user_account_id }, 'Failed to fetch active directions for pausing');
+            // Продолжаем, даже если не удалось получить направления, чтобы не блокировать автозапуск
+          }
+
           const activeCampaigns = await getActiveCampaigns(
             userAccount.ad_account_id,
             userAccount.access_token
           );
 
-          const campaignIdsForDirections = new Set(
-            directions
-              .map((direction: any) => direction.fb_campaign_id)
-              .filter((campaignId: string | null) => Boolean(campaignId))
-          );
+          const directionCampaignIds = (activeDirections || [])
+            .map((direction: any) => direction.fb_campaign_id)
+            .filter((campaignId: string | null) => Boolean(campaignId));
+
+          const campaignIdsForDirections = new Set(directionCampaignIds);
 
           const campaignIdsToPause = activeCampaigns
             .filter((campaign: any) => campaignIdsForDirections.has(campaign.campaign_id))

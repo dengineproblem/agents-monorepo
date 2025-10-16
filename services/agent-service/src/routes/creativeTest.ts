@@ -329,9 +329,12 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           const accessToken = userAccount.access_token;
 
           for (const test of tests) {
+            app.log.info({ campaign_id: test.campaign_id, adset_id: test.adset_id, ad_id: test.ad_id }, 'Pausing creative test Facebook objects');
+            
             try {
               if (test.campaign_id) {
                 await graph('POST', `${test.campaign_id}`, accessToken, { status: 'PAUSED' });
+                app.log.info({ campaign_id: test.campaign_id }, 'Creative test campaign paused');
               }
             } catch (pauseError: any) {
               app.log.warn({ message: pauseError.message, fb: pauseError.fb, campaign_id: test.campaign_id }, 'Failed to pause creative test campaign');
@@ -340,6 +343,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
             try {
               if (test.adset_id) {
                 await graph('POST', `${test.adset_id}`, accessToken, { status: 'PAUSED' });
+                app.log.info({ adset_id: test.adset_id }, 'Creative test ad set paused');
               }
             } catch (pauseError: any) {
               app.log.warn({ message: pauseError.message, fb: pauseError.fb, adset_id: test.adset_id }, 'Failed to pause creative test ad set');
@@ -348,6 +352,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
             try {
               if (test.ad_id) {
                 await graph('POST', `${test.ad_id}`, accessToken, { status: 'PAUSED' });
+                app.log.info({ ad_id: test.ad_id }, 'Creative test ad paused');
               }
             } catch (pauseError: any) {
               app.log.warn({ message: pauseError.message, fb: pauseError.fb, ad_id: test.ad_id }, 'Failed to pause creative test ad');

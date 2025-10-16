@@ -10,6 +10,7 @@ import { supabase } from './supabase.js';
 import { createLogger } from './logger.js';
 import { resolveFacebookError } from './facebookErrors.js';
 
+const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const log = createLogger({ module: 'campaignBuilder' });
 
 // ========================================
@@ -319,7 +320,7 @@ export async function getActiveCampaigns(adAccountId: string, accessToken: strin
 
   try {
     const response = await fetch(
-      `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/campaigns?fields=id,name,status,effective_status,daily_budget,created_time&limit=500&access_token=${accessToken}`
+      `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/campaigns?fields=id,name,status,effective_status,daily_budget,created_time&limit=500&access_token=${accessToken}`
     );
 
     if (!response.ok) {
@@ -379,7 +380,7 @@ export async function pauseActiveCampaigns(
   for (const campaign of campaigns) {
     try {
       const response = await fetch(
-        `https://graph.facebook.com/v20.0/${campaign.campaign_id}?access_token=${accessToken}`,
+        `https://graph.facebook.com/${FB_API_VERSION}/${campaign.campaign_id}?access_token=${accessToken}`,
         {
           method: 'POST',
           headers: {
@@ -429,12 +430,15 @@ export async function pauseActiveCampaigns(
   return results;
 }
 
-export async function getActiveAdSets(campaignId: string, accessToken: string) {
+export async function getActiveAdSets(
+  campaignId: string,
+  accessToken: string
+): Promise<Array<{ adset_id: string; name?: string; status?: string; effective_status?: string; optimized_goal?: string }>> {
   log.info({ campaignId }, 'Fetching active ad sets for campaign');
 
   try {
     const response = await fetch(
-      `https://graph.facebook.com/v20.0/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`
+      `https://graph.facebook.com/${FB_API_VERSION}/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`
     );
 
     if (!response.ok) {
@@ -442,7 +446,7 @@ export async function getActiveAdSets(campaignId: string, accessToken: string) {
     }
 
     const data = await response.json();
-    const adsets = data.data || [];
+    const adsets: Array<any> = data.data || [];
 
     const activeAdsets = adsets.filter((adset: any) => {
       const statusStr = String(adset.status || adset.effective_status || '');
@@ -467,14 +471,14 @@ export async function getActiveAdSets(campaignId: string, accessToken: string) {
 export async function pauseAdSetsForCampaign(
   campaignId: string,
   accessToken: string
-) {
+): Promise<void> {
   const adsets = await getActiveAdSets(campaignId, accessToken);
   log.info({ campaignId, count: adsets.length }, 'Pausing ad sets for campaign');
 
   for (const adset of adsets) {
     try {
       const response = await fetch(
-        `https://graph.facebook.com/v20.0/${adset.adset_id}?access_token=${accessToken}`,
+        `https://graph.facebook.com/${FB_API_VERSION}/${adset.adset_id}?access_token=${accessToken}`,
         {
           method: 'POST',
           headers: {
@@ -1168,7 +1172,7 @@ export async function createAdSetInCampaign(params: {
   }
 
   const response = await fetch(
-    `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/adsets`,
+    `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/adsets`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1231,7 +1235,7 @@ export async function createAdsInAdSet(params: {
 
     try {
       const response = await fetch(
-        `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/ads`,
+        `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/ads`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
