@@ -20,6 +20,7 @@ import {
   createAdsInAdSet,
   type CampaignBuilderInput,
   type CampaignObjective,
+  pauseAdSetsForCampaign,
 } from '../lib/campaignBuilder.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
@@ -587,34 +588,41 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         // ===================================================
-        // STEP 2: Проверяем и останавливаем активные кампании
+        // STEP 2: Пауза активных ad set'ов направлений (игнорируем тестовые кампании)
         // ===================================================
-        log.info({ userAccountId: userAccount.id }, 'Checking for active campaigns...');
+        log.info({ userAccountId: userAccount.id }, 'Pausing active ad sets for directions...');
 
-        let pausedCampaigns: any[] = [];
         try {
           const activeCampaigns = await getActiveCampaigns(
             userAccount.ad_account_id,
             userAccount.access_token
           );
 
-          if (activeCampaigns.length > 0) {
-            log.info({ count: activeCampaigns.length }, 'Found active campaigns to pause');
-            
-            const pauseResults = await pauseActiveCampaigns(activeCampaigns, userAccount.access_token);
-            pausedCampaigns = pauseResults;
+          const campaignIdsForDirections = new Set(
+            directions
+              .map((direction: any) => direction.fb_campaign_id)
+              .filter((campaignId: string | null) => Boolean(campaignId))
+          );
 
-            const successCount = pauseResults.filter((r) => r.success).length;
-            log.info({ pauseResults }, 'Paused campaigns summary');
+          const campaignIdsToPause = activeCampaigns
+            .filter((campaign: any) => campaignIdsForDirections.has(campaign.campaign_id))
+            .map((campaign: any) => campaign.campaign_id);
+
+          if (campaignIdsToPause.length > 0) {
+            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
+            for (const campaignId of campaignIdsToPause) {
+              try {
+                await pauseAdSetsForCampaign(campaignId, userAccount.access_token);
+                log.info({ campaignId }, 'Paused ad sets for campaign');
+              } catch (pauseError: any) {
+                log.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
+              }
+            }
           } else {
-            log.info('No active campaigns found');
+            log.info('No campaigns found for pausing');
           }
         } catch (error: any) {
-        log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Error managing active campaigns');
-          return reply.status(500).send({
-            success: false,
-            error: 'Failed to manage active campaigns',
-          });
+          log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Error pausing ad sets');
         }
 
         // ===================================================
@@ -733,11 +741,6 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           campaign_id: campaignResult.campaign_id,
           adset_id: campaignResult.adset_id,
           ads: campaignResult.ads,
-          paused_campaigns: pausedCampaigns.filter((c) => c.success).map((c) => ({
-            campaign_id: c.campaign_id,
-            name: c.name,
-          })),
-          paused_campaigns_count: pausedCampaigns.filter((c) => c.success).length,
           action: {
             type: action.type,
             campaign_name: action.params.campaign_name,

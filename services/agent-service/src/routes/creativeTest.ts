@@ -3,6 +3,7 @@ import { z } from 'zod';
 import axios from 'axios';
 import { supabase } from '../lib/supabase.js';
 import { workflowStartCreativeTest, fetchCreativeTestInsights } from '../workflows/creativeTest.js';
+import { graph } from '../adapters/facebook.js';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
@@ -305,15 +306,61 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      const { error } = await supabase
+      const { data: tests, error } = await supabase
         .from('creative_tests')
-        .delete()
+        .select('*')
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', String(user_id));
 
       if (error) {
         throw error;
       }
+
+      if (tests && tests.length > 0) {
+        const { data: userAccount, error: userAccountError } = await supabase
+          .from('user_accounts')
+          .select('access_token')
+          .eq('id', String(user_id))
+          .single();
+
+        if (userAccountError || !userAccount?.access_token) {
+          app.log.warn({ user_id }, 'Cannot pause creative test assets: no access_token');
+        } else {
+          const accessToken = userAccount.access_token;
+
+          for (const test of tests) {
+            try {
+              if (test.campaign_id) {
+                await graph('POST', `${test.campaign_id}`, accessToken, { status: 'PAUSED' });
+              }
+            } catch (pauseError: any) {
+              app.log.warn({ message: pauseError.message, fb: pauseError.fb, campaign_id: test.campaign_id }, 'Failed to pause creative test campaign');
+            }
+
+            try {
+              if (test.adset_id) {
+                await graph('POST', `${test.adset_id}`, accessToken, { status: 'PAUSED' });
+              }
+            } catch (pauseError: any) {
+              app.log.warn({ message: pauseError.message, fb: pauseError.fb, adset_id: test.adset_id }, 'Failed to pause creative test ad set');
+            }
+
+            try {
+              if (test.ad_id) {
+                await graph('POST', `${test.ad_id}`, accessToken, { status: 'PAUSED' });
+              }
+            } catch (pauseError: any) {
+              app.log.warn({ message: pauseError.message, fb: pauseError.fb, ad_id: test.ad_id }, 'Failed to pause creative test ad');
+            }
+          }
+        }
+      }
+
+      await supabase
+        .from('creative_tests')
+        .delete()
+        .eq('user_creative_id', user_creative_id)
+        .eq('user_id', String(user_id));
 
       return reply.send({ success: true });
     } catch (error: any) {

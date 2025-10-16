@@ -429,6 +429,73 @@ export async function pauseActiveCampaigns(
   return results;
 }
 
+export async function getActiveAdSets(campaignId: string, accessToken: string) {
+  log.info({ campaignId }, 'Fetching active ad sets for campaign');
+
+  try {
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Facebook API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const adsets = data.data || [];
+
+    const activeAdsets = adsets.filter((adset: any) => {
+      const statusStr = String(adset.status || adset.effective_status || '');
+      return statusStr.includes('ACTIVE');
+    });
+
+    log.info({ count: activeAdsets.length, campaignId }, 'Found active ad sets');
+
+    return activeAdsets.map((adset: any) => ({
+      adset_id: adset.id,
+      name: adset.name,
+      status: adset.status,
+      effective_status: adset.effective_status,
+      optimized_goal: adset.optimized_goal
+    }));
+  } catch (error: any) {
+    log.error({ err: error, campaignId }, 'Error fetching ad sets');
+    throw new Error(`Failed to fetch ad sets: ${error.message}`);
+  }
+}
+
+export async function pauseAdSetsForCampaign(
+  campaignId: string,
+  accessToken: string
+) {
+  const adsets = await getActiveAdSets(campaignId, accessToken);
+  log.info({ campaignId, count: adsets.length }, 'Pausing ad sets for campaign');
+
+  for (const adset of adsets) {
+    try {
+      const response = await fetch(
+        `https://graph.facebook.com/v20.0/${adset.adset_id}?access_token=${accessToken}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ status: 'PAUSED' }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(`Facebook API error: ${JSON.stringify(errorData)}`);
+      }
+
+      log.info({ adsetId: adset.adset_id, campaignId }, 'Paused ad set');
+    } catch (error: any) {
+      log.warn({ err: error, adsetId: adset.adset_id, campaignId }, 'Failed to pause ad set');
+    }
+  }
+}
+
 /**
  * Получить доступные креативы пользователя с их скорингом
  */
