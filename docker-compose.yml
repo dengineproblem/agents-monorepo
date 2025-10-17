@@ -44,6 +44,27 @@ services:
       - "8082:8082"
     restart: unless-stopped
 
+  frontend:
+    build: ./services/frontend
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3001:80"
+    restart: unless-stopped
+    depends_on:
+      - agent-service
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - agent-service
+    restart: unless-stopped
+
   loki:
     image: grafana/loki:2.9.1
     command: ["-config.file=/etc/loki/local-config.yml"]

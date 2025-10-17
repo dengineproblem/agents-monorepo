@@ -1,0 +1,142 @@
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/AppSidebar";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { AppProvider } from "./context/AppContext";
+import Dashboard from "./pages/Dashboard";
+import Login from "./pages/Login";
+import CampaignDetail from "./pages/CampaignDetail";
+import Consultations from "./pages/Consultations";
+import NotFound from "./pages/NotFound";
+import Profile from "./pages/Profile";
+import Signup from "./pages/Signup";
+import { useEffect, useState } from "react";
+import { useTelegramWebApp } from "./hooks/useTelegramWebApp";
+import { ThemeProvider } from "next-themes";
+import ROIAnalytics from './pages/ROIAnalytics';
+import CreativeGeneration from './pages/CreativeGeneration';
+import Creatives from './pages/Creatives';
+import AdSettings from './pages/AdSettings';
+
+const queryClient = new QueryClient();
+
+const PUBLIC_PATHS = ['/login', '/signup'];
+
+const AppRoutes = () => {
+  const location = useLocation();
+  const isPublic = PUBLIC_PATHS.includes(location.pathname);
+
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
+
+  useEffect(() => {
+    // Проверяем наличие пользовательских данных в localStorage
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        if (parsedUser && parsedUser.username && parsedUser.access_token) {
+          setUser(parsedUser);
+        } else {
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      } catch (error) {
+        localStorage.removeItem('user');
+        setUser(null);
+      }
+    } else {
+      setUser(null);
+    }
+    setLoading(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          setUser(parsedUser);
+        } catch (error) {
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">Загрузка...</div>;
+  }
+
+  const isPublicRoute = isPublic;
+
+  return (
+    <>
+      {user && !isPublicRoute ? (
+        <div className="min-h-screen w-full max-w-full overflow-x-hidden">
+          <SidebarProvider>
+            <div className="w-full max-w-full">
+              <AppSidebar />
+              <div className="pb-[64px] lg:pb-0 w-full max-w-full overflow-x-hidden lg:pl-[var(--sidebar-width)]">
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/campaign/:id" element={<CampaignDetail />} />
+                  <Route path="/consultations" element={<Consultations />} />
+                  <Route path="/roi" element={<ROIAnalytics />} />
+                  <Route path="/creatives" element={<CreativeGeneration />} />
+                  <Route path="/videos" element={<Creatives />} />
+                  <Route path="/profile" element={<Profile />} />
+                  <Route path="/ad-settings" element={<AdSettings />} />
+                  <Route path="*" element={<NotFound />} />
+                </Routes>
+              </div>
+            </div>
+          </SidebarProvider>
+        </div>
+      ) : (
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      )}
+    </>
+  );
+};
+
+const App = () => {
+  const { tg, isReady } = useTelegramWebApp();
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  
+  useEffect(() => {
+    if (isReady && tg.colorScheme) {
+      setTheme(tg.colorScheme);
+    }
+  }, [isReady, tg.colorScheme]);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider attribute="class" defaultTheme={theme} enableSystem={false}>
+        <TooltipProvider>
+          <AppProvider>
+            <Sonner position="top-center" />
+            <Toaster />
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </AppProvider>
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  );
+};
+
+export default App;

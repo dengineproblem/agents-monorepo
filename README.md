@@ -15,6 +15,9 @@ docker compose up -d --build agent-brain
 ### 🎬 agent-service
 Основной сервис для работы с Facebook Ads и обработки видео креативов.
 
+### 🎨 frontend (NEW!)
+Next.js frontend приложение для управления рекламными кампаниями.
+
 **Функциональность:**
 - Управление рекламными кампаниями (pause/resume/duplicate)
 - **Обработка видео и создание креативов:**
@@ -69,12 +72,19 @@ curl http://localhost:8080/health
 
 ## Документация
 
+### Backend
 - **Общий обзор:** [PROJECT_OVERVIEW_RU.md](./PROJECT_OVERVIEW_RU.md) - Полное описание архитектуры
 - **Campaign Builder Agent:** [CAMPAIGN_BUILDER_AGENT.md](./CAMPAIGN_BUILDER_AGENT.md) - 🆕 Автоматический запуск рекламы
 - **Обработка видео:** [VIDEO_PROCESSING_API.md](./VIDEO_PROCESSING_API.md) - Полная документация API
 - **Быстрый старт видео:** [VIDEO_QUICK_START.md](./VIDEO_QUICK_START.md) - Краткий гайд
 - **Тестирование создания кампаний:** [TEST_CREATE_CAMPAIGN.md](./TEST_CREATE_CAMPAIGN.md)
 - **Scoring агент:** [SCORING_QUICK_START.md](./SCORING_QUICK_START.md)
+
+### Frontend (NEW! 🎉)
+- **⚡ Быстрый старт:** [QUICK_START_FRONTEND.md](./QUICK_START_FRONTEND.md) - Запуск за 5 минут
+- **📖 Полное руководство:** [FRONTEND_INTEGRATION_GUIDE.md](./FRONTEND_INTEGRATION_GUIDE.md) - Детальная интеграция
+- **📦 Миграция кода:** [FRONTEND_MIGRATION_STEPS.md](./FRONTEND_MIGRATION_STEPS.md) - Перенос из GitHub
+- **✅ Тестирование:** [FRONTEND_TESTING_CHECKLIST.md](./FRONTEND_TESTING_CHECKLIST.md) - Чек-лист проверок
 
 ## Тестирование
 
@@ -110,10 +120,12 @@ export PAGE_ACCESS_TOKEN='ваш_токен'
 agents-monorepo/
 ├── services/
 │   ├── agent-brain/         # Scoring сервис
-│   └── agent-service/       # Основной сервис
+│   ├── agent-service/       # Основной сервис
+│   └── frontend/            # 🆕 Next.js frontend
 ├── migrations/              # SQL миграции
-├── test-*.sh               # Тестовые скрипты
-└── *.md                    # Документация
+├── test-*.sh                # Тестовые скрипты
+├── nginx.conf               # 🆕 Nginx reverse proxy
+└── *.md                     # Документация
 ```
 
 ## Переменные окружения

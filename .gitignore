@@ -1,22 +1,25 @@
-# Dependencies
-node_modules/
-npm-debug.log*
-package-lock.json
-
 # Environment variables
 .env
 .env.*
 !.env.example
 !env.*.example
 
-# TypeScript
-*.tsbuildinfo
-dist/
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Next.js
+.next/
+out/
 build/
 
+# Docker
+.docker/
+
 # Logs
-logs/
 *.log
+logs/
 
 # OS
 .DS_Store
@@ -28,16 +31,30 @@ Thumbs.db
 *.swp
 *.swo
 
-# Docker
-.dockerignore
-
-# Временные файлы
-/tmp/
+# Temporary files
+tmp/
+temp/
 *.tmp
+
+# Backup files
 *.bak
-*.bak.*
+*.backup
+*.old
+
+# Compiled files
+dist/
+*.js.map
+*.ts.map
+
+# Frontend specific (если будет нужно)
+services/frontend/.env.local
+services/frontend/.env.production
+services/frontend/node_modules/
+services/frontend/.next/
+
+# Nginx logs
+nginx-*.log
 
 # Test files
-test-*.json
-test-*.sh
-test-*.md
+test-results/
+coverage/
