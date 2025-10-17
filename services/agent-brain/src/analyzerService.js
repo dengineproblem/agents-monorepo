@@ -210,10 +210,11 @@ async function fetchProductionMetrics(adAccountId, accessToken, fbCreativeId) {
 /**
  * Health check
  */
+// Health check (без префикса, т.к. nginx проксирует /api/analyzer/ -> /)
 fastify.get('/health', async () => ({ ok: true, service: 'creative-analyzer' }));
 
 /**
- * POST /api/analyzer/analyze-test
+ * POST /analyze-test (nginx проксирует /api/analyzer/analyze-test -> /analyze-test)
  * 
  * Анализирует результаты быстрого теста креатива
  * 
@@ -227,7 +228,7 @@ fastify.get('/health', async () => ({ ok: true, service: 'creative-analyzer' }))
  * 4. Получает анализ (score, verdict, recommendations)
  * 5. Сохраняет результаты в creative_tests
  */
-fastify.post('/api/analyzer/analyze-test', async (request, reply) => {
+fastify.post('/analyze-test', async (request, reply) => {
   try {
     const { test_id } = request.body;
     
@@ -362,11 +363,11 @@ fastify.post('/api/analyzer/analyze-test', async (request, reply) => {
 });
 
 /**
- * POST /api/analyzer/analyze-batch
+ * POST /analyze-batch (nginx проксирует /api/analyzer/analyze-batch -> /analyze-batch)
  * 
  * Анализирует несколько тестов сразу (для cron)
  */
-fastify.post('/api/analyzer/analyze-batch', async (request, reply) => {
+fastify.post('/analyze-batch', async (request, reply) => {
   try {
     // Получаем все тесты готовые к анализу
     const { data: tests, error } = await supabase
@@ -425,7 +426,7 @@ fastify.post('/api/analyzer/analyze-batch', async (request, reply) => {
 });
 
 /**
- * GET /api/analyzer/creative-analytics/:user_creative_id
+ * GET /creative-analytics/:user_creative_id (nginx проксирует /api/analyzer/creative-analytics -> /creative-analytics)
  * 
  * Получить полную аналитику креатива (тест + production)
  * 
@@ -442,7 +443,7 @@ fastify.post('/api/analyzer/analyze-batch', async (request, reply) => {
  * 5. Анализирует через LLM
  * 6. Возвращает результат с кешированием
  */
-fastify.get('/api/analyzer/creative-analytics/:user_creative_id', async (request, reply) => {
+fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
   try {
     const { user_creative_id } = request.params;
     const { user_id, force } = request.query;
