@@ -9,6 +9,7 @@
     "start:analyzer": "node src/analyzerService.js"
   },
   "dependencies": {
+    "@fastify/cors": "^9.0.1",
     "@supabase/supabase-js": "^2.46.1",
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",

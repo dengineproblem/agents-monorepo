@@ -6,11 +6,18 @@
  */
 
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { analyzeCreativeTest } from './creativeAnalyzer.js';
 
 const fastify = Fastify({ logger: true });
+
+// CORS для фронтенда
+await fastify.register(cors, {
+  origin: true, // Разрешить все origin (или укажи конкретный домен)
+  credentials: true
+});
 
 // Supabase клиент
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
