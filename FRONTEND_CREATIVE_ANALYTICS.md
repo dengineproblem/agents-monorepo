@@ -94,8 +94,10 @@ interface CreativeAnalytics {
   
   test: {
     exists: boolean;
-    status: string;
-    completed_at: string;
+    status: 'running' | 'completed' | 'cancelled';  // ⚠️ Может быть running!
+    started_at: string;
+    completed_at: string | null;
+    test_id: string;
     metrics: {
       impressions: number;
       reach: number;
@@ -760,6 +762,103 @@ A: Опционально. Можно спрятать в раскрывающи
 - **API документация:** `CREATIVE_ANALYTICS_API.md`
 - **Примеры запросов:** `CREATIVE_ANALYTICS_QUICK_START.md`
 - **TypeScript типы:** см. раздел "Структура ответа" выше
+
+---
+
+## ⚠️ Важные примечания
+
+### 1. Running тесты
+
+**Analyzer теперь возвращает информацию о запущенных тестах!**
+
+```typescript
+// Если тест запущен (status='running'):
+{
+  test: {
+    exists: true,
+    status: 'running',  // ← Тест еще не завершён!
+    started_at: '2025-10-17...',
+    completed_at: null,
+    metrics: { impressions: 0, ... }  // Могут быть нулевыми
+  },
+  data_source: 'none',  // Нет данных для анализа
+  analysis: null  // LLM не анализирует running тесты
+}
+```
+
+**UI логика:**
+- `test.status === 'running'` → показывать кнопку **"Остановить тест"**
+- `test.status === 'completed'` → показывать кнопку **"Сбросить тест"**
+
+### 2. Приоритет данных
+
+Analyzer выбирает тест по приоритету:
+1. **Running** тест (если есть)
+2. **Completed** тест (последний)
+3. Любой другой тест
+
+Это гарантирует, что пользователь всегда видит актуальную информацию.
+
+### 3. Кеширование
+
+⏱️ **TTL кеша: 10 минут**
+
+Для принудительного обновления используйте параметр `force=true`:
+```
+GET /api/analyzer/creative-analytics/:id?user_id=xxx&force=true
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Проблема: Кнопка "Остановить тест" не появляется
+
+**Причины:**
+1. Тест не найден в БД (проверьте `user_id`)
+2. Тест в статусе `completed` или `cancelled`
+3. Frontend кеширует старые данные
+
+**Решение:**
+```javascript
+// В DevTools Console:
+localStorage.clear();  // Очистить кеш
+location.reload();     // Перезагрузить
+
+// Или принудительная перезагрузка:
+// Ctrl+Shift+R (Windows/Linux) или Cmd+Shift+R (Mac)
+```
+
+### Проблема: Возвращается `test: null` для running теста
+
+**Причина:** Старая версия analyzer (до коммита `83c4c4f`)
+
+**Решение на сервере:**
+```bash
+cd /root/agents-monorepo
+git pull origin main
+docker compose build --no-cache creative-analyzer
+docker compose up -d creative-analyzer
+```
+
+### Проблема: 404 на `/api/analyzer/creative-analytics/...`
+
+**Причины:**
+1. Nginx не проксирует analyzer
+2. Analyzer не запущен
+
+**Проверка:**
+```bash
+# Проверьте статус
+docker compose ps creative-analyzer
+
+# Проверьте логи
+docker compose logs creative-analyzer --tail 50
+
+# Проверьте nginx routing
+curl http://localhost/api/analyzer/health
+# Должен вернуть: {"ok":true,"service":"creative-analyzer"}
+```
 
 ---
 
