@@ -107,11 +107,9 @@ const AppRoutes = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
-          <Route path="/auth/facebook" element={<FacebookLogin />} />
-          <Route path="/auth/callback" element={<FacebookLogin />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
-          <Route path="*" element={<Navigate to="/auth/facebook" replace />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       )}
     </>

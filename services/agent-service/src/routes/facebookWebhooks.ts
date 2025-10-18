@@ -1,11 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import crypto from 'crypto';
 import { createLogger } from '../lib/logger.js';
+import { supabase } from '../lib/supabase.js';
 
 const log = createLogger({ module: 'facebookWebhooks' });
-
-// TODO: Настроить Supabase client
-// import { supabase } from '../lib/supabase.js';
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const FB_APP_ID = process.env.FB_APP_ID || '690472653668355';
@@ -24,7 +22,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
     try {
       log.info('Exchanging Facebook OAuth code for access token');
       
-      const { code } = req.body as { code?: string };
+      const { code, username } = req.body as { code?: string; username?: string };
       
       if (!code) {
         log.error('Missing code parameter');
@@ -52,7 +50,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
       const { access_token } = tokenData;
 
-      // Get user info and permissions
+      // Get user info
       const userInfoUrl = `https://graph.facebook.com/v21.0/me?` +
         `fields=id,name,email&` +
         `access_token=${access_token}`;
@@ -75,38 +73,107 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       const adAccountsResponse = await fetch(adAccountsUrl);
       const adAccountsData = await adAccountsResponse.json();
 
-      // Get pages
+      if (!adAccountsData.data || adAccountsData.data.length === 0) {
+        log.error('No ad accounts found for user');
+        return res.status(400).send({
+          error: 'No ad accounts found. Please make sure you have access to at least one Facebook Ad Account.'
+        });
+      }
+
+      // Get pages with instagram_business_account
       const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?` +
-        `fields=id,name,access_token&` +
+        `fields=id,name,access_token,instagram_business_account&` +
         `access_token=${access_token}`;
 
       const pagesResponse = await fetch(pagesUrl);
       const pagesData = await pagesResponse.json();
 
+      if (!pagesData.data || pagesData.data.length === 0) {
+        log.error('No pages found for user');
+        return res.status(400).send({
+          error: 'No Facebook Pages found. Please create or get access to at least one Facebook Page.'
+        });
+      }
+
+      // Extract Instagram ID from first page (if available)
+      const firstPage = pagesData.data[0];
+      const instagramId = firstPage.instagram_business_account?.id || null;
+
       log.info({ 
-        facebook_user_id: userInfo.id,
-        ad_accounts_count: adAccountsData.data?.length || 0,
-        pages_count: pagesData.data?.length || 0
+        fb_user_id: userInfo.id,
+        fb_user_name: userInfo.name,
+        ad_accounts_count: adAccountsData.data.length,
+        pages_count: pagesData.data.length,
+        instagram_id: instagramId
       }, 'Successfully exchanged code for token');
 
-      // TODO: Сохранить данные в Supabase
-      /*
-      const { error: dbError } = await supabase
-        .from('user_accounts')
-        .upsert({
-          facebook_user_id: userInfo.id,
-          name: userInfo.name,
-          email: userInfo.email,
+      // Save to Supabase
+      try {
+        // Find user by username
+        if (!username) {
+          log.error('No username provided');
+          return res.status(400).send({
+            error: 'Username is required. Please make sure you are logged in.'
+          });
+        }
+
+        const { data: existingUser, error: findError } = await supabase
+          .from('user_accounts')
+          .select('id')
+          .eq('username', username)
+          .maybeSingle();
+
+        if (findError) {
+          log.error({ error: findError, username }, 'Error finding user by username');
+          return res.status(500).send({
+            error: 'Database error while finding user'
+          });
+        }
+
+        if (!existingUser) {
+          log.error({ username }, 'User not found in database');
+          return res.status(400).send({
+            error: 'User not found. Please make sure you are logged in.'
+          });
+        }
+
+        const userId = existingUser.id;
+
+        // Update user with Facebook data
+        // Only update fields that exist in user_accounts table
+        const updateData: any = {
           access_token: access_token,
-          ad_accounts: adAccountsData.data || [],
-          pages: pagesData.data || [],
+          ad_account_id: adAccountsData.data[0].id,
+          page_id: firstPage.id,
+          instagram_id: instagramId,
           updated_at: new Date().toISOString()
+        };
+
+        // Add optional fields if they exist in the table
+        if (firstPage.name) {
+          updateData.page_name = firstPage.name;
+        }
+
+        const { error: updateError } = await supabase
+          .from('user_accounts')
+          .update(updateData)
+          .eq('id', userId);
+
+        if (updateError) {
+          log.error({ error: updateError, userId }, 'Failed to update user data in database');
+          return res.status(500).send({
+            error: 'Failed to save Facebook connection'
+          });
+        }
+
+        log.info({ userId, username, fb_user_id: userInfo.id }, 'Successfully saved Facebook data to database');
+
+      } catch (dbError) {
+        log.error({ error: dbError }, 'Database operation failed');
+        return res.status(500).send({
+          error: 'Failed to save data to database'
         });
-      
-      if (dbError) {
-        log.error({ error: dbError }, 'Failed to save user data to database');
       }
-      */
 
       return res.send({
         success: true,
@@ -116,8 +183,13 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           email: userInfo.email
         },
         access_token: access_token,
-        ad_accounts: adAccountsData.data || [],
-        pages: pagesData.data || []
+        ad_accounts: adAccountsData.data,
+        pages: pagesData.data.map((page: any) => ({
+          id: page.id,
+          name: page.name,
+          instagram_id: page.instagram_business_account?.id || null
+        })),
+        instagram_id: instagramId
       });
 
     } catch (error) {
