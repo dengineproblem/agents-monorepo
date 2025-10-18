@@ -8,8 +8,125 @@ const log = createLogger({ module: 'facebookWebhooks' });
 // import { supabase } from '../lib/supabase.js';
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
+const FB_APP_ID = process.env.FB_APP_ID || '690472653668355';
+const FB_REDIRECT_URI = process.env.FB_REDIRECT_URI || 'https://performanteaiagency.com/auth/callback';
 
 export default async function facebookWebhooks(app: FastifyInstance) {
+  
+  /**
+   * Facebook OAuth - Exchange code for access token
+   * 
+   * После того как пользователь авторизуется через Facebook,
+   * Facebook редиректит его обратно с code в URL.
+   * Этот endpoint обменивает code на access_token.
+   */
+  app.post('/facebook/oauth/token', async (req, res) => {
+    try {
+      log.info('Exchanging Facebook OAuth code for access token');
+      
+      const { code } = req.body as { code?: string };
+      
+      if (!code) {
+        log.error('Missing code parameter');
+        return res.status(400).send({ 
+          error: 'Missing code parameter' 
+        });
+      }
+
+      // Exchange code for access token
+      const tokenUrl = `https://graph.facebook.com/v21.0/oauth/access_token?` +
+        `client_id=${FB_APP_ID}&` +
+        `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
+        `client_secret=${FB_APP_SECRET}&` +
+        `code=${code}`;
+
+      const tokenResponse = await fetch(tokenUrl);
+      const tokenData = await tokenResponse.json();
+
+      if (!tokenResponse.ok || tokenData.error) {
+        log.error({ error: tokenData.error }, 'Failed to exchange code for token');
+        return res.status(400).send({
+          error: tokenData.error?.message || 'Failed to get access token'
+        });
+      }
+
+      const { access_token } = tokenData;
+
+      // Get user info and permissions
+      const userInfoUrl = `https://graph.facebook.com/v21.0/me?` +
+        `fields=id,name,email&` +
+        `access_token=${access_token}`;
+
+      const userInfoResponse = await fetch(userInfoUrl);
+      const userInfo = await userInfoResponse.json();
+
+      if (!userInfoResponse.ok || userInfo.error) {
+        log.error({ error: userInfo.error }, 'Failed to get user info');
+        return res.status(400).send({
+          error: userInfo.error?.message || 'Failed to get user info'
+        });
+      }
+
+      // Get ad accounts
+      const adAccountsUrl = `https://graph.facebook.com/v21.0/me/adaccounts?` +
+        `fields=id,name,account_status&` +
+        `access_token=${access_token}`;
+
+      const adAccountsResponse = await fetch(adAccountsUrl);
+      const adAccountsData = await adAccountsResponse.json();
+
+      // Get pages
+      const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?` +
+        `fields=id,name,access_token&` +
+        `access_token=${access_token}`;
+
+      const pagesResponse = await fetch(pagesUrl);
+      const pagesData = await pagesResponse.json();
+
+      log.info({ 
+        facebook_user_id: userInfo.id,
+        ad_accounts_count: adAccountsData.data?.length || 0,
+        pages_count: pagesData.data?.length || 0
+      }, 'Successfully exchanged code for token');
+
+      // TODO: Сохранить данные в Supabase
+      /*
+      const { error: dbError } = await supabase
+        .from('user_accounts')
+        .upsert({
+          facebook_user_id: userInfo.id,
+          name: userInfo.name,
+          email: userInfo.email,
+          access_token: access_token,
+          ad_accounts: adAccountsData.data || [],
+          pages: pagesData.data || [],
+          updated_at: new Date().toISOString()
+        });
+      
+      if (dbError) {
+        log.error({ error: dbError }, 'Failed to save user data to database');
+      }
+      */
+
+      return res.send({
+        success: true,
+        user: {
+          id: userInfo.id,
+          name: userInfo.name,
+          email: userInfo.email
+        },
+        access_token: access_token,
+        ad_accounts: adAccountsData.data || [],
+        pages: pagesData.data || []
+      });
+
+    } catch (error) {
+      log.error({ error }, 'Error exchanging OAuth code');
+      return res.status(500).send({ 
+        error: 'Internal server error' 
+      });
+    }
+  });
   
   /**
    * Facebook Data Deletion Callback - GET (для проверки Facebook)

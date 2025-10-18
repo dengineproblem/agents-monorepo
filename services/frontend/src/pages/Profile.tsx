@@ -74,6 +74,69 @@ const Profile: React.FC = () => {
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [isSavingOpenaiKey, setIsSavingOpenaiKey] = useState(false);
 
+  // Handle Facebook OAuth callback
+  useEffect(() => {
+    const handleFacebookCallback = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      const error = params.get('error');
+
+      if (error) {
+        console.error('Facebook OAuth error:', error);
+        toast.error(`Facebook connection failed: ${error}`);
+        window.history.replaceState({}, document.title, '/profile');
+        return;
+      }
+
+      if (code) {
+        try {
+          toast.info('Подключаем Facebook...');
+
+          const API_URL = 'https://performanteaiagency.com/api';
+          const response = await fetch(`${API_URL}/facebook/oauth/token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              code,
+              username: user?.username
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to connect Facebook');
+          }
+
+          // Update localStorage
+          const updatedUser = {
+            ...user,
+            facebook_user_id: data.user.id,
+            access_token: data.access_token,
+            ad_account_id: data.ad_accounts[0]?.id,
+            ad_accounts: data.ad_accounts,
+            page_id: data.pages[0]?.id,
+            pages: data.pages,
+          };
+
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+          toast.success('Facebook успешно подключен!');
+
+          // Clear URL params and reload
+          window.history.replaceState({}, document.title, '/profile');
+          window.location.reload();
+
+        } catch (error) {
+          console.error('Error connecting Facebook:', error);
+          toast.error(error instanceof Error ? error.message : 'Failed to connect Facebook');
+          window.history.replaceState({}, document.title, '/profile');
+        }
+      }
+    };
+
+    handleFacebookCallback();
+  }, []);
+
   useEffect(() => {
     const loadUserData = async () => {
       if (!user?.id) return;
@@ -633,6 +696,31 @@ const Profile: React.FC = () => {
           <ConnectionsGrid
             items={[
               {
+                id: 'facebook',
+                title: 'Facebook Ads',
+                connected: Boolean(user?.access_token && user?.ad_account_id),
+                onClick: () => {
+                  if (user?.access_token && user?.ad_account_id) {
+                    if (confirm('Вы уверены, что хотите отключить Facebook Ads?')) {
+                      handleDisconnectInstagram(); // Reuse the same function as it clears access_token
+                    }
+                  } else {
+                    // Redirect to Facebook OAuth
+                    const FB_APP_ID = '690472653668355';
+                    const FB_REDIRECT_URI = 'https://performanteaiagency.com/profile';
+                    const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads';
+                    const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?` +
+                      `client_id=${FB_APP_ID}&` +
+                      `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
+                      `scope=${FB_SCOPE}&` +
+                      `response_type=code&` +
+                      `state=${Date.now()}`;
+                    window.location.href = authUrl;
+                  }
+                },
+                disabled: false,
+              },
+              {
                 id: 'instagram',
                 title: 'Instagram',
                 connected: Boolean(user?.access_token && user?.page_id),
@@ -640,7 +728,7 @@ const Profile: React.FC = () => {
                   if (user?.access_token && user?.page_id) {
                     handleDisconnectInstagram();
                   } else {
-                    toast.info('Instagram подключается через Facebook API. Обратитесь в поддержку для настройки.');
+                    toast.info('Instagram подключается через Facebook API. Используйте подключение Facebook Ads выше.');
                   }
                 },
               },

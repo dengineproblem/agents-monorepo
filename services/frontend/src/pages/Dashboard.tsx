@@ -277,11 +277,26 @@ const Dashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Переключатель платформы и подключение TikTok */}
+        {/* Уведомления о подключении Facebook и TikTok */}
         {(() => {
           const stored = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
           const u = stored ? JSON.parse(stored) : null;
+          const isFbConnected = !!u?.access_token && !!u?.ad_account_id;
           const isTtConnected = tiktokConnected || !!u?.tiktok_business_id;
+          
+          const openFacebookAuth = () => {
+            const FB_APP_ID = '690472653668355';
+            const FB_REDIRECT_URI = 'https://performanteaiagency.com/profile';
+            const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads';
+            const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?` +
+              `client_id=${FB_APP_ID}&` +
+              `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
+              `scope=${FB_SCOPE}&` +
+              `response_type=code&` +
+              `state=${Date.now()}`;
+            window.location.href = authUrl;
+          };
+          
           const openTikTokAuth = () => {
             const uid = u?.id || '';
             const statePayload = { user_id: uid, ts: Date.now() };
@@ -340,6 +355,22 @@ const Dashboard: React.FC = () => {
                       </Button>
                     </div>
                   </div>
+                  {platform === 'instagram' && !isFbConnected && (
+                    <div className="p-3 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-transparent dark:to-transparent text-blue-700 dark:text-foreground flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-1">
+                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                        <span className="text-sm">Для просмотра статистики и управления кампаниями требуется подключение Facebook Ads.</span>
+                      </div>
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={openFacebookAuth}
+                        className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300 shadow-sm flex-shrink-0 transition-all duration-200"
+                      >
+                        Подключить
+                      </Button>
+                    </div>
+                  )}
                   {platform === 'tiktok' && !isTtConnected && (
                     <div className="p-3 rounded-lg border bg-gradient-to-r from-gray-50 to-slate-50 dark:from-transparent dark:to-transparent text-gray-700 dark:text-foreground flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2 flex-1">
