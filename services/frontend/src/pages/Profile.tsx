@@ -59,6 +59,8 @@ const Profile: React.FC = () => {
   const [facebookData, setFacebookData] = useState<any>(null);
   const [selectedAdAccount, setSelectedAdAccount] = useState<string>('');
   const [selectedPage, setSelectedPage] = useState<string>('');
+  const [searchAdAccount, setSearchAdAccount] = useState<string>('');
+  const [searchPage, setSearchPage] = useState<string>('');
   
   // Смена пароля
   const [oldPassword, setOldPassword] = useState('');
@@ -1128,52 +1130,105 @@ const Profile: React.FC = () => {
 
         {/* Диалог выбора Ad Account и Page */}
         <Dialog open={facebookSelectionModal} onOpenChange={setFacebookSelectionModal}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Выберите рекламный кабинет и страницу</DialogTitle>
               <DialogDescription>
-                Выберите рекламный кабинет и Facebook страницу для подключения
+                Выберите рекламный кабинет и Facebook страницу для подключения. 
+                Найдено: {facebookData?.ad_accounts.length} рекламных кабинетов и {facebookData?.pages.length} страниц
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
                 <Label>Рекламный кабинет</Label>
+                <Input
+                  placeholder="Поиск по названию..."
+                  value={searchAdAccount}
+                  onChange={(e) => setSearchAdAccount(e.target.value)}
+                  className="mt-1 mb-2"
+                />
                 <select
-                  className="w-full mt-1 p-2 border rounded"
+                  className="w-full p-2 border rounded max-h-40 overflow-y-auto"
+                  size={5}
                   value={selectedAdAccount}
                   onChange={(e) => setSelectedAdAccount(e.target.value)}
                 >
-                  {facebookData?.ad_accounts.map((account: any) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name} ({account.id})
-                    </option>
-                  ))}
+                  {facebookData?.ad_accounts
+                    .filter((account: any) => 
+                      searchAdAccount === '' || 
+                      account.name.toLowerCase().includes(searchAdAccount.toLowerCase()) ||
+                      account.id.includes(searchAdAccount)
+                    )
+                    .map((account: any) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} ({account.id})
+                      </option>
+                    ))
+                  }
                 </select>
+                <div className="text-xs text-gray-500 mt-1">
+                  Показано: {facebookData?.ad_accounts.filter((account: any) => 
+                    searchAdAccount === '' || 
+                    account.name.toLowerCase().includes(searchAdAccount.toLowerCase()) ||
+                    account.id.includes(searchAdAccount)
+                  ).length} из {facebookData?.ad_accounts.length}
+                </div>
               </div>
               <div>
                 <Label>Facebook Page</Label>
+                <Input
+                  placeholder="Поиск по названию..."
+                  value={searchPage}
+                  onChange={(e) => setSearchPage(e.target.value)}
+                  className="mt-1 mb-2"
+                />
                 <select
-                  className="w-full mt-1 p-2 border rounded"
+                  className="w-full p-2 border rounded max-h-40 overflow-y-auto"
+                  size={5}
                   value={selectedPage}
                   onChange={(e) => setSelectedPage(e.target.value)}
                 >
-                  {facebookData?.pages.map((page: any) => (
-                    <option key={page.id} value={page.id}>
-                      {page.name} ({page.id})
-                      {page.instagram_id && ` - IG: ${page.instagram_id}`}
-                    </option>
-                  ))}
+                  {facebookData?.pages
+                    .filter((page: any) => 
+                      searchPage === '' || 
+                      page.name.toLowerCase().includes(searchPage.toLowerCase()) ||
+                      page.id.includes(searchPage)
+                    )
+                    .map((page: any) => (
+                      <option key={page.id} value={page.id}>
+                        {page.name} ({page.id})
+                        {page.instagram_id && ` ✓ IG`}
+                      </option>
+                    ))
+                  }
                 </select>
+                <div className="text-xs text-gray-500 mt-1">
+                  Показано: {facebookData?.pages.filter((page: any) => 
+                    searchPage === '' || 
+                    page.name.toLowerCase().includes(searchPage.toLowerCase()) ||
+                    page.id.includes(searchPage)
+                  ).length} из {facebookData?.pages.length}
+                </div>
               </div>
               {facebookData?.pages.find((p: any) => p.id === selectedPage)?.instagram_id && (
-                <div className="text-sm text-green-600">
-                  ✓ Instagram Business Account подключен
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-2 text-green-700">
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span className="font-medium">Instagram Business Account подключен</span>
+                  </div>
+                  <div className="text-sm text-green-600 mt-1">
+                    ID: {facebookData?.pages.find((p: any) => p.id === selectedPage)?.instagram_id}
+                  </div>
                 </div>
               )}
               <div className="flex justify-end gap-2">
                 <Button 
                   variant="outline" 
-                  onClick={() => setFacebookSelectionModal(false)}
+                  onClick={() => {
+                    setFacebookSelectionModal(false);
+                    setSearchAdAccount('');
+                    setSearchPage('');
+                  }}
                 >
                   Отмена
                 </Button>
