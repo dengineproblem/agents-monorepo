@@ -96,27 +96,19 @@ const Login = () => {
         return;
       }
       
-      // Проверка наличия необходимых данных для Facebook API
-      if (!user.access_token || !user.ad_account_id || !user.page_id) {
-        console.error('В учетной записи отсутствуют данные для Facebook API:', {
-          hasToken: !!user.access_token,
-          hasAdAccountId: !!user.ad_account_id,
-          hasPageId: !!user.page_id
-        });
-        toast.error('В профиле пользователя отсутствуют необходимые данные для API');
-        setIsLoading(false);
-        return;
-      }
+      // Facebook данные теперь опциональны - подключаются в Profile
+      console.log('Аутентификация пользователя успешна!', {
+        username: user.username,
+        hasFacebookData: !!(user.access_token && user.ad_account_id && user.page_id)
+      });
       
-      console.log('Аутентификация пользователя успешна!');
-      
-      // Создаем данные сессии
+      // Создаем данные сессии (Facebook данные опциональны)
       const sessionUser = {
         id: user.id,
         username: user.username,
-        ad_account_id: user.ad_account_id,
-        page_id: user.page_id,
-        access_token: user.access_token
+        ad_account_id: user.ad_account_id || '',
+        page_id: user.page_id || '',
+        access_token: user.access_token || ''
       };
       
       // Подробно логируем данные, сохраняемые в localStorage
@@ -125,7 +117,7 @@ const Login = () => {
         username: sessionUser.username,
         ad_account_id: sessionUser.ad_account_id,
         page_id: sessionUser.page_id,
-        access_token_length: sessionUser.access_token.length
+        access_token_length: sessionUser.access_token?.length || 0
       });
       
       // Сохраняем данные в localStorage
