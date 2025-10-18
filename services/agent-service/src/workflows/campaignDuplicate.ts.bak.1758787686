@@ -1,0 +1,131 @@
+import { graph } from '../adapters/facebook.js';
+import { fb } from '../adapters/facebook.js';
+
+type CampaignInfo = { id:string; account_id:string; name:string; objective?:string; special_ad_categories?:string[]; daily_budget?:any; lifetime_budget?:any; };
+type AdsetInfo = {
+  id:string; name:string; status?:string;
+  daily_budget?:any; lifetime_budget?:any;
+  start_time?:string|null; end_time?:string|null;
+  bid_strategy?:string|null; bid_amount?:any;
+  optimization_goal?:string|null; billing_event?:string|null;
+  promoted_object?: any | null;
+  targeting?: any | null;
+  destination_type?: string | null;
+};
+type AdInfo = { id:string; name:string; status?:string; creative?: any; url_parameters?:string|null };
+type DupParams = { campaign_id:string; name?:string; page_id?:string };
+
+function toParams(p:Record<string,any>){const o:Record<string,any>={};for(const[k,v]of Object.entries(p)) if(v!==undefined&&v!==null) o[k]=typeof v==='object'?JSON.stringify(v):v;return o;}
+function withStep(step:string,payload:Record<string,any>,fn:()=>Promise<any>){return fn().catch((e:any)=>{e.step=step;e.payload=payload;throw e;});}
+
+async function fetchCampaign(id:string,t:string){const fields='id,account_id,name,objective,special_ad_categories,daily_budget,lifetime_budget';return await withStep('fetch_campaign',{id},()=>graph('GET',`${id}`,t,{fields}));}
+async function fetchAdsets(cid:string,t:string){const fields='id,name,status,daily_budget,lifetime_budget,start_time,end_time,bid_strategy,bid_amount,optimization_goal,billing_event,promoted_object,targeting,destination_type';const r=await withStep('fetch_adsets',{cid,fields,limit:200},()=>graph('GET',`${cid}/adsets`,t,{fields,limit:200}));return (r?.data||[]) as AdsetInfo[];}
+async function fetchAds(aid:string,t:string){const fields='id,name,status,creative{object_story_spec{page_id}},url_parameters';const r=await withStep('fetch_ads',{aid,fields,limit:200},()=>graph('GET',`${aid}/ads`,t,{fields,limit:200}));return (r?.data||[]) as AdInfo[];}
+
+function extractPageIdFromAds(ads:AdInfo[]):string|undefined{for(const a of ads){const pid=a?.creative?.object_story_spec?.page_id;if(pid)return String(pid);}return undefined;}
+function pickGeo(targeting:any){const g=targeting?.geo_locations||{};const out:any={};if(Array.isArray(g.cities)&&g.cities.length){out.cities=g.cities.map((c:any)=>({key:String(c.key),radius:c.radius||c.radius_km||10,distance_unit:c.distance_unit||'kilometer'}));}if(Array.isArray(g.countries)&&g.countries.length){out.countries=g.countries;}if(Array.isArray(g.regions)&&g.regions.length){out.regions=g.regions.map((r:any)=>({key:String(r.key)}));}if(Array.isArray(g.location_types))out.location_types=g.location_types;return {geo_locations:out};}
+function hasGeo(targeting:any){const g=targeting?.geo_locations||{};return Boolean((g.countries&&g.countries.length)||(g.cities&&g.cities.length)||(g.regions&&g.regions.length));}
+
+async function createCampaignFromSource(src:CampaignInfo,t:string):Promise<string>{
+  // Рабочая цель для WA — OUTCOME_ENGAGEMENT
+  const body={name:src.name,objective:'OUTCOME_ENGAGEMENT',special_ad_categories:src.special_ad_categories||[],status:'PAUSED',daily_budget: src.daily_budget || undefined};
+  const r=await withStep('create_campaign',{path:`act_${src.account_id}/campaigns`,body},()=>graph('POST',`act_${src.account_id}/campaigns`,t,toParams(body)));
+  const id=r?.id; if(!id) throw Object.assign(new Error('create_campaign_failed'),{step:'create_campaign_no_id'}); return String(id);
+}
+
+async function createAdsetFromSource(
+  accountId:string,
+  newCampaignId:string,          // куда создаём
+  src:AdsetInfo,                 // исходный ad set
+  isCbo:boolean,
+  pageIdFallback:string|undefined,
+  t:string,
+  validateOnCampaignId:string    // ВАЛИДАЦИЮ делаем на исходной кампании
+):Promise<string>{
+  const isWA=(src.destination_type==='WHATSAPP')||(src.optimization_goal==='CONVERSATIONS');
+
+  // Требуем ОРИГИНАЛЬНЫЕ page_id и whatsapp_phone_number
+  const pageId=src?.promoted_object?.page_id as (string|undefined);
+  const waPhone=src?.promoted_object?.whatsapp_phone_number as (string|undefined);
+  if(isWA && (!pageId || !waPhone)){
+    const ads=await fetchAds(src.id,t);
+    const pageFromAds=extractPageIdFromAds(ads)||pageIdFallback;
+    if(!pageId || !pageFromAds || !waPhone) throw Object.assign(new Error('missing_promoted_object.whatsapp_phone_number'),{step:'create_adset_missing_wa_phone',payload:{srcId:src.id}});
+  }
+
+  if(!src.targeting || !hasGeo(src.targeting)) throw Object.assign(new Error('missing_targeting.countries'),{step:'create_adset_missing_countries',payload:{srcId:src.id}});
+
+  // Бюджет
+  const budget:any={};
+  if(!isCbo){
+    if(src.daily_budget) budget.daily_budget=src.daily_budget;
+    else if(src.lifetime_budget){budget.lifetime_budget=src.lifetime_budget;if(src.start_time)budget.start_time=src.start_time;if(src.end_time)budget.end_time=src.end_time;}
+    else throw Object.assign(new Error('source_adset_has_no_budget'),{step:'create_adset_invalid_budget',payload:{srcId:src.id}});
+  }
+
+  // Ставочная стратегия
+  const bs=(src.bid_strategy||undefined) as (string|undefined);
+  const ba=(src.bid_amount!==undefined&&src.bid_amount!==null&&src.bid_amount!=='')?Number(src.bid_amount):undefined;
+  const bid:any={};
+  if(bs==='LOWEST_COST_WITHOUT_CAP'){bid.bid_strategy=bs;}
+  else if((bs==='LOWEST_COST_WITH_BID_CAP'||bs==='COST_CAP')&&typeof ba==='number'){bid.bid_strategy=bs;bid.bid_amount=ba;}
+  else if(isWA){ bid.bid_strategy='LOWEST_COST_WITH_BID_CAP'; bid.bid_amount=100; }
+
+  // Минимальный WA payload (как в рабочем примере)
+  const base:any={
+    name:src.name||'New Adset',
+    status:'PAUSED',
+    billing_event:'IMPRESSIONS',
+    optimization_goal:'CONVERSATIONS',
+    destination_type: 'WHATSAPP', messaging_app: 'WHATSAPP',
+    promoted_object:{page_id:String(src.promoted_object?.page_id),whatsapp_phone_number:String(src.promoted_object?.whatsapp_phone_number)},
+    targeting:pickGeo(src.targeting),
+    ...budget,
+    ...bid
+  };
+
+
+  // 2) create — УЖЕ НА НОВОЙ КАМПАНИИ
+  const createBody={...base,campaign_id:newCampaignId};
+  const r=await withStep('create_adset',{payload:createBody},()=>graph('POST',`act_${accountId}/adsets`,t,toParams(createBody)));
+  const id=r?.id; if(!id) throw Object.assign(new Error('create_adset_failed'),{step:'create_adset_no_id'}); return String(id);
+}
+
+async function createAdFromSource(accountId:string,dstAdsetId:string,src:AdInfo,t:string):Promise<string>{
+  const body:any={name:src.name||'New Ad',adset_id:dstAdsetId,status:'PAUSED',creative:src.creative?.id?{creative_id:src.creative.id}:(src.creative||undefined),url_parameters:src.url_parameters||undefined};
+  const r=await withStep('create_ad',{payload:body},()=>graph('POST',`act_${accountId}/ads`,t,toParams(body)));
+  const id=r?.id; if(!id) throw Object.assign(new Error('create_ad_failed'),{step:'create_ad_no_id'}); return String(id);
+}
+
+async function deleteCampaign(_:string,_t:string){ /* больше не удаляем автоматически при ошибке в validate */ }
+
+export async function workflowDuplicateAndPauseOriginal(p:DupParams,t:string){
+  const src=await fetchCampaign(p.campaign_id,t); const adsets=await fetchAdsets(p.campaign_id,t);
+  const isCbo=Boolean(src.daily_budget||src.lifetime_budget)||adsets.every(a=>!a.daily_budget&&!a.lifetime_budget);
+  const newCampaignId=await createCampaignFromSource({...src,name:p.name||`${src.name} (copy)`},t);
+  try{
+    for(const a of adsets){
+      const newAdsetId=await createAdsetFromSource(src.account_id,newCampaignId,a,isCbo,p.page_id,t,p.campaign_id);
+      const ads=await fetchAds(a.id,t);
+      for(const ad of ads) await createAdFromSource(src.account_id,newAdsetId,ad,t);
+    }
+    await withStep('pause_original',{campaign_id:p.campaign_id},()=>fb.pauseCampaign(p.campaign_id,t));
+    await withStep('activate_duplicate',{new_campaign_id:newCampaignId},()=>graph('POST',`${newCampaignId}`,t,{status:'ACTIVE'}));
+    return {new_campaign_id:newCampaignId,original_paused:true,duplicate_active:true,isCbo};
+  }catch(e){ throw e; }
+}
+
+export async function workflowDuplicateKeepOriginalActive(p:DupParams,t:string){
+  const src=await fetchCampaign(p.campaign_id,t); const adsets=await fetchAdsets(p.campaign_id,t);
+  const isCbo=Boolean(src.daily_budget||src.lifetime_budget)||adsets.every(a=>!a.daily_budget&&!a.lifetime_budget);
+  const newCampaignId=await createCampaignFromSource({...src,name:p.name||`${src.name} (copy)`},t);
+  try{
+    for(const a of adsets){
+      const newAdsetId=await createAdsetFromSource(src.account_id,newCampaignId,a,isCbo,p.page_id,t,p.campaign_id);
+      const ads=await fetchAds(a.id,t);
+      for(const ad of ads) await createAdFromSource(src.account_id,newAdsetId,ad,t);
+    }
+    await withStep('activate_duplicate',{new_campaign_id:newCampaignId},()=>graph('POST',`${newCampaignId}`,t,{status:'ACTIVE'}));
+    return {new_campaign_id:newCampaignId,original_active:true,duplicate_active:true,isCbo};
+  }catch(e){ throw e; }
+}

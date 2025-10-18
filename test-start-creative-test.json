@@ -1,0 +1,15 @@
+{
+  "idempotencyKey": "test-creative-48b5599f-3",
+  "account": {
+    "userAccountId": "0f559eb0-53fa-4b6a-a51b-5d3e15e5864b"
+  },
+  "actions": [
+    {
+      "type": "StartCreativeTest",
+      "params": {
+        "user_creative_id": "48b5599f-68d5-4142-8e63-5f8d109439b8"
+      }
+    }
+  ],
+  "source": "test"
+}

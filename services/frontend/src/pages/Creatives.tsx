@@ -1182,7 +1182,7 @@ const Creatives: React.FC = () => {
                         creativeId={it.id}
                         createdAt={it.created_at}
                         fbCreativeIds={[it.fb_creative_id_whatsapp, it.fb_creative_id_instagram_traffic, it.fb_creative_id_site_leads].filter(Boolean) as string[]} 
-                        demoMode={index === 0}
+                        demoMode={false}
                       />
                     </div>
                       </AccordionContent>
