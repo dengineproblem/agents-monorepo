@@ -74,8 +74,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         `access_token=${access_token}`;
 
       while (adAccountsUrl) {
-        const adAccountsResponse = await fetch(adAccountsUrl);
-        const adAccountsData = await adAccountsResponse.json();
+        const adAccountsResponse: Response = await fetch(adAccountsUrl);
+        const adAccountsData: any = await adAccountsResponse.json();
         
         if (adAccountsData.data) {
           allAdAccounts = allAdAccounts.concat(adAccountsData.data);
@@ -99,8 +99,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         `access_token=${access_token}`;
 
       while (pagesUrl) {
-        const pagesResponse = await fetch(pagesUrl);
-        const pagesData = await pagesResponse.json();
+        const pagesResponse: Response = await fetch(pagesUrl);
+        const pagesData: any = await pagesResponse.json();
         
         if (pagesData.data) {
           allPages = allPages.concat(pagesData.data);
