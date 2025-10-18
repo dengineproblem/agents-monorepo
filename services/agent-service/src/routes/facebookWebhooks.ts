@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 
@@ -126,7 +127,14 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           username_to_find: username
         }, 'Attempting Supabase query');
 
-        const { data: existingUser, error: findError } = await supabase
+        // Create fresh Supabase client with current env variables
+        const freshSupabase = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE!,
+          { auth: { persistSession: false, autoRefreshToken: false } }
+        );
+
+        const { data: existingUser, error: findError } = await freshSupabase
           .from('user_accounts')
           .select('id')
           .eq('username', username)
@@ -169,7 +177,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           updateData.page_name = firstPage.name;
         }
 
-        const { error: updateError } = await supabase
+        const { error: updateError } = await freshSupabase
           .from('user_accounts')
           .update(updateData)
           .eq('id', userId);
