@@ -516,15 +516,21 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
 
     // ===================================================
     // STEP 3: Проверяем тест (если был)
+    // Приоритет: running > completed > cancelled
     // ===================================================
-    const { data: test, error: testError } = await supabase
+    const { data: allTests, error: testsError } = await supabase
       .from('creative_tests')
       .select('*')
       .eq('user_creative_id', user_creative_id)
-      .eq('status', 'completed')
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .single();
+      .order('started_at', { ascending: false });
+    
+    // Выбираем тест по приоритету: running > completed > любой последний
+    let test = null;
+    if (allTests && allTests.length > 0) {
+      const runningTest = allTests.find(t => t.status === 'running');
+      const completedTest = allTests.find(t => t.status === 'completed');
+      test = runningTest || completedTest || allTests[0];
+    }
 
     // ===================================================
     // STEP 4: Пробуем получить production метрики
@@ -554,12 +560,12 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       }
     }
     
-    // Если нет production, используем тест
-    if (!productionMetrics && test) {
+    // Если нет production, используем тест (только completed)
+    if (!productionMetrics && test && test.status === 'completed') {
       dataSource = 'test';
     }
 
-    // Если нет ни production, ни теста
+    // Если нет ни production, ни завершённого теста
     if (dataSource === 'none') {
       return reply.send({
         creative: {
@@ -569,8 +575,22 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
           direction_name: creative.account_directions?.name || null
         },
         data_source: 'none',
-        message: 'Креатив не тестировался и не используется в рекламе',
-        test: null,
+        message: test?.status === 'running' 
+          ? 'Тест запущен, ожидание данных' 
+          : 'Креатив не тестировался и не используется в рекламе',
+        test: test ? {
+          exists: true,
+          status: test.status,
+          started_at: test.started_at,
+          completed_at: test.completed_at,
+          test_id: test.id,
+          metrics: {
+            impressions: test.impressions || 0,
+            reach: test.reach || 0,
+            leads: test.leads || 0,
+            spend_cents: test.spend_cents || 0
+          }
+        } : null,
         production: null,
         analysis: null
       });
