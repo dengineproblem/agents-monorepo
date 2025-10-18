@@ -90,19 +90,38 @@ const Profile: React.FC = () => {
 
       if (code) {
         try {
+          // Проверка наличия username
+          console.log('Facebook OAuth callback - проверка пользователя:', {
+            hasUser: !!user,
+            username: user?.username,
+            userId: user?.id
+          });
+
+          if (!user?.username) {
+            toast.error('Ошибка: необходимо выйти и войти заново');
+            console.error('Username отсутствует в localStorage. Данные пользователя:', user);
+            window.history.replaceState({}, document.title, '/profile');
+            return;
+          }
+
           toast.info('Подключаем Facebook...');
 
           const API_URL = 'https://performanteaiagency.com/api';
+          const requestBody = { 
+            code,
+            username: user.username
+          };
+          
+          console.log('Отправка запроса на /facebook/oauth/token с данными:', requestBody);
+
           const response = await fetch(`${API_URL}/facebook/oauth/token`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              code,
-              username: user?.username
-            }),
+            body: JSON.stringify(requestBody),
           });
 
           const data = await response.json();
+          console.log('Ответ от /facebook/oauth/token:', data);
 
           if (!response.ok || !data.success) {
             throw new Error(data.error || 'Failed to connect Facebook');
