@@ -172,11 +172,6 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           updated_at: new Date().toISOString()
         };
 
-        // Add optional fields if they exist in the table
-        if (firstPage.name) {
-          updateData.page_name = firstPage.name;
-        }
-
         const { error: updateError } = await freshSupabase
           .from('user_accounts')
           .update(updateData)
