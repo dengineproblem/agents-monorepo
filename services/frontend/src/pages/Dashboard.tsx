@@ -281,7 +281,7 @@ const Dashboard: React.FC = () => {
         {(() => {
           const stored = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
           const u = stored ? JSON.parse(stored) : null;
-          const isFbConnected = !!u?.access_token && !!u?.ad_account_id;
+          const isFbConnected = !!u?.access_token && u?.access_token !== '' && !!u?.ad_account_id && u?.ad_account_id !== '';
           const isTtConnected = tiktokConnected || !!u?.tiktok_business_id;
           
           const openFacebookAuth = () => {

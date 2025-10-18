@@ -359,10 +359,10 @@ const Profile: React.FC = () => {
       const { error } = await supabase
         .from('user_accounts')
         .update({ 
-          access_token: null,
-          page_id: null,
-          ad_account_id: null,
-          instagram_id: null
+          access_token: '',  // Пустая строка вместо null (поле NOT NULL)
+          page_id: '',
+          ad_account_id: '',
+          instagram_id: ''
         })
         .eq('id', user?.id);
 
@@ -374,10 +374,10 @@ const Profile: React.FC = () => {
       // Обновляем localStorage
       const updatedUser = { 
         ...user, 
-        access_token: null,
-        page_id: null,
-        ad_account_id: null,
-        instagram_id: null
+        access_token: '',
+        page_id: '',
+        ad_account_id: '',
+        instagram_id: ''
       };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
@@ -698,9 +698,9 @@ const Profile: React.FC = () => {
               {
                 id: 'facebook',
                 title: 'Facebook Ads',
-                connected: Boolean(user?.access_token && user?.ad_account_id),
+                connected: Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== ''),
                 onClick: () => {
-                  if (user?.access_token && user?.ad_account_id) {
+                  if (user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '') {
                     if (confirm('Вы уверены, что хотите отключить Facebook Ads?')) {
                       handleDisconnectInstagram(); // Reuse the same function as it clears access_token
                     }
@@ -723,9 +723,9 @@ const Profile: React.FC = () => {
               {
                 id: 'instagram',
                 title: 'Instagram',
-                connected: Boolean(user?.access_token && user?.page_id),
+                connected: Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== ''),
                 onClick: () => {
-                  if (user?.access_token && user?.page_id) {
+                  if (user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '') {
                     handleDisconnectInstagram();
                   } else {
                     toast.info('Instagram подключается через Facebook API. Используйте подключение Facebook Ads выше.');

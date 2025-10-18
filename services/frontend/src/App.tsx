@@ -40,7 +40,7 @@ const AppRoutes = () => {
     if (storedUser) {
       try {
         const parsedUser = JSON.parse(storedUser);
-        if (parsedUser && parsedUser.username && parsedUser.access_token) {
+        if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
         } else {
           localStorage.removeItem('user');
