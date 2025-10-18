@@ -141,7 +141,13 @@ export default async function facebookWebhooks(app: FastifyInstance) {
     try {
       log.info('Saving Facebook selection');
       
-      const { username, access_token, ad_account_id, page_id, instagram_id } = req.body;
+      const { username, access_token, ad_account_id, page_id, instagram_id } = req.body as { 
+        username?: string; 
+        access_token?: string; 
+        ad_account_id?: string; 
+        page_id?: string; 
+        instagram_id?: string | null;
+      };
       
       if (!username || !access_token || !ad_account_id || !page_id) {
         log.error('Missing required parameters');
