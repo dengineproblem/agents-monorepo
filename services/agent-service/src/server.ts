@@ -45,7 +45,7 @@ app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes);
 app.register(defaultSettingsRoutes);
-app.register(facebookWebhooks, { prefix: '/api' });
+app.register(facebookWebhooks); // Без префикса - nginx уже убирает /api
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
