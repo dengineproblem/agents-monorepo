@@ -1,10 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
 
-// Load environment variables before creating Supabase client
-dotenv.config({ path: '/root/.env.agent' });
-dotenv.config({ path: '../../.env.agent' });
-
+// Environment variables are loaded by docker-compose from .env.agent
 const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE!;
 
