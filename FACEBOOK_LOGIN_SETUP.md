@@ -47,13 +47,13 @@ git pull origin main
 
 ```bash
 # Facebook App Configuration
-FB_APP_ID=690472653668355
+FB_APP_ID=1441781603583445
 FB_APP_SECRET=ваш_app_secret_от_facebook
 FB_REDIRECT_URI=https://performanteaiagency.com/profile
 ```
 
 **Где взять FB_APP_SECRET:**
-1. Откройте https://developers.facebook.com/apps/690472653668355/settings/basic/
+1. Откройте https://developers.facebook.com/apps/1441781603583445/settings/basic/
 2. Найдите "App Secret" → нажмите "Show"
 3. Скопируйте значение
 
@@ -74,7 +74,7 @@ docker-compose logs -f frontend
 
 ### 1. Valid OAuth Redirect URIs
 
-Откройте: https://developers.facebook.com/apps/690472653668355/fb-login/settings/
+Откройте: https://developers.facebook.com/apps/1441781603583445/fb-login/settings/
 
 **Добавьте (если еще нет):**
 ```
@@ -83,7 +83,7 @@ https://performanteaiagency.com/profile
 
 ### 2. App Domains
 
-Откройте: https://developers.facebook.com/apps/690472653668355/settings/basic/
+Откройте: https://developers.facebook.com/apps/1441781603583445/settings/basic/
 
 **Убедитесь, что добавлен:**
 ```

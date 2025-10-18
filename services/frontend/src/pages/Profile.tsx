@@ -706,7 +706,7 @@ const Profile: React.FC = () => {
                     }
                   } else {
                     // Redirect to Facebook OAuth
-                    const FB_APP_ID = '690472653668355';
+                    const FB_APP_ID = '1441781603583445';
                     const FB_REDIRECT_URI = 'https://performanteaiagency.com/profile';
                     const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads';
                     const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?` +

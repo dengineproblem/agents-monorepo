@@ -6,8 +6,8 @@ import { supabase } from '../lib/supabase.js';
 const log = createLogger({ module: 'facebookWebhooks' });
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
-const FB_APP_ID = process.env.FB_APP_ID || '690472653668355';
-const FB_REDIRECT_URI = process.env.FB_REDIRECT_URI || 'https://performanteaiagency.com/auth/callback';
+const FB_APP_ID = process.env.FB_APP_ID || '1441781603583445';
+const FB_REDIRECT_URI = process.env.FB_REDIRECT_URI || 'https://performanteaiagency.com/profile';
 
 export default async function facebookWebhooks(app: FastifyInstance) {
   
