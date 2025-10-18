@@ -66,30 +66,50 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         });
       }
 
-      // Get ad accounts
-      const adAccountsUrl = `https://graph.facebook.com/v21.0/me/adaccounts?` +
+      // Get ALL ad accounts with pagination
+      let allAdAccounts: any[] = [];
+      let adAccountsUrl: string | null = `https://graph.facebook.com/v21.0/me/adaccounts?` +
         `fields=id,name,account_status&` +
+        `limit=500&` +
         `access_token=${access_token}`;
 
-      const adAccountsResponse = await fetch(adAccountsUrl);
-      const adAccountsData = await adAccountsResponse.json();
+      while (adAccountsUrl) {
+        const adAccountsResponse = await fetch(adAccountsUrl);
+        const adAccountsData = await adAccountsResponse.json();
+        
+        if (adAccountsData.data) {
+          allAdAccounts = allAdAccounts.concat(adAccountsData.data);
+        }
+        
+        adAccountsUrl = adAccountsData.paging?.next || null;
+      }
 
-      if (!adAccountsData.data || adAccountsData.data.length === 0) {
+      if (allAdAccounts.length === 0) {
         log.error('No ad accounts found for user');
         return res.status(400).send({
           error: 'No ad accounts found. Please make sure you have access to at least one Facebook Ad Account.'
         });
       }
 
-      // Get pages with instagram_business_account
-      const pagesUrl = `https://graph.facebook.com/v21.0/me/accounts?` +
+      // Get ALL pages with instagram_business_account with pagination
+      let allPages: any[] = [];
+      let pagesUrl: string | null = `https://graph.facebook.com/v21.0/me/accounts?` +
         `fields=id,name,access_token,instagram_business_account&` +
+        `limit=500&` +
         `access_token=${access_token}`;
 
-      const pagesResponse = await fetch(pagesUrl);
-      const pagesData = await pagesResponse.json();
+      while (pagesUrl) {
+        const pagesResponse = await fetch(pagesUrl);
+        const pagesData = await pagesResponse.json();
+        
+        if (pagesData.data) {
+          allPages = allPages.concat(pagesData.data);
+        }
+        
+        pagesUrl = pagesData.paging?.next || null;
+      }
 
-      if (!pagesData.data || pagesData.data.length === 0) {
+      if (allPages.length === 0) {
         log.error('No pages found for user');
         return res.status(400).send({
           error: 'No Facebook Pages found. Please create or get access to at least one Facebook Page.'
@@ -97,14 +117,14 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       }
 
       // Extract Instagram ID from first page (if available)
-      const firstPage = pagesData.data[0];
+      const firstPage = allPages[0];
       const instagramId = firstPage.instagram_business_account?.id || null;
 
       log.info({ 
         fb_user_id: userInfo.id,
         fb_user_name: userInfo.name,
-        ad_accounts_count: adAccountsData.data.length,
-        pages_count: pagesData.data.length,
+        ad_accounts_count: allAdAccounts.length,
+        pages_count: allPages.length,
         instagram_id: instagramId
       }, 'Successfully exchanged code for token');
 
@@ -117,8 +137,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           email: userInfo.email
         },
         access_token: access_token,
-        ad_accounts: adAccountsData.data,
-        pages: pagesData.data.map((page: any) => ({
+        ad_accounts: allAdAccounts,
+        pages: allPages.map((page: any) => ({
           id: page.id,
           name: page.name,
           instagram_id: page.instagram_business_account?.id || null
