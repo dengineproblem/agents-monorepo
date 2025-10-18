@@ -12,7 +12,24 @@ const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 export default async function facebookWebhooks(app: FastifyInstance) {
   
   /**
-   * Facebook Data Deletion Callback
+   * Facebook Data Deletion Callback - GET (для проверки Facebook)
+   * 
+   * Facebook сначала проверяет URL через GET запрос при добавлении в настройки.
+   * Нужно вернуть 200 OK чтобы Facebook принял URL.
+   */
+  app.get('/facebook/data-deletion', async (req, res) => {
+    log.info('Facebook data deletion URL verification (GET request)');
+    
+    return res.status(200).send({
+      message: 'Data deletion endpoint is active',
+      company: 'ИП A-ONE AGENCY',
+      app: 'Performante AI',
+      status: 'ready'
+    });
+  });
+  
+  /**
+   * Facebook Data Deletion Callback - POST (реальное удаление)
    * 
    * Этот эндпоинт ОБЯЗАТЕЛЕН для прохождения App Review.
    * Facebook вызывает его когда пользователь удаляет приложение
