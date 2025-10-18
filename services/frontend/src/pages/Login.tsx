@@ -27,7 +27,8 @@ const Login = () => {
       if (storedUser) {
         try {
           const parsedUser = JSON.parse(storedUser);
-          if (parsedUser && parsedUser.username && parsedUser.access_token) {
+          // Логин разрешен даже без Facebook токена
+          if (parsedUser && parsedUser.username) {
             console.log('Пользователь уже авторизован, перенаправляем на главную', {
               username: parsedUser.username,
               hasToken: !!parsedUser.access_token,
