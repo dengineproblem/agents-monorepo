@@ -20,10 +20,12 @@ import ROIAnalytics from './pages/ROIAnalytics';
 import CreativeGeneration from './pages/CreativeGeneration';
 import Creatives from './pages/Creatives';
 import AdSettings from './pages/AdSettings';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
 
 const queryClient = new QueryClient();
 
-const PUBLIC_PATHS = ['/login', '/signup'];
+const PUBLIC_PATHS = ['/login', '/signup', '/privacy', '/terms'];
 
 const AppRoutes = () => {
   const location = useLocation();
@@ -105,6 +107,8 @@ const AppRoutes = () => {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       )}

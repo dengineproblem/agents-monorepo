@@ -9,6 +9,7 @@ import { creativeTestRoutes } from './routes/creativeTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { directionsRoutes } from './routes/directions.js';
 import { defaultSettingsRoutes } from './routes/defaultSettings.js';
+import facebookWebhooks from './routes/facebookWebhooks.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
 
@@ -44,6 +45,7 @@ app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes);
 app.register(defaultSettingsRoutes);
+app.register(facebookWebhooks, { prefix: '/api' });
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
