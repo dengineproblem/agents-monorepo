@@ -117,11 +117,26 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           });
         }
 
+        // Debug: Log Supabase configuration
+        log.info({
+          supabase_url: process.env.SUPABASE_URL,
+          supabase_key_prefix: process.env.SUPABASE_SERVICE_ROLE?.substring(0, 30) + '...',
+          supabase_key_suffix: '...' + process.env.SUPABASE_SERVICE_ROLE?.substring(process.env.SUPABASE_SERVICE_ROLE.length - 20),
+          supabase_key_length: process.env.SUPABASE_SERVICE_ROLE?.length,
+          username_to_find: username
+        }, 'Attempting Supabase query');
+
         const { data: existingUser, error: findError } = await supabase
           .from('user_accounts')
           .select('id')
           .eq('username', username)
           .maybeSingle();
+
+        log.info({
+          found: !!existingUser,
+          error: findError,
+          user_id: existingUser?.id
+        }, 'Supabase query result');
 
         if (findError) {
           log.error({ error: findError, username }, 'Error finding user by username');
