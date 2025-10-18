@@ -54,6 +54,12 @@ const Profile: React.FC = () => {
   const [passwordModal, setPasswordModal] = useState(false);
   const [telegramIdModal, setTelegramIdModal] = useState(false);
   
+  // Facebook selection modal
+  const [facebookSelectionModal, setFacebookSelectionModal] = useState(false);
+  const [facebookData, setFacebookData] = useState<any>(null);
+  const [selectedAdAccount, setSelectedAdAccount] = useState<string>('');
+  const [selectedPage, setSelectedPage] = useState<string>('');
+  
   // Смена пароля
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -139,23 +145,14 @@ const Profile: React.FC = () => {
             throw new Error(data.error || 'Failed to connect Facebook');
           }
 
-          // Update localStorage
-          const updatedUser = {
-            ...user,
-            facebook_user_id: data.user.id,
-            access_token: data.access_token,
-            ad_account_id: data.ad_accounts[0]?.id,
-            ad_accounts: data.ad_accounts,
-            page_id: data.pages[0]?.id,
-            pages: data.pages,
-          };
+          // Сохраняем данные для выбора и показываем модальное окно
+          setFacebookData(data);
+          setSelectedAdAccount(data.ad_accounts[0]?.id || '');
+          setSelectedPage(data.pages[0]?.id || '');
+          setFacebookSelectionModal(true);
 
-          localStorage.setItem('user', JSON.stringify(updatedUser));
-          toast.success('Facebook успешно подключен!');
-
-          // Clear URL params and reload
+          // Clear URL params
           window.history.replaceState({}, document.title, '/profile');
-          window.location.reload();
 
         } catch (error) {
           console.error('Error connecting Facebook:', error);
@@ -417,6 +414,57 @@ const Profile: React.FC = () => {
     } catch (error) {
       console.error('Ошибка при отключении Instagram:', error);
       toast.error('Произошла ошибка при отключении');
+    }
+  };
+
+  const handleSaveFacebookSelection = async () => {
+    if (!selectedAdAccount || !selectedPage) {
+      toast.error('Выберите рекламный кабинет и страницу');
+      return;
+    }
+
+    try {
+      const selectedPageData = facebookData.pages.find((p: any) => p.id === selectedPage);
+      const instagramId = selectedPageData?.instagram_id || null;
+
+      const API_URL = 'https://performanteaiagency.com/api';
+      const response = await fetch(`${API_URL}/facebook/save-selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: user?.username,
+          access_token: facebookData.access_token,
+          ad_account_id: selectedAdAccount,
+          page_id: selectedPage,
+          instagram_id: instagramId
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to save selection');
+      }
+
+      // Update localStorage
+      const updatedUser = {
+        ...user,
+        access_token: facebookData.access_token,
+        ad_account_id: selectedAdAccount,
+        page_id: selectedPage,
+        instagram_id: instagramId,
+        ad_accounts: facebookData.ad_accounts,
+        pages: facebookData.pages,
+      };
+
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      setFacebookSelectionModal(false);
+      toast.success('Facebook успешно подключен!');
+      window.location.reload();
+
+    } catch (error) {
+      console.error('Error saving Facebook selection:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to save selection');
     }
   };
 
@@ -1072,6 +1120,65 @@ const Profile: React.FC = () => {
                   disabled={isSavingOpenaiKey}
                 >
                   {isSavingOpenaiKey ? 'Сохранение...' : 'Сохранить'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Диалог выбора Ad Account и Page */}
+        <Dialog open={facebookSelectionModal} onOpenChange={setFacebookSelectionModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Выберите рекламный кабинет и страницу</DialogTitle>
+              <DialogDescription>
+                Выберите рекламный кабинет и Facebook страницу для подключения
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Рекламный кабинет</Label>
+                <select
+                  className="w-full mt-1 p-2 border rounded"
+                  value={selectedAdAccount}
+                  onChange={(e) => setSelectedAdAccount(e.target.value)}
+                >
+                  {facebookData?.ad_accounts.map((account: any) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} ({account.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Facebook Page</Label>
+                <select
+                  className="w-full mt-1 p-2 border rounded"
+                  value={selectedPage}
+                  onChange={(e) => setSelectedPage(e.target.value)}
+                >
+                  {facebookData?.pages.map((page: any) => (
+                    <option key={page.id} value={page.id}>
+                      {page.name} ({page.id})
+                      {page.instagram_id && ` - IG: ${page.instagram_id}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {facebookData?.pages.find((p: any) => p.id === selectedPage)?.instagram_id && (
+                <div className="text-sm text-green-600">
+                  ✓ Instagram Business Account подключен
+                </div>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setFacebookSelectionModal(false)}
+                >
+                  Отмена
+                </Button>
+                <Button onClick={handleSaveFacebookSelection}>
+                  Сохранить
                 </Button>
               </div>
             </div>

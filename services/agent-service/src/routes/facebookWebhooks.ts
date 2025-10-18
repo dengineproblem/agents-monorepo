@@ -108,91 +108,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         instagram_id: instagramId
       }, 'Successfully exchanged code for token');
 
-      // Save to Supabase
-      try {
-        // Find user by username
-        if (!username) {
-          log.error('No username provided');
-          return res.status(400).send({
-            error: 'Username is required. Please make sure you are logged in.'
-          });
-        }
-
-        // Debug: Log Supabase configuration
-        log.info({
-          supabase_url: process.env.SUPABASE_URL,
-          supabase_key_prefix: process.env.SUPABASE_SERVICE_ROLE?.substring(0, 30) + '...',
-          supabase_key_suffix: '...' + process.env.SUPABASE_SERVICE_ROLE?.substring(process.env.SUPABASE_SERVICE_ROLE.length - 20),
-          supabase_key_length: process.env.SUPABASE_SERVICE_ROLE?.length,
-          username_to_find: username
-        }, 'Attempting Supabase query');
-
-        // Create fresh Supabase client with current env variables
-        const freshSupabase = createClient(
-          process.env.SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE!,
-          { auth: { persistSession: false, autoRefreshToken: false } }
-        );
-
-        const { data: existingUser, error: findError } = await freshSupabase
-          .from('user_accounts')
-          .select('id')
-          .eq('username', username)
-          .maybeSingle();
-
-        log.info({
-          found: !!existingUser,
-          error: findError,
-          user_id: existingUser?.id
-        }, 'Supabase query result');
-
-        if (findError) {
-          log.error({ error: findError, username }, 'Error finding user by username');
-          return res.status(500).send({
-            error: 'Database error while finding user'
-          });
-        }
-
-        if (!existingUser) {
-          log.error({ username }, 'User not found in database');
-          return res.status(400).send({
-            error: 'User not found. Please make sure you are logged in.'
-          });
-        }
-
-        const userId = existingUser.id;
-
-        // Update user with Facebook data
-        // Only update fields that exist in user_accounts table
-        const updateData: any = {
-          access_token: access_token,
-          ad_account_id: adAccountsData.data[0].id,
-          page_id: firstPage.id,
-          instagram_id: instagramId,
-          updated_at: new Date().toISOString()
-        };
-
-        const { error: updateError } = await freshSupabase
-          .from('user_accounts')
-          .update(updateData)
-          .eq('id', userId);
-
-        if (updateError) {
-          log.error({ error: updateError, userId }, 'Failed to update user data in database');
-          return res.status(500).send({
-            error: 'Failed to save Facebook connection'
-          });
-        }
-
-        log.info({ userId, username, fb_user_id: userInfo.id }, 'Successfully saved Facebook data to database');
-
-      } catch (dbError) {
-        log.error({ error: dbError }, 'Database operation failed');
-        return res.status(500).send({
-          error: 'Failed to save data to database'
-        });
-      }
-
+      // Return data without saving - frontend will show selection modal
       return res.send({
         success: true,
         user: {
@@ -212,6 +128,76 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
     } catch (error) {
       log.error({ error }, 'Error exchanging OAuth code');
+      return res.status(500).send({ 
+        error: 'Internal server error' 
+      });
+    }
+  });
+
+  /**
+   * Save Facebook selection - Ad Account and Page
+   */
+  app.post('/facebook/save-selection', async (req, res) => {
+    try {
+      log.info('Saving Facebook selection');
+      
+      const { username, access_token, ad_account_id, page_id, instagram_id } = req.body;
+      
+      if (!username || !access_token || !ad_account_id || !page_id) {
+        log.error('Missing required parameters');
+        return res.status(400).send({ 
+          error: 'Missing required parameters' 
+        });
+      }
+
+      // Create fresh Supabase client
+      const freshSupabase = createClient(
+        process.env.SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE!,
+        { auth: { persistSession: false, autoRefreshToken: false } }
+      );
+
+      // Find user by username
+      const { data: existingUser, error: findError } = await freshSupabase
+        .from('user_accounts')
+        .select('id')
+        .eq('username', username)
+        .maybeSingle();
+
+      if (findError || !existingUser) {
+        log.error({ error: findError, username }, 'User not found');
+        return res.status(400).send({
+          error: 'User not found'
+        });
+      }
+
+      // Update user with selected data
+      const { error: updateError } = await freshSupabase
+        .from('user_accounts')
+        .update({
+          access_token,
+          ad_account_id,
+          page_id,
+          instagram_id: instagram_id || null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingUser.id);
+
+      if (updateError) {
+        log.error({ error: updateError }, 'Failed to update user data');
+        return res.status(500).send({
+          error: 'Failed to save selection'
+        });
+      }
+
+      log.info({ userId: existingUser.id, username }, 'Successfully saved Facebook selection');
+
+      return res.send({
+        success: true
+      });
+
+    } catch (error) {
+      log.error({ error }, 'Error saving Facebook selection');
       return res.status(500).send({ 
         error: 'Internal server error' 
       });
