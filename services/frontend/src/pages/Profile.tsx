@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '@/components/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -33,9 +34,20 @@ const tarifColor: Record<Exclude<Tarif, null>, string> = {
 };
 
 const Profile: React.FC = () => {
+  const navigate = useNavigate();
   const storedUser = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const user = storedUser ? (() => { try { return JSON.parse(storedUser); } catch { return null; } })() : null;
   const isLoading = !storedUser;
+
+  // Проверка валидности данных пользователя
+  useEffect(() => {
+    if (storedUser && user && !user.username) {
+      console.error('Некорректные данные пользователя: отсутствует username. Выход...');
+      localStorage.removeItem('user');
+      toast.error('Необходимо войти заново');
+      navigate('/login', { replace: true });
+    }
+  }, []);
 
   const [tarif, setTarif] = useState<Tarif>(null);
   const [tarifExpires, setTarifExpires] = useState<string | null>(null);
