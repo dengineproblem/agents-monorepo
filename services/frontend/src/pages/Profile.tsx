@@ -15,6 +15,7 @@ import TariffInfoCard from '@/components/profile/TariffInfoCard';
 import ProfileHero from '@/components/profile/ProfileHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
+import { FEATURES } from '@/config/appReview';
  
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
@@ -770,7 +771,9 @@ const Profile: React.FC = () => {
               </Card>
 
               {/* Направления бизнеса */}
-              <DirectionsCard userAccountId={user?.id || null} />
+              {FEATURES.SHOW_DIRECTIONS && (
+                <DirectionsCard userAccountId={user?.id || null} />
+              )}
             </>
           )}
 
@@ -813,7 +816,7 @@ const Profile: React.FC = () => {
                   }
                 },
               },
-              {
+              ...(FEATURES.SHOW_TIKTOK ? [{
                 id: 'tiktok',
                 title: 'TikTok',
                 connected: Boolean(user?.tiktok_access_token && user?.tiktok_business_id),
@@ -835,7 +838,7 @@ const Profile: React.FC = () => {
                   }
                 },
                 disabled: false,
-              },
+              }] : []),
             ]}
           />
         </div>

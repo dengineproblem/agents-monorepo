@@ -9,6 +9,7 @@ import { facebookApi } from '@/services/facebookApi';
 import { manualLaunchAds, ManualLaunchResponse } from '@/services/manualLaunchApi';
 import CallbackRequest from './CallbackRequest';
 import { API_BASE_URL } from '@/config/api';
+import { FEATURES } from '@/config/appReview';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Popover,
@@ -1637,7 +1638,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             {selectedFile && (
               <>
                 {/* Выбор площадки - только для Instagram */}
-                {platform !== 'tiktok' && (
+                {FEATURES.SHOW_TIKTOK && platform !== 'tiktok' && (
                   <div className="mb-4">
                     <label className="block mb-1 font-medium">Площадка размещения</label>
                     <Popover>
@@ -1714,7 +1715,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   </div>
                 )}
                 {/* Выбор направления бизнеса */}
-                {(placement === 'instagram' || placement === 'both') && (
+                {FEATURES.SHOW_DIRECTIONS && (placement === 'instagram' || placement === 'both') && (
                   <>
                     {directions.length > 0 ? (
                       <div className="mb-4">
