@@ -22,6 +22,7 @@ import Creatives from './pages/Creatives';
 import AdSettings from './pages/AdSettings';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import { FEATURES } from '@/config/appReview';
 
 const queryClient = new QueryClient();
 
@@ -91,10 +92,18 @@ const AppRoutes = () => {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/campaign/:id" element={<CampaignDetail />} />
-                  <Route path="/consultations" element={<Consultations />} />
-                  <Route path="/roi" element={<ROIAnalytics />} />
-                  <Route path="/creatives" element={<CreativeGeneration />} />
-                  <Route path="/videos" element={<Creatives />} />
+                  {FEATURES.SHOW_CONSULTATIONS && (
+                    <Route path="/consultations" element={<Consultations />} />
+                  )}
+                  {FEATURES.SHOW_ANALYTICS && (
+                    <Route path="/roi" element={<ROIAnalytics />} />
+                  )}
+                  {FEATURES.SHOW_CREATIVES && (
+                    <>
+                      <Route path="/creatives" element={<CreativeGeneration />} />
+                      <Route path="/videos" element={<Creatives />} />
+                    </>
+                  )}
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/ad-settings" element={<AdSettings />} />
                   <Route path="*" element={<NotFound />} />
