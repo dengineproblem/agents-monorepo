@@ -92,7 +92,15 @@ const CampaignDetail: React.FC = () => {
   };
   
   const handleToggleStatus = (checked: boolean) => {
-    toggleCampaignStatus(id, checked);
+    // App Review: Confirmation dialog перед изменением статуса
+    const action = checked ? 'resume' : 'pause';
+    const confirmed = window.confirm(
+      `Are you sure you want to ${action} this campaign?`
+    );
+    
+    if (confirmed) {
+      toggleCampaignStatus(id, checked);
+    }
   };
   
   return (

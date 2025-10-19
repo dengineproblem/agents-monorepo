@@ -1,0 +1,21 @@
+// Feature flags для App Review mode
+export const APP_REVIEW_MODE = import.meta.env.VITE_APP_REVIEW_MODE === 'true';
+
+export const FEATURES = {
+  // Что показываем в App Review mode
+  SHOW_VIDEO_UPLOAD: true,
+  SHOW_CAMPAIGN_LIST: true,
+  SHOW_CAMPAIGN_DETAIL: true,
+  SHOW_PROFILE: true,
+  SHOW_FACEBOOK_CONNECT: true,
+  
+  // Что скрываем в App Review mode
+  SHOW_TIKTOK: !APP_REVIEW_MODE,
+  SHOW_CREATIVES: !APP_REVIEW_MODE,
+  SHOW_DIRECTIONS: !APP_REVIEW_MODE,
+  SHOW_AI_AUTOPILOT: !APP_REVIEW_MODE,
+  SHOW_CAMPAIGN_BUILDER: !APP_REVIEW_MODE,
+  SHOW_ANALYTICS: !APP_REVIEW_MODE,
+  SHOW_CONSULTATIONS: !APP_REVIEW_MODE,
+};
+

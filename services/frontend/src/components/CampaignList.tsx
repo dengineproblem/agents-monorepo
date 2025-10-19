@@ -52,7 +52,16 @@ const CampaignList: React.FC = () => {
   
   const handleToggle = (e: React.MouseEvent, campaignId: string, newStatus: boolean) => {
     e.stopPropagation(); // Останавливаем всплытие события, чтобы не вызвать onClick карточки
-    toggleCampaignStatus(campaignId, newStatus);
+    
+    // App Review: Confirmation dialog перед изменением статуса
+    const action = newStatus ? 'resume' : 'pause';
+    const confirmed = window.confirm(
+      `Are you sure you want to ${action} this campaign?`
+    );
+    
+    if (confirmed) {
+      toggleCampaignStatus(campaignId, newStatus);
+    }
   };
   
   if (loading && campaigns.length === 0) {

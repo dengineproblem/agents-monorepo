@@ -820,6 +820,28 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       return;
     }
 
+    // App Review: Confirmation dialog перед созданием кампании
+    const budgetText = placement === 'instagram' 
+      ? `$${dailyBudgetInstagram}/day`
+      : placement === 'tiktok'
+      ? `${dailyBudgetTiktok}₸/day`
+      : `Instagram: $${dailyBudgetInstagram}/day, TikTok: ${dailyBudgetTiktok}₸/day`;
+    
+    const citiesText = selectedCities.map(id => 
+      CITIES_AND_COUNTRIES.find(c => c.id === id)?.name || id
+    ).join(', ');
+    
+    const confirmed = window.confirm(
+      `Create campaign "${campaignName}" with budget ${budgetText}?\n\n` +
+      `Target: ${citiesText}\n` +
+      `Age: ${ageMin}-${ageMax}\n` +
+      `Goal: ${campaignGoal}`
+    );
+    
+    if (!confirmed) {
+      return; // Пользователь отменил
+    }
+
     setIsUploading(true);
     setProgress(0);
     setIsRetrying(false);
