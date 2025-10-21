@@ -39,8 +39,8 @@ app.register(cors, {
   allowedHeaders: ["Content-Type", "Authorization"]
 });
 app.register(actionsRoutes);
-app.register(videoRoutes);
-app.register(imageRoutes);
+app.register(videoRoutes, { prefix: '/api' });
+app.register(imageRoutes, { prefix: '/api' });
 app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes);
