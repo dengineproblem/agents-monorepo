@@ -18,7 +18,7 @@ type CreateCampaignParams = {
   page_id?: string;
   instagram_id?: string;
   use_default_settings?: boolean; // По умолчанию true
-  auto_activate?: boolean; // Если true - сразу активирует кампанию (по умолчанию false - создается в PAUSED)
+  auto_activate?: boolean; // Если true - сразу активирует кампанию (по умолчанию true)
 };
 
 type CreateCampaignContext = {
@@ -63,7 +63,8 @@ export async function workflowCreateCampaignWithCreative(
     targeting,
     page_id,
     instagram_id,
-    use_default_settings = true
+    use_default_settings = true,
+    auto_activate = true
   } = params;
 
   const { user_account_id, ad_account_id } = context;
@@ -172,7 +173,7 @@ export async function workflowCreateCampaignWithCreative(
     name: campaign_name,
     objective: fb_objective,
     special_ad_categories: [], // Требуется Facebook, даже если пустой
-    status: params.auto_activate ? 'ACTIVE' : 'PAUSED'
+    status: auto_activate ? 'ACTIVE' : 'PAUSED'
   };
 
   console.log('[CreateCampaignWithCreative] Creating campaign:', campaignBody);
@@ -252,7 +253,7 @@ export async function workflowCreateCampaignWithCreative(
   const adsetBody: any = {
     name: finalAdsetName,
     campaign_id,
-    status: params.auto_activate ? 'ACTIVE' : 'PAUSED',
+    status: auto_activate ? 'ACTIVE' : 'PAUSED',
     billing_event: 'IMPRESSIONS',
     optimization_goal,
     daily_budget: daily_budget_cents,
@@ -300,7 +301,7 @@ export async function workflowCreateCampaignWithCreative(
     const adBody: any = {
       name: creative.ad_name,
       adset_id,
-      status: params.auto_activate ? 'ACTIVE' : 'PAUSED',
+      status: auto_activate ? 'ACTIVE' : 'PAUSED',
       creative: { creative_id: creative.fb_creative_id }
     };
 
@@ -351,7 +352,7 @@ export async function workflowCreateCampaignWithCreative(
     ads: created_ads,
     ads_count: created_ads.length,
     objective,
-    message: `Campaign "${campaign_name}" created successfully with ${created_ads.length} ad(s) in one adset (status: ${params.auto_activate ? 'ACTIVE' : 'PAUSED'})`,
+    message: `Campaign "${campaign_name}" created successfully with ${created_ads.length} ad(s) in one adset (status: ${auto_activate ? 'ACTIVE' : 'PAUSED'})`,
   };
 }
 

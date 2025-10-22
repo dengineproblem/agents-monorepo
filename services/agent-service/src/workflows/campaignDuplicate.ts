@@ -40,7 +40,7 @@ function hasGeo(targeting:any){const g=targeting?.geo_locations||{};return Boole
 
 async function createCampaignFromSource(src:CampaignInfo,t:string):Promise<string>{
   // Рабочая цель для WA — OUTCOME_ENGAGEMENT
-  const body={name:src.name,objective:'OUTCOME_ENGAGEMENT',special_ad_categories:src.special_ad_categories||[],status:'PAUSED',daily_budget: src.daily_budget || undefined};
+  const body={name:src.name,objective:'OUTCOME_ENGAGEMENT',special_ad_categories:src.special_ad_categories||[],status:'ACTIVE',daily_budget: src.daily_budget || undefined};
   const r=await withStep('create_campaign',{path:`act_${src.account_id}/campaigns`,body},()=>graph('POST',`act_${src.account_id}/campaigns`,t,toParams(body)));
   const id=r?.id; if(!id) throw Object.assign(new Error('create_campaign_failed'),{step:'create_campaign_no_id'}); return String(id);
 }
@@ -89,7 +89,7 @@ async function createAdsetFromSource(
   // Минимальный WA payload (как в рабочем примере)
   const base:any={
     name:src.name||'New Adset',
-    status:'PAUSED',
+    status:'ACTIVE',
     billing_event:'IMPRESSIONS',
     optimization_goal:'CONVERSATIONS',
     destination_type: 'WHATSAPP',
@@ -107,7 +107,15 @@ async function createAdsetFromSource(
 }
 
 async function createAdFromSource(accountId:string,dstAdsetId:string,src:AdInfo,t:string):Promise<string>{
-  const body:any={name:src.name||'New Ad',adset_id:dstAdsetId,status:'PAUSED',creative:src.creative?.id?{creative_id:src.creative.id}:(src.creative||undefined),url_parameters:src.url_parameters||undefined};
+  // Всегда извлекаем только creative_id из объекта creative
+  const creativeId = src.creative?.id || (typeof src.creative === 'string' ? src.creative : undefined);
+  const body:any={
+    name:src.name||'New Ad',
+    adset_id:dstAdsetId,
+    status:'ACTIVE',  // Создаем сразу в активном состоянии
+    creative: creativeId ? {creative_id: creativeId} : undefined,
+    url_parameters:src.url_parameters||undefined
+  };
   const r=await withStep('create_ad',{payload:body},()=>graph('POST',`act_${accountId}/ads`,t,toParams(body)));
   const id=r?.id; if(!id) throw Object.assign(new Error('create_ad_failed'),{step:'create_ad_no_id'}); return String(id);
 }
@@ -215,7 +223,7 @@ export async function workflowDuplicateAdsetWithAudience(p:DupAdsetWithAudienceP
 
   const createBody:any={
     name: newName,
-    status:'PAUSED',
+    status:'ACTIVE',
     billing_event: srcAs.billing_event || 'IMPRESSIONS',
     optimization_goal: srcAs.optimization_goal || (isWA ? 'CONVERSATIONS' : undefined),
     destination_type: srcAs.destination_type || undefined,

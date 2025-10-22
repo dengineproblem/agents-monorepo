@@ -9,7 +9,7 @@ type CreateAdSetInDirectionParams = {
   user_creative_ids: string[]; // Массив креативов для создания нескольких ads в adset
   daily_budget_cents?: number; // Опционально - переопределяет бюджет из direction
   adset_name?: string; // Опционально - название adset
-  auto_activate?: boolean; // Если true - сразу активирует adset (по умолчанию false)
+  auto_activate?: boolean; // Если true - сразу активирует adset (по умолчанию true)
   start_mode?: 'now' | 'midnight_almaty'; // Когда запускать: сейчас или с ближайшей полуночи (UTC+5)
 };
 
@@ -53,7 +53,7 @@ export async function workflowCreateAdSetInDirection(
     user_creative_ids,
     daily_budget_cents,
     adset_name,
-    auto_activate = false,
+    auto_activate = true,
     start_mode = 'now'
   } = params;
 
