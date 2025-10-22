@@ -140,9 +140,45 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       const fbVideo = await uploadVideo(normalizedAdAccountId, userAccount.access_token, videoBuffer);
 
-      app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, creating creatives...`);
+      app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, loading direction settings...`);
 
-      const description = body.description || 'Видео креатив';
+      // ===================================================
+      // ПОЛУЧАЕМ НАСТРОЙКИ ИЗ НАПРАВЛЕНИЯ (default_ad_settings)
+      // ===================================================
+      let description = 'Напишите нам, чтобы узнать подробности';
+      let clientQuestion = 'Здравствуйте! Хочу узнать об этом подробнее.';
+      let siteUrl = null;
+      let utm = null;
+
+      if (body.direction_id) {
+        const { data: defaultSettings } = await supabase
+          .from('default_ad_settings')
+          .select('*')
+          .eq('direction_id', body.direction_id)
+          .maybeSingle();
+
+        if (defaultSettings) {
+          description = defaultSettings.description || description;
+          clientQuestion = defaultSettings.client_question || clientQuestion;
+          siteUrl = defaultSettings.site_url;
+          utm = defaultSettings.utm_tag;
+
+          app.log.info({
+            direction_id: body.direction_id,
+            description,
+            clientQuestion,
+            siteUrl
+          }, 'Using settings from direction');
+        } else {
+          app.log.warn({
+            direction_id: body.direction_id
+          }, 'No default settings found for direction, using fallback');
+        }
+      } else {
+        app.log.warn('No direction_id provided, using fallback settings');
+      }
+
+      app.log.info('Creating creatives with direction settings...');
       
       const [whatsappCreative, instagramCreative, websiteCreative] = await Promise.all([
         createWhatsAppCreative(normalizedAdAccountId, userAccount.access_token, {
@@ -150,7 +186,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           pageId: userAccount.page_id,
           instagramId: userAccount.instagram_id,
           message: description,
-          clientQuestion: body.client_question || 'Здравствуйте! Интересует ваше предложение.',
+          clientQuestion: clientQuestion,
           whatsappPhoneNumber: userAccount.whatsapp_phone_number || undefined
         }),
 
@@ -162,13 +198,13 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           message: description
         }),
 
-        body.site_url ? createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
+        siteUrl ? createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
           videoId: fbVideo.id,
           pageId: userAccount.page_id,
           instagramId: userAccount.instagram_id,
           message: description,
-          siteUrl: body.site_url,
-          utm: body.utm
+          siteUrl: siteUrl,
+          utm: utm
         }) : Promise.resolve({ id: '' })
       ]);
 
