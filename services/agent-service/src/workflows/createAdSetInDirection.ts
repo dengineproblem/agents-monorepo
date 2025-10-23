@@ -292,15 +292,18 @@ export async function workflowCreateAdSetInDirection(
     adsetBody.destination_type = destination_type;
   }
 
-  // Получаем page_id из user_accounts
+  // Получаем page_id и whatsapp_phone_number из user_accounts (как в автозапуске)
   const { data: userAccount } = await supabase
     .from('user_accounts')
-    .select('page_id')
+    .select('page_id, whatsapp_phone_number')
     .eq('id', user_account_id)
     .single();
 
   if (userAccount?.page_id && direction.objective === 'whatsapp') {
-    adsetBody.promoted_object = { page_id: userAccount.page_id };
+    adsetBody.promoted_object = {
+      page_id: String(userAccount.page_id),
+      ...(userAccount.whatsapp_phone_number && { whatsapp_phone_number: userAccount.whatsapp_phone_number })
+    };
   }
 
   log.info({
@@ -309,6 +312,8 @@ export async function workflowCreateAdSetInDirection(
     daily_budget: budget,
     optimization_goal,
     destination_type,
+    promoted_object: adsetBody.promoted_object,
+    has_whatsapp_number: !!userAccount?.whatsapp_phone_number,
     userAccountId: user_account_id,
     userAccountName: userAccountProfile?.username,
     directionName: direction.name
