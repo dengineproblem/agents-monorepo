@@ -25,7 +25,13 @@ function toParams(obj: any): any {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v === undefined || v === null) continue;
-    if (Array.isArray(v) || (typeof v === 'object' && v !== null)) {
+    
+    // Специальная обработка для creative - Facebook ожидает уже JSON-строку
+    if (k === 'creative' && typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      out[k] = JSON.stringify(v);
+    }
+    // Для остальных объектов и массивов - тоже JSON.stringify
+    else if (Array.isArray(v) || (typeof v === 'object' && v !== null)) {
       out[k] = JSON.stringify(v);
     } else {
       out[k] = String(v);
