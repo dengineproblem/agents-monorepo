@@ -4,6 +4,9 @@
 # Этап 1: Сборка приложения
 FROM node:20-alpine AS builder
 
+# Аргумент для определения режима сборки (production или appreview)
+ARG BUILD_MODE=production
+
 WORKDIR /app
 
 # Копируем package.json и устанавливаем зависимости
@@ -12,6 +15,19 @@ RUN npm ci
 
 # Копируем исходный код
 COPY . .
+
+# Создаём .env на основе BUILD_MODE
+RUN if [ "$BUILD_MODE" = "appreview" ]; then \
+      echo "VITE_APP_REVIEW_MODE=true" > .env.local && \
+      echo "VITE_API_URL=https://performanteaiagency.com/api" >> .env.local && \
+      echo "VITE_FB_APP_ID=1441781603583445" >> .env.local && \
+      echo "VITE_FB_REDIRECT_URI=https://performanteaiagency.com/profile" >> .env.local; \
+    else \
+      echo "VITE_APP_REVIEW_MODE=false" > .env.local && \
+      echo "VITE_API_URL=https://app.performanteaiagency.com/api" >> .env.local && \
+      echo "VITE_FB_APP_ID=1441781603583445" >> .env.local && \
+      echo "VITE_FB_REDIRECT_URI=https://app.performanteaiagency.com/profile" >> .env.local; \
+    fi
 
 # Собираем production build
 RUN npm run build

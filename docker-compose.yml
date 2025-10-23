@@ -44,12 +44,30 @@ services:
       - "8082:8082"
     restart: unless-stopped
 
+  # Production frontend (app.performanteaiagency.com)
   frontend:
-    build: ./services/frontend
+    build:
+      context: ./services/frontend
+      args:
+        BUILD_MODE: production
     environment:
       - NODE_ENV=production
     ports:
       - "3001:80"
+    restart: unless-stopped
+    depends_on:
+      - agent-service
+
+  # App Review frontend (performanteaiagency.com)
+  frontend-appreview:
+    build:
+      context: ./services/frontend
+      args:
+        BUILD_MODE: appreview
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3002:80"
     restart: unless-stopped
     depends_on:
       - agent-service
@@ -64,6 +82,7 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - frontend
+      - frontend-appreview
       - agent-service
     restart: unless-stopped
 
