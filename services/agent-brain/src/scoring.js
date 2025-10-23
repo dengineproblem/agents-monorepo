@@ -12,9 +12,8 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { createLogger } from './lib/logger.js';
+import { logger } from './lib/logger.js';
 
-const logger = createLogger({ service: 'agent-brain', module: 'scoring' });
 const FB_API_VERSION = 'v23.0';
 
 /**
