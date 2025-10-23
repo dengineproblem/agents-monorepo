@@ -377,40 +377,112 @@ function calculateTrend(prevDays, currentDays) {
 
 /**
  * Fetch insights для креатива за указанный период
+ * 
+ * НОВЫЙ МЕТОД: Сначала находим все ads использующие этот creative,
+ * затем получаем insights для каждого ad и агрегируем результаты
  */
 async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, options = {}) {
   const normalizedId = normalizeAdAccountId(adAccountId);
-  const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${normalizedId}/insights`);
-  url.searchParams.set('level', 'ad');
-  url.searchParams.set('filtering', JSON.stringify([
-    { field: 'ad.creative_id', operator: 'EQUAL', value: fbCreativeId }
-  ]));
-  url.searchParams.set('fields', 'ctr,cpm,cpp,cpc,frequency,impressions,spend,actions,reach');
-  url.searchParams.set('limit', '500');
-  url.searchParams.set('access_token', accessToken);
   
-  if (options.date_preset) {
-    url.searchParams.set('date_preset', options.date_preset);
-  } else if (options.time_range) {
-    url.searchParams.set('time_range', JSON.stringify(options.time_range));
-  } else {
-    url.searchParams.set('date_preset', 'last_30d');
+  // ============================================
+  // ШАГ 1: Найти все ads использующие этот creative
+  // ============================================
+  const adsUrl = `https://graph.facebook.com/${FB_API_VERSION}/${normalizedId}/ads`;
+  const adsParams = new URLSearchParams({
+    fields: 'id,name,status,effective_status,creative{id}',
+    limit: '500',
+    access_token: accessToken
+  });
+  
+  const adsRes = await fetch(`${adsUrl}?${adsParams.toString()}`);
+  if (!adsRes.ok) {
+    const err = await adsRes.text();
+    logger.error({ 
+      where: 'fetchCreativeInsights',
+      phase: 'fetch_ads',
+      creative_id: fbCreativeId,
+      status: adsRes.status,
+      error: err
+    });
+    return null;
   }
   
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    // Креатив может не иметь показов - это нормально
-    if (res.status === 400) {
-      return null;
+  const adsJson = await adsRes.json();
+  const allAds = adsJson.data || [];
+  
+  // Фильтруем ads с нашим creative_id
+  const adsWithCreative = allAds.filter(ad => ad.creative?.id === fbCreativeId);
+  
+  logger.info({ 
+    where: 'fetchCreativeInsights',
+    phase: 'ads_found',
+    creative_id: fbCreativeId,
+    total_ads: allAds.length,
+    ads_with_creative: adsWithCreative.length
+  });
+  
+  if (adsWithCreative.length === 0) {
+    logger.info({ 
+      where: 'fetchCreativeInsights',
+      creative_id: fbCreativeId,
+      message: 'No ads found using this creative'
+    });
+    return null;
+  }
+  
+  // ============================================
+  // ШАГ 2: Получить insights для каждого ad
+  // ============================================
+  const datePreset = options.date_preset || 'last_30d';
+  const allInsights = [];
+  
+  for (const ad of adsWithCreative) {
+    const insightsUrl = `https://graph.facebook.com/${FB_API_VERSION}/${ad.id}/insights`;
+    const insightsParams = new URLSearchParams({
+      fields: 'ctr,cpm,cpp,cpc,frequency,impressions,spend,actions,reach',
+      access_token: accessToken
+    });
+    
+    if (options.date_preset) {
+      insightsParams.set('date_preset', options.date_preset);
+    } else if (options.time_range) {
+      insightsParams.set('time_range', JSON.stringify(options.time_range));
+    } else {
+      insightsParams.set('date_preset', 'last_30d');
     }
-    const err = await res.text();
-    throw new Error(`FB creative insights failed: ${res.status} ${err}`);
+    
+    try {
+      const insightsRes = await fetch(`${insightsUrl}?${insightsParams.toString()}`);
+      if (insightsRes.ok) {
+        const insightsJson = await insightsRes.json();
+        if (insightsJson.data && insightsJson.data.length > 0) {
+          allInsights.push(...insightsJson.data);
+        }
+      }
+    } catch (error) {
+      logger.warn({ 
+        where: 'fetchCreativeInsights',
+        ad_id: ad.id,
+        error: error.message
+      });
+    }
   }
   
-  const json = await res.json();
-  const data = json.data || [];
+  // LOG: результаты
+  logger.info({ 
+    where: 'fetchCreativeInsights',
+    phase: 'insights_fetched',
+    creative_id: fbCreativeId,
+    ads_checked: adsWithCreative.length,
+    insights_records: allInsights.length,
+    date_preset: datePreset
+  });
   
-  if (!data.length) return null;
+  if (allInsights.length === 0) {
+    return null;
+  }
+  
+  const data = allInsights;
   
   // Агрегируем (если несколько ads с одним креативом)
   const totalImpressions = data.reduce((sum, d) => sum + (parseFloat(d.impressions) || 0), 0);
