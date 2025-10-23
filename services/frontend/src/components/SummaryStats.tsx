@@ -83,7 +83,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Общая статистика
+            {t('stats.overallStats')}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -113,7 +113,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
             isZero={stats.isZeroData}
           />
           <StatCard 
-            title="Всего показов" 
+            title={t('stats.totalImpressions')} 
             value={formatNumber(stats.totalImpressions)} 
             icon={<BarChart3 className="w-5 h-5 text-amber-600 dark:text-amber-500/70" />}
             loading={loading}
@@ -156,7 +156,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
       {platform !== 'tiktok' && (
         <>
           <StatCard 
-            title="Качество лидов" 
+            title={t('stats.qualityLeads')} 
             value={formatPercentWhole(stats.qualityRate)} 
             icon={<Percent className="w-4 h-4 text-orange-600 dark:text-orange-500/70" />} 
             loading={loading}
@@ -164,7 +164,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
             isZero={stats.isZeroData}
           />
           <StatCard 
-            title="Средний CPQL" 
+            title={t('stats.avgCPQL')} 
             value={formatCurrency(stats.avgCpql)} 
             icon={<Target className="w-4 h-4 text-emerald-600 dark:text-emerald-500/70" />} 
             loading={loading}
@@ -174,7 +174,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         </>
       )}
       <StatCard 
-        title="Всего показов" 
+        title={t('stats.totalImpressions')} 
         value={formatNumber(stats.totalImpressions)} 
         icon={<BarChart3 className="w-4 h-4 text-amber-600 dark:text-amber-500/70" />}
         loading={loading}

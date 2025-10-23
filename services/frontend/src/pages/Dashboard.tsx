@@ -267,15 +267,15 @@ const Dashboard: React.FC = () => {
       
       <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full">
         <DashboardHero 
-          title={userName || (userTarif === 'target' ? 'Панель таргетолога' : 'Панель управления')}
-          subtitle={userTarif === 'target' ? 'Ваши направления и планы' : t('campaign.management')}
+          title={userName || (userTarif === 'target' ? t('dashboard.targetologPanel') : t('dashboard.title'))}
+          subtitle={userTarif === 'target' ? t('dashboard.yourDirectionsAndPlans') : t('campaign.management')}
         />
 
         {formattedDateRange && (
           <div className="mb-6">
             <Badge variant="secondary" className="rounded-full px-3 py-1 text-sm font-medium flex items-center gap-2">
               <Calendar className="h-4 w-4" />
-              <span>Статистика за {formattedDateRange}</span>
+              <span>{t('dashboard.statsFor')} {formattedDateRange}</span>
             </Badge>
           </div>
         )}
@@ -326,7 +326,7 @@ const Dashboard: React.FC = () => {
               <CardContent className="p-4">
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-muted-foreground">Платформа:</span>
+                    <span className="text-sm font-medium text-muted-foreground">{t('dashboard.platform')}</span>
                     <div className="flex gap-2">
                       <Button
                         variant={platform === 'instagram' ? 'default' : 'outline'}
@@ -500,7 +500,7 @@ const Dashboard: React.FC = () => {
         </div>
         
             <div className="mb-6">
-              <h2 className="text-xl font-semibold mb-4">Рекламные кампании</h2>
+              <h2 className="text-xl font-semibold mb-4">{t('campaign.adCampaigns')}</h2>
           <CampaignList />
         </div>
           </>

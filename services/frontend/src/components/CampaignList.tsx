@@ -5,6 +5,7 @@ import { formatCurrency, formatPercent, formatNumber, formatCurrencyKZT } from '
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../hooks/use-mobile';
 import { useTranslation } from '../i18n/LanguageContext';
+import { REQUIRE_CONFIRMATION } from '../config/appReview';
 
 const statusMap: Record<string, { label: string; color: string }> = {
   ACTIVE: { label: 'Запущена', color: 'bg-green-100 text-green-700' },
@@ -123,14 +124,18 @@ const CampaignList: React.FC = () => {
                 e.stopPropagation(); 
               }}
               onCheckedChange={(checked) => {
-                // App Review: Confirmation dialog перед изменением статуса
-                const confirmed = window.confirm(
-                  checked ? t('msg.confirmResume') : t('msg.confirmPause')
-                );
-                
-                if (confirmed) {
-                  toggleCampaignStatus(campaign.id, checked);
+                // App Review: Confirmation dialog перед изменением статуса (только в App Review режиме)
+                if (REQUIRE_CONFIRMATION) {
+                  const confirmed = window.confirm(
+                    checked ? t('msg.confirmResume') : t('msg.confirmPause')
+                  );
+                  
+                  if (!confirmed) {
+                    return;
+                  }
                 }
+                
+                toggleCampaignStatus(campaign.id, checked);
               }}
             />
           </div>

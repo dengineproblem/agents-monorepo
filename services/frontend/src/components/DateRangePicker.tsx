@@ -12,6 +12,7 @@ import { useAppContext } from '@/context/AppContext';
 import { format, subDays, startOfDay } from 'date-fns';
 import { Toggle } from '@/components/ui/toggle';
 import { CalendarDays } from 'lucide-react';
+import { useTranslation } from '../i18n/LanguageContext';
 
 interface DateRangePickerProps {
   open: boolean;
@@ -20,6 +21,7 @@ interface DateRangePickerProps {
 
 const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange }) => {
   const { dateRange, setDateRange } = useAppContext();
+  const { t } = useTranslation();
   const [selectedOption, setSelectedOption] = React.useState<string>('today');
   const [showCustomCalendar, setShowCustomCalendar] = React.useState(false);
   const [customRange, setCustomRange] = React.useState<{ from: Date | undefined; to: Date | undefined }>({
@@ -148,7 +150,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Выберите период</DialogTitle>
+          <DialogTitle>{t('dateRange.selectPeriod')}</DialogTitle>
         </DialogHeader>
         
         {!showCustomCalendar ? (
@@ -160,7 +162,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
                 variant="outline"
                 className="flex-1"
               >
-                Сегодня
+                {t('dateRange.today')}
               </Toggle>
               <Toggle 
                 pressed={selectedOption === 'yesterday'}
@@ -168,7 +170,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
                 variant="outline"
                 className="flex-1"
               >
-                Вчера
+                {t('dateRange.yesterday')}
               </Toggle>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -178,7 +180,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
                 variant="outline"
                 className="flex-1"
               >
-                Последние 7 дней
+                {t('dateRange.last7Days')}
               </Toggle>
               <Toggle 
                 pressed={selectedOption === 'last30days'}
@@ -186,7 +188,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
                 variant="outline"
                 className="flex-1"
               >
-                Последние 30 дней
+                {t('dateRange.last30Days')}
               </Toggle>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -197,7 +199,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
                 className="flex-1"
               >
                 <CalendarDays className="mr-2 h-4 w-4" />
-                Настраиваемый период
+                {t('dateRange.customPeriod')}
               </Toggle>
             </div>
           </div>
@@ -205,7 +207,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
           <div className="py-4">
             <div className="mb-4">
               <p className="text-sm text-muted-foreground mb-3">
-                Выберите диапазон дат на календаре:
+                {t('dateRange.selectRange')}
               </p>
               {customRange.from && customRange.to && (
                 <p className="text-sm font-medium">
@@ -227,19 +229,19 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({ open, onOpenChange })
           {showCustomCalendar ? (
             <div className="flex gap-2 w-full">
               <Button variant="outline" onClick={handleCustomRangeCancel} className="flex-1">
-                Отмена
+                {t('action.cancel')}
               </Button>
               <Button 
                 onClick={handleCustomRangeApply} 
                 disabled={!customRange.from || !customRange.to}
                 className="flex-1"
               >
-                Применить
+                {t('action.apply')}
               </Button>
             </div>
           ) : (
             <Button onClick={() => onOpenChange(false)}>
-              Закрыть
+              {t('action.close')}
             </Button>
           )}
         </DialogFooter>

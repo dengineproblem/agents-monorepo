@@ -1402,7 +1402,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       {/* Основная секция действий */}
       <div className="flex flex-col gap-4 p-5 border rounded-xl bg-card shadow-sm">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Действия</h3>
+          <h3 className="text-lg font-semibold">{t('dashboard.actions')}</h3>
           {selectedFile && showVideoForm && (
             <div
               className="text-sm text-muted-foreground max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap"
@@ -1654,7 +1654,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 {/* Выбор площадки - только для Instagram и НЕ для App Review */}
                 {!APP_REVIEW_MODE && platform !== 'tiktok' && (
                   <div className="mb-4">
-                    <label className="block mb-1 font-medium">Площадка размещения</label>
+                    <label className="block mb-1 font-medium">{t('video.placement')}</label>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button variant="outline" disabled={isUploading} className="w-full justify-between">
@@ -1691,7 +1691,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 {/* Выбор цели объявления для Instagram/обе площадки - скрыто для TikTok и App Review */}
                 {!APP_REVIEW_MODE && platform !== 'tiktok' && (placement === 'instagram' || placement === 'both') && (
                   <div className="mb-4">
-                    <label className="block mb-1 font-medium">Цель объявления</label>
+                    <label className="block mb-1 font-medium">{t('video.adGoal')}</label>
                     <Popover>
                       <PopoverTrigger asChild>
                         <Button variant="outline" disabled={isUploading} className="w-full justify-between">
@@ -1733,14 +1733,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   <>
                     {directions.length > 0 ? (
                       <div className="mb-4">
-                        <label className="block mb-1 font-medium">Направление бизнеса</label>
+                        <label className="block mb-1 font-medium">{t('video.businessDirection')}</label>
                         <Select
                           value={selectedDirectionId}
                           onValueChange={setSelectedDirectionId}
                           disabled={isUploading || directionsLoading}
                         >
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Выберите направление" />
+                            <SelectValue placeholder={t('video.selectDirection')} />
                           </SelectTrigger>
                           <SelectContent>
                             {directions
@@ -1781,7 +1781,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 {campaignGoal === 'site_leads' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                     <div>
-                      <label className="block mb-1 text-sm text-muted-foreground">Сайт</label>
+                      <label className="block mb-1 text-sm text-muted-foreground">{t('video.website')}</label>
                       <input className="border rounded px-3 py-2 w-full" placeholder="https://example.com" value={siteUrl} onChange={e => setSiteUrl(e.target.value)} />
                     </div>
                     <div>
@@ -1794,18 +1794,18 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                       </select>
                     </div>
                     <div className="md:col-span-2">
-                      <label className="block mb-1 text-sm text-muted-foreground">UTM‑метка</label>
+                      <label className="block mb-1 text-sm text-muted-foreground">{t('video.utmTag')}</label>
                       <input className="border rounded px-3 py-2 w-full" placeholder="utm_source=...&utm_medium=...&utm_campaign=..." value={utmTag} onChange={e => setUtmTag(e.target.value)} />
                     </div>
                     
                   </div>
                 )}
                 <div className="mb-4">
-                  <label className="block mb-1 font-medium">Название объявления</label>
+                  <label className="block mb-1 font-medium">{t('video.campaignName')}</label>
                   <input
                     type="text"
                     className="border rounded px-3 py-2 w-full"
-                    placeholder="Введите название объявления"
+                    placeholder={t('video.campaignNamePlaceholder')}
                     value={campaignName}
                     onChange={e => setCampaignName(e.target.value)}
                     disabled={isUploading}
@@ -1850,7 +1850,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 {/* Платежеспособная аудитория — скрываем для TikTok */}
                 {placement === 'instagram' && (
                   <div className="mb-4">
-                    <label className="block mb-1 font-medium">Платежеспособная аудитория</label>
+                    <label className="block mb-1 font-medium">{t('video.payingAudience')}</label>
                     <label className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
                       <input
                         type="checkbox"
@@ -1872,7 +1872,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   </div>
                 )}
                 <div className="mb-4">
-                  <label className="block mb-1 font-medium">Возрастная группа</label>
+                  <label className="block mb-1 font-medium">{t('targeting.ageGroup')}</label>
                   <div className="flex items-center gap-4">
                     <div className="flex items-center gap-2">
                       <label className="text-sm">От:</label>
@@ -1932,11 +1932,11 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   </div>
                 </div>
                 <div className="mb-4">
-                  <label className="block mb-1 font-medium">Пол</label>
+                  <label className="block mb-1 font-medium">{t('targeting.gender')}</label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" disabled={isUploading} className="w-full justify-between">
-                        <span>{selectedGender === 'all' ? 'Любой' : selectedGender === 'male' ? 'Мужской' : 'Женский'}</span>
+                        <span>{selectedGender === 'all' ? t('targeting.all') : selectedGender === 'male' ? t('targeting.male') : t('targeting.female')}</span>
                         <ChevronDown className="h-4 w-4 opacity-50" />
                       </Button>
                     </PopoverTrigger>
@@ -1965,7 +1965,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   </Popover>
                 </div>
                 <div className="flex flex-col gap-2 mb-2">
-                  <label className="font-medium text-sm">Города / Страны</label>
+                  <label className="font-medium text-sm">{t('targeting.citiesCountries')}</label>
                   <Popover open={cityPopoverOpen} onOpenChange={setCityPopoverOpen}>
                     <PopoverTrigger asChild>
                       <Button variant="outline" disabled={isUploading} className="w-full justify-between">
@@ -2024,7 +2024,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 </div>
                 {placement === 'instagram' && (
                   <div className="flex flex-col gap-2 mb-2">
-                    <label className="font-medium text-sm">Суточный бюджет Instagram (USD)</label>
+                    <label className="font-medium text-sm">{t('video.dailyBudgetInstagram')}</label>
                     <div className="flex items-center gap-2">
                       <Button variant="outline" size="icon" onClick={() => handleInstagramBudgetChange(-1)} disabled={isUploading || dailyBudgetInstagram <= 1}>-</Button>
                       <input
@@ -2042,7 +2042,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 )}
                 {placement === 'tiktok' && (
                   <div className="flex flex-col gap-2 mb-2">
-                    <label className="font-medium text-sm">Суточный бюджет TikTok (₸)</label>
+                    <label className="font-medium text-sm">{t('video.dailyBudgetTikTok')}</label>
                     <div className="flex items-center gap-2">
                       <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 100}>-</Button>
                       <input
@@ -2078,7 +2078,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 )}
                 {placement === 'both' && (
                   <div className="flex flex-col gap-2 mb-2">
-                    <label className="font-medium text-sm">Суточные бюджеты</label>
+                    <label className="font-medium text-sm">{t('video.dailyBudgets')}</label>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <div className="text-xs text-muted-foreground mb-1">Instagram (USD)</div>
@@ -2113,7 +2113,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         </div>
                         {campaignGoal === 'whatsapp' && (
                           <div className="mt-2">
-                            <label className="font-medium text-sm">WhatsApp номер (10 цифр, без +7)</label>
+                            <label className="font-medium text-sm">{t('video.whatsappNumber')}</label>
                             <div className="flex items-center gap-2">
                               <span className="text-sm">+7</span>
                               <input
@@ -2134,19 +2134,19 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   </div>
                 )}
                 <div className="mb-4">
-                  <label className="block mb-1 font-medium">Время запуска</label>
+                  <label className="block mb-1 font-medium">{t('video.startTime')}</label>
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" disabled={isUploading} className="w-full justify-between">
-                        <span>{startType === 'midnight' ? 'С полуночи' : 'Сейчас'}</span>
+                        <span>{startType === 'midnight' ? t('video.startFromMidnight') : t('video.startNow')}</span>
                         <ChevronDown className="h-4 w-4 opacity-50" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[200px] p-3">
                       <div className="space-y-2">
                         {[
-                          { value: 'midnight', label: 'С полуночи' },
-                          { value: 'now', label: 'Сейчас' }
+                          { value: 'midnight', label: t('video.startFromMidnight') },
+                          { value: 'now', label: t('video.startNow') }
                         ].map((option) => (
                           <label key={option.value} className="flex items-center gap-2 cursor-pointer">
                             <input
@@ -2174,7 +2174,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     className="w-full bg-gradient-to-r from-gray-700 to-slate-800 hover:from-gray-800 hover:to-slate-900 text-white shadow-md hover:shadow-lg transition-all duration-200"
                   >
                     <Upload className="mr-2 h-4 w-4" />
-                    {isUploading ? 'Загружается...' : 'Загрузить видео'}
+                    {isUploading ? t('video.uploading') : t('video.uploadVideo')}
                   </Button>
                 </div>
               </>

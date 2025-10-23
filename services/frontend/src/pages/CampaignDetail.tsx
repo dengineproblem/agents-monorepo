@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { facebookApi } from '../services/facebookApi';
 import { useTranslation } from '../i18n/LanguageContext';
+import { REQUIRE_CONFIRMATION } from '../config/appReview';
 
 
 const CampaignDetail: React.FC = () => {
@@ -76,7 +77,7 @@ const CampaignDetail: React.FC = () => {
   if (loading || campaigns.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p>Загрузка...</p>
+        <p>{t('campaign.loading')}</p>
       </div>
     );
   }
@@ -84,7 +85,7 @@ const CampaignDetail: React.FC = () => {
   if (!id || !campaign) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p>Кампания не найдена</p>
+        <p>{t('campaign.notFound')}</p>
       </div>
     );
   }
@@ -94,14 +95,18 @@ const CampaignDetail: React.FC = () => {
   };
   
   const handleToggleStatus = (checked: boolean) => {
-    // App Review: Confirmation dialog перед изменением статуса
-    const confirmed = window.confirm(
-      checked ? t('msg.confirmResume') : t('msg.confirmPause')
-    );
-    
-    if (confirmed) {
-      toggleCampaignStatus(id, checked);
+    // App Review: Confirmation dialog перед изменением статуса (только в App Review режиме)
+    if (REQUIRE_CONFIRMATION) {
+      const confirmed = window.confirm(
+        checked ? t('msg.confirmResume') : t('msg.confirmPause')
+      );
+      
+      if (!confirmed) {
+        return;
+      }
     }
+    
+    toggleCampaignStatus(id, checked);
   };
   
   return (
@@ -118,11 +123,11 @@ const CampaignDetail: React.FC = () => {
             <Button variant="ghost" size="icon" onClick={handleBack} className="md:hidden">
               <ArrowLeft size={20} />
             </Button>
-            <h1 className="text-lg font-medium">Детали кампании</h1>
+            <h1 className="text-lg font-medium">{t('campaign.details')}</h1>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">
-              {campaign.status === 'ACTIVE' ? 'Активна' : 'Приостановлена'}
+              {campaign.status === 'ACTIVE' ? t('campaign.active') : t('campaign.suspended')}
             </span>
             <Switch 
               checked={campaign.status === 'ACTIVE'} 
@@ -134,11 +139,11 @@ const CampaignDetail: React.FC = () => {
         <CampaignDetailStats campaignId={id} />
         
         <div className="mb-6">
-          <h2 className="text-lg font-medium mb-3">Бюджет группы объявлений</h2>
+          <h2 className="text-lg font-medium mb-3">{t('campaign.adsetBudget')}</h2>
           {adsetLoading ? (
-            <div>Загрузка бюджетов...</div>
+            <div>{t('campaign.loadingBudgets')}</div>
           ) : adsets.length === 0 ? (
-            <div className="text-muted-foreground">Нет групп объявлений</div>
+            <div className="text-muted-foreground">{t('campaign.noAdsets')}</div>
           ) : (
             <div className="space-y-2">
               {adsets.map((adset) => (
@@ -168,7 +173,7 @@ const CampaignDetail: React.FC = () => {
                     onClick={() => handleBudgetSave(adset.id)}
                     disabled={adsetSaving[adset.id]}
                   >
-                    {adsetSaving[adset.id] ? 'Сохр...' : 'Сохранить'}
+                    {adsetSaving[adset.id] ? t('campaign.saving') : t('campaign.save')}
                   </Button>
                 </div>
               ))}

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Instagram, CheckCircle2, CircleDashed, Link } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from '../../i18n/LanguageContext';
 
 // TikTok icon SVG
 const TikTokIcon = () => (
@@ -34,12 +35,14 @@ interface ConnectionsGridProps {
 }
 
 const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
+  const { t } = useTranslation();
+  
   return (
     <Card>
       <CardHeader className="pb-4">
         <CardTitle className="text-lg flex items-center gap-2">
           <Link className="h-5 w-5" />
-          Подключения
+          {t('profile.connections')}
         </CardTitle>
       </CardHeader>
       <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -59,12 +62,12 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                     {it.connected ? (
                       <>
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                        <span className="text-emerald-600">Подключено</span>
+                        <span className="text-emerald-600">{t('profile.connected')}</span>
                       </>
                     ) : (
                       <>
                         <CircleDashed className="h-3.5 w-3.5" />
-                        <span>Не подключено</span>
+                        <span>{t('profile.notConnected')}</span>
                       </>
                     )}
                   </div>
@@ -77,7 +80,7 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                 disabled={it.disabled}
                 className="transition-all hover:shadow-sm"
               >
-                {it.connected ? 'Отключить' : 'Подключить'}
+                {it.connected ? t('profile.disconnect') : t('profile.connect')}
               </Button>
             </CardContent>
           </Card>

@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useAppContext } from '../context/AppContext';
 import { facebookApi } from '../services/facebookApi';
 import { addDays, format } from 'date-fns';
+import { useTranslation } from '../i18n/LanguageContext';
+import { FEATURES } from '../config/appReview';
 
 interface HeaderProps { 
   onOpenDatePicker: () => void;
@@ -18,13 +20,6 @@ interface HeaderProps {
   showBack?: boolean;
   onBack?: () => void;
 }
-
-const statusMap: Record<number, string> = {
-  1: 'Работает',
-  2: 'Неактивен',
-  3: 'Остановлен (заблокирован)',
-  7: 'Пауза по платежу',
-};
 
 const Header: React.FC<HeaderProps> = ({ 
   onOpenDatePicker, 
@@ -36,6 +31,14 @@ const Header: React.FC<HeaderProps> = ({
   const location = useLocation();
   const { theme, setTheme } = useTheme();
   const { accountStatus, accountStatusError } = useAppContext();
+  const { t } = useTranslation();
+  
+  const statusMap: Record<number, string> = {
+    1: t('budget.active'),
+    2: t('budget.inactive'),
+    3: t('budget.disabled'),
+    7: t('budget.inactive'),
+  };
   const [openBudget, setOpenBudget] = React.useState(false);
   const [dailySpend, setDailySpend] = React.useState<number | null>(null);
   const [loadingSpend, setLoadingSpend] = React.useState(false);
@@ -89,13 +92,15 @@ const Header: React.FC<HeaderProps> = ({
     window.location.reload();
   };
 
-  const mobileNavItems = [
-    { path: '/', icon: LayoutDashboard, label: 'Главная' },
-    { path: '/roi', icon: TrendingUp, label: 'ROI' },
-    { path: '/creatives', icon: Target, label: 'Креативы' },
-    { path: '/videos', icon: Video, label: 'Видео' },
-    { path: '/profile', icon: User, label: 'Профиль' },
+  const allMobileNavItems = [
+    { path: '/', icon: LayoutDashboard, label: t('menu.dashboard'), visible: true },
+    { path: '/roi', icon: TrendingUp, label: t('menu.roi'), visible: FEATURES.SHOW_ROI_ANALYTICS },
+    { path: '/creatives', icon: Target, label: t('menu.creatives'), visible: FEATURES.SHOW_CREATIVES },
+    { path: '/videos', icon: Video, label: t('menu.videos'), visible: true },
+    { path: '/profile', icon: User, label: t('menu.profile'), visible: true },
   ];
+
+  const mobileNavItems = allMobileNavItems.filter(item => item.visible);
 
   return (
     <>
@@ -197,21 +202,21 @@ const Header: React.FC<HeaderProps> = ({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <DollarSign className="h-5 w-5 text-green-600" />
-              Информация по бюджету
+              {t('budget.budgetInfo')}
             </DialogTitle>
             <DialogDescription>
-              Текущий статус рекламного кабинета
+              {t('budget.currentAccountStatus')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {accountStatus ? (
               <>
                 <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">Статус кабинета</span>
+                  <span className="text-sm text-muted-foreground">{t('budget.accountStatus')}</span>
                   <span className="font-semibold">{statusMap[Number(accountStatus.account_status)] || accountStatus.account_status}</span>
                 </div>
                 <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">К списанию</span>
+                  <span className="text-sm text-muted-foreground">{t('budget.toBeCharged')}</span>
                   <span className="font-semibold text-green-600">
                     {accountStatus.balance !== undefined ? `$${(Number(accountStatus.balance) / 100).toFixed(2)}` : '—'}
                   </span>

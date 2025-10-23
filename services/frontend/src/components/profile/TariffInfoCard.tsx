@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CalendarDays, Lock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '../../i18n/LanguageContext';
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex';
 
@@ -41,6 +42,8 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
   onChangePassword,
   className,
 }) => {
+  const { t } = useTranslation();
+  
   const tarifBadge = tarif ? (
     <span
       className={cn(
@@ -59,28 +62,28 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
       <CardHeader className="pb-2">
         <CardTitle className="text-lg flex items-center gap-2">
           <User className="h-5 w-5" />
-          Основная информация
+          {t('profile.basicInfo')}
         </CardTitle>
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
           <div className="space-y-2 text-sm">
             <div>
-              <span className="text-muted-foreground">Имя пользователя:</span>{' '}
+              <span className="text-muted-foreground">{t('profile.username')}</span>{' '}
               <b>{username || '—'}</b>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Тариф:</span>
+              <span className="text-muted-foreground">{t('profile.tariff')}</span>
               {tarifBadge}
             </div>
             <div className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4 text-muted-foreground" />
-              Действителен до: <b>{expiry || 'Не указано'}</b>
+              {t('profile.validUntil')} <b>{expiry || t('profile.notSpecified')}</b>
             </div>
           </div>
           <div className="flex md:justify-end items-start">
             <Button onClick={onChangePassword} variant="outline" className="gap-2">
-              <Lock className="h-4 w-4" /> Сменить пароль
+              <Lock className="h-4 w-4" /> {t('profile.changePassword')}
             </Button>
           </div>
         </div>

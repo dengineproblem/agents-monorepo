@@ -16,6 +16,7 @@ import ProfileHero from '@/components/profile/ProfileHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
 import { FEATURES } from '../config/appReview';
+import { useTranslation } from '../i18n/LanguageContext';
  
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
@@ -36,6 +37,7 @@ const tarifColor: Record<Exclude<Tarif, null>, string> = {
 
 const Profile: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const storedUser = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const user = storedUser ? (() => { try { return JSON.parse(storedUser); } catch { return null; } })() : null;
   const isLoading = !storedUser;
@@ -240,11 +242,11 @@ const Profile: React.FC = () => {
   }, [tarif]);
 
   const formattedExpiry = useMemo(() => {
-    if (!tarifExpires) return 'Не указано';
+    if (!tarifExpires) return t('profile.notSpecified');
     const d = new Date(tarifExpires);
-    if (isNaN(d.getTime())) return 'Не указано';
+    if (isNaN(d.getTime())) return t('profile.notSpecified');
     return format(d, 'dd.MM.yyyy');
-  }, [tarifExpires]);
+  }, [tarifExpires, t]);
 
   const handlePasswordSave = async () => {
     // Валидация
@@ -648,7 +650,7 @@ const Profile: React.FC = () => {
       <Header onOpenDatePicker={() => {}} showBack onBack={() => history.back()} />
       <div className="w-full py-6 px-4 pt-[76px] max-w-full overflow-x-hidden">
         <div className="max-w-4xl lg:max-w-6xl mx-auto space-y-6 w-full">
-          <ProfileHero title="Личный кабинет" subtitle="Ваши данные и сервисные подключения" />
+          <ProfileHero title={t('profile.title')} subtitle={t('profile.subtitle')} />
           
           {isLoading ? (
             <Card>
@@ -680,7 +682,7 @@ const Profile: React.FC = () => {
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <MessageCircle className="h-5 w-5" />
-                    Telegram для отчетов
+                    {t('profile.telegramReports')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -706,7 +708,7 @@ const Profile: React.FC = () => {
                               setTelegramIdModal(true);
                             }}
                           >
-                            Изменить
+                            {t('action.change')}
                           </Button>
                         </div>
                       );
@@ -729,7 +731,7 @@ const Profile: React.FC = () => {
                           className="w-full"
                         >
                           <Plus className="h-4 w-4 mr-2" />
-                          Добавить еще Telegram ID
+                          {t('profile.addTelegramId')}
                         </Button>
                       </div>
                     )}
@@ -737,38 +739,40 @@ const Profile: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* OpenAI API Key */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Key className="h-5 w-5" />
-                    OpenAI API ключ
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="text-sm text-muted-foreground mb-1">
-                        API ключ для генерации контента
+              {/* OpenAI API Key - скрыт в App Review */}
+              {FEATURES.SHOW_DIRECTIONS && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Key className="h-5 w-5" />
+                      {t('profile.openaiKey')}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="text-sm text-muted-foreground mb-1">
+                          {t('profile.apiKeyDescription')}
+                        </div>
+                        <div className="font-medium font-mono">
+                          {openaiApiKey ? `${openaiApiKey.substring(0, 7)}...${openaiApiKey.substring(openaiApiKey.length - 4)}` : t('profile.notSet')}
+                        </div>
                       </div>
-                      <div className="font-medium font-mono">
-                        {openaiApiKey ? `${openaiApiKey.substring(0, 7)}...${openaiApiKey.substring(openaiApiKey.length - 4)}` : 'Не установлен'}
-                      </div>
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setNewOpenaiKey(openaiApiKey);
+                          setShowOpenaiKey(false);
+                          setOpenaiModal(true);
+                        }}
+                      >
+                        {openaiApiKey ? t('action.change') : t('action.add')}
+                      </Button>
                     </div>
-                    <Button 
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setNewOpenaiKey(openaiApiKey);
-                        setShowOpenaiKey(false);
-                        setOpenaiModal(true);
-                      }}
-                    >
-                      {openaiApiKey ? 'Изменить' : 'Добавить'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Направления бизнеса */}
               {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} />}
