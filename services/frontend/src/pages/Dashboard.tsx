@@ -20,10 +20,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { FEATURES } from '../config/appReview';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/token';
 
 const Dashboard: React.FC = () => {
+  const { t } = useTranslation();
   const {
     loading,
     accountStatus,
@@ -266,7 +268,7 @@ const Dashboard: React.FC = () => {
       <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full">
         <DashboardHero 
           title={userName || (userTarif === 'target' ? 'Панель таргетолога' : 'Панель управления')}
-          subtitle={userTarif === 'target' ? 'Ваши направления и планы' : 'Управление рекламными кампаниями и аналитика'}
+          subtitle={userTarif === 'target' ? 'Ваши направления и планы' : t('campaign.management')}
         />
 
         {formattedDateRange && (

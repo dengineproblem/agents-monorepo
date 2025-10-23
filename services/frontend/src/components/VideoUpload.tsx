@@ -1580,7 +1580,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         {showVideoForm && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-base">Параметры рекламы</h4>
+              <h4 className="font-semibold text-base">{APP_REVIEW_MODE ? t('campaign.name') : 'Параметры рекламы'}</h4>
               <Button 
                 variant="ghost" 
                 size="sm"
@@ -1604,7 +1604,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 }}
                 disabled={isUploading}
               >
-                ← Назад
+                {APP_REVIEW_MODE ? '← Back' : '← Назад'}
               </Button>
             </div>
 
@@ -1651,8 +1651,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             
             {selectedFile && (
               <>
-                {/* Выбор площадки - только для Instagram */}
-                {platform !== 'tiktok' && (
+                {/* Выбор площадки - только для Instagram и НЕ для App Review */}
+                {!APP_REVIEW_MODE && platform !== 'tiktok' && (
                   <div className="mb-4">
                     <label className="block mb-1 font-medium">Площадка размещения</label>
                     <Popover>
@@ -1688,8 +1688,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   </div>
                 )}
                 
-                {/* Выбор цели объявления для Instagram/обе площадки - скрыто для TikTok */}
-                {platform !== 'tiktok' && (placement === 'instagram' || placement === 'both') && (
+                {/* Выбор цели объявления для Instagram/обе площадки - скрыто для TikTok и App Review */}
+                {!APP_REVIEW_MODE && platform !== 'tiktok' && (placement === 'instagram' || placement === 'both') && (
                   <div className="mb-4">
                     <label className="block mb-1 font-medium">Цель объявления</label>
                     <Popover>
@@ -1728,8 +1728,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     </Popover>
                   </div>
                 )}
-                {/* Выбор направления бизнеса */}
-                {(placement === 'instagram' || placement === 'both') && (
+                {/* Выбор направления бизнеса - НЕ для App Review */}
+                {!APP_REVIEW_MODE && (placement === 'instagram' || placement === 'both') && (
                   <>
                     {directions.length > 0 ? (
                       <div className="mb-4">

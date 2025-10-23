@@ -68,6 +68,12 @@ export const translations = {
       active: 'Active',
       paused: 'Paused',
       noCampaigns: 'No campaigns found',
+      totalSpend: 'Total Spend',
+      avgCPL: 'Average CPL',
+      management: 'Campaign Management',
+      adSettings: 'Ad Settings',
+      description: 'Description',
+      clientQuestion: 'Client Message',
     },
     targeting: {
       location: 'Location',
@@ -84,6 +90,12 @@ export const translations = {
       fileSelected: 'File selected',
       maxSize: 'Maximum file size: 512 MB',
       uploadProgress: 'Upload progress',
+    },
+    stats: {
+      metrics: 'Metrics',
+      totalSpend: 'Total Spend',
+      avgCPL: 'Avg CPL',
+      totalLeads: 'Total Leads',
     },
   },
   ru: {
@@ -148,6 +160,12 @@ export const translations = {
       active: 'Активна',
       paused: 'Остановлена',
       noCampaigns: 'Кампании не найдены',
+      totalSpend: 'Общий расход',
+      avgCPL: 'Средний CPL',
+      management: 'Управление рекламными кампаниями',
+      adSettings: 'Параметры рекламы',
+      description: 'Описание',
+      clientQuestion: 'Вопрос клиента',
     },
     targeting: {
       location: 'Местоположение',
@@ -164,6 +182,12 @@ export const translations = {
       fileSelected: 'Файл выбран',
       maxSize: 'Максимальный размер файла: 512 МБ',
       uploadProgress: 'Прогресс загрузки',
+    },
+    stats: {
+      metrics: 'Показатели',
+      totalSpend: 'Общий расход',
+      avgCPL: 'Средний CPL',
+      totalLeads: 'Всего лидов',
     },
   },
 };
