@@ -301,7 +301,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           daily_budget_cents: p.daily_budget_cents,
           adset_name: p.adset_name,
           auto_activate: p.auto_activate,
-          start_mode: (action as any).params?.start_mode || 'midnight_almaty'
+          start_mode: (action as any).params?.start_mode || 'now' // Agent Brain всегда запускает немедленно
         },
         {
           user_account_id: ctx.userAccountId,
