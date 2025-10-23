@@ -9,12 +9,14 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { facebookApi } from '../services/facebookApi';
+import { useTranslation } from '../i18n/LanguageContext';
 
 
 const CampaignDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { campaigns, toggleCampaignStatus, loading, campaignStats, dateRange, setDateRange, refreshData } = useAppContext();
+  const { t } = useTranslation();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [adsets, setAdsets] = useState<any[]>([]);
   const [adsetBudgets, setAdsetBudgets] = useState<Record<string, number>>({});
@@ -92,7 +94,14 @@ const CampaignDetail: React.FC = () => {
   };
   
   const handleToggleStatus = (checked: boolean) => {
-    toggleCampaignStatus(id, checked);
+    // App Review: Confirmation dialog перед изменением статуса
+    const confirmed = window.confirm(
+      checked ? t('msg.confirmResume') : t('msg.confirmPause')
+    );
+    
+    if (confirmed) {
+      toggleCampaignStatus(id, checked);
+    }
   };
   
   return (

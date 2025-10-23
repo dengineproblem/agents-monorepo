@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Video, User } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Video, User, Globe } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -12,63 +12,98 @@ import {
   SidebarMenuItem,
   SidebarFooter,
 } from '@/components/ui/sidebar';
+import { FEATURES } from '../config/appReview';
+import { useTranslation } from '../i18n/LanguageContext';
+import { Button } from './ui/button';
 
 const menuItems = [
   {
     path: '/',
-    label: 'Главная',
+    label: 'menu.dashboard',
     icon: LayoutDashboard,
+    show: true,
   },
   {
     path: '/roi',
-    label: 'ROI',
+    label: 'menu.roi',
     icon: TrendingUp,
+    show: FEATURES.SHOW_ROI_ANALYTICS,
   },
   {
     path: '/creatives',
-    label: 'Креативы',
+    label: 'menu.creatives',
     icon: Target,
+    show: FEATURES.SHOW_CREATIVES,
   },
   {
     path: '/videos',
-    label: 'Видео',
+    label: 'menu.creatives',
     icon: Video,
+    show: FEATURES.SHOW_CREATIVES,
   },
   {
     path: '/profile',
-    label: 'Личный кабинет',
+    label: 'menu.profile',
     icon: User,
+    show: true,
   },
 ];
 
 export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { t, language, setLanguage } = useTranslation();
+
+  // Фильтруем menuItems по флагу show
+  const visibleMenuItems = menuItems.filter(item => item.show);
 
   return (
     <Sidebar collapsible="none" className="hidden lg:flex border-r fixed left-0 top-[60px] bottom-0 z-40">
       <SidebarContent className="bg-background">
         <SidebarGroup>
-          <SidebarGroupLabel>Навигация</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('menu.dashboard')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.path}>
-                  <SidebarMenuButton
-                    onClick={() => navigate(item.path)}
-                    isActive={location.pathname === item.path}
-                    tooltip={item.label}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {visibleMenuItems.map((item) => {
+                const translatedLabel = t(item.label);
+                return (
+                  <SidebarMenuItem key={item.path}>
+                    <SidebarMenuButton
+                      onClick={() => navigate(item.path)}
+                      isActive={location.pathname === item.path}
+                      tooltip={translatedLabel}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span>{translatedLabel}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="border-t p-4 bg-background">
+        {FEATURES.SHOW_LANGUAGE_SWITCHER && (
+          <div className="flex gap-2 justify-center mb-3">
+            <Button
+              variant={language === 'ru' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setLanguage('ru')}
+              className="flex-1"
+            >
+              RU
+            </Button>
+            <Button
+              variant={language === 'en' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setLanguage('en')}
+              className="flex-1"
+            >
+              EN
+            </Button>
+          </div>
+        )}
         <p className="text-xs text-muted-foreground text-center">
           performante.ai v1.0
         </p>

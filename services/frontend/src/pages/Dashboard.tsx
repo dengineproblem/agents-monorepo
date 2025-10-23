@@ -19,6 +19,7 @@ import { Bot, ChevronDown, Instagram, AlertCircle, Calendar } from 'lucide-react
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { FEATURES } from '../config/appReview';
 
 const WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/token';
 
@@ -339,20 +340,22 @@ const Dashboard: React.FC = () => {
                         <Instagram className="h-4 w-4" />
                         Instagram
                       </Button>
-                      <Button
-                        variant={platform === 'tiktok' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setPlatform('tiktok')}
-                        className={cn(
-                          "gap-2 transition-all duration-200",
-                          platform === 'tiktok' 
-                            ? "bg-gradient-to-r from-black to-gray-900 hover:from-gray-900 hover:to-black text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground" 
-                            : "border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:border dark:text-foreground dark:hover:bg-accent"
-                        )}
-                      >
-                        <TikTokIcon />
-                        TikTok
-                      </Button>
+                      {FEATURES.SHOW_TIKTOK && (
+                        <Button
+                          variant={platform === 'tiktok' ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setPlatform('tiktok')}
+                          className={cn(
+                            "gap-2 transition-all duration-200",
+                            platform === 'tiktok' 
+                              ? "bg-gradient-to-r from-black to-gray-900 hover:from-gray-900 hover:to-black text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground" 
+                              : "border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:border dark:text-foreground dark:hover:bg-accent"
+                          )}
+                        >
+                          <TikTokIcon />
+                          TikTok
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {platform === 'instagram' && !isFbConnected && (
@@ -371,7 +374,7 @@ const Dashboard: React.FC = () => {
                       </Button>
                     </div>
                   )}
-                  {platform === 'tiktok' && !isTtConnected && (
+                  {FEATURES.SHOW_TIKTOK && platform === 'tiktok' && !isTtConnected && (
                     <div className="p-3 rounded-lg border bg-gradient-to-r from-gray-50 to-slate-50 dark:from-transparent dark:to-transparent text-gray-700 dark:text-foreground flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2 flex-1">
                         <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -430,8 +433,8 @@ const Dashboard: React.FC = () => {
         ) : (
           <>
             {/* Стандартный дашборд (AI автопилот + кампании) */}
-        {/* AI автопилот - только для Instagram */}
-            {platform === 'instagram' && (
+        {/* AI автопилот - только для Instagram и только в Production режиме */}
+            {platform === 'instagram' && FEATURES.SHOW_AI_AUTOPILOT && (
               <Card className="mb-6 shadow-sm overflow-hidden">
                 <CardHeader className="pb-3 bg-gradient-to-r from-gray-50 to-slate-50 dark:from-transparent dark:to-transparent">
             <div className="flex items-center justify-between">

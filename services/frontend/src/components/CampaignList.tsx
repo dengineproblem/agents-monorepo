@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { formatCurrency, formatPercent, formatNumber, formatCurrencyKZT } from '../utils/formatters';
 import { useNavigate } from 'react-router-dom';
 import { useIsMobile } from '../hooks/use-mobile';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const statusMap: Record<string, { label: string; color: string }> = {
   ACTIVE: { label: 'Запущена', color: 'bg-green-100 text-green-700' },
@@ -17,6 +18,7 @@ const CampaignList: React.FC = () => {
   const { campaigns, campaignStats, loading, toggleCampaignStatus, setSelectedCampaignId, platform } = useAppContext();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const { t } = useTranslation();
   
   const campaignWithStats = useMemo(() => {
     const arr = campaigns.map(campaign => {
@@ -121,7 +123,14 @@ const CampaignList: React.FC = () => {
                 e.stopPropagation(); 
               }}
               onCheckedChange={(checked) => {
-                toggleCampaignStatus(campaign.id, checked);
+                // App Review: Confirmation dialog перед изменением статуса
+                const confirmed = window.confirm(
+                  checked ? t('msg.confirmResume') : t('msg.confirmPause')
+                );
+                
+                if (confirmed) {
+                  toggleCampaignStatus(campaign.id, checked);
+                }
               }}
             />
           </div>

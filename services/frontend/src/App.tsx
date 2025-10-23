@@ -22,6 +22,8 @@ import Creatives from './pages/Creatives';
 import AdSettings from './pages/AdSettings';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import { LanguageProvider } from './i18n/LanguageContext';
+import { FEATURES } from './config/appReview';
 
 const queryClient = new QueryClient();
 
@@ -91,12 +93,12 @@ const AppRoutes = () => {
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/campaign/:id" element={<CampaignDetail />} />
-                  <Route path="/consultations" element={<Consultations />} />
-                  <Route path="/roi" element={<ROIAnalytics />} />
-                  <Route path="/creatives" element={<CreativeGeneration />} />
-                  <Route path="/videos" element={<Creatives />} />
+                  {FEATURES.SHOW_CONSULTATIONS && <Route path="/consultations" element={<Consultations />} />}
+                  {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
+                  {FEATURES.SHOW_CREATIVES && <Route path="/creatives" element={<CreativeGeneration />} />}
+                  {FEATURES.SHOW_CREATIVES && <Route path="/videos" element={<Creatives />} />}
                   <Route path="/profile" element={<Profile />} />
-                  <Route path="/ad-settings" element={<AdSettings />} />
+                  {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </div>
@@ -130,13 +132,15 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme={theme} enableSystem={false}>
         <TooltipProvider>
-          <AppProvider>
-            <Sonner position="top-center" />
-            <Toaster />
-            <BrowserRouter>
-              <AppRoutes />
-            </BrowserRouter>
-          </AppProvider>
+          <LanguageProvider>
+            <AppProvider>
+              <Sonner position="top-center" />
+              <Toaster />
+              <BrowserRouter>
+                <AppRoutes />
+              </BrowserRouter>
+            </AppProvider>
+          </LanguageProvider>
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
