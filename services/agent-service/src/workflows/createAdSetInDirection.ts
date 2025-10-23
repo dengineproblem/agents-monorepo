@@ -1,6 +1,7 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
 
 const log = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -217,35 +218,28 @@ export async function workflowCreateAdSetInDirection(
     .eq('direction_id', direction_id)
     .maybeSingle();
 
-  let targeting: any = {
-    geo_locations: { countries: ['RU'] },
-    age_min: 18,
-    age_max: 65,
-    publisher_platforms: ['instagram'],
-    instagram_positions: ['stream', 'story', 'explore', 'reels'],
-    device_platforms: ['mobile'],
-    targeting_automation: {
-      advantage_audience: 1
-    }
-  };
-
+  // Используем ту же функцию, что и в автозапуске (workflowCreateCampaignWithCreative)
+  let targeting: any;
+  
   if (defaultSettings) {
-    // Используем настройки из default_ad_settings
-    const cities = defaultSettings.cities || [];
-    if (cities.length > 0) {
-      // Для простоты используем key без поиска реального geo ID
-      targeting.geo_locations = {
-        cities: cities.map((city: string) => ({ key: city, name: city }))
-      };
-    }
-    
-    if (defaultSettings.age_min) targeting.age_min = defaultSettings.age_min;
-    if (defaultSettings.age_max) targeting.age_max = defaultSettings.age_max;
-    
-    if (defaultSettings.gender && defaultSettings.gender !== 'all') {
-      targeting.genders = [defaultSettings.gender === 'male' ? 1 : 2];
-    }
+    // Преобразуем настройки из БД в формат Facebook API
+    targeting = convertToFacebookTargeting(defaultSettings);
+  } else {
+    // Fallback на базовый таргетинг
+    targeting = {
+      geo_locations: { countries: ['RU'] },
+      age_min: 18,
+      age_max: 65
+    };
   }
+
+  // Добавляем обязательные поля для Instagram
+  targeting.publisher_platforms = ['instagram'];
+  targeting.instagram_positions = ['stream', 'story', 'explore', 'reels'];
+  targeting.device_platforms = ['mobile'];
+  targeting.targeting_automation = {
+    advantage_audience: 1
+  };
 
   log.debug({ targeting }, 'Using targeting for ad set');
 
