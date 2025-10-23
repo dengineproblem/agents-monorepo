@@ -23,6 +23,8 @@ import { useDirections } from '@/hooks/useDirections';
 import { OBJECTIVE_LABELS } from '@/types/direction';
 import { useNavigate } from 'react-router-dom';
 import { Target } from 'lucide-react';
+import { APP_REVIEW_MODE } from '../config/appReview';
+import { useTranslation } from '../i18n/LanguageContext';
 
 // Основной вебхук для загрузки видео
 const DEFAULT_WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/downloadvideo';
@@ -116,6 +118,7 @@ interface VideoUploadProps {
 
 export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }: VideoUploadProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -1418,7 +1421,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           )}
         </div>
         
-        {/* Скрытый input для выбора файла - всегда доступен */}
+        {/* Скрытые inputs для выбора файлов - всегда доступны */}
         <input
           type="file"
           id="video-upload"
@@ -1427,10 +1430,44 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           className="hidden"
           disabled={isUploading}
         />
+        <input
+          type="file"
+          id="image-upload"
+          accept="image/*"
+          onChange={handleImageChange}
+          className="hidden"
+          disabled={isUploading}
+        />
 
         {/* Кнопки действий */}
         {!showVideoForm && !showSaleForm && !showImageForm && (
-          showOnlyAddSale ? (
+          APP_REVIEW_MODE ? (
+            /* App Review Mode: только две простые кнопки */
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  document.getElementById('video-upload')?.click();
+                }}
+                disabled={isUploading}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Video className="mr-2 h-4 w-4" />
+                {t('action.uploadVideo')}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  document.getElementById('image-upload')?.click();
+                }}
+                disabled={isUploading}
+                className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                {t('action.uploadImage')}
+              </Button>
+            </div>
+          ) : showOnlyAddSale ? (
             /* Действия для тарифа "target" */
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Button
