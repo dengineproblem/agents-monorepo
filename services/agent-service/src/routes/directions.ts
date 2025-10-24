@@ -304,7 +304,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Получаем user_account для доступа к Facebook API
       const { data: userAccount, error: userAccountError } = await supabase
         .from('user_accounts')
-        .select('ad_account_id, access_token, username, institution_name, email')
+        .select('ad_account_id, access_token, username, email')
         .eq('id', userAccountId)
         .single();
 
@@ -328,7 +328,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      const userAccountName = userAccount.username || userAccount.institution_name || userAccount.email || undefined;
+      const userAccountName = userAccount.username || userAccount.email || undefined;
 
       log.info({
         user_account_id: userAccountId,
