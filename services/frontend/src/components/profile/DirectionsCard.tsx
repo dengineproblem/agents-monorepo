@@ -39,6 +39,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
     objective: 'whatsapp' | 'instagram_traffic' | 'site_leads';
     daily_budget_cents: number;
     target_cpl_cents: number;
+    whatsapp_phone_number?: string;
     adSettings: CreateDefaultSettingsInput;
   }) => {
     console.log('[DirectionsCard] Создание направления с настройками:', data);
@@ -52,6 +53,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
       objective: data.objective,
       daily_budget_cents: data.daily_budget_cents,
       target_cpl_cents: data.target_cpl_cents,
+      whatsapp_phone_number: data.whatsapp_phone_number, // Передаем WhatsApp номер
       default_settings: settingsData, // Передаём настройки в том же запросе
     });
 
@@ -74,6 +76,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
     daily_budget_cents: number;
     target_cpl_cents: number;
     is_active: boolean;
+    whatsapp_phone_number?: string | null;
   }) => {
     if (!selectedDirection) return;
 

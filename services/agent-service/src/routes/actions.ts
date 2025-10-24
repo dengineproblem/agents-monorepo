@@ -224,6 +224,76 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       if (!ctx?.userAccountId || !ctx?.adAccountId) {
         throw new Error('CreateCampaignWithCreative: userAccountId and adAccountId required in context');
       }
+      
+      // Получаем WhatsApp номер с приоритетом направления (для WhatsApp objective)
+      let whatsapp_phone_number = ctx.whatsappPhoneNumber;
+      
+      if (p.objective === 'WhatsApp' && creative_ids.length > 0) {
+        // Получаем первый креатив для определения direction_id
+        const { data: firstCreative } = await supabase
+          .from('user_creatives')
+          .select('direction_id')
+          .eq('id', creative_ids[0])
+          .single();
+        
+        if (firstCreative?.direction_id) {
+          // 1. Приоритет: номер из направления
+          const { data: direction } = await supabase
+            .from('account_directions')
+            .select('whatsapp_phone_number_id')
+            .eq('id', firstCreative.direction_id)
+            .single();
+          
+          if (direction?.whatsapp_phone_number_id) {
+            const { data: phoneNumber } = await supabase
+              .from('whatsapp_phone_numbers')
+              .select('phone_number')
+              .eq('id', direction.whatsapp_phone_number_id)
+              .eq('is_active', true)
+              .single();
+            
+            if (phoneNumber?.phone_number) {
+              whatsapp_phone_number = phoneNumber.phone_number;
+              console.log('[Brain Agent] Using WhatsApp number from direction:', {
+                creativeId: creative_ids[0],
+                directionId: firstCreative.direction_id,
+                phone_number: whatsapp_phone_number,
+                source: 'direction'
+              });
+            }
+          }
+          
+          // 2. Fallback: дефолтный номер пользователя
+          if (!whatsapp_phone_number) {
+            const { data: defaultNumber } = await supabase
+              .from('whatsapp_phone_numbers')
+              .select('phone_number')
+              .eq('user_account_id', ctx.userAccountId)
+              .eq('is_default', true)
+              .eq('is_active', true)
+              .single();
+            
+            if (defaultNumber?.phone_number) {
+              whatsapp_phone_number = defaultNumber.phone_number;
+              console.log('[Brain Agent] Using default WhatsApp number:', {
+                creativeId: creative_ids[0],
+                phone_number: whatsapp_phone_number,
+                source: 'default'
+              });
+            }
+          }
+        }
+        
+        // 3. Fallback: ctx.whatsappPhoneNumber уже установлен выше (legacy из user_accounts)
+        if (whatsapp_phone_number && whatsapp_phone_number === ctx.whatsappPhoneNumber) {
+          console.log('[Brain Agent] Using legacy WhatsApp number:', {
+            creativeId: creative_ids[0],
+            phone_number: whatsapp_phone_number,
+            source: 'user_accounts'
+          });
+        }
+      }
+      
       return workflowCreateCampaignWithCreative(
         {
           user_creative_ids: creative_ids,
@@ -240,7 +310,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         {
           user_account_id: ctx.userAccountId,
           ad_account_id: ctx.adAccountId,
-          whatsapp_phone_number: ctx.whatsappPhoneNumber,
+          whatsapp_phone_number,
         },
         token
       );

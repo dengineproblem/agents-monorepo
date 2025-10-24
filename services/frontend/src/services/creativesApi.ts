@@ -127,7 +127,7 @@ export const creativesApi = {
     // Выбираем эндпоинт по типу файла
     const isImage = (file?.type || '').startsWith('image/');
     const imageEndpoint = (import.meta as any).env?.VITE_PROCESS_IMAGE_URL || 'http://localhost:8082/process-image';
-    const videoEndpoint = (import.meta as any).env?.VITE_N8N_CREATIVE_WEBHOOK_URL || 'http://localhost:8082/process-video';
+    const videoEndpoint = (import.meta as any).env?.VITE_N8N_CREATIVE_WEBHOOK_URL || 'http://localhost:8082/api/process-video';
     const webhookUrl = isImage ? imageEndpoint : videoEndpoint;
     const userId = getUserId();
     if (!userId) return false;

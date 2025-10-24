@@ -31,6 +31,7 @@ interface EditDirectionDialogProps {
     daily_budget_cents: number;
     target_cpl_cents: number;
     is_active: boolean;
+    whatsapp_phone_number?: string | null;
   }) => Promise<void>;
 }
 
@@ -59,6 +60,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [description, setDescription] = useState('Напишите нам, чтобы узнать подробности');
   
   // Специфичные для целей
+  const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState('');
   const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.');
   const [instagramUrl, setInstagramUrl] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
@@ -98,6 +100,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setDailyBudget((direction.daily_budget_cents / 100).toFixed(2));
     setTargetCpl((direction.target_cpl_cents / 100).toFixed(2));
     setIsActive(direction.is_active);
+    setWhatsappPhoneNumber(direction.whatsapp_phone_number || '');
     setError(null);
 
     // Загружаем настройки рекламы
@@ -235,6 +238,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         daily_budget_cents: Math.round(budgetValue * 100),
         target_cpl_cents: Math.round(cplValue * 100),
         is_active: isActive,
+        whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
       });
 
       // Обновляем или создаём настройки рекламы
@@ -555,6 +559,23 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               {direction.objective === 'whatsapp' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-whatsapp-number">
+                      WhatsApp номер (опционально)
+                    </Label>
+                    <Input
+                      id="edit-whatsapp-number"
+                      value={whatsappPhoneNumber}
+                      onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                      placeholder="+77001234567"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
+                    </p>
+                  </div>
                   
                   <div className="space-y-2">
                     <Label htmlFor="edit-client-question">

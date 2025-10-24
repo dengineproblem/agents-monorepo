@@ -86,13 +86,14 @@ export async function getCreativeAnalytics(
   userId: string,
   force: boolean = false
 ): Promise<CreativeAnalytics> {
-  const url = new URL(`${ANALYTICS_API_BASE_URL}/api/analyzer/creative-analytics/${creativeId}`);
-  url.searchParams.set('user_id', userId);
+  const params = new URLSearchParams();
+  params.set('user_id', userId);
   if (force) {
-    url.searchParams.set('force', 'true');
+    params.set('force', 'true');
   }
 
-  const response = await fetch(url.toString());
+  const url = `${ANALYTICS_API_BASE_URL}/api/analyzer/creative-analytics/${creativeId}?${params.toString()}`;
+  const response = await fetch(url);
 
   if (!response.ok) {
     if (response.status === 404) {

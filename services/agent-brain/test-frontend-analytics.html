@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>Test Analytics</title></head>
+<body>
+<h1>Тест аналитики</h1>
+<pre id="result">Загрузка...</pre>
+<script>
+const userId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
+const creativeId = '5b5f5d1b-ddf2-4be5-8385-18fc0d8ee1e7';
+
+fetch(`/api/analyzer/creative-analytics/${creativeId}?user_id=${userId}`)
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+  })
+  .catch(err => {
+    document.getElementById('result').textContent = 'Ошибка: ' + err.message;
+  });
+</script>
+</body>
+</html>

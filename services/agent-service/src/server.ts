@@ -9,6 +9,7 @@ import { creativeTestRoutes } from './routes/creativeTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { directionsRoutes } from './routes/directions.js';
 import { defaultSettingsRoutes } from './routes/defaultSettings.js';
+import whatsappNumbersRoutes from './routes/whatsappNumbers.js';
 import facebookWebhooks from './routes/facebookWebhooks.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
@@ -45,6 +46,7 @@ app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes);
 app.register(defaultSettingsRoutes);
+app.register(whatsappNumbersRoutes);
 app.register(facebookWebhooks); // Без префикса - nginx уже убирает /api
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)

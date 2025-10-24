@@ -16,6 +16,7 @@ const CreateDirectionSchema = z.object({
   objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']),
   daily_budget_cents: z.number().int().min(1000), // минимум $10
   target_cpl_cents: z.number().int().min(50), // минимум $0.50
+  whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
   // Опциональные дефолтные настройки рекламы
   default_settings: z.object({
     cities: z.array(z.string()).optional(),
@@ -39,6 +40,7 @@ const UpdateDirectionSchema = z.object({
   daily_budget_cents: z.number().int().min(1000).optional(),
   target_cpl_cents: z.number().int().min(50).optional(),
   is_active: z.boolean().optional(),
+  whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую
 });
 
 type CreateDirectionInput = z.infer<typeof CreateDirectionSchema>;
@@ -248,7 +250,10 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       const { data: directions, error } = await supabase
         .from('account_directions')
-        .select('*')
+        .select(`
+          *,
+          whatsapp_phone_number:whatsapp_phone_numbers!whatsapp_phone_number_id(phone_number)
+        `)
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false });
 
@@ -260,9 +265,15 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Преобразуем вложенный объект в простое поле
+      const directionsWithNumber = (directions || []).map(dir => ({
+        ...dir,
+        whatsapp_phone_number: dir.whatsapp_phone_number?.phone_number || null,
+      }));
+
       return reply.send({
         success: true,
-        directions: directions || [],
+        directions: directionsWithNumber,
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error fetching directions list');
@@ -339,6 +350,60 @@ export async function directionsRoutes(app: FastifyInstance) {
         userAccountName
       }, 'Creating direction');
 
+      // Если указан WhatsApp номер, создаем или находим запись в whatsapp_phone_numbers
+      let whatsapp_phone_number_id: string | null = null;
+      
+      if (input.whatsapp_phone_number && input.whatsapp_phone_number.trim()) {
+        const phoneNumber = input.whatsapp_phone_number.trim();
+        
+        // Проверяем, существует ли уже такой номер
+        const { data: existingNumber, error: checkError } = await supabase
+          .from('whatsapp_phone_numbers')
+          .select('id')
+          .eq('user_account_id', userAccountId)
+          .eq('phone_number', phoneNumber)
+          .maybeSingle();
+
+        if (checkError) {
+          log.error({ err: checkError }, 'Error checking existing WhatsApp number');
+          return reply.code(500).send({
+            success: false,
+            error: 'Database error while checking WhatsApp number',
+          });
+        }
+
+        if (existingNumber) {
+          // Номер уже существует, используем его
+          whatsapp_phone_number_id = existingNumber.id;
+          log.info({ phoneNumber, id: whatsapp_phone_number_id }, 'Using existing WhatsApp number');
+        } else {
+          // Создаем новый номер
+          const { data: newNumber, error: insertNumberError } = await supabase
+            .from('whatsapp_phone_numbers')
+            .insert([
+              {
+                user_account_id: userAccountId,
+                phone_number: phoneNumber,
+                is_active: true,
+                is_default: false,
+              },
+            ])
+            .select('id')
+            .single();
+
+          if (insertNumberError) {
+            log.error({ err: insertNumberError }, 'Error creating WhatsApp number');
+            return reply.code(500).send({
+              success: false,
+              error: 'Failed to save WhatsApp number',
+            });
+          }
+
+          whatsapp_phone_number_id = newNumber.id;
+          log.info({ phoneNumber, id: whatsapp_phone_number_id }, 'Created new WhatsApp number');
+        }
+      }
+
       // Создаём Facebook Campaign
       let fbCampaign;
       try {
@@ -367,6 +432,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             objective: input.objective,
             daily_budget_cents: input.daily_budget_cents,
             target_cpl_cents: input.target_cpl_cents,
+            whatsapp_phone_number_id: whatsapp_phone_number_id,
             fb_campaign_id: fbCampaign.campaign_id,
             campaign_status: fbCampaign.status,
             is_active: true,
@@ -482,12 +548,67 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Обрабатываем WhatsApp номер если он передан
+      let updateData: any = { ...input };
+      delete updateData.whatsapp_phone_number; // Удаляем из объекта обновления, т.к. это не колонка БД
+      
+      if (input.whatsapp_phone_number !== undefined) {
+        if (input.whatsapp_phone_number === null || input.whatsapp_phone_number === '') {
+          // Удаляем привязку к номеру
+          updateData.whatsapp_phone_number_id = null;
+          log.info({ directionId: id }, 'Removing WhatsApp number from direction');
+        } else {
+          // Создаем или находим номер
+          const phoneNumber = input.whatsapp_phone_number.trim();
+          const userAccountId = existingDirection.user_account_id;
+          
+          const { data: existingNumber } = await supabase
+            .from('whatsapp_phone_numbers')
+            .select('id')
+            .eq('user_account_id', userAccountId)
+            .eq('phone_number', phoneNumber)
+            .maybeSingle();
+
+          if (existingNumber) {
+            updateData.whatsapp_phone_number_id = existingNumber.id;
+            log.info({ phoneNumber, id: existingNumber.id }, 'Using existing WhatsApp number for direction');
+          } else {
+            const { data: newNumber, error: insertNumberError } = await supabase
+              .from('whatsapp_phone_numbers')
+              .insert([
+                {
+                  user_account_id: userAccountId,
+                  phone_number: phoneNumber,
+                  is_active: true,
+                  is_default: false,
+                },
+              ])
+              .select('id')
+              .single();
+
+            if (insertNumberError) {
+              log.error({ err: insertNumberError }, 'Error creating WhatsApp number');
+              return reply.code(500).send({
+                success: false,
+                error: 'Failed to save WhatsApp number',
+              });
+            }
+
+            updateData.whatsapp_phone_number_id = newNumber.id;
+            log.info({ phoneNumber, id: newNumber.id }, 'Created new WhatsApp number for direction');
+          }
+        }
+      }
+
       // Обновляем направление в базе
       const { data: updatedDirection, error: updateError } = await supabase
         .from('account_directions')
-        .update(input)
+        .update(updateData)
         .eq('id', id)
-        .select()
+        .select(`
+          *,
+          whatsapp_phone_number:whatsapp_phone_numbers!whatsapp_phone_number_id(phone_number)
+        `)
         .single();
 
       if (updateError) {
@@ -498,11 +619,17 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Преобразуем вложенный объект в простое поле
+      const directionWithNumber = {
+        ...updatedDirection,
+        whatsapp_phone_number: updatedDirection.whatsapp_phone_number?.phone_number || null,
+      };
+
       log.info({ directionId: id }, 'Direction updated successfully');
 
       return reply.send({
         success: true,
-        direction: updatedDirection,
+        direction: directionWithNumber,
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error updating direction');

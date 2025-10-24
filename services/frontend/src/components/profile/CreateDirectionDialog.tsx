@@ -29,14 +29,17 @@ interface CreateDirectionDialogProps {
     objective: DirectionObjective;
     daily_budget_cents: number;
     target_cpl_cents: number;
+    whatsapp_phone_number?: string;
     adSettings: CreateDefaultSettingsInput;
   }) => Promise<void>;
+  userAccountId: string;
 }
 
 export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   open,
   onOpenChange,
   onSubmit,
+  userAccountId,
 }) => {
   // Ref для порталинга Popover внутрь Dialog
   const dialogContentRef = React.useRef<HTMLDivElement>(null);
@@ -46,6 +49,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [objective, setObjective] = useState<DirectionObjective>('whatsapp');
   const [dailyBudget, setDailyBudget] = useState('50');
   const [targetCpl, setTargetCpl] = useState('2.00');
+  
+  // WhatsApp номер (вводится напрямую)
+  const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState<string>('');
   
   // Настройки рекламы - Таргетинг
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
@@ -143,9 +149,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     }
 
     // Валидация специфичных полей
-    if (objective === 'whatsapp' && !clientQuestion.trim()) {
-      setError('Введите вопрос клиента для WhatsApp');
-      return;
+    if (objective === 'whatsapp') {
+      if (!clientQuestion.trim()) {
+        setError('Введите вопрос клиента для WhatsApp');
+        return;
+      }
+      
+      // Валидация номера WhatsApp (если указан)
+      if (whatsappPhoneNumber.trim() && !whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+        setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+        return;
+      }
     }
 
     if (objective === 'instagram_traffic' && !instagramUrl.trim()) {
@@ -184,6 +198,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         objective,
         daily_budget_cents: Math.round(budgetValue * 100),
         target_cpl_cents: Math.round(cplValue * 100),
+        whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
         adSettings,
       });
 
@@ -202,6 +217,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setObjective('whatsapp');
     setDailyBudget('50');
     setTargetCpl('2.00');
+    setWhatsappPhoneNumber('');
     setSelectedCities([]);
     setAgeMin(18);
     setAgeMax(65);
@@ -510,6 +526,24 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           {objective === 'whatsapp' && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
+              
+              {/* Ввод WhatsApp номера */}
+              <div className="space-y-2">
+                <Label htmlFor="whatsapp-number">
+                  WhatsApp номер (опционально)
+                </Label>
+                <Input
+                  id="whatsapp-number"
+                  value={whatsappPhoneNumber}
+                  onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                  placeholder="+77001234567"
+                  disabled={isSubmitting}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
+                </p>
+              </div>
               
               <div className="space-y-2">
                 <Label htmlFor="client-question">

@@ -48,6 +48,76 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
+      // Получаем креатив для определения direction_id
+      const { data: creative } = await supabase
+        .from('user_creatives')
+        .select('direction_id')
+        .eq('id', user_creative_id)
+        .single();
+
+      // Получаем WhatsApp номер с приоритетом направления
+      let whatsapp_phone_number = null;
+      
+      if (creative?.direction_id) {
+        // 1. Приоритет: номер из направления
+        const { data: direction } = await supabase
+          .from('account_directions')
+          .select('whatsapp_phone_number_id')
+          .eq('id', creative.direction_id)
+          .single();
+        
+        if (direction?.whatsapp_phone_number_id) {
+          const { data: phoneNumber } = await supabase
+            .from('whatsapp_phone_numbers')
+            .select('phone_number')
+            .eq('id', direction.whatsapp_phone_number_id)
+            .eq('is_active', true)
+            .single();
+          
+          whatsapp_phone_number = phoneNumber?.phone_number;
+          
+          if (whatsapp_phone_number) {
+            app.log.info({ 
+              creativeId: user_creative_id,
+              directionId: creative.direction_id,
+              phone_number: whatsapp_phone_number, 
+              source: 'direction' 
+            }, 'Using WhatsApp number from direction for test');
+          }
+        }
+      }
+      
+      // 2. Fallback: дефолтный номер пользователя
+      if (!whatsapp_phone_number) {
+        const { data: defaultNumber } = await supabase
+          .from('whatsapp_phone_numbers')
+          .select('phone_number')
+          .eq('user_account_id', user_id)
+          .eq('is_default', true)
+          .eq('is_active', true)
+          .single();
+        
+        whatsapp_phone_number = defaultNumber?.phone_number;
+        
+        if (whatsapp_phone_number) {
+          app.log.info({ 
+            creativeId: user_creative_id,
+            phone_number: whatsapp_phone_number, 
+            source: 'default' 
+          }, 'Using default WhatsApp number for test');
+        }
+      }
+      
+      // 3. Fallback: старый номер из user_accounts (обратная совместимость)
+      if (!whatsapp_phone_number && userAccount?.whatsapp_phone_number) {
+        whatsapp_phone_number = userAccount.whatsapp_phone_number;
+        app.log.info({ 
+          creativeId: user_creative_id,
+          phone_number: whatsapp_phone_number, 
+          source: 'user_accounts' 
+        }, 'Using legacy WhatsApp number for test');
+      }
+
       // Проверяем, не запускался ли тест ранее
       const { data: existingTests, error: existingError } = await supabase
         .from('creative_tests')
@@ -83,7 +153,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           ad_account_id: userAccount.ad_account_id,
           page_id: userAccount.page_id,
           instagram_id: userAccount.instagram_id,
-          whatsapp_phone_number: userAccount.whatsapp_phone_number
+          whatsapp_phone_number
         },
         userAccount.access_token
       );

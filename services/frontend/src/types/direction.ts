@@ -12,6 +12,7 @@ export interface Direction {
   daily_budget_cents: number;
   target_cpl_cents: number;
   is_active: boolean;
+  whatsapp_phone_number?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +23,7 @@ export interface CreateDirectionPayload {
   objective: DirectionObjective;
   daily_budget_cents: number;
   target_cpl_cents: number;
+  whatsapp_phone_number?: string;
   default_settings?: {
     cities?: string[];
     age_min?: number;
@@ -41,6 +43,7 @@ export interface UpdateDirectionPayload {
   daily_budget_cents?: number;
   target_cpl_cents?: number;
   is_active?: boolean;
+  whatsapp_phone_number?: string | null;
 }
 
 // Дефолтные настройки рекламы для направления

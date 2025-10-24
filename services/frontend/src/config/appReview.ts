@@ -32,8 +32,8 @@ export const FEATURES = {
   // Скрыть раздел Видео (в мобильной версии в App Review)
   SHOW_VIDEOS: !APP_REVIEW_MODE,
   
-  // Показывать переключатель языка (только в Production)
-  SHOW_LANGUAGE_SWITCHER: !APP_REVIEW_MODE,
+  // Показывать переключатель языка (скрыт)
+  SHOW_LANGUAGE_SWITCHER: false,
 };
 
 /**

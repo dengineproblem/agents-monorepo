@@ -560,9 +560,11 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       }
     }
     
-    // Если нет production, используем тест (completed или running с данными)
+    // Если нет production, используем тест (completed, cancelled или running с данными)
     if (!productionMetrics && test) {
-      if (test.status === 'completed' || (test.status === 'running' && test.impressions > 0)) {
+      if (test.status === 'completed' || 
+          (test.status === 'running' && test.impressions > 0) ||
+          (test.status === 'cancelled' && test.impressions > 0)) {
         dataSource = 'test';
       }
     }
@@ -655,15 +657,58 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     const shouldAnalyze = dataSource === 'production' || (dataSource === 'test' && test.status === 'completed');
     
     if (shouldAnalyze) {
-      fastify.log.info({ user_creative_id, data_source: dataSource }, 'Analyzing with LLM');
-      
-      analysis = await analyzeCreativeTest(metricsForAnalysis, transcriptText);
+      // ШАГ 1: Проверяем существующий анализ в БД
+      if (test && test.llm_score !== null && test.llm_verdict !== null) {
+        fastify.log.info({ user_creative_id, source: 'database', llm_score: test.llm_score }, 'Using existing LLM analysis from DB');
+        analysis = {
+          score: test.llm_score,
+          verdict: test.llm_verdict,
+          reasoning: test.llm_reasoning,
+          video_analysis: test.llm_video_analysis,
+          text_recommendations: test.llm_text_recommendations
+        };
+      } else {
+        // ШАГ 2: Делаем новый анализ через OpenAI
+        fastify.log.info({ user_creative_id, data_source: dataSource }, 'Analyzing with LLM');
+        
+        try {
+          analysis = await analyzeCreativeTest(metricsForAnalysis, transcriptText);
 
-      fastify.log.info({ 
-        user_creative_id, 
-        llm_score: analysis.score,
-        llm_verdict: analysis.verdict
-      }, 'LLM analysis complete');
+          fastify.log.info({ 
+            user_creative_id, 
+            llm_score: analysis.score,
+            llm_verdict: analysis.verdict
+          }, 'LLM analysis complete');
+
+          // ШАГ 3: Сохраняем результат в БД
+          if (test && test.id) {
+            const { error: updateError } = await supabase
+              .from('creative_tests')
+              .update({
+                llm_score: analysis.score,
+                llm_verdict: analysis.verdict,
+                llm_reasoning: analysis.reasoning,
+                llm_video_analysis: analysis.video_analysis,
+                llm_text_recommendations: analysis.text_recommendations,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', test.id);
+            
+            if (updateError) {
+              fastify.log.error({ test_id: test.id, error: updateError }, 'Failed to save LLM analysis to DB');
+            } else {
+              fastify.log.info({ test_id: test.id }, 'LLM analysis saved to DB');
+            }
+          }
+        } catch (error) {
+          fastify.log.warn({ 
+            user_creative_id, 
+            error: error.message 
+          }, 'LLM analysis failed, continuing without analysis');
+          // Продолжаем без анализа, возвращаем данные теста
+          analysis = null;
+        }
+      }
     } else {
       fastify.log.info({ user_creative_id, test_status: test.status }, 'Skipping LLM analysis for running test');
     }
