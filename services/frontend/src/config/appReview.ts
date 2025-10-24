@@ -29,6 +29,9 @@ export const FEATURES = {
   // Скрыть Campaign Builder / Brain Agent
   SHOW_CAMPAIGN_BUILDER: !APP_REVIEW_MODE,
   
+  // Скрыть раздел Видео (в мобильной версии в App Review)
+  SHOW_VIDEOS: !APP_REVIEW_MODE,
+  
   // Показывать переключатель языка (только в Production)
   SHOW_LANGUAGE_SWITCHER: !APP_REVIEW_MODE,
 };

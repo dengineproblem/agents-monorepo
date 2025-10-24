@@ -7,19 +7,19 @@ import { useIsMobile } from '../hooks/use-mobile';
 import { useTranslation } from '../i18n/LanguageContext';
 import { REQUIRE_CONFIRMATION } from '../config/appReview';
 
-const statusMap: Record<string, { label: string; color: string }> = {
-  ACTIVE: { label: 'Запущена', color: 'bg-green-100 text-green-700' },
-  PAUSED: { label: 'Остановлена', color: 'bg-gray-100 text-gray-600' },
-  ERROR: { label: 'Ошибка', color: 'bg-red-100 text-red-700' },
-  PLANNED: { label: 'Запланирована', color: 'bg-blue-100 text-blue-700' },
-  PAYMENT_FAILED: { label: 'Оплата не прошла', color: 'bg-red-200 text-red-800' },
-};
-
 const CampaignList: React.FC = () => {
   const { campaigns, campaignStats, loading, toggleCampaignStatus, setSelectedCampaignId, platform } = useAppContext();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
   const { t } = useTranslation();
+  
+  const statusMap: Record<string, { label: string; color: string }> = {
+    ACTIVE: { label: t('stats.statusActive'), color: 'bg-green-100 text-green-700' },
+    PAUSED: { label: t('stats.statusPaused'), color: 'bg-gray-100 text-gray-600' },
+    ERROR: { label: t('stats.statusError'), color: 'bg-red-100 text-red-700' },
+    PLANNED: { label: t('stats.statusPlanned'), color: 'bg-blue-100 text-blue-700' },
+    PAYMENT_FAILED: { label: t('stats.statusPaymentFailed'), color: 'bg-red-200 text-red-800' },
+  };
   
   const campaignWithStats = useMemo(() => {
     const arr = campaigns.map(campaign => {
@@ -114,7 +114,7 @@ const CampaignList: React.FC = () => {
                     ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm' 
                     : 'bg-gray-300 dark:bg-gray-600'
                 }`}
-                title={campaign.status === 'ACTIVE' ? 'Запущена' : 'Остановлена'}
+                title={statusMap[campaign.status]?.label || campaign.status}
               />
             </div>
             <Switch 
@@ -141,15 +141,15 @@ const CampaignList: React.FC = () => {
           </div>
           <div className="grid grid-cols-3 gap-3 text-sm">
             <div className="space-y-1">
-              <p className="text-muted-foreground text-xs font-medium">Расход</p>
+              <p className="text-muted-foreground text-xs font-medium">{t('stats.spend')}</p>
               <p className="font-semibold text-base">{platform === 'tiktok' ? formatCurrencyKZT(campaign.spend) : formatCurrency(campaign.spend)}</p>
             </div>
             <div className="space-y-1">
-              <p className="text-muted-foreground text-xs font-medium">{platform === 'tiktok' ? 'Переходы в WhatsApp' : 'Лиды/чаты'}</p>
+              <p className="text-muted-foreground text-xs font-medium">{platform === 'tiktok' ? t('stats.whatsappTransitions') : t('stats.leadsAndChats')}</p>
               <p className="font-semibold text-base">{formatNumber(campaign.leads)}</p>
             </div>
             <div className="space-y-1">
-              <p className="text-muted-foreground text-xs font-medium">{platform === 'tiktok' ? 'Стоимость перехода' : 'Стоимость лида'}</p>
+              <p className="text-muted-foreground text-xs font-medium">{platform === 'tiktok' ? t('stats.transitionCost') : t('stats.costPerLead')}</p>
               <p className="font-semibold text-base">{platform === 'tiktok' ? formatCurrencyKZT(campaign.cpl) : formatCurrency(campaign.cpl)}</p>
             </div>
           </div>
@@ -157,7 +157,7 @@ const CampaignList: React.FC = () => {
       ))}
       {campaignWithStats.length === 0 && !loading && (
         <div className="text-center py-8">
-          <p className="text-muted-foreground">Нет данных о рекламных кампаниях</p>
+          <p className="text-muted-foreground">{t('stats.noCampaignsData')}</p>
         </div>
       )}
     </div>

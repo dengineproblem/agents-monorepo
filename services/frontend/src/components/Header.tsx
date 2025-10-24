@@ -96,7 +96,7 @@ const Header: React.FC<HeaderProps> = ({
     { path: '/', icon: LayoutDashboard, label: t('menu.dashboard'), visible: true },
     { path: '/roi', icon: TrendingUp, label: t('menu.roi'), visible: FEATURES.SHOW_ROI_ANALYTICS },
     { path: '/creatives', icon: Target, label: t('menu.creatives'), visible: FEATURES.SHOW_CREATIVES },
-    { path: '/videos', icon: Video, label: t('menu.videos'), visible: true },
+    { path: '/videos', icon: Video, label: t('menu.videos'), visible: FEATURES.SHOW_VIDEOS },
     { path: '/profile', icon: User, label: t('menu.profile'), visible: true },
   ];
 
