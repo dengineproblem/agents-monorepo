@@ -309,10 +309,22 @@ export async function directionsRoutes(app: FastifyInstance) {
         .single();
 
       if (userAccountError || !userAccount) {
-        log.error({ userAccountId }, 'User account not found');
+        log.error({ 
+          userAccountId, 
+          error: userAccountError,
+          hasData: !!userAccount,
+          errorMessage: userAccountError?.message,
+          errorDetails: userAccountError?.details,
+          errorHint: userAccountError?.hint,
+          errorCode: userAccountError?.code
+        }, 'User account not found');
         return reply.code(404).send({
           success: false,
           error: 'User account not found',
+          debug: {
+            errorMessage: userAccountError?.message,
+            errorCode: userAccountError?.code
+          }
         });
       }
 
