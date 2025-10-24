@@ -13,14 +13,17 @@ const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const FB_VALIDATE_ONLY = String(process.env.FB_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
 const log = createLogger({ module: 'facebookAdapter' });
 
-function appsecret_proof(token: string) {
-  return crypto.createHmac('sha256', FB_APP_SECRET).update(token).digest('hex');
-}
+// appsecret_proof закомментирован - он нужен ТОЛЬКО для OAuth, 
+// но НЕ для обычных API запросов (конфликтует с токенами из Supabase)
+// function appsecret_proof(token: string) {
+//   return crypto.createHmac('sha256', FB_APP_SECRET).update(token).digest('hex');
+// }
 
 export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: string, params: Record<string, any> = {}) {
   const usp = new URLSearchParams();
   usp.set('access_token', token);
-  if (FB_APP_SECRET) usp.set('appsecret_proof', appsecret_proof(token));
+  // НЕ используем appsecret_proof - токены могут быть от других приложений
+  // if (FB_APP_SECRET) usp.set('appsecret_proof', appsecret_proof(token));
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) usp.set(k, String(v));
   if (FB_VALIDATE_ONLY && (method === 'POST' || method === 'DELETE')) {
     usp.set('execution_options', '["validate_only"]');
