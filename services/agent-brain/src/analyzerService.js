@@ -560,12 +560,14 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       }
     }
     
-    // Если нет production, используем тест (только completed)
-    if (!productionMetrics && test && test.status === 'completed') {
-      dataSource = 'test';
+    // Если нет production, используем тест (completed или running с данными)
+    if (!productionMetrics && test) {
+      if (test.status === 'completed' || (test.status === 'running' && test.impressions > 0)) {
+        dataSource = 'test';
+      }
     }
 
-    // Если нет ни production, ни завершённого теста
+    // Если нет ни production, ни данных теста
     if (dataSource === 'none') {
       return reply.send({
         creative: {
@@ -576,7 +578,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         },
         data_source: 'none',
         message: test?.status === 'running' 
-          ? 'Тест запущен, ожидание данных' 
+          ? 'Тест запущен, накапливается статистика' 
           : 'Креатив не тестировался и не используется в рекламе',
         test: test ? {
           exists: true,
@@ -645,17 +647,26 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     }
 
     // ===================================================
-    // STEP 7: Анализируем через LLM (СУЩЕСТВУЮЩАЯ ФУНКЦИЯ!)
+    // STEP 7: Анализируем через LLM (только для completed тестов или production)
     // ===================================================
-    fastify.log.info({ user_creative_id, data_source: dataSource }, 'Analyzing with LLM');
+    let analysis = null;
     
-    const analysis = await analyzeCreativeTest(metricsForAnalysis, transcriptText);
+    // LLM анализ только если тест завершён или это production данные
+    const shouldAnalyze = dataSource === 'production' || (dataSource === 'test' && test.status === 'completed');
+    
+    if (shouldAnalyze) {
+      fastify.log.info({ user_creative_id, data_source: dataSource }, 'Analyzing with LLM');
+      
+      analysis = await analyzeCreativeTest(metricsForAnalysis, transcriptText);
 
-    fastify.log.info({ 
-      user_creative_id, 
-      llm_score: analysis.score,
-      llm_verdict: analysis.verdict
-    }, 'LLM analysis complete');
+      fastify.log.info({ 
+        user_creative_id, 
+        llm_score: analysis.score,
+        llm_verdict: analysis.verdict
+      }, 'LLM analysis complete');
+    } else {
+      fastify.log.info({ user_creative_id, test_status: test.status }, 'Skipping LLM analysis for running test');
+    }
 
     // ===================================================
     // STEP 8: Формируем ответ
@@ -670,6 +681,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       },
       
       data_source: dataSource, // 'test' или 'production'
+      message: test?.status === 'running' ? 'Тест в процессе, анализ будет доступен после завершения' : undefined,
       
       test: test ? {
         exists: true,
@@ -699,13 +711,13 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         metrics: productionMetrics
       } : null,
       
-      analysis: {
+      analysis: analysis ? {
         ...analysis,
         based_on: dataSource,
         note: dataSource === 'production' 
           ? 'Анализ основан на реальных данных из рекламы'
           : 'Анализ основан на результатах теста'
-      }
+      } : null
     };
 
     // ===================================================
