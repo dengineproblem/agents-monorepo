@@ -1,60 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Image as ImageIcon, Loader2, ChevronDown, Play, Wand2, AlertTriangle } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-
-// Константы для городов и стран (как в VideoUpload)
-const CITIES = [
-  { id: 'KZ', name: 'Весь Казахстан' },
-  { id: '1289448', name: 'Актау' },
-  { id: '1289458', name: 'Актобе' },
-  { id: '1293836', name: 'Караганда' },
-  { id: '1295460', name: 'Костанай' },
-  { id: '1298077', name: 'Уральск' },
-  { id: '1298160', name: 'Усть-Каменогорск' },
-  { id: '1298304', name: 'Павлодар' },
-  { id: '1299700', name: 'Семей' },
-  { id: '1300313', name: 'Шымкент' },
-  { id: '1301648', name: 'Астана' },
-  { id: '1289662', name: 'Алматы' },
-  { id: '1290182', name: 'Атырау' },
-];
-
-const COUNTRIES = [
-  { code: 'KZ', name: 'Казахстан' },
-  { code: 'BY', name: 'Беларусь' },
-  { code: 'KG', name: 'Кыргызстан' },
-  { code: 'UZ', name: 'Узбекистан' },
-];
-
-const CITIES_AND_COUNTRIES = [
-  ...CITIES,
-  { id: 'BY', name: 'Беларусь' },
-  { id: 'KG', name: 'Кыргызстан' },
-  { id: 'UZ', name: 'Узбекистан' },
-  { id: 'US', name: 'США' },
-  { id: 'IT', name: 'Италия' },
-  { id: 'CA', name: 'Канада' },
-  { id: 'SA', name: 'Саудовская Аравия' },
-  { id: 'ES', name: 'Испания' },
-  { id: 'AE', name: 'ОАЭ' },
-  { id: 'AU', name: 'Австралия' },
-  { id: 'FR', name: 'Франция' },
-  { id: 'DE', name: 'Германия' },
-];
-
-const COUNTRY_IDS = ['KZ', 'BY', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE'];
-const IMAGE_WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/downloadimagegen';
+import { useDirections } from '@/hooks/useDirections';
+import { creativesApi } from '@/services/creativesApi';
 
 interface CreativeTexts {
   offer: string;
@@ -82,21 +39,15 @@ const CreativeGeneration = () => {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [userPrompt, setUserPrompt] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  
-  // State для формы рекламы
-  const [showAdForm, setShowAdForm] = useState(false);
-  const [isLaunchingAd, setIsLaunchingAd] = useState(false);
-  const [campaignName, setCampaignName] = useState('Новое объявление');
-  const [description, setDescription] = useState('Напишите нам, чтобы узнать подробности');
-  const [selectedCities, setSelectedCities] = useState<string[]>([]);
-  const [dailyBudget, setDailyBudget] = useState(10);
-  const [startType, setStartType] = useState<'now' | 'midnight'>('midnight');
-  const [ageMin, setAgeMin] = useState<number | ''>(18);
-  const [ageMax, setAgeMax] = useState<number | ''>(65);
-  const [selectedGender, setSelectedGender] = useState<'all' | 'male' | 'female'>('all');
   const [userData, setUserData] = useState<any>(null);
-  const [cityPopoverOpen, setCityPopoverOpen] = useState(false);
   const [creativeGenerationsAvailable, setCreativeGenerationsAvailable] = useState<number>(0);
+  
+  // State для создания креатива
+  const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
+  const [isCreatingCreative, setIsCreatingCreative] = useState(false);
+  
+  // Загрузка направлений
+  const { directions, loading: directionsLoading } = useDirections(userId);
 
   // Лимиты символов для каждого типа текста
   const CHARACTER_LIMITS = {
@@ -413,7 +364,6 @@ const CreativeGeneration = () => {
 
       if (imageUrl) {
         setGeneratedImage(imageUrl);
-        setShowAdForm(true); // Показываем форму запуска рекламы
         toast.success('Креатив сгенерирован!');
         
         // Уменьшаем счетчик генераций в базе данных
@@ -472,185 +422,60 @@ const CreativeGeneration = () => {
     return `${current}/${limit} символов`;
   };
 
-  // Функции для работы с городами и формой рекламы
-  const handleCitySelection = (cityId: string) => {
-    setSelectedCities(prev => {
-      if (prev.includes(cityId)) {
-        return prev.filter(id => id !== cityId);
-      } else {
-        if (cityId === 'KZ') {
-          return [cityId];
-        }
-        const newSelection = prev.filter(id => id !== 'KZ');
-        return [...newSelection, cityId];
-      }
-    });
-  };
-
-  const getSelectedCitiesText = () => {
-    if (selectedCities.length === 0) return 'Выберите города или страны';
-    if (selectedCities.includes('KZ')) return 'Весь Казахстан';
-    
-    const selectedNames = selectedCities.map(id => {
-      const city = CITIES_AND_COUNTRIES.find(c => c.id === id);
-      return city ? city.name : id;
-    });
-    
-    if (selectedNames.length > 2) {
-      return `${selectedNames.slice(0, 2).join(', ')} и еще ${selectedNames.length - 2}`;
-    }
-    return selectedNames.join(', ');
-  };
-
-  const handleBudgetChange = (delta: number) => {
-    setDailyBudget(prev => Math.max(1, prev + delta));
-  };
-
-  const getGendersArray = (): number[] => {
-    switch (selectedGender) {
-      case 'male': return [1];
-      case 'female': return [2];
-      case 'all':
-      default: return [1, 2];
-    }
-  };
-
-  // Функция запуска рекламы с сгенерированным изображением
-  const runAdWithImage = async () => {
-    if (!generatedImage) {
-      toast.error('Изображение не найдено');
-      return;
-    }
-    if (selectedCities.length === 0) {
-      toast.error('Пожалуйста, выберите город или "Весь Казахстан"');
-      return;
-    }
-    if (!dailyBudget || Number(dailyBudget) <= 0) {
-      toast.error('Пожалуйста, укажите суточный бюджет');
-      return;
-    }
-    if (!campaignName.trim()) {
-      toast.error('Пожалуйста, введите название объявления');
-      return;
-    }
-    if (ageMin === '' || ageMax === '' || ageMin > ageMax) {
-      toast.error('Проверьте корректность возрастного диапазона');
+  // Функция создания креатива
+  const createCreative = async () => {
+    if (!generatedImage || !selectedDirectionId) {
+      toast.error('Выберите направление');
       return;
     }
 
-    setIsLaunchingAd(true);
+    setIsCreatingCreative(true);
 
     try {
-      const actualUserData = userData || {};
-      
-      // Преобразуем blob URL в File объект
+      // Конвертируем изображение (blob URL или data URL) в File
       let imageFile: File;
+      
       if (generatedImage.startsWith('blob:')) {
-        // Получаем blob из URL
+        const response = await fetch(generatedImage);
+        const blob = await response.blob();
+        imageFile = new File([blob], 'generated_creative.png', { type: 'image/png' });
+      } else if (generatedImage.startsWith('data:')) {
+        // data URL
         const response = await fetch(generatedImage);
         const blob = await response.blob();
         imageFile = new File([blob], 'generated_creative.png', { type: 'image/png' });
       } else {
-        toast.error('Неподдерживаемый формат изображения');
-        return;
+        // Публичный URL - скачиваем
+        const response = await fetch(generatedImage);
+        const blob = await response.blob();
+        imageFile = new File([blob], 'generated_creative.png', { type: 'image/png' });
       }
 
-      const form = new FormData();
-      if (actualUserData.id) form.append('user_id', actualUserData.id);
-      if (actualUserData.instagram_id) form.append('instagram_id', actualUserData.instagram_id);
-      if (actualUserData.telegram_id) form.append('telegram_id', actualUserData.telegram_id);
-      if (actualUserData.telegram_bot_token) form.append('telegram_bot_token', actualUserData.telegram_bot_token);
-      if (actualUserData.access_token) form.append('page_access_token', actualUserData.access_token);
-      if (actualUserData.page_id) form.append('page_id', actualUserData.page_id);
-      if (actualUserData.ad_account_id) form.append('ad_account_id', actualUserData.ad_account_id);
-      if (actualUserData.prompt1) form.append('prompt1', actualUserData.prompt1);
-      if (actualUserData.prompt2) form.append('prompt2', actualUserData.prompt2);
-      if (actualUserData.prompt3) form.append('prompt3', actualUserData.prompt3);
-      if (actualUserData.username) form.append('username', actualUserData.username);
-      
-      form.append('campaign_name', campaignName);
-      form.append('description', description);
-      
-      // Геолокация
-      let countries: string[] = [];
-      let cities: any[] = [];
-      selectedCities.forEach(id => {
-        if (id === 'KZ') {
-          countries.push('KZ');
-        } else if (COUNTRY_IDS.includes(id)) {
-          countries.push(id);
+      // Используем существующий API для загрузки
+      const success = await creativesApi.uploadToWebhook(
+        imageFile,
+        `Креатив ${new Date().toLocaleDateString()}`,
+        null,
+        {},
+        undefined,
+        undefined,
+        selectedDirectionId
+      );
+
+      if (success) {
+        toast.success('Креатив успешно создан!');
+        // Очищаем форму
+        setGeneratedImage(null);
+        setTexts({ offer: '', bullets: '', profits: '', cta: '' });
+        setSelectedDirectionId('');
         } else {
-          cities.push({ key: id, radius: 20, distance_unit: 'kilometer' });
-        }
-      });
-      let geo_locations: any = {};
-      if (countries.length > 0) geo_locations.countries = countries;
-      if (cities.length > 0) geo_locations.cities = cities;
-      form.append('geo_locations', JSON.stringify(geo_locations));
-      
-      // Бюджет и настройки
-      const budgetInCents = dailyBudget * 100;
-      form.append('daily_budget', String(budgetInCents));
-      form.append('start_type', startType);
-      
-      // Возрастные ограничения
-      let min = Number(ageMin);
-      let max = Number(ageMax);
-      if (isNaN(min) || min < 18) min = 18;
-      if (min > 65) min = 65;
-      if (isNaN(max) || max > 65) max = 65;
-      if (max < 18) max = 18;
-      if (min > max) min = max;
-      if (max < min) max = min;
-      form.append('age_min', String(min));
-      form.append('age_max', String(max));
-      
-      // Пол
-      form.append('genders', JSON.stringify(getGendersArray()));
-      
-      // Добавляем изображение
-      form.append('image_file', imageFile);
-
-      console.log('Отправляем запрос на запуск рекламы с изображением');
-
-      // Отправляем запрос
-      const data = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', IMAGE_WEBHOOK_URL, true);
-
-        xhr.onload = function () {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve('success');
-          } else {
-            reject(new Error(`HTTP error! status: ${xhr.status}`));
-          }
-        };
-
-        xhr.onerror = function () {
-          reject(new Error('Ошибка сети при запуске рекламы'));
-        };
-
-        xhr.send(form);
-      });
-
-      toast.success('Реклама успешно запущена!');
-      setShowAdForm(false);
-      setGeneratedImage(null);
-      // Очищаем форму
-      setCampaignName('Новое объявление');
-      setDescription('Напишите нам, чтобы узнать подробности');
-      setSelectedCities([]);
-      setDailyBudget(10);
-      setStartType('midnight');
-      setAgeMin(18);
-      setAgeMax(65);
-      setSelectedGender('all');
-
+        toast.error('Ошибка создания креатива');
+      }
     } catch (error) {
-      console.error('Ошибка при запуске рекламы:', error);
-      toast.error('Ошибка запуска рекламы');
+      console.error('Ошибка при создании креатива:', error);
+      toast.error('Ошибка создания креатива');
     } finally {
-      setIsLaunchingAd(false);
+      setIsCreatingCreative(false);
     }
   };
 
@@ -804,265 +629,66 @@ const CreativeGeneration = () => {
                         <CardTitle className="text-lg">Сгенерированный креатив</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="rounded-lg overflow-hidden bg-muted/30 p-4">
+                  <div className="rounded-lg overflow-hidden bg-muted/30 p-4 flex justify-center items-center">
                           <img
                             src={generatedImage}
                             alt="Сгенерированный креатив"
-                            className="max-w-full h-auto rounded-lg shadow-md mx-auto"
+                      className="max-w-full max-h-[70vh] h-auto rounded-lg shadow-md"
                           />
                         </div>
                       </CardContent>
                     </Card>
                   )}
 
-                  {/* Форма запуска рекламы */}
-                  {showAdForm && generatedImage && (
+            {/* Форма создания креатива */}
+            {generatedImage && (
                     <Card className="shadow-sm">
                       <CardHeader>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <CardTitle>Запуск рекламы</CardTitle>
-                            <CardDescription>Настройте параметры рекламной кампании</CardDescription>
-                          </div>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => setShowAdForm(false)}
-                            disabled={isLaunchingAd}
-                          >
-                            ← Назад
-                          </Button>
-                        </div>
+                  <CardTitle>Создание креатива</CardTitle>
+                  <CardDescription>Выберите направление для сохранения креатива</CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
-
                       <div className="space-y-2">
-                        <Label htmlFor="campaign-name">Название объявления</Label>
-                        <Input
-                          id="campaign-name"
-                          type="text"
-                          placeholder="Введите название объявления"
-                          value={campaignName}
-                          onChange={e => setCampaignName(e.target.value)}
-                          disabled={isLaunchingAd}
-                          maxLength={100}
-                        />
+                    <Label>Направление</Label>
+                    {directions.length > 0 ? (
+                      <Select
+                        value={selectedDirectionId}
+                        onValueChange={setSelectedDirectionId}
+                        disabled={directionsLoading || isCreatingCreative}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Выберите направление" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {directions.map((direction) => (
+                            <SelectItem key={direction.id} value={direction.id}>
+                              {direction.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Направления не найдены. Создайте направление в профиле.
+                      </p>
+                    )}
                       </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="description">Описание</Label>
-                        <Textarea
-                          id="description"
-                          placeholder="Описание объявления"
-                          value={description}
-                          onChange={e => setDescription(e.target.value)}
-                          disabled={isLaunchingAd}
-                          maxLength={500}
-                          className="min-h-[60px] resize-none"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Возрастная группа</Label>
-                        <div className="flex items-center gap-4">
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor="age-min" className="text-sm text-muted-foreground">От:</Label>
-                            <Input
-                              id="age-min"
-                              type="number"
-                              min="18"
-                              max="65"
-                              className="w-20 text-center"
-                              value={ageMin}
-                              onChange={e => {
-                                const val = e.target.value;
-                                if (val === '') {
-                                  setAgeMin('');
-                                } else {
-                                  setAgeMin(Number(val));
-                                }
-                              }}
-                              onBlur={() => {
-                                let min = Number(ageMin);
-                                let max = Number(ageMax);
-                                if (isNaN(min) || min < 18) min = 18;
-                                if (min > 65) min = 65;
-                                if (min > max) min = max;
-                                setAgeMin(min);
-                              }}
-                              disabled={isLaunchingAd}
-                            />
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Label htmlFor="age-max" className="text-sm text-muted-foreground">До:</Label>
-                            <Input
-                              id="age-max"
-                              type="number"
-                              min="18"
-                              max="65"
-                              className="w-20 text-center"
-                              value={ageMax}
-                              onChange={e => {
-                                const val = e.target.value;
-                                if (val === '') {
-                                  setAgeMax('');
-                                } else {
-                                  setAgeMax(Number(val));
-                                }
-                              }}
-                              onBlur={() => {
-                                let min = Number(ageMin);
-                                let max = Number(ageMax);
-                                if (isNaN(max) || max > 65) max = 65;
-                                if (max < 18) max = 18;
-                                if (max < min) max = min;
-                                setAgeMax(max);
-                              }}
-                              disabled={isLaunchingAd}
-                            />
-                          </div>
-                          <span className="text-sm text-muted-foreground">лет</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="gender">Пол</Label>
-                        <select 
-                          id="gender"
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          value={selectedGender}
-                          onChange={e => setSelectedGender(e.target.value as 'all' | 'male' | 'female')}
-                          disabled={isLaunchingAd}
-                        >
-                          <option value="all">Любой</option>
-                          <option value="male">Мужской</option>
-                          <option value="female">Женский</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Города / Страны</Label>
-                        <Popover open={cityPopoverOpen} onOpenChange={setCityPopoverOpen}>
-                          <PopoverTrigger asChild>
-                            <Button variant="outline" disabled={isLaunchingAd} className="w-full justify-between">
-                              <span className="text-sm">{getSelectedCitiesText()}</span>
-                              <ChevronDown className="h-4 w-4 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-64 max-h-60 overflow-y-auto p-4">
-                            <div className="font-medium text-sm mb-3">Выберите города или страны</div>
-                            <div className="flex flex-col gap-1">
-                              {CITIES_AND_COUNTRIES.map(city => {
-                                const isKZ = city.id === 'KZ';
-                                const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
-                                const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
-                                const isKZSelected = selectedCities.includes('KZ');
-                                return (
-                                  <label key={city.id} className="flex items-center gap-2 cursor-pointer text-sm">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedCities.includes(city.id)}
-                                      onChange={() => handleCitySelection(city.id)}
-                                      disabled={
-                                        isLaunchingAd ||
-                                        (isKZ && anyCitySelected) ||
-                                        (!isKZ && !isOtherCountry && isKZSelected)
-                                      }
-                                    />
-                                    {city.name}
-                                  </label>
-                                );
-                              })}
-                            </div>
                             <Button
-                              className="mt-2"
-                              onClick={() => setCityPopoverOpen(false)}
-                              variant="default"
-                              size="sm"
-                            >
-                              ОК
-                            </Button>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="budget">Суточный бюджет ($)</Label>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="icon" onClick={() => handleBudgetChange(-1)} disabled={isLaunchingAd || dailyBudget <= 1}>-</Button>
-                          <Input
-                            id="budget"
-                            type="number"
-                            min="1"
-                            className="w-24 text-center"
-                            placeholder="10"
-                            value={dailyBudget}
-                            onChange={e => setDailyBudget(Number(e.target.value.replace(/[^0-9]/g, '')) || 1)}
-                            disabled={isLaunchingAd}
-                          />
-                          <Button variant="outline" size="icon" onClick={() => handleBudgetChange(1)} disabled={isLaunchingAd}>+</Button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Старт</Label>
-                        <div className="flex gap-4">
-                          <label className="flex items-center gap-2 cursor-pointer text-sm">
-                            <input
-                              type="radio"
-                              name="startType"
-                              value="midnight"
-                              checked={startType === 'midnight'}
-                              onChange={() => setStartType('midnight')}
-                              disabled={isLaunchingAd}
-                              className="h-4 w-4"
-                            />
-                            С полуночи
-                          </label>
-                          <label className="flex items-center gap-2 cursor-pointer text-sm">
-                            <input
-                              type="radio"
-                              name="startType"
-                              value="now"
-                              checked={startType === 'now'}
-                              onChange={() => setStartType('now')}
-                              disabled={isLaunchingAd}
-                              className="h-4 w-4"
-                            />
-                            Сейчас
-                          </label>
-                        </div>
-                      </div>
-
-                      <Separator />
-                      
-                      <Button 
-                        onClick={runAdWithImage} 
-                        disabled={isLaunchingAd || !generatedImage}
-                        className="w-full dark:bg-gray-700 dark:hover:bg-gray-800"
+                    onClick={createCreative} 
+                    disabled={!selectedDirectionId || isCreatingCreative || directionsLoading}
+                    className="w-full"
                         size="lg"
                       >
-                        <Play className="mr-2 h-4 w-4" />
-                        {isLaunchingAd ? 'Запускается...' : 'Запустить рекламу'}
+                    {isCreatingCreative ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Создается...
+                      </>
+                    ) : (
+                      'Создать креатив'
+                    )}
                       </Button>
-
-                      {isLaunchingAd && (
-                        <Card className="bg-amber-50/50 border-amber-200">
-                          <CardContent className="p-4">
-                            <div className="flex items-start gap-3">
-                              <div className="p-2 rounded-lg bg-amber-100">
-                                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                              </div>
-                              <div className="text-sm">
-                                <div className="font-medium text-amber-900 mb-1">Важно!</div>
-                                <p className="text-amber-800">
-                                  НЕ закрывайте браузер и НЕ блокируйте телефон до завершения запуска рекламы.
-                                </p>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
                       </CardContent>
                     </Card>
                   )}
