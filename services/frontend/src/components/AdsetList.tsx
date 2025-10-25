@@ -3,6 +3,9 @@ import { formatCurrency, formatNumber } from '../utils/formatters';
 import { useTranslation } from '../i18n/LanguageContext';
 import { facebookApi, type Adset, type DateRange } from '../services/facebookApi';
 import EditAdsetDialog from './EditAdsetDialog';
+import { Switch } from '@/components/ui/switch';
+import { toast } from 'sonner';
+import { REQUIRE_CONFIRMATION } from '../config/appReview';
 
 interface AdsetListProps {
   campaignId: string;
@@ -26,6 +29,7 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
   const [loading, setLoading] = useState(false);
   const [selectedAdset, setSelectedAdset] = useState<Adset | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState<Record<string, boolean>>({});
 
   // Загрузка ad sets при монтировании
   useEffect(() => {
@@ -83,6 +87,46 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
     setAdsets(prev => prev.map(a => a.id === updatedAdset.id ? updatedAdset : a));
     setEditDialogOpen(false);
     setSelectedAdset(null);
+  };
+
+  const handleToggleStatus = async (e: React.MouseEvent, adsetId: string, currentStatus: string) => {
+    e.stopPropagation(); // Останавливаем всплытие события
+    
+    const newStatus = currentStatus === 'ACTIVE';
+    
+    if (REQUIRE_CONFIRMATION) {
+      const confirmed = window.confirm(
+        newStatus ? t('msg.confirmPause') : t('msg.confirmResume')
+      );
+      
+      if (!confirmed) {
+        return;
+      }
+    }
+    
+    setUpdatingStatus(prev => ({ ...prev, [adsetId]: true }));
+    
+    try {
+      await facebookApi.updateAdsetStatus(adsetId, !newStatus);
+      
+      // Обновляем локальное состояние
+      setAdsets(prev => prev.map(adset => 
+        adset.id === adsetId 
+          ? { ...adset, status: !newStatus ? 'ACTIVE' : 'PAUSED' }
+          : adset
+      ));
+      
+      toast.success(
+        !newStatus 
+          ? 'Ad set успешно возобновлен' 
+          : 'Ad set успешно приостановлен'
+      );
+    } catch (error) {
+      console.error('Ошибка изменения статуса ad set:', error);
+      toast.error('Не удалось изменить статус ad set');
+    } finally {
+      setUpdatingStatus(prev => ({ ...prev, [adsetId]: false }));
+    }
   };
 
   if (loading && adsets.length === 0) {
@@ -151,6 +195,31 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
                   title={adset.status}
                 />
               </div>
+              <Switch 
+                className="ml-3"
+                checked={adset.status === 'ACTIVE'}
+                disabled={updatingStatus[adset.id]}
+                onClick={(e) => {
+                  e.stopPropagation(); 
+                }}
+                onCheckedChange={(checked) => {
+                  if (REQUIRE_CONFIRMATION) {
+                    const confirmed = window.confirm(
+                      checked ? t('msg.confirmResume') : t('msg.confirmPause')
+                    );
+                    
+                    if (!confirmed) {
+                      return;
+                    }
+                  }
+                  
+                  handleToggleStatus(
+                    { stopPropagation: () => {} } as React.MouseEvent,
+                    adset.id,
+                    adset.status
+                  );
+                }}
+              />
             </div>
             <div className="grid grid-cols-3 gap-3 text-sm">
               <div className="space-y-1">

@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
+import { SidebarAwareContent } from "@/components/SidebarAwareContent";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppProvider } from "./context/AppContext";
@@ -89,7 +90,7 @@ const AppRoutes = () => {
           <SidebarProvider>
             <div className="w-full max-w-full">
               <AppSidebar />
-              <div className="pb-[64px] lg:pb-0 w-full max-w-full overflow-x-hidden lg:pl-[var(--sidebar-width)]">
+              <SidebarAwareContent>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/campaign/:id" element={<CampaignDetail />} />
@@ -101,7 +102,7 @@ const AppRoutes = () => {
                   {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
                   <Route path="*" element={<NotFound />} />
                 </Routes>
-              </div>
+              </SidebarAwareContent>
             </div>
           </SidebarProvider>
         </div>

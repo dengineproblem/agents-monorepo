@@ -11,6 +11,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
+  SidebarRail,
 } from '@/components/ui/sidebar';
 import { FEATURES } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -37,9 +38,9 @@ const menuItems = [
   },
   {
     path: '/videos',
-    label: 'menu.creatives',
+    label: 'menu.videos',
     icon: Video,
-    show: FEATURES.SHOW_CREATIVES,
+    show: FEATURES.SHOW_VIDEOS,
   },
   {
     path: '/profile',
@@ -58,10 +59,10 @@ export function AppSidebar() {
   const visibleMenuItems = menuItems.filter(item => item.show);
 
   return (
-    <Sidebar collapsible="none" className="hidden lg:flex border-r fixed left-0 top-[60px] bottom-0 z-40">
+    <Sidebar collapsible="icon" className="hidden lg:flex border-r fixed left-0 top-[60px] bottom-0 z-40">
       <SidebarContent className="bg-background">
         <SidebarGroup>
-          <SidebarGroupLabel>{t('menu.dashboard')}</SidebarGroupLabel>
+          <SidebarGroupLabel>Навигация</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {visibleMenuItems.map((item) => {
@@ -108,6 +109,7 @@ export function AppSidebar() {
           performante.ai v1.0
         </p>
       </SidebarFooter>
+      <SidebarRail />
     </Sidebar>
   );
 }

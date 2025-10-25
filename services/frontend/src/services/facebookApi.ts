@@ -390,6 +390,26 @@ const updateAdsetBudget = async (adsetId: string, newBudget: number) => {
   return await response.json();
 };
 
+// Изменить статус adset-а (ACTIVE/PAUSED)
+const updateAdsetStatus = async (adsetId: string, isActive: boolean) => {
+  const FB_API_CONFIG = await getCurrentUserConfig();
+  if (!FB_API_CONFIG.access_token) throw new Error('Нет access_token');
+  const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${adsetId}`;
+  const formData = new URLSearchParams();
+  formData.append('access_token', FB_API_CONFIG.access_token);
+  formData.append('status', isActive ? 'ACTIVE' : 'PAUSED');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formData,
+  });
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData?.error?.message || response.statusText);
+  }
+  return await response.json();
+};
+
 // Получить статус рекламного кабинета и данные по бюджету
 const getAccountStatus = async () => {
   const FB_API_CONFIG = await getCurrentUserConfig();
@@ -778,6 +798,7 @@ export const facebookApi = {
   getAdsetsByCampaign,
   getAdsetStats,
   updateAdsetBudget,
+  updateAdsetStatus,
   getAccountStatus,
   getCurrentDailySpend,
   /**
