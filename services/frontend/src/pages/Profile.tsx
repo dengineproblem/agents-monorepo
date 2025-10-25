@@ -7,12 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key } from 'lucide-react';
+import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import TariffInfoCard from '@/components/profile/TariffInfoCard';
-import ProfileHero from '@/components/profile/ProfileHero';
+import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
 import { FEATURES } from '../config/appReview';
@@ -96,6 +96,12 @@ const Profile: React.FC = () => {
   const [newOpenaiKey, setNewOpenaiKey] = useState('');
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [isSavingOpenaiKey, setIsSavingOpenaiKey] = useState(false);
+  
+  // Audience ID (ig_seed_audience_id)
+  const [audienceId, setAudienceId] = useState<string>('');
+  const [audienceModal, setAudienceModal] = useState(false);
+  const [newAudienceId, setNewAudienceId] = useState('');
+  const [isSavingAudienceId, setIsSavingAudienceId] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -178,7 +184,7 @@ const Profile: React.FC = () => {
         // Загружаем актуальные данные из Supabase
         const { data, error } = await (supabase
           .from('user_accounts')
-          .select('tarif, tarif_expires, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key')
+          .select('tarif, tarif_expires, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, ig_seed_audience_id')
           .eq('id', user.id)
           .single() as any);
 
@@ -210,6 +216,7 @@ const Profile: React.FC = () => {
           setMaxBudgetCents(data.plan_daily_budget_cents ?? null);
           setPlannedCplCents(data.default_cpl_target_cents ?? null);
           setOpenaiApiKey(data.openai_api_key || '');
+          setAudienceId(data.ig_seed_audience_id || '');
 
           // Обновляем localStorage актуальными данными
           const updatedUser = { ...user, ...data };
@@ -645,12 +652,46 @@ const Profile: React.FC = () => {
     }
   };
 
+  const handleSaveAudienceId = async () => {
+    if (!user?.id) return;
+    
+    setIsSavingAudienceId(true);
+    try {
+      const idToSave = newAudienceId.trim();
+      
+      const { error } = await (supabase
+        .from('user_accounts')
+        .update({ ig_seed_audience_id: idToSave || null } as any)
+        .eq('id', user.id));
+      
+      if (error) {
+        console.error('Ошибка при сохранении:', error);
+        toast.error('Ошибка при сохранении: ' + error.message);
+        return;
+      }
+      
+      // Обновляем localStorage
+      const updatedUser = { ...user, ig_seed_audience_id: idToSave || null };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
+      setAudienceId(idToSave);
+      toast.success('ID аудитории успешно сохранен');
+      setAudienceModal(false);
+      setNewAudienceId('');
+    } catch (error) {
+      console.error('Ошибка при сохранении:', error);
+      toast.error('Произошла ошибка при сохранении');
+    } finally {
+      setIsSavingAudienceId(false);
+    }
+  };
+
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
-      <Header onOpenDatePicker={() => {}} showBack onBack={() => history.back()} />
+      <Header onOpenDatePicker={() => {}} />
       <div className="w-full py-6 px-4 pt-[76px] max-w-full overflow-x-hidden">
         <div className="max-w-4xl lg:max-w-6xl mx-auto space-y-6 w-full">
-          <ProfileHero title={t('profile.title')} subtitle={t('profile.subtitle')} />
+          <PageHero title={t('profile.title')} subtitle={t('profile.subtitle')} />
           
           {isLoading ? (
             <Card>
@@ -735,6 +776,38 @@ const Profile: React.FC = () => {
                         </Button>
                       </div>
                     )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Audience ID Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <Users className="h-5 w-5" />
+                    Аудитория
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="text-sm text-muted-foreground mb-1">
+                        Facebook Custom Audience ID для дублирования кампаний
+                      </div>
+                      <div className="font-medium font-mono">
+                        {audienceId || 'Не установлено'}
+                      </div>
+                    </div>
+                    <Button 
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setNewAudienceId(audienceId);
+                        setAudienceModal(true);
+                      }}
+                    >
+                      {audienceId ? 'Изменить' : 'Добавить'}
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
@@ -1127,6 +1200,52 @@ const Profile: React.FC = () => {
                   disabled={isSavingOpenaiKey}
                 >
                   {isSavingOpenaiKey ? 'Сохранение...' : 'Сохранить'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Диалог изменения ID аудитории */}
+        <Dialog open={audienceModal} onOpenChange={setAudienceModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>ID аудитории</DialogTitle>
+              <DialogDescription>
+                Укажите Facebook Custom Audience ID для использования при дублировании кампаний агентом Brain.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="audience-id">Audience ID</Label>
+                <Input 
+                  id="audience-id"
+                  type="text"
+                  placeholder="Например: 120210000000000000" 
+                  value={newAudienceId}
+                  onChange={(e) => setNewAudienceId(e.target.value)}
+                  disabled={isSavingAudienceId}
+                />
+                <p className="text-xs text-muted-foreground">
+                  ID готовой LAL аудитории из Facebook Ads Manager. Оставьте пустым, чтобы удалить.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    setAudienceModal(false);
+                    setNewAudienceId('');
+                  }}
+                  disabled={isSavingAudienceId}
+                >
+                  Отмена
+                </Button>
+                <Button 
+                  onClick={handleSaveAudienceId}
+                  disabled={isSavingAudienceId}
+                >
+                  {isSavingAudienceId ? 'Сохранение...' : 'Сохранить'}
                 </Button>
               </div>
             </div>

@@ -128,6 +128,7 @@ export type Database = {
           webhook_url: string | null
            current_campaign_goal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null
            current_campaign_goal_changed_at?: string | null
+          ig_seed_audience_id: string | null
         }
         Insert: {
           access_token: string
@@ -161,6 +162,7 @@ export type Database = {
           webhook_url?: string | null
            current_campaign_goal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null
            current_campaign_goal_changed_at?: string | null
+          ig_seed_audience_id?: string | null
         }
         Update: {
           access_token?: string
@@ -194,6 +196,7 @@ export type Database = {
           webhook_url?: string | null
            current_campaign_goal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null
            current_campaign_goal_changed_at?: string | null
+          ig_seed_audience_id?: string | null
         }
         Relationships: []
       }
