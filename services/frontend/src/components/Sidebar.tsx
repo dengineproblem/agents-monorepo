@@ -3,36 +3,38 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Menu, X, LayoutDashboard, Target, TrendingUp, Video, User } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const Sidebar: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
 
   const menuItems = [
     {
       path: '/',
-      label: 'Главная',
+      label: t('menu.dashboard'),
       icon: <LayoutDashboard className="h-5 w-5" />,
     },
     {
       path: '/roi',
-      label: 'ROI',
+      label: t('menu.roi'),
       icon: <TrendingUp className="h-5 w-5" />,
     },
     {
       path: '/creatives',
-      label: 'Креативы',
+      label: t('menu.creatives'),
       icon: <Target className="h-5 w-5" />,
     },
     {
       path: '/videos',
-      label: 'Видео',
+      label: t('menu.videos'),
       icon: <Video className="h-5 w-5" />,
     },
     {
       path: '/profile',
-      label: 'Личный кабинет',
+      label: t('menu.profile'),
       icon: <User className="h-5 w-5" />,
     },
   ];

@@ -1,12 +1,22 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { formatCurrency, formatNumber } from '../utils/formatters';
 import { useTranslation } from '../i18n/LanguageContext';
-import { facebookApi, type Adset, type AdsetStat, type DateRange } from '../services/facebookApi';
+import { facebookApi, type Adset, type DateRange } from '../services/facebookApi';
 import EditAdsetDialog from './EditAdsetDialog';
 
 interface AdsetListProps {
   campaignId: string;
   dateRange: DateRange;
+}
+
+interface AdsetStat {
+  adset_id: string;
+  adset_name: string;
+  spend: number;
+  leads: number;
+  cpl: number;
+  impressions: number;
+  clicks: number;
 }
 
 const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
@@ -38,26 +48,27 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
     if (!campaignId || !dateRange) return;
     
     facebookApi.getAdsetStats(campaignId, dateRange)
-      .then(setAdsetStats)
+      .then((stats) => {
+        setAdsetStats(stats);
+      })
       .catch((e) => {
         console.error('Ошибка загрузки статистики ad sets:', e);
         setAdsetStats([]);
       });
-  }, [campaignId, dateRange]);
+  }, [campaignId, dateRange.since, dateRange.until]);
 
   // Объединение ad sets со статистикой
   const adsetsWithStats = useMemo(() => {
     return adsets.map(adset => {
-      const stats = adsetStats.filter(stat => stat.adset_id === adset.id);
-      const totalSpend = stats.reduce((sum, stat) => sum + stat.spend, 0);
-      const totalLeads = stats.reduce((sum, stat) => sum + (stat.leads || 0), 0);
-      const cpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
-
+      const stats = adsetStats.find(stat => stat.adset_id === adset.id);
+      
       return {
         ...adset,
-        spend: totalSpend,
-        leads: totalLeads,
-        cpl: cpl
+        spend: stats?.spend || 0,
+        leads: stats?.leads || 0,
+        cpl: stats?.cpl || 0,
+        impressions: stats?.impressions || 0,
+        clicks: stats?.clicks || 0,
       };
     });
   }, [adsets, adsetStats]);
@@ -172,4 +183,3 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
 };
 
 export default AdsetList;
-

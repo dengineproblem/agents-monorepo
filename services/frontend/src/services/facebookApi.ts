@@ -302,12 +302,72 @@ const getAdsetsByCampaign = async (campaignId: string) => {
   }
   const endpoint = `${FB_API_CONFIG.ad_account_id}/adsets`;
   const params = {
-    fields: 'id,name,daily_budget,campaign_id',
+    fields: 'id,name,daily_budget,campaign_id,status',
     filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
     limit: '50',
   };
   const data = await fetchFromFacebookAPI(endpoint, params);
   return data.data || [];
+};
+
+// Получить статистику для ad sets кампании за период
+const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
+  const FB_API_CONFIG = await getCurrentUserConfig();
+  if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+    return [];
+  }
+  
+  try {
+    const endpoint = `${FB_API_CONFIG.ad_account_id}/insights`;
+    const params = {
+      level: 'adset',
+      fields: 'adset_id,adset_name,spend,impressions,clicks,actions',
+      time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
+      filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
+      action_breakdowns: 'action_type',
+      limit: '500',
+    };
+    
+    const response = await fetchFromFacebookAPI(endpoint, params);
+    
+    if (response.data && response.data.length > 0) {
+      return response.data.map((stat: any) => {
+        let leads = 0;
+        
+        if (stat.actions && Array.isArray(stat.actions)) {
+          for (const action of stat.actions) {
+            if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+              leads = Math.max(leads, parseInt(action.value || "0", 10));
+            } else if (action.action_type === 'onsite_web_lead') {
+              leads += parseInt(action.value || "0", 10);
+            } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+              leads += parseInt(action.value || "0", 10);
+            } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+              leads += parseInt(action.value || "0", 10);
+            }
+          }
+        }
+        
+        const spend = parseFloat(stat.spend || "0");
+        const cpl = leads > 0 ? spend / leads : 0;
+        
+        return {
+          adset_id: stat.adset_id,
+          adset_name: stat.adset_name,
+          spend,
+          leads,
+          cpl,
+          impressions: parseInt(stat.impressions || "0", 10),
+          clicks: parseInt(stat.clicks || "0", 10),
+        };
+      });
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('Ошибка получения статистики ad sets:', error);
+    return [];
+  }
 };
 
 // Изменить daily_budget adset-а
@@ -716,6 +776,7 @@ export const facebookApi = {
     }
   },
   getAdsetsByCampaign,
+  getAdsetStats,
   updateAdsetBudget,
   getAccountStatus,
   getCurrentDailySpend,
