@@ -6,10 +6,12 @@ import EditAdsetDialog from './EditAdsetDialog';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import { REQUIRE_CONFIRMATION } from '../config/appReview';
+import { getCachedData, setCachedData, invalidateCache } from '../utils/apiCache';
 
 interface AdsetListProps {
   campaignId: string;
   dateRange: DateRange;
+  forceRefresh?: boolean; // Флаг для принудительной перезагрузки данных
 }
 
 interface AdsetStat {
@@ -22,7 +24,7 @@ interface AdsetStat {
   clicks: number;
 }
 
-const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
+const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange, forceRefresh = false }) => {
   const { t } = useTranslation();
   const [adsets, setAdsets] = useState<Adset[]>([]);
   const [adsetStats, setAdsetStats] = useState<AdsetStat[]>([]);
@@ -31,35 +33,62 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<Record<string, boolean>>({});
 
-  // Загрузка ad sets при монтировании
+  // Загрузка ad sets при монтировании с кэшированием
   useEffect(() => {
     if (!campaignId) return;
     
+    const cacheKey = `adsets_${campaignId}`;
+    
+    // Проверяем кэш, если не форсируем обновление
+    if (!forceRefresh) {
+      const cached = getCachedData<Adset[]>(cacheKey);
+      if (cached) {
+        setAdsets(cached);
+        setLoading(false);
+        return;
+      }
+    }
+    
+    // Загружаем из API
     setLoading(true);
     facebookApi.getAdsetsByCampaign(campaignId)
       .then((data) => {
         setAdsets(data);
+        setCachedData(cacheKey, data, 10); // Кэш на 10 минут
       })
       .catch((e) => {
         console.error('Ошибка загрузки ad sets:', e);
         setAdsets([]);
       })
       .finally(() => setLoading(false));
-  }, [campaignId]);
+  }, [campaignId, forceRefresh]);
 
-  // Загрузка статистики при изменении периода
+  // Загрузка статистики при изменении периода с кэшированием
   useEffect(() => {
     if (!campaignId || !dateRange) return;
     
+    const statsCacheKey = `adset_stats_${campaignId}_${dateRange.since}_${dateRange.until}`;
+    
+    // Проверяем кэш, если не форсируем обновление
+    if (!forceRefresh) {
+      const cached = getCachedData<AdsetStat[]>(statsCacheKey);
+      if (cached) {
+        setAdsetStats(cached);
+        return;
+      }
+    }
+    
+    // Загружаем из API
     facebookApi.getAdsetStats(campaignId, dateRange)
       .then((stats) => {
         setAdsetStats(stats);
+        setCachedData(statsCacheKey, stats, 5); // Кэш на 5 минут
       })
       .catch((e) => {
         console.error('Ошибка загрузки статистики ad sets:', e);
         setAdsetStats([]);
       });
-  }, [campaignId, dateRange.since, dateRange.until]);
+  }, [campaignId, dateRange.since, dateRange.until, forceRefresh]);
 
   // Объединение ad sets со статистикой
   const adsetsWithStats = useMemo(() => {
@@ -109,6 +138,9 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
     try {
       await facebookApi.updateAdsetStatus(adsetId, !newStatus);
       
+      // Инвалидируем кэш списка ad sets после изменения статуса
+      invalidateCache(`adsets_${campaignId}`);
+      
       // Обновляем локальное состояние
       setAdsets(prev => prev.map(adset => 
         adset.id === adsetId 
@@ -136,22 +168,31 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange }) => {
           <div key={i} className="campaign-card bg-card border shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div className="flex items-center gap-2 flex-1">
-                <div className="h-5 w-48 bg-gradient-to-r from-muted via-muted/50 to-muted rounded animate-pulse" />
+                <div className="h-5 w-48 bg-muted/70 rounded animate-pulse" />
                 <div className="h-2 w-2 bg-muted rounded-full animate-pulse" />
               </div>
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div className="space-y-1">
                 <div className="h-3 w-16 bg-muted/70 rounded animate-pulse" />
-                <div className="h-5 w-20 bg-gradient-to-r from-muted via-muted/50 to-muted rounded animate-pulse" />
+                <div className="relative h-5 w-20 overflow-hidden rounded-md">
+                  <div className="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 dark:via-white/20 to-transparent animate-shimmer" />
+                </div>
               </div>
               <div className="space-y-1">
                 <div className="h-3 w-16 bg-muted/70 rounded animate-pulse" />
-                <div className="h-5 w-12 bg-gradient-to-r from-muted via-muted/50 to-muted rounded animate-pulse" />
+                <div className="relative h-5 w-12 overflow-hidden rounded-md">
+                  <div className="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 dark:via-white/20 to-transparent animate-shimmer" />
+                </div>
               </div>
               <div className="space-y-1">
                 <div className="h-3 w-20 bg-muted/70 rounded animate-pulse" />
-                <div className="h-5 w-16 bg-gradient-to-r from-muted via-muted/50 to-muted rounded animate-pulse" />
+                <div className="relative h-5 w-16 overflow-hidden rounded-md">
+                  <div className="absolute inset-0 bg-gradient-to-r from-gray-200 via-gray-300 to-gray-200 dark:from-gray-700 dark:via-gray-600 dark:to-gray-700 animate-pulse" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 dark:via-white/20 to-transparent animate-shimmer" />
+                </div>
               </div>
             </div>
           </div>

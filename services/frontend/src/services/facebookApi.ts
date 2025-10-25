@@ -324,26 +324,36 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
       fields: 'adset_id,adset_name,spend,impressions,clicks,actions',
       time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
       filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
-      action_breakdowns: 'action_type',
+      // БЕЗ action_breakdowns для снижения нагрузки на API!
       limit: '500',
     };
     
+    console.log(`[API] Запрос статистики ad sets для кампании ${campaignId} без action_breakdowns`);
     const response = await fetchFromFacebookAPI(endpoint, params);
     
     if (response.data && response.data.length > 0) {
       return response.data.map((stat: any) => {
         let leads = 0;
         
+        // Упрощенный подсчет лидов без детализации по типам
+        // Facebook вернет агрегированные данные, если не указан action_breakdowns
         if (stat.actions && Array.isArray(stat.actions)) {
           for (const action of stat.actions) {
-            if (action.action_type === 'onsite_conversion.total_messaging_connection') {
-              leads = Math.max(leads, parseInt(action.value || "0", 10));
-            } else if (action.action_type === 'onsite_web_lead') {
-              leads += parseInt(action.value || "0", 10);
-            } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
-              leads += parseInt(action.value || "0", 10);
-            } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-              leads += parseInt(action.value || "0", 10);
+            const actionType = action.action_type;
+            
+            // Собираем все типы лидов в одно значение
+            if (
+              actionType === 'onsite_conversion.total_messaging_connection' ||
+              actionType === 'onsite_conversion.messaging_conversation_started_7d' ||
+              actionType === 'onsite_web_lead' ||
+              actionType === 'offsite_conversion.fb_pixel_lead' ||
+              actionType === 'lead' ||
+              (typeof actionType === 'string' && 
+                (actionType.includes('lead') || actionType.includes('conversion')))
+            ) {
+              const value = parseInt(action.value || "0", 10);
+              // Берем максимум, чтобы избежать дублирования
+              leads = Math.max(leads, value);
             }
           }
         }

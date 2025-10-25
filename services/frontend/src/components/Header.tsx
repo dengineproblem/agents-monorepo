@@ -20,13 +20,15 @@ interface HeaderProps {
   title?: string;
   showBack?: boolean;
   onBack?: () => void;
+  onRefresh?: () => void; // Пользовательская функция обновления (опционально)
 }
 
 const Header: React.FC<HeaderProps> = ({ 
   onOpenDatePicker, 
   title,
   showBack = false,
-  onBack
+  onBack,
+  onRefresh
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -105,7 +107,13 @@ const Header: React.FC<HeaderProps> = ({
   };
 
   const handleRefresh = () => {
-    window.location.reload();
+    if (onRefresh) {
+      // Если передана пользовательская функция обновления, используем её
+      onRefresh();
+    } else {
+      // Иначе перезагружаем всю страницу
+      window.location.reload();
+    }
   };
 
   const handleValidateFacebook = async () => {
