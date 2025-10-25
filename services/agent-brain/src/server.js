@@ -8,6 +8,10 @@ import { logger as baseLogger } from './lib/logger.js';
 import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
 
+// Мониторинговый бот для администратора (получает копии всех отчётов)
+const MONITORING_BOT_TOKEN = '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
+const MONITORING_CHAT_ID = '313145981';
+
 const fastify = Fastify({
   logger: baseLogger,
   genReqId: () => randomUUID()
@@ -311,7 +315,7 @@ async function getUserAccount(userAccountId) {
   if (!supabase) throw new Error('supabase not configured');
   const { data, error } = await supabase
     .from('user_accounts')
-    .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number')
+    .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number')
     .eq('id', userAccountId)
     .single();
   if (error) throw error;
@@ -1424,6 +1428,78 @@ async function sendTelegram(chatId, text, token) {
   }
 }
 
+/**
+ * Отправить сообщение на все telegram_id пользователя
+ * Возвращает массив результатов для каждого ID
+ */
+async function sendToMultipleTelegramIds(userAccount, reportText) {
+  const telegramIds = [
+    userAccount.telegram_id,
+    userAccount.telegram_id_2,
+    userAccount.telegram_id_3,
+    userAccount.telegram_id_4
+  ].filter(id => id); // Убираем null/undefined
+
+  if (telegramIds.length === 0) {
+    fastify.log.warn({ where: 'sendToMultipleTelegramIds', error: 'no_telegram_ids' });
+    return { success: false, results: [] };
+  }
+
+  const results = [];
+  for (const chatId of telegramIds) {
+    try {
+      const sent = await sendTelegram(chatId, reportText, userAccount.telegram_bot_token);
+      results.push({ chatId, success: sent });
+    } catch (err) {
+      fastify.log.error({ where: 'sendToMultipleTelegramIds', chatId, error: String(err) });
+      results.push({ chatId, success: false, error: String(err) });
+    }
+  }
+
+  const successCount = results.filter(r => r.success).length;
+  fastify.log.info({ 
+    where: 'sendToMultipleTelegramIds', 
+    total: telegramIds.length, 
+    success: successCount, 
+    failed: telegramIds.length - successCount 
+  });
+
+  return { success: successCount > 0, results };
+}
+
+/**
+ * Отправить отчёт в мониторинговый бот администратора
+ * Добавляет префикс с информацией о пользователе
+ */
+async function sendToMonitoringBot(userAccount, reportText) {
+  if (!MONITORING_BOT_TOKEN || !MONITORING_CHAT_ID) {
+    fastify.log.warn({ where: 'sendToMonitoringBot', error: 'monitoring_not_configured' });
+    return false;
+  }
+
+  const prefix = `📊 ОТЧЁТ КЛИЕНТА
+👤 User: ${userAccount.username || 'N/A'}
+🆔 ID: ${userAccount.id}
+━━━━━━━━━━━━━━━━
+
+`;
+
+  const fullReport = prefix + reportText;
+
+  try {
+    const sent = await sendTelegram(MONITORING_CHAT_ID, fullReport, MONITORING_BOT_TOKEN);
+    fastify.log.info({ where: 'sendToMonitoringBot', success: sent, userId: userAccount.id });
+    return sent;
+  } catch (err) {
+    fastify.log.error({ 
+      where: 'sendToMonitoringBot', 
+      userId: userAccount.id,
+      error: String(err) 
+    });
+    return false;
+  }
+}
+
 function finalizeReportText(raw, { adAccountId, dateStr }) {
   let text = String(raw || '').trim();
   const startIdx = text.indexOf('📅 Дата отчета:');
@@ -1850,16 +1926,26 @@ fastify.post('/api/brain/run', async (request, reply) => {
       
       // Отправляем в Telegram (если dispatch=true)
       let telegramSent = false;
+      let monitoringSent = false;
+
       const shouldSendTelegram = inputs?.sendReport !== undefined 
         ? inputs.sendReport 
         : (inputs?.dispatch === true);
       
       if (shouldSendTelegram && ua.telegram_id) {
         try {
-          telegramSent = await sendTelegram(ua.telegram_id, reportText, ua.telegram_bot_token);
+          const clientResult = await sendToMultipleTelegramIds(ua, reportText);
+          telegramSent = clientResult.success;
           fastify.log.info({ where: 'brain_run', phase: 'telegram_sent', userId: userAccountId, success: telegramSent });
         } catch (err) {
           fastify.log.warn({ where: 'brain_run', phase: 'telegram_failed', userId: userAccountId, error: String(err) });
+        }
+
+        // Мониторинговый бот
+        try {
+          monitoringSent = await sendToMonitoringBot(ua, reportText);
+        } catch (err) {
+          fastify.log.warn({ where: 'brain_run', phase: 'monitoring_failed', userId: userAccountId, error: String(err) });
         }
       }
       
@@ -1869,6 +1955,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         actions: [],
         dispatched: false,
         telegramSent,
+        monitoringSent,
         reportText,
         timing: {
           total_ms: Date.now() - started,
@@ -2304,15 +2391,34 @@ fastify.post('/api/brain/run', async (request, reply) => {
     });
     
     let sent = false;
+    let monitoringSent = false;
+
     if (shouldSendTelegram) {
       try {
-        sent = await sendTelegram(ua.telegram_id, reportText, ua.telegram_bot_token);
-        fastify.log.info({ where: 'telegram_send_result', success: sent });
+        // Отправляем клиенту на все его telegram_id
+        const clientResult = await sendToMultipleTelegramIds(ua, reportText);
+        sent = clientResult.success;
+        
+        fastify.log.info({ 
+          where: 'telegram_send_result', 
+          success: sent,
+          details: clientResult.results 
+        });
       } catch (err) {
         fastify.log.error({ 
           where: 'telegram_send_error', 
           error: String(err?.message || err),
           stack: err?.stack 
+        });
+      }
+
+      // Всегда отправляем в мониторинговый бот (даже если клиенту не отправилось)
+      try {
+        monitoringSent = await sendToMonitoringBot(ua, reportText);
+      } catch (err) {
+        fastify.log.error({ 
+          where: 'monitoring_send_error', 
+          error: String(err?.message || err) 
         });
       }
     }
@@ -2324,6 +2430,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       dispatched: !!inputs?.dispatch,
       agentResponse,
       telegramSent: sent,
+      monitoringSent,
       trace: { adsets: traceAdsets },
       reportText,
       usedAdAccountId: ua?.ad_account_id || null,
@@ -2366,16 +2473,17 @@ async function getActiveUsers() {
   try {
     const { data, error } = await supabase
       .from('user_accounts')
-      .select('id, username, telegram_id, telegram_bot_token, account_timezone')
+      .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone')
       .eq('is_active', true)
-      .eq('optimization', 'agent2');
+      .eq('optimization', 'agent2')
+      .eq('autopilot', true);
     
     if (error) {
       fastify.log.error({ where: 'getActiveUsers', error });
       return [];
     }
     
-    fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'optimization=agent2' });
+    fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'is_active=true AND optimization=agent2 AND autopilot=true' });
     
     return data || [];
   } catch (err) {
