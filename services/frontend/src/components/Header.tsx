@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Video, User } from 'lucide-react';
+import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Video, User, CheckCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
@@ -13,6 +13,7 @@ import { facebookApi } from '../services/facebookApi';
 import { addDays, format } from 'date-fns';
 import { useTranslation } from '../i18n/LanguageContext';
 import { FEATURES } from '../config/appReview';
+import { supabase } from '../integrations/supabase/client';
 
 interface HeaderProps { 
   onOpenDatePicker: () => void;
@@ -43,6 +44,21 @@ const Header: React.FC<HeaderProps> = ({
   const [dailySpend, setDailySpend] = React.useState<number | null>(null);
   const [loadingSpend, setLoadingSpend] = React.useState(false);
   const [predictedDate, setPredictedDate] = React.useState<string | null>(null);
+  
+  // Facebook validation state
+  const [openValidation, setOpenValidation] = React.useState(false);
+  const [isValidating, setIsValidating] = React.useState(false);
+  const [validationResult, setValidationResult] = React.useState<{
+    success: boolean;
+    checks?: {
+      token?: boolean;
+      adAccount?: boolean;
+      page?: boolean;
+      campaign?: boolean;
+    };
+    error?: string;
+    details?: string;
+  } | null>(null);
 
   React.useEffect(() => {
     if (!openBudget) return;
@@ -92,6 +108,108 @@ const Header: React.FC<HeaderProps> = ({
     window.location.reload();
   };
 
+  const handleValidateFacebook = async () => {
+    setOpenValidation(true);
+    setIsValidating(true);
+    setValidationResult(null);
+
+    try {
+      // Загружаем данные пользователя из localStorage
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) {
+        setValidationResult({
+          success: false,
+          error: 'Пользователь не авторизован',
+          details: 'Не найдены данные пользователя в системе'
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      const userData = JSON.parse(storedUser);
+      if (!userData.id) {
+        setValidationResult({
+          success: false,
+          error: 'Отсутствует ID пользователя',
+          details: 'Невозможно загрузить данные учетной записи'
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      // Запрашиваем актуальные данные из user_accounts
+      const { data: userAccount, error: dbError } = await supabase
+        .from('user_accounts')
+        .select('access_token, ad_account_id, page_id, instagram_id')
+        .eq('id', userData.id)
+        .single();
+
+      if (dbError || !userAccount) {
+        setValidationResult({
+          success: false,
+          error: 'Ошибка загрузки данных',
+          details: dbError?.message || 'Не удалось загрузить данные учетной записи'
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      // Проверяем наличие обязательных полей
+      if (!userAccount.access_token) {
+        setValidationResult({
+          success: false,
+          error: 'Facebook не подключен',
+          details: 'Отсутствует токен доступа. Подключите Facebook в профиле.'
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      if (!userAccount.ad_account_id) {
+        setValidationResult({
+          success: false,
+          error: 'Не выбран рекламный кабинет',
+          details: 'Выберите рекламный кабинет в профиле.'
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      // Вызываем edge function validate-facebook
+      const { data, error } = await supabase.functions.invoke('validate-facebook', {
+        body: {
+          accessToken: userAccount.access_token,
+          adAccountId: userAccount.ad_account_id,
+          pageId: userAccount.page_id,
+          instagramId: userAccount.instagram_id,
+        }
+      });
+
+      if (error) {
+        console.error('Facebook validation error:', error);
+        setValidationResult({
+          success: false,
+          error: 'Ошибка валидации',
+          details: error.message || 'Не удалось выполнить проверку Facebook'
+        });
+        setIsValidating(false);
+        return;
+      }
+
+      // Устанавливаем результат
+      setValidationResult(data);
+    } catch (error: any) {
+      console.error('Unexpected error during Facebook validation:', error);
+      setValidationResult({
+        success: false,
+        error: 'Неожиданная ошибка',
+        details: error.message || 'Произошла непредвиденная ошибка'
+      });
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
   const allMobileNavItems = [
     { path: '/', icon: LayoutDashboard, label: t('menu.dashboard'), visible: true },
     { path: '/roi', icon: TrendingUp, label: t('menu.roi'), visible: FEATURES.SHOW_ROI_ANALYTICS },
@@ -138,6 +256,17 @@ const Header: React.FC<HeaderProps> = ({
         
         <TooltipProvider>
           <div className="flex items-center gap-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={handleValidateFacebook}>
+                  <CheckCircle className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Проверить Facebook</p>
+              </TooltipContent>
+            </Tooltip>
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" onClick={() => setOpenBudget(true)}>
@@ -225,6 +354,132 @@ const Header: React.FC<HeaderProps> = ({
             ) : (
               <div className="text-center p-4 text-muted-foreground">
                 Нет данных по бюджету
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={openValidation} onOpenChange={setOpenValidation}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-blue-600" />
+              Проверка Facebook
+            </DialogTitle>
+            <DialogDescription>
+              Валидация подключения к Facebook
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {isValidating ? (
+              <div className="flex flex-col items-center justify-center p-8 space-y-4">
+                <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Проверяем подключение...</p>
+              </div>
+            ) : validationResult ? (
+              <>
+                {validationResult.success ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                      <span className="font-semibold text-green-900 dark:text-green-100">
+                        Все проверки пройдены успешно
+                      </span>
+                    </div>
+                    {validationResult.checks && (
+                      <div className="space-y-2">
+                        {validationResult.checks.token && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm">Токен валиден</span>
+                          </div>
+                        )}
+                        {validationResult.checks.adAccount && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm">Доступ к рекламному кабинету</span>
+                          </div>
+                        )}
+                        {validationResult.checks.page && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm">Доступ к странице</span>
+                          </div>
+                        )}
+                        {validationResult.checks.campaign && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm">Тестовая кампания создана</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                      <svg className="h-5 w-5 text-red-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      <div className="flex-1">
+                        <p className="font-semibold text-red-900 dark:text-red-100">
+                          {validationResult.error || 'Ошибка проверки'}
+                        </p>
+                        {validationResult.details && (
+                          <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                            {validationResult.details}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {validationResult.checks && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Статус проверок:</p>
+                        {validationResult.checks.token !== undefined && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            {validationResult.checks.token ? (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <svg className="h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                            <span className="text-sm">Токен</span>
+                          </div>
+                        )}
+                        {validationResult.checks.adAccount !== undefined && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            {validationResult.checks.adAccount ? (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <svg className="h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                            <span className="text-sm">Рекламный кабинет</span>
+                          </div>
+                        )}
+                        {validationResult.checks.page !== undefined && (
+                          <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
+                            {validationResult.checks.page ? (
+                              <CheckCircle className="h-4 w-4 text-green-600" />
+                            ) : (
+                              <svg className="h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                            <span className="text-sm">Страница</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center p-4 text-muted-foreground">
+                Нажмите кнопку для запуска проверки
               </div>
             )}
           </div>
