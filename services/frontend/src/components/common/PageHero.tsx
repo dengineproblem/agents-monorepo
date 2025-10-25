@@ -1,13 +1,13 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 
-interface DashboardHeroProps {
-  title?: string;
+interface PageHeroProps {
+  title: string;
   subtitle?: string;
   className?: string;
 }
 
-const DashboardHero: React.FC<DashboardHeroProps> = ({ title = 'Главная панель', subtitle = 'Управление рекламными кампаниями и аналитика', className }) => {
+const PageHero: React.FC<PageHeroProps> = ({ title, subtitle, className }) => {
   return (
     <div className={cn('mb-6', className)}>
       <h1 className="text-3xl font-bold tracking-tight">{title}</h1>
@@ -16,5 +16,5 @@ const DashboardHero: React.FC<DashboardHeroProps> = ({ title = 'Главная �
   );
 };
 
-export default DashboardHero;
+export default PageHero;
 

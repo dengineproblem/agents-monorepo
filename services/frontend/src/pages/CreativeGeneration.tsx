@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { Sparkles, Image as ImageIcon, Loader2, ChevronDown, Play, Wand2, AlertTriangle } from 'lucide-react';
 import Header from '@/components/Header';
+import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -672,10 +673,10 @@ const CreativeGeneration = () => {
               <Header onOpenDatePicker={handleOpenDatePicker} />
       <div className="w-full px-4 py-8 pt-[76px] max-w-full overflow-x-hidden">
         <div className="max-w-3xl lg:max-w-6xl mx-auto w-full">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold tracking-tight mb-2">Генерация Креативов</h1>
-            <p className="text-muted-foreground">Создавайте креативы с помощью AI</p>
-          </div>
+          <PageHero 
+            title="Генерация Креативов"
+            subtitle="Создавайте креативы с помощью AI"
+          />
           
           {/* Уведомление о количестве оставшихся генераций */}
           <Card className="mb-6 shadow-sm">

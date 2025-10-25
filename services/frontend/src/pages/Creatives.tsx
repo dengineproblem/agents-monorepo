@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Header from "@/components/Header";
+import PageHero from "@/components/common/PageHero";
 import { useUserCreatives } from "@/hooks/useUserCreatives";
 import { creativesApi, UserCreative } from "@/services/creativesApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -930,8 +931,12 @@ const Creatives: React.FC = () => {
 
   return (
     <div className="w-full max-w-full overflow-x-hidden">
-      <Header title="Видео" onOpenDatePicker={() => {}} />
+      <Header onOpenDatePicker={() => {}} />
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
+        <PageHero 
+          title="Видео"
+          subtitle="Загружайте и управляйте вашими видео креативами"
+        />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-1">
             <CardHeader>

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import Header from '@/components/Header';
+import PageHero from '@/components/common/PageHero';
 import DateRangePicker from '@/components/DateRangePicker';
 import {
   getConsultants,
@@ -378,14 +379,18 @@ const Consultations: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
-              <Header onOpenDatePicker={() => setDatePickerOpen(true)} />
+      <Header onOpenDatePicker={() => setDatePickerOpen(true)} />
       
-      <main className="flex-1 p-2 md:p-4 space-y-2 md:space-y-4">
-        {/* Заголовок и кнопки - адаптивно */}
+      <main className="flex-1 p-2 md:p-4 pt-[76px] space-y-2 md:space-y-4">
+        <PageHero 
+          title="Расписание консультаций"
+          subtitle="Управление записями и встречами"
+        />
+        
+        {/* Кнопки управления */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
           <div>
-            <h1 className="text-lg md:text-2xl font-bold">Расписание консультаций</h1>
-            <p className="text-gray-600 text-xs md:text-sm">{formatDate(selectedDate)}</p>
+            <p className="text-muted-foreground text-sm">{formatDate(selectedDate)}</p>
           </div>
           
           <div className="flex gap-1 md:gap-2">

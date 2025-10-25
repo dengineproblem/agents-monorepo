@@ -6,7 +6,7 @@ import DateRangePicker from '../components/DateRangePicker';
 import DirectionsTable from '../components/DirectionsTable';
 import MonthlyPlanFact from '../components/MonthlyPlanFact';
 import TargetologJournal from '../components/TargetologJournal';
-import DashboardHero from '../components/dashboard/DashboardHero';
+import PageHero from '../components/common/PageHero';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
@@ -266,7 +266,7 @@ const Dashboard: React.FC = () => {
       />
       
       <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full">
-        <DashboardHero 
+        <PageHero 
           title={userName || (userTarif === 'target' ? t('dashboard.targetologPanel') : t('dashboard.title'))}
           subtitle={userTarif === 'target' ? t('dashboard.yourDirectionsAndPlans') : t('campaign.management')}
         />

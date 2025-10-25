@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Header from '../components/Header';
+import PageHero from '../components/common/PageHero';
 import { salesApi, ROIData, CampaignROI } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
 import { 
@@ -217,8 +218,12 @@ const ROIAnalytics: React.FC = () => {
       <Header onOpenDatePicker={() => {}} />
       
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="text-xl md:text-2xl font-bold">ROI Аналитика</h1>
+        <PageHero 
+          title="ROI Аналитика"
+          subtitle="Отслеживайте окупаемость ваших рекламных кампаний"
+        />
+        
+        <div className="mb-4 flex justify-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">Период</Button>

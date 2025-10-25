@@ -235,7 +235,7 @@ export async function directionsRoutes(app: FastifyInstance) {
    * GET /api/directions
    * Получить все направления пользователя
    */
-  app.get('/api/directions', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/directions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const userAccountId = (request.query as any).userAccountId;
 
@@ -288,7 +288,7 @@ export async function directionsRoutes(app: FastifyInstance) {
    * POST /api/directions
    * Создать новое направление + Facebook Campaign
    */
-  app.post('/api/directions', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/directions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const body = request.body as any;
       const userAccountId = body.userAccountId;
@@ -515,7 +515,7 @@ export async function directionsRoutes(app: FastifyInstance) {
    * PATCH /api/directions/:id
    * Обновить направление
    */
-  app.patch('/api/directions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/directions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
       const body = request.body as any;
@@ -644,7 +644,7 @@ export async function directionsRoutes(app: FastifyInstance) {
    * DELETE /api/directions/:id
    * Удалить направление (архивирует кампанию в Facebook)
    */
-  app.delete('/api/directions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/directions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
 
