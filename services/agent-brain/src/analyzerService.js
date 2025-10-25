@@ -658,14 +658,17 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     
     if (shouldAnalyze) {
       // ШАГ 1: Проверяем существующий анализ в БД
-      if (test && test.llm_score !== null && test.llm_verdict !== null) {
+      // Проверяем что есть ВСЕ поля (включая transcript_suggestions), иначе делаем новый анализ
+      if (test && test.llm_score !== null && test.llm_verdict !== null && test.transcript_suggestions !== null) {
         fastify.log.info({ user_creative_id, source: 'database', llm_score: test.llm_score }, 'Using existing LLM analysis from DB');
         analysis = {
           score: test.llm_score,
           verdict: test.llm_verdict,
           reasoning: test.llm_reasoning,
           video_analysis: test.llm_video_analysis,
-          text_recommendations: test.llm_text_recommendations
+          text_recommendations: test.llm_text_recommendations,
+          transcript_match_quality: test.transcript_match_quality,
+          transcript_suggestions: test.transcript_suggestions
         };
       } else {
         // ШАГ 2: Делаем новый анализ через OpenAI
@@ -680,7 +683,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
             llm_verdict: analysis.verdict
           }, 'LLM analysis complete');
 
-          // ШАГ 3: Сохраняем результат в БД
+          // ШАГ 3: Сохраняем результат в БД (все поля включая transcript_suggestions)
           if (test && test.id) {
             const { error: updateError } = await supabase
               .from('creative_tests')
@@ -690,6 +693,8 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
                 llm_reasoning: analysis.reasoning,
                 llm_video_analysis: analysis.video_analysis,
                 llm_text_recommendations: analysis.text_recommendations,
+                transcript_match_quality: analysis.transcript_match_quality,
+                transcript_suggestions: analysis.transcript_suggestions,
                 updated_at: new Date().toISOString()
               })
               .eq('id', test.id);
