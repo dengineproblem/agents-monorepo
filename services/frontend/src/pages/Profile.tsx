@@ -812,7 +812,8 @@ const Profile: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* OpenAI API Key - скрыт в App Review */}
+              {/* OpenAI API Key - скрыт (не используется в данной версии) */}
+              {/* 
               {FEATURES.SHOW_DIRECTIONS && (
                 <Card>
                   <CardHeader>
@@ -846,6 +847,7 @@ const Profile: React.FC = () => {
                   </CardContent>
                 </Card>
               )}
+              */}
 
               {/* Направления бизнеса */}
               {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} />}
