@@ -18,6 +18,13 @@ export type UserCreative = {
   media_type?: 'video' | 'image' | null;
 };
 
+export type CreativeTestStatus = {
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  started_at: string | null;
+  completed_at: string | null;
+  impressions: number;
+};
+
 const getUserId = (): string | null => {
   const stored = localStorage.getItem('user');
   if (!stored) return null;
@@ -113,6 +120,64 @@ export const creativesApi = {
       return false;
     }
     return true;
+  },
+
+  async getCreativeTestStatus(creativeId: string): Promise<CreativeTestStatus | null> {
+    try {
+      const { data, error } = await supabase
+        .from('creative_tests' as any)
+        .select('status, started_at, completed_at, impressions')
+        .eq('user_creative_id', creativeId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('creativesApi.getCreativeTestStatus error:', error);
+        return null;
+      }
+      
+      return data as CreativeTestStatus | null;
+    } catch (e) {
+      console.error('creativesApi.getCreativeTestStatus exception:', e);
+      return null;
+    }
+  },
+
+  async getCreativeTestStatuses(creativeIds: string[]): Promise<Record<string, CreativeTestStatus>> {
+    if (!creativeIds || creativeIds.length === 0) return {};
+    
+    try {
+      const { data, error } = await supabase
+        .from('creative_tests' as any)
+        .select('user_creative_id, status, started_at, completed_at, impressions, created_at')
+        .in('user_creative_id', creativeIds)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('creativesApi.getCreativeTestStatuses error:', error);
+        return {};
+      }
+
+      // Группируем по user_creative_id и берем последний тест для каждого креатива
+      const result: Record<string, CreativeTestStatus> = {};
+      for (const test of (data || [])) {
+        const creativeId = (test as any).user_creative_id;
+        if (!result[creativeId]) {
+          result[creativeId] = {
+            status: (test as any).status,
+            started_at: (test as any).started_at,
+            completed_at: (test as any).completed_at,
+            impressions: (test as any).impressions || 0,
+          };
+        }
+      }
+      
+      return result;
+    } catch (e) {
+      console.error('creativesApi.getCreativeTestStatuses exception:', e);
+      return {};
+    }
   },
 
   async uploadToWebhook(

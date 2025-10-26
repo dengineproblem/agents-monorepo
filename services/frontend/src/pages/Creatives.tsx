@@ -21,6 +21,7 @@ import { useDirections } from "@/hooks/useDirections";
 import { OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
 import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativeAnalyticsApi";
+import { TestStatusIndicator } from "@/components/TestStatusIndicator";
 
 type UploadItemStatus = "queued" | "uploading" | "success" | "error";
 
@@ -753,7 +754,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 };
 
 const Creatives: React.FC = () => {
-  const { items, loading, reload } = useUserCreatives();
+  const { items, loading, reload, testStatuses } = useUserCreatives();
   const navigate = useNavigate();
 
   const [queue, setQueue] = useState<UploadItem[]>([]);
@@ -1136,6 +1137,9 @@ const Creatives: React.FC = () => {
                           <AccordionTrigger className="hover:no-underline w-auto flex-shrink-0">
                             <div className="font-medium text-left" title={it.title}>{it.title}</div>
                           </AccordionTrigger>
+                          
+                          {/* Индикатор статуса теста */}
+                          <TestStatusIndicator status={testStatuses[it.id]?.status} />
                           
                           {/* Badge с направлением */}
                           <DirectionBadge
