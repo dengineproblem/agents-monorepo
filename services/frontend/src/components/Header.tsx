@@ -1,3 +1,4 @@
+import { toastT } from '@/utils/toastUtils';
 import React from 'react';
 import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Video, User, CheckCircle } from 'lucide-react';
 import { Button } from './ui/button';
@@ -94,11 +95,11 @@ const Header: React.FC<HeaderProps> = ({
       localStorage.removeItem('user');
       console.log('User signed out, localStorage cleared');
       
-      toast.success('Вы успешно вышли из системы');
+      toastT.success('loggedOut');
       navigate('/login');
     } catch (error) {
       console.error('Error during sign out:', error);
-      toast.error('Ошибка при выходе из системы');
+      toastT.error('logoutError');
     }
   };
 

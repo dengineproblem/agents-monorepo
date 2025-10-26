@@ -1,3 +1,4 @@
+import { toastT } from '@/utils/toastUtils';
 import React, { useState, useEffect } from 'react';
 import Header from '@/components/Header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -133,7 +134,7 @@ const AdSettings: React.FC = () => {
       }
     } catch (error) {
       console.error('Ошибка загрузки настроек:', error);
-      toast.error('Не удалось загрузить настройки');
+      toastT.error('settingsLoadError');
     } finally {
       setIsLoading(false);
     }
@@ -141,7 +142,7 @@ const AdSettings: React.FC = () => {
 
   const saveSettings = async () => {
     if (!user?.id) {
-      toast.error('Пользователь не авторизован');
+      toastT.error('userNotAuthorized');
       return;
     }
 
@@ -172,10 +173,10 @@ const AdSettings: React.FC = () => {
 
       if (error) throw error;
 
-      toast.success('Настройки успешно сохранены');
+      toastT.success('settingsSaved');
     } catch (error) {
       console.error('Ошибка сохранения настроек:', error);
-      toast.error('Не удалось сохранить настройки');
+      toastT.error('settingsSaveError');
     } finally {
       setIsSaving(false);
     }

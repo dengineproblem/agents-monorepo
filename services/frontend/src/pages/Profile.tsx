@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import { toastT } from '@/utils/toastUtils';
 import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import TariffInfoCard from '@/components/profile/TariffInfoCard';
@@ -47,7 +48,7 @@ const Profile: React.FC = () => {
     if (storedUser && user && !user.username) {
       console.error('Некорректные данные пользователя: отсутствует username. Выход...');
       localStorage.removeItem('user');
-      toast.error('Необходимо войти заново');
+      toastT.error('loginRequired');
       navigate('/login', { replace: true });
     }
   }, []);
@@ -127,13 +128,13 @@ const Profile: React.FC = () => {
           });
 
           if (!user?.username) {
-            toast.error('Ошибка: необходимо выйти и войти заново');
+            toastT.error('loginRequired');
             console.error('Username отсутствует в localStorage. Данные пользователя:', user);
             window.history.replaceState({}, document.title, '/profile');
             return;
           }
 
-          toast.info('Подключаем Facebook...');
+          toastT.info('facebookConnecting');
 
           const API_URL = 'https://performanteaiagency.com/api';
           const requestBody = { 
@@ -431,7 +432,7 @@ const Profile: React.FC = () => {
 
   const handleSaveFacebookSelection = async () => {
     if (!selectedAdAccount || !selectedPage) {
-      toast.error('Выберите рекламный кабинет и страницу');
+      toastT.error('selectAdAccountAndPage');
       return;
     }
 

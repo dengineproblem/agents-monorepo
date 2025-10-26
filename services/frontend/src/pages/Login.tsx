@@ -1,3 +1,4 @@
+import { toastT } from '@/utils/toastUtils';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -64,7 +65,7 @@ const Login = () => {
       // Проверка пустых полей
       if (!data.username.trim() || !data.password.trim()) {
         console.error('Пустой логин или пароль');
-        toast.error('Логин и пароль не могут быть пустыми');
+        toastT.error('emptyCredentials');
         setIsLoading(false);
         return;
       }
@@ -84,14 +85,14 @@ const Login = () => {
       
       if (error) {
         console.error('Ошибка запроса к базе данных:', error);
-        toast.error('Ошибка при проверке учетных данных');
+        toastT.error('loginError');
         setIsLoading(false);
         return;
       }
       
       if (!user) {
         console.error('Неверные учетные данные');
-        toast.error('Неверный логин или пароль');
+        toastT.error('invalidCredentials');
         setIsLoading(false);
         return;
       }
@@ -124,7 +125,7 @@ const Login = () => {
       localStorage.setItem('user', JSON.stringify(sessionUser));
       console.log('Данные пользователя сохранены в localStorage');
       
-      toast.success('Вы успешно вошли в систему');
+      toastT.success('loggedIn');
       
       // Перенаправляем на главную страницу
       console.log('Перенаправляем на главную страницу...');
@@ -132,7 +133,7 @@ const Login = () => {
       
     } catch (error) {
       console.error('Ошибка при входе:', error);
-      toast.error('Произошла ошибка при входе');
+      toastT.error('loginError');
     } finally {
       setIsLoading(false);
     }

@@ -1,3 +1,4 @@
+import { toastT } from '@/utils/toastUtils';
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,7 +28,7 @@ export const useReports = () => {
       
       if (error) {
         console.error('Ошибка при загрузке отчетов:', error);
-        toast.error('Не удалось загрузить отчеты');
+        toastT.error('failedToLoadReports');
         return;
       }
       
@@ -35,7 +36,7 @@ export const useReports = () => {
       setReports(data);
     } catch (error) {
       console.error('Ошибка при обработке запроса отчетов:', error);
-      toast.error('Произошла ошибка при загрузке отчетов');
+      toastT.error('reportsLoadError');
     } finally {
       setLoading(false);
     }

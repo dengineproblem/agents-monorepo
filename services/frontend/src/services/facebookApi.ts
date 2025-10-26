@@ -4,7 +4,7 @@
 
 import { format, subDays, addDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
+import { toastT } from '@/utils/toastUtils';
 
 // Types
 export interface Campaign {
@@ -129,7 +129,7 @@ const fetchFromFacebookAPI = async (endpoint: string, params: Record<string, str
       // Проверка на истекший или недействительный токен
       if (errorData?.error?.code === 190) {
         console.error('Токен доступа недействителен или истек срок его действия');
-        toast.error('Ошибка авторизации Facebook. Пожалуйста, войдите снова.');
+        toastT.error('facebookAuthError');
         // Очистка токена, чтобы пользователь мог повторно авторизоваться
         const storedUser = localStorage.getItem('user');
         if (storedUser) {
@@ -514,7 +514,7 @@ export const facebookApi = {
       return (response.data || []).map((p: any) => ({ id: String(p.id), name: p.name || p.id }));
     } catch (e) {
       console.error('Не удалось получить список пикселей:', e);
-      toast.error('Не удалось получить список пикселей Facebook');
+      toastT.error('failedToLoadPixels');
       return [];
     }
   },
@@ -559,7 +559,7 @@ export const facebookApi = {
         start_time: campaign.start_time || new Date().toISOString()
       }));
     } catch (error) {
-      toast.error('Не удалось получить список кампаний. Попробуйте позже.');
+      toastT.error('failedToLoadCampaigns');
       return [];
     }
   },
@@ -733,7 +733,7 @@ export const facebookApi = {
       console.log(`Создано ${zeroStats.length} записей статистики с нулевыми значениями`);
       return zeroStats;
     } catch (error) {
-      toast.error('Не удалось получить статистику кампаний. Попробуйте позже.');
+      toastT.error('failedToLoadStats');
       return [];
     }
   },
@@ -744,7 +744,7 @@ export const facebookApi = {
     
     if (!await hasValidConfig()) {
       console.warn('Используются моковые данные для изменения статуса. Не удалось получить данные пользователя.');
-      toast.warning('Используются тестовые данные. Изменения не будут сохранены на Facebook.');
+      toastT.warning('testDataWarning');
       await new Promise(resolve => setTimeout(resolve, 600)); // Имитация задержки API
       
       const campaignIndex = mockCampaigns.findIndex(c => c.id === campaignId);
@@ -783,9 +783,9 @@ export const facebookApi = {
         
         // Проверка на истекший токен
         if (errorData?.error?.code === 190) {
-          toast.error('Ошибка авторизации. Пожалуйста, войдите снова.');
+          toastT.error('statusAuthError');
         } else {
-          toast.error('Не удалось изменить статус кампании');
+          toastT.error('statusUpdateError');
         }
         
         throw new Error(`Ошибка Facebook API: ${errorData?.error?.message || response.statusText}`);
@@ -793,15 +793,15 @@ export const facebookApi = {
       
       const result = await response.json();
       console.log('Результат изменения статуса кампании:', result);
-      
+
       if (result.success === true) {
-        toast.success(`Кампания ${isActive ? 'запущена' : 'приостановлена'}`);
+        toastT.success(isActive ? 'campaignResumed' : 'campaignPaused');
       }
       
       return result.success === true;
     } catch (error) {
       console.error('Ошибка при изменении статуса кампании:', error);
-      toast.error('Не удалось обновить статус кампании');
+      toastT.error('statusUpdateError');
       return false;
     }
   },
@@ -1004,7 +1004,7 @@ export const facebookApi = {
       }
       return [];
     } catch (error) {
-      toast.error('Не удалось получить статистику кампании по дням.');
+      toastT.error('failedToLoadDailyStats');
       return [];
     }
   },

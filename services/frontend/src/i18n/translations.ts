@@ -202,6 +202,53 @@ export const translations = {
       disconnect: 'Disconnect',
       connect: 'Connect',
     },
+    toast: {
+      // Auth
+      loggedOut: 'Successfully logged out',
+      logoutError: 'Error logging out',
+      loginRequired: 'Please log in again',
+      loggedIn: 'Successfully logged in',
+      loginError: 'Error logging in',
+      invalidCredentials: 'Invalid username or password',
+      emptyCredentials: 'Username and password cannot be empty',
+
+      // Facebook
+      facebookAuthError: 'Facebook authorization error. Please log in again.',
+      facebookConnecting: 'Connecting to Facebook...',
+      facebookConnected: 'Facebook successfully connected!',
+      facebookConnectionError: 'Error connecting to Facebook',
+      facebookDisconnectConfirm: 'Are you sure you want to disconnect Facebook Ads?',
+
+      // Data loading
+      failedToLoadReports: 'Failed to load reports',
+      reportsLoadError: 'Error loading reports',
+      failedToLoadCampaigns: 'Failed to load campaigns. Please try again later.',
+      failedToLoadStats: 'Failed to load campaign statistics. Please try again later.',
+      failedToLoadPixels: 'Failed to load Facebook pixels',
+      failedToLoadDailyStats: 'Failed to load daily campaign statistics.',
+
+      // Campaign status
+      campaignResumed: 'Campaign resumed',
+      campaignPaused: 'Campaign paused',
+      statusUpdateError: 'Failed to update campaign status',
+      statusAuthError: 'Authorization error. Please log in again.',
+      testDataWarning: 'Using test data. Changes will not be saved to Facebook.',
+
+      // Settings
+      settingsLoadError: 'Failed to load settings',
+      userNotAuthorized: 'User not authorized',
+      settingsSaved: 'Settings saved successfully',
+      settingsSaveError: 'Failed to save settings',
+
+      // Profile
+      selectAdAccountAndPage: 'Select ad account and page',
+
+      // General
+      success: 'Success',
+      error: 'Error',
+      loading: 'Loading...',
+      saving: 'Saving...',
+    },
   },
   ru: {
     menu: {
@@ -398,6 +445,53 @@ export const translations = {
       notConnected: 'Не подключено',
       disconnect: 'Отключить',
       connect: 'Подключить',
+    },
+    toast: {
+      // Авторизация
+      loggedOut: 'Вы успешно вышли из системы',
+      logoutError: 'Ошибка при выходе из системы',
+      loginRequired: 'Необходимо войти заново',
+      loggedIn: 'Вы успешно вошли в систему',
+      loginError: 'Произошла ошибка при входе',
+      invalidCredentials: 'Неверный логин или пароль',
+      emptyCredentials: 'Логин и пароль не могут быть пустыми',
+
+      // Facebook
+      facebookAuthError: 'Ошибка авторизации Facebook. Пожалуйста, войдите снова.',
+      facebookConnecting: 'Подключаем Facebook...',
+      facebookConnected: 'Facebook успешно подключен!',
+      facebookConnectionError: 'Ошибка подключения Facebook',
+      facebookDisconnectConfirm: 'Вы уверены, что хотите отключить Facebook Ads?',
+
+      // Загрузка данных
+      failedToLoadReports: 'Не удалось загрузить отчеты',
+      reportsLoadError: 'Произошла ошибка при загрузке отчетов',
+      failedToLoadCampaigns: 'Не удалось получить список кампаний. Попробуйте позже.',
+      failedToLoadStats: 'Не удалось получить статистику кампаний. Попробуйте позже.',
+      failedToLoadPixels: 'Не удалось получить список пикселей Facebook',
+      failedToLoadDailyStats: 'Не удалось получить статистику кампании по дням.',
+
+      // Статус кампании
+      campaignResumed: 'Кампания запущена',
+      campaignPaused: 'Кампания приостановлена',
+      statusUpdateError: 'Не удалось обновить статус кампании',
+      statusAuthError: 'Ошибка авторизации. Пожалуйста, войдите снова.',
+      testDataWarning: 'Используются тестовые данные. Изменения не будут сохранены на Facebook.',
+
+      // Настройки
+      settingsLoadError: 'Не удалось загрузить настройки',
+      userNotAuthorized: 'Пользователь не авторизован',
+      settingsSaved: 'Настройки успешно сохранены',
+      settingsSaveError: 'Не удалось сохранить настройки',
+
+      // Профиль
+      selectAdAccountAndPage: 'Выберите рекламный кабинет и страницу',
+
+      // Общее
+      success: 'Успешно',
+      error: 'Ошибка',
+      loading: 'Загрузка...',
+      saving: 'Сохранение...',
     },
   },
 };
