@@ -226,24 +226,28 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
   };
 
-  // Функция для проверки авторизации пользователя
+  // Функция для проверки авторизации пользователя (только username, Facebook данные опциональны)
   const checkUserAuth = () => {
     const storedUser = localStorage.getItem('user');
     if (!storedUser) {
       console.warn('Пользователь не авторизован. Необходима авторизация.');
       return false;
     }
-    
+
     try {
       const userData = JSON.parse(storedUser);
-      if (!userData || !userData.access_token || !userData.ad_account_id) {
-        console.warn('Недостаточно данных пользователя для API:', {
-          hasToken: !!userData?.access_token,
-          hasAdAccountId: !!userData?.ad_account_id,
-          hasPageId: !!userData?.page_id
+      // Проверяем только наличие username - Facebook данные опциональны
+      if (!userData || !userData.username) {
+        console.warn('Недостаточно данных пользователя:', {
+          hasUsername: !!userData?.username
         });
         return false;
       }
+
+      console.log('Пользователь авторизован:', {
+        username: userData.username,
+        hasFacebookData: !!(userData.access_token && userData.ad_account_id)
+      });
       return true;
     } catch (e) {
       console.error('Ошибка при проверке данных пользователя:', e);
@@ -254,15 +258,26 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const refreshData = async () => {
     setLoading(true);
     setError(null);
-    
+
     try {
       console.log('Обновление данных приложения...');
-      
-      // Проверяем авторизацию перед запросами
+
+      // Проверяем авторизацию пользователя (только username)
       if (!checkUserAuth()) {
-        console.warn('Невозможно обновить данные: пользователь не авторизован или отсутствуют данные для API');
-        toast.error('Для получения данных необходимо войти в систему');
-        setError('Для получения данных необходимо войти в систему');
+        console.warn('Невозможно обновить данные: пользователь не авторизован');
+        setLoading(false);
+        return;
+      }
+
+      // Проверяем наличие Facebook данных
+      const storedUser = localStorage.getItem('user');
+      const userData = storedUser ? JSON.parse(storedUser) : null;
+      const hasFacebookData = userData?.access_token && userData?.ad_account_id;
+
+      if (!hasFacebookData) {
+        console.log('Facebook данные отсутствуют. Пропускаем загрузку данных Facebook.');
+        setCampaigns([]);
+        setCampaignStats([]);
         setLoading(false);
         return;
       }
