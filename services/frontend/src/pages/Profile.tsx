@@ -15,7 +15,7 @@ import TariffInfoCard from '@/components/profile/TariffInfoCard';
 import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
-import { FEATURES } from '../config/appReview';
+import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
  
 
@@ -780,37 +780,39 @@ const Profile: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* Audience ID Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Users className="h-5 w-5" />
-                    Аудитория
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="text-sm text-muted-foreground mb-1">
-                        Facebook Custom Audience ID для дублирования кампаний
+              {/* Audience ID Card - скрыто в preview версии */}
+              {!APP_REVIEW_MODE && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Аудитория
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="text-sm text-muted-foreground mb-1">
+                          Facebook Custom Audience ID для дублирования кампаний
+                        </div>
+                        <div className="font-medium font-mono">
+                          {audienceId || 'Не установлено'}
+                        </div>
                       </div>
-                      <div className="font-medium font-mono">
-                        {audienceId || 'Не установлено'}
-                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setNewAudienceId(audienceId);
+                          setAudienceModal(true);
+                        }}
+                      >
+                        {audienceId ? 'Изменить' : 'Добавить'}
+                      </Button>
                     </div>
-                    <Button 
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setNewAudienceId(audienceId);
-                        setAudienceModal(true);
-                      }}
-                    >
-                      {audienceId ? 'Изменить' : 'Добавить'}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              )}
 
               {/* OpenAI API Key - скрыт (не используется в данной версии) */}
               {/* 
