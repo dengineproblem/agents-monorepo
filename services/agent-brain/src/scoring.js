@@ -846,7 +846,8 @@ export async function runScoringAgent(userAccount, options = {}) {
           fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
           recommended_objective: recommendedObjective,
-          created_at: uc.created_at
+          created_at: uc.created_at,
+          direction_id: uc.direction_id  // ВАЖНО: привязка к направлению
         });
       }
     }
