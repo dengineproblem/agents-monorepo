@@ -527,7 +527,9 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       setFacebookSelectionModal(false);
       toastT.success('facebookConnected');
-      window.location.reload();
+      // TEMPORARILY DISABLED FOR DEBUGGING - page won't reload so you can see logs
+      // window.location.reload();
+      console.log('✅ Save completed successfully! Check console logs above.');
 
     } catch (error) {
       console.error('Error saving Facebook selection:', error);
