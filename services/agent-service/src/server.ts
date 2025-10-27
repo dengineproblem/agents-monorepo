@@ -44,9 +44,9 @@ app.register(videoRoutes, { prefix: '/api' });
 app.register(imageRoutes, { prefix: '/api' });
 app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
-app.register(directionsRoutes);
-app.register(defaultSettingsRoutes);
-app.register(whatsappNumbersRoutes);
+app.register(directionsRoutes, { prefix: '/api' });
+app.register(defaultSettingsRoutes, { prefix: '/api' });
+app.register(whatsappNumbersRoutes, { prefix: '/api' });
 app.register(facebookWebhooks); // Без префикса - nginx уже убирает /api
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
