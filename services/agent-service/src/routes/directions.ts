@@ -600,6 +600,44 @@ export async function directionsRoutes(app: FastifyInstance) {
         }
       }
 
+      // Если изменился статус is_active, обновляем Facebook кампанию
+      if (input.is_active !== undefined && existingDirection.is_active !== input.is_active && existingDirection.fb_campaign_id) {
+        const newCampaignStatus = input.is_active ? 'ACTIVE' : 'PAUSED';
+
+        try {
+          log.info({
+            directionId: id,
+            campaignId: existingDirection.fb_campaign_id,
+            oldStatus: existingDirection.is_active ? 'ACTIVE' : 'PAUSED',
+            newStatus: newCampaignStatus
+          }, 'Updating Facebook campaign status due to direction is_active change');
+
+          await updateFacebookCampaignStatus(
+            existingDirection.fb_campaign_id,
+            (existingDirection.user_accounts as any).access_token,
+            newCampaignStatus as 'ACTIVE' | 'PAUSED'
+          );
+
+          // Обновляем campaign_status в базе данных
+          updateData.campaign_status = newCampaignStatus;
+
+          log.info({ directionId: id, newCampaignStatus }, 'Facebook campaign status updated successfully');
+        } catch (fbError: any) {
+          log.error({
+            err: fbError,
+            directionId: id,
+            campaignId: existingDirection.fb_campaign_id
+          }, 'Failed to update Facebook campaign status');
+
+          // Возвращаем ошибку, не обновляем направление
+          return reply.code(500).send({
+            success: false,
+            error: 'Не удалось обновить статус кампании в Facebook',
+            details: fbError.message,
+          });
+        }
+      }
+
       // Обновляем направление в базе
       const { data: updatedDirection, error: updateError } = await supabase
         .from('account_directions')
