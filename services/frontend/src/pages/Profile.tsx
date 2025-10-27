@@ -194,9 +194,11 @@ const Profile: React.FC = () => {
           }
 
           // Сохраняем данные для выбора и показываем модальное окно
+          console.log('📋 All available pages:', data.pages.map((p: any) => ({ id: p.id, name: p.name })));
           setFacebookData(data);
           setSelectedAdAccount(data.ad_accounts[0]?.id || '');
           setSelectedPage(data.pages[0]?.id || '');
+          console.log('🔧 Default selected page:', data.pages[0]?.id, data.pages[0]?.name);
           setFacebookSelectionModal(true);
 
           // Clear URL params
@@ -1375,7 +1377,9 @@ const Profile: React.FC = () => {
                   className="w-full p-2 border rounded max-h-40 overflow-y-auto"
                   size={5}
                   value={selectedPage}
+                  onClick={() => console.log('🖱️ Select clicked, current value:', selectedPage)}
                   onChange={(e) => {
+                    console.log('🔄 onChange triggered!', e.target.value);
                     const newPageId = e.target.value;
                     const pageName = filteredPages.find((p: any) => p.id === newPageId)?.name;
                     console.log('📝 User selected page:', {
