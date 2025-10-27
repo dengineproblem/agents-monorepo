@@ -159,20 +159,26 @@ export default async function facebookWebhooks(app: FastifyInstance) {
    */
   app.post('/facebook/save-selection', async (req, res) => {
     try {
-      log.info('Saving Facebook selection');
-      
-      const { username, access_token, ad_account_id, page_id, instagram_id } = req.body as { 
-        username?: string; 
-        access_token?: string; 
-        ad_account_id?: string; 
-        page_id?: string; 
+      const { username, access_token, ad_account_id, page_id, instagram_id } = req.body as {
+        username?: string;
+        access_token?: string;
+        ad_account_id?: string;
+        page_id?: string;
         instagram_id?: string | null;
       };
-      
+
+      log.info({
+        username,
+        ad_account_id,
+        page_id,
+        instagram_id,
+        access_token_prefix: access_token ? `${access_token.substring(0, 20)}...` : 'none'
+      }, 'Saving Facebook selection - received data');
+
       if (!username || !access_token || !ad_account_id || !page_id) {
         log.error('Missing required parameters');
-        return res.status(400).send({ 
-          error: 'Missing required parameters' 
+        return res.status(400).send({
+          error: 'Missing required parameters'
         });
       }
 
@@ -216,7 +222,13 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         });
       }
 
-      log.info({ userId: existingUser.id, username }, 'Successfully saved Facebook selection');
+      log.info({
+        userId: existingUser.id,
+        username,
+        saved_page_id: page_id,
+        saved_ad_account_id: ad_account_id,
+        saved_instagram_id: instagram_id
+      }, 'Successfully saved Facebook selection to database');
 
       return res.send({
         success: true
