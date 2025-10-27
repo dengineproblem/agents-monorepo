@@ -8,7 +8,7 @@ import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 const FB_APP_ID = import.meta.env.VITE_FB_APP_ID || '690472653668355';
 const FB_REDIRECT_URI = import.meta.env.VITE_FB_REDIRECT_URI || 'https://performanteaiagency.com/profile';
-const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads';
+const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads,pages_read_engagement';
 const API_URL = import.meta.env.VITE_API_URL || 'https://performanteaiagency.com/api';
 
 interface FacebookConnectProps {
