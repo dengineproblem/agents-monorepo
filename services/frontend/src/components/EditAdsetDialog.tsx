@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { facebookApi, type Adset } from '../services/facebookApi';
 import { useTranslation } from '../i18n/LanguageContext';
 import { toast } from 'sonner';
+import { REQUIRE_CONFIRMATION } from '../config/appReview';
 
 interface EditAdsetDialogProps {
   adset: Adset;
@@ -35,26 +36,37 @@ const EditAdsetDialog: React.FC<EditAdsetDialogProps> = ({
     setSaving(true);
     try {
       const budgetCents = Math.round(budget * 100);
-      
+
+      // App Review: Confirmation dialog перед изменением бюджета (только в App Review режиме)
+      if (budgetCents !== adset.daily_budget && REQUIRE_CONFIRMATION) {
+        const confirmMessage = t('msg.confirmBudgetChange').replace('${budget}', `$${budget}`);
+        const confirmed = window.confirm(confirmMessage);
+
+        if (!confirmed) {
+          setSaving(false);
+          return;
+        }
+      }
+
       // Обновляем название, если изменилось
       if (name !== adset.name) {
         await facebookApi.updateAdsetName(adset.id, name);
       }
-      
+
       // Обновляем бюджет, если изменился
       if (budgetCents !== adset.daily_budget) {
         await facebookApi.updateAdsetBudget(adset.id, budgetCents);
       }
-      
+
       toast.success('Ad set обновлен успешно');
-      
+
       // Уведомляем родительский компонент об обновлении
       onUpdate({
         ...adset,
         name,
         daily_budget: budgetCents,
       });
-      
+
     } catch (error: any) {
       console.error('Ошибка при сохранении ad set:', error);
       toast.error(error.message || 'Не удалось сохранить изменения');
