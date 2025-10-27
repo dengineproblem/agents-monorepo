@@ -299,10 +299,22 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       // This demonstrates the minimal usage of pages_read_engagement for app review
       if (pageId) {
         try {
+          log.info({
+            requestedPageId: pageId,
+            usingAccessToken: accessToken ? `${accessToken.substring(0, 20)}...` : 'none'
+          }, 'Requesting Page data from Facebook');
+
           const pageResponse = await fetch(
-            `https://graph.facebook.com/v21.0/${pageId}?fields=name,link,instagram_business_account{id,username}&access_token=${accessToken}`
+            `https://graph.facebook.com/v21.0/${pageId}?fields=id,name,link,instagram_business_account{id,username}&access_token=${accessToken}`
           );
           const pageData = await pageResponse.json();
+
+          log.info({
+            requestedPageId: pageId,
+            returnedPageId: pageData.id,
+            returnedPageName: pageData.name,
+            match: pageData.id === pageId
+          }, 'Facebook response received');
 
           if (pageData.name) {
             checks.page = true;
@@ -312,15 +324,17 @@ export default async function facebookWebhooks(app: FastifyInstance) {
               instagram: pageData.instagram_business_account || null
             };
             log.info({
-              pageId,
+              requestedPageId: pageId,
+              returnedPageId: pageData.id,
               pageName: pageData.name,
-              hasInstagram: !!pageData.instagram_business_account
+              hasInstagram: !!pageData.instagram_business_account,
+              pageMatches: pageData.id === pageId
             }, 'Page access validated using pages_read_engagement');
           } else if (pageData.error) {
-            log.error({ error: pageData.error }, 'Page validation failed');
+            log.error({ error: pageData.error, requestedPageId: pageId }, 'Page validation failed');
           }
         } catch (e) {
-          log.error({ error: e }, 'Page validation request failed');
+          log.error({ error: e, requestedPageId: pageId }, 'Page validation request failed');
         }
       }
 
