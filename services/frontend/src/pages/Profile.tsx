@@ -480,6 +480,14 @@ const Profile: React.FC = () => {
       const selectedPageData = facebookData.pages.find((p: any) => p.id === selectedPage);
       const instagramId = selectedPageData?.instagram_id || null;
 
+      console.log('📤 Frontend sending to /facebook/save-selection:', {
+        username: user?.username,
+        ad_account_id: selectedAdAccount,
+        page_id: selectedPage,
+        page_name: selectedPageData?.name,
+        instagram_id: instagramId
+      });
+
       const API_URL = 'https://performanteaiagency.com/api';
       const response = await fetch(`${API_URL}/facebook/save-selection`, {
         method: 'POST',
