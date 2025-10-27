@@ -529,9 +529,8 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       setFacebookSelectionModal(false);
       toastT.success('facebookConnected');
-      // TEMPORARILY DISABLED FOR DEBUGGING - page won't reload so you can see logs
-      // window.location.reload();
-      console.log('✅ Save completed successfully! Check console logs above.');
+      console.log('✅ Save completed successfully! Reloading page...');
+      window.location.reload();
 
     } catch (error) {
       console.error('Error saving Facebook selection:', error);
@@ -1373,30 +1372,38 @@ const Profile: React.FC = () => {
                   onChange={(e) => setSearchPage(e.target.value)}
                   className="mt-1 mb-2"
                 />
-                <select
-                  className="w-full p-2 border rounded max-h-40 overflow-y-auto"
-                  size={5}
-                  value={selectedPage}
-                  onClick={() => console.log('🖱️ Select clicked, current value:', selectedPage)}
-                  onChange={(e) => {
-                    console.log('🔄 onChange triggered!', e.target.value);
-                    const newPageId = e.target.value;
-                    const pageName = filteredPages.find((p: any) => p.id === newPageId)?.name;
-                    console.log('📝 User selected page:', {
-                      page_id: newPageId,
-                      page_name: pageName,
-                      previous_page_id: selectedPage
-                    });
-                    setSelectedPage(newPageId);
-                  }}
-                >
+                <div className="w-full border rounded max-h-40 overflow-y-auto p-2">
                   {filteredPages.map((page: any) => (
-                    <option key={page.id} value={page.id}>
-                      {page.name} ({page.id})
-                      {page.instagram_id && ` ✓ IG`}
-                    </option>
+                    <label
+                      key={page.id}
+                      className="flex items-center p-2 hover:bg-gray-50 cursor-pointer rounded"
+                      onClick={() => console.log('🖱️ Radio button clicked for page:', page.id, page.name)}
+                    >
+                      <input
+                        type="radio"
+                        name="facebookPage"
+                        value={page.id}
+                        checked={selectedPage === page.id}
+                        onChange={(e) => {
+                          console.log('🔄 onChange triggered!', e.target.value);
+                          const newPageId = e.target.value;
+                          const pageName = filteredPages.find((p: any) => p.id === newPageId)?.name;
+                          console.log('📝 User selected page:', {
+                            page_id: newPageId,
+                            page_name: pageName,
+                            previous_page_id: selectedPage
+                          });
+                          setSelectedPage(newPageId);
+                        }}
+                        className="mr-3"
+                      />
+                      <span className="flex-1">
+                        {page.name} ({page.id})
+                        {page.instagram_id && ` ✓ IG`}
+                      </span>
+                    </label>
                   ))}
-                </select>
+                </div>
                 <div className="text-xs text-gray-500 mt-1">
                   {isAppReviewMode
                     ? `Showing: ${filteredPages.length} of ${pages.length}`
