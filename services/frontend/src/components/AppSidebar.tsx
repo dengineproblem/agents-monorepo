@@ -62,7 +62,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="hidden lg:flex border-r fixed left-0 top-[60px] bottom-0 z-40">
       <SidebarContent className="bg-background">
         <SidebarGroup>
-          <SidebarGroupLabel>Навигация</SidebarGroupLabel>
+          <SidebarGroupLabel>{t('sidebar.navigation')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {visibleMenuItems.map((item) => {

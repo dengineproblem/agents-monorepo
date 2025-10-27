@@ -6,13 +6,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { toast } from 'sonner';
 import * as z from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation } from '@/i18n/LanguageContext';
+import { APP_REVIEW_MODE } from '@/config/appReview';
+
+const USERNAME_REQUIRED_MESSAGE = APP_REVIEW_MODE ? 'Username is required' : 'Логин обязателен';
+const PASSWORD_REQUIRED_MESSAGE = APP_REVIEW_MODE ? 'Password is required' : 'Пароль обязателен';
 
 const loginSchema = z.object({
-  username: z.string().min(1, 'Логин обязателен'),
-  password: z.string().min(1, 'Пароль обязателен'),
+  username: z.string().min(1, USERNAME_REQUIRED_MESSAGE),
+  password: z.string().min(1, PASSWORD_REQUIRED_MESSAGE),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -20,6 +24,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 const Login = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+  const { t } = useTranslation();
   
   // Проверяем, авторизован ли пользователь уже
   useEffect(() => {
@@ -143,8 +148,8 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-md p-6 space-y-6">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold">Meta Ads Monitor</h1>
-          <p className="text-muted-foreground">Войдите для доступа к панели управления</p>
+          <h1 className="text-2xl font-bold">{t('auth.loginTitle')}</h1>
+          <p className="text-muted-foreground">{t('auth.loginSubtitle')}</p>
         </div>
 
         <Form {...form}>
@@ -154,9 +159,9 @@ const Login = () => {
               name="username"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Логин</FormLabel>
+                  <FormLabel>{t('auth.usernameLabel')}</FormLabel>
                   <FormControl>
-                    <Input placeholder="Введите логин" {...field} />
+                    <Input placeholder={t('auth.usernamePlaceholder')} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -168,9 +173,9 @@ const Login = () => {
               name="password"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Пароль</FormLabel>
+                  <FormLabel>{t('auth.passwordLabel')}</FormLabel>
                   <FormControl>
-                    <Input type="password" placeholder="Введите пароль" {...field} />
+                    <Input type="password" placeholder={t('auth.passwordPlaceholder')} {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -178,7 +183,7 @@ const Login = () => {
             />
 
             <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? 'Вход...' : 'Войти'}
+              {isLoading ? t('auth.loginButtonLoading') : t('auth.loginButton')}
             </Button>
           </form>
         </Form>

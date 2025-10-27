@@ -18,6 +18,7 @@ import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
+import { appReviewText } from '../utils/appReviewText';
  
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
@@ -65,6 +66,41 @@ const Profile: React.FC = () => {
   const [selectedPage, setSelectedPage] = useState<string>('');
   const [searchAdAccount, setSearchAdAccount] = useState<string>('');
   const [searchPage, setSearchPage] = useState<string>('');
+
+  const isAppReviewMode = APP_REVIEW_MODE;
+  const adAccounts = facebookData?.ad_accounts ?? [];
+  const pages = facebookData?.pages ?? [];
+
+  const filteredAdAccounts = useMemo(() => {
+    const trimmedSearch = searchAdAccount.trim();
+    const query = trimmedSearch.toLowerCase();
+
+    if (!query) {
+      return adAccounts;
+    }
+
+    return adAccounts.filter((account: any) =>
+      account.name.toLowerCase().includes(query) || account.id.includes(trimmedSearch)
+    );
+  }, [adAccounts, searchAdAccount]);
+
+  const filteredPages = useMemo(() => {
+    const trimmedSearch = searchPage.trim();
+    const query = trimmedSearch.toLowerCase();
+
+    if (!query) {
+      return pages;
+    }
+
+    return pages.filter((page: any) =>
+      page.name.toLowerCase().includes(query) || page.id.includes(trimmedSearch)
+    );
+  }, [pages, searchPage]);
+
+  const selectedPageData = useMemo(
+    () => pages.find((page: any) => page.id === selectedPage) ?? null,
+    [pages, selectedPage]
+  );
   
   // Смена пароля
   const [oldPassword, setOldPassword] = useState('');
@@ -113,7 +149,7 @@ const Profile: React.FC = () => {
 
       if (error) {
         console.error('Facebook OAuth error:', error);
-        toast.error(`Facebook connection failed: ${error}`);
+        toast.error(appReviewText(`Facebook connection failed: ${error}`, `Не удалось подключиться к Facebook: ${error}`));
         window.history.replaceState({}, document.title, '/profile');
         return;
       }
@@ -168,7 +204,11 @@ const Profile: React.FC = () => {
 
         } catch (error) {
           console.error('Error connecting Facebook:', error);
-          toast.error(error instanceof Error ? error.message : 'Failed to connect Facebook');
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : appReviewText('Failed to connect Facebook', 'Не удалось подключиться к Facebook')
+          );
           window.history.replaceState({}, document.title, '/profile');
         }
       }
@@ -259,19 +299,19 @@ const Profile: React.FC = () => {
   const handlePasswordSave = async () => {
     // Валидация
     if (!oldPassword.trim()) {
-      toast.error('Введите текущий пароль');
+      toast.error(appReviewText('Enter your current password', 'Введите текущий пароль'));
       return;
     }
     if (!newPassword.trim()) {
-      toast.error('Введите новый пароль');
+      toast.error(appReviewText('Enter a new password', 'Введите новый пароль'));
       return;
     }
     if (newPassword.length < 6) {
-      toast.error('Новый пароль должен содержать минимум 6 символов');
+      toast.error(appReviewText('The new password must be at least 6 characters long', 'Новый пароль должен содержать минимум 6 символов'));
       return;
     }
     if (newPassword !== confirmPassword) {
-      toast.error('Пароли не совпадают');
+      toast.error(appReviewText('Passwords do not match', 'Пароли не совпадают'));
       return;
     }
 
@@ -285,7 +325,7 @@ const Profile: React.FC = () => {
       });
 
       if (signInError) {
-        toast.error('Неверный текущий пароль');
+        toast.error(appReviewText('Incorrect current password', 'Неверный текущий пароль'));
         setIsChangingPassword(false);
         return;
       }
@@ -296,19 +336,19 @@ const Profile: React.FC = () => {
       });
 
       if (updateError) {
-        toast.error('Ошибка при смене пароля: ' + updateError.message);
+        toast.error(appReviewText(`Failed to change password: ${updateError.message}`, 'Ошибка при смене пароля: ' + updateError.message));
         setIsChangingPassword(false);
         return;
       }
 
-      toast.success('Пароль успешно изменен');
+      toast.success(appReviewText('Password changed successfully', 'Пароль успешно изменен'));
     setPasswordModal(false);
       setOldPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
       console.error('Ошибка при смене пароля:', error);
-      toast.error('Произошла ошибка при смене пароля');
+      toast.error(appReviewText('An error occurred while changing the password', 'Произошла ошибка при смене пароля'));
     } finally {
       setIsChangingPassword(false);
     }
@@ -329,7 +369,7 @@ const Profile: React.FC = () => {
           .eq('id', user?.id);
 
         if (error) {
-          toast.error('Ошибка при удалении Telegram ID: ' + error.message);
+          toast.error(appReviewText(`Failed to remove Telegram ID: ${error.message}`, 'Ошибка при удалении Telegram ID: ' + error.message));
           return;
         }
 
@@ -340,11 +380,11 @@ const Profile: React.FC = () => {
         const updatedUser = { ...user, [fieldName]: null };
         localStorage.setItem('user', JSON.stringify(updatedUser));
         
-        toast.success('Telegram ID успешно удален');
+        toast.success(appReviewText('Telegram ID removed successfully', 'Telegram ID успешно удален'));
         setTelegramIdModal(false);
       } catch (error) {
         console.error('Ошибка при удалении Telegram ID:', error);
-        toast.error('Произошла ошибка при удалении');
+        toast.error(appReviewText('An error occurred while removing the Telegram ID', 'Произошла ошибка при удалении'));
       } finally {
         setIsSavingTelegramId(false);
       }
@@ -352,7 +392,7 @@ const Profile: React.FC = () => {
     }
 
     if (!newTelegramId.trim()) {
-      toast.error('Введите Telegram ID');
+      toast.error(appReviewText('Enter a Telegram ID', 'Введите Telegram ID'));
       return;
     }
 
@@ -370,7 +410,7 @@ const Profile: React.FC = () => {
         .eq('id', user?.id);
 
       if (error) {
-        toast.error('Ошибка при сохранении Telegram ID: ' + error.message);
+        toast.error(appReviewText(`Failed to save Telegram ID: ${error.message}`, 'Ошибка при сохранении Telegram ID: ' + error.message));
         return;
       }
 
@@ -381,18 +421,18 @@ const Profile: React.FC = () => {
       const updatedUser = { ...user, [fieldName]: newTelegramId };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
-      toast.success('Telegram ID успешно обновлен');
+      toast.success(appReviewText('Telegram ID updated successfully', 'Telegram ID успешно обновлен'));
       setTelegramIdModal(false);
     } catch (error) {
       console.error('Ошибка при сохранении Telegram ID:', error);
-      toast.error('Произошла ошибка при сохранении');
+      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingTelegramId(false);
     }
   };
 
   const handleDisconnectInstagram = async () => {
-    if (!confirm('Вы уверены, что хотите отключить Instagram?')) {
+    if (!confirm(appReviewText('Are you sure you want to disconnect Instagram?', 'Вы уверены, что хотите отключить Instagram?'))) {
       return;
     }
 
@@ -408,7 +448,7 @@ const Profile: React.FC = () => {
         .eq('id', user?.id);
 
       if (error) {
-        toast.error('Ошибка при отключении Instagram: ' + error.message);
+        toast.error(appReviewText(`Failed to disconnect Instagram: ${error.message}`, 'Ошибка при отключении Instagram: ' + error.message));
         return;
       }
 
@@ -422,11 +462,11 @@ const Profile: React.FC = () => {
       };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
-      toast.success('Instagram успешно отключен');
+      toast.success(appReviewText('Instagram disconnected successfully', 'Instagram успешно отключен'));
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
       console.error('Ошибка при отключении Instagram:', error);
-      toast.error('Произошла ошибка при отключении');
+      toast.error(appReviewText('An error occurred while disconnecting', 'Произошла ошибка при отключении'));
     }
   };
 
@@ -472,17 +512,21 @@ const Profile: React.FC = () => {
 
       localStorage.setItem('user', JSON.stringify(updatedUser));
       setFacebookSelectionModal(false);
-      toast.success('Facebook успешно подключен!');
+      toastT.success('facebookConnected');
       window.location.reload();
 
     } catch (error) {
       console.error('Error saving Facebook selection:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to save selection');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : appReviewText('Failed to save selection', 'Не удалось сохранить выбор')
+      );
     }
   };
 
   const handleDisconnectTikTok = async () => {
-    if (!confirm('Вы уверены, что хотите отключить TikTok?')) {
+    if (!confirm(t('profile.confirmDisconnectTikTok'))) {
       return;
     }
 
@@ -497,7 +541,7 @@ const Profile: React.FC = () => {
         .eq('id', user?.id);
 
       if (error) {
-        toast.error('Ошибка при отключении TikTok: ' + error.message);
+        toast.error(appReviewText(`Failed to disconnect TikTok: ${error.message}`, 'Ошибка при отключении TikTok: ' + error.message));
         return;
       }
 
@@ -510,11 +554,11 @@ const Profile: React.FC = () => {
       };
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
-      toast.success('TikTok успешно отключен');
+      toast.success(appReviewText('TikTok disconnected successfully', 'TikTok успешно отключен'));
       window.location.reload(); // Перезагружаем для обновления UI
     } catch (error) {
       console.error('Ошибка при отключении TikTok:', error);
-      toast.error('Произошла ошибка при отключении');
+      toast.error(appReviewText('An error occurred while disconnecting', 'Произошла ошибка при отключении'));
     }
   };
 
@@ -538,7 +582,7 @@ const Profile: React.FC = () => {
     const maxBudgetDollars = parseAmount(newMaxBudget);
 
     if (maxBudgetDollars !== null && (isNaN(maxBudgetDollars) || maxBudgetDollars < 0)) {
-      toast.error('Введите корректное значение максимального бюджета (без пробелов)');
+      toast.error(appReviewText('Enter a valid maximum budget without spaces', 'Введите корректное значение максимального бюджета (без пробелов)'));
       return;
     }
 
@@ -554,7 +598,7 @@ const Profile: React.FC = () => {
         .eq('id', user?.id);
 
       if (error) {
-        toast.error('Ошибка при сохранении: ' + error.message);
+        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
         return;
       }
 
@@ -563,11 +607,11 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
       setMaxBudgetCents(maxBudgetCentsValue);
-      toast.success('Максимальный бюджет успешно сохранен');
+      toast.success(appReviewText('Maximum budget saved successfully', 'Максимальный бюджет успешно сохранен'));
       setMaxBudgetModal(false);
     } catch (error) {
       console.error('Ошибка при сохранении:', error);
-      toast.error('Произошла ошибка при сохранении');
+      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingMaxBudget(false);
     }
@@ -577,7 +621,7 @@ const Profile: React.FC = () => {
     const plannedCplDollars = parseAmount(newPlannedCpl);
 
     if (plannedCplDollars !== null && (isNaN(plannedCplDollars) || plannedCplDollars < 0)) {
-      toast.error('Введите корректное значение плановой стоимости заявки (без пробелов)');
+      toast.error(appReviewText('Enter a valid planned cost per lead without spaces', 'Введите корректное значение плановой стоимости заявки (без пробелов)'));
       return;
     }
 
@@ -593,7 +637,7 @@ const Profile: React.FC = () => {
         .eq('id', user?.id);
 
       if (error) {
-        toast.error('Ошибка при сохранении: ' + error.message);
+        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
         return;
       }
 
@@ -602,11 +646,11 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
       setPlannedCplCents(plannedCplCentsValue);
-      toast.success('Плановая стоимость заявки успешно сохранена');
+      toast.success(appReviewText('Planned cost per lead saved successfully', 'Плановая стоимость заявки успешно сохранена'));
       setPlannedCplModal(false);
     } catch (error) {
       console.error('Ошибка при сохранении:', error);
-      toast.error('Произошла ошибка при сохранении');
+      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingPlannedCpl(false);
     }
@@ -620,7 +664,7 @@ const Profile: React.FC = () => {
       const keyToSave = newOpenaiKey.trim();
       
       if (keyToSave && !keyToSave.startsWith('sk-')) {
-        toast.error('Некорректный формат ключа OpenAI (должен начинаться с sk-)');
+        toast.error(appReviewText('Invalid OpenAI key format (must start with sk-)', 'Некорректный формат ключа OpenAI (должен начинаться с sk-)'));
         setIsSavingOpenaiKey(false);
         return;
       }
@@ -632,7 +676,7 @@ const Profile: React.FC = () => {
       
       if (error) {
         console.error('Ошибка при сохранении:', error);
-        toast.error('Ошибка при сохранении: ' + error.message);
+        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
         return;
       }
       
@@ -641,13 +685,13 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
       setOpenaiApiKey(keyToSave);
-      toast.success('OpenAI API ключ успешно сохранен');
+      toast.success(appReviewText('OpenAI API key saved successfully', 'OpenAI API ключ успешно сохранен'));
       setOpenaiModal(false);
       setNewOpenaiKey('');
       setShowOpenaiKey(false);
     } catch (error) {
       console.error('Ошибка при сохранении:', error);
-      toast.error('Произошла ошибка при сохранении');
+      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingOpenaiKey(false);
     }
@@ -667,7 +711,7 @@ const Profile: React.FC = () => {
       
       if (error) {
         console.error('Ошибка при сохранении:', error);
-        toast.error('Ошибка при сохранении: ' + error.message);
+        toast.error(appReviewText(`Failed to save: ${error.message}`, 'Ошибка при сохранении: ' + error.message));
         return;
       }
       
@@ -676,12 +720,12 @@ const Profile: React.FC = () => {
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
       setAudienceId(idToSave);
-      toast.success('ID аудитории успешно сохранен');
+      toast.success(appReviewText('Audience ID saved successfully', 'ID аудитории успешно сохранен'));
       setAudienceModal(false);
       setNewAudienceId('');
     } catch (error) {
       console.error('Ошибка при сохранении:', error);
-      toast.error('Произошла ошибка при сохранении');
+      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
     } finally {
       setIsSavingAudienceId(false);
     }
@@ -865,7 +909,7 @@ const Profile: React.FC = () => {
                 connected: Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== ''),
                 onClick: () => {
                   if (user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '') {
-                    if (confirm('Вы уверены, что хотите отключить Facebook Ads?')) {
+                    if (confirm(t('profile.confirmDisconnectFacebook'))) {
                       handleDisconnectInstagram(); // Reuse the same function as it clears access_token
                     }
                   } else {
@@ -892,7 +936,7 @@ const Profile: React.FC = () => {
                   if (user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '') {
                     handleDisconnectInstagram();
                   } else {
-                    toast.info('Instagram подключается через Facebook API. Используйте подключение Facebook Ads выше.');
+                    toast.info(t('profile.instagramConnectInfo'));
                   }
                 },
               },
@@ -927,19 +971,19 @@ const Profile: React.FC = () => {
         <Dialog open={passwordModal} onOpenChange={setPasswordModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Смена пароля</DialogTitle>
+              <DialogTitle>{appReviewText('Change password', 'Смена пароля')}</DialogTitle>
               <DialogDescription>
-                Введите текущий пароль и новый пароль для смены.
+                {appReviewText('Enter your current and new password to update it.', 'Введите текущий пароль и новый пароль для смены.')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="old-password">Текущий пароль</Label>
+                <Label htmlFor="old-password">{appReviewText('Current password', 'Текущий пароль')}</Label>
                 <div className="relative">
-                  <Input 
+                  <Input
                     id="old-password"
                     type={showOldPassword ? "text" : "password"}
-                    placeholder="Введите текущий пароль" 
+                    placeholder={appReviewText('Enter current password', 'Введите текущий пароль')}
                     value={oldPassword}
                     onChange={(e) => setOldPassword(e.target.value)}
                     disabled={isChangingPassword}
@@ -956,12 +1000,12 @@ const Profile: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-password">Новый пароль</Label>
+                <Label htmlFor="new-password">{appReviewText('New password', 'Новый пароль')}</Label>
                 <div className="relative">
-                  <Input 
+                  <Input
                     id="new-password"
                     type={showNewPassword ? "text" : "password"}
-                    placeholder="Введите новый пароль (минимум 6 символов)" 
+                    placeholder={appReviewText('Enter new password (min. 6 characters)', 'Введите новый пароль (минимум 6 символов)')}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     disabled={isChangingPassword}
@@ -978,12 +1022,12 @@ const Profile: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirm-password">Повторите новый пароль</Label>
+                <Label htmlFor="confirm-password">{appReviewText('Confirm new password', 'Повторите новый пароль')}</Label>
                 <div className="relative">
-                  <Input 
+                  <Input
                     id="confirm-password"
                     type={showConfirmPassword ? "text" : "password"}
-                    placeholder="Повторите новый пароль" 
+                    placeholder={appReviewText('Re-enter the new password', 'Повторите новый пароль')}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     disabled={isChangingPassword}
@@ -1000,8 +1044,8 @@ const Profile: React.FC = () => {
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setPasswordModal(false);
                     setOldPassword('');
@@ -1010,13 +1054,13 @@ const Profile: React.FC = () => {
                   }}
                   disabled={isChangingPassword}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
-                <Button 
+                <Button
                   onClick={handlePasswordSave}
                   disabled={isChangingPassword}
                 >
-                  {isChangingPassword ? 'Сохранение...' : 'Сохранить'}
+                  {isChangingPassword ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>
@@ -1027,39 +1071,39 @@ const Profile: React.FC = () => {
         <Dialog open={telegramIdModal} onOpenChange={setTelegramIdModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Изменить Telegram ID</DialogTitle>
+              <DialogTitle>{appReviewText('Edit Telegram ID', 'Изменить Telegram ID')}</DialogTitle>
               <DialogDescription>
-                Введите ваш Telegram ID для получения отчетов.
+                {appReviewText('Enter your Telegram ID to receive reports.', 'Введите ваш Telegram ID для получения отчетов.')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="telegram-id">Telegram ID</Label>
-                <Input 
+                <Input
                   id="telegram-id"
                   type="text"
-                  placeholder="Например: 123456789" 
+                  placeholder={appReviewText('For example: 123456789', 'Например: 123456789')}
                   value={newTelegramId}
                   onChange={(e) => setNewTelegramId(e.target.value)}
                   disabled={isSavingTelegramId}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Ваш Telegram ID можно узнать у бота @userinfobot
+                  {appReviewText('You can find your Telegram ID via @userinfobot', 'Ваш Telegram ID можно узнать у бота @userinfobot')}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => setTelegramIdModal(false)}
                   disabled={isSavingTelegramId}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
-                <Button 
+                <Button
                   onClick={handleTelegramIdSave}
                   disabled={isSavingTelegramId}
                 >
-                  {isSavingTelegramId ? 'Сохранение...' : 'Сохранить'}
+                  {isSavingTelegramId ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>
@@ -1070,39 +1114,39 @@ const Profile: React.FC = () => {
         <Dialog open={maxBudgetModal} onOpenChange={setMaxBudgetModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Изменить максимальный бюджет</DialogTitle>
+              <DialogTitle>{appReviewText('Edit maximum budget', 'Изменить максимальный бюджет')}</DialogTitle>
               <DialogDescription>
-                Укажите максимальный дневной бюджет в долларах.
+                {appReviewText('Specify the maximum daily budget in USD.', 'Укажите максимальный дневной бюджет в долларах.')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="max-budget">Максимальный бюджет (USD)</Label>
-                <Input 
+                <Label htmlFor="max-budget">{appReviewText('Maximum budget (USD)', 'Максимальный бюджет (USD)')}</Label>
+                <Input
                   id="max-budget"
                   type="text"
-                  placeholder="Например: 10000 или 10000.50 или 10000,50" 
+                  placeholder={appReviewText('For example: 10000 or 10000.50 or 10000,50', 'Например: 10000 или 10000.50 или 10000,50')}
                   value={newMaxBudget}
                   onChange={(e) => setNewMaxBudget(e.target.value)}
                   disabled={isSavingMaxBudget}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Можно использовать точку или запятую для десятых. Оставьте пустым, чтобы убрать ограничение.
+                  {appReviewText('You can use a dot or comma for decimals. Leave empty to remove the limit.', 'Можно использовать точку или запятую для десятых. Оставьте пустым, чтобы убрать ограничение.')}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => setMaxBudgetModal(false)}
                   disabled={isSavingMaxBudget}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
-                <Button 
+                <Button
                   onClick={handleSaveMaxBudget}
                   disabled={isSavingMaxBudget}
                 >
-                  {isSavingMaxBudget ? 'Сохранение...' : 'Сохранить'}
+                  {isSavingMaxBudget ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>
@@ -1113,39 +1157,39 @@ const Profile: React.FC = () => {
         <Dialog open={plannedCplModal} onOpenChange={setPlannedCplModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Изменить плановую стоимость заявки</DialogTitle>
+              <DialogTitle>{appReviewText('Edit planned cost per lead', 'Изменить плановую стоимость заявки')}</DialogTitle>
               <DialogDescription>
-                Укажите целевую стоимость одного лида в долларах.
+                {appReviewText('Set the target cost per lead in USD.', 'Укажите целевую стоимость одного лида в долларах.')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="planned-cpl">Плановая стоимость заявки (USD)</Label>
-                <Input 
+                <Label htmlFor="planned-cpl">{appReviewText('Planned cost per lead (USD)', 'Плановая стоимость заявки (USD)')}</Label>
+                <Input
                   id="planned-cpl"
                   type="text"
-                  placeholder="Например: 50 или 50.75 или 50,75" 
+                  placeholder={appReviewText('For example: 50 or 50.75 or 50,75', 'Например: 50 или 50.75 или 50,75')}
                   value={newPlannedCpl}
                   onChange={(e) => setNewPlannedCpl(e.target.value)}
                   disabled={isSavingPlannedCpl}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Можно использовать точку или запятую для десятых. Оставьте пустым, чтобы убрать значение.
+                  {appReviewText('You can use a dot or comma for decimals. Leave empty to remove the value.', 'Можно использовать точку или запятую для десятых. Оставьте пустым, чтобы убрать значение.')}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => setPlannedCplModal(false)}
                   disabled={isSavingPlannedCpl}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
-                <Button 
+                <Button
                   onClick={handleSavePlannedCpl}
                   disabled={isSavingPlannedCpl}
                 >
-                  {isSavingPlannedCpl ? 'Сохранение...' : 'Сохранить'}
+                  {isSavingPlannedCpl ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>
@@ -1156,19 +1200,19 @@ const Profile: React.FC = () => {
         <Dialog open={openaiModal} onOpenChange={setOpenaiModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>OpenAI API ключ</DialogTitle>
+              <DialogTitle>{appReviewText('OpenAI API key', 'OpenAI API ключ')}</DialogTitle>
               <DialogDescription>
-                Укажите ваш API ключ OpenAI для генерации контента. Ключ должен начинаться с "sk-".
+                {appReviewText('Provide your OpenAI API key for content generation. The key must start with "sk-".', 'Укажите ваш API ключ OpenAI для генерации контента. Ключ должен начинаться с "sk-".')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="openai-key">API ключ</Label>
+                <Label htmlFor="openai-key">{appReviewText('API key', 'API ключ')}</Label>
                 <div className="relative">
-                  <Input 
+                  <Input
                     id="openai-key"
                     type={showOpenaiKey ? "text" : "password"}
-                    placeholder="sk-..." 
+                    placeholder={appReviewText('sk-...', 'sk-...')}
                     value={newOpenaiKey}
                     onChange={(e) => setNewOpenaiKey(e.target.value)}
                     disabled={isSavingOpenaiKey}
@@ -1185,12 +1229,12 @@ const Profile: React.FC = () => {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Оставьте пустым, чтобы удалить ключ.
+                  {appReviewText('Leave empty to remove the key.', 'Оставьте пустым, чтобы удалить ключ.')}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setOpenaiModal(false);
                     setNewOpenaiKey('');
@@ -1198,13 +1242,13 @@ const Profile: React.FC = () => {
                   }}
                   disabled={isSavingOpenaiKey}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
-                <Button 
+                <Button
                   onClick={handleSaveOpenaiKey}
                   disabled={isSavingOpenaiKey}
                 >
-                  {isSavingOpenaiKey ? 'Сохранение...' : 'Сохранить'}
+                  {isSavingOpenaiKey ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>
@@ -1215,42 +1259,42 @@ const Profile: React.FC = () => {
         <Dialog open={audienceModal} onOpenChange={setAudienceModal}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>ID аудитории</DialogTitle>
+              <DialogTitle>{appReviewText('Audience ID', 'ID аудитории')}</DialogTitle>
               <DialogDescription>
-                Укажите Facebook Custom Audience ID для использования при дублировании кампаний агентом Brain.
+                {appReviewText('Provide the Facebook Custom Audience ID used for duplicating campaigns with Brain.', 'Укажите Facebook Custom Audience ID для использования при дублировании кампаний агентом Brain.')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="audience-id">Audience ID</Label>
-                <Input 
+                <Input
                   id="audience-id"
                   type="text"
-                  placeholder="Например: 120210000000000000" 
+                  placeholder={appReviewText('For example: 120210000000000000', 'Например: 120210000000000000')}
                   value={newAudienceId}
                   onChange={(e) => setNewAudienceId(e.target.value)}
                   disabled={isSavingAudienceId}
                 />
                 <p className="text-xs text-muted-foreground">
-                  ID готовой LAL аудитории из Facebook Ads Manager. Оставьте пустым, чтобы удалить.
+                  {appReviewText('Use the existing LAL audience ID from Facebook Ads Manager. Leave empty to remove.', 'ID готовой LAL аудитории из Facebook Ads Manager. Оставьте пустым, чтобы удалить.')}
                 </p>
               </div>
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setAudienceModal(false);
                     setNewAudienceId('');
                   }}
                   disabled={isSavingAudienceId}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
-                <Button 
+                <Button
                   onClick={handleSaveAudienceId}
                   disabled={isSavingAudienceId}
                 >
-                  {isSavingAudienceId ? 'Сохранение...' : 'Сохранить'}
+                  {isSavingAudienceId ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>
@@ -1261,17 +1305,26 @@ const Profile: React.FC = () => {
         <Dialog open={facebookSelectionModal} onOpenChange={setFacebookSelectionModal}>
           <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Выберите рекламный кабинет и страницу</DialogTitle>
+              <DialogTitle>
+                {isAppReviewMode
+                  ? 'Select ad account and page'
+                  : 'Выберите рекламный кабинет и страницу'}
+              </DialogTitle>
               <DialogDescription>
-                Выберите рекламный кабинет и Facebook страницу для подключения. 
-                Найдено: {facebookData?.ad_accounts.length} рекламных кабинетов и {facebookData?.pages.length} страниц
+                {isAppReviewMode
+                  ? 'Select the ad account and Facebook Page to connect.'
+                  : 'Выберите рекламный кабинет и Facebook страницу для подключения.'}
+                <br />
+                {isAppReviewMode
+                  ? `Found: ${adAccounts.length} ad account(s) and ${pages.length} page(s)`
+                  : `Найдено: ${adAccounts.length} рекламных кабинетов и ${pages.length} страниц`}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label>Рекламный кабинет</Label>
+                <Label>{isAppReviewMode ? 'Ad Account' : 'Рекламный кабинет'}</Label>
                 <Input
-                  placeholder="Поиск по названию..."
+                  placeholder={isAppReviewMode ? 'Search by name...' : 'Поиск по названию...'}
                   value={searchAdAccount}
                   onChange={(e) => setSearchAdAccount(e.target.value)}
                   className="mt-1 mb-2"
@@ -1282,31 +1335,22 @@ const Profile: React.FC = () => {
                   value={selectedAdAccount}
                   onChange={(e) => setSelectedAdAccount(e.target.value)}
                 >
-                  {facebookData?.ad_accounts
-                    .filter((account: any) => 
-                      searchAdAccount === '' || 
-                      account.name.toLowerCase().includes(searchAdAccount.toLowerCase()) ||
-                      account.id.includes(searchAdAccount)
-                    )
-                    .map((account: any) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name} ({account.id})
-                      </option>
-                    ))
-                  }
+                  {filteredAdAccounts.map((account: any) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} ({account.id})
+                    </option>
+                  ))}
                 </select>
                 <div className="text-xs text-gray-500 mt-1">
-                  Показано: {facebookData?.ad_accounts.filter((account: any) => 
-                    searchAdAccount === '' || 
-                    account.name.toLowerCase().includes(searchAdAccount.toLowerCase()) ||
-                    account.id.includes(searchAdAccount)
-                  ).length} из {facebookData?.ad_accounts.length}
+                  {isAppReviewMode
+                    ? `Showing: ${filteredAdAccounts.length} of ${adAccounts.length}`
+                    : `Показано: ${filteredAdAccounts.length} из ${adAccounts.length}`}
                 </div>
               </div>
               <div>
                 <Label>Facebook Page</Label>
                 <Input
-                  placeholder="Поиск по названию..."
+                  placeholder={isAppReviewMode ? 'Search by name...' : 'Поиск по названию...'}
                   value={searchPage}
                   onChange={(e) => setSearchPage(e.target.value)}
                   className="mt-1 mb-2"
@@ -1317,52 +1361,47 @@ const Profile: React.FC = () => {
                   value={selectedPage}
                   onChange={(e) => setSelectedPage(e.target.value)}
                 >
-                  {facebookData?.pages
-                    .filter((page: any) => 
-                      searchPage === '' || 
-                      page.name.toLowerCase().includes(searchPage.toLowerCase()) ||
-                      page.id.includes(searchPage)
-                    )
-                    .map((page: any) => (
-                      <option key={page.id} value={page.id}>
-                        {page.name} ({page.id})
-                        {page.instagram_id && ` ✓ IG`}
-                      </option>
-                    ))
-                  }
+                  {filteredPages.map((page: any) => (
+                    <option key={page.id} value={page.id}>
+                      {page.name} ({page.id})
+                      {page.instagram_id && ` ✓ IG`}
+                    </option>
+                  ))}
                 </select>
                 <div className="text-xs text-gray-500 mt-1">
-                  Показано: {facebookData?.pages.filter((page: any) => 
-                    searchPage === '' || 
-                    page.name.toLowerCase().includes(searchPage.toLowerCase()) ||
-                    page.id.includes(searchPage)
-                  ).length} из {facebookData?.pages.length}
+                  {isAppReviewMode
+                    ? `Showing: ${filteredPages.length} of ${pages.length}`
+                    : `Показано: ${filteredPages.length} из ${pages.length}`}
                 </div>
               </div>
-              {facebookData?.pages.find((p: any) => p.id === selectedPage)?.instagram_id && (
+              {selectedPageData?.instagram_id && (
                 <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                   <div className="flex items-center gap-2 text-green-700">
                     <CheckCircle2 className="h-4 w-4" />
-                    <span className="font-medium">Instagram Business Account подключен</span>
+                    <span className="font-medium">
+                      {isAppReviewMode
+                        ? 'Instagram Business Account connected'
+                        : 'Instagram Business Account подключен'}
+                    </span>
                   </div>
                   <div className="text-sm text-green-600 mt-1">
-                    ID: {facebookData?.pages.find((p: any) => p.id === selectedPage)?.instagram_id}
+                    ID: {selectedPageData?.instagram_id}
                   </div>
                 </div>
               )}
               <div className="flex justify-end gap-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setFacebookSelectionModal(false);
                     setSearchAdAccount('');
                     setSearchPage('');
                   }}
                 >
-                  Отмена
+                  {t('action.cancel')}
                 </Button>
                 <Button onClick={handleSaveFacebookSelection}>
-                  Сохранить
+                  {t('action.save')}
                 </Button>
               </div>
             </div>

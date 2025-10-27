@@ -364,7 +364,7 @@ const Dashboard: React.FC = () => {
                     <div className="p-3 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-transparent dark:to-transparent text-blue-700 dark:text-foreground flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2 flex-1">
                         <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-sm">Для просмотра статистики и управления кампаниями требуется подключение Facebook Ads.</span>
+                        <span className="text-sm">{t('dashboard.connectFacebookDescription')}</span>
                       </div>
                       <Button 
                         variant="outline"
@@ -372,7 +372,7 @@ const Dashboard: React.FC = () => {
                         onClick={openFacebookAuth}
                         className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300 shadow-sm flex-shrink-0 transition-all duration-200"
                       >
-                        Подключить
+                        {t('profile.connect')}
                       </Button>
                     </div>
                   )}
@@ -403,11 +403,11 @@ const Dashboard: React.FC = () => {
               <div className="flex items-center gap-3">
                 <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
                 <p className="text-sm font-medium text-red-900">
-                  Оплата не прошла, ваш рекламный кабинет временно отключен. Пополните баланс.
+                  {t('dashboard.paymentFailedMessage')}
                 </p>
               </div>
               <button
-                aria-label="Скрыть уведомление"
+                aria-label={t('action.close')}
                 className="absolute right-3 top-3 text-red-600/70 hover:text-red-900 transition-colors text-xl leading-none"
                 onClick={() => { setHideDebtBanner(true); localStorage.setItem('hideDebtBanner', '1'); }}
               >

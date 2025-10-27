@@ -23,7 +23,7 @@ import Creatives from './pages/Creatives';
 import AdSettings from './pages/AdSettings';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
-import { LanguageProvider } from './i18n/LanguageContext';
+import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 
 const queryClient = new QueryClient();
@@ -33,6 +33,7 @@ const PUBLIC_PATHS = ['/login', '/signup', '/privacy', '/terms'];
 const AppRoutes = () => {
   const location = useLocation();
   const isPublic = PUBLIC_PATHS.includes(location.pathname);
+  const { t } = useTranslation();
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
@@ -78,7 +79,7 @@ const AppRoutes = () => {
   }, []);
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Загрузка...</div>;
+    return <div className="min-h-screen flex items-center justify-center">{t('common.loading')}</div>;
   }
 
   const isPublicRoute = isPublic;
