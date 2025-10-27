@@ -7,6 +7,19 @@
 
 export const translations = {
   en: {
+    common: {
+      loading: 'Loading...'
+    },
+    auth: {
+      loginTitle: 'Meta Ads Monitor',
+      loginSubtitle: 'Log in to access your dashboard',
+      usernameLabel: 'Username',
+      usernamePlaceholder: 'Enter username',
+      passwordLabel: 'Password',
+      passwordPlaceholder: 'Enter password',
+      loginButton: 'Log in',
+      loginButtonLoading: 'Logging in...'
+    },
     menu: {
       dashboard: 'Dashboard',
       campaigns: 'Campaigns',
@@ -17,6 +30,9 @@ export const translations = {
       roi: 'ROI Analytics',
       consultations: 'Consultations',
       videos: 'Videos',
+    },
+    sidebar: {
+      navigation: 'Navigation'
     },
     action: {
       uploadVideo: 'Upload Video',
@@ -97,6 +113,8 @@ export const translations = {
       statsFor: 'Statistics for',
       platform: 'Platform:',
       actions: 'Actions',
+      connectFacebookDescription: 'Connect Facebook Ads to view statistics and manage campaigns.',
+      paymentFailedMessage: 'Payment failed. Your ad account is temporarily disabled. Please top up the balance.'
     },
     targeting: {
       location: 'Location',
@@ -201,6 +219,9 @@ export const translations = {
       notConnected: 'Not connected',
       disconnect: 'Disconnect',
       connect: 'Connect',
+      confirmDisconnectFacebook: 'Are you sure you want to disconnect Facebook Ads?',
+      confirmDisconnectTikTok: 'Are you sure you want to disconnect TikTok?',
+      instagramConnectInfo: 'Instagram connects via the Facebook API. Use the Facebook Ads connection above.'
     },
     toast: {
       // Auth
@@ -251,6 +272,19 @@ export const translations = {
     },
   },
   ru: {
+    common: {
+      loading: 'Загрузка...'
+    },
+    auth: {
+      loginTitle: 'Meta Ads Monitor',
+      loginSubtitle: 'Войдите для доступа к панели управления',
+      usernameLabel: 'Логин',
+      usernamePlaceholder: 'Введите логин',
+      passwordLabel: 'Пароль',
+      passwordPlaceholder: 'Введите пароль',
+      loginButton: 'Войти',
+      loginButtonLoading: 'Вход...'
+    },
     menu: {
       dashboard: 'Дашборд',
       campaigns: 'Кампании',
@@ -261,6 +295,9 @@ export const translations = {
       roi: 'ROI Аналитика',
       consultations: 'Консультации',
       videos: 'Видео',
+    },
+    sidebar: {
+      navigation: 'Навигация'
     },
     action: {
       uploadVideo: 'Загрузить видео',
@@ -341,6 +378,8 @@ export const translations = {
       statsFor: 'Статистика за',
       platform: 'Платформа:',
       actions: 'Действия',
+      connectFacebookDescription: 'Подключите Facebook Ads, чтобы просматривать статистику и управлять кампаниями.',
+      paymentFailedMessage: 'Оплата не прошла, ваш рекламный кабинет временно отключен. Пополните баланс.'
     },
     targeting: {
       location: 'Местоположение',
@@ -445,6 +484,9 @@ export const translations = {
       notConnected: 'Не подключено',
       disconnect: 'Отключить',
       connect: 'Подключить',
+      confirmDisconnectFacebook: 'Вы уверены, что хотите отключить Facebook Ads?',
+      confirmDisconnectTikTok: 'Вы уверены, что хотите отключить TikTok?',
+      instagramConnectInfo: 'Instagram подключается через Facebook API. Используйте подключение Facebook Ads выше.',
     },
     toast: {
       // Авторизация

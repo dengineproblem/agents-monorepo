@@ -15,6 +15,7 @@ import { addDays, format } from 'date-fns';
 import { useTranslation } from '../i18n/LanguageContext';
 import { FEATURES } from '../config/appReview';
 import { supabase } from '../integrations/supabase/client';
+import { appReviewText } from '@/utils/appReviewText';
 
 interface HeaderProps { 
   onOpenDatePicker: () => void;
@@ -128,8 +129,8 @@ const Header: React.FC<HeaderProps> = ({
       if (!storedUser) {
         setValidationResult({
           success: false,
-          error: 'Пользователь не авторизован',
-          details: 'Не найдены данные пользователя в системе'
+          error: appReviewText('User not authorized', 'Пользователь не авторизован'),
+          details: appReviewText('No user data found in the system', 'Не найдены данные пользователя в системе')
         });
         setIsValidating(false);
         return;
@@ -139,8 +140,8 @@ const Header: React.FC<HeaderProps> = ({
       if (!userData.id) {
         setValidationResult({
           success: false,
-          error: 'Отсутствует ID пользователя',
-          details: 'Невозможно загрузить данные учетной записи'
+          error: appReviewText('Missing user ID', 'Отсутствует ID пользователя'),
+          details: appReviewText('Unable to load account data', 'Невозможно загрузить данные учетной записи')
         });
         setIsValidating(false);
         return;
@@ -156,8 +157,8 @@ const Header: React.FC<HeaderProps> = ({
       if (dbError || !userAccount) {
         setValidationResult({
           success: false,
-          error: 'Ошибка загрузки данных',
-          details: dbError?.message || 'Не удалось загрузить данные учетной записи'
+          error: appReviewText('Failed to load data', 'Ошибка загрузки данных'),
+          details: dbError?.message || appReviewText('Unable to load account data', 'Не удалось загрузить данные учетной записи')
         });
         setIsValidating(false);
         return;
@@ -167,8 +168,8 @@ const Header: React.FC<HeaderProps> = ({
       if (!userAccount.access_token) {
         setValidationResult({
           success: false,
-          error: 'Facebook не подключен',
-          details: 'Отсутствует токен доступа. Подключите Facebook в профиле.'
+          error: appReviewText('Facebook not connected', 'Facebook не подключен'),
+          details: appReviewText('Missing access token. Connect Facebook in the profile.', 'Отсутствует токен доступа. Подключите Facebook в профиле.')
         });
         setIsValidating(false);
         return;
@@ -177,8 +178,8 @@ const Header: React.FC<HeaderProps> = ({
       if (!userAccount.ad_account_id) {
         setValidationResult({
           success: false,
-          error: 'Не выбран рекламный кабинет',
-          details: 'Выберите рекламный кабинет в профиле.'
+          error: appReviewText('Ad account not selected', 'Не выбран рекламный кабинет'),
+          details: appReviewText('Select an ad account in the profile.', 'Выберите рекламный кабинет в профиле.')
         });
         setIsValidating(false);
         return;
@@ -198,8 +199,8 @@ const Header: React.FC<HeaderProps> = ({
         console.error('Facebook validation error:', error);
         setValidationResult({
           success: false,
-          error: 'Ошибка валидации',
-          details: error.message || 'Не удалось выполнить проверку Facebook'
+          error: appReviewText('Validation error', 'Ошибка валидации'),
+          details: error.message || appReviewText('Failed to run Facebook validation', 'Не удалось выполнить проверку Facebook')
         });
         setIsValidating(false);
         return;
@@ -211,8 +212,8 @@ const Header: React.FC<HeaderProps> = ({
       console.error('Unexpected error during Facebook validation:', error);
       setValidationResult({
         success: false,
-        error: 'Неожиданная ошибка',
-        details: error.message || 'Произошла непредвиденная ошибка'
+        error: appReviewText('Unexpected error', 'Неожиданная ошибка'),
+        details: error.message || appReviewText('An unexpected error occurred', 'Произошла непредвиденная ошибка')
       });
     } finally {
       setIsValidating(false);
@@ -243,10 +244,10 @@ const Header: React.FC<HeaderProps> = ({
               <h1 className="text-xl font-semibold">{title}</h1>
             ) : (
               // Логотип и название - всегда показываем
-              <button 
+              <button
                 onClick={() => navigate('/')}
                 className="flex items-center gap-2 hover:opacity-80 transition-opacity duration-200 cursor-pointer"
-                title="На главную"
+                title={appReviewText('Go to dashboard', 'На главную')}
               >
                 <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-sm overflow-hidden">
                   <img 
@@ -272,7 +273,7 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Проверить Facebook</p>
+                <p>{appReviewText('Validate Facebook', 'Проверить Facebook')}</p>
               </TooltipContent>
             </Tooltip>
 
@@ -283,7 +284,7 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Бюджет</p>
+                <p>{appReviewText('Budget', 'Бюджет')}</p>
               </TooltipContent>
             </Tooltip>
 
@@ -294,7 +295,11 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>{theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}</p>
+                <p>
+                  {theme === 'dark'
+                    ? appReviewText('Light theme', 'Светлая тема')
+                    : appReviewText('Dark theme', 'Тёмная тема')}
+                </p>
               </TooltipContent>
             </Tooltip>
 
@@ -305,7 +310,7 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Выбрать период</p>
+                <p>{appReviewText('Select period', 'Выбрать период')}</p>
               </TooltipContent>
             </Tooltip>
 
@@ -316,7 +321,7 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Обновить</p>
+                <p>{appReviewText('Refresh', 'Обновить')}</p>
               </TooltipContent>
             </Tooltip>
 
@@ -329,7 +334,7 @@ const Header: React.FC<HeaderProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Выйти</p>
+                <p>{appReviewText('Log out', 'Выйти')}</p>
               </TooltipContent>
             </Tooltip>
           </div>
@@ -362,7 +367,7 @@ const Header: React.FC<HeaderProps> = ({
               </>
             ) : (
               <div className="text-center p-4 text-muted-foreground">
-                Нет данных по бюджету
+                {appReviewText('No budget data', 'Нет данных по бюджету')}
               </div>
             )}
           </div>
@@ -374,17 +379,17 @@ const Header: React.FC<HeaderProps> = ({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-blue-600" />
-              Проверка Facebook
+              {appReviewText('Facebook validation', 'Проверка Facebook')}
             </DialogTitle>
             <DialogDescription>
-              Валидация подключения к Facebook
+              {appReviewText('Validating the Facebook connection', 'Валидация подключения к Facebook')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {isValidating ? (
               <div className="flex flex-col items-center justify-center p-8 space-y-4">
                 <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">Проверяем подключение...</p>
+                <p className="text-sm text-muted-foreground">{appReviewText('Checking connection...', 'Проверяем подключение...')}</p>
               </div>
             ) : validationResult ? (
               <>
@@ -393,7 +398,7 @@ const Header: React.FC<HeaderProps> = ({
                     <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
                       <CheckCircle className="h-5 w-5 text-green-600" />
                       <span className="font-semibold text-green-900 dark:text-green-100">
-                        Все проверки пройдены успешно
+                        {appReviewText('All checks passed successfully', 'Все проверки пройдены успешно')}
                       </span>
                     </div>
                     {validationResult.checks && (
@@ -401,25 +406,25 @@ const Header: React.FC<HeaderProps> = ({
                         {validationResult.checks.token && (
                           <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
                             <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm">Токен валиден</span>
+                            <span className="text-sm">{appReviewText('Token valid', 'Токен валиден')}</span>
                           </div>
                         )}
                         {validationResult.checks.adAccount && (
                           <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
                             <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm">Доступ к рекламному кабинету</span>
+                            <span className="text-sm">{appReviewText('Ad account access confirmed', 'Доступ к рекламному кабинету')}</span>
                           </div>
                         )}
                         {validationResult.checks.page && (
                           <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
                             <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm">Доступ к странице</span>
+                            <span className="text-sm">{appReviewText('Page access confirmed', 'Доступ к странице')}</span>
                           </div>
                         )}
                         {validationResult.checks.campaign && (
                           <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
                             <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm">Тестовая кампания создана</span>
+                            <span className="text-sm">{appReviewText('Test campaign created', 'Тестовая кампания создана')}</span>
                           </div>
                         )}
                       </div>
@@ -433,7 +438,7 @@ const Header: React.FC<HeaderProps> = ({
                       </svg>
                       <div className="flex-1">
                         <p className="font-semibold text-red-900 dark:text-red-100">
-                          {validationResult.error || 'Ошибка проверки'}
+                          {validationResult.error || appReviewText('Validation error', 'Ошибка проверки')}
                         </p>
                         {validationResult.details && (
                           <p className="text-sm text-red-700 dark:text-red-300 mt-1">
@@ -444,7 +449,7 @@ const Header: React.FC<HeaderProps> = ({
                     </div>
                     {validationResult.checks && (
                       <div className="space-y-2">
-                        <p className="text-sm font-medium">Статус проверок:</p>
+                        <p className="text-sm font-medium">{appReviewText('Check statuses:', 'Статус проверок:')}</p>
                         {validationResult.checks.token !== undefined && (
                           <div className="flex items-center gap-2 p-2 rounded bg-muted/50">
                             {validationResult.checks.token ? (
@@ -454,7 +459,7 @@ const Header: React.FC<HeaderProps> = ({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                               </svg>
                             )}
-                            <span className="text-sm">Токен</span>
+                            <span className="text-sm">{appReviewText('Token', 'Токен')}</span>
                           </div>
                         )}
                         {validationResult.checks.adAccount !== undefined && (
@@ -466,7 +471,7 @@ const Header: React.FC<HeaderProps> = ({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                               </svg>
                             )}
-                            <span className="text-sm">Рекламный кабинет</span>
+                            <span className="text-sm">{appReviewText('Ad account', 'Рекламный кабинет')}</span>
                           </div>
                         )}
                         {validationResult.checks.page !== undefined && (
@@ -478,7 +483,7 @@ const Header: React.FC<HeaderProps> = ({
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                               </svg>
                             )}
-                            <span className="text-sm">Страница</span>
+                            <span className="text-sm">{appReviewText('Page', 'Страница')}</span>
                           </div>
                         )}
                       </div>
@@ -488,7 +493,7 @@ const Header: React.FC<HeaderProps> = ({
               </>
             ) : (
               <div className="text-center p-4 text-muted-foreground">
-                Нажмите кнопку для запуска проверки
+                {appReviewText('Press the button to start validation', 'Нажмите кнопку для запуска проверки')}
               </div>
             )}
           </div>
