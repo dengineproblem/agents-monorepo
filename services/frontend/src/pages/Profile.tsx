@@ -471,6 +471,12 @@ const Profile: React.FC = () => {
   };
 
   const handleSaveFacebookSelection = async () => {
+    console.log('🔵 handleSaveFacebookSelection called with:', {
+      selectedAdAccount,
+      selectedPage,
+      allPages: facebookData?.pages?.map((p: any) => ({ id: p.id, name: p.name }))
+    });
+
     if (!selectedAdAccount || !selectedPage) {
       toastT.error('selectAdAccountAndPage');
       return;
@@ -1367,7 +1373,16 @@ const Profile: React.FC = () => {
                   className="w-full p-2 border rounded max-h-40 overflow-y-auto"
                   size={5}
                   value={selectedPage}
-                  onChange={(e) => setSelectedPage(e.target.value)}
+                  onChange={(e) => {
+                    const newPageId = e.target.value;
+                    const pageName = filteredPages.find((p: any) => p.id === newPageId)?.name;
+                    console.log('📝 User selected page:', {
+                      page_id: newPageId,
+                      page_name: pageName,
+                      previous_page_id: selectedPage
+                    });
+                    setSelectedPage(newPageId);
+                  }}
                 >
                   {filteredPages.map((page: any) => (
                     <option key={page.id} value={page.id}>
