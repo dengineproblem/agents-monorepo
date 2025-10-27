@@ -141,6 +141,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         pages: allPages.map((page: any) => ({
           id: page.id,
           name: page.name,
+          access_token: page.access_token, // Page access token
           instagram_id: page.instagram_business_account?.id || null
         })),
         instagram_id: instagramId
@@ -161,15 +162,16 @@ export default async function facebookWebhooks(app: FastifyInstance) {
     try {
       log.info('Saving Facebook selection');
       
-      const { username, access_token, ad_account_id, page_id, instagram_id } = req.body as { 
-        username?: string; 
-        access_token?: string; 
-        ad_account_id?: string; 
-        page_id?: string; 
+      const { username, access_token, ad_account_id, page_id, page_access_token, instagram_id } = req.body as {
+        username?: string;
+        access_token?: string;
+        ad_account_id?: string;
+        page_id?: string;
+        page_access_token?: string;
         instagram_id?: string | null;
       };
-      
-      if (!username || !access_token || !ad_account_id || !page_id) {
+
+      if (!username || !access_token || !ad_account_id || !page_id || !page_access_token) {
         log.error('Missing required parameters');
         return res.status(400).send({ 
           error: 'Missing required parameters' 
@@ -204,6 +206,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           access_token,
           ad_account_id,
           page_id,
+          page_access_token, // Save page access token
           instagram_id: instagram_id || null,
           updated_at: new Date().toISOString()
         })
@@ -238,10 +241,11 @@ export default async function facebookWebhooks(app: FastifyInstance) {
     try {
       log.info('Validating Facebook connection');
 
-      const { accessToken, adAccountId, pageId } = req.body as {
+      const { accessToken, adAccountId, pageId, pageAccessToken } = req.body as {
         accessToken?: string;
         adAccountId?: string;
         pageId?: string;
+        pageAccessToken?: string;
       };
 
       if (!accessToken) {
@@ -297,10 +301,11 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
       // 3. Validate Page access using pages_read_engagement permission
       // This demonstrates the minimal usage of pages_read_engagement for app review
-      if (pageId) {
+      // IMPORTANT: Use page access token (not user token) to get correct page data
+      if (pageId && pageAccessToken) {
         try {
           const pageResponse = await fetch(
-            `https://graph.facebook.com/v21.0/${pageId}?fields=name,link,instagram_business_account{id,username}&access_token=${accessToken}`
+            `https://graph.facebook.com/v21.0/${pageId}?fields=name,link,instagram_business_account{id,username}&access_token=${pageAccessToken}`
           );
           const pageData = await pageResponse.json();
 
@@ -322,6 +327,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         } catch (e) {
           log.error({ error: e }, 'Page validation request failed');
         }
+      } else if (pageId && !pageAccessToken) {
+        log.warn('Page ID provided but no page access token - skipping page validation');
       }
 
       const allPassed = checks.token && checks.adAccount && checks.page;
