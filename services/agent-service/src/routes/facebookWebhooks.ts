@@ -229,7 +229,118 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       });
     }
   });
-  
+
+  /**
+   * Validate Facebook connection - Check token, ad account, and page access
+   * Uses pages_read_engagement to fetch basic Page metadata
+   */
+  app.post('/facebook/validate', async (req, res) => {
+    try {
+      log.info('Validating Facebook connection');
+
+      const { accessToken, adAccountId, pageId } = req.body as {
+        accessToken?: string;
+        adAccountId?: string;
+        pageId?: string;
+      };
+
+      if (!accessToken) {
+        log.error('Missing access token');
+        return res.status(400).send({
+          success: false,
+          error: 'Missing access token'
+        });
+      }
+
+      const checks = {
+        token: false,
+        adAccount: false,
+        page: false,
+        pageDetails: null as any
+      };
+
+      // 1. Validate token
+      try {
+        const meResponse = await fetch(
+          `https://graph.facebook.com/v21.0/me?access_token=${accessToken}`
+        );
+        const meData = await meResponse.json();
+
+        if (meData.id) {
+          checks.token = true;
+          log.info({ userId: meData.id }, 'Token validated successfully');
+        } else if (meData.error) {
+          log.error({ error: meData.error }, 'Token validation failed');
+        }
+      } catch (e) {
+        log.error({ error: e }, 'Token validation request failed');
+      }
+
+      // 2. Validate Ad Account access
+      if (adAccountId) {
+        try {
+          const adAccountResponse = await fetch(
+            `https://graph.facebook.com/v21.0/${adAccountId}?fields=account_id,name,account_status&access_token=${accessToken}`
+          );
+          const adAccountData = await adAccountResponse.json();
+
+          if (adAccountData.account_id) {
+            checks.adAccount = true;
+            log.info({ adAccountId: adAccountData.account_id }, 'Ad account access validated');
+          } else if (adAccountData.error) {
+            log.error({ error: adAccountData.error }, 'Ad account validation failed');
+          }
+        } catch (e) {
+          log.error({ error: e }, 'Ad account validation request failed');
+        }
+      }
+
+      // 3. Validate Page access using pages_read_engagement permission
+      // This demonstrates the minimal usage of pages_read_engagement for app review
+      if (pageId) {
+        try {
+          const pageResponse = await fetch(
+            `https://graph.facebook.com/v21.0/${pageId}?fields=name,link,instagram_business_account{id,username}&access_token=${accessToken}`
+          );
+          const pageData = await pageResponse.json();
+
+          if (pageData.name) {
+            checks.page = true;
+            checks.pageDetails = {
+              name: pageData.name,
+              link: pageData.link,
+              instagram: pageData.instagram_business_account || null
+            };
+            log.info({
+              pageId,
+              pageName: pageData.name,
+              hasInstagram: !!pageData.instagram_business_account
+            }, 'Page access validated using pages_read_engagement');
+          } else if (pageData.error) {
+            log.error({ error: pageData.error }, 'Page validation failed');
+          }
+        } catch (e) {
+          log.error({ error: e }, 'Page validation request failed');
+        }
+      }
+
+      const allPassed = checks.token && checks.adAccount && checks.page;
+
+      return res.send({
+        success: allPassed,
+        checks,
+        error: allPassed ? null : 'Some checks failed',
+        details: allPassed ? 'All validations passed' : 'Check individual statuses'
+      });
+    } catch (error) {
+      log.error({ error }, 'Error validating Facebook connection');
+      return res.status(500).send({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  });
+
   /**
    * Facebook Data Deletion Callback - GET (для проверки Facebook)
    * 

@@ -193,22 +193,28 @@ const Header: React.FC<HeaderProps> = ({
         return;
       }
 
-      // Вызываем edge function validate-facebook
-      const { data, error } = await supabase.functions.invoke('validate-facebook', {
-        body: {
+      // Вызываем backend endpoint /facebook/validate
+      const API_URL = import.meta.env.VITE_API_URL || 'https://performanteaiagency.com/api';
+      const response = await fetch(`${API_URL}/facebook/validate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           accessToken: userAccount.access_token,
           adAccountId: userAccount.ad_account_id,
           pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
-        }
+        })
       });
 
-      if (error) {
-        console.error('Facebook validation error:', error);
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        console.error('Facebook validation error:', data);
         setValidationResult({
           success: false,
           error: appReviewText('Validation error', 'Ошибка валидации'),
-          details: error.message || appReviewText('Failed to run Facebook validation', 'Не удалось выполнить проверку Facebook')
+          details: data.error || appReviewText('Failed to run Facebook validation', 'Не удалось выполнить проверку Facebook')
         });
         setIsValidating(false);
         return;
