@@ -916,7 +916,7 @@ const Profile: React.FC = () => {
                     // Redirect to Facebook OAuth
                     const FB_APP_ID = '1441781603583445';
                     const FB_REDIRECT_URI = 'https://performanteaiagency.com/profile';
-                    const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads';
+                    const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads,pages_read_engagement';
                     const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?` +
                       `client_id=${FB_APP_ID}&` +
                       `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
