@@ -326,6 +326,7 @@ export const translations = {
       confirmResume: 'Вы уверены, что хотите возобновить эту кампанию?',
       confirmCreate: 'Вы уверены, что хотите создать эту кампанию?',
       confirmDelete: 'Вы уверены, что хотите удалить этот элемент?',
+      confirmBudgetChange: 'Изменить бюджет на ${budget}?',
       success: 'Успешно',
       error: 'Ошибка',
       loading: 'Загрузка...',
