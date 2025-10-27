@@ -59,6 +59,14 @@ const Header: React.FC<HeaderProps> = ({
       adAccount?: boolean;
       page?: boolean;
       campaign?: boolean;
+      pageDetails?: {
+        name?: string;
+        link?: string;
+        instagram?: {
+          id?: string;
+          username?: string;
+        } | null;
+      } | null;
     };
     error?: string;
     details?: string;
@@ -427,6 +435,58 @@ const Header: React.FC<HeaderProps> = ({
                             <span className="text-sm">{appReviewText('Test campaign created', 'Тестовая кампания создана')}</span>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* Page Details - uses pages_read_engagement permission */}
+                    {validationResult.checks?.pageDetails && (
+                      <div className="mt-4 p-4 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20">
+                        <p className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-3">
+                          {appReviewText('Facebook Page Details', 'Детали Facebook Page')}
+                        </p>
+                        <div className="space-y-2">
+                          {validationResult.checks.pageDetails.name && (
+                            <div className="flex items-start gap-2">
+                              <span className="text-xs text-blue-700 dark:text-blue-300 min-w-[60px]">
+                                {appReviewText('Page:', 'Страница:')}
+                              </span>
+                              <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                {validationResult.checks.pageDetails.name}
+                              </span>
+                            </div>
+                          )}
+                          {validationResult.checks.pageDetails.link && (
+                            <div className="flex items-start gap-2">
+                              <span className="text-xs text-blue-700 dark:text-blue-300 min-w-[60px]">
+                                {appReviewText('Link:', 'Ссылка:')}
+                              </span>
+                              <a
+                                href={validationResult.checks.pageDetails.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                {appReviewText('View on Facebook', 'Открыть в Facebook')}
+                              </a>
+                            </div>
+                          )}
+                          {validationResult.checks.pageDetails.instagram && (
+                            <div className="flex items-start gap-2">
+                              <span className="text-xs text-blue-700 dark:text-blue-300 min-w-[60px]">
+                                {appReviewText('Instagram:', 'Instagram:')}
+                              </span>
+                              <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                                @{validationResult.checks.pageDetails.instagram.username || validationResult.checks.pageDetails.instagram.id}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-3 italic">
+                          {appReviewText(
+                            '✓ Retrieved using pages_read_engagement permission',
+                            '✓ Получено через разрешение pages_read_engagement'
+                          )}
+                        </p>
                       </div>
                     )}
                   </div>
