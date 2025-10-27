@@ -158,7 +158,7 @@ const Header: React.FC<HeaderProps> = ({
       // Запрашиваем актуальные данные из user_accounts
       const { data: userAccount, error: dbError } = await supabase
         .from('user_accounts')
-        .select('access_token, ad_account_id, page_id, page_access_token, instagram_id')
+        .select('access_token, ad_account_id, page_id, instagram_id')
         .eq('id', userData.id)
         .single();
 
@@ -204,7 +204,6 @@ const Header: React.FC<HeaderProps> = ({
           accessToken: userAccount.access_token,
           adAccountId: userAccount.ad_account_id,
           pageId: userAccount.page_id,
-          pageAccessToken: userAccount.page_access_token, // Use page token for correct page data
         })
       });
 

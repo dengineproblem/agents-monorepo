@@ -479,7 +479,6 @@ const Profile: React.FC = () => {
     try {
       const selectedPageData = facebookData.pages.find((p: any) => p.id === selectedPage);
       const instagramId = selectedPageData?.instagram_id || null;
-      const pageAccessToken = selectedPageData?.access_token || null;
 
       const API_URL = 'https://performanteaiagency.com/api';
       const response = await fetch(`${API_URL}/facebook/save-selection`, {
@@ -490,7 +489,6 @@ const Profile: React.FC = () => {
           access_token: facebookData.access_token,
           ad_account_id: selectedAdAccount,
           page_id: selectedPage,
-          page_access_token: pageAccessToken, // Add page access token
           instagram_id: instagramId
         }),
       });
@@ -507,7 +505,6 @@ const Profile: React.FC = () => {
         access_token: facebookData.access_token,
         ad_account_id: selectedAdAccount,
         page_id: selectedPage,
-        page_access_token: pageAccessToken, // Save page access token
         instagram_id: instagramId,
         ad_accounts: facebookData.ad_accounts,
         pages: facebookData.pages,
