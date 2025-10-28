@@ -378,6 +378,74 @@ async function fbGet(url) {
   try { return JSON.parse(text); } catch { return { raw: text }; }
 }
 
+// Retry helper с exponential backoff для Facebook API rate limits
+async function fbGetWithRetry(url, retries = 3, baseDelay = 1000) {
+  let lastError;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+
+      // Успех
+      if (res.ok) {
+        try { return JSON.parse(text); } catch { return { raw: text }; }
+      }
+
+      // Rate limit (код 17 или 613 от Facebook, или HTTP 429)
+      const isRateLimit = res.status === 429 ||
+                         text.includes('"code":17') ||
+                         text.includes('"code":613') ||
+                         text.includes('Application request limit reached');
+
+      if (isRateLimit && attempt < retries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt); // exponential backoff: 1s, 2s, 4s
+        fastify.log.warn({
+          where: 'fbGetWithRetry',
+          message: 'Rate limit hit, retrying',
+          attempt: attempt + 1,
+          retries,
+          delayMs: delay,
+          status: res.status
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      // Другая ошибка - не ретраим
+      throw new Error(`FB ${res.status}: ${text}`);
+
+    } catch (err) {
+      lastError = err;
+
+      // Последняя попытка - бросаем ошибку
+      if (attempt === retries - 1) {
+        throw err;
+      }
+
+      // Network error - ретраим
+      if (err.message.includes('fetch failed') || err.message.includes('ETIMEDOUT')) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        fastify.log.warn({
+          where: 'fbGetWithRetry',
+          message: 'Network error, retrying',
+          attempt: attempt + 1,
+          retries,
+          delayMs: delay,
+          error: String(err.message)
+        });
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      // Другие ошибки - не ретраим
+      throw err;
+    }
+  }
+
+  throw lastError;
+}
+
 async function fetchAccountStatus(adAccountId, accessToken) {
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}`);
   url.searchParams.set('fields','account_status,disable_reason');
@@ -389,7 +457,8 @@ async function fetchAdsets(adAccountId, accessToken) {
   url.searchParams.set('fields','id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status');
   url.searchParams.set('limit', '500'); // Get all adsets, not just first 25
   url.searchParams.set('access_token', accessToken);
-  return fbGet(url.toString());
+  // Используем retry логику т.к. это критичный запрос
+  return fbGetWithRetry(url.toString(), 3, 2000); // 3 попытки, начиная с 2 секунд
 }
 async function fetchYesterdayInsights(adAccountId, accessToken) {
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${adAccountId}/insights`);
@@ -440,7 +509,8 @@ async function fetchCampaigns(adAccountId, accessToken) {
   url.searchParams.set('fields','id,name,status,effective_status,daily_budget,lifetime_budget');
   url.searchParams.set('limit', '500'); // Ensure we get all campaigns
   url.searchParams.set('access_token', accessToken);
-  return fbGet(url.toString());
+  // Используем retry логику т.к. это критичный запрос
+  return fbGetWithRetry(url.toString(), 3, 2000);
 }
 
 function sumInt(a, b) { return (Number.isFinite(a)?a:0) + (Number.isFinite(b)?b:0); }
