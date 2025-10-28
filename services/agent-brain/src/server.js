@@ -1733,6 +1733,44 @@ fastify.post('/api/brain/run', async (request, reply) => {
       fetchYesterdayInsights(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) }))
     ]);
 
+    // КРИТИЧНО: Логируем ошибки от Facebook API
+    if (accountStatus?.error) {
+      fastify.log.error({
+        where: 'brain_run',
+        phase: 'fetch_account_status_error',
+        userId: userAccountId,
+        error: accountStatus.error
+      });
+    }
+    if (adsets?.error) {
+      fastify.log.error({
+        where: 'brain_run',
+        phase: 'fetch_adsets_error',
+        userId: userAccountId,
+        ad_account_id: ua.ad_account_id,
+        error: adsets.error
+      });
+    }
+    if (insights?.error) {
+      fastify.log.error({
+        where: 'brain_run',
+        phase: 'fetch_insights_error',
+        userId: userAccountId,
+        error: insights.error
+      });
+    }
+
+    // Логируем что получили от Facebook
+    fastify.log.info({
+      where: 'brain_run',
+      phase: 'facebook_api_results',
+      userId: userAccountId,
+      adsets_count: Array.isArray(adsets?.data) ? adsets.data.length : 0,
+      adsets_has_error: !!adsets?.error,
+      insights_count: Array.isArray(insights?.data) ? insights.data.length : 0,
+      insights_has_error: !!insights?.error
+    });
+
     const date = (insights?.data?.[0]?.date_start) || new Date().toISOString().slice(0,10);
     // Детализация по окнам и HS/решениям (детерминированная логика v1.2)
     const [yRows, d3Rows, d7Rows, d30Rows, todayRows, adRowsY, campY, camp3, camp7, camp30, campT, campList] = await Promise.all([
