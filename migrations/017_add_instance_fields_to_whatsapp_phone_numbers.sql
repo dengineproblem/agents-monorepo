@@ -6,26 +6,33 @@
 -- 1. Добавить колонки instance_name и connection_status
 -- =====================================================
 
+-- Добавить instance_name
 DO $$
 BEGIN
-    -- Добавить instance_name (ссылка на whatsapp_instances.instance_name)
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name='whatsapp_phone_numbers' AND column_name='instance_name') THEN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='whatsapp_phone_numbers' AND column_name='instance_name'
+    ) THEN
         ALTER TABLE whatsapp_phone_numbers
         ADD COLUMN instance_name TEXT;
-
-        COMMENT ON COLUMN whatsapp_phone_numbers.instance_name IS 'Имя инстанса WhatsApp в Evolution API';
-    END IF;
-
-    -- Добавить connection_status
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                   WHERE table_name='whatsapp_phone_numbers' AND column_name='connection_status') THEN
-        ALTER TABLE whatsapp_phone_numbers
-        ADD COLUMN connection_status TEXT CHECK (connection_status IN ('connecting', 'connected', 'disconnected') OR connection_status IS NULL);
-
-        COMMENT ON COLUMN whatsapp_phone_numbers.connection_status IS 'Статус подключения: connecting, connected, disconnected';
     END IF;
 END $$;
+
+COMMENT ON COLUMN whatsapp_phone_numbers.instance_name IS 'Имя инстанса WhatsApp в Evolution API';
+
+-- Добавить connection_status
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name='whatsapp_phone_numbers' AND column_name='connection_status'
+    ) THEN
+        ALTER TABLE whatsapp_phone_numbers
+        ADD COLUMN connection_status TEXT CHECK (connection_status IN ('connecting', 'connected', 'disconnected') OR connection_status IS NULL);
+    END IF;
+END $$;
+
+COMMENT ON COLUMN whatsapp_phone_numbers.connection_status IS 'Статус подключения: connecting, connected, disconnected';
 
 -- =====================================================
 -- 2. Создать индекс для быстрого поиска по instance_name
