@@ -137,7 +137,7 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     environment:
-      - SERVER_URL=${EVOLUTION_SERVER_URL:-https://app.performanteaiagency.com/evolution}
+      - SERVER_URL=https://evolution.performanteaiagency.com
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
       - DATABASE_ENABLED=true
       - DATABASE_PROVIDER=postgresql
@@ -153,6 +153,8 @@ services:
       - QRCODE_LIMIT=30
       - LOG_LEVEL=DEBUG
       - LOG_COLOR=false
+      - LOG_BAILEYS=debug
+      - WEBSOCKET_ENABLED=true
     depends_on:
       - evolution-redis
       - evolution-postgres
