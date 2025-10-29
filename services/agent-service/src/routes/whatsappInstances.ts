@@ -65,6 +65,24 @@ export default async function whatsappInstances(app: FastifyInstance) {
         return reply.status(500).send({ error: 'Failed to save instance' });
       }
 
+      // Если передан phoneNumberId - обновить whatsapp_phone_numbers
+      if (body.phoneNumberId) {
+        const { error: updateError } = await supabase
+          .from('whatsapp_phone_numbers')
+          .update({
+            instance_name: instanceName,
+            connection_status: 'connecting'
+          })
+          .eq('id', body.phoneNumberId)
+          .eq('user_account_id', userAccountId);
+
+        if (updateError) {
+          app.log.error({ updateError }, 'Failed to update phone number with instance');
+        } else {
+          app.log.info({ phoneNumberId: body.phoneNumberId, instanceName }, 'Updated phone number with instance');
+        }
+      }
+
       app.log.info({ instanceId: instance.id, instanceName }, 'WhatsApp instance created');
 
       return reply.send({

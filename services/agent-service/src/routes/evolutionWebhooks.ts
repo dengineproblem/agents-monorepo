@@ -290,6 +290,20 @@ async function handleConnectionUpdate(event: any, app: FastifyInstance) {
   } else {
     app.log.info({ instance, status }, 'Updated WhatsApp instance connection status');
   }
+
+  // Также обновить whatsapp_phone_numbers для отображения на фронте
+  const { error: phoneUpdateError } = await supabase
+    .from('whatsapp_phone_numbers')
+    .update({
+      connection_status: status
+    })
+    .eq('instance_name', instance);
+
+  if (phoneUpdateError) {
+    app.log.error({ phoneUpdateError, instance }, 'Failed to update phone number connection status');
+  } else {
+    app.log.info({ instance, status }, 'Updated phone number connection status');
+  }
 }
 
 /**
