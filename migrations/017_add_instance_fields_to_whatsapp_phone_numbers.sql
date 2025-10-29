@@ -6,32 +6,29 @@
 -- 1. Добавить колонки instance_name и connection_status
 -- =====================================================
 
--- Добавить instance_name
+-- Добавить instance_name (если не существует)
+ALTER TABLE whatsapp_phone_numbers
+ADD COLUMN IF NOT EXISTS instance_name TEXT;
+
+-- Добавить connection_status (если не существует)
+ALTER TABLE whatsapp_phone_numbers
+ADD COLUMN IF NOT EXISTS connection_status TEXT;
+
+-- Добавить ограничение на connection_status
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name='whatsapp_phone_numbers' AND column_name='instance_name'
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'whatsapp_phone_numbers_connection_status_check'
     ) THEN
         ALTER TABLE whatsapp_phone_numbers
-        ADD COLUMN instance_name TEXT;
+        ADD CONSTRAINT whatsapp_phone_numbers_connection_status_check
+        CHECK (connection_status IN ('connecting', 'connected', 'disconnected') OR connection_status IS NULL);
     END IF;
 END $$;
 
+-- Добавить комментарии
 COMMENT ON COLUMN whatsapp_phone_numbers.instance_name IS 'Имя инстанса WhatsApp в Evolution API';
-
--- Добавить connection_status
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name='whatsapp_phone_numbers' AND column_name='connection_status'
-    ) THEN
-        ALTER TABLE whatsapp_phone_numbers
-        ADD COLUMN connection_status TEXT CHECK (connection_status IN ('connecting', 'connected', 'disconnected') OR connection_status IS NULL);
-    END IF;
-END $$;
-
 COMMENT ON COLUMN whatsapp_phone_numbers.connection_status IS 'Статус подключения: connecting, connected, disconnected';
 
 -- =====================================================
