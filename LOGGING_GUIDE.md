@@ -77,6 +77,22 @@ docker compose logs agent-service --tail 50
 docker compose logs agent-brain --tail 50
 ```
 
+### Обновление конфигурации Promtail
+
+После правок в `logging/promtail-config.yml` перезапустите сервис, чтобы Promtail перечитал конфигурацию:
+
+```bash
+docker compose restart promtail
+```
+
+Через пару секунд убедитесь, что Loki видит новые лейблы. Пример запроса с функцией `label_values`:
+
+```bash
+curl "http://localhost:3100/loki/api/v1/query?query=label_values({job=\"docker-logs\"},%20\"userAccountId\")"
+```
+
+В ответе должен появиться список `userAccountId`, а аналогичные запросы для `directionId`, `directionName`, `objective` и `workflow` покажут значения из логов.
+
 ## 5. Просмотр логов
 
 ### Loki API
@@ -89,7 +105,8 @@ curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",l
 
 - Datasource Loki создаётся автоматически.
 - Дашборд «Campaign Builder Errors» показывает ошибки, их количество и подсказки.
-- Можно применять фильтры по `userAccountId`, `module`, `resolution.severity`.
+- Дашборды «Agent Services Overview» и «Campaign Builder Drilldown» используют переменные `userAccountId`, `directionId`, `directionName`, `objective` и `workflow` — после обновления Promtail проверьте, что выпадающие списки подхватывают свежие значения и панели фильтруются по выбранным лейблам.
+- Можно применять фильтры по `userAccountId`, `directionId`, `directionName`, `objective`, `workflow`, `module`, `resolution.severity` (все поля подтягиваются как одноимённые лейблы в Loki).
 
 ## 6. Telegram-уведомления
 
