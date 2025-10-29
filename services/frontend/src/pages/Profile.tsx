@@ -16,6 +16,7 @@ import TariffInfoCard from '@/components/profile/TariffInfoCard';
 import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
+import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionCard';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
@@ -915,6 +916,9 @@ const Profile: React.FC = () => {
 
               {/* Направления бизнеса */}
               {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} />}
+
+              {/* WhatsApp Connection Card */}
+              {FEATURES.SHOW_WHATSAPP && <WhatsAppConnectionCard userAccountId={user?.id || null} />}
             </>
           )}
 

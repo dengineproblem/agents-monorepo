@@ -22,8 +22,8 @@ const UpdateWhatsAppNumberSchema = z.object({
 
 export default async function whatsappNumbersRoutes(app: FastifyInstance) {
   
-  // GET /api/whatsapp-numbers - получить список номеров пользователя
-  app.get('/api/whatsapp-numbers', async (request, reply) => {
+  // GET /whatsapp-numbers - получить список номеров пользователя
+  app.get('/whatsapp-numbers', async (request, reply) => {
     const { userAccountId } = request.query as { userAccountId?: string };
     
     if (!userAccountId) {
@@ -48,8 +48,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
     }
   });
   
-  // POST /api/whatsapp-numbers - добавить новый номер
-  app.post('/api/whatsapp-numbers', async (request, reply) => {
+  // POST /whatsapp-numbers - добавить новый номер
+  app.post('/whatsapp-numbers', async (request, reply) => {
     try {
       const body = CreateWhatsAppNumberSchema.parse(request.body);
       
@@ -90,8 +90,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
     }
   });
   
-  // PUT /api/whatsapp-numbers/:id - обновить номер
-  app.put('/api/whatsapp-numbers/:id', async (request, reply) => {
+  // PUT /whatsapp-numbers/:id - обновить номер
+  app.put('/whatsapp-numbers/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     
     try {
@@ -120,8 +120,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
     }
   });
   
-  // DELETE /api/whatsapp-numbers/:id - удалить номер
-  app.delete('/api/whatsapp-numbers/:id', async (request, reply) => {
+  // DELETE /whatsapp-numbers/:id - удалить номер
+  app.delete('/whatsapp-numbers/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const { userAccountId } = request.query as { userAccountId?: string };
     
@@ -160,8 +160,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
     }
   });
   
-  // GET /api/whatsapp-numbers/default - получить дефолтный номер пользователя
-  app.get('/api/whatsapp-numbers/default', async (request, reply) => {
+  // GET /whatsapp-numbers/default - получить дефолтный номер пользователя
+  app.get('/whatsapp-numbers/default', async (request, reply) => {
     const { userAccountId } = request.query as { userAccountId?: string };
     
     if (!userAccountId) {
