@@ -183,7 +183,7 @@ services:
     restart: unless-stopped
 
   evolution-manager:
-    image: evoapicloud/evolution-manager:v2
+    image: evoapicloud/evolution-manager:latest
     container_name: evolution-manager
     ports:
       - "3003:80"
