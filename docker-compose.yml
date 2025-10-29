@@ -151,8 +151,8 @@ services:
       - WEBHOOK_EVENTS_QRCODE_UPDATED=true
       - CONFIG_SESSION_PHONE_CLIENT=Evolution API
       - QRCODE_LIMIT=30
-      - LOG_LEVEL=ERROR
-      - DEV_ENV=true
+      - LOG_LEVEL=DEBUG
+      - LOG_COLOR=false
     depends_on:
       - evolution-redis
       - evolution-postgres
