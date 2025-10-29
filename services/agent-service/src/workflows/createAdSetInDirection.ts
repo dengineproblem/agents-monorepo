@@ -368,7 +368,14 @@ export async function workflowCreateAdSetInDirection(
     'POST',
     `${normalized_ad_account_id}/adsets`,
     accessToken,
-    toParams(adsetBody)
+    toParams(adsetBody),
+    {
+      userAccountId: user_account_id,
+      userAccountName: userAccountProfile?.username,
+      directionId: direction.id,
+      directionName: direction.name,
+      workflow: 'createAdSetInDirection'
+    }
   );
 
   const adset_id = adsetResult?.id;
@@ -407,7 +414,14 @@ export async function workflowCreateAdSetInDirection(
       'POST',
       `${normalized_ad_account_id}/ads`,
       accessToken,
-      toParams(adBody)
+      toParams(adBody),
+      {
+        userAccountId: user_account_id,
+        userAccountName: userAccountProfile?.username,
+        directionId: direction.id,
+        directionName: direction.name,
+        workflow: 'createAdSetInDirection'
+      }
     );
 
     const ad_id = adResult?.id;

@@ -18,7 +18,21 @@ const fastify = Fastify({
 });
 
 fastify.addHook('onRequest', (request, _reply, done) => {
-  request.log = baseLogger.child({ requestId: request.id });
+  request.log = baseLogger.child({ module: 'agentBrainRoutes', requestId: request.id });
+  done();
+});
+
+fastify.addHook('preHandler', (request, _reply, done) => {
+  const userAccountId = request.body?.user_account_id || request.body?.userAccountId || request.query?.user_account_id || request.query?.userAccountId;
+  if (userAccountId) {
+    request.log = request.log.child({ userAccountId });
+  }
+
+  const directionId = request.body?.direction_id || request.body?.directionId || request.query?.direction_id || request.query?.directionId;
+  if (directionId) {
+    request.log = request.log.child({ directionId });
+  }
+
   done();
 });
 

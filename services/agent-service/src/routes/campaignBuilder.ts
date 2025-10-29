@@ -96,7 +96,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      log.info({ userAccountId: user_account_id }, 'Auto-launch request for all directions');
+      let requestLog = log.child({ requestId: request.id, userAccountId: user_account_id });
+
+      requestLog.info('Auto-launch request for all directions');
 
       try {
         // Получаем данные пользователя
@@ -107,12 +109,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .single();
 
         if (userError || !userAccount) {
-          log.warn({ userAccountId: user_account_id, err: userError }, 'User account not found for auto-launch');
+          requestLog.warn({ err: userError }, 'User account not found for auto-launch');
           return reply.status(404).send({
             success: false,
             error: 'User account not found',
           });
         }
+
+        requestLog = requestLog.child({ userAccountName: userAccount.username });
 
         // Находим ВСЕ активные направления пользователя
         const { data: directions, error: directionsError } = await supabase
@@ -122,7 +126,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .eq('is_active', true);
 
         if (directionsError) {
-          log.error({ err: directionsError, userAccountId: user_account_id }, 'Failed to fetch directions');
+          requestLog.error({ err: directionsError }, 'Failed to fetch directions');
           return reply.status(500).send({
             success: false,
             error: 'Failed to fetch directions',
@@ -132,7 +136,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         const activeDirections = directions || [];
 
         if (activeDirections.length === 0) {
-          log.warn({ userAccountId: user_account_id }, 'No active directions found');
+          requestLog.warn('No active directions found');
           return reply.status(400).send({
             success: false,
             error: 'No active directions found',
@@ -140,12 +144,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        log.info({ userAccountId: user_account_id, directionCount: activeDirections.length }, 'Found active directions');
+        requestLog.info({ directionCount: activeDirections.length }, 'Found active directions');
 
         // ===================================================
         // STEP 2: Пауза активных ad set'ов направлений (игнорируем тестовые кампании)
         // ===================================================
-        log.info({ userAccountId: userAccount.id }, 'Pausing active ad sets for directions...');
+        requestLog.info('Pausing active ad sets for directions...');
 
         try {
           const activeCampaigns = await getActiveCampaigns(
@@ -164,39 +168,39 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .map((campaign: any) => campaign.campaign_id);
 
           if (campaignIdsToPause.length > 0) {
-            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
+            requestLog.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
             for (const campaignId of campaignIdsToPause) {
               try {
                 await pauseAdSetsForCampaign(campaignId, userAccount.access_token);
-                log.info({ campaignId }, 'Paused ad sets for campaign');
+                requestLog.info({ campaignId }, 'Paused ad sets for campaign');
               } catch (pauseError: any) {
-                log.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
+                requestLog.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
               }
             }
           } else {
-            log.info('No campaigns found for pausing');
+            requestLog.info('No campaigns found for pausing');
           }
         } catch (error: any) {
-          log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Error pausing ad sets');
+          requestLog.error({ err: error }, 'Error pausing ad sets');
         }
 
         const results: any[] = [];
 
         // Обрабатываем каждое направление
         for (const direction of activeDirections) {
-          log.info({
+          const directionLog = requestLog.child({
             directionId: direction.id,
             directionName: direction.name,
             objective: direction.objective,
-            userAccountId: user_account_id,
-            userAccountName: userAccount.username
-          }, 'Processing direction');
+          });
+
+          directionLog.info('Processing direction');
 
           // Получаем креативы для этого направления (используем objective направления)
           const creatives = await getAvailableCreatives(user_account_id, direction.objective, direction.id);
 
           if (creatives.length === 0) {
-            log.warn({ directionId: direction.id, directionName: direction.name }, 'No creatives for direction');
+            directionLog.warn('No creatives for direction');
             results.push({
               direction_id: direction.id,
               direction_name: direction.name,
@@ -206,17 +210,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             continue;
           }
 
-          log.info({ directionId: direction.id, creativeCount: creatives.length }, 'Found creatives for direction');
+          directionLog.info({ creativeCount: creatives.length }, 'Found creatives for direction');
 
           try {
             // Получаем дефолтные настройки направления
             const defaultSettings = await getDefaultSettings(direction.id);
-            log.info({
-              directionId: direction.id,
-              hasDefaultSettings: Boolean(defaultSettings),
-              userAccountId: user_account_id,
-            userAccountName: userAccount.username
-            }, 'Default settings status');
+            directionLog.info({ hasDefaultSettings: Boolean(defaultSettings) }, 'Default settings status');
 
             // Строим таргетинг (используем objective направления)
             const targeting = buildTargeting(defaultSettings, direction.objective);
@@ -244,10 +243,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 whatsapp_phone_number = phoneNumber?.phone_number;
                 
                 if (whatsapp_phone_number) {
-                  log.info({ 
-                    directionId: direction.id, 
-                    phone_number: whatsapp_phone_number, 
-                    source: 'direction' 
+                  directionLog.info({
+                    phone_number: whatsapp_phone_number,
+                    source: 'direction'
                   }, 'Using WhatsApp number from direction');
                 }
               }
@@ -265,10 +263,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 whatsapp_phone_number = defaultNumber?.phone_number;
                 
                 if (whatsapp_phone_number) {
-                  log.info({ 
-                    directionId: direction.id, 
-                    phone_number: whatsapp_phone_number, 
-                    source: 'default' 
+                  directionLog.info({
+                    phone_number: whatsapp_phone_number,
+                    source: 'default'
                   }, 'Using default WhatsApp number');
                 }
               }
@@ -276,10 +273,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               // 3. Fallback: старый номер из user_accounts (обратная совместимость)
               if (!whatsapp_phone_number && userAccount?.whatsapp_phone_number) {
                 whatsapp_phone_number = userAccount.whatsapp_phone_number;
-                log.info({ 
-                  directionId: direction.id, 
-                  phone_number: whatsapp_phone_number, 
-                  source: 'user_accounts' 
+                directionLog.info({
+                  phone_number: whatsapp_phone_number,
+                  source: 'user_accounts'
                 }, 'Using legacy WhatsApp number');
               }
               
@@ -312,9 +308,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               billing_event,
               promoted_object,
               start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
+              logContext: directionLog.bindings()
             });
 
-            log.info({ directionId: direction.id, adsetId: adset.id, userAccountId: user_account_id, userAccountName: userAccount.username }, 'Ad set created for direction');
+            directionLog.info({ adsetId: adset.id }, 'Ad set created for direction');
 
             // Создаём Ads с креативами (максимум 5)
             const creativesToUse = creatives.slice(0, 5);
@@ -324,9 +321,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               creatives: creativesToUse,
               accessToken: userAccount.access_token,
               objective: direction.objective, // Используем objective направления
+              logContext: directionLog.bindings()
             });
 
-            log.info({ directionId: direction.id, adsetId: adset.id, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
+            directionLog.info({ adsetId: adset.id, adsCount: ads.length }, 'Ads created for direction');
 
             results.push({
               direction_id: direction.id,
@@ -341,7 +339,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             });
           } catch (error: any) {
             const resolution = error?.fb ? resolveFacebookError(error.fb) : undefined;
-            log.error({ err: error, directionId: direction.id, directionName: direction.name, resolution }, 'Failed to create ad set for direction');
+            directionLog.error({ err: error, resolution }, 'Failed to create ad set for direction');
             
             // Парсим ошибку Facebook API для более понятного сообщения
             let errorMessage = error.message;
@@ -372,7 +370,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // ===================================================
         // STEP 3: Возвращаем результаты
         // ===================================================
-        log.info({ userAccountId: user_account_id, totalDirections: results.length }, 'Auto-launch-v2 completed');
+        requestLog.info({ totalDirections: results.length }, 'Auto-launch-v2 completed');
 
         return reply.send({
           success: true,
@@ -380,7 +378,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           results,
         });
       } catch (error: any) {
-        log.error({ err: error, userAccountId: user_account_id }, 'Unexpected error in auto-launch-v2');
+        requestLog.error({ err: error }, 'Unexpected error in auto-launch-v2');
         return reply.status(500).send({
           success: false,
           error: error.message || 'Internal server error',
@@ -427,8 +425,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
     async (request: any, reply: any) => {
       const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting } = request.body;
 
-      log.info({
-        userAccountId: user_account_id,
+      let requestLog = log.child({ requestId: request.id, userAccountId: user_account_id });
+
+      requestLog.info({
         objective: request.body?.objective,
         adAccountId: request.body?.ad_account_id,
         campaignId: request.body?.campaign_id,
@@ -450,6 +449,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
+        requestLog = requestLog.child({ userAccountName: userAccount.username });
+
         // Получаем направление
         const { data: direction, error: directionError } = await supabase
           .from('account_directions')
@@ -465,6 +466,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             error: 'Direction not found or inactive',
           });
         }
+
+        const directionLog = requestLog.child({
+          directionId: direction.id,
+          directionName: direction.name,
+          objective: direction.objective,
+        });
 
         // Проверяем, что у направления есть fb_campaign_id
         if (!direction.fb_campaign_id) {
@@ -492,10 +499,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         if (creatives.length !== creative_ids.length) {
-          log.warn({ missingCreatives: creative_ids.length - creatives.length }, 'Some creatives not found or inactive');
+          directionLog.warn({ missingCreatives: creative_ids.length - creatives.length }, 'Some creatives not found or inactive');
         }
 
-        log.info({ creativeCount: creatives.length }, 'Found creatives for manual launch');
+        directionLog.info({ creativeCount: creatives.length }, 'Found creatives for manual launch');
 
         // Получаем дефолтные настройки направления (если не переопределены)
         const defaultSettings = await getDefaultSettings(direction_id);
@@ -535,9 +542,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           optimization_goal,
           billing_event,
           promoted_object,
+          logContext: directionLog.bindings(),
         });
 
-        log.info({ adsetId: adset.id }, 'Manual launch ad set created');
+        directionLog.info({ adsetId: adset.id }, 'Manual launch ad set created');
 
         // Создаём Ads с выбранными креативами
         const creativesForAds = creatives.map(c => ({
@@ -555,9 +563,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           creatives: creativesForAds,
           accessToken: userAccount.access_token,
           objective: direction.objective,
+          logContext: directionLog.bindings(),
         });
 
-        log.info({ adsCount: ads.length }, 'Manual launch ads created');
+        directionLog.info({ adsCount: ads.length }, 'Manual launch ads created');
 
         return reply.send({
           success: true,
@@ -574,7 +583,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           })),
         });
       } catch (error: any) {
-        log.error({ err: error, userAccountId: request.body?.user_account_id }, 'Manual launch failed');
+        requestLog.error({ err: error }, 'Manual launch failed');
         
         // Парсим ошибку для понятного сообщения
         let errorMessage = error.message;

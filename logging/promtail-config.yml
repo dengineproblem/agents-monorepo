@@ -27,8 +27,13 @@ scrape_configs:
             objective:
             workflow:
             requestId:
+            directionId:
+            directionName:
+            objective:
+            workflow:
             err:
             resolution:
+            resolutionSeverity: resolution.severity
       - labels:
           level:
           environment:
@@ -37,6 +42,7 @@ scrape_configs:
           userAccountId:
           userAccountName:
           userTelegram:
+          requestId:
           directionId:
           directionName:
           objective:
