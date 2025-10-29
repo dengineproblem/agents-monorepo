@@ -182,13 +182,6 @@ services:
       - evolution-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  evolution-manager:
-    image: evoapicloud/evolution-manager:latest
-    container_name: evolution-manager
-    ports:
-      - "3003:80"
-    restart: unless-stopped
-
 volumes:
   loki-data:
   grafana-data:
