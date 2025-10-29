@@ -33,6 +33,7 @@
 - `fb.code` / `fb.error_subcode`
 - `fbtrace_id`
 - `resolution.short` и `resolution.hint`
+- `resolutionSeverity` — значение `resolution.severity` вынесено в отдельную метку Loki для фильтров
 
 Эти же поля используются при оформлении Telegram-уведомлений. Для креатив-тестов теперь добавлено логирование `force=true` и ручного удаления тестов (`DELETE /api/creative-test/:id`).
 
@@ -97,7 +98,7 @@ curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",l
 
 - Datasource Loki создаётся автоматически.
 - Дашборд **Agent Services Overview** (папка *Logging*) — сводка по всем сервисам. Вверху доступны фильтры `service`, `module`, `userAccountId`; таблицы показывают последние ошибки, предупреждения и падения Graph API.
-- Дашборд **Campaign Builder Drilldown** — углублённый просмотр автозапусков и ручных запусков. Используйте фильтры `userAccountId` и `directionId`, чтобы увидеть конкретные шаги и подсказки Facebook.
+- Дашборд **Campaign Builder Drilldown** — углублённый просмотр автозапусков и ручных запусков. Фильтры поддерживают `userAccountId`, `directionId`, `directionName`, `objective`, `workflow` и `resolutionSeverity`, чтобы легко отслеживать конкретные шаги и подсказки Facebook.
 
 #### После изменения лейблов в Promtail
 
@@ -105,6 +106,7 @@ curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",l
 2. Проверьте, что агент поднялся без ошибок: `docker compose logs promtail --tail 20`.
 3. Убедитесь, что Loki видит новые лейблы: в Grafana Explore выполните `label_values({service="agent-service"}, userAccountId)` или запрос `curl "http://localhost:3100/loki/api/v1/labels"`.
 4. Обновите переменные на дашбордах (**Dashboard settings → Variables → Update**), чтобы выпадающие списки `userAccountId`/`directionId` подхватили новые значения.
+5. Для дашборда Campaign Builder обновите также переменную `resolutionSeverity`, чтобы список уровней (`error`, `warning`) синхронизировался с Loki.
 
 ## 6. Telegram-уведомления
 

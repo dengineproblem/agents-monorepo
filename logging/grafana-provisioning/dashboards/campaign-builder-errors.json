@@ -32,12 +32,26 @@
           "value": ".*"
         }
       },
-      {
+      { 
         "type": "query",
         "name": "userAccountId",
         "label": "User Account",
         "datasource": "Loki",
         "query": "label_values({environment=\"$environment\",module=\"campaignBuilderRoutes\",directionId=~\"$directionId\"}, userAccountId)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "type": "query",
+        "name": "resolutionSeverity",
+        "label": "Severity",
+        "datasource": "Loki",
+        "query": "label_values({environment=\"$environment\",module=\"campaignBuilderRoutes\"}, resolutionSeverity)",
         "includeAll": true,
         "allValue": ".*",
         "refresh": 1,
@@ -54,7 +68,7 @@
       "title": "Errors by User",
       "targets": [
         {
-          "expr": "sum by (userAccountId) (count_over_time({environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",directionId=~\"$directionId\"}[5m]))",
+          "expr": "sum by (userAccountId) (count_over_time({environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",directionId=~\"$directionId\",resolutionSeverity=~\"$resolutionSeverity\"}[5m]))",
           "legendFormat": "{{userAccountId}}",
           "refId": "A"
         }
@@ -66,7 +80,7 @@
       "title": "Auto-launch Failures",
       "targets": [
         {
-          "expr": "{environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",directionId=~\"$directionId\"} |= \"Failed to create ad set for direction\" | logfmt",
+          "expr": "{environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",directionId=~\"$directionId\",resolutionSeverity=~\"$resolutionSeverity\"} |= \"Failed to create ad set for direction\" | logfmt",
           "refId": "A"
         }
       ],
@@ -77,7 +91,7 @@
       "title": "Manual Launch Failures",
       "targets": [
         {
-          "expr": "{environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\"} |= \"Manual launch failed\" | logfmt",
+          "expr": "{environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",resolutionSeverity=~\"$resolutionSeverity\"} |= \"Manual launch failed\" | logfmt",
           "refId": "A"
         }
       ],
@@ -88,7 +102,7 @@
       "title": "Underlying Graph API Errors",
       "targets": [
         {
-          "expr": "{environment=\"$environment\",module=\"facebookAdapter\",userAccountId=~\"$userAccountId\"} |= \"Graph API request failed\" | logfmt",
+          "expr": "{environment=\"$environment\",module=\"facebookAdapter\",userAccountId=~\"$userAccountId\",resolutionSeverity=~\"$resolutionSeverity\"} |= \"Graph API request failed\" | logfmt",
           "refId": "A"
         }
       ],

@@ -29,6 +29,7 @@ scrape_configs:
             workflow:
             err:
             resolution:
+            resolutionSeverity: resolution.severity
       - labels:
           level:
           environment:
@@ -42,6 +43,7 @@ scrape_configs:
           directionName:
           objective:
           workflow:
+          resolutionSeverity:
       - static_labels:
           job: docker-logs
           environment: development
