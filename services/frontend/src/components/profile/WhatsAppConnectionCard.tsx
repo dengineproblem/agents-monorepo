@@ -27,6 +27,20 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
     setQrDialogOpen(true);
   };
 
+  const handleDisconnect = async (instanceName: string) => {
+    if (!confirm('Вы уверены, что хотите отключить этот WhatsApp номер?')) {
+      return;
+    }
+
+    try {
+      await whatsappApi.disconnectInstance(instanceName);
+      refresh(); // Обновить список после отключения
+    } catch (error) {
+      console.error('Failed to disconnect WhatsApp instance:', error);
+      alert('Не удалось отключить WhatsApp. Попробуйте позже.');
+    }
+  };
+
   const handleConnected = () => {
     refresh(); // Обновить список после успешного подключения
   };
@@ -111,22 +125,24 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2">
-                    {number.connection_status === 'connected' ? (
-                      <Badge variant="default" className="bg-green-500">
-                        Подключен
-                      </Badge>
-                    ) : number.connection_status === 'connecting' ? (
-                      <Badge variant="secondary">Подключение...</Badge>
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={() => handleConnect(number.id, number.phone_number)}
-                      >
-                        Подключить
-                      </Button>
-                    )}
-                  </div>
+                  <Button
+                    variant={number.connection_status === 'connected' ? 'outline' : 'default'}
+                    size="sm"
+                    onClick={() => {
+                      if (number.connection_status === 'connected') {
+                        handleDisconnect(number.instance_name!);
+                      } else {
+                        handleConnect(number.id, number.phone_number);
+                      }
+                    }}
+                    disabled={number.connection_status === 'connecting'}
+                  >
+                    {number.connection_status === 'connected'
+                      ? 'Отключить'
+                      : number.connection_status === 'connecting'
+                      ? 'Подключение...'
+                      : 'Подключить'}
+                  </Button>
                 </div>
               ))}
             </div>

@@ -45,32 +45,13 @@ CREATE INDEX IF NOT EXISTS idx_whatsapp_numbers_instance
 
 -- Обновить whatsapp_phone_numbers данными из whatsapp_instances
 -- (если номер телефона совпадает)
-DO $$
-DECLARE
-  instance_rec RECORD;
-BEGIN
-  FOR instance_rec IN
-    SELECT
-      wi.instance_name,
-      wi.status,
-      wi.phone_number,
-      wi.user_account_id
-    FROM whatsapp_instances wi
-    WHERE wi.phone_number IS NOT NULL
-  LOOP
-    -- Найти соответствующую запись в whatsapp_phone_numbers и обновить
-    UPDATE whatsapp_phone_numbers
-    SET
-      instance_name = instance_rec.instance_name,
-      connection_status = instance_rec.status
-    WHERE
-      user_account_id = instance_rec.user_account_id
-      AND phone_number = instance_rec.phone_number
-      AND (instance_name IS NULL OR instance_name != instance_rec.instance_name);
-
-    IF FOUND THEN
-      RAISE NOTICE 'Updated phone number % with instance %',
-        instance_rec.phone_number, instance_rec.instance_name;
-    END IF;
-  END LOOP;
-END $$;
+UPDATE whatsapp_phone_numbers wpn
+SET
+  instance_name = wi.instance_name,
+  connection_status = wi.status
+FROM whatsapp_instances wi
+WHERE
+  wi.phone_number IS NOT NULL
+  AND wpn.user_account_id = wi.user_account_id
+  AND wpn.phone_number = wi.phone_number
+  AND (wpn.instance_name IS NULL OR wpn.instance_name != wi.instance_name);
