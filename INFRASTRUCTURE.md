@@ -73,7 +73,32 @@ Docker nginx (контейнер)
 
 ---
 
-### **3. Другие домены (для справки)**
+### **3. `n8n.performanteaiagency.com` (Workflow Automation)**
+
+**Назначение:** Автоматизация workflows, генерация креативов с текстом, интеграции
+
+**Особенности:**
+- ✅ Python 3.12.12 + Pillow 11.0.0 для генерации изображений
+- ✅ ffmpeg для обработки видео
+- ✅ WebSocket для real-time обновлений workflow
+- ✅ Шрифты DejaVu для текста на изображениях
+- ✅ PostgreSQL для хранения данных
+
+**Docker контейнеры:** 
+- `root-n8n-1` - основной контейнер n8n
+- `root-postgres-1` - база данных PostgreSQL
+
+**Важные детали:**
+- **Docker-compose:** `/root/docker-compose.yml` (отдельный от основного)
+- **Dockerfile:** `/root/Dockerfile`
+- **Сеть:** `root_default` + подключен к `agents-monorepo_default` (для связи с nginx)
+- **Volume:** `n8n_data` - хранит все workflows и настройки
+- **Порт внутри:** `5678`
+- **Домен:** `https://n8n.performanteaiagency.com`
+
+---
+
+### **4. Другие домены (для справки)**
 
 - `agents.performanteaiagency.com` - прямой доступ к agent-service API (не используется в продакшене)
 - `agent2.performanteaiagency.com` - legacy (не используется)
@@ -97,11 +122,20 @@ Docker nginx (контейнер)
 | `grafana` | 3000 | 3000 | Мониторинг и визуализация логов |
 | `n8n` | 5678 | 5678 | Workflow automation (отдельный docker-compose) |
 | `postgres` | 5432 | - | БД для n8n (не публичный) |
+| `evolution-api` | 8080 | 8080 | WhatsApp Business API (Evolution API) |
+| `evolution-postgres` | 5432 | 5433 | БД для Evolution API |
+| `evolution-redis` | 6379 | 6380 | Cache для Evolution API |
 
 ### **Docker Compose файлы:**
 
-- **Основной:** `/root/agents-monorepo/docker-compose.yml` (все сервисы агентов и фронтенды)
-- **N8N:** `/root/docker-compose.yml` (n8n и postgres)
+- **Основной:** `/root/agents-monorepo/docker-compose.yml` (все сервисы агентов, фронтенды, nginx)
+  - Сеть: `agents-monorepo_default`
+  - Контейнеры: nginx, frontend, frontend-appreview, agent-service, agent-brain, creative-analyzer, loki, grafana, evolution-api, evolution-postgres, evolution-redis
+  
+- **N8N (отдельный):** `/root/docker-compose.yml` (n8n + postgres)
+  - Сеть: `root_default`
+  - Контейнеры: n8n, postgres
+  - **ВАЖНО:** n8n также подключен к `agents-monorepo_default` через `docker network connect` для связи с nginx
 
 ---
 
@@ -125,6 +159,10 @@ location / {
     proxy_pass http://frontend-appreview:80;
 }
 
+location /evolution/ {
+    proxy_pass http://evolution-api:8080/;
+}
+
 location /api/ {
     rewrite ^/api/(.*)$ /$1 break;
     proxy_pass http://agent-service:8082;
@@ -142,6 +180,10 @@ location / {
     proxy_pass http://frontend:80;
 }
 
+location /evolution/ {
+    proxy_pass http://evolution-api:8080/;
+}
+
 location /api/ {
     rewrite ^/api/(.*)$ /$1 break;
     proxy_pass http://agent-service:8082;
@@ -153,9 +195,60 @@ location /api/analyzer/ {
 }
 ```
 
+#### **3. N8N Workflow Automation (`n8n.performanteaiagency.com`):**
+```nginx
+# WebSocket поддержка (в начале http блока)
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name n8n.performanteaiagency.com;
+    
+    # Webhooks с CORS
+    location ^~ /webhook/ {
+        client_max_body_size 512M;
+        proxy_pass http://root-n8n-1:5678;
+        proxy_http_version 1.1;
+        
+        # WebSocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        
+        # Таймауты для долгих операций
+        proxy_connect_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+    }
+    
+    # Интерфейс n8n
+    location / {
+        proxy_pass http://root-n8n-1:5678;
+        proxy_http_version 1.1;
+        
+        # WebSocket support (КРИТИЧНО для работы workflow!)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+**ВАЖНО:** 
+- `map $http_upgrade $connection_upgrade` должен быть ПЕРЕД server блоками
+- Использовать `Connection $connection_upgrade`, НЕ `Connection "upgrade"`
+- Без правильного WebSocket workflow не будут открываться!
+
 ### **SSL сертификаты:**
 - `performanteaiagency.com`: `/etc/letsencrypt/live/performanteaiagency.com/`
 - `app.performanteaiagency.com`: `/etc/letsencrypt/live/app.performanteaiagency.com/`
+- `n8n.performanteaiagency.com`: `/etc/letsencrypt/live/n8n.performanteaiagency.com/`
 
 ---
 
@@ -272,6 +365,21 @@ docker-compose up -d agent-service
 ```bash
 docker-compose build agent-brain creative-analyzer
 docker-compose up -d agent-brain creative-analyzer
+```
+
+**ВАРИАНТ E: Пересобрать N8N (отдельный docker-compose):**
+```bash
+cd /root
+docker-compose build n8n
+docker-compose down
+docker-compose up -d
+
+# Проверить что n8n подключен к сети nginx
+docker network connect agents-monorepo_default root-n8n-1 2>/dev/null || echo "Already connected"
+
+# Перезагрузить nginx для применения конфигурации
+cd /root/agents-monorepo
+docker-compose restart nginx
 ```
 
 #### **4. Проверить статус контейнеров:**
@@ -417,6 +525,90 @@ sudo certbot certificates
 
 ---
 
+### **❌ ПРОБЛЕМА: n8n открывается, но workflow не открываются (зависают)**
+
+**Причина:** WebSocket не работает - неправильная конфигурация nginx
+
+**Решение:**
+```bash
+# 1. Проверить что в nginx-production.conf есть map директива
+grep "map.*http_upgrade" /root/agents-monorepo/nginx-production.conf
+
+# Если НЕТ - добавить в начало http блока (после error_log):
+# map $http_upgrade $connection_upgrade {
+#     default upgrade;
+#     '' close;
+# }
+
+# 2. Проверить что используется $connection_upgrade, а не "upgrade"
+grep "Connection.*connection_upgrade" /root/agents-monorepo/nginx-production.conf
+
+# Если НЕТ - заменить Connection "upgrade" на Connection $connection_upgrade
+
+# 3. Перезагрузить nginx
+cd /root/agents-monorepo
+docker-compose restart nginx
+
+# 4. Проверить в браузере DevTools Console - не должно быть ошибок WebSocket
+```
+
+---
+
+### **❌ ПРОБЛЕМА: n8n показывает 502 Bad Gateway**
+
+**Причина:** n8n контейнер не подключен к сети nginx
+
+**Решение:**
+```bash
+# 1. Проверить статус контейнера n8n
+docker ps | grep n8n
+
+# 2. Проверить сети n8n
+docker inspect root-n8n-1 | grep -A 5 "Networks"
+
+# 3. Подключить к сети nginx (если нужно)
+docker network connect agents-monorepo_default root-n8n-1
+
+# 4. Перезагрузить nginx
+cd /root/agents-monorepo
+docker-compose restart nginx
+
+# 5. Проверить доступность
+curl -I http://localhost:5678
+```
+
+---
+
+### **❌ ПРОБЛЕМА: После пересоздания n8n контейнера пропал Python/Pillow**
+
+**Причина:** Изменения не сохранены в Docker образе
+
+**Решение:**
+```bash
+# 1. Проверить Dockerfile
+cat /root/Dockerfile
+
+# Должен содержать:
+# RUN apk add --no-cache python3 py3-pillow jpeg-dev zlib-dev freetype-dev ...
+
+# 2. Пересобрать образ
+cd /root
+docker-compose build --no-cache n8n
+
+# 3. Пересоздать контейнер
+docker-compose down
+docker-compose up -d
+
+# 4. Подключить к сети nginx
+docker network connect agents-monorepo_default root-n8n-1 2>/dev/null
+
+# 5. Проверить что Python и Pillow работают
+docker exec root-n8n-1 python3 --version
+docker exec root-n8n-1 python3 -c "from PIL import Image; print('OK')"
+```
+
+---
+
 ### **📊 ПОЛЕЗНЫЕ КОМАНДЫ ДЛЯ ДИАГНОСТИКИ**
 
 ```bash
@@ -449,6 +641,7 @@ docker system prune -a --volumes
 /root/agents-monorepo/
 ├── docker-compose.yml          # Основной файл для всех сервисов
 ├── nginx-production.conf       # Конфигурация nginx (монтируется в контейнер)
+│                               # ВАЖНО: содержит map $http_upgrade для WebSocket
 ├── services/
 │   ├── frontend/               # React приложение (Vite)
 │   │   ├── Dockerfile          # Multi-stage build с BUILD_MODE
@@ -467,7 +660,17 @@ docker system prune -a --volumes
 │           └── analyzerService.js  # LLM анализатор
 └── .env.brain, .env.agent      # Переменные окружения (не в git!)
 
-/root/docker-compose.yml        # N8N + Postgres (отдельно)
+/root/                          # N8N (отдельная директория)
+├── docker-compose.yml          # N8N + Postgres
+│                               # Образ: custom-n8n:latest-ffmpeg
+│                               # Сеть: root_default + agents-monorepo_default
+│                               # Volume: n8n_data (хранит workflow)
+├── Dockerfile                  # Кастомный образ n8n с:
+│                               # - Python 3.12.12
+│                               # - Pillow 11.0.0
+│                               # - ffmpeg
+│                               # - Шрифты DejaVu
+└── Dockerfile.backup           # Резервная копия
 ```
 
 ---
@@ -503,10 +706,11 @@ docker system prune -a --volumes
 ## 📞 КОНТАКТЫ И ССЫЛКИ
 
 **Домены:**
-- Production: https://app.performanteaiagency.com
-- App Review: https://performanteaiagency.com
-- Grafana: https://app.performanteaiagency.com:3000 (через SSH tunnel)
-- N8N: https://n8n.performanteaiagency.com
+- Production Frontend: https://app.performanteaiagency.com
+- App Review Frontend: https://performanteaiagency.com
+- N8N Workflows: https://n8n.performanteaiagency.com
+- Grafana (через SSH tunnel): http://localhost:3000
+- Agent Brain (через SSH tunnel): http://localhost:7080
 
 **Важные порты для SSH туннелей:**
 - Grafana: `ssh -L 3000:localhost:3000 root@server`
@@ -515,6 +719,22 @@ docker system prune -a --volumes
 ---
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
+
+**28 октября 2025:**
+- ✅ Добавлена интеграция Evolution API для WhatsApp Business
+- ✅ Создана инфраструктура для работы с несколькими WhatsApp номерами
+- ✅ Выполнены миграции БД (013-016) для поддержки direction_id, creative_id, WhatsApp instances
+- ✅ Добавлены новые сервисы: evolution-api (порт 8080), evolution-postgres (5433), evolution-redis (6380)
+- ✅ Обновлен nginx-production.conf с маршрутом /evolution/
+- ✅ Добавлены роуты в agent-service: /api/webhooks/evolution, /api/whatsapp/instances
+
+**25 октября 2025:**
+- ✅ Добавлен Python 3.12.12 + Pillow 11.0.0 в n8n контейнер
+- ✅ Обновлен `/root/Dockerfile` с полным набором зависимостей для работы с изображениями
+- ✅ Исправлена WebSocket конфигурация в nginx (добавлен `map $http_upgrade`)
+- ✅ Решена проблема с Docker сетями (n8n подключен к `agents-monorepo_default`)
+- ✅ Добавлена документация по n8n в INFRASTRUCTURE.md
+- ✅ Создан отчет N8N_PYTHON_PILLOW_SETUP_REPORT.md
 
 **23 октября 2025:**
 - ✅ Исправлен конфликт портов (системный nginx vs Docker nginx)

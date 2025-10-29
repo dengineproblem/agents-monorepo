@@ -127,6 +127,63 @@ services:
       - loki
     restart: unless-stopped
 
+  # Evolution API - WhatsApp integration
+  evolution-api:
+    image: atendai/evolution-api:latest
+    container_name: evolution-api
+    ports:
+      - "8080:8080"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    environment:
+      - SERVER_URL=${EVOLUTION_SERVER_URL:-https://app.performanteaiagency.com/evolution}
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evolution:${EVOLUTION_DB_PASSWORD}@evolution-postgres:5432/evolution
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://evolution-redis:6379/0
+      - WEBHOOK_GLOBAL_ENABLED=true
+      - WEBHOOK_GLOBAL_URL=http://agent-service:8082/api/webhooks/evolution
+      - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
+      - WEBHOOK_EVENTS_CONNECTION_UPDATE=true
+      - WEBHOOK_EVENTS_QRCODE_UPDATED=true
+      - CONFIG_SESSION_PHONE_CLIENT=Evolution API
+      - QRCODE_LIMIT=30
+      - LOG_LEVEL=ERROR
+      - DEV_ENV=true
+    depends_on:
+      - evolution-redis
+      - evolution-postgres
+      - agent-service
+    restart: unless-stopped
+
+  evolution-redis:
+    image: redis:7-alpine
+    container_name: evolution-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - evolution-redis-data:/data
+    restart: unless-stopped
+
+  evolution-postgres:
+    image: postgres:15-alpine
+    container_name: evolution-postgres
+    environment:
+      - POSTGRES_USER=evolution
+      - POSTGRES_PASSWORD=${EVOLUTION_DB_PASSWORD}
+      - POSTGRES_DB=evolution
+    ports:
+      - "5433:5432"
+    volumes:
+      - evolution-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
 volumes:
   loki-data:
   grafana-data:
+  evolution-redis-data:
+  evolution-postgres-data:

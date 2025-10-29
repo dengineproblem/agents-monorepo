@@ -181,3 +181,6 @@ ALTER TABLE whatsapp_phone_numbers DISABLE ROW LEVEL SECURITY;
 --   USING (user_account_id = auth.uid());
 
 
+
+
+

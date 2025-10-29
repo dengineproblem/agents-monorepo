@@ -15,3 +15,6 @@ WHERE ad.objective = 'whatsapp'
 ORDER BY ad.created_at DESC
 LIMIT 10;
 
+
+
+
