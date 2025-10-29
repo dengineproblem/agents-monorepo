@@ -136,6 +136,8 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     environment:
       - SERVER_URL=https://evolution.performanteaiagency.com
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
