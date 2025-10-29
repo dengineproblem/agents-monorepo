@@ -22,6 +22,10 @@ scrape_configs:
             userAccountId:
             userAccountName:
             userTelegram:
+            directionId:
+            directionName:
+            objective:
+            workflow:
             requestId:
             directionId:
             directionName:
@@ -43,7 +47,6 @@ scrape_configs:
           directionName:
           objective:
           workflow:
-          resolutionSeverity:
       - static_labels:
           job: docker-logs
           environment: development
