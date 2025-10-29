@@ -47,10 +47,10 @@ type UpdateDefaultSettingsInput = z.infer<typeof UpdateDefaultSettingsSchema>;
 export async function defaultSettingsRoutes(app: FastifyInstance) {
   
   // ========================================
-  // GET /api/default-settings?directionId=uuid
+  // GET /default-settings?directionId=uuid
   // Получить настройки для направления
   // ========================================
-  app.get('/api/default-settings', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/default-settings', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { directionId } = request.query as { directionId?: string };
 
@@ -99,10 +99,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
   });
 
   // ========================================
-  // POST /api/default-settings
+  // POST /default-settings
   // Создать или обновить настройки для направления
   // ========================================
-  app.post('/api/default-settings', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/default-settings', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       // Валидация входных данных
       const parseResult = CreateDefaultSettingsSchema.safeParse(request.body);
@@ -226,10 +226,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
   });
 
   // ========================================
-  // PATCH /api/default-settings/:id
+  // PATCH /default-settings/:id
   // Частичное обновление настроек
   // ========================================
-  app.patch('/api/default-settings/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/default-settings/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
 
@@ -294,10 +294,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
   });
 
   // ========================================
-  // DELETE /api/default-settings/:id
+  // DELETE /default-settings/:id
   // Удалить настройки
   // ========================================
-  app.delete('/api/default-settings/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/default-settings/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
 
