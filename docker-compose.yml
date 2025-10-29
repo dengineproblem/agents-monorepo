@@ -182,6 +182,15 @@ services:
       - evolution-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  evolution-manager:
+    image: evoapicloud/evolution-manager:latest
+    container_name: evolution-manager
+    ports:
+      - "8081:80"
+    environment:
+      - VITE_API_URL=https://app.performanteaiagency.com/evolution
+    restart: unless-stopped
+
 volumes:
   loki-data:
   grafana-data:
