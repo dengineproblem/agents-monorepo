@@ -1,28 +1,95 @@
 {
   "id": null,
-  "title": "Campaign Builder Errors",
+  "title": "Campaign Builder Drilldown",
+  "uid": "campaign-builder-drilldown",
   "time": {
-    "from": "now-6h",
+    "from": "now-24h",
     "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "type": "constant",
+        "name": "environment",
+        "label": "Environment",
+        "query": "development",
+        "current": {
+          "text": "development",
+          "value": "development"
+        }
+      },
+      {
+        "type": "query",
+        "name": "directionId",
+        "label": "Direction",
+        "datasource": "Loki",
+        "query": "label_values({environment=\"$environment\",module=\"campaignBuilderRoutes\"}, directionId)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "type": "query",
+        "name": "userAccountId",
+        "label": "User Account",
+        "datasource": "Loki",
+        "query": "label_values({environment=\"$environment\",module=\"campaignBuilderRoutes\",directionId=~\"$directionId\"}, userAccountId)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      }
+    ]
   },
   "panels": [
     {
       "type": "timeseries",
-      "title": "Errors by Service",
+      "title": "Errors by User",
       "targets": [
         {
-          "expr": "count_over_time({level=\"error\"}[5m])",
-          "legendFormat": "{{service}}"
+          "expr": "sum by (userAccountId) (count_over_time({environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",directionId=~\"$directionId\"}[5m]))",
+          "legendFormat": "{{userAccountId}}",
+          "refId": "A"
         }
       ],
       "span": 12
     },
     {
       "type": "table",
-      "title": "Recent Facebook Errors",
+      "title": "Auto-launch Failures",
       "targets": [
         {
-          "expr": "{module=\"campaignBuilderRoutes\"} |= \"fb\" | logfmt"
+          "expr": "{environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\",directionId=~\"$directionId\"} |= \"Failed to create ad set for direction\" | logfmt",
+          "refId": "A"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Manual Launch Failures",
+      "targets": [
+        {
+          "expr": "{environment=\"$environment\",module=\"campaignBuilderRoutes\",level=\"error\",userAccountId=~\"$userAccountId\"} |= \"Manual launch failed\" | logfmt",
+          "refId": "A"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Underlying Graph API Errors",
+      "targets": [
+        {
+          "expr": "{environment=\"$environment\",module=\"facebookAdapter\",userAccountId=~\"$userAccountId\"} |= \"Graph API request failed\" | logfmt",
+          "refId": "A"
         }
       ],
       "span": 12
@@ -31,4 +98,3 @@
   "schemaVersion": 38,
   "version": 1
 }
-

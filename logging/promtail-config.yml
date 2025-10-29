@@ -23,6 +23,10 @@ scrape_configs:
             userAccountName:
             userTelegram:
             requestId:
+            directionId:
+            directionName:
+            objective:
+            workflow:
             err:
             resolution:
       - labels:
@@ -30,6 +34,14 @@ scrape_configs:
           environment:
           service:
           module:
+          userAccountId:
+          userAccountName:
+          userTelegram:
+          requestId:
+          directionId:
+          directionName:
+          objective:
+          workflow:
       - static_labels:
           job: docker-logs
           environment: development

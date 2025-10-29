@@ -1116,12 +1116,26 @@ export async function createAdSetInCampaign(params: {
   billing_event: string;
   promoted_object?: any;
   start_mode?: 'now' | 'midnight_almaty';
+  logContext?: Record<string, unknown>;
 }) {
-  const { campaignId, adAccountId, accessToken, name, dailyBudget, targeting, optimization_goal, billing_event, promoted_object } = params;
+  const {
+    campaignId,
+    adAccountId,
+    accessToken,
+    name,
+    dailyBudget,
+    targeting,
+    optimization_goal,
+    billing_event,
+    promoted_object,
+    logContext
+  } = params;
+
+  const scopedLog = logContext ? log.child(logContext) : log;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
-  log.info({ campaignId, name, dailyBudget, optimizationGoal: optimization_goal }, 'Creating ad set in campaign');
+  scopedLog.info({ campaignId, name, dailyBudget, optimizationGoal: optimization_goal }, 'Creating ad set in campaign');
 
   // Ближайшая полночь Asia/Almaty (+05:00)
   function formatWithOffset(date: Date, offsetMin: number) {
@@ -1182,12 +1196,12 @@ export async function createAdSetInCampaign(params: {
 
   if (!response.ok) {
     const error = await response.json();
-    log.error({ err: error, campaignId, name }, 'Failed to create ad set');
+    scopedLog.error({ err: error, campaignId, name }, 'Failed to create ad set');
     throw new Error(`Failed to create ad set: ${JSON.stringify(error)}`);
   }
 
   const result = await response.json();
-  log.info({ adsetId: result.id }, 'Ad set created successfully');
+  scopedLog.info({ adsetId: result.id }, 'Ad set created successfully');
   return result;
 }
 
@@ -1216,12 +1230,15 @@ export async function createAdsInAdSet(params: {
   creatives: AvailableCreative[];
   accessToken: string;
   objective: CampaignObjective;
+  logContext?: Record<string, unknown>;
 }) {
-  const { adsetId, adAccountId, creatives, accessToken, objective } = params;
+  const { adsetId, adAccountId, creatives, accessToken, objective, logContext } = params;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
-  log.info({ adsetId, creativeCount: creatives.length }, 'Creating ads in ad set');
+  const scopedLog = logContext ? log.child(logContext) : log;
+
+  scopedLog.info({ adsetId, creativeCount: creatives.length }, 'Creating ads in ad set');
 
   const ads = [];
 
@@ -1229,7 +1246,7 @@ export async function createAdsInAdSet(params: {
     const creativeId = getCreativeIdForObjective(creative, objective);
     
     if (!creativeId) {
-      log.warn({ creativeId: creative.user_creative_id, objective }, 'No Facebook creative ID for creative');
+      scopedLog.warn({ creativeId: creative.user_creative_id, objective }, 'No Facebook creative ID for creative');
       continue;
     }
 
@@ -1251,15 +1268,15 @@ export async function createAdsInAdSet(params: {
 
       if (!response.ok) {
         const error = await response.json();
-        log.error({ err: error, creativeId: creative.user_creative_id }, 'Failed to create ad');
+        scopedLog.error({ err: error, creativeId: creative.user_creative_id }, 'Failed to create ad');
         continue;
       }
 
       const ad = await response.json();
-      log.info({ adId: ad.id, creativeId: creative.user_creative_id }, 'Ad created successfully');
+      scopedLog.info({ adId: ad.id, creativeId: creative.user_creative_id }, 'Ad created successfully');
       ads.push(ad);
     } catch (error: any) {
-      log.error({ err: error, adsetId, creativeId: creative.user_creative_id }, 'Error creating ad');
+      scopedLog.error({ err: error, adsetId, creativeId: creative.user_creative_id }, 'Error creating ad');
     }
   }
 

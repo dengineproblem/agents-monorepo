@@ -21,13 +21,15 @@
 - `environment` — `development`/`production` (берётся из `NODE_ENV`).
 - `module` — подмодуль (например, `campaignBuilderRoutes`).
 - `requestId` — уникальный ID HTTP-запроса.
+- Контекст домена (добавляется автоматически в маршрутах):
+  - `userAccountId` / `userAccountName` — идентификатор и имя клиента.
+  - `directionId` / `directionName` — направление, с которым идёт работа.
+  - `objective` — целевая метрика кампании.
+  - Для `agent-brain` и `agent-service` контекст прикрепляется во всех HTTP-хендлерах, поэтому фильтр по пользователю работает в Grafana и Loki «из коробки».
 
 Дополнительные поля, важные для Facebook-сценариев:
 
-- `userAccountId`
-- `userAccountName`
 - `userTelegram`
-- `directionId`
 - `fb.code` / `fb.error_subcode`
 - `fbtrace_id`
 - `resolution.short` и `resolution.hint`
@@ -85,11 +87,24 @@ docker compose logs agent-brain --tail 50
 curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",level=\"error\"}&limit=20"
 ```
 
+Чтобы посмотреть ошибки конкретного клиента, добавьте фильтр по метке:
+
+```bash
+curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",level=\"error\",userAccountId=\"<UUID>\"}&limit=50"
+```
+
 ### Grafana
 
 - Datasource Loki создаётся автоматически.
-- Дашборд «Campaign Builder Errors» показывает ошибки, их количество и подсказки.
-- Можно применять фильтры по `userAccountId`, `module`, `resolution.severity`.
+- Дашборд **Agent Services Overview** (папка *Logging*) — сводка по всем сервисам. Вверху доступны фильтры `service`, `module`, `userAccountId`; таблицы показывают последние ошибки, предупреждения и падения Graph API.
+- Дашборд **Campaign Builder Drilldown** — углублённый просмотр автозапусков и ручных запусков. Используйте фильтры `userAccountId` и `directionId`, чтобы увидеть конкретные шаги и подсказки Facebook.
+
+#### После изменения лейблов в Promtail
+
+1. Примените конфигурацию: `docker compose restart promtail`.
+2. Проверьте, что агент поднялся без ошибок: `docker compose logs promtail --tail 20`.
+3. Убедитесь, что Loki видит новые лейблы: в Grafana Explore выполните `label_values({service="agent-service"}, userAccountId)` или запрос `curl "http://localhost:3100/loki/api/v1/labels"`.
+4. Обновите переменные на дашбордах (**Dashboard settings → Variables → Update**), чтобы выпадающие списки `userAccountId`/`directionId` подхватили новые значения.
 
 ## 6. Telegram-уведомления
 
@@ -143,7 +158,7 @@ requestId: 2f1...
 ## 10. Дополнительные советы
 
 - При добавлении сервисов используйте общий `logger` (через `createLogger`).
-- В логах всегда добавляйте `userAccountId`, `userAccountName`, `userTelegram`.
+- В логах всегда добавляйте `userAccountId`, `userAccountName`, `userTelegram`. Для HTTP-роутов `campaignBuilderRoutes` и `agent-brain` это делается автоматически, но при логировании из вспомогательных модулей (например, при прямой работе с Facebook API) передавайте контекст через `log.child` или параметр `logContext`.
 - Перед деплоем проверяйте:
   - `docker compose logs promtail --tail 20`
   - `curl http://localhost:3100/metrics`

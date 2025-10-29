@@ -1,0 +1,114 @@
+{
+  "id": null,
+  "title": "Agent Services Overview",
+  "uid": "agent-services-overview",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "type": "constant",
+        "name": "environment",
+        "label": "Environment",
+        "query": "development",
+        "current": {
+          "text": "development",
+          "value": "development"
+        }
+      },
+      {
+        "type": "query",
+        "name": "service",
+        "label": "Service",
+        "datasource": "Loki",
+        "query": "label_values({environment=\"$environment\"}, service)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "type": "query",
+        "name": "module",
+        "label": "Module",
+        "datasource": "Loki",
+        "query": "label_values({environment=\"$environment\",service=~\"$service\"}, module)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "type": "query",
+        "name": "userAccountId",
+        "label": "User Account",
+        "datasource": "Loki",
+        "query": "label_values({environment=\"$environment\",service=~\"$service\",module=~\"$module\"}, userAccountId)",
+        "includeAll": true,
+        "allValue": ".*",
+        "refresh": 1,
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Errors by Service",
+      "targets": [
+        {
+          "expr": "sum by (service) (count_over_time({environment=\"$environment\",level=\"error\",service=~\"$service\"}[5m]))",
+          "legendFormat": "{{service}}",
+          "refId": "A"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Recent Errors",
+      "targets": [
+        {
+          "expr": "{environment=\"$environment\",level=\"error\",service=~\"$service\",module=~\"$module\",userAccountId=~\"$userAccountId\"} | logfmt",
+          "refId": "A"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Warnings",
+      "targets": [
+        {
+          "expr": "{environment=\"$environment\",level=\"warn\",service=~\"$service\",module=~\"$module\",userAccountId=~\"$userAccountId\"} | logfmt",
+          "refId": "A"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Graph API Failures",
+      "targets": [
+        {
+          "expr": "{environment=\"$environment\",module=~\"$module\",service=~\"$service\"} |= \"Graph API request failed\" | logfmt",
+          "refId": "A"
+        }
+      ],
+      "span": 12
+    }
+  ],
+  "schemaVersion": 38,
+  "version": 1
+}

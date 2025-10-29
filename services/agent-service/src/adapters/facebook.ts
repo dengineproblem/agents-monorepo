@@ -19,7 +19,13 @@ const log = createLogger({ module: 'facebookAdapter' });
 //   return crypto.createHmac('sha256', FB_APP_SECRET).update(token).digest('hex');
 // }
 
-export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: string, params: Record<string, any> = {}) {
+export async function graph(
+  method: 'GET'|'POST'|'DELETE',
+  path: string,
+  token: string,
+  params: Record<string, any> = {},
+  context: Record<string, any> = {}
+) {
   const usp = new URLSearchParams();
   usp.set('access_token', token);
   // НЕ используем appsecret_proof - токены могут быть от других приложений
@@ -41,6 +47,8 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
 
   const text = await res.text();
   let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+  const scopedLog = context && Object.keys(context).length > 0 ? log.child(context) : log;
+
   if (!res.ok) {
     const g = json?.error || {};
     const err: any = new Error(g?.message || text || `HTTP ${res.status}`);
@@ -51,7 +59,7 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
       type: g?.type, code: g?.code, error_subcode: g?.error_subcode, fbtrace_id: g?.fbtrace_id
     };
     const resolution = resolveFacebookError(err.fb);
-    log.error({ meta: err.fb, resolution }, 'Graph API request failed');
+    scopedLog.error({ meta: err.fb, resolution }, 'Graph API request failed');
     err.resolution = resolution;
     throw err;
   }
