@@ -186,9 +186,7 @@ services:
     image: evoapicloud/evolution-manager:latest
     container_name: evolution-manager
     ports:
-      - "8081:80"
-    environment:
-      - VITE_API_URL=https://app.performanteaiagency.com/evolution
+      - "3003:80"
     restart: unless-stopped
 
 volumes:
