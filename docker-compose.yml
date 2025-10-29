@@ -128,6 +128,8 @@ services:
     restart: unless-stopped
 
   # Evolution API - WhatsApp integration
+  # ВАЖНО: Образ собран локально из исходников GitHub (v2.3.6)
+  # Обновление: cd ~/evolution-api && git checkout NEW_VERSION && docker build -t atendai/evolution-api:NEW_VERSION .
   evolution-api:
     image: atendai/evolution-api:2.3.6
     container_name: evolution-api
@@ -137,7 +139,7 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     sysctls:
-      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.all.disable_ipv6=1  # Отключен для стабильности WhatsApp подключения
     environment:
       - SERVER_URL=https://evolution.performanteaiagency.com
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY}
