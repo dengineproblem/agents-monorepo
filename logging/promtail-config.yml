@@ -32,6 +32,21 @@ scrape_configs:
       - template:
           source: environment
           template: '{{ if .Value }}{{ .Value }}{{ else }}{{ getenv "PROMTAIL_ENVIRONMENT" }}{{ end }}'
+            where:
+            phase:
+            userId:
+            automationId:
+            executionId:
+            campaign_id:
+            campaignId:
+            adset_id:
+            adsetId:
+            worker:
+            job:
+            jobName:
+            alertType:
+            taskId:
+            cron:
       - labels:
           level:
           environment:
@@ -44,6 +59,21 @@ scrape_configs:
           directionName:
           objective:
           workflow:
+          where:
+          phase:
+          userId:
+          automationId:
+          executionId:
+          campaign_id:
+          campaignId:
+          adset_id:
+          adsetId:
+          worker:
+          job:
+          jobName:
+          alertType:
+          taskId:
+          cron:
       - static_labels:
           job: docker-logs
     static_configs:
