@@ -4,7 +4,7 @@
  * Webhook для автоматического запуска рекламы с фронтенда
  */
 
-import { FastifyPluginAsync } from 'fastify';
+import { type FastifyRequest, FastifyPluginAsync } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import {
   buildCampaignAction,
@@ -25,7 +25,16 @@ import {
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
 
-const log = createLogger({ module: 'campaignBuilderRoutes' });
+const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
+
+function getWorkflowLogger(request: FastifyRequest, workflow: string) {
+  const parent = (request?.log as any) ?? baseLog;
+  const child = parent.child({ module: 'campaignBuilderRoutes', workflow });
+  if (request) {
+    (request as any).log = child;
+  }
+  return child;
+}
 
 // ========================================
 // REQUEST SCHEMAS
@@ -82,6 +91,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       }
     },
     async (request, reply) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'autoLaunchV2');
       const body = request.body as {
         user_account_id?: string;
         userId?: string;
@@ -425,6 +435,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request: any, reply: any) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'manualLaunch');
       const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting } = request.body;
 
       log.info({
@@ -611,6 +622,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'legacyAutoLaunch');
       const body = request.body as {
         user_account_id?: string;
         userId?: string; // Алиас для обратной совместимости
@@ -872,6 +884,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       },
     },
     async (request, reply) => {
+      const log = getWorkflowLogger(request as FastifyRequest, 'preview');
       const body = request.body as CampaignBuilderInput;
 
       log.info({
@@ -917,6 +930,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
    * @query objective - whatsapp|instagram_traffic|site_leads (optional)
    */
   fastify.get('/available-creatives', async (request, reply) => {
+    const log = getWorkflowLogger(request as FastifyRequest, 'availableCreatives');
     const { user_account_id, objective } = request.query as {
       user_account_id?: string;
       objective?: CampaignObjective;
@@ -955,6 +969,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
    * @query user_account_id - UUID пользователя
    */
   fastify.get('/budget-constraints', async (request, reply) => {
+    const log = getWorkflowLogger(request as FastifyRequest, 'budgetConstraints');
     const { user_account_id } = request.query as { user_account_id?: string };
 
     if (!user_account_id) {

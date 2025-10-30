@@ -79,10 +79,10 @@ docker compose logs agent-brain --tail 50
 
 ### Обновление конфигурации Promtail
 
-После правок в `logging/promtail-config.yml` перезапустите сервис, чтобы Promtail перечитал конфигурацию:
+После правок в `logging/promtail-config.yml` перезапустите сервисы, чтобы Promtail перечитал конфигурацию, а Grafana подхватила новые панели:
 
 ```bash
-docker compose restart promtail
+docker compose restart promtail grafana
 ```
 
 Через пару секунд убедитесь, что Loki видит новые лейблы. Пример запроса с функцией `label_values`:
@@ -104,9 +104,9 @@ curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",l
 ### Grafana
 
 - Datasource Loki создаётся автоматически.
-- Дашборд «Campaign Builder Errors» показывает ошибки, их количество и подсказки.
+- Дашборд «Campaign Builder Workflow Overview» показывает ошибки и предупреждения Campaign Builder с разбивкой по `workflow` (например, `autoLaunchV2`, `manualLaunch`, `legacyAutoLaunch`). Используйте легенду или фильтры, чтобы быстро локализовать проблемный сценарий.
 - Дашборды «Agent Services Overview» и «Campaign Builder Drilldown» используют переменные `userAccountId`, `directionId`, `directionName`, `objective` и `workflow` — после обновления Promtail проверьте, что выпадающие списки подхватывают свежие значения и панели фильтруются по выбранным лейблам.
-- Можно применять фильтры по `userAccountId`, `directionId`, `directionName`, `objective`, `workflow`, `module`, `resolution.severity` (все поля подтягиваются как одноимённые лейблы в Loki).
+- В лог-панелях можно добавлять фильтры вида `{module="campaignBuilderRoutes", workflow="manualLaunch"}` или `{workflow!=""}` для поиска по конкретным workflow. Дополнительно доступны `userAccountId`, `directionId`, `directionName`, `objective`, `module`, `resolution.severity`.
 
 ## 6. Telegram-уведомления
 

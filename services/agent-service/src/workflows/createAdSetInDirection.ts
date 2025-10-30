@@ -1,9 +1,13 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
-import { createLogger } from '../lib/logger.js';
+import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
 
-const log = createLogger({ module: 'workflowCreateAdSetInDirection' });
+const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
+
+type WorkflowLoggerOptions = {
+  logger?: AppLogger;
+};
 
 type CreateAdSetInDirectionParams = {
   direction_id: string;
@@ -53,8 +57,12 @@ function toParams(obj: any): any {
 export async function workflowCreateAdSetInDirection(
   params: CreateAdSetInDirectionParams,
   context: CreateAdSetInDirectionContext,
-  accessToken: string
+  accessToken: string,
+  options: WorkflowLoggerOptions = {}
 ) {
+  const log = options.logger
+    ? options.logger.child({ module: 'workflowCreateAdSetInDirection' })
+    : baseLog;
   const {
     direction_id,
     user_creative_ids,

@@ -1,9 +1,13 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { getDefaultAdSettingsWithFallback, convertToFacebookTargeting } from '../lib/defaultSettings.js';
-import { createLogger } from '../lib/logger.js';
+import { createLogger, type AppLogger } from '../lib/logger.js';
 
-const log = createLogger({ module: 'creativeTestWorkflow' });
+const baseLog = createLogger({ module: 'creativeTestWorkflow' });
+
+type CreativeTestLoggerOptions = {
+  logger?: AppLogger;
+};
 
 // Вспомогательные функции (как в CreateCampaignWithCreative)
 function toParams(p: Record<string, any>) {
@@ -38,8 +42,12 @@ type CreativeTestContext = {
 export async function workflowStartCreativeTest(
   params: StartCreativeTestParams,
   context: CreativeTestContext,
-  accessToken: string
+  accessToken: string,
+  options: CreativeTestLoggerOptions = {}
 ) {
+  const log = options.logger
+    ? options.logger.child({ module: 'creativeTestWorkflow' })
+    : baseLog;
   const { user_creative_id, user_id } = params;
   const { ad_account_id, page_id, instagram_id } = context;
 
