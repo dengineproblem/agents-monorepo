@@ -991,84 +991,16 @@ export function convertActionToEnvelope(
 // ========================================
 
 /**
- * Получить дефолтные настройки для направления
+ * @deprecated Moved to settingsHelpers.ts - use getDirectionSettings() instead
+ * This export is kept for backward compatibility only
  */
-export async function getDefaultSettings(directionId: string) {
-  const { data, error } = await supabase
-    .from('default_ad_settings')
-    .select('*')
-    .eq('direction_id', directionId)
-    .maybeSingle();
-
-  if (error) {
-    log.error({ err: error, directionId }, 'Error fetching default settings');
-    return null;
-  }
-
-  return data;
-}
+export { getDirectionSettings as getDefaultSettings } from './settingsHelpers.js';
 
 /**
- * Построить таргетинг из дефолтных настроек
+ * @deprecated Moved to settingsHelpers.ts - use buildTargeting() from there instead
+ * This export is kept for backward compatibility only
  */
-export function buildTargeting(defaultSettings: any, objective: CampaignObjective) {
-  if (!defaultSettings) {
-    // Дефолтный таргетинг если настроек нет
-    return {
-      geo_locations: { countries: ['RU'] },
-      age_min: 18,
-      age_max: 65,
-    };
-  }
-
-  const targeting: any = {
-    age_min: defaultSettings.age_min || 18,
-    age_max: defaultSettings.age_max || 65,
-  };
-
-  // Пол
-  if (defaultSettings.gender && defaultSettings.gender !== 'all') {
-    targeting.genders = defaultSettings.gender === 'male' ? [1] : [2];
-  }
-
-  // Гео-локации (читаем из поля cities в БД)
-  if (defaultSettings.cities && Array.isArray(defaultSettings.cities) && defaultSettings.cities.length > 0) {
-    const countries: string[] = [];
-    const cities: string[] = [];
-    
-    for (const item of defaultSettings.cities) {
-      if (typeof item === 'string' && item.length === 2 && item === item.toUpperCase()) {
-        // 2 заглавные буквы = код страны (RU, KZ, BY, US)
-        countries.push(item);
-      } else {
-        // Все остальное = ID города
-        cities.push(item);
-      }
-    }
-    
-    targeting.geo_locations = {};
-    
-    if (countries.length > 0) {
-      targeting.geo_locations.countries = countries;
-    }
-    
-    if (cities.length > 0) {
-      targeting.geo_locations.cities = cities.map((cityId: string) => ({
-        key: cityId,
-      }));
-    }
-    
-    // Если ничего не распознано - по умолчанию Россия
-    if (countries.length === 0 && cities.length === 0) {
-      targeting.geo_locations.countries = ['RU'];
-    }
-  } else {
-    // Default: таргетинг на Россию
-    targeting.geo_locations = { countries: ['RU'] };
-  }
-
-  return targeting;
-}
+export { buildTargeting } from './settingsHelpers.js';
 
 /**
  * Получить optimization_goal для objective
@@ -1163,7 +1095,7 @@ export async function createAdSetInCampaign(params: {
   }
 
   // Для WhatsApp добавляем destination_type
-  if (optimization_goal === 'CONVERSATIONS' && promoted_object?.whatsapp_phone_number) {
+  if (optimization_goal === 'CONVERSATIONS') {
     body.destination_type = 'WHATSAPP';
   }
 

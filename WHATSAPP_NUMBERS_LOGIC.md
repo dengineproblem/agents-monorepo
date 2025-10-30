@@ -63,9 +63,12 @@ await supabase
 
 Когда система создает ad set для направления, она использует fallback логику:
 
-1. **Приоритет**: Номер из `direction.whatsapp_phone_number_id`
-2. **Fallback 1**: Дефолтный номер из `whatsapp_phone_numbers` (где `is_default = true`)
-3. **Fallback 2**: Legacy номер из `user_accounts.whatsapp_phone_number`
+1. **Приоритет 1**: Номер из `direction.whatsapp_phone_number_id`
+2. **Приоритет 2**: Дефолтный номер из Facebook Page (через Graph API)
+3. **Приоритет 3**: Дефолтный номер из `whatsapp_phone_numbers` (где `is_default = true`)
+4. **Приоритет 4**: Legacy номер из `user_accounts.whatsapp_phone_number`
+
+**ВАЖНО:** Если ни один номер не найден, функция `getWhatsAppPhoneNumber()` возвращает `null` (не выбрасывает ошибку). В этом случае поле `whatsapp_phone_number` **не передается** в Facebook API, и Facebook автоматически использует дефолтный номер WhatsApp со страницы.
 
 ```typescript
 // Пример из createAdSetInDirection.ts
@@ -102,6 +105,56 @@ if (!whatsappPhoneNumber) {
 if (!whatsappPhoneNumber && userAccount.whatsapp_phone_number) {
   whatsappPhoneNumber = userAccount.whatsapp_phone_number;
 }
+
+// 4. Если номер не найден - возвращаем null (не ошибку!)
+// Facebook сам использует дефолтный номер со страницы
+return whatsappPhoneNumber; // может быть null
+```
+
+### 4. Передача номера в Facebook API (Spread Operator)
+
+При создании `promoted_object` для ad set используется **spread operator**, чтобы поле `whatsapp_phone_number` добавлялось только если номер найден:
+
+```typescript
+// В Creative Test, Manual Launch, Auto-Launch V2
+const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_id, supabase) || undefined;
+
+const promoted_object = {
+  page_id: userAccount.page_id,
+  ...(whatsapp_phone_number && { whatsapp_phone_number }) // Добавляется только если есть
+};
+```
+
+**Почему это важно:**
+- Если `whatsapp_phone_number` === `null` или `undefined` → поле НЕ добавляется в объект
+- Facebook получает `promoted_object` без поля `whatsapp_phone_number`
+- Facebook автоматически использует дефолтный WhatsApp номер настроенный на странице
+
+### 5. КРИТИЧЕСКОЕ: destination_type для WhatsApp кампаний
+
+**ВАЖНО:** Для всех ad sets с `optimization_goal: 'CONVERSATIONS'` **ОБЯЗАТЕЛЬНО** должно быть указано `destination_type: 'WHATSAPP'`, **независимо от наличия whatsapp_phone_number**.
+
+```typescript
+// В campaignBuilder.ts createAdSetInCampaign()
+if (optimization_goal === 'CONVERSATIONS') {
+  body.destination_type = 'WHATSAPP'; // ВСЕГДА добавляем!
+}
+
+if (promoted_object) {
+  body.promoted_object = promoted_object; // может содержать или не содержать whatsapp_phone_number
+}
+```
+
+**Баг который был исправлен (2025-10-30):**
+Ранее `destination_type` добавлялся только если `promoted_object?.whatsapp_phone_number` существует:
+```typescript
+// НЕПРАВИЛЬНО (старый код):
+if (optimization_goal === 'CONVERSATIONS' && promoted_object?.whatsapp_phone_number) {
+  body.destination_type = 'WHATSAPP';
+}
+```
+
+Это вызывало ошибку Facebook API: **"Invalid parameter - optimization_goal недоступна"**, потому что `CONVERSATIONS` требует `destination_type: 'WHATSAPP'` даже без явно указанного номера.
 ```
 
 ## Структура базы данных

@@ -4,6 +4,7 @@ import axios from 'axios';
 import { supabase } from '../lib/supabase.js';
 import { workflowStartCreativeTest, fetchCreativeTestInsights } from '../workflows/creativeTest.js';
 import { graph } from '../adapters/facebook.js';
+import { getWhatsAppPhoneNumber } from '../lib/settingsHelpers.js';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
@@ -55,68 +56,29 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         .eq('id', user_creative_id)
         .single();
 
-      // Получаем WhatsApp номер с приоритетом направления
-      let whatsapp_phone_number = null;
-      
-      if (creative?.direction_id) {
-        // 1. Приоритет: номер из направления
-        const { data: direction } = await supabase
-          .from('account_directions')
-          .select('whatsapp_phone_number_id')
-          .eq('id', creative.direction_id)
-          .single();
-        
-        if (direction?.whatsapp_phone_number_id) {
-          const { data: phoneNumber } = await supabase
-            .from('whatsapp_phone_numbers')
-            .select('phone_number')
-            .eq('id', direction.whatsapp_phone_number_id)
-            .eq('is_active', true)
-            .single();
-          
-          whatsapp_phone_number = phoneNumber?.phone_number;
-          
-          if (whatsapp_phone_number) {
-            app.log.info({ 
-              creativeId: user_creative_id,
-              directionId: creative.direction_id,
-              phone_number: whatsapp_phone_number, 
-              source: 'direction' 
-            }, 'Using WhatsApp number from direction for test');
-          }
-        }
+      if (!creative || !creative.direction_id) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Creative not found or has no direction'
+        });
       }
-      
-      // 2. Fallback: дефолтный номер пользователя
-      if (!whatsapp_phone_number) {
-        const { data: defaultNumber } = await supabase
-          .from('whatsapp_phone_numbers')
-          .select('phone_number')
-          .eq('user_account_id', user_id)
-          .eq('is_default', true)
-          .eq('is_active', true)
-          .single();
-        
-        whatsapp_phone_number = defaultNumber?.phone_number;
-        
-        if (whatsapp_phone_number) {
-          app.log.info({ 
-            creativeId: user_creative_id,
-            phone_number: whatsapp_phone_number, 
-            source: 'default' 
-          }, 'Using default WhatsApp number for test');
-        }
+
+      // Получаем direction для WhatsApp fallback
+      const { data: direction } = await supabase
+        .from('account_directions')
+        .select('*')
+        .eq('id', creative.direction_id)
+        .single();
+
+      if (!direction) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Direction not found'
+        });
       }
-      
-      // 3. Fallback: старый номер из user_accounts (обратная совместимость)
-      if (!whatsapp_phone_number && userAccount?.whatsapp_phone_number) {
-        whatsapp_phone_number = userAccount.whatsapp_phone_number;
-        app.log.info({ 
-          creativeId: user_creative_id,
-          phone_number: whatsapp_phone_number, 
-          source: 'user_accounts' 
-        }, 'Using legacy WhatsApp number for test');
-      }
+
+      // Получаем WhatsApp номер с 4-tier fallback (может вернуть null)
+      const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_id, supabase) || undefined;
 
       // Проверяем, не запускался ли тест ранее
       const { data: existingTests, error: existingError } = await supabase

@@ -12,8 +12,6 @@ import {
   getActiveCampaigns,
   pauseActiveCampaigns,
   getAvailableCreatives,
-  getDefaultSettings,
-  buildTargeting,
   getOptimizationGoal,
   getBillingEvent,
   createAdSetInCampaign,
@@ -22,6 +20,11 @@ import {
   type CampaignObjective,
   pauseAdSetsForCampaign,
 } from '../lib/campaignBuilder.js';
+import {
+  getDirectionSettings,
+  buildTargeting,
+  getWhatsAppPhoneNumber
+} from '../lib/settingsHelpers.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
 
@@ -220,12 +223,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
           try {
             // Получаем дефолтные настройки направления
-            const defaultSettings = await getDefaultSettings(direction.id);
+            const defaultSettings = await getDirectionSettings(direction.id);
             log.info({
               directionId: direction.id,
               hasDefaultSettings: Boolean(defaultSettings),
               userAccountId: user_account_id,
-            userAccountName: userAccount.username
+              userAccountName: userAccount.username
             }, 'Default settings status');
 
             // Строим таргетинг (используем objective направления)
@@ -237,68 +240,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
             // Формируем promoted_object в зависимости от objective направления
             let promoted_object;
-            
+
             if (direction.objective === 'whatsapp') {
-              // Получаем WhatsApp номер с приоритетом направления
-              let whatsapp_phone_number = null;
-              
-              // 1. Приоритет: номер из направления
-              if (direction.whatsapp_phone_number_id) {
-                const { data: phoneNumber } = await supabase
-                  .from('whatsapp_phone_numbers')
-                  .select('phone_number')
-                  .eq('id', direction.whatsapp_phone_number_id)
-                  .eq('is_active', true)
-                  .single();
-                
-                whatsapp_phone_number = phoneNumber?.phone_number;
-                
-                if (whatsapp_phone_number) {
-                  log.info({ 
-                    directionId: direction.id, 
-                    phone_number: whatsapp_phone_number, 
-                    source: 'direction' 
-                  }, 'Using WhatsApp number from direction');
-                }
-              }
-              
-              // 2. Fallback: дефолтный номер пользователя
-              if (!whatsapp_phone_number) {
-                const { data: defaultNumber } = await supabase
-                  .from('whatsapp_phone_numbers')
-                  .select('phone_number')
-                  .eq('user_account_id', user_account_id)
-                  .eq('is_default', true)
-                  .eq('is_active', true)
-                  .single();
-                
-                whatsapp_phone_number = defaultNumber?.phone_number;
-                
-                if (whatsapp_phone_number) {
-                  log.info({ 
-                    directionId: direction.id, 
-                    phone_number: whatsapp_phone_number, 
-                    source: 'default' 
-                  }, 'Using default WhatsApp number');
-                }
-              }
-              
-              // 3. Fallback: старый номер из user_accounts (обратная совместимость)
-              if (!whatsapp_phone_number && userAccount?.whatsapp_phone_number) {
-                whatsapp_phone_number = userAccount.whatsapp_phone_number;
-                log.info({ 
-                  directionId: direction.id, 
-                  phone_number: whatsapp_phone_number, 
-                  source: 'user_accounts' 
-                }, 'Using legacy WhatsApp number');
-              }
-              
-              if (whatsapp_phone_number) {
-                promoted_object = {
-                  page_id: userAccount.page_id,
-                  whatsapp_phone_number,
-                };
-              }
+              // Получаем WhatsApp номер с 4-tier fallback (может вернуть null)
+              const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+              promoted_object = {
+                page_id: userAccount.page_id,
+                ...(whatsapp_phone_number && { whatsapp_phone_number })
+              };
             } else if (direction.objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
               promoted_object = {
                 link: defaultSettings.instagram_url,
@@ -509,7 +458,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         log.info({ creativeCount: creatives.length }, 'Found creatives for manual launch');
 
         // Получаем дефолтные настройки направления (если не переопределены)
-        const defaultSettings = await getDefaultSettings(direction_id);
+        const defaultSettings = await getDirectionSettings(direction_id);
         const finalBudget = daily_budget_cents || direction.daily_budget_cents;
         const finalTargeting = targeting || buildTargeting(defaultSettings, direction.objective);
 
@@ -519,10 +468,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         // Формируем promoted_object
         let promoted_object;
-        if (direction.objective === 'whatsapp' && userAccount.whatsapp_phone_number) {
+        if (direction.objective === 'whatsapp') {
+          // Получаем WhatsApp номер с 4-tier fallback (может вернуть null)
+          const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
           promoted_object = {
             page_id: userAccount.page_id,
-            whatsapp_phone_number: userAccount.whatsapp_phone_number,
+            ...(whatsapp_phone_number && { whatsapp_phone_number })
           };
         } else if (direction.objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
           promoted_object = {
