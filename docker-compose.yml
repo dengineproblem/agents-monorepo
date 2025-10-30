@@ -100,7 +100,7 @@ services:
     image: grafana/promtail:2.9.1
     command: ["-config.file=/etc/promtail/promtail-config.yml"]
     environment:
-      - ENVIRONMENT=development
+      - PROMTAIL_ENVIRONMENT=development
     volumes:
       - ./logging/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro

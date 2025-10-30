@@ -29,6 +29,9 @@ scrape_configs:
             requestId:
             err:
             resolution:
+      - template:
+          source: environment
+          template: '{{ if .Value }}{{ .Value }}{{ else }}{{ getenv "PROMTAIL_ENVIRONMENT" }}{{ end }}'
       - labels:
           level:
           environment:
@@ -43,7 +46,6 @@ scrape_configs:
           workflow:
       - static_labels:
           job: docker-logs
-          environment: development
     static_configs:
       - targets:
           - localhost
