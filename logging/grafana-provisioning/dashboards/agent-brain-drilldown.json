@@ -1,0 +1,146 @@
+{
+  "id": null,
+  "title": "Agent Brain Drilldown",
+  "uid": "agentbrain-drill",
+  "tags": ["agent-brain", "autolaunch"],
+  "timezone": "",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "where",
+        "type": "query",
+        "datasource": "Loki",
+        "definition": "label_values({job=\"docker-logs\"}, \"where\")",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1
+      },
+      {
+        "name": "phase",
+        "type": "query",
+        "datasource": "Loki",
+        "definition": "label_values({job=\"docker-logs\",where=~\"$where\"}, \"phase\")",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 2
+      },
+      {
+        "name": "userId",
+        "type": "query",
+        "datasource": "Loki",
+        "definition": "label_values({job=\"docker-logs\",where=~\"$where\"}, \"userId\")",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 3
+      },
+      {
+        "name": "requestId",
+        "type": "query",
+        "datasource": "Loki",
+        "definition": "label_values({job=\"docker-logs\",where=~\"$where\"}, \"requestId\")",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 4
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Agent Brain",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries",
+      "title": "Events by Phase",
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 1},
+      "targets": [
+        {
+          "expr": "sum by (phase) (count_over_time({service=\"agent-brain\",where=~\"$where\",phase=~\"$phase\",userId=~\"$userId\",requestId=~\"$requestId\"}[$__interval]))",
+          "legendFormat": "{{phase}}"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Errors (Agent Brain)",
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 1},
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service=\"agent-brain\",level=\"error\",where=~\"$where\",phase=~\"$phase\",userId=~\"$userId\",requestId=~\"$requestId\"}[$__range]))"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Agent Brain Logs",
+      "datasource": "Loki",
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 9},
+      "targets": [
+        {
+          "expr": "{service=\"agent-brain\",where=~\"$where\",phase=~\"$phase\",userId=~\"$userId\",requestId=~\"$requestId\"}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Cron Workers",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 19}
+    },
+    {
+      "type": "logs",
+      "title": "Cron Worker Activity",
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {
+          "expr": "{service=\"agent-service\",module=~\".*cron.*\"}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cron Errors",
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {
+          "expr": "sum by (module) (count_over_time({service=\"agent-service\",module=~\".*cron.*\",level=\"error\"}[$__interval]))",
+          "legendFormat": "{{module}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Log Alerts",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 28}
+    },
+    {
+      "type": "logs",
+      "title": "Log Alerts Worker",
+      "datasource": "Loki",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 29},
+      "targets": [
+        {
+          "expr": "{service=\"agent-brain\",module=~\"logAlerts.*\"}"
+        }
+      ]
+    }
+  ]
+}
