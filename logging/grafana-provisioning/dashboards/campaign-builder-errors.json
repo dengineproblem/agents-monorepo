@@ -1,6 +1,6 @@
 {
   "id": null,
-  "title": "Campaign Builder Errors",
+  "title": "Campaign Builder Workflow Overview",
   "time": {
     "from": "now-6h",
     "to": "now"
@@ -8,27 +8,51 @@
   "panels": [
     {
       "type": "timeseries",
-      "title": "Errors by Service",
+      "title": "Errors by Workflow",
+      "description": "Количество ошибок за 5 минут с группировкой по значению workflow.",
       "targets": [
         {
-          "expr": "count_over_time({level=\"error\"}[5m])",
-          "legendFormat": "{{service}}"
+          "expr": "sum by (workflow) (count_over_time({module=\"campaignBuilderRoutes\",level=\"error\"}[5m]))",
+          "legendFormat": "{{workflow}}"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "timeseries",
+      "title": "Warnings by Workflow",
+      "description": "Количество предупреждений за 5 минут для каждого workflow.",
+      "targets": [
+        {
+          "expr": "sum by (workflow) (count_over_time({module=\"campaignBuilderRoutes\",level=\"warn\"}[5m]))",
+          "legendFormat": "{{workflow}}"
         }
       ],
       "span": 12
     },
     {
       "type": "table",
-      "title": "Recent Facebook Errors",
+      "title": "Recent Campaign Builder Errors",
+      "description": "Последние ошибки Campaign Builder с указанием workflow и подсказок Facebook.",
       "targets": [
         {
-          "expr": "{module=\"campaignBuilderRoutes\"} |= \"fb\" | logfmt"
+          "expr": "{module=\"campaignBuilderRoutes\",level=\"error\",workflow!=\"\"} | logfmt"
+        }
+      ],
+      "span": 12
+    },
+    {
+      "type": "table",
+      "title": "Recent Campaign Builder Warnings",
+      "description": "Свежие предупреждения с лейблом workflow для быстрой диагностики.",
+      "targets": [
+        {
+          "expr": "{module=\"campaignBuilderRoutes\",level=\"warn\",workflow!=\"\"} | logfmt"
         }
       ],
       "span": 12
     }
   ],
   "schemaVersion": 38,
-  "version": 1
+  "version": 2
 }
-

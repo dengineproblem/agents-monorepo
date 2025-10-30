@@ -82,10 +82,10 @@ docker compose logs agent-brain --tail 50
 
 ### Обновление конфигурации Promtail
 
-После правок в `logging/promtail-config.yml` перезапустите сервис, чтобы Promtail перечитал конфигурацию:
+После правок в `logging/promtail-config.yml` перезапустите сервисы, чтобы Promtail перечитал конфигурацию, а Grafana подхватила новые панели:
 
 ```bash
-docker compose restart promtail
+docker compose restart promtail grafana
 ```
 
 После обновления лейблов или Grafana-дэшбордов перезапустите также интерфейс визуализации:
@@ -113,8 +113,9 @@ curl "http://localhost:3100/loki/api/v1/query?query={service=\"agent-service\",l
 ### Grafana
 
 - Datasource Loki создаётся автоматически.
-- Дашборд «Campaign Builder Errors» показывает ошибки, их количество и подсказки.
+- Дашборд «Campaign Builder Workflow Overview» показывает ошибки и предупреждения Campaign Builder с разбивкой по `workflow` (например, `autoLaunchV2`, `manualLaunch`, `legacyAutoLaunch`). Используйте легенду или фильтры, чтобы быстро локализовать проблемный сценарий.
 - Дашборды «Agent Services Overview» и «Campaign Builder Drilldown» используют переменные `userAccountId`, `directionId`, `directionName`, `objective` и `workflow` — после обновления Promtail проверьте, что выпадающие списки подхватывают свежие значения и панели фильтруются по выбранным лейблам.
+- В лог-панелях можно добавлять фильтры вида `{module="campaignBuilderRoutes", workflow="manualLaunch"}` или `{workflow!=""}` для поиска по конкретным workflow. Дополнительно доступны `userAccountId`, `directionId`, `directionName`, `objective`, `module`, `resolution.severity`.
 - Новый дашборд «Agent Brain Drilldown» (папка **Logging**) добавляет шаблонные переменные `where`, `phase`, `userId`, `requestId`, что позволяет быстро фильтровать конкретный запуск Brain Agent или автозапуска. Панели «Events by Phase» и «Agent Brain Logs» используют выбранные фильтры.
 - В разделах «Cron Workers» и «Log Alerts» того же дашборда вынесены отдельные панели: одна показывает активность воркеров (модули `cron*`), другая — процесс `logAlerts`. Используйте их для диагностики периодических задач и Telegram-алертов без переключения между обзорами.
 - Можно применять фильтры по `userAccountId`, `directionId`, `directionName`, `objective`, `workflow`, `where`, `phase`, `userId`, `requestId`, `module`, `resolution.severity` (все поля подтягиваются как одноимённые лейблы в Loki).
