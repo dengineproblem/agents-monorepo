@@ -29,6 +29,21 @@ scrape_configs:
             requestId:
             err:
             resolution:
+            where:
+            phase:
+            userId:
+            automationId:
+            executionId:
+            campaign_id:
+            campaignId:
+            adset_id:
+            adsetId:
+            worker:
+            job:
+            jobName:
+            alertType:
+            taskId:
+            cron:
       - labels:
           level:
           environment:
@@ -41,6 +56,21 @@ scrape_configs:
           directionName:
           objective:
           workflow:
+          where:
+          phase:
+          userId:
+          automationId:
+          executionId:
+          campaign_id:
+          campaignId:
+          adset_id:
+          adsetId:
+          worker:
+          job:
+          jobName:
+          alertType:
+          taskId:
+          cron:
       - static_labels:
           job: docker-logs
           environment: development
