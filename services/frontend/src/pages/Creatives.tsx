@@ -151,6 +151,27 @@ const getDirectionColor = (directionId: string): string => {
   return colors[index];
 };
 
+// Генерация цвета кружка (hex) для направления
+const getDirectionDotColor = (directionId: string): string => {
+  const colors = [
+    "#6B7280", // gray
+    "#10B981", // emerald
+    "#A855F7", // purple
+    "#F59E0B", // amber
+    "#EC4899", // pink
+    "#06B6D4", // cyan
+    "#6366F1", // indigo
+    "#F43F5E", // rose
+  ];
+
+  let hash = 0;
+  for (let i = 0; i < directionId.length; i++) {
+    hash = directionId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % colors.length;
+  return colors[index];
+};
+
 // Компонент Badge с быстрым выбором направления
 type DirectionBadgeProps = {
   creative: UserCreative;
@@ -178,18 +199,35 @@ const DirectionBadge: React.FC<DirectionBadgeProps> = ({
       <PopoverTrigger asChild>
         <div onClick={(e) => e.stopPropagation()}>
           {currentDirection ? (
-            <Badge 
-              className={`${getDirectionColor(currentDirection.id)} text-xs px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap`}
-            >
-              {currentDirection.name}
-            </Badge>
+            <>
+              {/* Мобильная версия: цветной кружок */}
+              <div
+                className="sm:hidden w-3 h-3 rounded-full cursor-pointer hover:opacity-80 transition-opacity"
+                style={{ backgroundColor: getDirectionDotColor(currentDirection.id) }}
+                title={currentDirection.name}
+              />
+              {/* Десктопная версия: полное название */}
+              <Badge
+                className={`hidden sm:inline-flex ${getDirectionColor(currentDirection.id)} text-xs px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap`}
+              >
+                {currentDirection.name}
+              </Badge>
+            </>
           ) : (
-            <Badge 
-              variant="outline" 
-              className="text-xs px-2 py-0.5 text-muted-foreground border-dashed cursor-pointer hover:bg-muted/50 transition-colors whitespace-nowrap"
-            >
-              Без направления
-            </Badge>
+            <>
+              {/* Мобильная версия: серый кружок */}
+              <div
+                className="sm:hidden w-3 h-3 rounded-full border border-dashed border-gray-400 cursor-pointer hover:bg-muted/50 transition-colors"
+                title="Без направления"
+              />
+              {/* Десктопная версия: полное название */}
+              <Badge
+                variant="outline"
+                className="hidden sm:inline-flex text-xs px-2 py-0.5 text-muted-foreground border-dashed cursor-pointer hover:bg-muted/50 transition-colors whitespace-nowrap"
+              >
+                Без направления
+              </Badge>
+            </>
           )}
         </div>
       </PopoverTrigger>
@@ -215,7 +253,10 @@ const DirectionBadge: React.FC<DirectionBadgeProps> = ({
                 onClick={() => handleDirectionSelect(dir.id)}
                 className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted transition-colors flex items-center gap-2"
               >
-                <div className={`w-2 h-2 rounded-full ${getDirectionColor(dir.id)}`} />
+                <div
+                  className="w-2 h-2 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: getDirectionDotColor(dir.id) }}
+                />
                 <span className="flex-1 truncate">{dir.name}</span>
                 <span className="text-xs text-muted-foreground">
                   {OBJECTIVE_LABELS[dir.objective]}
@@ -249,6 +290,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   const [analytics, setAnalytics] = useState<CreativeAnalytics | null>(null);
   const [quickTestLoading, setQuickTestLoading] = useState(false);
   const [stopTestLoading, setStopTestLoading] = useState(false);
+  const [refreshLoading, setRefreshLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -327,12 +369,47 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   // Demo mode пока отключаем, т.к. новый API предоставляет реальные данные
   // TODO: если нужен demo mode, можно создать mock analytics объект
 
-  // Realtime подписку убираем - новый API работает через polling/force refresh
-  // В будущем можно добавить периодическое обновление
+  // Polling для обновления аналитики когда тест запущен
   useEffect(() => {
-    if (!analytics) return;
-    // TODO: Добавить периодическое обновление аналитики если нужно
-  }, [analytics]);
+    if (!analytics?.test?.exists) return;
+    if (analytics.test.status !== 'running') return;
+
+    console.log('[CreativeDetails] Запуск polling для running теста');
+
+    // Обновляем analytics каждые 30 секунд
+    const intervalId = setInterval(async () => {
+      console.log('[CreativeDetails] Polling: обновление аналитики...');
+      try {
+        const storedUser = localStorage.getItem('user');
+        if (!storedUser) return;
+
+        const userData = JSON.parse(storedUser);
+        const userId = userData.id;
+        if (!userId) return;
+
+        const updatedAnalytics = await getCreativeAnalytics(creativeId, userId);
+        setAnalytics(updatedAnalytics);
+
+        console.log('[CreativeDetails] Polling: аналитика обновлена', {
+          test_status: updatedAnalytics.test?.status,
+          impressions: updatedAnalytics.test?.metrics?.impressions,
+        });
+
+        // Останавливаем polling если тест завершился
+        if (updatedAnalytics.test?.status !== 'running') {
+          console.log('[CreativeDetails] Тест завершён, останавливаем polling');
+          clearInterval(intervalId);
+        }
+      } catch (error) {
+        console.error('[CreativeDetails] Polling: ошибка обновления', error);
+      }
+    }, 30000); // 30 секунд
+
+    return () => {
+      console.log('[CreativeDetails] Очистка polling interval');
+      clearInterval(intervalId);
+    };
+  }, [analytics?.test?.exists, analytics?.test?.status, creativeId]);
 
   const mockTranscript = `Демо-скрипт:\n1. Представление оффера\n2. Преимущества продукта\n3. Призыв к действию`;
 
@@ -456,7 +533,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       return;
     }
     if (!analytics?.test?.exists) return;
-    
+
     setStopTestLoading(true);
     try {
       const storedUser = localStorage.getItem('user');
@@ -495,6 +572,41 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       toast.error('Ошибка при остановке теста');
     } finally {
       setStopTestLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshLoading(true);
+    setLoadError(null);
+    try {
+      console.log('[CreativeDetails] Ручное обновление данных...');
+
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) {
+        toast.error('Пользователь не авторизован');
+        return;
+      }
+
+      const userData = JSON.parse(storedUser);
+      const userId = userData.id;
+
+      if (!userId) {
+        toast.error('ID пользователя не найден');
+        return;
+      }
+
+      // Принудительное обновление с force=true для игнорирования кеша
+      const updatedAnalytics = await getCreativeAnalytics(creativeId, userId, true);
+      setAnalytics(updatedAnalytics);
+
+      console.log('[CreativeDetails] Данные успешно обновлены');
+      toast.success('Данные обновлены');
+    } catch (error) {
+      console.error('[CreativeDetails] Ошибка обновления данных:', error);
+      toast.error('Не удалось обновить данные');
+      setLoadError('Ошибка обновления данных');
+    } finally {
+      setRefreshLoading(false);
     }
   };
 
@@ -632,6 +744,25 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
             )}
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="w-full sm:w-auto gap-2"
+          onClick={handleRefresh}
+          disabled={refreshLoading}
+        >
+          {refreshLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Обновление...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-4 w-4" />
+              Обновить
+            </>
+          )}
+        </Button>
       </div>
 
       {loadError && (
@@ -1134,20 +1265,28 @@ const Creatives: React.FC = () => {
                     <AccordionItem key={it.id} value={it.id}>
                       <div className="flex items-center justify-between w-full py-2 gap-4">
                         <div className="min-w-0 flex-1 flex items-center gap-2">
-                          <AccordionTrigger className="hover:no-underline w-auto flex-shrink-0">
-                            <div className="font-medium text-left" title={it.title}>{it.title}</div>
+                          <AccordionTrigger className="hover:no-underline min-w-0">
+                            <div className="font-medium text-left truncate max-w-[200px] sm:max-w-none" title={it.title}>{it.title}</div>
                           </AccordionTrigger>
-                          
+
                           {/* Индикатор статуса теста */}
-                          <TestStatusIndicator status={testStatuses[it.id]?.status} />
-                          
+                          <div className="flex-shrink-0">
+                            <TestStatusIndicator
+                              status={testStatuses[it.id]?.status}
+                              impressions={testStatuses[it.id]?.impressions}
+                              limit={1000}
+                            />
+                          </div>
+
                           {/* Badge с направлением */}
-                          <DirectionBadge
-                            creative={it}
-                            currentDirection={currentDirection}
-                            directions={directions}
-                            onDirectionChange={handleDirectionChange}
-                          />
+                          <div className="flex-shrink-0">
+                            <DirectionBadge
+                              creative={it}
+                              currentDirection={currentDirection}
+                              directions={directions}
+                              onDirectionChange={handleDirectionChange}
+                            />
+                          </div>
                         </div>
                         <div className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
                           {format(new Date(it.created_at), 'yyyy-MM-dd')}

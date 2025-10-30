@@ -101,74 +101,35 @@ export async function upsertDefaultAdSettings(
 
 /**
  * Преобразовать настройки в формат для Facebook API таргетинга
+ * @deprecated Use buildTargeting() from settingsHelpers.ts instead
+ * This function is kept for backward compatibility and now uses the new implementation internally
  */
 export function convertToFacebookTargeting(settings: DefaultAdSettings) {
-  const targeting: any = {
-    age_min: settings.age_min,
-    age_max: settings.age_max,
-  };
-
-  // Пол
-  if (settings.gender === 'male') {
-    targeting.genders = [1]; // Male
-  } else if (settings.gender === 'female') {
-    targeting.genders = [2]; // Female
-  }
-  // Если 'all' - не указываем genders
-
-  // Гео таргетинг - умная логика
-  if (settings.geo_locations && Object.keys(settings.geo_locations).length > 0) {
-    // Если есть готовый geo_locations (новый формат) - используем напрямую
-    targeting.geo_locations = settings.geo_locations;
-  } else if (settings.cities && settings.cities.length > 0) {
-    // Автоопределение: страны или города?
-    const countries: string[] = [];
-    const cities: string[] = [];
-    
-    for (const item of settings.cities) {
-      if (item.length === 2 && /^[A-Z]{2}$/.test(item)) {
-        // 2 заглавные буквы = код страны (RU, KZ, BY, US)
-        countries.push(item);
-      } else {
-        // Все остальное = ID города
-        cities.push(item);
-      }
-    }
-    
-    targeting.geo_locations = {};
-    
-    if (countries.length > 0) {
-      targeting.geo_locations.countries = countries;
-    }
-    
-    if (cities.length > 0) {
-      targeting.geo_locations.cities = cities.map(cityId => ({
-        key: cityId
-      }));
-    }
-    
-    // Если ничего не распознано - по умолчанию Россия
-    if (countries.length === 0 && cities.length === 0) {
-      targeting.geo_locations.countries = ['RU'];
-    }
-  } else {
-    // Default: таргетинг на Россию
-    targeting.geo_locations = {
-      countries: ['RU']
-    };
-  }
-
-  return targeting;
+  // Import здесь для избежания циклических зависимостей
+  const { buildTargeting } = require('./settingsHelpers.js');
+  return buildTargeting(settings, settings.campaign_goal);
 }
 
 /**
  * Получить дефолтные настройки с фолбеком
  * Если нет в БД - возвращает стандартные значения
+ *
+ * @deprecated This function uses old logic (user_id + campaign_goal) from before migration 010.
+ * New code should use getDirectionSettings(direction_id) from settingsHelpers.ts instead.
+ * This function is kept only for backward compatibility with legacy workflows.
+ *
+ * WARNING: This will return fallback settings with RU targeting if no settings found,
+ * which may cause errors for users with Russia restrictions.
  */
 export async function getDefaultAdSettingsWithFallback(
   userId: string,
   campaignGoal: CampaignGoal
 ): Promise<DefaultAdSettings> {
+  console.warn(
+    '[DEPRECATED] getDefaultAdSettingsWithFallback() uses old user_id logic. ' +
+    'Consider migrating to getDirectionSettings(direction_id) from settingsHelpers.ts'
+  );
+
   const settings = await getDefaultAdSettings(userId, campaignGoal);
 
   if (settings) {
@@ -185,8 +146,8 @@ export async function getDefaultAdSettingsWithFallback(
     age_max: 65,
     gender: 'all',
     description: 'Напишите нам, чтобы узнать подробности',
-    client_question: campaignGoal === 'whatsapp' 
-      ? 'Здравствуйте! Хочу узнать об этом подробнее.' 
+    client_question: campaignGoal === 'whatsapp'
+      ? 'Здравствуйте! Хочу узнать об этом подробнее.'
       : undefined,
     utm_tag: campaignGoal === 'site_leads'
       ? 'utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.name}}'

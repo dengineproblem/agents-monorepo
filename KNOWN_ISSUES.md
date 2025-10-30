@@ -2,9 +2,10 @@
 
 ## 1. Creative Test UI - Cancel Button Not Showing
 
-**Status:** 🔴 Not Fixed
+**Status:** 🟢 Partially Fixed (2025-10-30)
 **Priority:** High
 **Date Reported:** 2025-10-30
+**Date Fixed:** 2025-10-30 (Partial)
 **Affected:** Frontend UI for creative tests
 
 ### Symptom
@@ -89,6 +90,11 @@ if (data.length > 0) {
 - User must refresh page to see status updates
 - No polling or real-time subscription mechanism
 
+**✅ FIXED:** Added Supabase Realtime subscription (2025-10-30)
+- Real-time updates when test status changes
+- No page refresh needed
+- See `SESSION_2025-10-30_UI_IMPROVEMENTS.md` for details
+
 ### Workaround
 
 Currently **NO WORKAROUND** available in UI. User must:
@@ -112,11 +118,13 @@ Currently **NO WORKAROUND** available in UI. User must:
 - Frontend loads test status independently from analytics
 - Show Cancel button based on this status, not analytics
 
-**Additional Improvements:**
-1. Add polling to refresh test statuses every 30 seconds
-2. Use Supabase Realtime subscriptions for instant updates
-3. Show test progress (impressions, spend) instead of just spinner
-4. Add manual "Refresh" button for status updates
+**Additional Improvements (ALL IMPLEMENTED 2025-10-30):**
+1. ✅ Add polling to refresh test statuses every 30 seconds - **DONE**
+2. ✅ Use Supabase Realtime subscriptions for instant updates - **DONE**
+3. ✅ Show test progress (impressions, spend) instead of just spinner - **DONE** (shows "450/1,000")
+4. ✅ Add manual "Refresh" button for status updates - **DONE**
+
+See `SESSION_2025-10-30_UI_IMPROVEMENTS.md` for complete implementation details.
 
 ### Related Files
 
@@ -148,6 +156,87 @@ SELECT * FROM creative_tests
 WHERE user_creative_id = '044386a2-de8b-465e-8b9c-8cdd36cfe47a'
 ORDER BY created_at DESC;
 ```
+
+---
+
+## 2. Mobile Layout Broken by Long Creative Names
+
+**Status:** 🟢 Fixed (2025-10-30)
+**Priority:** Medium
+**Date Reported:** 2025-10-30
+**Date Fixed:** 2025-10-30
+**Affected:** Mobile/responsive layout on Creatives page
+
+### Symptom
+
+1. Long creative names (e.g., `copy_7FC6DB56-FB49-49D4-97CD-D6710EC839B5.mov`) pushed other elements off screen
+2. Direction badges took too much horizontal space on mobile
+3. Test status indicators and date overlapped or disappeared
+4. Layout became completely unusable on screens < 640px
+
+### Root Cause
+
+```tsx
+<AccordionTrigger className="flex-shrink-0">  // ❌ Never shrinks!
+  <div className="font-medium">{it.title}</div>  // ❌ No truncation!
+</AccordionTrigger>
+```
+
+- AccordionTrigger had `flex-shrink-0` preventing compression
+- Title div had no `truncate` or `max-width` limiting
+- Direction badges showed full text on all screen sizes
+- No responsive design considerations
+
+### Fix Implemented
+
+**A) Title truncation with responsive max-width:**
+```tsx
+<AccordionTrigger className="min-w-0">
+  <div className="truncate max-w-[200px] sm:max-w-none" title={it.title}>
+    {it.title}
+  </div>
+</AccordionTrigger>
+```
+- Mobile: max 200px then "..."
+- Desktop: unlimited
+- Tooltip shows full name on hover
+
+**B) Direction badges → Color dots on mobile:**
+```tsx
+{/* Mobile */}
+<div className="sm:hidden w-3 h-3 rounded-full"
+     style={{ backgroundColor: getDirectionDotColor(dir.id) }}
+     title={dir.name} />
+
+{/* Desktop */}
+<Badge className="hidden sm:inline-flex">{dir.name}</Badge>
+```
+- Mobile: 12px colored circle (saves ~80px per row)
+- Desktop: full badge with text
+- Consistent colors using hex values
+
+**C) Flex-shrink protection for indicators:**
+```tsx
+<div className="flex-shrink-0">
+  <TestStatusIndicator ... />
+</div>
+<div className="flex-shrink-0">
+  <DirectionBadge ... />
+</div>
+```
+
+### Result
+
+✅ Mobile layout compact and functional
+✅ All information visible without horizontal scroll
+✅ Direction colors preserved (dots match badge colors)
+✅ Desktop layout unchanged (full information)
+
+### Related Files
+
+- `/services/frontend/src/pages/Creatives.tsx` - Layout fixes
+- `/services/frontend/src/components/TestStatusIndicator.tsx` - Responsive props
+- `SESSION_2025-10-30_UI_IMPROVEMENTS.md` - Full documentation
 
 ---
 

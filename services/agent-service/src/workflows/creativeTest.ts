@@ -1,6 +1,6 @@
 import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
-import { getDefaultAdSettingsWithFallback, convertToFacebookTargeting } from '../lib/defaultSettings.js';
+import { getDirectionSettings, buildTargeting } from '../lib/settingsHelpers.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 
 const baseLog = createLogger({ module: 'creativeTestWorkflow' });
@@ -121,10 +121,13 @@ export async function workflowStartCreativeTest(
   // ===================================================
   // STEP 3: Получаем дефолтные настройки таргетинга
   // ===================================================
-  const defaultSettings = await getDefaultAdSettingsWithFallback(user_id, 'whatsapp');
-  const targeting = convertToFacebookTargeting(defaultSettings);
+  const defaultSettings = await getDirectionSettings(creative.direction_id);
+  const targeting = buildTargeting(defaultSettings, 'whatsapp');
 
-  log.info('Using default targeting for creative test');
+  log.info({
+    directionId: creative.direction_id,
+    hasSettings: Boolean(defaultSettings)
+  }, 'Using direction targeting for creative test');
 
   // Нормализуем ad_account_id
   const normalized_ad_account_id = ad_account_id.startsWith('act_')
@@ -300,14 +303,14 @@ export async function fetchCreativeTestInsights(
 
     const url = `${ad_id}/insights`;
 
-    log.info({ ad_id }, 'Fetching insights for creative test ad');
+    baseLog.info({ ad_id }, 'Fetching insights for creative test ad');
 
     const result = await graph('GET', url, accessToken, {
       fields,
       date_preset: 'today'
     });
-    
-    log.debug({ ad_id, insights: result?.data }, 'Insights response for creative test');
+
+    baseLog.debug({ ad_id, insights: result?.data }, 'Insights response for creative test');
 
   if (!result?.data || result.data.length === 0) {
     // Данных ещё нет - возвращаем нули
@@ -384,7 +387,7 @@ export async function fetchCreativeTestInsights(
     video_avg_watch_time_sec: parseFloat(videoAvgTime)
   };
   } catch (error: any) {
-    log.error({ err: error, ad_id }, 'Error fetching insights for creative test');
+    baseLog.error({ err: error, ad_id }, 'Error fetching insights for creative test');
     throw error;
   }
 }
