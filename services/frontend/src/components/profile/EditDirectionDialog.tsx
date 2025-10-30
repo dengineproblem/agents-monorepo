@@ -185,8 +185,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     }
 
     const budgetValue = parseFloat(dailyBudget);
-    if (isNaN(budgetValue) || budgetValue < 10) {
-      setError('Минимальный бюджет: $10/день');
+    if (isNaN(budgetValue) || budgetValue < 5) {
+      setError('Минимальный бюджет: $5/день');
       return;
     }
 
@@ -359,7 +359,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     <Input
                       id="edit-daily-budget"
                       type="number"
-                      min="10"
+                      min="5"
                       step="1"
                       value={dailyBudget}
                       onChange={(e) => setDailyBudget(e.target.value)}

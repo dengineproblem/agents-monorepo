@@ -428,7 +428,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             user_account_id: { type: 'string', format: 'uuid' },
             direction_id: { type: 'string', format: 'uuid' },
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
-            daily_budget_cents: { type: 'number', minimum: 1000 },
+            daily_budget_cents: { type: 'number', minimum: 500 },
             targeting: { type: 'object' },
           },
         },

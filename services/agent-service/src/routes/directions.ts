@@ -14,7 +14,7 @@ const CreateDirectionSchema = z.object({
   userAccountId: z.string().uuid(),
   name: z.string().min(2).max(100),
   objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']),
-  daily_budget_cents: z.number().int().min(1000), // минимум $10
+  daily_budget_cents: z.number().int().min(500), // минимум $5
   target_cpl_cents: z.number().int().min(50), // минимум $0.50
   whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
   // Опциональные дефолтные настройки рекламы
@@ -37,7 +37,7 @@ const CreateDirectionSchema = z.object({
 
 const UpdateDirectionSchema = z.object({
   name: z.string().min(2).max(100).optional(),
-  daily_budget_cents: z.number().int().min(1000).optional(),
+  daily_budget_cents: z.number().int().min(500).optional(),
   target_cpl_cents: z.number().int().min(50).optional(),
   is_active: z.boolean().optional(),
   whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую

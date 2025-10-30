@@ -219,7 +219,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
       "reason": "Новый креатив для тестирования"
     }
   ],
-  "reasoning": "Выбрано 3 креатива для теста в одном adset. Бюджет $10/день на 3 креатива.",
+  "reasoning": "Выбрано 3 креатива для теста в одном adset. Бюджет $5-10/день на 3 креатива.",
   "estimated_cpl": 2.10,
   "confidence": "high"
 }
@@ -893,8 +893,8 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
     if (action.params.user_creative_ids.length === 0) {
       throw new Error('No creatives selected by LLM');
     }
-    if (action.params.daily_budget_cents < 1000) {
-      throw new Error('Budget less than minimum $10 per adset');
+    if (action.params.daily_budget_cents < 500) {
+      throw new Error('Budget less than minimum $5 per adset');
     }
     // Убедимся что objective в правильном формате (на случай если LLM вернул в другом регистре)
     action.params.objective = objectiveToLLMFormat(objective);
@@ -909,8 +909,8 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
       if (!adset.user_creative_ids || adset.user_creative_ids.length === 0) {
         throw new Error('Adset has no creatives');
       }
-      if (adset.daily_budget_cents < 1000) {
-        throw new Error(`Adset budget less than minimum $10: ${adset.adset_name}`);
+      if (adset.daily_budget_cents < 500) {
+        throw new Error(`Adset budget less than minimum $5: ${adset.adset_name}`);
       }
     }
   }

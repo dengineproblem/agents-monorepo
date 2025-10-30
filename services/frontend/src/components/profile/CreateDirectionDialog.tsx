@@ -121,8 +121,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     }
 
     const budgetValue = parseFloat(dailyBudget);
-    if (isNaN(budgetValue) || budgetValue < 10) {
-      setError('Минимальный бюджет: $10/день');
+    if (isNaN(budgetValue) || budgetValue < 5) {
+      setError('Минимальный бюджет: $5/день');
       return;
     }
 
@@ -314,7 +314,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <Input
                   id="daily-budget"
                   type="number"
-                  min="10"
+                  min="5"
                   step="1"
                   placeholder="50"
                   value={dailyBudget}
@@ -326,7 +326,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   $ / день
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">Минимум: $10/день</p>
+              <p className="text-xs text-muted-foreground">Минимум: $5/день</p>
             </div>
 
             {/* Целевая стоимость заявки */}
