@@ -10,42 +10,44 @@ clients:
 
 scrape_configs:
   - job_name: docker-logs
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          job: docker-logs
-          __path__: /var/lib/docker/containers/*/*-json.log
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        filters:
+          - name: label
+            values: ["logging=promtail"]
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_id']
+        regex: (.*)
+        target_label: '__path__'
+        replacement: '/var/lib/docker/containers/$1/$1-json.log'
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container_name'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'compose_service'
+      - replacement: 'docker-logs'
+        target_label: 'job'
     pipeline_stages:
-      # Шаг 1: Распарсить Docker JSON обёртку (извлекает поле "log")
+      # Шаг 1: Распарсить Docker JSON обёртку (извлекает поле "log" и timestamp)
       - docker: {}
       
       # Шаг 2: Распарсить Pino JSON внутри поля "log"
       - json:
           expressions:
             level:
-            message:
             service:
-            environment:
-            module:
+            msg:
             userAccountId:
             userAccountName:
-            userTelegram:
-            msg:
-            time:
+            environment:
+            module:
       
       # Шаг 3: Преобразовать поля в labels для индексации
       - labels:
           level:
           service:
-          environment:
-          module:
+          msg:
           userAccountId:
           userAccountName:
-          userTelegram:
-          msg:
-      
-      # Шаг 4: Использовать time из Pino как timestamp
-      - timestamp:
-          source: time
-          format: RFC3339Nano
+          environment:
+          module:

@@ -134,12 +134,33 @@ export async function startLogAlertsWorker(logger) {
 
   logger.info('Starting log alerts worker');
 
+  // Проверяем доступность Loki при старте
+  let lokiAvailable = true;
+  try {
+    const testRes = await fetch(`${LOKI_URL}/ready`, { timeout: 5000 });
+    if (!testRes.ok) {
+      lokiAvailable = false;
+      logger.warn(`Loki not ready at ${LOKI_URL}, alerts worker disabled`);
+      return;
+    }
+  } catch (err) {
+    lokiAvailable = false;
+    logger.warn({ err: { message: err.message, code: err.code } }, `Loki unavailable at ${LOKI_URL}, alerts worker disabled`);
+    return;
+  }
+
+  let consecutiveErrors = 0;
+  const MAX_CONSECUTIVE_ERRORS = 5;
+
   while (true) {
     try {
       const end = Date.now();
       const start = end - POLL_INTERVAL_MS;
       const data = await queryLoki(start, end);
       const results = data?.data?.result || [];
+
+      // Сбрасываем счётчик ошибок при успешном запросе
+      consecutiveErrors = 0;
 
       for (const stream of results) {
         const labels = stream?.stream || {};
@@ -173,7 +194,24 @@ export async function startLogAlertsWorker(logger) {
         }
       }
     } catch (err) {
-      logger.error({ err }, 'Log alerts worker iteration failed');
+      consecutiveErrors++;
+      
+      // Если это ошибка подключения к Loki
+      if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.message?.includes('getaddrinfo')) {
+        logger.warn({ 
+          consecutiveErrors,
+          lokiUrl: LOKI_URL 
+        }, 'Loki temporarily unavailable, will retry');
+        
+        // Если слишком много последовательных ошибок - останавливаем воркер
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          logger.error(`Loki unavailable after ${MAX_CONSECUTIVE_ERRORS} attempts, stopping alerts worker`);
+          return;
+        }
+      } else {
+        // Для других ошибок логируем полностью
+        logger.error({ err }, 'Log alerts worker iteration failed');
+      }
     }
 
     await sleep(POLL_INTERVAL_MS);
