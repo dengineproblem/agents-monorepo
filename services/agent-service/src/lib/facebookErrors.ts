@@ -7,56 +7,85 @@ type ErrorKey = `${number}:${number}` | `${number}:*` | `*:${number}` | `${numbe
 
 const dictionary: Record<ErrorKey, FacebookErrorResolution> = {
   '190:*': {
+    msgCode: 'fb_token_expired',
     short: 'Сессия Facebook истекла. Нужна повторная авторизация в рекламном кабинете.',
     hint: 'Попросите клиента залогиниться заново и обновить токен доступа.',
     severity: 'error',
   },
+  '4:*': {
+    msgCode: 'fb_rate_limit',
+    short: 'Facebook ограничил частоту запросов (код 4)',
+    hint: 'Подождите несколько минут и повторите попытку',
+    severity: 'warning',
+  },
+  '17:*': {
+    msgCode: 'fb_rate_limit',
+    short: 'Превышен лимит запросов API (код 17)',
+    hint: 'Снизьте частоту запросов или запросите повышение лимита в Business Manager',
+    severity: 'warning',
+  },
   '200:0': {
+    msgCode: 'fb_permission_error',
     short: 'Недостаточно прав для действия в рекламном аккаунте.',
     hint: 'Проверьте роль пользователя и выдайте доступ admin/advertiser.',
     severity: 'error',
   },
   '200:1545041': {
+    msgCode: 'fb_account_restricted',
     short: 'Facebook заблокировал создание объявлений из-за ограничений аккаунта.',
     hint: 'Проверьте статус Ads Manager, долги и ограничения по Policy.',
     severity: 'error',
   },
+  '200:*': {
+    msgCode: 'fb_permission_error',
+    short: 'Ошибка прав доступа Facebook (код 200)',
+    hint: 'Проверьте права доступа к рекламному аккаунту',
+    severity: 'error',
+  },
   '368:*': {
+    msgCode: 'fb_temporary_restriction',
     short: 'Facebook временно ограничил действие из-за подозрительной активности.',
     hint: 'Попробуйте позже или свяжитесь с поддержкой Facebook.',
     severity: 'warning',
   },
   '80000:*': {
+    msgCode: 'fb_budget_limit',
     short: 'Нет лимита бюджета/лимита кампаний для этого аккаунта.',
     hint: 'Проверьте spending limit и ограничения Business Manager.',
     severity: 'error',
   },
   '1487010:*': {
+    msgCode: 'fb_whatsapp_error',
     short: 'Недоступен WhatsApp Business аккаунт или номер.',
     hint: 'Убедитесь, что номер подключён и подтверждён в WhatsApp Business Manager.',
     severity: 'error',
   },
   '1815757:*': {
+    msgCode: 'fb_policy_violation',
     short: 'Промоция недоступна: политика Facebook запрещает контент.',
     hint: 'Проверьте рекламное объявление на соответствие политике. Требуется модерация.',
     severity: 'error',
   },
   '1:*': {
+    msgCode: 'fb_internal_error',
     short: 'Внутренняя ошибка Facebook. Попробуйте повторить позже.',
     hint: 'Повторить запрос через несколько минут, при повторении обратиться в поддержку FB.',
     severity: 'warning',
   },
   '*:33': {
+    msgCode: 'fb_not_found',
     short: 'Рекламный объект не найден или был удалён.',
     hint: 'Проверьте наличие кампании/adset/объявления по ID.',
     severity: 'error',
   },
   '100:*': {
+    msgCode: 'fb_invalid_params',
     short: 'Некорректные параметры запроса к Facebook API.',
     hint: 'Проверьте обязательные поля (objective, creative, budget).',
     severity: 'error',
   },
   '*': {
+    msgCode: 'fb_api_error',
     short: 'Facebook вернул ошибку. Проверьте детали и повторите попытку.',
     hint: 'Смотрите лог err.fb для детальной информации.',
     severity: 'error',

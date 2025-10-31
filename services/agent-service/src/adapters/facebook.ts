@@ -33,11 +33,33 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
     ? `https://graph.facebook.com/${FB_API_VERSION}/${path}?${usp.toString()}`
     : `https://graph.facebook.com/${FB_API_VERSION}/${path}`;
 
-  const res = await fetch(url, {
-    method,
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: method === 'GET' ? undefined : usp.toString(),
-  });
+  // Таймаут 15 секунд для Facebook API запросов
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      signal: controller.signal,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: method === 'GET' ? undefined : usp.toString(),
+    });
+    clearTimeout(timeout);
+  } catch (error: any) {
+    clearTimeout(timeout);
+    
+    if (error.name === 'AbortError') {
+      log.error({ 
+        msg: 'fb_fetch_timeout',
+        method, 
+        path,
+        timeout: 15000
+      }, 'Facebook API request timeout');
+      throw new Error(`Facebook API timeout after 15s: ${method} ${path}`);
+    }
+    throw error;
+  }
 
   const text = await res.text();
   let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
@@ -51,7 +73,11 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
       type: g?.type, code: g?.code, error_subcode: g?.error_subcode, fbtrace_id: g?.fbtrace_id
     };
     const resolution = resolveFacebookError(err.fb);
-    log.error({ meta: err.fb, resolution }, 'Graph API request failed');
+    log.error({ 
+      msg: resolution.msgCode,
+      meta: err.fb, 
+      resolution 
+    }, 'Graph API request failed');
     err.resolution = resolution;
     throw err;
   }
@@ -101,14 +127,6 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fs.unlinkSync(tmpPath);
     }
     
-    log.error({
-      adAccountId,
-      status: error?.response?.status,
-      statusText: error?.response?.statusText,
-      data: error?.response?.data,
-      message: error?.message
-    }, 'Facebook API error during video upload');
-    
     const g = error?.response?.data?.error || {};
     const err: any = new Error(g?.message || error.message);
     err.fb = {
@@ -121,6 +139,17 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fbtrace_id: g?.fbtrace_id
     };
     err.resolution = resolveFacebookError(err.fb);
+    
+    log.error({
+      msg: err.resolution.msgCode,
+      adAccountId,
+      meta: err.fb,
+      resolution: err.resolution,
+      status: error?.response?.status,
+      statusText: error?.response?.statusText,
+      message: error?.message
+    }, 'Facebook API error during video upload');
+    
     throw err;
   }
 }

@@ -130,7 +130,7 @@ Docker nginx (контейнер)
 
 - **Основной:** `/root/agents-monorepo/docker-compose.yml` (все сервисы агентов, фронтенды, nginx)
   - Сеть: `agents-monorepo_default`
-  - Контейнеры: nginx, frontend, frontend-appreview, agent-service, agent-brain, creative-analyzer, loki, grafana, evolution-api, evolution-postgres, evolution-redis
+  - Контейнеры: nginx, frontend, frontend-appreview, agent-service, agent-brain, creative-analyzer, loki, promtail, grafana, evolution-api, evolution-postgres, evolution-redis
   
 - **N8N (отдельный):** `/root/docker-compose.yml` (n8n + postgres)
   - Сеть: `root_default`
@@ -754,7 +754,135 @@ docker system prune -a --volumes
 
 ---
 
+## 📊 МОНИТОРИНГ И ЛОГИРОВАНИЕ
+
+### **Стек мониторинга:**
+
+```
+Docker контейнеры (agent-brain, agent-service)
+    ↓ (логи в JSON формате через Pino)
+Promtail (сборщик логов)
+    ↓ (отправка в Loki API)
+Loki (хранилище логов)
+    ↓ (запросы через LogQL)
+Grafana (визуализация)
+```
+
+### **Компоненты:**
+
+#### **1. Loki (порт 3100)**
+- Хранилище логов (как Prometheus, но для логов)
+- Индексирует по labels: `service`, `level`, `msg`, `userAccountName`, и т.д.
+- Конфигурация: `logging/loki-config.yml`
+- Volume: `loki-data` (хранит chunks и индексы)
+
+#### **2. Promtail (порт 9080)**
+- Собирает логи из Docker контейнеров
+- Читает `/var/lib/docker/containers/*/*-json.log`
+- Парсит двойной JSON: Docker обёртка + Pino JSON внутри
+- Конфигурация: `logging/promtail-config.yml`
+
+**Важные моменты:**
+- ✅ Собирает логи от ВСЕХ контейнеров (не только с label `logging=promtail`)
+- ✅ Автоматически парсит JSON поля: `level`, `service`, `msg`, `userAccountName`, и т.д.
+- ✅ Использует `job=docker-logs` для совместимости с дашбордами Grafana
+- ⚠️ Если Promtail падает - проверить конфигурацию pipeline_stages
+
+#### **3. Grafana (порт 3000)**
+- Визуализация логов и метрик
+- Доступ: через SSH tunnel `ssh -L 3000:localhost:3000 root@server`
+- Дашборды: `logging/grafana-provisioning/dashboards/`
+  - `errors-by-user.json` - ошибки по пользователям
+  - `agent-brain-drilldown.json` - детальный анализ agent-brain
+  - `campaign-builder-errors.json` - ошибки campaign builder
+
+**Datasource:**
+- Loki: `http://loki:3100` (автоматически настроен через provisioning)
+
+### **Полезные LogQL запросы:**
+
+```logql
+# Все ошибки от agent-brain
+{service="agent-brain",level="error"}
+
+# Ошибки конкретного пользователя
+{userAccountName="performante",level="error"}
+
+# Ошибки истечения Facebook токена
+{msg="fb_token_expired"}
+
+# Ошибки за последний час
+{service="agent-service",level="error"}[1h]
+
+# Подсчёт ошибок по типам
+sum by (msg) (count_over_time({level="error"}[24h]))
+```
+
+### **Telegram алерты:**
+
+Настроены в `agent-brain` через `logAlerts.js`:
+- Опрашивает Loki каждые 30 секунд
+- Дедупликация: 10 минут (не спамит одинаковыми ошибками)
+- Фильтр критических ошибок: `fb_token_expired`, `fb_rate_limit`, `actions_dispatch_failed`, `supabase_unavailable`
+- Эмодзи для разных типов ошибок: 🔑 (токен), ⏱️ (rate limit), 🗄️ (БД), и т.д.
+
+**Переменные окружения** (в `.env.brain`):
+```bash
+LOG_ALERT_TELEGRAM_BOT_TOKEN=...
+LOG_ALERT_TELEGRAM_CHAT_ID=...
+LOKI_URL=http://loki:3100
+LOG_ALERT_POLL_INTERVAL_MS=30000
+LOG_ALERT_DEDUP_WINDOW_MS=600000
+LOG_ALERT_CRITICAL_ONLY=true  # опционально
+```
+
+### **Диагностика проблем:**
+
+**Promtail не собирает логи:**
+```bash
+# Проверить статус
+docker-compose ps promtail
+
+# Проверить логи
+docker-compose logs promtail --tail 50
+
+# Перезапустить
+docker-compose restart promtail
+```
+
+**Loki не отвечает:**
+```bash
+# Проверить доступность
+curl http://localhost:3100/ready
+
+# Проверить labels
+curl http://localhost:3100/loki/api/v1/labels
+
+# Проверить логи
+docker-compose logs loki --tail 50
+```
+
+**Grafana не показывает логи:**
+```bash
+# Проверить datasource в Grafana UI: Configuration → Data Sources → Loki
+# URL должен быть: http://loki:3100
+
+# Проверить что дашборды загружены
+ls -la logging/grafana-provisioning/dashboards/
+
+# Перезапустить Grafana
+docker-compose restart grafana
+```
+
+---
+
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
+
+**31 октября 2025:**
+- ✅ Упрощена конфигурация Promtail (убран проблемный match stage)
+- ✅ Promtail теперь собирает логи от всех контейнеров через static_configs
+- ✅ Добавлена секция "Мониторинг и логирование" в INFRASTRUCTURE.md
+- ✅ Удалены тестовые файлы (test-promtail-logs.sh, test-generate-errors.js)
 
 **29 октября 2025:**
 - ✅ Решена проблема с генерацией QR-кодов в Evolution API

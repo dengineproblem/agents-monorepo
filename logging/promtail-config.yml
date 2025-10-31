@@ -10,8 +10,17 @@ clients:
 
 scrape_configs:
   - job_name: docker-logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker-logs
+          __path__: /var/lib/docker/containers/*/*-json.log
     pipeline_stages:
+      # Шаг 1: Распарсить Docker JSON обёртку (извлекает поле "log")
       - docker: {}
+      
+      # Шаг 2: Распарсить Pino JSON внутри поля "log"
       - json:
           expressions:
             level:
@@ -22,63 +31,21 @@ scrape_configs:
             userAccountId:
             userAccountName:
             userTelegram:
-            directionId:
-            directionName:
-            objective:
-            workflow:
-            requestId:
-            err:
-            resolution:
-      - template:
-          source: environment
-          template: '{{ if .Value }}{{ .Value }}{{ else }}{{ getenv "PROMTAIL_ENVIRONMENT" }}{{ end }}'
-            where:
-            phase:
-            userId:
-            automationId:
-            executionId:
-            campaign_id:
-            campaignId:
-            adset_id:
-            adsetId:
-            worker:
-            job:
-            jobName:
-            alertType:
-            taskId:
-            cron:
+            msg:
+            time:
+      
+      # Шаг 3: Преобразовать поля в labels для индексации
       - labels:
           level:
-          environment:
           service:
+          environment:
           module:
           userAccountId:
           userAccountName:
           userTelegram:
-          directionId:
-          directionName:
-          objective:
-          workflow:
-          where:
-          phase:
-          userId:
-          automationId:
-          executionId:
-          campaign_id:
-          campaignId:
-          adset_id:
-          adsetId:
-          worker:
-          job:
-          jobName:
-          alertType:
-          taskId:
-          cron:
-      - static_labels:
-          job: docker-logs
-    static_configs:
-      - targets:
-          - localhost
-        labels:
-          __path__: /var/lib/docker/containers/*/*-json.log
-
+          msg:
+      
+      # Шаг 4: Использовать time из Pino как timestamp
+      - timestamp:
+          source: time
+          format: RFC3339Nano

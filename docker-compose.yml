@@ -1,6 +1,8 @@
 services:
   agent-brain:
     build: ./services/agent-brain
+    labels:
+      logging: "promtail"
     env_file:
       - ./.env.brain
     environment:
@@ -37,6 +39,8 @@ services:
 
   agent-service:
     build: ./services/agent-service
+    labels:
+      logging: "promtail"
     env_file:
       - ./.env.agent
     environment:

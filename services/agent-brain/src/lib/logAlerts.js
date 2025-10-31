@@ -23,8 +23,17 @@ function makeKey(streamLabels, payload) {
 }
 
 async function queryLoki(startMs, endMs) {
+  // Базовый запрос для всех ошибок
+  const baseQuery = `{environment="${ENVIRONMENT_LABEL}"} | json | level="error"`;
+  
+  // Фильтр для критических ошибок (опционально включается через env)
+  const filterCriticalOnly = process.env.LOG_ALERT_CRITICAL_ONLY === 'true';
+  const criticalFilter = filterCriticalOnly 
+    ? ` | msg=~"fb_token_expired|fb_rate_limit|actions_dispatch_failed|supabase_unavailable|supabase_config_missing"`
+    : '';
+  
   const params = new URLSearchParams({
-    query: `{environment="${ENVIRONMENT_LABEL}"} | json | level="error"`,
+    query: baseQuery + criticalFilter,
     start: String(startMs * 1_000_000),
     end: String(endMs * 1_000_000),
     limit: '2000',
@@ -58,8 +67,35 @@ async function sendTelegram(text) {
 function formatMessage(streamLabels, payload) {
   const fb = payload?.err?.fb;
   const resolution = payload?.resolution;
+  const msg = payload?.msg;
+  
+  // Специальное форматирование для типовых ошибок
+  let emoji = '❗️';
+  let title = 'Ошибка в сервисе';
+  
+  if (msg === 'fb_token_expired') {
+    emoji = '🔑';
+    title = 'Facebook токен истёк';
+  } else if (msg === 'fb_rate_limit') {
+    emoji = '⏱️';
+    title = 'Превышен лимит запросов FB';
+  } else if (msg === 'fb_fetch_timeout') {
+    emoji = '⏳';
+    title = 'Таймаут запроса к FB';
+  } else if (msg === 'supabase_unavailable' || msg === 'supabase_config_missing') {
+    emoji = '🗄️';
+    title = 'Проблема с БД';
+  } else if (msg === 'actions_dispatch_failed') {
+    emoji = '⚠️';
+    title = 'Не удалось применить действия';
+  } else if (msg?.startsWith('fb_')) {
+    emoji = '❌';
+    title = 'Ошибка Facebook API';
+  }
+  
   const parts = [
-    '*❗️ Ошибка в сервисе*',
+    `*${emoji} ${title}*`,
+    msg ? `Тип: \`${escapeMd(msg)}\`` : undefined,
     `Сервис: ${escapeMd(streamLabels?.service || 'unknown')}`,
     payload?.module ? `Модуль: ${escapeMd(payload.module)}` : undefined,
     payload?.message ? `Сообщение: ${escapeMd(payload.message)}` : undefined,

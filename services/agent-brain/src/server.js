@@ -1,12 +1,12 @@
 import Fastify from 'fastify';
 import 'dotenv/config';
 import OpenAI from 'openai';
-import { createClient } from '@supabase/supabase-js';
 import cron from 'node-cron';
 import { randomUUID } from 'node:crypto';
 import { logger as baseLogger } from './lib/logger.js';
 import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
+import { supabase, supabaseQuery } from './lib/supabaseClient.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
@@ -344,10 +344,6 @@ fastify.post('/api/brain/test-merger', async (request, reply) => {
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE;
-const supabase = (process.env.SUPABASE_URL && supabaseServiceKey)
-  ? createClient(process.env.SUPABASE_URL, supabaseServiceKey)
-  : null;
 
 const FB_API_VERSION = 'v20.0';
 const MODEL = process.env.BRAIN_MODEL || 'gpt-5';
@@ -392,14 +388,14 @@ function genIdem() {
 const toInt = (v) => Number.isFinite(+v) ? Math.round(+v) : null;
 
 async function getUserAccount(userAccountId) {
-  if (!supabase) throw new Error('supabase not configured');
-  const { data, error } = await supabase
-    .from('user_accounts')
-    .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number')
-    .eq('id', userAccountId)
-    .single();
-  if (error) throw error;
-  return data;
+  return await supabaseQuery('user_accounts', 
+    async () => await supabase
+      .from('user_accounts')
+      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number')
+      .eq('id', userAccountId)
+      .single(),
+    { userAccountId }
+  );
 }
 
 async function getLastReports(telegramId) {
@@ -422,19 +418,21 @@ async function getLastReports(telegramId) {
 // ========================================
 
 async function getUserDirections(userAccountId) {
-  if (!supabase) return [];
-  const { data, error } = await supabase
-    .from('account_directions')
-    .select('*')
-    .eq('user_account_id', userAccountId)
-    .eq('is_active', true)
-    .order('created_at', { ascending: false });
-  
-  if (error) {
-    fastify.log.warn({ msg: 'load_directions_failed', error });
+  try {
+    const data = await supabaseQuery('account_directions',
+      async () => await supabase
+        .from('account_directions')
+        .select('*')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false }),
+      { userAccountId }
+    );
+    return data || [];
+  } catch (error) {
+    fastify.log.warn({ msg: 'load_directions_failed', error: String(error) });
     return [];
   }
-  return data || [];
 }
 
 async function getDirectionByCampaignId(campaignId) {
@@ -1633,9 +1631,17 @@ function finalizeReportText(raw, { adAccountId, dateStr }) {
 }
 
 function buildReport({ date, accountStatus, insights, actions, lastReports }) {
-  const statusLine = accountStatus?.account_status === 1
-    ? `Аккаунт активен (ID: ${accountStatus?.id || '—'})`
-    : `Аккаунт неактивен (причина: ${accountStatus?.disable_reason ?? '—'})`;
+  // Проверяем, были ли ошибки при получении данных из Facebook
+  let statusLine;
+  if (accountStatus?.error) {
+    statusLine = `⚠️ Не удалось получить данные из Facebook (${accountStatus.error})`;
+  } else if (accountStatus?.account_status === 1) {
+    statusLine = `Аккаунт активен (ID: ${accountStatus?.id || '—'})`;
+  } else if (accountStatus?.account_status === 2) {
+    statusLine = `Аккаунт неактивен (причина: ${accountStatus?.disable_reason ?? '—'})`;
+  } else {
+    statusLine = `⚠️ Статус аккаунта не определён`;
+  }
 
   const executed = actions?.length
     ? actions.map((a,i)=>`${i+1}. ${a.type} — ${JSON.stringify(a.params)}`).join('\n')
@@ -2426,7 +2432,10 @@ fastify.post('/api/brain/run', async (request, reply) => {
         });
       } catch (dispatchErr) {
         fastify.log.error({
+          msg: 'actions_dispatch_failed',
           where: 'actions_dispatch_failed',
+          userAccountId,
+          userAccountName: ua?.username,
           error: String(dispatchErr?.message || dispatchErr),
           stack: dispatchErr?.stack
         });
@@ -2570,23 +2579,16 @@ fastify.post('/api/brain/decide', async (request, reply) => {
  * Получить всех активных пользователей из Supabase
  */
 async function getActiveUsers() {
-  if (!supabase) {
-    fastify.log.warn('Supabase not configured, skipping getActiveUsers');
-    return [];
-  }
-  
   try {
-    const { data, error } = await supabase
-      .from('user_accounts')
-      .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone')
-      .eq('is_active', true)
-      .eq('optimization', 'agent2')
-      .eq('autopilot', true);
-    
-    if (error) {
-      fastify.log.error({ where: 'getActiveUsers', error });
-      return [];
-    }
+    const data = await supabaseQuery('user_accounts',
+      async () => await supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone')
+        .eq('is_active', true)
+        .eq('optimization', 'agent2')
+        .eq('autopilot', true),
+      { where: 'getActiveUsers' }
+    );
     
     fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'is_active=true AND optimization=agent2 AND autopilot=true' });
     

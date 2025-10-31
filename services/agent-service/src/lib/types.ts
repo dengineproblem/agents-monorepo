@@ -10,6 +10,7 @@ export type FacebookErrorMeta = {
 };
 
 export type FacebookErrorResolution = {
+  msgCode: string; // Короткий код для поиска в Loki (fb_token_expired, fb_rate_limit, etc)
   short: string;
   hint?: string;
   severity: 'warning' | 'error';

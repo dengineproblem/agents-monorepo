@@ -1,0 +1,318 @@
+{
+  "id": null,
+  "uid": "errors-by-user",
+  "title": "Errors by User",
+  "tags": ["errors", "monitoring", "users"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "username",
+        "type": "query",
+        "label": "Username",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "definition": "label_values({job=\"docker-logs\"}, userAccountName)",
+        "query": "label_values({job=\"docker-logs\"}, userAccountName)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "multi": false
+      },
+      {
+        "name": "service",
+        "type": "query",
+        "label": "Service",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "definition": "label_values({job=\"docker-logs\"}, service)",
+        "query": "label_values({job=\"docker-logs\"}, service)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "multi": false
+      },
+      {
+        "name": "msg",
+        "type": "query",
+        "label": "Error Type",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "definition": "label_values({job=\"docker-logs\",level=\"error\"}, msg)",
+        "query": "label_values({job=\"docker-logs\",level=\"error\"}, msg)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "sort": 1,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "User Errors Log Stream",
+      "type": "logs",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{userAccountName=~\"$username\",service=~\"$service\",level=\"error\"} | json | msg=~\"$msg\"",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": false,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    },
+    {
+      "id": 2,
+      "title": "Errors by Service (Last 24h)",
+      "type": "bargauge",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (count_over_time({userAccountName=~\"$username\",level=\"error\"}[24h]))",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 10,
+                "color": "yellow"
+              },
+              {
+                "value": 50,
+                "color": "red"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Errors by Message Type (Last 24h)",
+      "type": "table",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (msg, service) (count_over_time({userAccountName=~\"$username\",level=\"error\"}[24h]))",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "legendFormat": "{{msg}} - {{service}}"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "field": "Value",
+                "desc": true
+              }
+            ]
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 10,
+                "color": "yellow"
+              },
+              {
+                "value": 50,
+                "color": "red"
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "msg"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "fb_token_expired": {
+                        "text": "🔑 Facebook токен истёк",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "fb_rate_limit": {
+                        "text": "⏱️ Превышен лимит запросов FB",
+                        "color": "orange",
+                        "index": 1
+                      },
+                      "fb_permission_error": {
+                        "text": "🔒 Ошибка прав доступа FB",
+                        "color": "red",
+                        "index": 2
+                      },
+                      "fb_fetch_timeout": {
+                        "text": "⏳ Таймаут запроса к FB",
+                        "color": "orange",
+                        "index": 3
+                      },
+                      "actions_dispatch_failed": {
+                        "text": "⚠️ Не удалось применить действия",
+                        "color": "red",
+                        "index": 4
+                      },
+                      "supabase_unavailable": {
+                        "text": "🗄️ БД недоступна",
+                        "color": "red",
+                        "index": 5
+                      },
+                      "supabase_query_error": {
+                        "text": "🗄️ Ошибка запроса к БД",
+                        "color": "orange",
+                        "index": 6
+                      },
+                      "supabase_config_missing": {
+                        "text": "⚙️ Не настроена БД",
+                        "color": "red",
+                        "index": 7
+                      },
+                      "fb_api_error": {
+                        "text": "❌ Общая ошибка FB API",
+                        "color": "red",
+                        "index": 8
+                      },
+                      "fb_internal_error": {
+                        "text": "⚙️ Внутренняя ошибка FB",
+                        "color": "orange",
+                        "index": 9
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "title": "Infrastructure Errors (no user)",
+      "type": "logs",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{level=\"error\"} | json | userAccountId=\"\" | line_format \"{{.service}} | {{.module}} | {{.message}}\"",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          }
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": false,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      }
+    }
+  ]
+}
+
