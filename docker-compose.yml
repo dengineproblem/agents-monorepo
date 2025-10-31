@@ -16,6 +16,10 @@ services:
       - LOG_ALERT_TELEGRAM_CHAT_ID=313145981
       - LOKI_URL=http://loki:3100
       - LOG_ALERT_LOKI_ENVIRONMENT=development
+      - MONITORING_BOT_TOKEN=8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE
+      - MONITORING_CHAT_ID=313145981
+      - HOSTNAME=agent-brain-prod
+      - OPENAI_MAX_RETRIES=3
     ports:
       - "7080:7080"
     restart: unless-stopped

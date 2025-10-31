@@ -9,8 +9,8 @@ import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
-const MONITORING_BOT_TOKEN = '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
-const MONITORING_CHAT_ID = '313145981';
+const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
+const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '313145981';
 
 const fastify = Fastify({
   logger: baseLogger,
@@ -60,9 +60,89 @@ async function responsesCreate(payload) {
     const err = new Error(`${res.status} ${text}`);
     err._requestBody = safeBody;
     err._responseText = text;
+    err.status = res.status; // Сохраняем HTTP статус для retry-логики
     throw err;
   }
   try { return JSON.parse(text); } catch { return { raw: text }; }
+}
+
+/**
+ * Wrapper для responsesCreate с retry-логикой
+ * Ретраит только на временные ошибки: 429, 500, 502, 503
+ */
+async function responsesCreateWithRetry(payload, maxRetries = Number(process.env.OPENAI_MAX_RETRIES || 3)) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await responsesCreate(payload);
+      
+      // Успех! Если это была не первая попытка - логируем
+      if (attempt > 1) {
+        fastify.log.info({ 
+          where: 'responsesCreateWithRetry', 
+          attempt, 
+          status: 'success_after_retry' 
+        });
+      }
+      
+      return result;
+      
+    } catch (error) {
+      lastError = error;
+      const status = error.status || parseInt(error.message?.match(/^\d+/)?.[0]);
+      
+      // Определяем, нужно ли ретраить
+      const shouldRetry = 
+        status === 429 ||  // Rate limit
+        status === 500 ||  // Internal server error
+        status === 502 ||  // Bad gateway
+        status === 503 ||  // Service unavailable
+        !status;           // Network error (нет статуса)
+      
+      // Если ошибка не подлежит retry (400, 401, 403, 404 и т.д.) - сразу падаем
+      if (!shouldRetry) {
+        fastify.log.error({ 
+          where: 'responsesCreateWithRetry', 
+          attempt,
+          status,
+          reason: 'non_retryable_error',
+          error: String(error)
+        });
+        throw error;
+      }
+      
+      // Если последняя попытка - бросаем ошибку
+      if (attempt === maxRetries) {
+        fastify.log.error({ 
+          where: 'responsesCreateWithRetry', 
+          attempts: maxRetries, 
+          status: 'failed_all_retries',
+          httpStatus: status,
+          error: String(error)
+        });
+        throw error;
+      }
+      
+      // Exponential backoff: 2s, 4s, 8s...
+      const delayMs = Math.pow(2, attempt) * 1000;
+      
+      fastify.log.warn({ 
+        where: 'responsesCreateWithRetry', 
+        attempt, 
+        maxRetries,
+        httpStatus: status,
+        delayMs,
+        nextAttemptIn: `${delayMs / 1000}s`,
+        error: String(error).slice(0, 200)
+      });
+      
+      // Ждём перед следующей попыткой
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  
+  throw lastError;
 }
 
 // Test endpoint: fetch raw adsets from Facebook API
@@ -137,7 +217,7 @@ fastify.post('/api/brain/test-scoring', async (request, reply) => {
       supabase,
       logger: fastify.log,
       useLLM: true,
-      responsesCreate,
+      responsesCreate: responsesCreateWithRetry,
       minImpressions: SCORING_MIN_IMPRESSIONS,
       predictionDays: SCORING_PREDICTION_DAYS
     });
@@ -174,7 +254,7 @@ fastify.post('/api/brain/test-merger', async (request, reply) => {
     const scoringData = await runScoringAgent(ua, {
       supabase,
       logger: fastify.log,
-      responsesCreate,
+      responsesCreate: responsesCreateWithRetry,
       saveExecution: false
     });
     
@@ -1487,15 +1567,39 @@ async function sendToMonitoringBot(userAccount, reportText) {
 
   const fullReport = prefix + reportText;
 
+  // Детальное логирование перед отправкой
+  fastify.log.info({
+    where: 'sendToMonitoringBot',
+    phase: 'before_send',
+    userId: userAccount.id,
+    username: userAccount.username,
+    chatId: MONITORING_CHAT_ID,
+    botToken: MONITORING_BOT_TOKEN.slice(0, 10) + '***',
+    reportLength: fullReport.length,
+    environment: process.env.NODE_ENV || 'unknown',
+    hostname: process.env.HOSTNAME || 'unknown'
+  });
+
   try {
     const sent = await sendTelegram(MONITORING_CHAT_ID, fullReport, MONITORING_BOT_TOKEN);
-    fastify.log.info({ where: 'sendToMonitoringBot', success: sent, userId: userAccount.id });
+    
+    fastify.log.info({ 
+      where: 'sendToMonitoringBot',
+      phase: 'after_send',
+      success: sent,
+      userId: userAccount.id,
+      username: userAccount.username
+    });
+    
     return sent;
   } catch (err) {
     fastify.log.error({ 
-      where: 'sendToMonitoringBot', 
+      where: 'sendToMonitoringBot',
+      phase: 'send_failed',
       userId: userAccount.id,
-      error: String(err) 
+      username: userAccount.username,
+      error: String(err),
+      stack: err?.stack
     });
     return false;
   }
@@ -1585,7 +1689,7 @@ const TEST_SYSTEM_PROMPT = `
 `;
 
 async function llmPlan(systemPrompt, userPayload) {
-  const resp = await responsesCreate({
+  const resp = await responsesCreateWithRetry({
     model: MODEL,
     input: [
       { role: 'system', content: [ { type: 'input_text', text: systemPrompt } ] },
@@ -1696,7 +1800,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
           supabase,
           logger: fastify.log,
           useLLM: CAN_USE_LLM,
-          responsesCreate,
+          responsesCreate: responsesCreateWithRetry,
           minImpressions: SCORING_MIN_IMPRESSIONS,
           predictionDays: SCORING_PREDICTION_DAYS
         });
@@ -2601,7 +2705,76 @@ async function processUser(user) {
  */
 async function processDailyBatch() {
   const batchStartTime = Date.now();
-  fastify.log.info({ where: 'processDailyBatch', status: 'started' });
+  const lockKey = 'daily_batch_lock';
+  const instanceId = process.env.HOSTNAME || 'unknown';
+  
+  fastify.log.info({ where: 'processDailyBatch', status: 'started', instanceId });
+  
+  // Leader Lock: проверяем, не запущен ли уже batch другим инстансом
+  if (supabase) {
+    try {
+      const { data: existingLock, error: lockCheckError } = await supabase
+        .from('batch_locks')
+        .select('*')
+        .eq('lock_key', lockKey)
+        .maybeSingle();
+      
+      if (lockCheckError && lockCheckError.code !== 'PGRST116') {
+        // PGRST116 = no rows returned, это нормально (нет лока)
+        fastify.log.error({ 
+          where: 'processDailyBatch', 
+          phase: 'lock_check_failed', 
+          error: String(lockCheckError) 
+        });
+      }
+      
+      if (existingLock && new Date(existingLock.expires_at) > new Date()) {
+        fastify.log.warn({
+          where: 'processDailyBatch',
+          status: 'locked',
+          lockedBy: existingLock.instance_id,
+          expiresAt: existingLock.expires_at,
+          message: 'Another instance is already processing batch'
+        });
+        return { 
+          success: false, 
+          reason: 'locked_by_another_instance',
+          lockedBy: existingLock.instance_id 
+        };
+      }
+      
+      // Устанавливаем lock (или обновляем существующий)
+      const { error: lockSetError } = await supabase
+        .from('batch_locks')
+        .upsert({
+          lock_key: lockKey,
+          instance_id: instanceId,
+          expires_at: new Date(Date.now() + 3600000).toISOString() // 1 час
+        });
+      
+      if (lockSetError) {
+        fastify.log.error({ 
+          where: 'processDailyBatch', 
+          phase: 'lock_set_failed', 
+          error: String(lockSetError) 
+        });
+      } else {
+        fastify.log.info({ 
+          where: 'processDailyBatch', 
+          phase: 'lock_acquired', 
+          instanceId,
+          expiresIn: '1 hour'
+        });
+      }
+    } catch (lockErr) {
+      fastify.log.error({ 
+        where: 'processDailyBatch', 
+        phase: 'lock_error', 
+        error: String(lockErr) 
+      });
+      // Продолжаем выполнение даже если lock не удался (graceful degradation)
+    }
+  }
   
   try {
     const users = await getActiveUsers();
@@ -2674,6 +2847,29 @@ async function processDailyBatch() {
       error: String(err?.message || err),
       totalDuration: batchDuration
     };
+  } finally {
+    // Освобождаем lock после завершения обработки (успешной или с ошибкой)
+    if (supabase) {
+      try {
+        await supabase
+          .from('batch_locks')
+          .delete()
+          .eq('lock_key', lockKey)
+          .eq('instance_id', instanceId);
+        
+        fastify.log.info({ 
+          where: 'processDailyBatch', 
+          phase: 'lock_released', 
+          instanceId 
+        });
+      } catch (unlockErr) {
+        fastify.log.error({ 
+          where: 'processDailyBatch', 
+          phase: 'lock_release_failed', 
+          error: String(unlockErr) 
+        });
+      }
+    }
   }
 }
 
