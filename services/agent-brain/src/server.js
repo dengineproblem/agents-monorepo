@@ -10,7 +10,10 @@ import { supabase, supabaseQuery } from './lib/supabaseClient.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
-const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '313145981';
+const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '313145981,280192618')
+  .split(',')
+  .map(id => id.trim())
+  .filter(Boolean);
 
 const fastify = Fastify({
   logger: baseLogger,
@@ -1550,13 +1553,14 @@ async function sendToMultipleTelegramIds(userAccount, reportText) {
  * Отправить отчёт в мониторинговый бот администратора
  * Добавляет префикс с информацией о пользователе
  */
-async function sendToMonitoringBot(userAccount, reportText) {
-  if (!MONITORING_BOT_TOKEN || !MONITORING_CHAT_ID) {
+async function sendToMonitoringBot(userAccount, reportText, dispatchFailed = false) {
+  if (!MONITORING_BOT_TOKEN || !MONITORING_CHAT_IDS || MONITORING_CHAT_IDS.length === 0) {
     fastify.log.warn({ where: 'sendToMonitoringBot', error: 'monitoring_not_configured' });
     return false;
   }
 
-  const prefix = `📊 ОТЧЁТ КЛИЕНТА
+  const errorPrefix = dispatchFailed ? '❌ ОШИБКА ВЫПОЛНЕНИЯ\n' : '';
+  const prefix = `${errorPrefix}📊 ОТЧЁТ КЛИЕНТА
 👤 User: ${userAccount.username || 'N/A'}
 🆔 ID: ${userAccount.id}
 ━━━━━━━━━━━━━━━━
@@ -1571,36 +1575,55 @@ async function sendToMonitoringBot(userAccount, reportText) {
     phase: 'before_send',
     userId: userAccount.id,
     username: userAccount.username,
-    chatId: MONITORING_CHAT_ID,
+    chatIds: MONITORING_CHAT_IDS,
+    dispatchFailed,
     botToken: MONITORING_BOT_TOKEN.slice(0, 10) + '***',
     reportLength: fullReport.length,
     environment: process.env.NODE_ENV || 'unknown',
     hostname: process.env.HOSTNAME || 'unknown'
   });
 
-  try {
-    const sent = await sendTelegram(MONITORING_CHAT_ID, fullReport, MONITORING_BOT_TOKEN);
-    
-    fastify.log.info({ 
-      where: 'sendToMonitoringBot',
-      phase: 'after_send',
-      success: sent,
-      userId: userAccount.id,
-      username: userAccount.username
-    });
-    
-    return sent;
-  } catch (err) {
-    fastify.log.error({ 
-      where: 'sendToMonitoringBot',
-      phase: 'send_failed',
-      userId: userAccount.id,
-      username: userAccount.username,
-      error: String(err),
-      stack: err?.stack
-    });
-    return false;
+  let anySuccess = false;
+  const results = [];
+
+  for (const chatId of MONITORING_CHAT_IDS) {
+    try {
+      const sent = await sendTelegram(chatId, fullReport, MONITORING_BOT_TOKEN);
+      anySuccess = anySuccess || sent;
+      results.push({ chatId, success: sent });
+
+      fastify.log.info({
+        where: 'sendToMonitoringBot',
+        phase: 'after_send',
+        chatId,
+        success: sent,
+        userId: userAccount.id,
+        username: userAccount.username
+      });
+    } catch (err) {
+      results.push({ chatId, success: false, error: String(err) });
+      fastify.log.error({
+        where: 'sendToMonitoringBot',
+        phase: 'send_failed',
+        chatId,
+        userId: userAccount.id,
+        username: userAccount.username,
+        error: String(err),
+        stack: err?.stack
+      });
+    }
   }
+
+  fastify.log.info({
+    where: 'sendToMonitoringBot',
+    phase: 'completed',
+    userId: userAccount.id,
+    username: userAccount.username,
+    anySuccess,
+    results
+  });
+
+  return anySuccess;
 }
 
 function finalizeReportText(raw, { adAccountId, dateStr }) {
@@ -2407,14 +2430,15 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }
 
     let agentResponse = null;
-    
+    let dispatchFailed = false;
+
     fastify.log.info({
       where: 'before_actions_dispatch',
       dispatch_requested: !!inputs?.dispatch,
       actions_count: actions?.length || 0,
       actions_preview: actions?.slice(0, 3).map(a => a.type) || []
     });
-    
+
     if (inputs?.dispatch) {
       try {
         fastify.log.info({
@@ -2422,15 +2446,16 @@ fastify.post('/api/brain/run', async (request, reply) => {
           actions_count: actions?.length || 0,
           idem
         });
-        
+
         agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number);
-        
+
         fastify.log.info({
           where: 'actions_dispatched',
           success: !!agentResponse,
           response_preview: JSON.stringify(agentResponse).slice(0, 200)
         });
       } catch (dispatchErr) {
+        dispatchFailed = true;
         fastify.log.error({
           msg: 'actions_dispatch_failed',
           where: 'actions_dispatch_failed',
@@ -2439,7 +2464,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
           error: String(dispatchErr?.message || dispatchErr),
           stack: dispatchErr?.stack
         });
-        // Не пробрасываем ошибку, чтобы отчёт всё равно сформировался
+        // Не пробрасываем ошибку, но устанавливаем флаг для корректной обработки
       }
     }
 
@@ -2508,31 +2533,42 @@ fastify.post('/api/brain/run', async (request, reply) => {
     let monitoringSent = false;
 
     if (shouldSendTelegram) {
-      try {
-        // Отправляем клиенту на все его telegram_id
-        const clientResult = await sendToMultipleTelegramIds(ua, reportText);
-        sent = clientResult.success;
-        
-        fastify.log.info({ 
-          where: 'telegram_send_result', 
-          success: sent,
-          details: clientResult.results 
-        });
-      } catch (err) {
-        fastify.log.error({ 
-          where: 'telegram_send_error', 
-          error: String(err?.message || err),
-          stack: err?.stack 
+      // Если действия не выполнились - НЕ отправляем клиенту, только в monitoring bot
+      if (!dispatchFailed) {
+        try {
+          // Отправляем клиенту на все его telegram_id
+          const clientResult = await sendToMultipleTelegramIds(ua, reportText);
+          sent = clientResult.success;
+
+          fastify.log.info({
+            where: 'telegram_send_result',
+            success: sent,
+            details: clientResult.results
+          });
+        } catch (err) {
+          fastify.log.error({
+            where: 'telegram_send_error',
+            error: String(err?.message || err),
+            stack: err?.stack
+          });
+        }
+      } else {
+        fastify.log.info({
+          where: 'telegram_send_skipped',
+          reason: 'dispatch_failed',
+          userAccountId,
+          userAccountName: ua?.username,
+          message: 'Report not sent to client because actions dispatch failed'
         });
       }
 
       // Всегда отправляем в мониторинговый бот (даже если клиенту не отправилось)
       try {
-        monitoringSent = await sendToMonitoringBot(ua, reportText);
+        monitoringSent = await sendToMonitoringBot(ua, reportText, dispatchFailed);
       } catch (err) {
-        fastify.log.error({ 
-          where: 'monitoring_send_error', 
-          error: String(err?.message || err) 
+        fastify.log.error({
+          where: 'monitoring_send_error',
+          error: String(err?.message || err)
         });
       }
     }

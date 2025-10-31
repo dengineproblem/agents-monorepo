@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase.js';
+import { buildTargeting } from './settingsHelpers.js';
 
 export type CampaignGoal = 'whatsapp' | 'instagram_traffic' | 'site_leads';
 
@@ -105,8 +106,6 @@ export async function upsertDefaultAdSettings(
  * This function is kept for backward compatibility and now uses the new implementation internally
  */
 export function convertToFacebookTargeting(settings: DefaultAdSettings) {
-  // Import здесь для избежания циклических зависимостей
-  const { buildTargeting } = require('./settingsHelpers.js');
   return buildTargeting(settings, settings.campaign_goal);
 }
 
