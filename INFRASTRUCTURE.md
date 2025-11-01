@@ -878,6 +878,17 @@ docker-compose restart grafana
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
 
+**1 ноября 2025:**
+- ✅ **КРИТИЧЕСКИЙ ФИКС:** Исправлена ошибка создания adsets в `Direction.CreateAdSetWithCreatives`
+- ✅ Проблема: Facebook API возвращал "Invalid parameter" (error_subcode: 1870189)
+- ✅ Причина: В targeting добавлялись лишние поля (`publisher_platforms`, `instagram_positions`, `device_platforms`, `targeting_automation.advantage_audience`)
+- ✅ Решение: Убраны все лишние поля, targeting теперь используется КАК ЕСТЬ из `defaultSettings`
+- ✅ Приведено в соответствие с рабочими workflows (auto-launch, manual-launch, creativeTest)
+- ✅ Добавлено подробное логирование ошибок Facebook API в agent-brain (rate limits, invalid parameters)
+- ✅ Файл: `services/agent-service/src/workflows/createAdSetInDirection.ts`
+- ✅ Коммит: `3b82679` - "fix: Remove invalid targeting fields in CreateAdSetWithCreatives"
+- ✅ Протестировано: adset успешно создан (ID: 120232923985510449)
+
 **31 октября 2025:**
 - ✅ Упрощена конфигурация Promtail (убран проблемный match stage)
 - ✅ Promtail теперь собирает логи от всех контейнеров через static_configs
