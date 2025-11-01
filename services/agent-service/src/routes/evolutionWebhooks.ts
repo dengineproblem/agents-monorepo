@@ -97,15 +97,24 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const sourceId = contextInfo?.stanzaId || contextInfo?.referredProductId; // Ad ID
   const creativeUrl = contextInfo?.participant;
 
+  // Extract Facebook metadata
+  if (!sourceId) {
+    app.log.debug({
+      instance,
+      remoteJid,
+      messageText: messageText.substring(0, 30)
+    }, 'Ignoring message without Facebook metadata (no source_id)');
+    return;
+  }
+
   app.log.info({
     instance,
     remoteJid,
-    hasSourceId: !!sourceId,
     sourceId,
     messageText: messageText.substring(0, 50)
-  }, 'Processing incoming WhatsApp message');
+  }, 'Processing lead from Facebook ad');
 
-  // 1. Найти instance в базе
+  // Find instance in database
   const { data: instanceData, error: instanceError } = await supabase
     .from('whatsapp_instances')
     .select('id, user_account_id, phone_number')
@@ -117,7 +126,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     return;
   }
 
-  // 2. Найти whatsapp_phone_number_id
+  // Find whatsapp_phone_number_id
   const { data: whatsappNumber } = await supabase
     .from('whatsapp_phone_numbers')
     .select('id')
@@ -125,43 +134,19 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     .eq('user_account_id', instanceData.user_account_id)
     .single();
 
-  // 3. Сохранить сообщение в таблицу messages_ai_target
   const clientPhone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
 
-  const { data: savedMessage, error: messageError } = await supabase
-    .from('messages_ai_target')
-    .insert({
-      chat_id: clientPhone,
-      message_text: messageText,
-      message_type: 'text',
-      direction: 'incoming',
-      timestamp: Math.floor((message.messageTimestamp || Date.now()) / 1000),
-      whatsapp_message_id: message.key.id,
-      source_id: sourceId,
-      instance_id: instanceData.id,
-      raw_data: message
-    })
-    .select()
-    .single();
-
-  if (messageError) {
-    app.log.error({ error: messageError }, 'Failed to save message');
-  }
-
-  // 4. Если есть source_id, обработать как лид от рекламы
-  if (sourceId) {
-    await processAdLead({
-      userAccountId: instanceData.user_account_id,
-      whatsappPhoneNumberId: whatsappNumber?.id,
-      clientPhone,
-      sourceId,
-      creativeUrl,
-      messageText,
-      timestamp: new Date(message.messageTimestamp * 1000 || Date.now()),
-      rawData: message,
-      messageId: savedMessage?.id
-    }, app);
-  }
+  // Process as lead from Facebook ad
+  await processAdLead({
+    userAccountId: instanceData.user_account_id,
+    whatsappPhoneNumberId: whatsappNumber?.id,
+    clientPhone,
+    sourceId,
+    creativeUrl,
+    messageText,
+    timestamp: new Date(message.messageTimestamp * 1000 || Date.now()),
+    rawData: message
+  }, app);
 }
 
 /**
@@ -176,7 +161,6 @@ async function processAdLead(params: {
   messageText: string;
   timestamp: Date;
   rawData: any;
-  messageId?: number;
 }, app: FastifyInstance) {
   const {
     userAccountId,
@@ -186,8 +170,7 @@ async function processAdLead(params: {
     creativeUrl,
     messageText,
     timestamp,
-    rawData,
-    messageId
+    rawData
   } = params;
 
   app.log.info({ userAccountId, clientPhone, sourceId }, 'Processing ad lead');
@@ -248,18 +231,6 @@ async function processAdLead(params: {
       app.log.error({ error, leadId: existingLead.id }, 'Failed to update lead');
     } else {
       app.log.info({ leadId: existingLead.id }, 'Updated existing lead');
-
-      // Обновить message с lead_id
-      if (messageId) {
-        await supabase
-          .from('messages_ai_target')
-          .update({
-            lead_id: existingLead.id,
-            creative_id: creativeId,
-            direction_id: directionId
-          })
-          .eq('id', messageId);
-      }
     }
   } else {
     // Создать новый лид
@@ -287,18 +258,6 @@ async function processAdLead(params: {
       app.log.error({ error, clientPhone }, 'Failed to create lead');
     } else {
       app.log.info({ leadId: newLead?.id }, 'Created new lead from ad');
-
-      // Обновить message с lead_id
-      if (messageId && newLead) {
-        await supabase
-          .from('messages_ai_target')
-          .update({
-            lead_id: newLead.id,
-            creative_id: creativeId,
-            direction_id: directionId
-          })
-          .eq('id', messageId);
-      }
     }
   }
 }
