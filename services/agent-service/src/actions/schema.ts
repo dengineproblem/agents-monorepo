@@ -20,7 +20,7 @@ export type ActionInput = z.infer<typeof ActionSchema>;
 export const ActionsEnvelope = z.object({
   idempotencyKey: z.string().min(5),
   account: AccountSchema,
-  actions: z.array(ActionSchema).min(1),
+  actions: z.array(ActionSchema).min(0), // Разрешаем пустой массив для reportOnlyMode и случаев когда действия не нужны
   source: z.string().optional(),
 });
 export type ActionsEnvelope = z.infer<typeof ActionsEnvelope>;

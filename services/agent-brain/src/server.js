@@ -380,6 +380,7 @@ const ALLOWED_TYPES = new Set([
   // Audience tools
   'Audience.DuplicateAdSetWithAudience',
   // Direction-based adset creation (use existing campaign from direction)
+  // Brain Agent работает ТОЛЬКО на уровне adsets, НЕ создает новые кампании!
   'Direction.CreateAdSetWithCreatives'
 ]);
 
@@ -1124,14 +1125,15 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false) => [
   '',
   '🎯 ПРИОРИТЕТ 2: РОТАЦИЯ СУЩЕСТВУЮЩИХ КРЕАТИВОВ (если unused пусто, но есть ready_creatives)',
   '- Применяется если scoring.unused_creatives = [] НО scoring.ready_creatives.length > 0',
-  '- Назначение: ротация уже протестированных креативов в новой кампании для свежего обучения алгоритма',
+  '- Назначение: ротация уже протестированных креативов в новом adset для свежего обучения алгоритма',
   '- ВЫБОР КРЕАТИВА:',
   '  • Анализируй performance из ready_creatives (avg_cpl, avg_ctr, total_leads)',
   '  • Выбирай креативы с ЛУЧШЕЙ historical performance (низкий CPL, высокий CTR)',
   '  • Можно выбрать 1-3 лучших креатива для ротации',
-  '- Используй CreateCampaignWithCreative с user_creative_ids из ready_creatives',
-  '- Параметры те же что в ПРИОРИТЕТ 1 (objective, daily_budget_cents, use_default_settings, auto_activate)',
-  '- Это НЕ новый контент, но даёт шанс на лучшие результаты через свежую связку Campaign+AdSet',
+  '  • КРИТИЧЕСКИ ВАЖНО: выбирай ТОЛЬКО креативы с direction_id === direction_id направления!',
+  '- Используй Direction.CreateAdSetWithCreatives с user_creative_ids из ready_creatives',
+  '- Параметры: direction_id (UUID направления), user_creative_ids (массив), daily_budget_cents, adset_name, auto_activate',
+  '- Это НЕ новый контент, но даёт шанс на лучшие результаты через новый AdSet',
   '',
   '🎯 ПРИОРИТЕТ 3: LAL ДУБЛЬ (если нет креативов вообще)',
   '- Применяется ТОЛЬКО если unused_creatives = [] И ready_creatives = []',
@@ -1176,8 +1178,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false) => [
   '- Workflow.DuplicateAndPauseOriginal {"campaign_id","name?"} — дублирует кампанию и паузит оригинал (используется для реанимации)',
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
   '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+.',
-  '- CreateCampaignWithCreative {"user_creative_ids":["uuid1","uuid2","uuid3"],"objective","campaign_name","daily_budget_cents","adset_name?","use_default_settings?","auto_activate?"} — создает НОВУЮ кампанию с НЕСКОЛЬКИМИ креативами в ОДНОМ adset. ПРИОРИТЕТНЫЙ инструмент для реанимации! ВАЖНО: use_default_settings=true автоматически применяет таргетинг из default_ad_settings. auto_activate=true сразу запускает (рекомендуется!). Работает СРАЗУ и БЕССРОЧНО (daily_budget). ПАРАМЕТР user_creative_ids — МАССИВ! Передавай ВСЕ unused_creatives (1-3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном adset. КОГДА: (1) ВСЕГДА если есть unused_creatives при slightly_bad/bad; (2) если нужно масштабирование но текущие кампании в обучении. BACKWARD COMPATIBILITY: можно передать user_creative_id (одиночный) для одного креатива.',
-  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — СОЗДАТЬ ТОЛЬКО AD SET внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ (кампания = направление). Используй, когда направление уже создано и нужно добавить группу объявлений с выбранными креативами без создания новой кампании. КРИТИЧЕСКИ ВАЖНО: используй ТОЛЬКО креативы с direction_id === указанному direction_id! Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. Следи за суммой бюджетов ad sets в пределах daily_budget_cents направления.',
+  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — ПРИОРИТЕТНЫЙ инструмент для работы с креативами! СОЗДАЕТ НОВЫЙ AD SET внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах daily_budget_cents направления. КОГДА ИСПОЛЬЗОВАТЬ: (1) ВСЕГДА если есть unused_creatives с подходящим direction_id при slightly_bad/bad показателях; (2) для ротации креативов; (3) для масштабирования направления. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1-3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном adset.',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
   '- Выведи ОДИН JSON-объект: { "planNote": string, "actions": Action[], "reportText": string } — и больше НИЧЕГО.',
@@ -1288,13 +1289,13 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false) => [
   'Example JSON:\n{\n  "planNote": "HS bad → down -50%, pause top-spend ad; дублирование рекомендовано (см. reportText), но не включено в actions",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "<ADSET_ID>", "daily_budget": 1000 } },\n    { "type": "PauseAd", "params": { "ad_id": "<AD_ID>", "status": "PAUSED" } }\n  ],\n  "reportText": "<здесь итоговый отчёт по шаблону>"\n}',
   '',
   'ПРИМЕР 3A (реанимация: снижение -50%, переносим часть бюджета, НЕСКОЛЬКО креативов)',
-  'Example JSON:\n{\n  "planNote": "HS bad (adset_123, бюджет 5000 центов = $50/день, CPL x2.5). Снижаем плохой adset на -50% (до $25/день), unused_creatives=3. Создаем ОДНУ новую кампанию с ТРЕМЯ креативами в ОДНОМ adset, переносим освободившийся бюджет $25 на нее.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_123", "daily_budget": 2500 } },\n    { "type": "CreateCampaignWithCreative", "params": { "user_creative_ids": ["uuid-1", "uuid-2", "uuid-3"], "objective": "WhatsApp", "campaign_name": "Новая кампания — Тест 3 креативов", "daily_budget_cents": 2500, "use_default_settings": true, "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nОбнаружены плохие результаты (adset_123, CPL превышает целевой в 2.5 раза). Снижаем бюджет плохого adset на 50% (с $50 до $25/день). Вместо дублирования запускаем новую кампанию с 3 свежими креативами в одном adset — Facebook сам выберет лучший. Переносим освободившуюся половину бюджета ($25/день) на новую кампанию."\n}',
+  'Example JSON:\n{\n  "planNote": "HS bad (adset_123, бюджет 5000 центов = $50/день, CPL x2.5). Снижаем плохой adset на -50% (до $25/день), unused_creatives=3 с direction_id = abc-123. Создаем НОВЫЙ AD SET с ТРЕМЯ креативами внутри существующей кампании направления, переносим освободившийся бюджет $25 на него.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<DIRECTION_CAMPAIGN_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_123", "daily_budget": 2500 } },\n    { "type": "Direction.CreateAdSetWithCreatives", "params": { "direction_id": "abc-123", "user_creative_ids": ["uuid-1", "uuid-2", "uuid-3"], "daily_budget_cents": 2500, "adset_name": "Тест 3 креативов #1", "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nОбнаружены плохие результаты (adset_123, CPL превышает целевой в 2.5 раза). Снижаем бюджет плохого adset на 50% (с $50 до $25/день). Запускаем новую группу объявлений с 3 свежими креативами — Facebook сам выберет лучший. Переносим освободившуюся половину бюджета ($25/день) на новую группу объявлений."\n}',
   '',
   'ПРИМЕР 3B (реанимация: полная пауза, переносим весь бюджет, ДВА креатива)',
-  'Example JSON:\n{\n  "planNote": "HS bad (adset_456, бюджет 5000 центов = $50/день, CPL x4, траты есть но лидов почти нет). ПАУЗИМ adset полностью, unused_creatives=2. Создаем ОДНУ новую кампанию с ДВУМЯ креативами в ОДНОМ adset, переносим весь освободившийся бюджет $50 на нее.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "PauseAdset", "params": { "adsetId": "adset_456" } },\n    { "type": "CreateCampaignWithCreative", "params": { "user_creative_ids": ["uuid-2", "uuid-5"], "objective": "WhatsApp", "campaign_name": "Новая кампания — Тест 2 креативов", "daily_budget_cents": 5000, "use_default_settings": true, "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nОбнаружены критические результаты (adset_456, CPL превышает целевой в 4 раза, траты без лидов). ПОЛНОСТЬЮ паузим неэффективный adset. Вместо дублирования запускаем новую кампанию с 2 свежими креативами в одном adset — Facebook сам выберет лучший. Переносим весь освободившийся бюджет ($50/день) на новую кампанию для свежего старта."\n}',
+  'Example JSON:\n{\n  "planNote": "HS bad (adset_456, бюджет 5000 центов = $50/день, CPL x4, траты есть но лидов почти нет). ПАУЗИМ adset полностью, unused_creatives=2 с direction_id = abc-123. Создаем НОВЫЙ AD SET с ДВУМЯ креативами внутри существующей кампании направления, переносим весь освободившийся бюджет $50 на него.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<DIRECTION_CAMPAIGN_ID>" } },\n    { "type": "PauseAdset", "params": { "adsetId": "adset_456" } },\n    { "type": "Direction.CreateAdSetWithCreatives", "params": { "direction_id": "abc-123", "user_creative_ids": ["uuid-2", "uuid-5"], "daily_budget_cents": 5000, "adset_name": "Тест 2 креативов #1", "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nОбнаружены критические результаты (adset_456, CPL превышает целевой в 4 раза, траты без лидов). ПОЛНОСТЬЮ паузим неэффективный adset. Запускаем новую группу объявлений с 2 свежими креативами — Facebook сам выберет лучший. Переносим весь освободившийся бюджет ($50/день) на новую группу объявлений для свежего старта."\n}',
   '',
   'ПРИМЕР 4 (ротация существующих креативов, unused пусто)',
-  'Example JSON:\n{\n  "planNote": "HS bad, unused_creatives=[] но ready_creatives=[2]. Ротация лучших креативов в новой кампании.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "<ADSET_ID>", "daily_budget": 2500 } },\n    { "type": "CreateCampaignWithCreative", "params": { "user_creative_ids": ["uuid-5", "uuid-7"], "objective": "WhatsApp", "campaign_name": "Ротация — Лучшие креативы", "daily_budget_cents": 2500, "use_default_settings": true, "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты. Новых креативов нет, но есть проверенные креативы с хорошей historical performance (CPL $3.20 и $4.10). Снижаем бюджет плохого adset на 50% и запускаем ротацию 2 лучших креативов в новой кампании — свежая связка Campaign+AdSet даст шанс на улучшение результатов."\n}',
+  'Example JSON:\n{\n  "planNote": "HS bad, unused_creatives=[] но ready_creatives=[2] с direction_id = abc-123. Ротация лучших креативов в новом adset внутри существующей кампании направления.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<DIRECTION_CAMPAIGN_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "<ADSET_ID>", "daily_budget": 2500 } },\n    { "type": "Direction.CreateAdSetWithCreatives", "params": { "direction_id": "abc-123", "user_creative_ids": ["uuid-5", "uuid-7"], "daily_budget_cents": 2500, "adset_name": "Ротация — Лучшие креативы", "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты. Новых креативов нет, но есть проверенные креативы с хорошей historical performance (CPL $3.20 и $4.10). Снижаем бюджет плохого adset на 50% и запускаем ротацию 2 лучших креативов в новой группе объявлений — новый adset даст шанс на улучшение результатов."\n}',
   '',
   'ПРИМЕР 5 (ребаланс бюджета: снижение плохого + увеличение хороших)',
   'Example JSON:\n{\n  "planNote": "AdSet_A (slightly_bad, бюджет $30) → снижаем на -40% до $18 (освобождается $12). AdSet_B (good) и AdSet_C (very_good) получают по $6 каждый. unused_creatives=[], ready_creatives=[].",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_A>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_A", "daily_budget": 1800 } },\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_B>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_B", "daily_budget": 2600 } },\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMP_C>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_C", "daily_budget": 3600 } }\n  ],\n  "reportText": "📊 Отчет\\n\\nПроизведен ребаланс бюджета для соблюдения планового расхода. AdSet_A показывает slightly_bad результаты (CPL выше целевого на 40%) — снижен бюджет на $12/день. Освободившиеся средства перераспределены на эффективные adsets: AdSet_B (good, +$6) и AdSet_C (very_good, +$6). Общий суточный бюджет сохранен. Новых креативов для тестирования нет."\n}',
@@ -1372,6 +1373,18 @@ function validateAndNormalizeActions(actions) {
       if (!params.campaign_id) throw new Error(`${type}: campaign_id required`);
       if (params.name !== undefined && typeof params.name !== 'string') {
         throw new Error(`${type}: name must be string if provided`);
+      }
+    }
+    if (type === 'Direction.CreateAdSetWithCreatives') {
+      if (!params.direction_id) throw new Error('Direction.CreateAdSetWithCreatives: direction_id required');
+      const creativeIds = params.user_creative_ids;
+      if (!creativeIds || !Array.isArray(creativeIds) || creativeIds.length === 0) {
+        throw new Error('Direction.CreateAdSetWithCreatives: user_creative_ids array required');
+      }
+      if (params.daily_budget_cents !== undefined) {
+        const nb = toInt(params.daily_budget_cents);
+        if (nb === null) throw new Error('Direction.CreateAdSetWithCreatives: daily_budget_cents must be int');
+        params.daily_budget_cents = Math.max(300, Math.min(10000, nb));
       }
     }
     cleaned.push({ type, params });
@@ -1860,11 +1873,52 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // ========================================
     // 2. Сбор данных из Facebook API
     // ========================================
-    const [accountStatus, adsets, insights] = await Promise.all([
+    const [accountStatus, adsets] = await Promise.all([
       fetchAccountStatus(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) })),
-      fetchAdsets(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) })),
-      fetchYesterdayInsights(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) }))
+      fetchAdsets(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) }))
     ]);
+
+    // Логируем ошибки Facebook API (rate limits, auth, etc)
+    if (accountStatus?.error) {
+      fastify.log.warn({ 
+        where: 'brain_run', 
+        phase: 'fb_api_error',
+        userId: userAccountId,
+        api: 'accountStatus',
+        error: accountStatus.error 
+      }, 'Facebook API error: account status');
+    }
+    if (adsets?.error) {
+      fastify.log.warn({ 
+        where: 'brain_run', 
+        phase: 'fb_api_error',
+        userId: userAccountId,
+        api: 'adsets',
+        error: adsets.error 
+      }, 'Facebook API error: adsets (possibly rate limit)');
+    }
+    if (insights?.error) {
+      fastify.log.warn({ 
+        where: 'brain_run', 
+        phase: 'fb_api_error',
+        userId: userAccountId,
+        api: 'insights',
+        error: insights.error 
+      }, 'Facebook API error: insights');
+    }
+    
+    // Логируем что получили от FB API
+    const adsetsCount = adsets?.data?.length || 0;
+    const insightsCount = insights?.data?.length || 0;
+    fastify.log.info({
+      where: 'brain_run',
+      phase: 'fb_api_data_received',
+      userId: userAccountId,
+      adsetsCount,
+      insightsCount,
+      hasAdsetsError: !!adsets?.error,
+      hasInsightsError: !!insights?.error
+    }, `FB API data: ${adsetsCount} adsets, ${insightsCount} insights`);
 
     const date = (insights?.data?.[0]?.date_start) || new Date().toISOString().slice(0,10);
     // Детализация по окнам и HS/решениям (детерминированная логика v1.2)
@@ -1888,6 +1942,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const by30 = indexByAdset(d30Rows);
     const byToday = indexByAdset(todayRows);
     const adsByAdsetY = indexAdsByAdset(adRowsY);
+
+    // Проверяем если все массивы пустые - возможно FB API проблема
+    const adsetData = adsets?.data || [];
+    if (yRows.length === 0 && d3Rows.length === 0 && d7Rows.length === 0 && adsetData.length === 0) {
+      fastify.log.warn({
+        where: 'brain_run',
+        phase: 'fb_api_empty_response',
+        userId: userAccountId,
+        message: 'All Facebook API responses are empty - possible rate limit or API issue'
+      });
+    }
 
     // ========================================
     // ИСТОРИЯ ДЕЙСТВИЙ ЗА ПОСЛЕДНИЕ 3 ДНЯ

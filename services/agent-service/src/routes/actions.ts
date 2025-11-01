@@ -22,6 +22,17 @@ export async function actionsRoutes(app: FastifyInstance) {
       }
       const { idempotencyKey, account, actions, source } = parsed.data;
 
+      // Если actions пустой - возвращаем успешный response без выполнения
+      // Это происходит когда Brain Agent определяет что действия не нужны (хорошие показатели или reportOnlyMode)
+      if (actions.length === 0) {
+        return reply.code(202).send({ 
+          executionId: 'no-actions-needed', 
+          executed: false, 
+          message: 'No actions to execute (all campaigns performing well or report-only mode)',
+          actionsCount: 0 
+        });
+      }
+
       // DRY RUN mode: validate actions (against manifest or minimal manual checks), no Supabase/FB side effects
       if (String(process.env.AGENT_DRY_RUN || 'false').toLowerCase() === 'true') {
         const validations = actions.map((a) => validateActionShape(a));

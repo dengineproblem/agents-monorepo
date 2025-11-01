@@ -241,13 +241,8 @@ export async function workflowCreateAdSetInDirection(
     };
   }
 
-  // Добавляем обязательные поля для Instagram
-  targeting.publisher_platforms = ['instagram'];
-  targeting.instagram_positions = ['stream', 'story', 'explore', 'reels'];
-  targeting.device_platforms = ['mobile'];
-  targeting.targeting_automation = {
-    advantage_audience: 1
-  };
+  // НЕ добавляем дополнительные поля - используем targeting как есть
+  // (как в workflowCreateCampaignWithCreative и creativeTest)
 
   log.debug({ targeting }, 'Using targeting for ad set');
 
@@ -257,55 +252,20 @@ export async function workflowCreateAdSetInDirection(
   const budget = daily_budget_cents || direction.daily_budget_cents;
   const final_adset_name = adset_name || `${direction.name} - AdSet ${new Date().toISOString().split('T')[0]}`;
 
-  // Вычисляем ближайшую полночь по Asia/Almaty (UTC+5)
-  function formatWithOffset(date: Date, offsetMin: number) {
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const y = date.getFullYear();
-    const m = pad(date.getMonth() + 1);
-    const d = pad(date.getDate());
-    const hh = pad(date.getHours());
-    const mm = pad(date.getMinutes());
-    const ss = pad(date.getSeconds());
-    const sign = offsetMin >= 0 ? '+' : '-';
-    const abs = Math.abs(offsetMin);
-    const oh = pad(Math.floor(abs / 60));
-    const om = pad(abs % 60);
-    return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
-  }
-  const tzOffsetMin = 5 * 60; // Asia/Almaty UTC+5
-  const nowUtcMs = Date.now() + (new Date().getTimezoneOffset() * 60000);
-  const localNow = new Date(nowUtcMs + tzOffsetMin * 60000);
-  let m = new Date(localNow);
-  m.setHours(0, 0, 0, 0);
-  if (m <= localNow) m = new Date(m.getTime() + 24 * 60 * 60 * 1000);
-  const start_time = formatWithOffset(m, tzOffsetMin);
-
-  const adsetBody: any = {
-    name: final_adset_name,
-    campaign_id: direction.fb_campaign_id, // КЛЮЧЕВОЕ: используем Campaign из Direction
-    daily_budget: budget,
-    billing_event: 'IMPRESSIONS',
-    optimization_goal: optimization_goal,
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    targeting: targeting,
-    status: auto_activate ? 'ACTIVE' : 'PAUSED'
-  };
-
-  if (start_mode === 'midnight_almaty') {
-    adsetBody.start_time = start_time;
-  }
-
-  // Добавляем destination_type и promoted_object для WhatsApp
-  if (destination_type) {
-    adsetBody.destination_type = destination_type;
-  }
-
-  // Получаем page_id из user_accounts
+  // Получаем page_id из user_accounts ПЕРЕД формированием adsetBody
   const { data: userAccount } = await supabase
     .from('user_accounts')
     .select('page_id, whatsapp_phone_number')
     .eq('id', user_account_id)
     .single();
+
+  // КРИТИЧЕСКАЯ ПРОВЕРКА: для WhatsApp кампаний ОБЯЗАТЕЛЬНО нужен page_id
+  if (direction.objective === 'whatsapp' && !userAccount?.page_id) {
+    throw new Error(
+      `Cannot create WhatsApp adset for direction "${direction.name}": page_id not configured for user account ${user_account_id}. ` +
+      `Please connect Facebook Page in settings.`
+    );
+  }
 
   // Получаем WhatsApp номер с fallback логикой
   let whatsapp_phone_number = null;
@@ -351,7 +311,49 @@ export async function workflowCreateAdSetInDirection(
     }
   }
 
-  if (userAccount?.page_id && direction.objective === 'whatsapp') {
+  // Вычисляем ближайшую полночь по Asia/Almaty (UTC+5)
+  function formatWithOffset(date: Date, offsetMin: number) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const y = date.getFullYear();
+    const m = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const hh = pad(date.getHours());
+    const mm = pad(date.getMinutes());
+    const ss = pad(date.getSeconds());
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const abs = Math.abs(offsetMin);
+    const oh = pad(Math.floor(abs / 60));
+    const om = pad(abs % 60);
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}${sign}${oh}:${om}`;
+  }
+  const tzOffsetMin = 5 * 60; // Asia/Almaty UTC+5
+  const nowUtcMs = Date.now() + (new Date().getTimezoneOffset() * 60000);
+  const localNow = new Date(nowUtcMs + tzOffsetMin * 60000);
+  let m = new Date(localNow);
+  m.setHours(0, 0, 0, 0);
+  if (m <= localNow) m = new Date(m.getTime() + 24 * 60 * 60 * 1000);
+  const start_time = formatWithOffset(m, tzOffsetMin);
+
+  // Формируем adsetBody
+  const adsetBody: any = {
+    name: final_adset_name,
+    campaign_id: direction.fb_campaign_id, // КЛЮЧЕВОЕ: используем Campaign из Direction
+    daily_budget: budget,
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: optimization_goal,
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    targeting: targeting,
+    status: auto_activate ? 'ACTIVE' : 'PAUSED'
+  };
+
+  if (start_mode === 'midnight_almaty') {
+    adsetBody.start_time = start_time;
+  }
+
+  // Для WhatsApp добавляем destination_type и promoted_object ВМЕСТЕ
+  // Это критично! Facebook требует promoted_object если указан destination_type
+  if (direction.objective === 'whatsapp' && userAccount?.page_id) {
+    adsetBody.destination_type = 'WHATSAPP';
     adsetBody.promoted_object = {
       page_id: String(userAccount.page_id),
       ...(whatsapp_phone_number && { whatsapp_phone_number })
