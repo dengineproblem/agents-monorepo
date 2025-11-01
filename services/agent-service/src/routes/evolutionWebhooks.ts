@@ -97,6 +97,10 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const sourceId = contextInfo?.stanzaId || contextInfo?.referredProductId; // Ad ID
   const creativeUrl = contextInfo?.participant;
 
+  // НОВОЕ: Проверяем messageContextInfo (там может быть информация о рекламе)
+  const messageContextInfo = message.message?.messageContextInfo;
+  const dataContextInfo = data.contextInfo;
+
   // Log message structure for debugging
   app.log.info({
     instance,
@@ -106,6 +110,13 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     hasExtendedText: !!message.message?.extendedTextMessage,
     hasContextInfo: !!contextInfo,
     contextInfoKeys: contextInfo ? Object.keys(contextInfo) : [],
+    // НОВОЕ: Логируем messageContextInfo и dataContextInfo
+    hasMessageContextInfo: !!messageContextInfo,
+    messageContextInfo: messageContextInfo ? JSON.stringify(messageContextInfo) : null,
+    messageContextInfoKeys: messageContextInfo ? Object.keys(messageContextInfo) : [],
+    hasDataContextInfo: !!dataContextInfo,
+    dataContextInfo: dataContextInfo ? JSON.stringify(dataContextInfo) : null,
+    dataContextInfoKeys: dataContextInfo ? Object.keys(dataContextInfo) : [],
     sourceId: sourceId || null,
     messageText: messageText.substring(0, 30)
   }, 'Incoming message structure');
