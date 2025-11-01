@@ -14,7 +14,14 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
     try {
       const event = request.body as any;
 
-      app.log.info({ event: event.event, instance: event.instance }, 'Evolution webhook received');
+      app.log.info({
+        event: event.event,
+        instance: event.instance,
+        hasData: !!event.data,
+        hasMessages: !!(event.data?.messages),
+        messagesLength: event.data?.messages?.length || 0,
+        dataKeys: event.data ? Object.keys(event.data) : []
+      }, 'Evolution webhook received');
 
       switch (event.event) {
         case 'messages.upsert':
@@ -30,7 +37,19 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
           break;
 
         default:
-          app.log.warn({ event: event.event }, 'Unknown Evolution event type');
+          // Use debug level for common system events that we don't process
+          const systemEvents = [
+            'messages.update', 'messages.delete',
+            'contacts.update', 'contacts.upsert',
+            'chats.update', 'chats.upsert', 'chats.delete',
+            'presence.update'
+          ];
+
+          if (systemEvents.includes(event.event)) {
+            app.log.debug({ event: event.event }, 'System event (not processed)');
+          } else {
+            app.log.warn({ event: event.event }, 'Unknown Evolution event type');
+          }
       }
 
       return reply.send({ success: true });
@@ -47,12 +66,28 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
 async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const { instance, data } = event;
 
-  if (!data.messages || data.messages.length === 0) {
-    app.log.warn('No messages in webhook payload');
+  // Handle different payload formats: data.messages array or data itself
+  let messages = data.messages || (data.key ? [data] : null);
+
+  if (!messages || messages.length === 0) {
+    app.log.debug({
+      dataKeys: data ? Object.keys(data) : [],
+      hasKey: !!data.key
+    }, 'No messages in webhook payload');
     return;
   }
 
-  const message = data.messages[0];
+  const message = messages[0];
+
+  // IMPORTANT: Ignore outgoing messages (fromMe === true)
+  if (message.key?.fromMe === true) {
+    app.log.debug({
+      remoteJid: message.key.remoteJid,
+      messageId: message.key.id
+    }, 'Ignoring outgoing message');
+    return;
+  }
+
   const remoteJid = message.key.remoteJid;
   const messageText = message.message?.conversation ||
                       message.message?.extendedTextMessage?.text || '';
