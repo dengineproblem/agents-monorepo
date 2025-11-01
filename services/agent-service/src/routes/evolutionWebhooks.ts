@@ -97,13 +97,26 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const sourceId = contextInfo?.stanzaId || contextInfo?.referredProductId; // Ad ID
   const creativeUrl = contextInfo?.participant;
 
-  // Extract Facebook metadata
+  // Log message structure for debugging
+  app.log.info({
+    instance,
+    remoteJid,
+    hasMessage: !!message.message,
+    messageKeys: message.message ? Object.keys(message.message) : [],
+    hasExtendedText: !!message.message?.extendedTextMessage,
+    hasContextInfo: !!contextInfo,
+    contextInfoKeys: contextInfo ? Object.keys(contextInfo) : [],
+    sourceId: sourceId || null,
+    messageText: messageText.substring(0, 30)
+  }, 'Incoming message structure');
+
+  // Only process messages with Facebook metadata (from ads)
   if (!sourceId) {
-    app.log.debug({
+    app.log.info({
       instance,
       remoteJid,
       messageText: messageText.substring(0, 30)
-    }, 'Ignoring message without Facebook metadata (no source_id)');
+    }, 'Ignoring message without Facebook metadata (no source_id) - not from ad');
     return;
   }
 
