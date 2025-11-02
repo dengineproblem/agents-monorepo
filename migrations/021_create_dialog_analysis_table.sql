@@ -81,4 +81,3 @@ CREATE TRIGGER trigger_dialog_analysis_updated_at
 BEFORE UPDATE ON dialog_analysis
 FOR EACH ROW
 EXECUTE FUNCTION update_dialog_analysis_updated_at();
-
