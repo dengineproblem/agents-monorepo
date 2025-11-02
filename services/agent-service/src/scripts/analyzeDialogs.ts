@@ -152,7 +152,7 @@ function groupMessagesByContact(messages: Message[]): Map<string, Contact> {
 
     const contact = contacts.get(phone)!;
     const { text, isSystem } = extractMessageText(msg.message_data);
-    const fromMe = msg.from_me === 'true' || msg.from_me === true;
+    const fromMe = String(msg.from_me) === 'true';
     const timestamp = new Date(parseInt(msg.timestamp) * 1000);
 
     contact.messages.push({
@@ -222,7 +222,7 @@ async function analyzeDialog(contact: Contact): Promise<AnalysisResult> {
       temperature: 0.3,
     });
 
-    const content = response.content || response.choices[0]?.message?.content;
+    const content = response.choices[0]?.message?.content;
     if (!content) {
       throw new Error('Empty response from OpenAI');
     }

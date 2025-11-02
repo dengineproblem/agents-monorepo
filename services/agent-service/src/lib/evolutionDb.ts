@@ -30,7 +30,7 @@ evolutionPool.on('connect', () => {
   log.info({ host: EVOLUTION_DB_CONFIG.host }, 'Connected to Evolution PostgreSQL');
 });
 
-evolutionPool.on('error', (err) => {
+evolutionPool.on('error', (err: Error) => {
   log.error({ error: err.message }, 'Evolution PostgreSQL pool error');
 });
 
@@ -40,15 +40,15 @@ evolutionPool.on('error', (err) => {
  * @param params Query parameters
  * @returns Query result
  */
-export async function evolutionQuery<T = any>(
+export async function evolutionQuery(
   query: string,
   params: any[] = []
-): Promise<pg.QueryResult<T>> {
+): Promise<pg.QueryResult<any>> {
   const client = await evolutionPool.connect();
   
   try {
     log.debug({ query: query.substring(0, 100), paramsCount: params.length }, 'Executing Evolution query');
-    const result = await client.query<T>(query, params);
+    const result = await client.query(query, params);
     log.debug({ rowCount: result.rowCount }, 'Evolution query completed');
     return result;
   } catch (error: any) {
