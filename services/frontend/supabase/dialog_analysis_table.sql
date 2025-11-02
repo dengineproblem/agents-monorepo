@@ -1,8 +1,11 @@
 -- Migration: Create dialog_analysis table for WhatsApp dialog analysis
 -- This table stores analyzed WhatsApp dialogs with AI-generated insights
 
+-- Enable UUID extension if not enabled
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 CREATE TABLE IF NOT EXISTS dialog_analysis (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   
   -- Instance and user identification
   instance_name TEXT NOT NULL,
@@ -30,7 +33,7 @@ CREATE TABLE IF NOT EXISTS dialog_analysis (
   
   -- Key insights
   objection TEXT,
-  next_message TEXT NOT NULL,  -- Main field: personalized reactivation message
+  next_message TEXT NOT NULL,
   action TEXT CHECK (action IN ('want_call', 'want_work', 'reserve', 'none')),
   
   -- Scoring
@@ -38,7 +41,7 @@ CREATE TABLE IF NOT EXISTS dialog_analysis (
   reasoning TEXT,
   
   -- Dialog history
-  messages JSONB,  -- Full conversation for context
+  messages JSONB,
   
   -- Timestamps
   analyzed_at TIMESTAMPTZ DEFAULT NOW(),
@@ -80,4 +83,3 @@ CREATE TRIGGER trigger_dialog_analysis_updated_at
 BEFORE UPDATE ON dialog_analysis
 FOR EACH ROW
 EXECUTE FUNCTION update_dialog_analysis_updated_at();
-
