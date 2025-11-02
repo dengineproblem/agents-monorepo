@@ -15,7 +15,7 @@ export default async function greenApiWebhooks(app: FastifyInstance) {
   /**
    * Main webhook endpoint for GreenAPI events
    */
-  app.post('/api/webhooks/greenapi', async (request, reply) => {
+  app.post('/webhooks/greenapi', async (request, reply) => {
     try {
       const event = request.body as any;
 
