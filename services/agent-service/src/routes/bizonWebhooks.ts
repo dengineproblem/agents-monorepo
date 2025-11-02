@@ -41,7 +41,7 @@ export default async function bizonWebhooks(app: FastifyInstance) {
   app.post('/api/webhooks/bizon', async (request, reply) => {
     try {
       const payload = request.body as BizonWebhookPayload;
-      const userAccountId = request.query['user_id'] as string | undefined;
+      const userAccountId = (request.query as any)['user_id'] as string | undefined;
 
       app.log.info({
         event: payload.event,
