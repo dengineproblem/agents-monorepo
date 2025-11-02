@@ -92,40 +92,34 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const messageText = message.message?.conversation ||
                       message.message?.extendedTextMessage?.text || '';
 
-  // Извлекаем метаданные Facebook (если есть)
-  const contextInfo = message.message?.extendedTextMessage?.contextInfo;
-  const sourceId = contextInfo?.stanzaId || contextInfo?.referredProductId; // Ad ID
-  const creativeUrl = contextInfo?.participant;
+  // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из message.key (а не из contextInfo)
+  // В Evolution API информация о рекламе Facebook находится в key объекте
+  const sourceId = message.key?.sourceId; // Ad ID из Facebook
+  const sourceType = message.key?.sourceType; // "ad" для рекламных сообщений
+  const sourceUrl = message.key?.sourceUrl; // Ссылка на рекламу
+  const mediaUrl = message.key?.mediaUrl; // Медиа из рекламы
 
-  // НОВОЕ: Проверяем messageContextInfo (там может быть информация о рекламе)
-  const messageContextInfo = message.message?.messageContextInfo;
-  const dataContextInfo = data.contextInfo;
+  // Старый способ (для совместимости, если вдруг придёт в другом формате)
+  const contextInfo = message.message?.extendedTextMessage?.contextInfo;
+  const legacySourceId = contextInfo?.stanzaId || contextInfo?.referredProductId;
+
+  // Используем sourceId из key, если есть, иначе пробуем старый способ
+  const finalSourceId = sourceId || legacySourceId;
 
   // Log message structure for debugging
   app.log.info({
     instance,
     remoteJid,
-    hasMessage: !!message.message,
-    messageKeys: message.message ? Object.keys(message.message) : [],
-    hasExtendedText: !!message.message?.extendedTextMessage,
-    hasContextInfo: !!contextInfo,
-    contextInfoKeys: contextInfo ? Object.keys(contextInfo) : [],
-    // НОВОЕ: Логируем messageContextInfo и dataContextInfo
-    hasMessageContextInfo: !!messageContextInfo,
-    messageContextInfo: messageContextInfo ? JSON.stringify(messageContextInfo) : null,
-    messageContextInfoKeys: messageContextInfo ? Object.keys(messageContextInfo) : [],
-    hasDataContextInfo: !!dataContextInfo,
-    dataContextInfo: dataContextInfo ? JSON.stringify(dataContextInfo) : null,
-    dataContextInfoKeys: dataContextInfo ? Object.keys(dataContextInfo) : [],
-    // Проверяем все возможные места где может быть sourceId
-    fullMessage: JSON.stringify(message, null, 2),
-    sourceId: sourceId || null,
-    messageText: messageText.substring(0, 30)
+    sourceId: finalSourceId || null,
+    sourceType: sourceType || null,
+    sourceUrl: sourceUrl || null,
+    keyKeys: message.key ? Object.keys(message.key) : [],
+    messageText: messageText.substring(0, 50)
   }, 'Incoming message structure');
 
   // Only process messages with Facebook metadata (from ads)
-  if (!sourceId) {
-    app.log.info({
+  if (!finalSourceId) {
+    app.log.debug({
       instance,
       remoteJid,
       messageText: messageText.substring(0, 30)
@@ -136,7 +130,8 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   app.log.info({
     instance,
     remoteJid,
-    sourceId,
+    sourceId: finalSourceId,
+    sourceType,
     messageText: messageText.substring(0, 50)
   }, 'Processing lead from Facebook ad');
 
@@ -167,8 +162,8 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     userAccountId: instanceData.user_account_id,
     whatsappPhoneNumberId: whatsappNumber?.id,
     clientPhone,
-    sourceId,
-    creativeUrl,
+    sourceId: finalSourceId,
+    creativeUrl: sourceUrl || mediaUrl, // Используем sourceUrl или mediaUrl из рекламы
     messageText,
     timestamp: new Date(message.messageTimestamp * 1000 || Date.now()),
     rawData: message
