@@ -9,6 +9,7 @@ import { creativeTestRoutes } from './routes/creativeTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { directionsRoutes } from './routes/directions.js';
 import { defaultSettingsRoutes } from './routes/defaultSettings.js';
+import { dialogsRoutes } from './routes/dialogs.js';
 import whatsappNumbersRoutes from './routes/whatsappNumbers.js';
 import facebookWebhooks from './routes/facebookWebhooks.js';
 import evolutionWebhooks from './routes/evolutionWebhooks.js';
@@ -50,6 +51,7 @@ app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes, { prefix: '/api' });
 app.register(defaultSettingsRoutes, { prefix: '/api' });
+app.register(dialogsRoutes, { prefix: '/api' });
 app.register(whatsappNumbersRoutes, { prefix: '/api' });
 app.register(facebookWebhooks); // Без префикса - nginx уже убирает /api
 app.register(evolutionWebhooks); // Evolution API webhooks
