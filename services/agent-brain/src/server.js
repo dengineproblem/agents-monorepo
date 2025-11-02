@@ -1687,6 +1687,23 @@ function finalizeReportText(raw, { adAccountId, dateStr }) {
   return text;
 }
 
+function getAccountStatusText(accountStatus) {
+  if (!accountStatus || accountStatus.error) {
+    return '⚠️ Не удалось получить статус';
+  }
+  const status = Number(accountStatus.account_status);
+  switch(status) {
+    case 1:
+      return '✅ Активен';
+    case 2:
+      return '⚠️ Отключен (DISABLED)';
+    case 3:
+      return '💳 Задолженность (UNSETTLED - необходима оплата)';
+    default:
+      return `⚠️ Неизвестный статус (${status})`;
+  }
+}
+
 function buildReport({ date, accountStatus, insights, actions, lastReports }) {
   // Проверяем, были ли ошибки при получении данных из Facebook
   let statusLine;
@@ -2144,7 +2161,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         ``,
         `🚀 Запустите рекламу, и я продолжу давать вам ежедневные отчёты с рекомендациями!`,
         ``,
-        `Статус аккаунта: ${accountStatus?.account_status === 1 ? '✅ Активен' : '⚠️ Проверьте статус'}`,
+        `Статус аккаунта: ${getAccountStatusText(accountStatus)}`,
         `Всего ad sets: ${adsetList.length}`,
         `Активных ad sets: ${adsetList.filter(a => a.status === 'ACTIVE').length}`,
       ].join('\n');
@@ -2423,11 +2440,10 @@ fastify.post('/api/brain/run', async (request, reply) => {
           const Lq = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
           const cpl = Ltot>0 ? (spend / Ltot) : null;
           const qcpl = Lq>0 ? (spend / Lq) : null;
-          const status = (accountStatus?.account_status === 1) ? 'Активен' : 'Неактивен';
           return [
             `📅 Дата отчета: ${d}`,
             '',
-            `🏢 Статус рекламного кабинета: ${status}`,
+            `🏢 Статус рекламного кабинета: ${getAccountStatusText(accountStatus)}`,
             '',
             '📈 Общая сводка:',
             `- Общие затраты по всем кампаниям: ${spend.toFixed(2)} USD`,
