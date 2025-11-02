@@ -36,6 +36,12 @@ const dictionary: Record<ErrorKey, FacebookErrorResolution> = {
     hint: 'Проверьте статус Ads Manager, долги и ограничения по Policy.',
     severity: 'error',
   },
+  '200:1815694': {
+    msgCode: 'fb_budget_permission_error',
+    short: 'Недостаточно прав для изменения бюджета. Возможно задолженность в кабинете.',
+    hint: 'Проверьте статус кабинета (account_status) и баланс в Facebook Ads Manager.',
+    severity: 'error',
+  },
   '200:*': {
     msgCode: 'fb_permission_error',
     short: 'Ошибка прав доступа Facebook (код 200)',
@@ -77,6 +83,12 @@ const dictionary: Record<ErrorKey, FacebookErrorResolution> = {
     short: 'Рекламный объект не найден или был удалён.',
     hint: 'Проверьте наличие кампании/adset/объявления по ID.',
     severity: 'error',
+  },
+  '100:2923012': {
+    msgCode: 'fb_status_invalid',
+    short: 'Невозможно изменить статус объекта (уже в этом статусе или недоступен для изменений).',
+    hint: 'Проверьте текущий статус объекта перед изменением. Используйте GET запрос.',
+    severity: 'warning',
   },
   '100:*': {
     msgCode: 'fb_invalid_params',
