@@ -117,6 +117,8 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     hasDataContextInfo: !!dataContextInfo,
     dataContextInfo: dataContextInfo ? JSON.stringify(dataContextInfo) : null,
     dataContextInfoKeys: dataContextInfo ? Object.keys(dataContextInfo) : [],
+    // Проверяем все возможные места где может быть sourceId
+    fullMessage: JSON.stringify(message, null, 2),
     sourceId: sourceId || null,
     messageText: messageText.substring(0, 30)
   }, 'Incoming message structure');
