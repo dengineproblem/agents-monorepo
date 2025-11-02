@@ -78,7 +78,9 @@ export async function getInstanceMessages(instanceName: string) {
       "messageTimestamp" as timestamp,
       "key" as key_data
     FROM "Message"
-    WHERE "owner" = $1
+    WHERE "instanceId" = (
+      SELECT id FROM "Instance" WHERE name = $1
+    )
     ORDER BY "messageTimestamp" ASC
   `;
   
