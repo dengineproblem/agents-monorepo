@@ -12,6 +12,7 @@ import { defaultSettingsRoutes } from './routes/defaultSettings.js';
 import whatsappNumbersRoutes from './routes/whatsappNumbers.js';
 import facebookWebhooks from './routes/facebookWebhooks.js';
 import evolutionWebhooks from './routes/evolutionWebhooks.js';
+import bizonWebhooks from './routes/bizonWebhooks.js';
 import whatsappInstances from './routes/whatsappInstances.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
@@ -51,6 +52,7 @@ app.register(defaultSettingsRoutes, { prefix: '/api' });
 app.register(whatsappNumbersRoutes, { prefix: '/api' });
 app.register(facebookWebhooks); // Без префикса - nginx уже убирает /api
 app.register(evolutionWebhooks); // Evolution API webhooks
+app.register(bizonWebhooks); // Bizon365 webinar webhooks
 app.register(whatsappInstances); // WhatsApp instance management
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
