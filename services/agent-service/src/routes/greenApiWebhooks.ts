@@ -19,6 +19,11 @@ export default async function greenApiWebhooks(app: FastifyInstance) {
     try {
       const event = request.body as any;
 
+      // Log full webhook body for debugging
+      app.log.info({
+        fullBody: JSON.stringify(event, null, 2),
+      }, 'GreenAPI webhook FULL BODY');
+
       app.log.info({
         typeWebhook: event.typeWebhook,
         instanceId: event.instanceData?.idInstance,
@@ -31,8 +36,15 @@ export default async function greenApiWebhooks(app: FastifyInstance) {
           await handleIncomingMessage(event, app);
           break;
 
+        case 'quotaExceeded':
+          app.log.warn({ instanceId: event.instanceData?.idInstance }, 'GreenAPI quota exceeded');
+          break;
+
         default:
-          app.log.debug({ type: event.typeWebhook }, 'Unhandled GreenAPI event type');
+          app.log.info({
+            type: event.typeWebhook,
+            fullEvent: JSON.stringify(event, null, 2)
+          }, 'Unhandled GreenAPI event type - logging full event');
       }
 
       return reply.send({ success: true });
