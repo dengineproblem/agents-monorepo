@@ -1935,30 +1935,18 @@ fastify.post('/api/brain/run', async (request, reply) => {
         error: adsets.error 
       }, 'Facebook API error: adsets (possibly rate limit)');
     }
-    if (insights?.error) {
-      fastify.log.warn({ 
-        where: 'brain_run', 
-        phase: 'fb_api_error',
-        userId: userAccountId,
-        api: 'insights',
-        error: insights.error 
-      }, 'Facebook API error: insights');
-    }
     
     // Логируем что получили от FB API
     const adsetsCount = adsets?.data?.length || 0;
-    const insightsCount = insights?.data?.length || 0;
     fastify.log.info({
       where: 'brain_run',
       phase: 'fb_api_data_received',
       userId: userAccountId,
       adsetsCount,
-      insightsCount,
-      hasAdsetsError: !!adsets?.error,
-      hasInsightsError: !!insights?.error
-    }, `FB API data: ${adsetsCount} adsets, ${insightsCount} insights`);
+      hasAdsetsError: !!adsets?.error
+    }, `FB API data: ${adsetsCount} adsets`);
 
-    const date = (insights?.data?.[0]?.date_start) || new Date().toISOString().slice(0,10);
+    const date = new Date().toISOString().slice(0,10);
     // Детализация по окнам и HS/решениям (детерминированная логика v1.2)
     const [yRows, d3Rows, d7Rows, d30Rows, todayRows, adRowsY, campY, camp3, camp7, camp30, campT, campList] = await Promise.all([
       fetchInsightsPreset(ua.ad_account_id, ua.access_token, 'yesterday').then(r=>r.data||[]).catch(()=>[]),
