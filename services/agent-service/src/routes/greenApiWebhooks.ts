@@ -59,7 +59,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const instancePhone = normalizePhoneNumber(instanceData.wid); // Business phone (e.g., "79991234567")
   const clientPhone = normalizePhoneNumber(senderData.chatId);   // Client phone (e.g., "79991234567")
 
-  app.log.debug({
+  app.log.info({
     instancePhone,
     clientPhone,
     typeMessage: messageData?.typeMessage,
@@ -67,7 +67,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
   // Ignore outgoing messages
   if (messageData?.typeMessage === 'outgoing') {
-    app.log.debug({ clientPhone }, 'Ignoring outgoing message');
+    app.log.info({ clientPhone }, 'Ignoring outgoing message');
     return;
   }
 
@@ -79,15 +79,23 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     .maybeSingle();
 
   if (existingLead) {
-    app.log.debug({ leadId: existingLead.id, clientPhone }, 'Lead already exists, ignoring');
+    app.log.info({ leadId: existingLead.id, clientPhone }, 'Lead already exists, ignoring');
     return;
   }
 
   // Extract Facebook ad metadata
   const adMetadata = extractFacebookAdMetadata(messageData);
 
+  app.log.info({
+    clientPhone,
+    hasSourceId: !!adMetadata.sourceId,
+    sourceId: adMetadata.sourceId,
+    sourceType: adMetadata.sourceType,
+    sourceUrl: adMetadata.sourceUrl,
+  }, 'Extracted ad metadata');
+
   if (!adMetadata.sourceId) {
-    app.log.debug({ clientPhone }, 'No Facebook ad metadata found, ignoring');
+    app.log.info({ clientPhone, messageData }, 'No Facebook ad metadata found, ignoring');
     return;
   }
 
