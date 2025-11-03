@@ -432,8 +432,9 @@ export async function analyzeDialogs(params: {
   instanceName: string;
   userAccountId: string;
   minIncoming?: number;
+  maxDialogs?: number;
 }) {
-  const { instanceName, userAccountId, minIncoming = 3 } = params;
+  const { instanceName, userAccountId, minIncoming = 3, maxDialogs } = params;
 
   log.info({ instanceName, userAccountId, minIncoming }, 'Starting dialog analysis');
 
@@ -449,13 +450,20 @@ export async function analyzeDialogs(params: {
     // 3. Separate new leads (< minIncoming) and contacts to analyze (>= minIncoming)
     const allContacts = Array.from(contacts.values());
     const newLeads = allContacts.filter(contact => contact.incoming_count < minIncoming);
-    const contactsToAnalyze = allContacts.filter(contact => contact.incoming_count >= minIncoming);
+    let contactsToAnalyze = allContacts.filter(contact => contact.incoming_count >= minIncoming);
+    
+    // Limit number of dialogs if maxDialogs is specified
+    if (maxDialogs && maxDialogs > 0) {
+      contactsToAnalyze = contactsToAnalyze.slice(0, maxDialogs);
+      log.info({ maxDialogs }, 'Limiting analysis to specified number of dialogs');
+    }
     
     log.info({ 
       totalContacts: contacts.size,
       newLeads: newLeads.length,
       toAnalyze: contactsToAnalyze.length,
-      minIncoming 
+      minIncoming,
+      maxDialogs: maxDialogs || 'unlimited'
     }, 'Contacts categorized');
 
     // 4. Save new leads without LLM analysis
@@ -523,13 +531,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const instanceName = process.argv[2];
   const userAccountId = process.argv[3];
   const minIncoming = parseInt(process.argv[4] || '3', 10);
+  const maxDialogs = process.argv[5] ? parseInt(process.argv[5], 10) : undefined;
 
   if (!instanceName || !userAccountId) {
-    console.error('Usage: tsx src/scripts/analyzeDialogs.ts <instanceName> <userAccountId> [minIncoming]');
+    console.error('Usage: tsx src/scripts/analyzeDialogs.ts <instanceName> <userAccountId> [minIncoming] [maxDialogs]');
+    console.error('Example: tsx src/scripts/analyzeDialogs.ts instance_name user_uuid 3 10');
     process.exit(1);
   }
 
-  analyzeDialogs({ instanceName, userAccountId, minIncoming })
+  analyzeDialogs({ instanceName, userAccountId, minIncoming, maxDialogs })
     .then(stats => {
       console.log('✅ Analysis completed:', stats);
       process.exit(0);

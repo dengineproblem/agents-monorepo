@@ -8,6 +8,7 @@ const AnalyzeDialogsSchema = z.object({
   instanceName: z.string().min(1),
   userAccountId: z.string().uuid(),
   minIncoming: z.number().int().min(1).optional().default(3),
+  maxDialogs: z.number().int().min(1).optional(),
 });
 
 const GetAnalysisSchema = z.object({
@@ -34,9 +35,9 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.post('/dialogs/analyze', async (request, reply) => {
     try {
       const body = AnalyzeDialogsSchema.parse(request.body);
-      const { instanceName, userAccountId, minIncoming } = body;
+      const { instanceName, userAccountId, minIncoming, maxDialogs } = body;
 
-      app.log.info({ instanceName, userAccountId, minIncoming }, 'Starting dialog analysis');
+      app.log.info({ instanceName, userAccountId, minIncoming, maxDialogs }, 'Starting dialog analysis');
 
       // Verify that instance belongs to user
       const { data: instance, error: instanceError } = await supabase
@@ -57,6 +58,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
         instanceName,
         userAccountId,
         minIncoming,
+        maxDialogs,
       });
 
       app.log.info({ stats }, 'Dialog analysis completed');
