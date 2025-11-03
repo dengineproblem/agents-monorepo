@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8081,
+    historyApiFallback: true,
     proxy: {
       // Специфичный proxy для analyzer (порт 7081)
       // Убираем /api/analyzer префикс, т.к. analyzerService ожидает запросы без префикса
