@@ -103,7 +103,7 @@ export async function getInstanceMessages(instanceName: string, maxContacts?: nu
     `;
     
     log.info({ maxContacts }, 'Fetching messages for top N most active contacts');
-    const result = await evolutionQuery(query, [instanceName, maxContacts]);
+    const result = await evolutionQuery(query, [instanceName, instanceName, maxContacts]);
     return result.rows;
   } else {
     // Get all messages (original behavior)
