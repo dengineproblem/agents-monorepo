@@ -118,27 +118,45 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   }, 'Facebook ad metadata found, creating lead');
 
   // Find WhatsApp phone number and user account
+  // We need this to get user_account_id for querying creative_tests
   const whatsappNumberData = await findWhatsAppNumber(instancePhone, app);
 
   if (!whatsappNumberData) {
-    app.log.error({ instancePhone }, 'WhatsApp phone number not found in database');
+    app.log.error({ 
+      instancePhone, 
+      clientPhone,
+      message: 'WhatsApp phone number not found in database'
+    }, 'WhatsApp phone number not found in database');
     return;
   }
 
-  // Resolve creative_id and direction_id from Facebook Ad ID
-  const { creativeId, directionId } = await resolveCreativeAndDirection(
+  // Resolve creative_id, direction_id AND whatsapp_phone_number_id from Facebook Ad ID
+  const { creativeId, directionId, whatsappPhoneNumberId } = await resolveCreativeAndDirection(
     adMetadata.sourceId,
     adMetadata.sourceUrl,
     whatsappNumberData.userAccountId,
     app
   );
 
+  // Use WhatsApp phone number from direction if available, otherwise fallback to instance phone
+  const finalWhatsappPhoneNumberId = whatsappPhoneNumberId || whatsappNumberData.id;
+
+  app.log.info({
+    clientPhone,
+    sourceId: adMetadata.sourceId,
+    creativeId,
+    directionId,
+    whatsappPhoneNumberId: finalWhatsappPhoneNumberId,
+    usedDirectionWhatsApp: !!whatsappPhoneNumberId,
+  }, 'Resolved lead data from ad metadata');
+
   // Create new lead
   const { data: newLead, error } = await supabase
     .from('leads')
     .insert({
       user_account_id: whatsappNumberData.userAccountId,
-      whatsapp_phone_number_id: whatsappNumberData.id,
+      business_id: finalWhatsappPhoneNumberId ? instancePhone : clientPhone, // legacy fallback
+      whatsapp_phone_number_id: finalWhatsappPhoneNumberId, // Use WhatsApp from direction!
       chat_id: clientPhone,
       source_id: adMetadata.sourceId,
       creative_id: creativeId,
@@ -164,6 +182,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     sourceId: adMetadata.sourceId,
     creativeId,
     directionId,
+    whatsappPhoneNumberId: finalWhatsappPhoneNumberId,
   }, 'Successfully created lead from GreenAPI webhook');
 }
 
@@ -185,28 +204,39 @@ function extractFacebookAdMetadata(messageData: any): {
     };
   }
 
-  // Check extendedTextMessageData (primary location for ad metadata)
-  const extendedData = messageData.extendedTextMessageData;
-  if (extendedData && extendedData.sourceType === 'ad') {
-    return {
-      sourceId: extendedData.sourceId || null,
-      sourceType: extendedData.sourceType || null,
-      sourceUrl: extendedData.sourceUrl || null,
-      conversionSource: extendedData.conversionSource || null,
-    };
+  // Check BOTH extendedTextMessageData and extendedTextMessage
+  // (GreenAPI uses different field names in different contexts)
+  const extendedData = messageData.extendedTextMessageData || messageData.extendedTextMessage;
+  
+  if (extendedData) {
+    // Check if this message has ad metadata
+    // We extract if sourceId exists (some ads may not have sourceType='ad')
+    if (extendedData.sourceId) {
+      return {
+        sourceId: extendedData.sourceId || null,
+        sourceType: extendedData.sourceType || null,
+        sourceUrl: extendedData.sourceUrl || null,
+        conversionSource: extendedData.conversionSource || null,
+      };
+    }
   }
 
   // Check other message types (imageMessage, videoMessage, etc.)
   const messageTypes = [
     'textMessageData',
+    'textMessage',
     'imageMessageData',
+    'imageMessage',
     'videoMessageData',
+    'videoMessage',
     'documentMessageData',
+    'documentMessage',
   ];
 
   for (const type of messageTypes) {
     const msgData = messageData[type];
-    if (msgData?.sourceId && msgData?.sourceType === 'ad') {
+    // Extract if sourceId exists (removed strict sourceType === 'ad' check)
+    if (msgData?.sourceId) {
       return {
         sourceId: msgData.sourceId || null,
         sourceType: msgData.sourceType || null,
@@ -268,25 +298,34 @@ async function findWhatsAppNumber(
 }
 
 /**
- * Resolve creative_id and direction_id from Facebook Ad ID
+ * Resolve creative_id, direction_id, and whatsapp_phone_number_id from Facebook Ad ID
  *
  * Strategy:
  * 1. PRIMARY: Lookup in creative_tests by ad_id
  * 2. FALLBACK: Lookup in user_creatives by creative URL matching
+ * 3. Get whatsapp_phone_number_id from direction (if available)
  */
 async function resolveCreativeAndDirection(
   sourceId: string,
   sourceUrl: string | null,
   userAccountId: string,
   app: FastifyInstance
-): Promise<{ creativeId: string | null; directionId: string | null }> {
+): Promise<{ 
+  creativeId: string | null; 
+  directionId: string | null;
+  whatsappPhoneNumberId: string | null;
+}> {
 
   // PRIMARY LOOKUP: Find in creative_tests by ad_id
   const { data: creativeTest, error: testError } = await supabase
     .from('creative_tests')
     .select(`
       user_creative_id,
-      user_creatives!inner(id, direction_id)
+      user_creatives!inner(
+        id, 
+        direction_id,
+        account_directions!inner(whatsapp_phone_number_id)
+      )
     `)
     .eq('ad_id', sourceId)
     .eq('user_id', userAccountId)
@@ -299,16 +338,19 @@ async function resolveCreativeAndDirection(
   if (creativeTest) {
     const creatives = creativeTest.user_creatives as any;
     const directionId = creatives?.direction_id || null;
+    const whatsappPhoneNumberId = creatives?.account_directions?.whatsapp_phone_number_id || null;
 
     app.log.debug({
       sourceId,
       creativeId: creativeTest.user_creative_id,
       directionId,
+      whatsappPhoneNumberId,
     }, 'Found creative via creative_tests.ad_id');
 
     return {
       creativeId: creativeTest.user_creative_id,
       directionId,
+      whatsappPhoneNumberId,
     };
   }
 
@@ -316,7 +358,11 @@ async function resolveCreativeAndDirection(
   if (sourceUrl) {
     const { data: creativeByUrl, error: urlError } = await supabase
       .from('user_creatives')
-      .select('id, direction_id')
+      .select(`
+        id, 
+        direction_id,
+        account_directions!inner(whatsapp_phone_number_id)
+      `)
       .eq('user_id', userAccountId)
       .ilike('title', `%${sourceUrl}%`)
       .maybeSingle();
@@ -326,15 +372,19 @@ async function resolveCreativeAndDirection(
     }
 
     if (creativeByUrl) {
+      const whatsappPhoneNumberId = (creativeByUrl as any)?.account_directions?.whatsapp_phone_number_id || null;
+
       app.log.debug({
         sourceUrl,
         creativeId: creativeByUrl.id,
         directionId: creativeByUrl.direction_id,
+        whatsappPhoneNumberId,
       }, 'Found creative via URL matching');
 
       return {
         creativeId: creativeByUrl.id,
         directionId: creativeByUrl.direction_id,
+        whatsappPhoneNumberId,
       };
     }
   }
@@ -344,5 +394,6 @@ async function resolveCreativeAndDirection(
   return {
     creativeId: null,
     directionId: null,
+    whatsappPhoneNumberId: null,
   };
 }
