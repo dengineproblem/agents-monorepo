@@ -557,6 +557,7 @@ const Header: React.FC<HeaderProps> = ({
                       </div>
                     </div>
                     {validationResult.checks && (
+                      <>
                       <div className="space-y-2">
                         <p className="text-sm font-medium">{appReviewText('Check statuses:', 'Статус проверок:')}</p>
                         {validationResult.checks.token !== undefined && (
@@ -691,6 +692,7 @@ const Header: React.FC<HeaderProps> = ({
                         </div>
                       </div>
                     )}
+                    </>
                     )}
                   </div>
                 )}
