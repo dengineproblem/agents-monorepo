@@ -467,7 +467,7 @@ export async function analyzeDialogs(params: {
   maxDialogs?: number;
   maxContacts?: number;
 }) {
-  const { instanceName, userAccountId, minIncoming = 3, maxDialogs, maxContacts = 100 } = params;
+  const { instanceName, userAccountId, minIncoming = 3, maxDialogs, maxContacts } = params;
 
   log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
@@ -565,7 +565,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const userAccountId = process.argv[3];
   const minIncoming = parseInt(process.argv[4] || '3', 10);
   const maxDialogs = process.argv[5] ? parseInt(process.argv[5], 10) : undefined;
-  const maxContacts = process.argv[6] ? parseInt(process.argv[6], 10) : 100; // Default 100
+  const maxContacts = process.argv[6] ? parseInt(process.argv[6], 10) : undefined;
 
   if (!instanceName || !userAccountId) {
     console.error('Usage: tsx src/scripts/analyzeDialogs.ts <instanceName> <userAccountId> [minIncoming] [maxDialogs] [maxContacts]');

@@ -9,7 +9,7 @@ const AnalyzeDialogsSchema = z.object({
   userAccountId: z.string().uuid(),
   minIncoming: z.number().int().min(1).optional().default(3),
   maxDialogs: z.number().int().min(1).optional(),
-  maxContacts: z.number().int().min(1).optional().default(100),
+  maxContacts: z.number().int().min(1).optional(),
 });
 
 const GetAnalysisSchema = z.object({
