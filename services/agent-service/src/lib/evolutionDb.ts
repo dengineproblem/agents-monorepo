@@ -75,14 +75,15 @@ export async function getInstanceMessages(instanceName: string, maxContacts?: nu
   if (maxContacts && maxContacts > 0) {
     // Get messages only for top N most active contacts
     query = `
-      WITH top_contacts AS (
+      WITH instance_data AS (
+        SELECT id FROM "Instance" WHERE name = $1
+      ),
+      top_contacts AS (
         SELECT 
           "key"->>'remoteJid' as remote_jid,
           COUNT(*) as message_count
         FROM "Message"
-        WHERE "instanceId" = (
-          SELECT id FROM "Instance" WHERE name = $1
-        )
+        WHERE "instanceId" IN (SELECT id FROM instance_data)
         GROUP BY "key"->>'remoteJid'
         ORDER BY message_count DESC
         LIMIT $2
@@ -95,15 +96,13 @@ export async function getInstanceMessages(instanceName: string, maxContacts?: nu
         "messageTimestamp" as timestamp,
         "key" as key_data
       FROM "Message"
-      WHERE "instanceId" = (
-        SELECT id FROM "Instance" WHERE name = $1
-      )
-      AND "key"->>'remoteJid' IN (SELECT remote_jid FROM top_contacts)
+      WHERE "instanceId" IN (SELECT id FROM instance_data)
+        AND "key"->>'remoteJid' IN (SELECT remote_jid FROM top_contacts)
       ORDER BY "messageTimestamp" ASC
     `;
     
     log.info({ maxContacts }, 'Fetching messages for top N most active contacts');
-    const result = await evolutionQuery(query, [instanceName, instanceName, maxContacts]);
+    const result = await evolutionQuery(query, [instanceName, maxContacts]);
     return result.rows;
   } else {
     // Get all messages (original behavior)
