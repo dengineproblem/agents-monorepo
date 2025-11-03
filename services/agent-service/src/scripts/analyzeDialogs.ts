@@ -25,8 +25,12 @@ S: — системное сообщение
   "is_owner": boolean | null,
   "uses_ads_now": boolean | null,
   "has_sales_dept": boolean | null,
+  "ad_budget": string | null,
+  "qualification_complete": boolean,
   "has_booking": boolean,
   "sent_instagram": boolean,
+  "instagram_url": string | null,
+  "funnel_stage": "not_qualified" | "qualified" | "consultation_booked" | "consultation_completed" | "deal_closed" | "deal_lost",
   "interest_level": "hot" | "warm" | "cold",
   "main_intent": "clinic_lead" | "ai_targetolog" | "marketing_analysis" | "other",
   "objection": string | null,
@@ -36,13 +40,97 @@ S: — системное сообщение
   "reasoning": string
 }
 
-Обращай внимание на:
-- Тип бизнеса: стоматология/косметология/реабилитация
-- Ключевые слова: запись, консультация, цена, стоимость, Instagram
-- Возражения: дорого, не подходит, подумаю
-- Готовность: записался/спросил когда = hot
+КВАЛИФИКАЦИОННЫЕ ВОПРОСЫ (4 вопроса):
+1. is_owner - Владелец бизнеса?
+2. has_sales_dept - Есть отдел продаж?
+3. uses_ads_now - Запускает ли рекламу?
+4. ad_budget - Бюджет на рекламу (текст: "50000", "100-200к", "не сказал" или null)
 
-next_message: учитывай контекст диалога, персонализируй (до 50 слов), побуждай к действию.
+qualification_complete = true ТОЛЬКО если ВСЕ 4 поля выше заполнены (не null).
+
+ЭТАПЫ ВОРОНКИ (определи правильный этап):
+- "not_qualified" - НЕ ответил на все 4 квалификационных вопроса
+- "qualified" - ОТВЕТИЛ на все 4 вопроса, но еще не записан
+- "consultation_booked" - Записан на консультацию (есть дата/время или подтверждение)
+- "consultation_completed" - Консультация состоялась
+- "deal_closed" - Согласился работать, подписал договор, оплатил
+- "deal_lost" - Отказался, не подошло, пропал, не отвечает
+
+СИСТЕМА СКОРИНГА (строго следуй правилам):
+
+=== БАЗОВЫЙ SCORE по этапу воронки ===
+- new_lead: 10 баллов
+- not_qualified: 30 баллов
+- qualified: 50 баллов
+- consultation_booked: 70 баллов
+- consultation_completed: 75 баллов
+- deal_closed: 95 баллов
+- deal_lost: 5 баллов
+
+=== МОДИФИКАТОРЫ НИШИ (критично важно!) ===
+
+ЦЕЛЕВЫЕ НИШИ (+баллы):
++ Медицина (стоматология, косметология, клиники, медцентры): +15
++ Инфобизнес (курсы, обучение, коучинг, тренинги): +10
++ Салоны красоты, SPA, фитнес: +10
++ Реабилитация, wellness: +15
+
+НЕ ЦЕЛЕВЫЕ НИШИ (-баллы):
+- Таргетологи, SMM-специалисты, маркетологи: -30 (НЕ наша аудитория!)
+- Агентства (конкуренты): -25
+- Фриланс услуги (дизайн, разработка, копирайтинг): -15
+- Розничная торговля товарами: -10
+
+=== МОДИФИКАТОРЫ ПОВЕДЕНИЯ ===
+
+ПЛЮСЫ (+баллы):
++ Владелец бизнеса (is_owner = true): +10
++ Указал бюджет (ad_budget): +10
++ Бюджет >100к: +5 дополнительно
++ Активно задает вопросы про результаты/кейсы: +10
++ Отправил Instagram: +5
++ Быстро отвечает (<1 часа между сообщениями): +5
++ Говорит "хочу записаться", "когда можно", называет время: +20
++ Спрашивает про гарантии/как работаете: +5
+
+МИНУСЫ (-баллы):
+- Возражения ("дорого", "не подходит", "не уверен"): -15
+- "Подумаю", "потом перезвоню", "посоветуюсь": -20
+- Не владелец, есть отдел продаж: -5
+- Нет бюджета на рекламу: -10
+- Долго не отвечает (>24 часа): -15
+- Односложные ответы ("да", "ок"): -10
+- Игнорирует вопросы агента: -20
+- Просто спрашивает цены: 0 (нейтрально, базовый вопрос)
+
+=== INTEREST LEVEL (по итоговому score) ===
+
+HOT (75-100): 
+ТОЛЬКО если записан на консультацию ИЛИ прямо сейчас готов записаться ИЛИ сделка закрыта.
+Признаки: конкретные действия, называет время, подтверждает встречу.
+
+WARM (40-74):
+Есть интерес, но НЕ готов записаться. Задает вопросы, но откладывает решение.
+"Подумаю", "перезвоню" = максимум WARM.
+
+COLD (0-39):
+Слабый интерес, не целевая ниша, возражения, пропал, отказался.
+Таргетолог/агентство = автоматически максимум WARM (даже если интерес есть).
+
+=== ПРАВИЛА ===
+1. HOT ТОЛЬКО если ЗАПИСАЛСЯ или ПРЯМО СЕЙЧАС готов
+2. Вопрос про цены = 0 баллов (нейтрально)
+3. Таргетолог/SMM = максимум WARM, даже с интересом
+4. "Подумаю" = НИКОГДА не HOT
+5. Нет конкретных действий = не HOT
+
+ИНСТРУКЦИИ:
+- instagram_url: извлеки ссылку (instagram.com/username, @username)
+- ad_budget: извлеки сумму ("50 тысяч", "100-200к")
+- Определи этап воронки
+- Рассчитай score: базовый + модификаторы ниши + модификаторы поведения
+- interest_level определи строго по итоговому score
+- next_message: персонализируй (до 50 слов), побуждай к следующему шагу
 
 Диалог:
 
@@ -77,8 +165,12 @@ interface AnalysisResult {
   is_owner: boolean | null;
   uses_ads_now: boolean | null;
   has_sales_dept: boolean | null;
+  ad_budget: string | null;
+  qualification_complete: boolean;
   has_booking: boolean;
   sent_instagram: boolean;
+  instagram_url: string | null;
+  funnel_stage: 'not_qualified' | 'qualified' | 'consultation_booked' | 'consultation_completed' | 'deal_closed' | 'deal_lost';
   interest_level: 'hot' | 'warm' | 'cold';
   main_intent: 'clinic_lead' | 'ai_targetolog' | 'marketing_analysis' | 'other';
   objection: string | null;
@@ -237,6 +329,47 @@ async function analyzeDialog(contact: Contact): Promise<AnalysisResult> {
 }
 
 /**
+ * Save new lead (< minIncoming messages) to Supabase without LLM analysis
+ */
+async function saveNewLead(
+  instanceName: string,
+  userAccountId: string,
+  contact: Contact
+) {
+  const { error } = await supabase
+    .from('dialog_analysis')
+    .upsert({
+      instance_name: instanceName,
+      user_account_id: userAccountId,
+      contact_phone: contact.phone,
+      contact_name: contact.name,
+      incoming_count: contact.incoming_count,
+      outgoing_count: contact.outgoing_count,
+      first_message: contact.first_message.toISOString(),
+      last_message: contact.last_message.toISOString(),
+      
+      // Set as new lead
+      funnel_stage: 'new_lead',
+      next_message: 'Новый лид, требуется первый контакт',
+      score: 0,
+      
+      // Store full conversation
+      messages: contact.messages,
+      
+      analyzed_at: new Date().toISOString(),
+    }, {
+      onConflict: 'instance_name,contact_phone'
+    });
+
+  if (error) {
+    log.error({ error: error.message, phone: contact.phone }, 'Failed to save new lead');
+    throw error;
+  }
+
+  log.info({ phone: contact.phone }, 'New lead saved');
+}
+
+/**
  * Save analysis result to Supabase
  */
 async function saveAnalysisResult(
@@ -262,8 +395,12 @@ async function saveAnalysisResult(
       is_owner: analysis.is_owner,
       uses_ads_now: analysis.uses_ads_now,
       has_sales_dept: analysis.has_sales_dept,
+      ad_budget: analysis.ad_budget,
+      qualification_complete: analysis.qualification_complete,
       has_booking: analysis.has_booking,
       sent_instagram: analysis.sent_instagram,
+      instagram_url: analysis.instagram_url,
+      funnel_stage: analysis.funnel_stage,
       interest_level: analysis.interest_level,
       main_intent: analysis.main_intent,
       objection: analysis.objection,
@@ -285,7 +422,7 @@ async function saveAnalysisResult(
     throw error;
   }
 
-  log.info({ phone: contact.phone }, 'Analysis saved');
+  log.info({ phone: contact.phone, funnel_stage: analysis.funnel_stage }, 'Analysis saved');
 }
 
 /**
@@ -309,29 +446,55 @@ export async function analyzeDialogs(params: {
     const contacts = groupMessagesByContact(messages);
     log.info({ contactCount: contacts.size }, 'Grouped messages by contact');
 
-    // 3. Filter contacts with enough incoming messages
-    const filteredContacts = Array.from(contacts.values()).filter(
-      contact => contact.incoming_count >= minIncoming
-    );
+    // 3. Separate new leads (< minIncoming) and contacts to analyze (>= minIncoming)
+    const allContacts = Array.from(contacts.values());
+    const newLeads = allContacts.filter(contact => contact.incoming_count < minIncoming);
+    const contactsToAnalyze = allContacts.filter(contact => contact.incoming_count >= minIncoming);
+    
     log.info({ 
-      totalContacts: contacts.size, 
-      filteredContacts: filteredContacts.length,
+      totalContacts: contacts.size,
+      newLeads: newLeads.length,
+      toAnalyze: contactsToAnalyze.length,
       minIncoming 
-    }, 'Filtered contacts');
+    }, 'Contacts categorized');
 
-    // 4. Analyze each contact
+    // 4. Save new leads without LLM analysis
+    for (const contact of newLeads) {
+      try {
+        await saveNewLead(instanceName, userAccountId, contact);
+      } catch (error: any) {
+        log.error({ error: error.message, phone: contact.phone }, 'Failed to save new lead');
+      }
+    }
+
+    // 5. Analyze contacts with enough messages
     const stats = {
-      total: filteredContacts.length,
+      total: contactsToAnalyze.length,
       analyzed: 0,
+      new_leads: newLeads.length,
       hot: 0,
       warm: 0,
       cold: 0,
       errors: 0,
     };
 
-    for (const contact of filteredContacts) {
+    for (const contact of contactsToAnalyze) {
       try {
-        const analysis = await analyzeDialog(contact);
+        let analysis = await analyzeDialog(contact);
+        
+        // Post-processing: Check if should be qualified
+        if (
+          analysis.qualification_complete &&
+          analysis.is_owner !== null &&
+          analysis.has_sales_dept !== null &&
+          analysis.uses_ads_now !== null &&
+          analysis.ad_budget !== null &&
+          analysis.funnel_stage === 'not_qualified'
+        ) {
+          analysis.funnel_stage = 'qualified';
+          log.info({ phone: contact.phone }, 'Auto-upgraded to qualified stage');
+        }
+        
         await saveAnalysisResult(instanceName, userAccountId, contact, analysis);
         
         stats.analyzed++;

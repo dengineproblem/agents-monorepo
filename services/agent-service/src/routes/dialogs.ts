@@ -15,6 +15,8 @@ const GetAnalysisSchema = z.object({
   instanceName: z.string().optional(),
   interestLevel: z.enum(['hot', 'warm', 'cold']).optional(),
   minScore: z.number().int().min(0).max(100).optional(),
+  funnelStage: z.enum(['new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost']).optional(),
+  qualificationComplete: z.boolean().optional(),
 });
 
 const ExportCsvSchema = z.object({
@@ -86,7 +88,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.get('/dialogs/analysis', async (request, reply) => {
     try {
       const query = GetAnalysisSchema.parse(request.query);
-      const { userAccountId, instanceName, interestLevel, minScore } = query;
+      const { userAccountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
 
       let dbQuery = supabase
         .from('dialog_analysis')
@@ -105,6 +107,14 @@ export async function dialogsRoutes(app: FastifyInstance) {
 
       if (minScore !== undefined) {
         dbQuery = dbQuery.gte('score', minScore);
+      }
+
+      if (funnelStage) {
+        dbQuery = dbQuery.eq('funnel_stage', funnelStage);
+      }
+
+      if (qualificationComplete !== undefined) {
+        dbQuery = dbQuery.eq('qualification_complete', qualificationComplete);
       }
 
       const { data, error } = await dbQuery;
@@ -145,7 +155,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
 
       let dbQuery = supabase
         .from('dialog_analysis')
-        .select('contact_phone, contact_name, interest_level, score, business_type, objection, next_message, incoming_count, outgoing_count, last_message')
+        .select('contact_phone, contact_name, interest_level, score, business_type, funnel_stage, instagram_url, ad_budget, qualification_complete, is_owner, has_sales_dept, uses_ads_now, objection, next_message, incoming_count, outgoing_count, last_message')
         .eq('user_account_id', userAccountId)
         .order('score', { ascending: false });
 
@@ -174,6 +184,13 @@ export async function dialogsRoutes(app: FastifyInstance) {
         'interest_level',
         'score',
         'business_type',
+        'funnel_stage',
+        'instagram_url',
+        'ad_budget',
+        'qualification_complete',
+        'is_owner',
+        'has_sales_dept',
+        'uses_ads_now',
         'objection',
         'next_message',
         'incoming_count',
@@ -238,7 +255,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
 
       let dbQuery = supabase
         .from('dialog_analysis')
-        .select('interest_level, score, incoming_count')
+        .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
         .eq('user_account_id', userAccountId);
 
       if (instanceName) {
@@ -261,6 +278,16 @@ export async function dialogsRoutes(app: FastifyInstance) {
           ? Math.round(data.reduce((sum, d) => sum + (d.score || 0), 0) / data.length)
           : 0,
         totalMessages: data?.reduce((sum, d) => sum + (d.incoming_count || 0), 0) || 0,
+        // Funnel stages
+        new_lead: data?.filter(d => d.funnel_stage === 'new_lead').length || 0,
+        not_qualified: data?.filter(d => d.funnel_stage === 'not_qualified').length || 0,
+        qualified: data?.filter(d => d.funnel_stage === 'qualified').length || 0,
+        consultation_booked: data?.filter(d => d.funnel_stage === 'consultation_booked').length || 0,
+        consultation_completed: data?.filter(d => d.funnel_stage === 'consultation_completed').length || 0,
+        deal_closed: data?.filter(d => d.funnel_stage === 'deal_closed').length || 0,
+        deal_lost: data?.filter(d => d.funnel_stage === 'deal_lost').length || 0,
+        // Qualification
+        qualified_count: data?.filter(d => d.qualification_complete === true).length || 0,
       };
 
       return reply.send({

@@ -209,18 +209,19 @@ const Header: React.FC<HeaderProps> = ({
 
       const data = await response.json();
 
-      if (!response.ok || !data.success) {
-        console.error('Facebook validation error:', data);
+      if (!response.ok) {
+        console.error('Facebook validation HTTP error:', data);
         setValidationResult({
           success: false,
-          error: appReviewText('Validation error', 'Ошибка валидации'),
-          details: data.error || appReviewText('Failed to run Facebook validation', 'Не удалось выполнить проверку Facebook')
+          error: appReviewText('Connection error', 'Ошибка соединения'),
+          details: data.error || appReviewText('Failed to connect to Facebook', 'Не удалось подключиться к Facebook')
         });
         setIsValidating(false);
         return;
       }
 
-      // Устанавливаем результат
+      // Всегда устанавливаем полный ответ от сервера (даже если success: false)
+      console.log('Facebook validation result:', data);
       setValidationResult(data);
     } catch (error: any) {
       console.error('Unexpected error during Facebook validation:', error);
