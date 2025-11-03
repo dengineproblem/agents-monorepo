@@ -596,7 +596,6 @@ const Header: React.FC<HeaderProps> = ({
                           </div>
                         )}
                       </div>
-                    )}
 
                     {/* Page Details - uses pages_read_engagement permission */}
                     {validationResult.checks?.pageDetails && (
@@ -691,6 +690,7 @@ const Header: React.FC<HeaderProps> = ({
                           ))}
                         </div>
                       </div>
+                    )}
                     )}
                   </div>
                 )}
