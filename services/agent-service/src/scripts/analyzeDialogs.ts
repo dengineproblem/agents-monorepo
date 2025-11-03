@@ -465,15 +465,16 @@ export async function analyzeDialogs(params: {
   userAccountId: string;
   minIncoming?: number;
   maxDialogs?: number;
+  maxContacts?: number;
 }) {
-  const { instanceName, userAccountId, minIncoming = 3, maxDialogs } = params;
+  const { instanceName, userAccountId, minIncoming = 3, maxDialogs, maxContacts = 100 } = params;
 
-  log.info({ instanceName, userAccountId, minIncoming }, 'Starting dialog analysis');
+  log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
   try {
-    // 1. Get all messages from Evolution PostgreSQL
-    const messages = await getInstanceMessages(instanceName);
-    log.info({ messageCount: messages.length }, 'Retrieved messages from Evolution DB');
+    // 1. Get messages from Evolution PostgreSQL (limited to top N most active contacts)
+    const messages = await getInstanceMessages(instanceName, maxContacts);
+    log.info({ messageCount: messages.length, maxContacts }, 'Retrieved messages from Evolution DB');
 
     // 2. Group by contact
     const contacts = groupMessagesByContact(messages);
@@ -564,14 +565,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const userAccountId = process.argv[3];
   const minIncoming = parseInt(process.argv[4] || '3', 10);
   const maxDialogs = process.argv[5] ? parseInt(process.argv[5], 10) : undefined;
+  const maxContacts = process.argv[6] ? parseInt(process.argv[6], 10) : 100; // Default 100
 
   if (!instanceName || !userAccountId) {
-    console.error('Usage: tsx src/scripts/analyzeDialogs.ts <instanceName> <userAccountId> [minIncoming] [maxDialogs]');
-    console.error('Example: tsx src/scripts/analyzeDialogs.ts instance_name user_uuid 3 10');
+    console.error('Usage: tsx src/scripts/analyzeDialogs.ts <instanceName> <userAccountId> [minIncoming] [maxDialogs] [maxContacts]');
+    console.error('Example: tsx src/scripts/analyzeDialogs.ts instance_name user_uuid 3 10 100');
+    console.error('  - minIncoming: minimum incoming messages to analyze (default: 3)');
+    console.error('  - maxDialogs: max dialogs to analyze (default: unlimited)');
+    console.error('  - maxContacts: max contacts to load from DB (default: 100)');
     process.exit(1);
   }
 
-  analyzeDialogs({ instanceName, userAccountId, minIncoming, maxDialogs })
+  analyzeDialogs({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts })
     .then(stats => {
       console.log('✅ Analysis completed:', stats);
       process.exit(0);

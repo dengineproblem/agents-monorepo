@@ -64,28 +64,67 @@ export async function evolutionQuery(
 }
 
 /**
- * Get all messages for a specific Evolution API instance
+ * Get messages for a specific Evolution API instance
  * @param instanceName Evolution API instance name
+ * @param maxContacts Optional limit on number of contacts to fetch (most active first)
  * @returns Messages grouped by contact
  */
-export async function getInstanceMessages(instanceName: string) {
-  const query = `
-    SELECT 
-      "key"->>'remoteJid' as remote_jid,
-      "pushName" as contact_name,
-      "key"->>'fromMe' as from_me,
-      "message" as message_data,
-      "messageTimestamp" as timestamp,
-      "key" as key_data
-    FROM "Message"
-    WHERE "instanceId" = (
-      SELECT id FROM "Instance" WHERE name = $1
-    )
-    ORDER BY "messageTimestamp" ASC
-  `;
+export async function getInstanceMessages(instanceName: string, maxContacts?: number) {
+  let query: string;
   
-  const result = await evolutionQuery(query, [instanceName]);
-  return result.rows;
+  if (maxContacts && maxContacts > 0) {
+    // Get messages only for top N most active contacts
+    query = `
+      WITH top_contacts AS (
+        SELECT 
+          "key"->>'remoteJid' as remote_jid,
+          COUNT(*) as message_count
+        FROM "Message"
+        WHERE "instanceId" = (
+          SELECT id FROM "Instance" WHERE name = $1
+        )
+        GROUP BY "key"->>'remoteJid'
+        ORDER BY message_count DESC
+        LIMIT $2
+      )
+      SELECT 
+        "key"->>'remoteJid' as remote_jid,
+        "pushName" as contact_name,
+        "key"->>'fromMe' as from_me,
+        "message" as message_data,
+        "messageTimestamp" as timestamp,
+        "key" as key_data
+      FROM "Message"
+      WHERE "instanceId" = (
+        SELECT id FROM "Instance" WHERE name = $1
+      )
+      AND "key"->>'remoteJid' IN (SELECT remote_jid FROM top_contacts)
+      ORDER BY "messageTimestamp" ASC
+    `;
+    
+    log.info({ maxContacts }, 'Fetching messages for top N most active contacts');
+    const result = await evolutionQuery(query, [instanceName, maxContacts]);
+    return result.rows;
+  } else {
+    // Get all messages (original behavior)
+    query = `
+      SELECT 
+        "key"->>'remoteJid' as remote_jid,
+        "pushName" as contact_name,
+        "key"->>'fromMe' as from_me,
+        "message" as message_data,
+        "messageTimestamp" as timestamp,
+        "key" as key_data
+      FROM "Message"
+      WHERE "instanceId" = (
+        SELECT id FROM "Instance" WHERE name = $1
+      )
+      ORDER BY "messageTimestamp" ASC
+    `;
+    
+    const result = await evolutionQuery(query, [instanceName]);
+    return result.rows;
+  }
 }
 
 /**
