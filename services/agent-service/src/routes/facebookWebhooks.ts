@@ -268,7 +268,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         token: false,
         adAccount: false,
         page: false,
-        pageDetails: null as any
+        pageDetails: null as any,
+        directions: [] as any[]
       };
 
       // 1. Validate token
@@ -353,14 +354,20 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       // 4. Validate active directions - check if adsets can be created
       const directionsValidation: any[] = [];
 
+      log.info({ hasToken: checks.token, hasAdAccount: checks.adAccount }, 'Starting directions validation');
+
       if (checks.token && checks.adAccount) {
         try {
+          log.info({ accessToken: accessToken?.substring(0, 20) + '...' }, 'Searching for user by access_token');
+          
           // Get user_account_id by access_token from database
-          const { data: userAccount } = await supabase
+          const { data: userAccount, error: userError } = await supabase
             .from('user_accounts')
             .select('id')
             .eq('access_token', accessToken)
             .single();
+
+          log.info({ found: !!userAccount, error: userError?.message }, 'User search result');
 
           if (userAccount) {
             // Get active directions for this user
