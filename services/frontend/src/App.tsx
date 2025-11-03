@@ -21,6 +21,7 @@ import ROIAnalytics from './pages/ROIAnalytics';
 import CreativeGeneration from './pages/CreativeGeneration';
 import Creatives from './pages/Creatives';
 import AdSettings from './pages/AdSettings';
+import WhatsAppAnalysis from './pages/WhatsAppAnalysis';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
@@ -99,6 +100,7 @@ const AppRoutes = () => {
                   {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
                   {FEATURES.SHOW_CREATIVES && <Route path="/creatives" element={<CreativeGeneration />} />}
                   {FEATURES.SHOW_CREATIVES && <Route path="/videos" element={<Creatives />} />}
+                  <Route path="/whatsapp-analysis" element={<WhatsAppAnalysis />} />
                   <Route path="/profile" element={<Profile />} />
                   {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
                   <Route path="*" element={<NotFound />} />
