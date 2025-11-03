@@ -395,7 +395,7 @@ async function getUserAccount(userAccountId) {
   return await supabaseQuery('user_accounts', 
     async () => await supabase
       .from('user_accounts')
-      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number')
+      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id')
       .eq('id', userAccountId)
       .single(),
     { userAccountId }
@@ -1158,8 +1158,11 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '',
   '🎯 ПРИОРИТЕТ 3: LAL ДУБЛЬ (если нет креативов вообще)',
   '- Применяется ТОЛЬКО если unused_creatives = [] И ready_creatives = []',
+  '- ⚠️ КРИТИЧЕСКИ ВАЖНО: ДОСТУПНО ТОЛЬКО если account.has_lal_audience === true!',
+  '- ⚠️ Если account.has_lal_audience === false - НЕ ИСПОЛЬЗУЙ это действие! Вместо этого упомяни в planNote что нужно настроить LAL аудиторию в Ads Manager и добавить её ID в настройки.',
   '- Назначение: смена аудитории на LAL 3% IG Engagers 365d (когда нет креативов для ротации)',
   '- Условия:',
+  '  • account.has_lal_audience === true (ОБЯЗАТЕЛЬНО! Проверяй ПЕРВЫМ делом)',
   '  • HS ≤ -6 (slightly_bad или bad)',
   '  • CPL_ratio ≥ 2.0 на yesterday ИЛИ last_3d',
   '  • impr_yesterday ≥ 1000 ИЛИ impr_last_3d ≥ 1500',
@@ -1198,7 +1201,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- PauseAd {"ad_id","status":"PAUSED"}',
   '- Workflow.DuplicateAndPauseOriginal {"campaign_id","name?"} — дублирует кампанию и паузит оригинал (используется для реанимации)',
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
-  '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+.',
+  '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+. ⚠️ ДОСТУПНО ТОЛЬКО если account.has_lal_audience === true! При audience_id="use_lal_from_settings" использует готовую LAL аудиторию из настроек пользователя.',
   '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — ПРИОРИТЕТНЫЙ инструмент для работы с креативами! СОЗДАЕТ НОВЫЙ AD SET внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах daily_budget_cents направления. КОГДА ИСПОЛЬЗОВАТЬ: (1) ВСЕГДА если есть unused_creatives с подходящим direction_id при slightly_bad/bad показателях; (2) для ротации креативов; (3) для масштабирования направления. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1-3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном adset.',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
@@ -2309,7 +2312,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
         timezone: ua?.account_timezone || 'Asia/Almaty',
         report_date: date,
         dispatch: !!inputs?.dispatch,
-        report_only_mode: reportOnlyMode
+        report_only_mode: reportOnlyMode,
+        has_lal_audience: !!ua?.ig_seed_audience_id
       },
       limits: { min_cents: bounds.minCents, max_cents: bounds.maxCents, step_up: 0.30, step_down: 0.50 },
       targets,
