@@ -358,29 +358,36 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
       if (checks.token && checks.adAccount) {
         try {
-          log.info({ accessToken: accessToken?.substring(0, 20) + '...' }, 'Searching for user by access_token');
+          // Normalize ad_account_id (remove 'act_' prefix if present)
+          const normalizedAdAccountId = adAccountId?.replace('act_', '');
           
-          // Get user_account_id by access_token from database
-          const { data: userAccount, error: userError } = await supabase
-            .from('user_accounts')
-            .select('id')
-            .eq('access_token', accessToken)
-            .single();
+          log.info({ adAccountId: `act_${normalizedAdAccountId}` }, 'Searching for active directions for this ad account');
+          
+          // Get active directions for this ad_account_id (через join с user_accounts)
+          const { data: directions, error: directionsError } = await supabase
+            .from('account_directions')
+            .select(`
+              id, 
+              name, 
+              objective, 
+              fb_campaign_id, 
+              daily_budget_cents, 
+              whatsapp_phone_number_id,
+              user_accounts!inner(ad_account_id)
+            `)
+            .eq('user_accounts.ad_account_id', `act_${normalizedAdAccountId}`)
+            .eq('is_active', true);
 
-          log.info({ found: !!userAccount, error: userError?.message }, 'User search result');
+          log.info({ 
+            found: !!directions, 
+            count: directions?.length || 0,
+            error: directionsError?.message 
+          }, 'Directions search result');
 
-          if (userAccount) {
-            // Get active directions for this user
-            const { data: directions } = await supabase
-              .from('account_directions')
-              .select('id, name, objective, fb_campaign_id, daily_budget_cents, whatsapp_phone_number_id')
-              .eq('user_account_id', userAccount.id)
-              .eq('is_active', true);
+          if (directions && directions.length > 0) {
+            log.info({ directionsCount: directions.length }, 'Validating directions');
 
-            if (directions && directions.length > 0) {
-              log.info({ directionsCount: directions.length }, 'Validating directions');
-
-              for (const direction of directions) {
+            for (const direction of directions) {
                 const validation: any = {
                   id: direction.id,
                   name: direction.name,
@@ -467,8 +474,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
                   validation.error = null;
                 }
 
-                directionsValidation.push(validation);
-              }
+              directionsValidation.push(validation);
             }
           }
         } catch (e) {
