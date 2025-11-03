@@ -495,6 +495,49 @@ const Header: React.FC<HeaderProps> = ({
                         </p>
                       </div>
                     )}
+
+                    {/* Directions Validation */}
+                    {validationResult.checks?.directions && validationResult.checks.directions.length > 0 && (
+                      <div className="mt-4 p-4 rounded-lg border border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/20">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
+                          {appReviewText('Directions Validation', 'Проверка направлений')}
+                        </p>
+                        <div className="space-y-2">
+                          {validationResult.checks.directions.map((dir: any) => (
+                            <div key={dir.id} className="flex items-start gap-2 p-2 rounded bg-white dark:bg-gray-800 border">
+                              {dir.success ? (
+                                <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                              ) : (
+                                <svg className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                  {dir.name}
+                                  <span className="ml-2 text-xs text-gray-500">({dir.objective})</span>
+                                </p>
+                                {!dir.success && dir.error && (
+                                  <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                    {dir.errorDetails || dir.error}
+                                  </p>
+                                )}
+                                {!dir.success && dir.errorSubcode === 2446885 && (
+                                  <a
+                                    href="https://business.facebook.com/wa/manage/phone-numbers/"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 inline-block"
+                                  >
+                                    {appReviewText('→ Configure WhatsApp Business', '→ Настроить WhatsApp Business')}
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
