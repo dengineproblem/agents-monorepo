@@ -52,7 +52,8 @@ const DisconnectQuerySchema = z.object({
 
 export default async function amocrmOAuthRoutes(app: FastifyInstance) {
   /**
-   * GET /api/amocrm/auth
+   * GET /amocrm/auth
+   * External URL: /api/amocrm/auth (nginx adds /api/ prefix)
    *
    * Initiates OAuth flow by redirecting user to AmoCRM authorization page
    *
@@ -62,7 +63,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
    *
    * Returns: Redirect to AmoCRM OAuth page
    */
-  app.get('/api/amocrm/auth', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/amocrm/auth', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = AuthQuerySchema.safeParse(request.query);
 
@@ -109,7 +110,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /api/amocrm/callback
+   * GET /amocrm/callback
+   * External URL: /api/amocrm/callback (nginx adds /api/ prefix)
    *
    * OAuth callback endpoint - receives authorization code from AmoCRM
    *
@@ -121,7 +123,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
    *
    * Returns: Success page or error
    */
-  app.get('/api/amocrm/callback', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/amocrm/callback', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = CallbackQuerySchema.safeParse(request.query);
 
@@ -310,7 +312,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /api/amocrm/status
+   * GET /amocrm/status
+   * External URL: /api/amocrm/status (nginx adds /api/ prefix)
    *
    * Check AmoCRM connection status for user
    *
@@ -319,7 +322,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
    *
    * Returns: { connected: boolean, subdomain?: string, tokenExpiresAt?: string }
    */
-  app.get('/api/amocrm/status', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/amocrm/status', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = StatusQuerySchema.safeParse(request.query);
 
@@ -346,7 +349,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
   });
 
   /**
-   * DELETE /api/amocrm/disconnect
+   * DELETE /amocrm/disconnect
+   * External URL: /api/amocrm/disconnect (nginx adds /api/ prefix)
    *
    * Disconnect AmoCRM from user account
    *
@@ -355,7 +359,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
    *
    * Returns: { success: true }
    */
-  app.delete('/api/amocrm/disconnect', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/amocrm/disconnect', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = DisconnectQuerySchema.safeParse(request.query);
 

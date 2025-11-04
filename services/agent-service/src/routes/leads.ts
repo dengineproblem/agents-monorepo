@@ -66,7 +66,8 @@ function normalizePhoneForWhatsApp(phone: string): string {
 
 export default async function leadsRoutes(app: FastifyInstance) {
   /**
-   * POST /api/leads
+   * POST /leads
+   * External URL: /api/leads (nginx adds /api/ prefix)
    *
    * Create a new lead from website and sync to AmoCRM
    *
@@ -80,7 +81,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
    *
    * Returns: { success: true, leadId: number, amocrmSynced: boolean }
    */
-  app.post('/api/leads', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       // 1. Validate request body
       const parsed = CreateLeadSchema.safeParse(request.body);
@@ -190,7 +191,8 @@ export default async function leadsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /api/leads/:id
+   * GET /leads/:id
+   * External URL: /api/leads/:id (nginx adds /api/ prefix)
    *
    * Get lead by ID
    *
@@ -202,7 +204,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
    *
    * Returns: Lead object
    */
-  app.get('/api/leads/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/leads/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
       const { userAccountId } = request.query as { userAccountId?: string };
@@ -240,7 +242,8 @@ export default async function leadsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /api/leads
+   * GET /leads
+   * External URL: /api/leads (nginx adds /api/ prefix)
    *
    * List all leads for a user account
    *
@@ -251,7 +254,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
    *
    * Returns: Array of leads
    */
-  app.get('/api/leads', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { userAccountId, limit = '50', offset = '0' } = request.query as {
         userAccountId?: string;

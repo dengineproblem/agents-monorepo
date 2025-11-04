@@ -50,12 +50,13 @@ export default async function amocrmWebhooks(app: FastifyInstance) {
    * AmoCRM webhook endpoint
    * Receives notifications when leads/deals are created or updated
    *
-   * URL format: /api/webhooks/amocrm?user_id={uuid}
+   * Internal route: POST /webhooks/amocrm
+   * External URL: /api/webhooks/amocrm?user_id={uuid} (nginx adds /api/ prefix)
    *
    * The user_id query parameter identifies which user account owns the AmoCRM account
    * This should be configured in AmoCRM webhook settings
    */
-  app.post('/api/webhooks/amocrm', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/webhooks/amocrm', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const payload = request.body as AmoCRMWebhookPayload;
       const userAccountId = (request.query as any)['user_id'] as string | undefined;

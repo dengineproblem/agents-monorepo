@@ -21,12 +21,13 @@ const SecretsSchema = z.object({
 
 export default async function amocrmSecretsRoutes(app: FastifyInstance) {
   /**
-   * POST /api/amocrm/secrets
+   * POST /amocrm/secrets
+   * External URL: /api/amocrm/secrets (nginx adds /api/ prefix)
    *
    * Receives client_id and client_secret from AmoCRM when integration is auto-created
    * This happens BEFORE the OAuth redirect, so we need to store them temporarily
    */
-  app.post('/api/amocrm/secrets', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/amocrm/secrets', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = SecretsSchema.safeParse(request.body);
 
