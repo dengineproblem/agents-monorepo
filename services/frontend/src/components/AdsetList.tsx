@@ -51,13 +51,21 @@ const AdsetList: React.FC<AdsetListProps> = ({ campaignId, dateRange, forceRefre
     
     // Загружаем из API
     setLoading(true);
+    console.log(`[AdsetList] Загрузка ad sets для кампании: ${campaignId}`);
     facebookApi.getAdsetsByCampaign(campaignId)
       .then((data) => {
+        console.log(`[AdsetList] Получено ${data.length} ad sets для кампании ${campaignId}`);
         setAdsets(data);
-        setCachedData(cacheKey, data, 10); // Кэш на 10 минут
+        // НЕ кэшируем пустые массивы - они могут быть временным состоянием
+        if (data.length > 0) {
+          setCachedData(cacheKey, data, 10); // Кэш на 10 минут
+          console.log(`[AdsetList] Ad sets закэшированы`);
+        } else {
+          console.warn(`[AdsetList] Пустой результат НЕ закэширован - будет повторный запрос`);
+        }
       })
       .catch((e) => {
-        console.error('Ошибка загрузки ad sets:', e);
+        console.error('[AdsetList] Ошибка загрузки ad sets:', e);
         setAdsets([]);
       })
       .finally(() => setLoading(false));

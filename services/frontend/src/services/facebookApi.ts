@@ -306,7 +306,20 @@ const getAdsetsByCampaign = async (campaignId: string) => {
     filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
     limit: '50',
   };
+  
+  console.log(`[facebookApi] Запрос ad sets для кампании ${campaignId}:`, {
+    endpoint,
+    filtering: params.filtering
+  });
+  
   const data = await fetchFromFacebookAPI(endpoint, params);
+  
+  console.log(`[facebookApi] Получен ответ:`, {
+    totalAdsets: data.data?.length || 0,
+    campaignId,
+    adsets: data.data?.map((a: any) => ({ id: a.id, name: a.name, campaign_id: a.campaign_id }))
+  });
+  
   return data.data || [];
 };
 
