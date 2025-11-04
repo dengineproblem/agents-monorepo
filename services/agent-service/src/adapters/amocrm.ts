@@ -229,7 +229,7 @@ export async function exchangeCodeForToken(
     throw new Error('AmoCRM OAuth credentials not configured (neither provided nor in environment)');
   }
 
-  const url = `https://${subdomain}.amocrm.ru/oauth2/access_token`;
+  const url = `https://www.amocrm.ru/oauth2/access_token`;
 
   const response = await fetch(url, {
     method: 'POST',
@@ -241,7 +241,8 @@ export async function exchangeCodeForToken(
       client_secret: actualClientSecret,
       grant_type: 'authorization_code',
       code,
-      redirect_uri: redirectUri
+      redirect_uri: redirectUri,
+      subdomain: subdomain
     })
   });
 
