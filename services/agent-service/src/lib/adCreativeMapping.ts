@@ -1,7 +1,7 @@
-import { supabase } from './supabaseClient';
-import { log as baseLog } from './logger';
+import { supabase } from './supabase.js';
+import { createLogger } from './logger.js';
 
-const log = baseLog.child({ module: 'adCreativeMapping' });
+const log = createLogger({ module: 'adCreativeMapping' });
 
 export interface SaveAdMappingParams {
   ad_id: string;
