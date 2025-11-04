@@ -1,5 +1,5 @@
 -- Migration 024: Add Website Lead Fields
--- Description: Add fields for website leads (name, phone, email) and make chat_id optional
+-- Description: Add fields for website leads (name, phone, email)
 -- Date: 2025-11-04
 
 -- ============================================================================
@@ -13,9 +13,7 @@ ALTER TABLE leads
   ADD COLUMN IF NOT EXISTS message TEXT,
   ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'whatsapp' CHECK (source_type IN ('whatsapp', 'website', 'manual'));
 
--- Make chat_id optional (nullable) since website leads don't have WhatsApp chat
-ALTER TABLE leads
-  ALTER COLUMN chat_id DROP NOT NULL;
+-- Note: chat_id is already nullable in the original table definition
 
 COMMENT ON COLUMN leads.name IS 'Lead name from website form or WhatsApp contact';
 COMMENT ON COLUMN leads.phone IS 'Phone number in original format (e.g., +7 912 345-67-89)';
@@ -38,8 +36,19 @@ SET source_type = 'whatsapp'
 WHERE chat_id IS NOT NULL AND source_type IS NULL;
 
 -- ============================================================================
--- 3. Add constraint: either chat_id OR phone must be present
+-- 3. Add constraint: either chat_id OR phone OR email must be present
 -- ============================================================================
+
+-- Drop existing constraint if it exists
+DO $$ 
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint 
+    WHERE conname = 'leads_contact_info_check'
+  ) THEN
+    ALTER TABLE leads DROP CONSTRAINT leads_contact_info_check;
+  END IF;
+END $$;
 
 -- Add a check constraint to ensure we have at least one way to contact the lead
 ALTER TABLE leads
