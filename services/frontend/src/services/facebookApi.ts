@@ -300,16 +300,17 @@ const getAdsetsByCampaign = async (campaignId: string) => {
   if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
     throw new Error('Нет access_token или ad_account_id');
   }
-  const endpoint = `${FB_API_CONFIG.ad_account_id}/adsets`;
+  // ИСПРАВЛЕНО: Используем прямой endpoint кампании вместо фильтрации
+  // Фильтрация через ad_account_id/adsets?filtering=... не работает для некоторых аккаунтов
+  const endpoint = `${campaignId}/adsets`;
   const params = {
     fields: 'id,name,daily_budget,campaign_id,status',
-    filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
     limit: '50',
   };
   
   console.log(`[facebookApi] Запрос ad sets для кампании ${campaignId}:`, {
     endpoint,
-    filtering: params.filtering
+    method: 'direct campaign endpoint (без filtering)'
   });
   
   const data = await fetchFromFacebookAPI(endpoint, params);
