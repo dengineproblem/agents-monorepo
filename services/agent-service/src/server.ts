@@ -16,6 +16,10 @@ import evolutionWebhooks from './routes/evolutionWebhooks.js';
 import greenApiWebhooks from './routes/greenApiWebhooks.js';
 import bizonWebhooks from './routes/bizonWebhooks.js';
 import whatsappInstances from './routes/whatsappInstances.js';
+import amocrmOAuthRoutes from './routes/amocrmOAuth.js';
+import amocrmWebhooks from './routes/amocrmWebhooks.js';
+import amocrmSecretsRoutes from './routes/amocrmSecrets.js';
+import leadsRoutes from './routes/leads.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
 
@@ -58,6 +62,10 @@ app.register(evolutionWebhooks); // Evolution API webhooks
 app.register(greenApiWebhooks); // GreenAPI webhooks
 app.register(bizonWebhooks); // Bizon365 webinar webhooks
 app.register(whatsappInstances); // WhatsApp instance management
+app.register(amocrmOAuthRoutes); // AmoCRM OAuth integration
+app.register(amocrmWebhooks); // AmoCRM webhooks
+app.register(amocrmSecretsRoutes); // AmoCRM auto-generated credentials
+app.register(leadsRoutes); // Leads from website
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);

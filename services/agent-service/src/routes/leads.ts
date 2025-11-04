@@ -1,0 +1,297 @@
+/**
+ * Leads API Routes
+ *
+ * Handles lead creation from website and syncing to AmoCRM
+ *
+ * @module routes/leads
+ */
+
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
+import { supabase } from '../lib/supabase.js';
+import { syncLeadToAmoCRM } from '../workflows/amocrmSync.js';
+import { isAmoCRMConnected } from '../lib/amocrmTokens.js';
+
+/**
+ * Schema for creating a lead from website
+ */
+const CreateLeadSchema = z.object({
+  userAccountId: z.string().uuid(),
+  name: z.string().min(1).max(255),
+  phone: z.string().min(5).max(20),
+
+  // UTM tracking parameters
+  utm_source: z.string().optional(),
+  utm_medium: z.string().optional(),
+  utm_campaign: z.string().optional(),
+  utm_term: z.string().optional(),
+  utm_content: z.string().optional(),
+
+  // Optional fields
+  email: z.string().email().optional(),
+  message: z.string().optional()
+});
+
+type CreateLeadInput = z.infer<typeof CreateLeadSchema>;
+
+/**
+ * Normalize phone number to WhatsApp format
+ * Converts: +7 912 345-67-89 -> 79123456789@s.whatsapp.net
+ *
+ * @param phone - Raw phone number
+ * @returns Normalized phone in WhatsApp format
+ */
+function normalizePhoneForWhatsApp(phone: string): string {
+  // Remove all non-digit characters except leading +
+  let normalized = phone.replace(/[^\d+]/g, '');
+
+  // If starts with 8, replace with 7 (Russia)
+  if (normalized.startsWith('8')) {
+    normalized = '7' + normalized.substring(1);
+  }
+
+  // If starts with +7, remove +
+  if (normalized.startsWith('+7')) {
+    normalized = '7' + normalized.substring(2);
+  }
+
+  // If starts with +, remove it
+  if (normalized.startsWith('+')) {
+    normalized = normalized.substring(1);
+  }
+
+  // Add WhatsApp suffix
+  return `${normalized}@s.whatsapp.net`;
+}
+
+export default async function leadsRoutes(app: FastifyInstance) {
+  /**
+   * POST /api/leads
+   *
+   * Create a new lead from website and sync to AmoCRM
+   *
+   * Body:
+   *   - userAccountId: UUID of user account
+   *   - name: Lead's name
+   *   - phone: Lead's phone number
+   *   - utm_source, utm_medium, utm_campaign, utm_term, utm_content: UTM parameters
+   *   - email (optional): Lead's email
+   *   - message (optional): Additional message from lead
+   *
+   * Returns: { success: true, leadId: number, amocrmSynced: boolean }
+   */
+  app.post('/api/leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      // 1. Validate request body
+      const parsed = CreateLeadSchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const leadData = parsed.data;
+
+      app.log.info({
+        userAccountId: leadData.userAccountId,
+        name: leadData.name,
+        phone: leadData.phone,
+        utm_campaign: leadData.utm_campaign
+      }, 'Received lead from website');
+
+      // 2. Verify user account exists
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('id')
+        .eq('id', leadData.userAccountId)
+        .single();
+
+      if (userError || !userAccount) {
+        return reply.code(404).send({
+          error: 'user_account_not_found',
+          message: 'User account not found'
+        });
+      }
+
+      // 3. Normalize phone to WhatsApp format for storage
+      const chatId = normalizePhoneForWhatsApp(leadData.phone);
+
+      // 4. Insert lead into database
+      const { data: lead, error: insertError } = await supabase
+        .from('leads')
+        .insert({
+          user_account_id: leadData.userAccountId,
+          chat_id: chatId,
+
+          // UTM tracking
+          utm_source: leadData.utm_source || null,
+          utm_medium: leadData.utm_medium || null,
+          utm_campaign: leadData.utm_campaign || null,
+          utm_term: leadData.utm_term || null,
+          utm_content: leadData.utm_content || null,
+
+          // Leave direction_id and creative_id null for now
+          // They can be determined later based on UTM data
+          direction_id: null,
+          creative_id: null,
+
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select('id')
+        .single();
+
+      if (insertError || !lead) {
+        app.log.error({ error: insertError }, 'Failed to insert lead into database');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: 'Failed to create lead'
+        });
+      }
+
+      const leadId = lead.id;
+
+      app.log.info({ leadId, chatId }, 'Lead created in database');
+
+      // 5. Immediately respond to website (don't make them wait for AmoCRM sync)
+      reply.send({
+        success: true,
+        leadId,
+        message: 'Lead received successfully'
+      });
+
+      // 6. Asynchronously sync to AmoCRM (don't await - runs in background)
+      const amocrmConnected = await isAmoCRMConnected(leadData.userAccountId);
+
+      if (amocrmConnected) {
+        app.log.info({ leadId }, 'Starting background AmoCRM sync');
+
+        syncLeadToAmoCRM(leadId, leadData.userAccountId, app)
+          .then(() => {
+            app.log.info({ leadId }, 'Lead synced to AmoCRM successfully');
+          })
+          .catch((error) => {
+            app.log.error({ error, leadId }, 'Failed to sync lead to AmoCRM');
+            // Don't throw - lead is already saved in DB
+          });
+      } else {
+        app.log.info({ leadId }, 'AmoCRM not connected, skipping sync');
+      }
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error processing lead creation');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/leads/:id
+   *
+   * Get lead by ID
+   *
+   * Params:
+   *   - id: Lead ID
+   *
+   * Query:
+   *   - userAccountId: UUID of user account (for authorization)
+   *
+   * Returns: Lead object
+   */
+  app.get('/api/leads/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { userAccountId } = request.query as { userAccountId?: string };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'missing_user_account_id',
+          message: 'userAccountId query parameter is required'
+        });
+      }
+
+      const { data: lead, error } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', parseInt(id))
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (error || !lead) {
+        return reply.code(404).send({
+          error: 'lead_not_found',
+          message: 'Lead not found'
+        });
+      }
+
+      return reply.send(lead);
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching lead');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /api/leads
+   *
+   * List all leads for a user account
+   *
+   * Query:
+   *   - userAccountId: UUID of user account
+   *   - limit (optional): Number of leads to return (default: 50)
+   *   - offset (optional): Offset for pagination (default: 0)
+   *
+   * Returns: Array of leads
+   */
+  app.get('/api/leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, limit = '50', offset = '0' } = request.query as {
+        userAccountId?: string;
+        limit?: string;
+        offset?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'missing_user_account_id',
+          message: 'userAccountId query parameter is required'
+        });
+      }
+
+      const { data: leads, error } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: false })
+        .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch leads');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: 'Failed to fetch leads'
+        });
+      }
+
+      return reply.send({
+        leads: leads || [],
+        count: leads?.length || 0
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching leads');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+}

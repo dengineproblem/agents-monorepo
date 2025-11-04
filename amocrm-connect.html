@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Подключение AmoCRM</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .container {
+      background: white;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+      text-align: center;
+      max-width: 500px;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 16px;
+    }
+    p {
+      color: #666;
+      margin-bottom: 24px;
+      line-height: 1.6;
+    }
+    .info {
+      background: #f5f5f5;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      font-size: 14px;
+      text-align: left;
+    }
+    .info strong {
+      color: #667eea;
+    }
+    #amocrm-button {
+      margin: 20px 0;
+    }
+    .note {
+      font-size: 12px;
+      color: #999;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Подключение AmoCRM</h1>
+    <p>
+      Нажмите кнопку ниже, чтобы автоматически создать интеграцию и получить
+      Client ID / Secret для вашего проекта.
+    </p>
+
+    <div class="info">
+      <strong>Что произойдёт:</strong><br>
+      1. AmoCRM создаст интеграцию автоматически<br>
+      2. Вам покажут Client ID и Secret<br>
+      3. Данные сохранятся в .env.agent<br>
+      4. Вы сможете авторизоваться
+    </div>
+
+    <!-- Кнопка AmoCRM -->
+    <div id="amocrm-button"></div>
+
+    <p class="note">
+      После авторизации проверьте логи Docker:<br>
+      <code>docker-compose logs agent-service | grep "AmoCRM Integration Created"</code>
+    </p>
+  </div>
+
+  <!-- Скрипт кнопки AmoCRM с автоматическим созданием интеграции -->
+  <script
+    class="amocrm_oauth"
+    charset="utf-8"
+    data-name="Performante AI - Лиды и аналитика"
+    data-description="Автоматическая передача лидов с сайта в AmoCRM и сквозная аналитика продаж"
+    data-redirect_uri="https://app.performanteaiagency.com/api/amocrm/callback"
+    data-secrets_uri="https://app.performanteaiagency.com/api/amocrm/secrets"
+    data-logo="https://app.performanteaiagency.com/logo.png"
+    data-scopes="crm,notifications"
+    data-title="Подключить AmoCRM"
+    data-compact="false"
+    data-class-name="amocrm-button"
+    data-color="blue"
+    data-state="auto-setup-2024"
+    data-mode="popup"
+    data-error-callback="onAmoAuthError"
+    src="https://www.amocrm.ru/auth/button.min.js">
+  </script>
+
+  <script>
+    // Обработчик ошибок
+    function onAmoAuthError({ error, error_description }) {
+      console.error('AmoCRM auth error:', error, error_description);
+
+      if (error === 'access_denied') {
+        alert('Вы отменили авторизацию AmoCRM. Попробуйте ещё раз.');
+      } else {
+        alert('Ошибка подключения AmoCRM: ' + (error_description || error));
+      }
+    }
+
+    // Слушаем успешное подключение
+    window.addEventListener('message', (event) => {
+      if (event.origin !== 'https://www.amocrm.ru') return;
+
+      if (event.data.type === 'amocrm_oauth_success') {
+        console.log('AmoCRM подключен успешно!', event.data);
+      }
+    });
+  </script>
+</body>
+</html>
