@@ -117,7 +117,14 @@ async function createAdFromSource(accountId:string,dstAdsetId:string,src:AdInfo,
     url_parameters:src.url_parameters||undefined
   };
   const r=await withStep('create_ad',{payload:body},()=>graph('POST',`act_${accountId}/ads`,t,toParams(body)));
-  const id=r?.id; if(!id) throw Object.assign(new Error('create_ad_failed'),{step:'create_ad_no_id'}); return String(id);
+  const id=r?.id; if(!id) throw Object.assign(new Error('create_ad_failed'),{step:'create_ad_no_id'}); 
+  
+  // NOTE: Не сохраняем в ad_creative_mapping, так как:
+  // 1. При дублировании нет доступа к user_creative_id
+  // 2. Это копии существующих ads, которые уже должны быть в маппинге (если созданы через наши workflow)
+  // 3. Дублирование используется редко и для технических целей
+  
+  return String(id);
 }
 
 async function deleteCampaign(_:string,_t:string){ /* больше не удаляем автоматически при ошибке в validate */ }

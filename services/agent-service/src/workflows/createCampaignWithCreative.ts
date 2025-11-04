@@ -5,6 +5,7 @@ import {
   convertToFacebookTargeting,
   type CampaignGoal 
 } from '../lib/defaultSettings.js';
+import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 
 type ObjectiveType = 'WhatsApp' | 'Instagram' | 'SiteLeads';
 
@@ -341,6 +342,20 @@ export async function workflowCreateCampaignWithCreative(
     count: created_ads.length,
     ads: created_ads
   });
+
+  // Сохраняем маппинг всех созданных ads для трекинга лидов
+  await saveAdCreativeMappingBatch(
+    created_ads.map(ad => ({
+      ad_id: ad.ad_id,
+      user_creative_id: ad.user_creative_id,
+      direction_id: null, // В этом workflow нет direction
+      user_id: context.user_account_id,
+      adset_id: String(adset_id),
+      campaign_id: String(campaign_id),
+      fb_creative_id: ad.fb_creative_id,
+      source: 'campaign_builder' as const
+    }))
+  );
 
   // ===================================================
   // RETURN

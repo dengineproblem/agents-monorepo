@@ -296,3 +296,4 @@ docker-compose logs -f agent-brain | grep username
 **Автор:** AI Assistant  
 **Дата:** 04.11.2025
 
+

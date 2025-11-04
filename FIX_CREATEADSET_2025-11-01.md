@@ -225,3 +225,4 @@ docker exec agents-monorepo-agent-service-1 grep -c "publisher_platforms" /app/d
 **Автор:** AI Assistant  
 **Дата:** 1 ноября 2025, 09:28 UTC+5
 
+

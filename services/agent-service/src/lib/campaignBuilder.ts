@@ -9,6 +9,7 @@
 import { supabase } from './supabase.js';
 import { createLogger } from './logger.js';
 import { resolveFacebookError } from './facebookErrors.js';
+import { saveAdCreativeMapping } from './adCreativeMapping.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const log = createLogger({ module: 'campaignBuilder' });
@@ -1164,8 +1165,11 @@ export async function createAdsInAdSet(params: {
   creatives: AvailableCreative[];
   accessToken: string;
   objective: CampaignObjective;
+  userId?: string;
+  directionId?: string | null;
+  campaignId?: string;
 }) {
-  const { adsetId, adAccountId, creatives, accessToken, objective } = params;
+  const { adsetId, adAccountId, creatives, accessToken, objective, userId, directionId, campaignId } = params;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -1206,6 +1210,20 @@ export async function createAdsInAdSet(params: {
       const ad = await response.json();
       log.info({ adId: ad.id, creativeId: creative.user_creative_id }, 'Ad created successfully');
       ads.push(ad);
+
+      // Сохраняем маппинг для трекинга лидов (если есть userId)
+      if (userId && ad.id) {
+        await saveAdCreativeMapping({
+          ad_id: ad.id,
+          user_creative_id: creative.user_creative_id,
+          direction_id: directionId || null,
+          user_id: userId,
+          adset_id: adsetId,
+          campaign_id: campaignId,
+          fb_creative_id: creativeId,
+          source: 'campaign_builder'
+        });
+      }
     } catch (error: any) {
       log.error({ err: error, adsetId, creativeId: creative.user_creative_id }, 'Error creating ad');
     }

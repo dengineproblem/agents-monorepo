@@ -285,6 +285,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               creatives: creativesToUse,
               accessToken: userAccount.access_token,
               objective: direction.objective, // Используем objective направления
+              userId: user_account_id,
+              directionId: direction.id,
+              campaignId: direction.fb_campaign_id,
             });
 
             log.info({ directionId: direction.id, adsetId: adset.id, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
@@ -521,6 +524,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           creatives: creativesForAds,
           accessToken: userAccount.access_token,
           objective: direction.objective,
+          userId: user_account_id,
+          directionId: direction.id,
+          campaignId: direction.fb_campaign_id,
         });
 
         log.info({ adsCount: ads.length }, 'Manual launch ads created');

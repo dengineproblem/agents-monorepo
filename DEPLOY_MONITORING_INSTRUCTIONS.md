@@ -291,3 +291,4 @@ docker-compose restart agent-brain
 
 **Время на поиск ошибки пользователя:** ~10 секунд ✅
 
+

@@ -196,22 +196,18 @@ async function processAdLead(params: {
 
   app.log.info({ userAccountId, clientPhone, sourceId }, 'Processing ad lead');
 
-  // 1. Попытка найти creative по source_id (Ad ID)
-  // Сначала проверяем в creative_tests
-  const { data: creativeTest } = await supabase
-    .from('creative_tests')
-    .select(`
-      user_creative_id,
-      user_creatives!inner(id, direction_id)
-    `)
+  // 1. PRIMARY: Найти creative по source_id (Ad ID) в ad_creative_mapping
+  const { data: adMapping } = await supabase
+    .from('ad_creative_mapping')
+    .select('user_creative_id, direction_id')
     .eq('ad_id', sourceId)
     .eq('user_id', userAccountId)
     .maybeSingle();
 
-  let creativeId = (creativeTest as any)?.user_creative_id;
-  let directionId = (creativeTest as any)?.user_creatives?.direction_id;
+  let creativeId = adMapping?.user_creative_id;
+  let directionId = adMapping?.direction_id;
 
-  // 2. Альтернатива: найти по creative_url (Instagram post URL)
+  // 2. FALLBACK: Найти по creative_url (Instagram post URL)
   if (!creativeId && creativeUrl) {
     const { data: creativeByUrl } = await supabase
       .from('user_creatives')

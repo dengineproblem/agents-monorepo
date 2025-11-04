@@ -301,9 +301,8 @@ async function findWhatsAppNumber(
  * Resolve creative_id, direction_id, and whatsapp_phone_number_id from Facebook Ad ID
  *
  * Strategy:
- * 1. PRIMARY: Lookup in creative_tests by ad_id
+ * 1. PRIMARY: Lookup in ad_creative_mapping by ad_id
  * 2. FALLBACK: Lookup in user_creatives by creative URL matching
- * 3. Get whatsapp_phone_number_id from direction (if available)
  */
 async function resolveCreativeAndDirection(
   sourceId: string,
@@ -316,40 +315,35 @@ async function resolveCreativeAndDirection(
   whatsappPhoneNumberId: string | null;
 }> {
 
-  // PRIMARY LOOKUP: Find in creative_tests by ad_id
-  const { data: creativeTest, error: testError } = await supabase
-    .from('creative_tests')
+  // PRIMARY LOOKUP: Find in ad_creative_mapping by ad_id
+  const { data: adMapping, error: mappingError } = await supabase
+    .from('ad_creative_mapping')
     .select(`
       user_creative_id,
-      user_creatives!inner(
-        id, 
-        direction_id,
-        account_directions!inner(whatsapp_phone_number_id)
-      )
+      direction_id,
+      account_directions(whatsapp_phone_number_id)
     `)
     .eq('ad_id', sourceId)
     .eq('user_id', userAccountId)
     .maybeSingle();
 
-  if (testError) {
-    app.log.error({ error: testError.message, sourceId }, 'Error looking up creative_tests');
+  if (mappingError) {
+    app.log.error({ error: mappingError.message, sourceId }, 'Error looking up ad_creative_mapping');
   }
 
-  if (creativeTest) {
-    const creatives = creativeTest.user_creatives as any;
-    const directionId = creatives?.direction_id || null;
-    const whatsappPhoneNumberId = creatives?.account_directions?.whatsapp_phone_number_id || null;
+  if (adMapping) {
+    const whatsappPhoneNumberId = (adMapping as any)?.account_directions?.whatsapp_phone_number_id || null;
 
     app.log.debug({
       sourceId,
-      creativeId: creativeTest.user_creative_id,
-      directionId,
+      creativeId: adMapping.user_creative_id,
+      directionId: adMapping.direction_id,
       whatsappPhoneNumberId,
-    }, 'Found creative via creative_tests.ad_id');
+    }, 'Found creative via ad_creative_mapping');
 
     return {
-      creativeId: creativeTest.user_creative_id,
-      directionId,
+      creativeId: adMapping.user_creative_id,
+      directionId: adMapping.direction_id,
       whatsappPhoneNumberId,
     };
   }
@@ -361,7 +355,7 @@ async function resolveCreativeAndDirection(
       .select(`
         id, 
         direction_id,
-        account_directions!inner(whatsapp_phone_number_id)
+        account_directions(whatsapp_phone_number_id)
       `)
       .eq('user_id', userAccountId)
       .ilike('title', `%${sourceUrl}%`)

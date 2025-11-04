@@ -2,6 +2,7 @@ import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { getDirectionSettings, buildTargeting } from '../lib/settingsHelpers.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
+import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
 
 const baseLog = createLogger({ module: 'creativeTestWorkflow' });
 
@@ -225,6 +226,18 @@ export async function workflowStartCreativeTest(
   }
 
   log.info({ ad_id }, 'Creative test ad created');
+
+  // Сохраняем маппинг для трекинга лидов
+  await saveAdCreativeMapping({
+    ad_id,
+    user_creative_id,
+    direction_id: null, // У creative test нет direction
+    user_id,
+    adset_id,
+    campaign_id,
+    fb_creative_id,
+    source: 'creative_test'
+  });
 
   // ===================================================
   // STEP 7: НЕ используем Facebook Auto Rules

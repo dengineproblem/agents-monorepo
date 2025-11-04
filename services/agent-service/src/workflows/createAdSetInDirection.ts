@@ -2,6 +2,7 @@ import { graph } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
+import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 
 const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -443,6 +444,20 @@ export async function workflowCreateAdSetInDirection(
     count: created_ads.length,
     ads: created_ads
   }, 'All ads created for direction');
+
+  // Сохраняем маппинг всех созданных ads для трекинга лидов
+  await saveAdCreativeMappingBatch(
+    created_ads.map(ad => ({
+      ad_id: ad.ad_id,
+      user_creative_id: ad.user_creative_id,
+      direction_id: direction_id,
+      user_id: user_account_id,
+      adset_id: adset_id,
+      campaign_id: direction.fb_campaign_id,
+      fb_creative_id: ad.fb_creative_id,
+      source: 'direction_launch' as const
+    }))
+  );
 
   // ===================================================
   // STEP 7: Сохраняем связь AdSet с Direction (опционально)

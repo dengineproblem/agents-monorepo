@@ -169,3 +169,4 @@ docker-compose exec agent-service npm run analyze-dialogs instance_0f559eb0_1761
 - SQL синтаксически корректен (нет ошибок при выполнении)
 - Возможно проблема в логике CTE или специфике PostgreSQL версии
 
+

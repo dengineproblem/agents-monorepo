@@ -54,3 +54,4 @@ echo "Для полного теста:"
 echo "1. Убедитесь что agent-service запущен на порту 3002"
 echo "2. Запустите: bash test-empty-actions-fix.sh"
 
+
