@@ -16,12 +16,19 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
    *   - userAccountId: UUID of user account (required)
    */
   app.get('/amocrm/connect', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
+    const { userAccountId, subdomain } = request.query as { userAccountId?: string; subdomain?: string };
 
     if (!userAccountId) {
       return reply.code(400).send({
         error: 'missing_user_account_id',
         message: 'userAccountId query parameter is required'
+      });
+    }
+
+    if (!subdomain) {
+      return reply.code(400).send({
+        error: 'missing_subdomain',
+        message: 'subdomain query parameter is required (e.g., subdomain=performanteaiagency for performanteaiagency.amocrm.ru)'
       });
     }
 
@@ -209,7 +216,7 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
     data-secrets_uri="https://app.performanteaiagency.com/api/amocrm/secrets"
     data-scopes="crm,notifications"
     data-title="Подключить amoCRM"
-    data-state="${Buffer.from(userAccountId).toString('base64')}"
+    data-state="${Buffer.from(`${userAccountId}|${subdomain}`).toString('base64')}"
     data-mode="popup"
     data-error-callback="onAmoAuthError"
     src="https://www.amocrm.ru/auth/button.min.js">
