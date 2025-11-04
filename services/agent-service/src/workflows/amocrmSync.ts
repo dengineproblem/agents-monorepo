@@ -146,9 +146,21 @@ export async function syncLeadToAmoCRM(
     const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
 
     // 3. Extract contact info
-    const phone = lead.chat_id
-      ? normalizePhone(lead.chat_id.replace('@s.whatsapp.net', ''))
-      : null;
+    // For website/manual leads use phone field, for WhatsApp use chat_id
+    let phone: string | null = null;
+    let displayName: string = 'Лид';
+
+    if (lead.source_type === 'website' || lead.source_type === 'manual') {
+      // Website lead - use phone and name fields directly
+      phone = lead.phone ? normalizePhone(lead.phone) : null;
+      displayName = lead.name || 'Лид с сайта';
+    } else {
+      // WhatsApp lead - extract from chat_id
+      phone = lead.chat_id 
+        ? normalizePhone(lead.chat_id.replace('@s.whatsapp.net', '').replace('@c.us', ''))
+        : null;
+      displayName = lead.chat_id || 'Лид';
+    }
 
     if (!phone) {
       throw new Error('Lead has no phone number');
@@ -160,7 +172,7 @@ export async function syncLeadToAmoCRM(
 
     if (!contact) {
       // Create new contact
-      const { first_name, last_name } = extractName(lead.chat_id || 'Лид с сайта');
+      const { first_name, last_name } = extractName(displayName);
 
       const newContact: AmoCRMContact = {
         name: `${first_name}${last_name ? ' ' + last_name : ''}`,
@@ -367,9 +379,21 @@ export async function processDealWebhook(
       .eq('amocrm_deal_id', dealId)
       .maybeSingle();
 
+    // Extract client info based on lead source type
+    let clientPhone = '';
+    let clientName = 'Unknown';
+    
+    if (ourLead.source_type === 'website' || ourLead.source_type === 'manual') {
+      clientPhone = ourLead.phone || '';
+      clientName = ourLead.name || 'Клиент с сайта';
+    } else {
+      clientPhone = ourLead.chat_id?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
+      clientName = ourLead.chat_id || 'Unknown';
+    }
+
     const saleData = {
-      client_phone: ourLead.chat_id?.replace('@s.whatsapp.net', '') || '',
-      client_name: ourLead.chat_id || 'Unknown',
+      client_phone: clientPhone,
+      client_name: clientName,
       amount: amount / 100, // Convert cents to rubles (if needed)
       currency: 'RUB',
       status: dealStatus === 142 ? 'paid' : 'pending', // 142 is typical "Won" status
