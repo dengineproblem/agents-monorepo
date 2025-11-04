@@ -477,9 +477,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             page_id: userAccount.page_id,
             ...(whatsapp_phone_number && { whatsapp_phone_number })
           };
-        } else if (direction.objective === 'instagram_traffic' && defaultSettings?.instagram_url) {
+        } else if (direction.objective === 'instagram_traffic') {
+          // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
+          // Ссылка уже в креативе в call_to_action
           promoted_object = {
-            link: defaultSettings.instagram_url,
+            page_id: userAccount.page_id
           };
         } else if (direction.objective === 'site_leads' && defaultSettings?.site_url) {
           promoted_object = {
