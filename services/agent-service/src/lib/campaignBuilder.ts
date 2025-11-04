@@ -1099,6 +1099,11 @@ export async function createAdSetInCampaign(params: {
     body.destination_type = 'WHATSAPP';
   }
 
+  // Для Instagram Profile добавляем destination_type (как в рабочем n8n workflow)
+  if (optimization_goal === 'LINK_CLICKS' && promoted_object?.page_id && !promoted_object?.link) {
+    body.destination_type = 'INSTAGRAM_PROFILE';
+  }
+
   if (promoted_object) {
     body.promoted_object = promoted_object;
   }
