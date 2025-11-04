@@ -216,14 +216,17 @@ export async function amocrmRequest<T = any>(
  */
 export async function exchangeCodeForToken(
   code: string,
-  subdomain: string
+  subdomain: string,
+  clientId?: string,
+  clientSecret?: string
 ): Promise<AmoCRMTokenResponse> {
-  const clientId = process.env.AMOCRM_CLIENT_ID;
-  const clientSecret = process.env.AMOCRM_CLIENT_SECRET;
+  // Use provided credentials or fall back to environment variables
+  const actualClientId = clientId || process.env.AMOCRM_CLIENT_ID;
+  const actualClientSecret = clientSecret || process.env.AMOCRM_CLIENT_SECRET;
   const redirectUri = process.env.AMOCRM_REDIRECT_URI;
 
-  if (!clientId || !clientSecret || !redirectUri) {
-    throw new Error('AmoCRM OAuth credentials not configured in environment');
+  if (!actualClientId || !actualClientSecret || !redirectUri) {
+    throw new Error('AmoCRM OAuth credentials not configured (neither provided nor in environment)');
   }
 
   const url = `https://${subdomain}.amocrm.ru/oauth2/access_token`;
@@ -234,8 +237,8 @@ export async function exchangeCodeForToken(
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
+      client_id: actualClientId,
+      client_secret: actualClientSecret,
       grant_type: 'authorization_code',
       code,
       redirect_uri: redirectUri

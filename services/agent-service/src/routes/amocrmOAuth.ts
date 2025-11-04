@@ -14,6 +14,10 @@ import {
   disconnectAmoCRM,
   getAmoCRMStatus
 } from '../lib/amocrmTokens.js';
+import {
+  getTempCredentials,
+  deleteTempCredentials
+} from '../lib/amocrmTempCredentials.js';
 
 const AMOCRM_CLIENT_ID = process.env.AMOCRM_CLIENT_ID;
 const AMOCRM_REDIRECT_URI = process.env.AMOCRM_REDIRECT_URI;
@@ -136,36 +140,97 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
 
       const { code, state } = parsed.data;
 
-      // Decode state to get userAccountId and subdomain
       let userAccountId: string;
       let subdomain: string;
+      let clientId: string | undefined;
+      let clientSecret: string | undefined;
+      let isAutoCreated = false;
 
-      try {
-        const decoded = Buffer.from(state, 'base64').toString('utf-8');
-        [userAccountId, subdomain] = decoded.split('|');
+      // Try to get credentials from temporary storage (auto-created integration)
+      const tempCreds = await getTempCredentials(state);
 
-        if (!userAccountId || !subdomain) {
-          throw new Error('Invalid state format');
+      if (tempCreds) {
+        // Auto-created integration via button
+        app.log.info({ state }, 'Found auto-created integration credentials');
+        
+        clientId = tempCreds.client_id;
+        clientSecret = tempCreds.client_secret;
+        isAutoCreated = true;
+
+        // For auto-created integrations, we need userAccountId from query or temp storage
+        // Since AmoCRM doesn't pass it in callback, it must be in temp storage or state
+        if (tempCreds.user_account_id) {
+          userAccountId = tempCreds.user_account_id;
+        } else {
+          // Try to decode from state as fallback
+          try {
+            const decoded = Buffer.from(state, 'base64').toString('utf-8');
+            const parts = decoded.split('|');
+            if (parts.length >= 1) {
+              userAccountId = parts[0];
+            } else {
+              throw new Error('user_account_id not found in temp storage or state');
+            }
+          } catch (error) {
+            app.log.error({ error, state }, 'Failed to extract userAccountId for auto-created integration');
+            return reply.code(400).send({
+              error: 'missing_user_account',
+              message: 'Cannot determine user account for auto-created integration'
+            });
+          }
         }
-      } catch (error) {
-        app.log.error({ error, state }, 'Failed to decode OAuth state');
-        return reply.code(400).send({
-          error: 'invalid_state',
-          message: 'Invalid OAuth state parameter'
-        });
+
+        // Extract subdomain from callback or use default
+        // AmoCRM callback includes referer which contains subdomain
+        const referer = (request.query as any).referer as string | undefined;
+        if (referer) {
+          const match = referer.match(/https?:\/\/([^.]+)\.amocrm\.ru/);
+          subdomain = match ? match[1] : 'amo';
+        } else {
+          subdomain = 'amo'; // Default fallback
+        }
+
+        app.log.info({
+          userAccountId,
+          subdomain,
+          integrationName: tempCreds.integration_name
+        }, 'Processing auto-created AmoCRM integration');
+
+      } else {
+        // Traditional flow with pre-configured integration
+        try {
+          const decoded = Buffer.from(state, 'base64').toString('utf-8');
+          [userAccountId, subdomain] = decoded.split('|');
+
+          if (!userAccountId || !subdomain) {
+            throw new Error('Invalid state format');
+          }
+        } catch (error) {
+          app.log.error({ error, state }, 'Failed to decode OAuth state');
+          return reply.code(400).send({
+            error: 'invalid_state',
+            message: 'Invalid OAuth state parameter'
+          });
+        }
+
+        app.log.info({
+          userAccountId,
+          subdomain,
+          code: code.substring(0, 10) + '...'
+        }, 'Received AmoCRM OAuth callback (pre-configured integration)');
       }
 
-      app.log.info({
-        userAccountId,
-        subdomain,
-        code: code.substring(0, 10) + '...'
-      }, 'Received AmoCRM OAuth callback');
-
-      // Exchange code for tokens
-      const tokens = await exchangeCodeForToken(code, subdomain);
+      // Exchange code for tokens (with optional credentials for auto-created integrations)
+      const tokens = await exchangeCodeForToken(code, subdomain, clientId, clientSecret);
 
       // Save tokens to database
       await saveAmoCRMTokens(userAccountId, subdomain, tokens);
+
+      // Delete temporary credentials if this was an auto-created integration
+      if (isAutoCreated) {
+        await deleteTempCredentials(state);
+        app.log.info({ state }, 'Deleted temporary credentials after successful OAuth');
+      }
 
       // Verify connection by fetching account info
       try {
@@ -173,7 +238,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
         app.log.info({
           userAccountId,
           accountName: accountInfo.name,
-          accountId: accountInfo.id
+          accountId: accountInfo.id,
+          isAutoCreated
         }, 'AmoCRM connected successfully');
       } catch (error) {
         app.log.warn({ error }, 'Connected to AmoCRM but failed to fetch account info');

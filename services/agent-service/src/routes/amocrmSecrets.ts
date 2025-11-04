@@ -8,8 +8,7 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import fs from 'fs';
-import path from 'path';
+import { saveTempCredentials, extractUserAccountIdFromState } from '../lib/amocrmTempCredentials.js';
 
 const SecretsSchema = z.object({
   client_id: z.string(),
@@ -41,6 +40,13 @@ export default async function amocrmSecretsRoutes(app: FastifyInstance) {
 
       const { client_id, client_secret, state, name, scopes } = parsed.data;
 
+      if (!state) {
+        return reply.code(400).send({
+          error: 'missing_state',
+          message: 'State parameter is required for auto-created integrations'
+        });
+      }
+
       app.log.info({
         client_id: client_id.substring(0, 10) + '...',
         state,
@@ -48,32 +54,29 @@ export default async function amocrmSecretsRoutes(app: FastifyInstance) {
         scopes
       }, 'Received AmoCRM auto-generated credentials');
 
-      // Write credentials to .env.agent file
-      const envPath = path.resolve(process.cwd(), '../../.env.agent');
-      const envContent = fs.readFileSync(envPath, 'utf-8');
+      // Extract user_account_id from state if encoded
+      const userAccountId = extractUserAccountIdFromState(state);
 
-      // Replace placeholder values
-      const updatedContent = envContent
-        .replace(/AMOCRM_CLIENT_ID=.*/, `AMOCRM_CLIENT_ID=${client_id}`)
-        .replace(/AMOCRM_CLIENT_SECRET=.*/, `AMOCRM_CLIENT_SECRET=${client_secret}`);
+      // Save credentials temporarily (expires in 10 minutes)
+      // They will be retrieved during OAuth callback
+      await saveTempCredentials({
+        state,
+        client_id,
+        client_secret,
+        user_account_id: userAccountId || undefined,
+        integration_name: name,
+        scopes
+      });
 
-      fs.writeFileSync(envPath, updatedContent, 'utf-8');
-
-      app.log.info('AmoCRM credentials saved to .env.agent');
-
-      // Also log to console for manual backup
-      console.log('\n=================================================');
-      console.log('AmoCRM Integration Created!');
-      console.log('=================================================');
-      console.log(`Client ID: ${client_id}`);
-      console.log(`Client Secret: ${client_secret}`);
-      console.log(`State: ${state || 'N/A'}`);
-      console.log(`Name: ${name || 'N/A'}`);
-      console.log('=================================================\n');
+      app.log.info({
+        state,
+        userAccountId: userAccountId || 'not_encoded',
+        integrationName: name
+      }, 'AmoCRM credentials saved temporarily');
 
       return reply.send({
         success: true,
-        message: 'Credentials received and saved'
+        message: 'Credentials received and saved temporarily'
       });
 
     } catch (error: any) {
