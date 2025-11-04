@@ -116,15 +116,21 @@ export default async function leadsRoutes(app: FastifyInstance) {
         });
       }
 
-      // 3. Normalize phone to WhatsApp format for storage
-      const chatId = normalizePhoneForWhatsApp(leadData.phone);
-
-      // 4. Insert lead into database
+      // 3. Insert lead into database
       const { data: lead, error: insertError } = await supabase
         .from('leads')
         .insert({
           user_account_id: leadData.userAccountId,
-          chat_id: chatId,
+          
+          // Website lead fields
+          name: leadData.name,
+          phone: leadData.phone,
+          email: leadData.email || null,
+          message: leadData.message || null,
+          source_type: 'website',
+
+          // chat_id is NULL for website leads (only used for WhatsApp)
+          chat_id: null,
 
           // UTM tracking
           utm_source: leadData.utm_source || null,
@@ -154,7 +160,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
 
       const leadId = lead.id;
 
-      app.log.info({ leadId, chatId }, 'Lead created in database');
+      app.log.info({ leadId, name: leadData.name, phone: leadData.phone }, 'Lead created in database');
 
       // 5. Immediately respond to website (don't make them wait for AmoCRM sync)
       reply.send({
