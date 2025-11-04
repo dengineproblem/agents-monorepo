@@ -641,7 +641,7 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
  */
 export async function runScoringAgent(userAccount, options = {}) {
   const startTime = Date.now();
-  const { ad_account_id, access_token, id: userAccountId } = userAccount;
+  const { ad_account_id, access_token, id: userAccountId, username } = userAccount;
   
   const supabase = options.supabase || createClient(
     process.env.SUPABASE_URL,
@@ -650,7 +650,7 @@ export async function runScoringAgent(userAccount, options = {}) {
   
   const logger = options.logger || console;
   
-  logger.info({ where: 'scoring_agent', phase: 'start', userId: userAccountId });
+  logger.info({ where: 'scoring_agent', phase: 'start', userId: userAccountId, username });
   
   try {
     // ========================================
@@ -918,6 +918,7 @@ export async function runScoringAgent(userAccount, options = {}) {
       where: 'scoring_agent',
       phase: 'error',
       userId: userAccountId,
+      username,
       duration,
       error: String(error),
       stack: error.stack

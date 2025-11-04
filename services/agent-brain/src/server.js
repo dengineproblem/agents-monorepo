@@ -1861,6 +1861,14 @@ fastify.post('/api/brain/run', async (request, reply) => {
 
     const ua = await getUserAccount(userAccountId);
     
+    // Логируем старт с username для Grafana
+    fastify.log.info({ 
+      where: 'brain_run', 
+      phase: 'start', 
+      userId: userAccountId,
+      username: ua.username 
+    });
+    
     // ========================================
     // DIRECTIONS - Получаем направления бизнеса
     // ========================================
@@ -1869,6 +1877,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       where: 'brain_run', 
       phase: 'directions_loaded', 
       userId: userAccountId,
+      username: ua.username,
       count: directions.length 
     });
     
@@ -1878,7 +1887,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
     let scoringOutput = null;
     if (SCORING_ENABLED) {
       try {
-        fastify.log.info({ where: 'brain_run', phase: 'scoring_start', userId: userAccountId });
+        fastify.log.info({ where: 'brain_run', phase: 'scoring_start', userId: userAccountId, username: ua.username });
         scoringOutput = await runScoringAgent(ua, {
           supabase,
           logger: fastify.log,
@@ -1891,13 +1900,15 @@ fastify.post('/api/brain/run', async (request, reply) => {
           where: 'brain_run', 
           phase: 'scoring_complete', 
           userId: userAccountId,
+          username: ua.username,
           summary: scoringOutput?.summary 
         });
       } catch (err) {
         fastify.log.warn({ 
           where: 'brain_run', 
           phase: 'scoring_failed', 
-          userId: userAccountId, 
+          userId: userAccountId,
+          username: ua.username, 
           error: String(err) 
         });
         // Продолжаем работу без scoring данных
@@ -2707,7 +2718,59 @@ fastify.post('/api/brain/run', async (request, reply) => {
       ...(BRAIN_DEBUG_LLM ? { llm: { used: CAN_USE_LLM, model: MODEL, input: llmInput, plan: planLLMRaw } } : {})
     });
   } catch (err) {
-    request.log.error(err);
+    const duration = Date.now() - started;
+    
+    // Попытаемся получить username если ua уже был получен
+    let username = 'unknown';
+    let uaForMonitoring = null;
+    try {
+      if (typeof ua !== 'undefined' && ua) {
+        username = ua.username || 'N/A';
+        uaForMonitoring = ua;
+      } else if (userAccountId) {
+        // Попробуем получить username из базы
+        const tempUa = await getUserAccount(userAccountId).catch(() => null);
+        if (tempUa) {
+          username = tempUa.username || 'N/A';
+          uaForMonitoring = tempUa;
+        }
+      }
+    } catch {}
+    
+    // Логируем с username для Grafana
+    request.log.error({
+      where: 'brain_run',
+      phase: 'fatal_error',
+      userId: userAccountId,
+      username,
+      duration,
+      error: String(err?.message || err),
+      stack: err?.stack
+    });
+    
+    // Отправляем в мониторинговый бот
+    if (uaForMonitoring) {
+      try {
+        const errorReport = `❌ КРИТИЧЕСКАЯ ОШИБКА
+
+Пользователь: ${username}
+User ID: ${userAccountId}
+Длительность: ${duration}ms
+
+Ошибка: ${String(err?.message || err)}
+
+Stack:
+${err?.stack || 'N/A'}`;
+        await sendToMonitoringBot(uaForMonitoring, errorReport, true);
+      } catch (monitoringErr) {
+        request.log.error({
+          where: 'brain_run_catch',
+          phase: 'monitoring_failed',
+          error: String(monitoringErr)
+        });
+      }
+    }
+    
     return reply.code(500).send({ error:'brain_run_failed', details:String(err?.message || err) });
   }
 });
