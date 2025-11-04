@@ -1,0 +1,274 @@
+/**
+ * AmoCRM Connect Page
+ * 
+ * Serves HTML page with AmoCRM button for auto-creation flow
+ */
+
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+
+export default async function amocrmConnectRoutes(app: FastifyInstance) {
+  /**
+   * GET /amocrm/connect
+   * External URL: /api/amocrm/connect (nginx adds /api/ prefix)
+   * 
+   * Serves HTML page with AmoCRM integration button
+   * Query params:
+   *   - userAccountId: UUID of user account (required)
+   */
+  app.get('/amocrm/connect', async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userAccountId } = request.query as { userAccountId?: string };
+
+    if (!userAccountId) {
+      return reply.code(400).send({
+        error: 'missing_user_account_id',
+        message: 'userAccountId query parameter is required'
+      });
+    }
+
+    const html = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Подключить AmoCRM - AI Таргетолог Performante</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      padding: 50px 40px;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      max-width: 500px;
+      width: 100%;
+      animation: slideUp 0.5s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .logo {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+    }
+
+    h1 {
+      color: #333;
+      font-size: 28px;
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+
+    p {
+      color: #666;
+      font-size: 16px;
+      line-height: 1.6;
+      margin-bottom: 30px;
+    }
+
+    .features {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 30px;
+      text-align: left;
+    }
+
+    .features h3 {
+      font-size: 14px;
+      color: #333;
+      margin-bottom: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .features ul {
+      list-style: none;
+    }
+
+    .features li {
+      padding: 8px 0;
+      color: #555;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+    }
+
+    .features li::before {
+      content: "✓";
+      color: #667eea;
+      font-weight: bold;
+      margin-right: 10px;
+      font-size: 16px;
+    }
+
+    #amocrm-button-container {
+      margin: 30px 0;
+      min-height: 50px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .loading {
+      color: #999;
+      font-size: 14px;
+    }
+
+    .note {
+      font-size: 13px;
+      color: #999;
+      margin-top: 20px;
+    }
+
+    .success-message {
+      display: none;
+      background: #d4edda;
+      border: 1px solid #c3e6cb;
+      color: #155724;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+
+    .success-message.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">🤖</div>
+    
+    <h1>Подключение AmoCRM</h1>
+    <p>Интегрируйте вашу CRM с AI-таргетологом для автоматизации лидогенерации и аналитики продаж</p>
+
+    <div class="features">
+      <h3>Что вы получите:</h3>
+      <ul>
+        <li>Автоматическая передача лидов с сайта в AmoCRM</li>
+        <li>Создание контактов и сделок с UTM-метками</li>
+        <li>Уведомления о закрытых сделках</li>
+        <li>Сквозная аналитика ROI по рекламным кампаниям</li>
+      </ul>
+    </div>
+
+    <!-- Контейнер для кнопки AmoCRM -->
+    <div id="amocrm-button-container">
+      <div class="loading">Загрузка...</div>
+    </div>
+
+    <div class="success-message" id="success-message">
+      ✅ AmoCRM успешно подключен! Окно можно закрыть.
+    </div>
+
+    <div class="note">
+      Вы будете перенаправлены на страницу авторизации AmoCRM. 
+      После авторизации интеграция будет автоматически создана и настроена.
+    </div>
+  </div>
+
+  <!-- Скрипт кнопки AmoCRM -->
+  <script
+    class="amocrm_oauth"
+    charset="utf-8"
+    data-name="AI-таргетолог Performante"
+    data-description="Автоматическая передача лидов с сайта и сквозная аналитика продаж"
+    data-redirect_uri="https://app.performanteaiagency.com/api/amocrm/callback"
+    data-secrets_uri="https://app.performanteaiagency.com/api/amocrm/secrets"
+    data-scopes="crm,notifications"
+    data-title="Подключить amoCRM"
+    data-state="${Buffer.from(userAccountId).toString('base64')}"
+    data-mode="popup"
+    data-error-callback="onAmoAuthError"
+    src="https://www.amocrm.ru/auth/button.min.js">
+  </script>
+
+  <script>
+    // Error callback
+    function onAmoAuthError({ error, error_description }) {
+      console.error('AmoCRM auth error:', error, error_description);
+      
+      if (error === 'access_denied') {
+        alert('Вы отменили авторизацию AmoCRM');
+      } else {
+        alert('Ошибка подключения AmoCRM: ' + (error_description || error));
+      }
+    }
+
+    // Hide loading after button loads
+    setTimeout(() => {
+      const loading = document.querySelector('.loading');
+      if (loading) {
+        loading.style.display = 'none';
+      }
+    }, 2000);
+
+    // Listen for success message from popup
+    window.addEventListener('message', (event) => {
+      // Verify origin for security
+      if (event.origin !== 'https://app.performanteaiagency.com' && 
+          event.origin !== 'https://performanteaiagency.com') {
+        return;
+      }
+
+      if (event.data.type === 'amocrm_connected') {
+        console.log('AmoCRM connected:', event.data);
+        
+        // Show success message
+        const successMessage = document.getElementById('success-message');
+        if (successMessage) {
+          successMessage.classList.add('show');
+        }
+
+        // Hide button
+        const buttonContainer = document.getElementById('amocrm-button-container');
+        if (buttonContainer) {
+          buttonContainer.style.display = 'none';
+        }
+
+        // Redirect to profile page after 3 seconds
+        setTimeout(() => {
+          window.location.href = 'https://app.performanteaiagency.com/profile';
+        }, 3000);
+      }
+    });
+  </script>
+</body>
+</html>`;
+
+    return reply.type('text/html').send(html);
+  });
+}
+

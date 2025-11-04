@@ -19,6 +19,7 @@ import whatsappInstances from './routes/whatsappInstances.js';
 import amocrmOAuthRoutes from './routes/amocrmOAuth.js';
 import amocrmWebhooks from './routes/amocrmWebhooks.js';
 import amocrmSecretsRoutes from './routes/amocrmSecrets.js';
+import amocrmConnectRoutes from './routes/amocrmConnect.js';
 import leadsRoutes from './routes/leads.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
@@ -65,6 +66,7 @@ app.register(whatsappInstances); // WhatsApp instance management
 app.register(amocrmOAuthRoutes); // AmoCRM OAuth integration
 app.register(amocrmWebhooks); // AmoCRM webhooks
 app.register(amocrmSecretsRoutes); // AmoCRM auto-generated credentials
+app.register(amocrmConnectRoutes); // AmoCRM connect page
 app.register(leadsRoutes); // Leads from website
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
