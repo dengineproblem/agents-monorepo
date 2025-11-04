@@ -180,14 +180,27 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
           }
         }
 
-        // Extract subdomain from callback or use default
-        // AmoCRM callback includes referer which contains subdomain
-        const referer = (request.query as any).referer as string | undefined;
-        if (referer) {
-          const match = referer.match(/https?:\/\/([^.]+)\.amocrm\.ru/);
-          subdomain = match ? match[1] : 'amo';
-        } else {
-          subdomain = 'amo'; // Default fallback
+        // Extract subdomain from state (we encode it as userAccountId|subdomain)
+        try {
+          const decoded = Buffer.from(state, 'base64').toString('utf-8');
+          const parts = decoded.split('|');
+          if (parts.length >= 2) {
+            subdomain = parts[1];
+            app.log.info({ subdomain }, 'Extracted subdomain from state');
+          } else {
+            throw new Error('State does not contain subdomain');
+          }
+        } catch (error) {
+          // Fallback: try to extract from referer
+          app.log.warn({ error, state }, 'Failed to extract subdomain from state, trying referer');
+          const referer = (request.query as any).referer as string | undefined;
+          if (referer) {
+            // Referer может быть как "performanteaiagency.amocrm.ru" так и "https://performanteaiagency.amocrm.ru"
+            const match = referer.match(/([^.\/]+)\.amocrm\.ru/);
+            subdomain = match ? match[1] : 'amo';
+          } else {
+            subdomain = 'amo';
+          }
         }
 
         app.log.info({
