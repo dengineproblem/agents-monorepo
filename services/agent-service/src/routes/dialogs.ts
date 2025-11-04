@@ -308,6 +308,170 @@ export async function dialogsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /api/dialogs/leads
+   * Create a new lead manually
+   */
+  app.post('/dialogs/leads', async (request, reply) => {
+    try {
+      const CreateLeadSchema = z.object({
+        phone: z.string().min(1),
+        contactName: z.string().optional(),
+        businessType: z.string().optional(),
+        isMedical: z.boolean().optional(),
+        funnelStage: z.enum(['new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost']),
+        userAccountId: z.string().uuid(),
+        instanceName: z.string().min(1),
+        notes: z.string().optional(),
+      });
+
+      const body = CreateLeadSchema.parse(request.body);
+
+      // Verify that instance belongs to user
+      const { data: instance, error: instanceError } = await supabase
+        .from('whatsapp_instances')
+        .select('id')
+        .eq('instance_name', body.instanceName)
+        .eq('user_account_id', body.userAccountId)
+        .maybeSingle();
+
+      if (instanceError || !instance) {
+        return reply.status(404).send({ 
+          error: 'Instance not found or does not belong to user' 
+        });
+      }
+
+      const { data, error } = await supabase
+        .from('dialog_analysis')
+        .insert({
+          contact_phone: body.phone,
+          contact_name: body.contactName || null,
+          business_type: body.businessType || null,
+          is_medical: body.isMedical || false,
+          funnel_stage: body.funnelStage,
+          user_account_id: body.userAccountId,
+          instance_name: body.instanceName,
+          interest_level: 'cold',
+          score: 5,
+          incoming_count: 0,
+          outgoing_count: 0,
+          next_message: '',
+          notes: body.notes || null,
+          analyzed_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      app.log.info({ leadId: data.id, phone: body.phone }, 'Lead created manually');
+
+      return reply.send({ success: true, lead: data });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ 
+          error: 'Validation error', 
+          details: error.errors 
+        });
+      }
+      
+      app.log.error({ error: error.message }, 'Failed to create lead');
+      return reply.status(500).send({ 
+        error: 'Failed to create lead', 
+        message: error.message 
+      });
+    }
+  });
+
+  /**
+   * PATCH /api/dialogs/leads/:id
+   * Update a lead
+   */
+  app.patch('/dialogs/leads/:id', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      
+      const UpdateLeadSchema = z.object({
+        userAccountId: z.string().uuid(),
+        contactName: z.string().optional(),
+        businessType: z.string().optional(),
+        isMedical: z.boolean().optional(),
+        isOwner: z.boolean().optional(),
+        hasSalesDept: z.boolean().optional(),
+        usesAdsNow: z.boolean().optional(),
+        adBudget: z.string().optional(),
+        sentInstagram: z.boolean().optional(),
+        instagramUrl: z.string().optional(),
+        hasBooking: z.boolean().optional(),
+        funnelStage: z.enum(['new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost']).optional(),
+        interestLevel: z.enum(['hot', 'warm', 'cold']).optional(),
+        objection: z.string().optional(),
+        nextMessage: z.string().optional(),
+        notes: z.string().optional(),
+        score: z.number().min(0).max(100).optional(),
+      });
+
+      const body = UpdateLeadSchema.parse(request.body);
+
+      // Build update object
+      const updateData: any = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (body.contactName !== undefined) updateData.contact_name = body.contactName;
+      if (body.businessType !== undefined) updateData.business_type = body.businessType;
+      if (body.isMedical !== undefined) updateData.is_medical = body.isMedical;
+      if (body.isOwner !== undefined) updateData.is_owner = body.isOwner;
+      if (body.hasSalesDept !== undefined) updateData.has_sales_dept = body.hasSalesDept;
+      if (body.usesAdsNow !== undefined) updateData.uses_ads_now = body.usesAdsNow;
+      if (body.adBudget !== undefined) updateData.ad_budget = body.adBudget;
+      if (body.sentInstagram !== undefined) updateData.sent_instagram = body.sentInstagram;
+      if (body.instagramUrl !== undefined) updateData.instagram_url = body.instagramUrl;
+      if (body.hasBooking !== undefined) updateData.has_booking = body.hasBooking;
+      if (body.funnelStage !== undefined) updateData.funnel_stage = body.funnelStage;
+      if (body.interestLevel !== undefined) updateData.interest_level = body.interestLevel;
+      if (body.objection !== undefined) updateData.objection = body.objection;
+      if (body.nextMessage !== undefined) updateData.next_message = body.nextMessage;
+      if (body.notes !== undefined) updateData.notes = body.notes;
+      if (body.score !== undefined) updateData.score = body.score;
+
+      const { data, error } = await supabase
+        .from('dialog_analysis')
+        .update(updateData)
+        .eq('id', id)
+        .eq('user_account_id', body.userAccountId)
+        .select()
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      app.log.info({ leadId: id }, 'Lead updated');
+
+      return reply.send({ success: true, lead: data });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ 
+          error: 'Validation error', 
+          details: error.errors 
+        });
+      }
+      
+      app.log.error({ error: error.message }, 'Failed to update lead');
+      return reply.status(500).send({ 
+        error: 'Failed to update lead', 
+        message: error.message 
+      });
+    }
+  });
+
+  /**
    * DELETE /api/dialogs/analysis/:id
    * Delete a specific analysis result
    */
@@ -329,6 +493,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
       if (error) {
         throw error;
       }
+
+      app.log.info({ leadId: id }, 'Lead deleted');
 
       return reply.send({ success: true });
     } catch (error: any) {

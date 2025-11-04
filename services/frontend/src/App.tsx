@@ -36,6 +36,9 @@ const AppRoutes = () => {
   const isPublic = PUBLIC_PATHS.includes(location.pathname);
   const { t } = useTranslation();
 
+  // Routes that don't need sidebar (e.g., WhatsApp CRM)
+  const noSidebarRoutes = ['/whatsapp-analysis'];
+
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
 
@@ -84,31 +87,44 @@ const AppRoutes = () => {
   }
 
   const isPublicRoute = isPublic;
+  const isNoSidebarRoute = noSidebarRoutes.includes(location.pathname);
 
   return (
     <>
       {user && !isPublicRoute ? (
-        <div className="min-h-screen w-full max-w-full overflow-x-hidden">
-          <SidebarProvider>
-            <div className="w-full max-w-full">
-              <AppSidebar />
-              <SidebarAwareContent>
-                <Routes>
-                  <Route path="/" element={<Dashboard />} />
-                  <Route path="/campaign/:id" element={<CampaignDetail />} />
-                  {FEATURES.SHOW_CONSULTATIONS && <Route path="/consultations" element={<Consultations />} />}
-                  {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
-                  {FEATURES.SHOW_CREATIVES && <Route path="/creatives" element={<CreativeGeneration />} />}
-                  {FEATURES.SHOW_CREATIVES && <Route path="/videos" element={<Creatives />} />}
-                  <Route path="/whatsapp-analysis" element={<WhatsAppAnalysis />} />
-                  <Route path="/profile" element={<Profile />} />
-                  {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </SidebarAwareContent>
+        <>
+          {isNoSidebarRoute ? (
+            // Routes without sidebar (e.g., WhatsApp CRM)
+            <div className="min-h-screen w-full">
+              <Routes>
+                <Route path="/whatsapp-analysis" element={<WhatsAppAnalysis />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
             </div>
-          </SidebarProvider>
-        </div>
+          ) : (
+            // Routes with sidebar
+            <div className="min-h-screen w-full max-w-full overflow-x-hidden">
+              <SidebarProvider>
+                <div className="w-full max-w-full">
+                  <AppSidebar />
+                  <SidebarAwareContent>
+                    <Routes>
+                      <Route path="/" element={<Dashboard />} />
+                      <Route path="/campaign/:id" element={<CampaignDetail />} />
+                      {FEATURES.SHOW_CONSULTATIONS && <Route path="/consultations" element={<Consultations />} />}
+                      {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
+                      {FEATURES.SHOW_CREATIVES && <Route path="/creatives" element={<CreativeGeneration />} />}
+                      {FEATURES.SHOW_CREATIVES && <Route path="/videos" element={<Creatives />} />}
+                      <Route path="/profile" element={<Profile />} />
+                      {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
+                      <Route path="*" element={<NotFound />} />
+                    </Routes>
+                  </SidebarAwareContent>
+                </div>
+              </SidebarProvider>
+            </div>
+          )}
+        </>
       ) : (
         <Routes>
           <Route path="/login" element={<Login />} />

@@ -27,6 +27,7 @@ export interface DialogAnalysis {
   
   // Бизнес-профиль
   business_type: string | null;
+  is_medical: boolean | null;
   is_owner: boolean | null;
   uses_ads_now: boolean | null;
   has_sales_dept: boolean | null;
@@ -35,6 +36,7 @@ export interface DialogAnalysis {
   has_booking: boolean | null;
   sent_instagram: boolean | null;
   instagram_url: string | null;
+  notes: string | null;
   
   // Анализ
   funnel_stage: FunnelStage | null;

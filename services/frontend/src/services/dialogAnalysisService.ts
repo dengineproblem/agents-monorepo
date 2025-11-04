@@ -182,5 +182,131 @@ export const dialogAnalysisService = {
       throw new Error('Failed to delete analysis');
     }
   },
+
+  /**
+   * Create a new lead manually
+   */
+  async createLead(data: {
+    phone: string;
+    contactName?: string;
+    businessType?: string;
+    isMedical?: boolean;
+    funnelStage: string;
+    userAccountId: string;
+    instanceName: string;
+    notes?: string;
+  }): Promise<DialogAnalysis> {
+    const { data: lead, error } = await supabase
+      .from('dialog_analysis')
+      .insert({
+        contact_phone: data.phone,
+        contact_name: data.contactName || null,
+        business_type: data.businessType || null,
+        is_medical: data.isMedical || false,
+        funnel_stage: data.funnelStage,
+        user_account_id: data.userAccountId,
+        instance_name: data.instanceName,
+        interest_level: 'cold',
+        score: 5,
+        incoming_count: 0,
+        outgoing_count: 0,
+        next_message: '',
+        notes: data.notes || null,
+        analyzed_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Supabase error:', error);
+      throw new Error('Failed to create lead');
+    }
+    
+    return lead as DialogAnalysis;
+  },
+
+  /**
+   * Update a lead
+   */
+  async updateLead(
+    id: string,
+    userAccountId: string,
+    updates: Partial<{
+      contactName: string;
+      businessType: string;
+      isMedical: boolean;
+      isOwner: boolean;
+      hasSalesDept: boolean;
+      usesAdsNow: boolean;
+      adBudget: string;
+      sentInstagram: boolean;
+      instagramUrl: string;
+      hasBooking: boolean;
+      funnelStage: string;
+      interestLevel: string;
+      objection: string;
+      nextMessage: string;
+      notes: string;
+      score: number;
+    }>
+  ): Promise<DialogAnalysis> {
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (updates.contactName !== undefined) updateData.contact_name = updates.contactName;
+    if (updates.businessType !== undefined) updateData.business_type = updates.businessType;
+    if (updates.isMedical !== undefined) updateData.is_medical = updates.isMedical;
+    if (updates.isOwner !== undefined) updateData.is_owner = updates.isOwner;
+    if (updates.hasSalesDept !== undefined) updateData.has_sales_dept = updates.hasSalesDept;
+    if (updates.usesAdsNow !== undefined) updateData.uses_ads_now = updates.usesAdsNow;
+    if (updates.adBudget !== undefined) updateData.ad_budget = updates.adBudget;
+    if (updates.sentInstagram !== undefined) updateData.sent_instagram = updates.sentInstagram;
+    if (updates.instagramUrl !== undefined) updateData.instagram_url = updates.instagramUrl;
+    if (updates.hasBooking !== undefined) updateData.has_booking = updates.hasBooking;
+    if (updates.funnelStage !== undefined) updateData.funnel_stage = updates.funnelStage;
+    if (updates.interestLevel !== undefined) updateData.interest_level = updates.interestLevel;
+    if (updates.objection !== undefined) updateData.objection = updates.objection;
+    if (updates.nextMessage !== undefined) updateData.next_message = updates.nextMessage;
+    if (updates.notes !== undefined) updateData.notes = updates.notes;
+    if (updates.score !== undefined) updateData.score = updates.score;
+
+    const { data, error } = await supabase
+      .from('dialog_analysis')
+      .update(updateData)
+      .eq('id', id)
+      .eq('user_account_id', userAccountId)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Supabase error:', error);
+      throw new Error('Failed to update lead');
+    }
+    
+    if (!data) {
+      throw new Error('Lead not found');
+    }
+    
+    return data as DialogAnalysis;
+  },
+
+  /**
+   * Get WhatsApp instances for user
+   */
+  async getInstances(userAccountId: string): Promise<Array<{ id: string; instance_name: string }>> {
+    const { data, error } = await supabase
+      .from('whatsapp_instances')
+      .select('id, instance_name')
+      .eq('user_account_id', userAccountId)
+      .order('instance_name');
+    
+    if (error) {
+      console.error('Supabase error:', error);
+      throw new Error('Failed to fetch instances');
+    }
+    
+    return data || [];
+  },
 };
 
