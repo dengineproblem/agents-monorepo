@@ -722,7 +722,7 @@ const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <item.icon className="h-5 w-5" />
-            <span className="text-xs">{item.label}</span>
+            <span className="text-xs hidden sm:inline">{item.label}</span>
           </Button>
         ))}
       </div>

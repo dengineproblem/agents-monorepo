@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key, Users } from 'lucide-react';
+import { Instagram, User, Lock, CheckCircle2, CircleDashed, CalendarDays, Eye, EyeOff, MessageCircle, DollarSign, Plus, X, Key, Users, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { toastT } from '@/utils/toastUtils';
 import { format } from 'date-fns';
@@ -853,12 +853,12 @@ const Profile: React.FC = () => {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
+                    <div className="flex items-start justify-between gap-2 sm:gap-3">
+                      <div className="flex-1 min-w-0">
                         <div className="text-sm text-muted-foreground mb-1">
                           Facebook Custom Audience ID для дублирования кампаний
                         </div>
-                        <div className="font-medium font-mono">
+                        <div className="font-medium font-mono text-sm break-all">
                           {audienceId || 'Не установлено'}
                         </div>
                       </div>
@@ -869,8 +869,19 @@ const Profile: React.FC = () => {
                           setNewAudienceId(audienceId);
                           setAudienceModal(true);
                         }}
+                        className="px-2 sm:px-4 flex-shrink-0"
                       >
-                        {audienceId ? 'Изменить' : 'Добавить'}
+                        {audienceId ? (
+                          <>
+                            <Edit className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Изменить</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4 sm:mr-2" />
+                            <span className="hidden sm:inline">Добавить</span>
+                          </>
+                        )}
                       </Button>
                     </div>
                   </CardContent>

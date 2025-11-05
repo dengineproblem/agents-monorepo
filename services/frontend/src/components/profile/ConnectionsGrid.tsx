@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Instagram, CheckCircle2, CircleDashed, Link } from 'lucide-react';
+import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../i18n/LanguageContext';
 
@@ -78,9 +78,19 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                 size="sm"
                 onClick={it.onClick}
                 disabled={it.disabled}
-                className="transition-all hover:shadow-sm"
+                className="transition-all hover:shadow-sm px-2 sm:px-4"
               >
-                {it.connected ? t('profile.disconnect') : t('profile.connect')}
+                {it.connected ? (
+                  <>
+                    <X className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">{t('profile.disconnect')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">{t('profile.connect')}</span>
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>

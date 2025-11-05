@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Smartphone, PhoneOff, MessageSquare } from 'lucide-react';
+import { Smartphone, MessageSquare, Loader2, Plus, X, PhoneOff } from 'lucide-react';
 import { useWhatsAppNumbers } from '@/hooks/useWhatsAppNumbers';
 import { WhatsAppQRDialog } from './WhatsAppQRDialog';
 
@@ -136,12 +136,24 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                       }
                     }}
                     disabled={number.connection_status === 'connecting'}
+                    className="px-2 sm:px-4"
                   >
-                    {number.connection_status === 'connected'
-                      ? 'Отключить'
-                      : number.connection_status === 'connecting'
-                      ? 'Подключение...'
-                      : 'Подключить'}
+                    {number.connection_status === 'connected' ? (
+                      <>
+                        <X className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Отключить</span>
+                      </>
+                    ) : number.connection_status === 'connecting' ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
+                        <span className="hidden sm:inline">Подключение...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Подключить</span>
+                      </>
+                    )}
                   </Button>
                 </div>
               ))}

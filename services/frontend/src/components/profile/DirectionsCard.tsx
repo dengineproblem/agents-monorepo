@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Plus, Target, Trash2 } from 'lucide-react';
+import { Plus, Target, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDirections } from '@/hooks/useDirections';
 import { CreateDirectionDialog } from './CreateDirectionDialog';
@@ -154,18 +154,18 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
                       : 'border-muted bg-muted/20 opacity-70'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 space-y-1">
-                      <div className="flex items-center gap-2">
+                  <div className="flex items-start justify-between gap-2 sm:gap-3">
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <div
-                          className={`h-2 w-2 rounded-full ${
+                          className={`h-2 w-2 rounded-full flex-shrink-0 ${
                             direction.is_active ? 'bg-green-500' : 'bg-gray-400'
                           }`}
                         />
-                        <h3 className="font-semibold">
+                        <h3 className="font-semibold truncate">
                           {direction.name}
                         </h3>
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground flex-shrink-0">
                           ({OBJECTIVE_LABELS[direction.objective]})
                         </span>
                       </div>
@@ -179,7 +179,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
                       <div className="flex items-center gap-2">
                         <Switch
                           id={`active-${direction.id}`}
@@ -211,8 +211,10 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
                           setSelectedDirection(direction);
                           setEditDialogOpen(true);
                         }}
+                        className="px-2 sm:px-4"
                       >
-                        Изменить
+                        <Edit className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Изменить</span>
                       </Button>
                       <Button
                         size="sm"
@@ -221,7 +223,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
                           setSelectedDirection(direction);
                           setDeleteAlertOpen(true);
                         }}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 px-2"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
