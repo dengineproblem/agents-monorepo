@@ -24,6 +24,7 @@ import AdSettings from './pages/AdSettings';
 import WhatsAppAnalysis from './pages/WhatsAppAnalysis';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
+import OAuthCallback from './pages/OAuthCallback';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 
@@ -110,6 +111,7 @@ const AppRoutes = () => {
                   <SidebarAwareContent>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
+                      <Route path="/oauth/callback" element={<OAuthCallback />} />
                       <Route path="/campaign/:id" element={<CampaignDetail />} />
                       {FEATURES.SHOW_CONSULTATIONS && <Route path="/consultations" element={<Consultations />} />}
                       {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
@@ -131,6 +133,7 @@ const AppRoutes = () => {
           <Route path="/signup" element={<Signup />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/oauth/callback" element={<OAuthCallback />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       )}
