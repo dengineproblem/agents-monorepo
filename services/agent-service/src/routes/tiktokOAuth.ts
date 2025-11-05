@@ -133,9 +133,20 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
       }
 
       // Get advertiser accounts (business accounts)
-      const advertiserUrl = `https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/?app_id=${TIKTOK_APP_ID}&secret=${TIKTOK_APP_SECRET}&access_token=${access_token}`;
-      
-      const advertiserResponse = await fetch(advertiserUrl);
+      const advertiserResponse = await fetch(
+        'https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            app_id: TIKTOK_APP_ID,
+            secret: TIKTOK_APP_SECRET,
+            access_token: access_token
+          })
+        }
+      );
       const advertiserData = await advertiserResponse.json();
 
       log.info({ 
