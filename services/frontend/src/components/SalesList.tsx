@@ -30,10 +30,10 @@ interface Purchase {
 }
 
 interface SalesListProps {
-  businessId: string;
+  userAccountId: string;
 }
 
-const SalesList: React.FC<SalesListProps> = ({ businessId }) => {
+const SalesList: React.FC<SalesListProps> = ({ userAccountId }) => {
   const [sales, setSales] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -44,15 +44,15 @@ const SalesList: React.FC<SalesListProps> = ({ businessId }) => {
 
   const loadSales = async () => {
     setLoading(true);
-    const { data, error } = await salesApi.getAllPurchases(businessId);
+    const { data, error } = await salesApi.getAllPurchases(userAccountId);
     if (!error && data) setSales(data);
     setLoading(false);
   };
 
-  const loadCampaigns = async (businessId: string) => {
+  const loadCampaigns = async (userAccountId: string) => {
     setLoadingCampaigns(true);
     try {
-      const result = await salesApi.getExistingCampaigns(businessId);
+      const result = await salesApi.getExistingCampaigns(userAccountId);
       setCampaigns(result);
     } catch (e) {
       setCampaigns([]);
@@ -62,9 +62,9 @@ const SalesList: React.FC<SalesListProps> = ({ businessId }) => {
   };
 
   useEffect(() => {
-    if (businessId) loadSales();
+    if (userAccountId) loadSales();
     // eslint-disable-next-line
-  }, [businessId]);
+  }, [userAccountId]);
 
   const startEdit = (sale: Purchase) => {
     setEditingId(sale.id);
@@ -73,7 +73,7 @@ const SalesList: React.FC<SalesListProps> = ({ businessId }) => {
       amount: sale.amount,
       campaign_name: sale.campaign_name || '',
     });
-    if (businessId) loadCampaigns(businessId);
+    if (userAccountId) loadCampaigns(userAccountId);
     setModalOpen(true);
   };
 

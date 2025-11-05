@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
-import PageHero from '../components/common/PageHero';
-import { salesApi, ROIData, CampaignROI } from '../services/salesApi';
+import { salesApi, ROIData, CampaignROI, Direction } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
 import { 
   TrendingUp, 
@@ -15,6 +15,7 @@ import {
   ExternalLink,
   RefreshCw,
   AlertCircle,
+  ChevronDown,
   Edit,
   Trash2,
   Save,
@@ -33,13 +34,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import SalesList from '@/components/SalesList';
 
 const ROIAnalytics: React.FC = () => {
-  const { checkBusinessId } = useAppContext();
   const [roiData, setRoiData] = useState<ROIData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showBusinessIdWarning, setShowBusinessIdWarning] = useState(false);
-  const [businessId, setBusinessId] = useState<string>('');
-  // откат периода — показываем как раньше (все)
+  const [userAccountId, setUserAccountId] = useState<string>('');
+  const [directions, setDirections] = useState<Direction[]>([]);
+  const [selectedDirectionId, setSelectedDirectionId] = useState<string | null>(null);
+  const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false);
   
 
 
@@ -60,19 +61,24 @@ const ROIAnalytics: React.FC = () => {
     return `${percent.toFixed(1)}%`;
   };
 
+  // Загрузка направлений
+  const loadDirections = async (userAccountId: string) => {
+    try {
+      const { data, error } = await salesApi.getDirections(userAccountId);
+      if (error) {
+        console.error('Ошибка загрузки направлений:', error);
+        return;
+      }
+      setDirections(data);
+    } catch (err) {
+      console.error('Ошибка загрузки направлений:', err);
+    }
+  };
+
   const loadROIData = async (tf?: 7 | 30 | 90 | 'all') => {
     try {
       setLoading(true);
       setError(null);
-      setShowBusinessIdWarning(false);
-      
-      // Проверяем наличие business_id
-      const hasBusinessId = await checkBusinessId();
-      if (!hasBusinessId) {
-        setShowBusinessIdWarning(true);
-        setLoading(false);
-        return;
-      }
       
       const storedUser = localStorage.getItem('user');
       if (!storedUser) {
@@ -80,16 +86,25 @@ const ROIAnalytics: React.FC = () => {
       }
       
       const userData = JSON.parse(storedUser);
-      if (!userData.business_id) {
-        throw new Error('Business ID не найден');
+      const userId = userData?.id;
+      
+      if (!userId) {
+        throw new Error('User ID не найден');
       }
 
-      console.log('🔄 Загружаем ROI данные...');
-      const data = tf
-        ? await salesApi.getROIData(userData.business_id, tf)
-        : await salesApi.getROIData(userData.business_id);
-      console.log('✅ ROI данные загружены:', data);
+      console.log('🔄 Загружаем ROI данные...', {
+        userId,
+        directionId: selectedDirectionId || 'все',
+        timeframe: tf || 'all'
+      });
       
+      const data = await salesApi.getROIData(
+        userId, 
+        selectedDirectionId,
+        tf || 'all'
+      );
+      
+      console.log('✅ ROI данные загружены:', data);
       setRoiData(data);
     } catch (err) {
       console.error('Ошибка загрузки ROI данных:', err);
@@ -100,16 +115,30 @@ const ROIAnalytics: React.FC = () => {
   };
 
   useEffect(() => {
-    // Устанавливаем businessId один раз при монтировании
+    // Инициализация при монтировании
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
       const userData = JSON.parse(storedUser);
-      setBusinessId(userData?.business_id || userData?.id || '');
+      const userId = userData?.id || '';
+      setUserAccountId(userId);
+      
+      // Загружаем направления
+      if (userId) {
+        loadDirections(userId);
+      }
     }
     
     loadROIData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Перезагрузка при смене направления
+  useEffect(() => {
+    if (userAccountId) {
+      loadROIData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDirectionId]);
 
   const getROIBadgeVariant = (roi: number) => {
     if (roi > 0) return 'outline';
@@ -152,37 +181,6 @@ const ROIAnalytics: React.FC = () => {
     );
   }
 
-  if (showBusinessIdWarning) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Header onOpenDatePicker={() => {}}  />
-        <main className="flex-1 container mx-auto px-4 py-8">
-          <Card className="max-w-md mx-auto shadow-sm">
-            <CardContent className="flex items-center justify-center py-12">
-              <div className="text-center">
-                <div className="p-3 rounded-full bg-orange-100 inline-flex items-center justify-center mb-4">
-                  <AlertCircle className="h-8 w-8 text-orange-600" />
-                </div>
-                <h2 className="text-lg font-semibold mb-2">Требуется подключение WhatsApp</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Для отслеживания ROI необходимо подключить WhatsApp аккаунт для отслеживания лидов. 
-                  Обратитесь в тех поддержку.
-                </p>
-                <Button 
-                  onClick={() => loadROIData()}
-                  variant="outline"
-                  className="transition-all duration-200"
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Проверить снова
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
-    );
-  }
 
   if (error) {
     return (
@@ -215,27 +213,100 @@ const ROIAnalytics: React.FC = () => {
 
   return (
     <div className="w-full max-w-full overflow-x-hidden">
-      <Header onOpenDatePicker={() => {}} />
+      <Header onOpenDatePicker={() => setIsPeriodMenuOpen(true)} />
+      
+      {/* Меню периодов - позиционируется относительно кнопки календаря */}
+      {isPeriodMenuOpen && (
+        <div 
+          className="fixed inset-0 z-50" 
+          onClick={() => setIsPeriodMenuOpen(false)}
+        >
+          <div 
+            className="absolute top-[60px] right-[120px] bg-popover text-popover-foreground rounded-md border shadow-md p-1 min-w-[8rem]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => { loadROIData(7); setIsPeriodMenuOpen(false); }}
+            >
+              7 дней
+            </div>
+            <div
+              className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => { loadROIData(30); setIsPeriodMenuOpen(false); }}
+            >
+              30 дней
+            </div>
+            <div
+              className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => { loadROIData(90); setIsPeriodMenuOpen(false); }}
+            >
+              90 дней
+            </div>
+            <div
+              className="relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+              onClick={() => { loadROIData('all'); setIsPeriodMenuOpen(false); }}
+            >
+              Всё время
+            </div>
+          </div>
+        </div>
+      )}
       
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
-        <PageHero 
-          title="ROI Аналитика"
-          subtitle="Отслеживайте окупаемость ваших рекламных кампаний"
-        />
-        
-        <div className="mb-4 flex justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">Период</Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => loadROIData(7)}>7 дней</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => loadROIData(30)}>30 дней</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => loadROIData(90)}>90 дней</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => loadROIData('all')}>Все</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        {/* Хедер с заголовком */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
+          <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
         </div>
+        
+        {/* Фильтр по направлениям */}
+        {directions.length > 0 && (
+          <div className="mb-4">
+            {/* Десктоп: табы */}
+            <div className="hidden md:block">
+              <Tabs value={selectedDirectionId || 'all'} onValueChange={(value) => setSelectedDirectionId(value === 'all' ? null : value)}>
+                <TabsList className="bg-muted">
+                  <TabsTrigger value="all">Все направления</TabsTrigger>
+                  {directions.map((direction) => (
+                    <TabsTrigger key={direction.id} value={direction.id}>
+                      {direction.name}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </Tabs>
+            </div>
+            
+            {/* Мобилка: кнопка-бургер */}
+            <div className="md:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    <span>
+                      {selectedDirectionId 
+                        ? directions.find(d => d.id === selectedDirectionId)?.name 
+                        : 'Все направления'}
+                    </span>
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)]">
+                  <DropdownMenuItem onClick={() => setSelectedDirectionId(null)}>
+                    Все направления
+                  </DropdownMenuItem>
+                  {directions.map((direction) => (
+                    <DropdownMenuItem 
+                      key={direction.id} 
+                      onClick={() => setSelectedDirectionId(direction.id)}
+                    >
+                      {direction.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        )}
 
         {/* Общая статистика */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
@@ -286,11 +357,11 @@ const ROIAnalytics: React.FC = () => {
           </Card>
         </div>
 
-                {/* Кампании */}
+                {/* Креативы */}
         <div className="mb-6">
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
-            Кампании ({roiData?.campaigns?.length || 0})
+            Креативы ({roiData?.campaigns?.length || 0})
           </h2>
           
           {roiData?.campaigns && roiData.campaigns.length > 0 ? (
@@ -303,14 +374,14 @@ const ROIAnalytics: React.FC = () => {
                       <table className="min-w-full">
                         <thead className="bg-muted/50 border-b">
                           <tr>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Название кампании</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Название креатива</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Выручка</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Затраты</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">ROI</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Лиды</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсии</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсия %</th>
-                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Креатив</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ссылка</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -441,9 +512,9 @@ const ROIAnalytics: React.FC = () => {
                   <div className="p-3 rounded-full bg-muted inline-flex items-center justify-center mb-4">
                     <BarChart3 className="h-8 w-8 text-muted-foreground" />
                   </div>
-                  <h3 className="text-base font-semibold mb-2">Нет данных по кампаниям</h3>
+                  <h3 className="text-base font-semibold mb-2">Нет данных по креативам</h3>
                   <p className="text-sm text-muted-foreground">
-                    Добавьте лиды и продажи, чтобы увидеть ROI по кампаниям
+                    Добавьте лиды и продажи, чтобы увидеть ROI по креативам
                   </p>
                 </div>
               </CardContent>
@@ -452,7 +523,7 @@ const ROIAnalytics: React.FC = () => {
         </div>
 
         {/* Список продаж */}
-        {businessId && <SalesList businessId={businessId} />}
+        {userAccountId && <SalesList userAccountId={userAccountId} />}
       </div>
     </div>
   );

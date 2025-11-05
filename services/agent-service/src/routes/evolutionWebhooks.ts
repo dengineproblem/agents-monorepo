@@ -157,17 +157,136 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
   const clientPhone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
 
+  // Resolve creative, direction AND whatsapp_phone_number_id BEFORE processing lead
+  const { creativeId, directionId, whatsappPhoneNumberId: directionWhatsappId } = 
+    await resolveCreativeAndDirection(
+      finalSourceId,
+      sourceUrl || mediaUrl,
+      instanceData.user_account_id,
+      app
+    );
+
+  // Use WhatsApp from direction if available, otherwise fallback to instance
+  const finalWhatsappPhoneNumberId = directionWhatsappId || whatsappNumber?.id;
+
+  app.log.info({
+    clientPhone,
+    sourceId: finalSourceId,
+    creativeId,
+    directionId,
+    whatsappPhoneNumberId: finalWhatsappPhoneNumberId,
+    usedDirectionWhatsApp: !!directionWhatsappId,
+  }, 'Resolved lead data from ad metadata');
+
   // Process as lead from Facebook ad
   await processAdLead({
     userAccountId: instanceData.user_account_id,
-    whatsappPhoneNumberId: whatsappNumber?.id,
+    whatsappPhoneNumberId: finalWhatsappPhoneNumberId,
+    instancePhone: instanceData.phone_number,
     clientPhone,
     sourceId: finalSourceId,
-    creativeUrl: sourceUrl || mediaUrl, // Используем sourceUrl или mediaUrl из рекламы
+    creativeId,      // Pass resolved value
+    directionId,     // Pass resolved value
+    creativeUrl: sourceUrl || mediaUrl,
     messageText,
     timestamp: new Date(message.messageTimestamp * 1000 || Date.now()),
     rawData: message
   }, app);
+}
+
+/**
+ * Resolve creative_id, direction_id, and whatsapp_phone_number_id from Facebook Ad ID
+ *
+ * Strategy:
+ * 1. PRIMARY: Lookup in ad_creative_mapping by ad_id
+ * 2. FALLBACK: Lookup in user_creatives by creative URL matching
+ */
+async function resolveCreativeAndDirection(
+  sourceId: string,
+  sourceUrl: string | null,
+  userAccountId: string,
+  app: FastifyInstance
+): Promise<{ 
+  creativeId: string | null; 
+  directionId: string | null;
+  whatsappPhoneNumberId: string | null;
+}> {
+
+  // PRIMARY LOOKUP: Find in ad_creative_mapping by ad_id
+  const { data: adMapping, error: mappingError } = await supabase
+    .from('ad_creative_mapping')
+    .select(`
+      user_creative_id,
+      direction_id,
+      account_directions(whatsapp_phone_number_id)
+    `)
+    .eq('ad_id', sourceId)
+    .eq('user_id', userAccountId)
+    .maybeSingle();
+
+  if (mappingError) {
+    app.log.error({ error: mappingError.message, sourceId }, 'Error looking up ad_creative_mapping');
+  }
+
+  if (adMapping) {
+    const whatsappPhoneNumberId = (adMapping as any)?.account_directions?.whatsapp_phone_number_id || null;
+
+    app.log.debug({
+      sourceId,
+      creativeId: adMapping.user_creative_id,
+      directionId: adMapping.direction_id,
+      whatsappPhoneNumberId,
+    }, 'Found creative via ad_creative_mapping');
+
+    return {
+      creativeId: adMapping.user_creative_id,
+      directionId: adMapping.direction_id,
+      whatsappPhoneNumberId,
+    };
+  }
+
+  // FALLBACK LOOKUP: Find by creative URL matching
+  if (sourceUrl) {
+    const { data: creativeByUrl, error: urlError } = await supabase
+      .from('user_creatives')
+      .select(`
+        id, 
+        direction_id,
+        account_directions(whatsapp_phone_number_id)
+      `)
+      .eq('user_id', userAccountId)
+      .ilike('title', `%${sourceUrl}%`)
+      .maybeSingle();
+
+    if (urlError) {
+      app.log.error({ error: urlError.message, sourceUrl }, 'Error looking up user_creatives by URL');
+    }
+
+    if (creativeByUrl) {
+      const whatsappPhoneNumberId = (creativeByUrl as any)?.account_directions?.whatsapp_phone_number_id || null;
+
+      app.log.debug({
+        sourceUrl,
+        creativeId: creativeByUrl.id,
+        directionId: creativeByUrl.direction_id,
+        whatsappPhoneNumberId,
+      }, 'Found creative via URL matching');
+
+      return {
+        creativeId: creativeByUrl.id,
+        directionId: creativeByUrl.direction_id,
+        whatsappPhoneNumberId,
+      };
+    }
+  }
+
+  app.log.warn({ sourceId, sourceUrl }, 'Could not resolve creative_id and direction_id');
+
+  return {
+    creativeId: null,
+    directionId: null,
+    whatsappPhoneNumberId: null,
+  };
 }
 
 /**
@@ -176,8 +295,11 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 async function processAdLead(params: {
   userAccountId: string;
   whatsappPhoneNumberId?: string;
+  instancePhone: string;
   clientPhone: string;
   sourceId: string;
+  creativeId: string | null;   // NEW
+  directionId: string | null;  // NEW
   creativeUrl?: string;
   messageText: string;
   timestamp: Date;
@@ -186,41 +308,18 @@ async function processAdLead(params: {
   const {
     userAccountId,
     whatsappPhoneNumberId,
+    instancePhone,
     clientPhone,
     sourceId,
+    creativeId,
+    directionId,
     creativeUrl,
     messageText,
     timestamp,
     rawData
   } = params;
 
-  app.log.info({ userAccountId, clientPhone, sourceId }, 'Processing ad lead');
-
-  // 1. PRIMARY: Найти creative по source_id (Ad ID) в ad_creative_mapping
-  const { data: adMapping } = await supabase
-    .from('ad_creative_mapping')
-    .select('user_creative_id, direction_id')
-    .eq('ad_id', sourceId)
-    .eq('user_id', userAccountId)
-    .maybeSingle();
-
-  let creativeId = adMapping?.user_creative_id;
-  let directionId = adMapping?.direction_id;
-
-  // 2. FALLBACK: Найти по creative_url (Instagram post URL)
-  if (!creativeId && creativeUrl) {
-    const { data: creativeByUrl } = await supabase
-      .from('user_creatives')
-      .select('id, direction_id')
-      .eq('user_id', userAccountId)
-      .ilike('title', `%${creativeUrl}%`)
-      .maybeSingle();
-
-    if (creativeByUrl) {
-      creativeId = creativeByUrl.id;
-      directionId = creativeByUrl.direction_id;
-    }
-  }
+  app.log.info({ userAccountId, clientPhone, sourceId, creativeId, directionId }, 'Processing ad lead');
 
   // 3. Проверить, существует ли уже лид
   const { data: existingLead } = await supabase
@@ -255,10 +354,10 @@ async function processAdLead(params: {
       .from('leads')
       .insert({
         user_account_id: userAccountId,
-        business_id: whatsappPhoneNumberId ? null : params.clientPhone, // legacy fallback
+        business_id: instancePhone, // Instance phone number (our business number)
         chat_id: clientPhone,
         source_id: sourceId,
-        conversion_source: 'FB_Ads',
+        conversion_source: 'Evolution_API',
         creative_url: creativeUrl,
         creative_id: creativeId,
         direction_id: directionId,

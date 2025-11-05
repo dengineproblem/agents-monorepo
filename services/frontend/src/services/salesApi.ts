@@ -20,17 +20,43 @@ export interface CampaignROI {
   conversions: number;
 }
 
+export interface Direction {
+  id: string;
+  name: string;
+  objective: string;
+  whatsapp_phone_number: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
 class SalesApiService {
-  // Получение всех продаж по бизнесу
-  async getAllPurchases(businessId: string): Promise<{ data: any[]; error: any }> {
+  // Получение всех продаж по пользователю
+  async getAllPurchases(userAccountId: string): Promise<{ data: any[]; error: any }> {
     try {
       const { data, error } = await (supabase as any)
         .from('purchases')
         .select('*')
-        .eq('business_id', businessId)
+        .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false });
       return { data, error };
     } catch (error) {
+      return { data: [], error };
+    }
+  }
+
+  // Получение списка направлений пользователя
+  async getDirections(userAccountId: string): Promise<{ data: Direction[]; error: any }> {
+    try {
+      const response = await fetch(`/api/directions?userAccountId=${userAccountId}`);
+      const result = await response.json();
+      
+      if (!result.success) {
+        return { data: [], error: result.error };
+      }
+      
+      return { data: result.directions || [], error: null };
+    } catch (error) {
+      console.error('Error fetching directions:', error);
       return { data: [], error };
     }
   }
@@ -51,24 +77,41 @@ class SalesApiService {
   }
 
   // Функция для получения затрат по конкретному объявлению
-  private async getAdSpend(accessToken: string, adId: string, datePreset: 'last_7d' | 'last_30d' | 'last_90d' | 'maximum'): Promise<number> {
+  private async getAdSpend(accessToken: string, adId: string, datePreset: 'last_7d' | 'last_30d' | 'last_90d'): Promise<number> {
     try {
       const baseUrl = 'https://graph.facebook.com/v18.0';
       const url = new URL(`${baseUrl}/${adId}/insights`);
       url.searchParams.append('access_token', accessToken);
-      url.searchParams.append('date_preset', datePreset);
+      
+      // Используем кастомный диапазон дат вместо date_preset
+      // Это гарантирует получение данных даже для остановленных объявлений
+      const timeRanges: { [key: string]: number } = {
+        'last_7d': 7,
+        'last_30d': 30,
+        'last_90d': 90
+      };
+      
+      const daysBack = timeRanges[datePreset];
+      const since = new Date();
+      since.setDate(since.getDate() - daysBack);
+      const sinceStr = since.toISOString().split('T')[0]; // YYYY-MM-DD
+      const untilStr = new Date().toISOString().split('T')[0]; // Сегодня
+      
+      url.searchParams.append('time_range', JSON.stringify({
+        since: sinceStr,
+        until: untilStr
+      }));
       url.searchParams.append('fields', 'spend');
 
       const response = await fetch(url.toString());
       
       if (!response.ok) {
-        console.log(`⚠️ Не удалось получить затраты для объявления ${adId}`);
+        console.warn(`⚠️ Не удалось получить затраты для объявления ${adId}: ${response.status}`);
         return 0;
       }
 
       const data = await response.json();
       const spend = data.data?.[0]?.spend || 0;
-      console.log(`💰 Объявление ${adId}: затраты $${spend}`);
       return parseFloat(spend);
       
     } catch (error) {
@@ -161,10 +204,14 @@ class SalesApiService {
     }
   }
 
-  // Получение ROI данных по business_id
-  async getROIData(businessId: string, timeframeDays: 7 | 30 | 90 | 'all' = 'all'): Promise<ROIData> {
+  // Получение ROI данных по user_account_id с опциональным фильтром по direction
+  async getROIData(
+    userAccountId: string, 
+    directionId: string | null = null,
+    timeframeDays: 7 | 30 | 90 | 'all' = 'all'
+  ): Promise<ROIData> {
     try {
-      console.log('🔄 Загружаем ROI данные для business_id:', businessId);
+      console.log('🔄 Загружаем ROI данные для user_account_id:', userAccountId, 'direction:', directionId || 'все');
 
       // Фильтрация по периоду
       const since = (() => {
@@ -176,11 +223,26 @@ class SalesApiService {
         return d.toISOString();
       })();
 
-      // Получаем статистику лидов с source_id
+      // Получаем статистику лидов с именем креатива через ad_creative_mapping -> user_creatives
       let leadsQuery = (supabase as any)
         .from('leads')
-        .select('id, chat_id, sale_amount, source_id, creative_url, created_at')
-        .eq('business_id', businessId);
+        .select(`
+          id, 
+          chat_id, 
+          sale_amount, 
+          source_id, 
+          creative_id, 
+          creative_url, 
+          created_at, 
+          direction_id
+        `)
+        .eq('user_account_id', userAccountId);
+      
+      // Фильтр по направлению (если выбрано)
+      if (directionId) {
+        leadsQuery = leadsQuery.eq('direction_id', directionId);
+      }
+      
       if (since) leadsQuery = leadsQuery.gte('created_at', since);
       const { data: leadsStats, error: leadsError } = await leadsQuery;
 
@@ -191,11 +253,39 @@ class SalesApiService {
 
       console.log('📊 Загружено лидов:', leadsStats?.length || 0);
 
-      // Получаем все продажи для подсчета количества отдельных конверсий
+      // Получаем маппинг ad_id -> creative_name через ad_creative_mapping -> user_creatives
+      const adIds = leadsStats?.map(l => l.source_id).filter(Boolean) || [];
+      let creativeNamesMap = new Map<string, string>();
+      
+      if (adIds.length > 0) {
+        const { data: creativeMappings, error: creativeMappingsError } = await (supabase as any)
+          .from('ad_creative_mapping')
+          .select(`
+            ad_id,
+            user_creatives!inner(title)
+          `)
+          .in('ad_id', adIds);
+        
+        if (!creativeMappingsError && creativeMappings) {
+          creativeMappings.forEach((mapping: any) => {
+            if (mapping.user_creatives?.title) {
+              creativeNamesMap.set(mapping.ad_id, mapping.user_creatives.title);
+            }
+          });
+          console.log('📊 Загружено названий креативов:', creativeNamesMap.size);
+        }
+      }
+
+      // Получаем все продажи через JOIN с leads (по client_phone)
+      // Это позволяет фильтровать purchases через связь с leads
+      const leadPhones = leadsStats?.map(l => l.chat_id) || [];
+      
       let purchasesQuery = (supabase as any)
         .from('purchases')
         .select('id, client_phone, amount, created_at')
-        .eq('business_id', businessId);
+        .eq('user_account_id', userAccountId)
+        .in('client_phone', leadPhones.length > 0 ? leadPhones : ['__no_match__']);
+      
       if (since) purchasesQuery = purchasesQuery.gte('created_at', since);
       const { data: purchasesStats, error: purchasesError } = await purchasesQuery;
 
@@ -206,27 +296,24 @@ class SalesApiService {
 
       console.log('📊 Загружено продаж:', purchasesStats?.length || 0);
 
-      // Пытаемся получить реальные данные кампаний из Facebook
-      let facebookCampaigns: Map<string, any> = new Map();
-      const usdToKztRate = 500; // Курс доллара к тенге
+      // Курс доллара к тенге
+      const usdToKztRate = 500;
 
       // Получаем access_token один раз
       let fbAccessToken: string | null = null;
       let fbAdAccountId: string | null = null;
       try {
-        console.log('🔄 Получаем access_token из таблицы user_accounts для business_id:', businessId);
+        console.log('🔄 Получаем access_token из таблицы user_accounts');
         const { data: userData, error: userError } = await (supabase as any)
           .from('user_accounts')
           .select('access_token, ad_account_id')
-          .eq('business_id', businessId)
+          .eq('id', userAccountId)
           .single();
 
         if (!userError && userData?.access_token) {
           fbAccessToken = userData.access_token;
           fbAdAccountId = userData.ad_account_id;
-          console.log('✅ Access token найден');
-          // Подтянем карту кампаний один раз (для названий)
-          facebookCampaigns = await this.getFacebookCampaignsData(fbAccessToken, fbAdAccountId);
+          console.log('✅ Access token найден, будем запрашивать расходы напрямую по ad_id');
         } else {
           console.log('⚠️ Access token не найден, используем 30% формулу для затрат');
         }
@@ -234,7 +321,7 @@ class SalesApiService {
         console.warn('⚠️ Не удалось получить данные из Facebook API:', fbError);
       }
 
-      // Группируем по source_id (ID объявления)
+      // Группируем по creative_id (ID креатива)
       const campaignMap = new Map<string, CampaignROI>();
       let totalRevenue = 0;
       let totalLeads = leadsStats?.length || 0;
@@ -242,7 +329,7 @@ class SalesApiService {
 
       // Обрабатываем каждый лид асинхронно
       for (const lead of leadsStats || []) {
-        const sourceId = lead.source_id || 'manual_sale';
+        const creativeId = lead.creative_id || 'unknown_creative';
         const revenue = Number(lead.sale_amount) || 0;
         const hasConversion = revenue > 0;
         
@@ -250,40 +337,27 @@ class SalesApiService {
         const leadPurchases = purchasesStats?.filter(p => p.client_phone === lead.chat_id) || [];
         const purchaseCount = leadPurchases.length;
         
-        console.log(`📊 Лид ${lead.id}: source_id=${sourceId}, revenue=${revenue}, hasConversion=${hasConversion}, purchases=${purchaseCount}`);
+        // console.log(`📊 Лид ${lead.id}: creative_id=${creativeId}, revenue=${revenue}, hasConversion=${hasConversion}, purchases=${purchaseCount}`);
         
         if (hasConversion) {
           totalConversions += purchaseCount; // Считаем количество продаж, а не лидов
         }
         totalRevenue += revenue;
 
-        // Группируем по source_id (ID объявления)
-        if (!campaignMap.has(sourceId)) {
-          // Пытаемся получить реальное название из Facebook API
-          console.log(`🔍 Создаем кампанию для source_id: ${sourceId}`);
+        // Группируем по creative_id
+        if (!campaignMap.has(creativeId)) {
+          console.log(`🔍 Создаем запись для креатива: ${creativeId}`);
           
-          let campaignName = sourceId === 'manual_sale' ? 'Ручные продажи' : `Кампания ${sourceId}`;
+          // Название креатива - берём из маппинга по source_id (ad_id)
+          let creativeName = creativeId === 'unknown_creative' 
+            ? 'Без креатива' 
+            : (creativeNamesMap.get(lead.source_id) || `Креатив ${creativeId.substring(0, 8)}...`);
           
-          // Если есть Facebook токен, пытаемся получить реальное название
-          if (facebookCampaigns.size > 0 && sourceId !== 'manual_sale' && fbAccessToken) {
-            try {
-              const campaignId = await this.getCampaignIdByAdId(fbAccessToken, sourceId);
-              if (campaignId) {
-                const fbCampaign = facebookCampaigns.get(campaignId);
-                if (fbCampaign) {
-                  campaignName = fbCampaign.name;
-                }
-              }
-            } catch (error) {
-              console.error(`❌ Ошибка получения названия кампании для объявления ${sourceId}:`, error);
-            }
-          }
+          console.log(`📋 Название креатива: ${creativeName}`);
           
-          console.log(`📋 Итоговое название кампании: ${campaignName}`);
-          
-          campaignMap.set(sourceId, {
-            id: sourceId,
-            name: campaignName,
+          campaignMap.set(creativeId, {
+            id: creativeId,
+            name: creativeName,
             creative_url: lead.creative_url || '',
             spend: 0, // Будет рассчитан ниже
             revenue: 0,
@@ -293,23 +367,38 @@ class SalesApiService {
           });
         }
 
-        const campaign = campaignMap.get(sourceId)!;
+        const campaign = campaignMap.get(creativeId)!;
         campaign.leads++;
         campaign.revenue += revenue;
         if (hasConversion) campaign.conversions += purchaseCount;
         
-        // Берем любую ссылку для этого source_id (как сказал пользователь)
+        // Обновляем creative_url если его не было
         if (!campaign.creative_url && lead.creative_url) {
           campaign.creative_url = lead.creative_url;
         }
       }
 
+      // Создаём мапу creative_id → source_ids для подсчёта затрат
+      const creativeToSourceIds = new Map<string, Set<string>>();
+      for (const lead of leadsStats || []) {
+        const creativeId = lead.creative_id || 'unknown_creative';
+        const sourceId = lead.source_id;
+        if (sourceId) {
+          if (!creativeToSourceIds.has(creativeId)) {
+            creativeToSourceIds.set(creativeId, new Set());
+          }
+          creativeToSourceIds.get(creativeId)!.add(sourceId);
+        }
+      }
+      console.log('📊 Мапа креативов к объявлениям:', Array.from(creativeToSourceIds.entries()).map(([k, v]) => `${k}: ${v.size} ads`));
+
       // Вычисляем ROI с реальными затратами или временной формулой
       const campaigns = Array.from(campaignMap.values());
       
-      // Получаем реальные затраты для каждой кампании (параллельно, с ограничением)
-      const datePreset: 'last_7d' | 'last_30d' | 'last_90d' | 'maximum' =
-        timeframeDays === 7 ? 'last_7d' : timeframeDays === 30 ? 'last_30d' : timeframeDays === 90 ? 'last_90d' : 'maximum';
+      // Получаем реальные затраты для каждого креатива (параллельно, с ограничением)
+      // Для 'all' используем last_90d (максимально доступный стандартный период в FB API)
+      const datePreset: 'last_7d' | 'last_30d' | 'last_90d' =
+        timeframeDays === 7 ? 'last_7d' : timeframeDays === 30 ? 'last_30d' : 'last_90d';
 
       const concurrency = 6;
       const queue: Promise<void>[] = [];
@@ -323,7 +412,7 @@ class SalesApiService {
         }
       };
 
-      const schedule = async (task: () => Promise<void>) => {
+      const schedule = async (task: () => Promise<void>): Promise<void> => {
         while (active >= concurrency) {
           await Promise.race(queue);
         }
@@ -333,24 +422,38 @@ class SalesApiService {
           const idx = queue.indexOf(p);
           if (idx >= 0) queue.splice(idx, 1);
         });
+        return p; // ВАЖНО: возвращаем промис!
       };
 
       await Promise.all(
         campaigns.map((campaign) =>
           schedule(async () => {
-            const sourceId = campaign.id;
-            let spendInKzt: number;
-            if (sourceId !== 'manual_sale' && facebookCampaigns.size > 0 && fbAccessToken) {
-              try {
-                const spendInUsd = await this.getAdSpend(fbAccessToken, sourceId, datePreset);
-                spendInKzt = Math.round(spendInUsd * usdToKztRate);
-              } catch (error) {
-                console.error(`❌ Ошибка получения затрат для ${sourceId}:`, error);
+            const creativeId = campaign.id;
+            let spendInKzt = 0;
+            
+            // Собираем затраты со всех source_id (объявлений), использующих этот креатив
+            const sourceIds = creativeToSourceIds.get(creativeId);
+            
+            if (sourceIds && sourceIds.size > 0 && fbAccessToken) {
+              // Суммируем затраты по всем объявлениям этого креатива
+              for (const sourceId of sourceIds) {
+                try {
+                  const spendInUsd = await this.getAdSpend(fbAccessToken, sourceId, datePreset);
+                  spendInKzt += Math.round(spendInUsd * usdToKztRate);
+                } catch (error) {
+                  console.error(`❌ Ошибка получения затрат для объявления ${sourceId}:`, error);
+                }
+              }
+              
+              // Если не удалось получить ни одних затрат, используем формулу
+              if (spendInKzt === 0) {
                 spendInKzt = Math.round(campaign.revenue * 0.3);
               }
             } else {
+              // Нет source_id или нет доступа к Facebook API - используем формулу
               spendInKzt = Math.round(campaign.revenue * 0.3);
             }
+            
             const roi = spendInKzt > 0 ? Math.round(((campaign.revenue - spendInKzt) / spendInKzt) * 100) : 0;
             campaign.spend = spendInKzt;
             campaign.roi = roi;
@@ -479,7 +582,7 @@ class SalesApiService {
   }
 
   // Обновляем sale_amount в лиде после добавления продажи
-  private async updateLeadSaleAmount(clientPhone: string, businessId: string) {
+  private async updateLeadSaleAmount(clientPhone: string, userAccountId: string) {
     try {
       console.log('🔄 Обновляем sale_amount в лиде...');
       
@@ -488,7 +591,7 @@ class SalesApiService {
         .from('purchases')
         .select('amount')
         .eq('client_phone', clientPhone)
-        .eq('business_id', businessId);
+        .eq('user_account_id', userAccountId);
 
       if (sumError) {
         console.error('❌ Ошибка подсчета суммы продаж:', sumError);
@@ -506,7 +609,7 @@ class SalesApiService {
           updated_at: new Date().toISOString()
         })
         .eq('chat_id', clientPhone)
-        .eq('business_id', businessId);
+        .eq('user_account_id', userAccountId);
 
       if (updateError) {
         console.error('❌ Ошибка обновления sale_amount в лиде:', updateError);
@@ -523,22 +626,23 @@ class SalesApiService {
   public async addSale(saleData: {
     client_phone: string;
     amount: number;
-    business_id: string;
+    user_account_id: string;
     manual_source_id?: string;
     manual_creative_url?: string;
+    direction_id?: string;
   }) {
     try {
       console.log('🔄 Добавляем продажу:', saleData);
       console.log('📞 Номер телефона:', saleData.client_phone);
       console.log('💰 Сумма:', saleData.amount);
-      console.log('🏢 Business ID:', saleData.business_id);
+      console.log('👤 User Account ID:', saleData.user_account_id);
       console.log('📋 Source ID:', saleData.manual_source_id);
 
       // Проверяем есть ли лид с таким номером
       const { data: existingLead, error: leadCheckError } = await (supabase as any)
         .from('leads')
-        .select('id, source_id, creative_url')
-        .eq('business_id', saleData.business_id)
+        .select('id, source_id, creative_url, direction_id, user_account_id')
+        .eq('user_account_id', saleData.user_account_id)
         .eq('chat_id', saleData.client_phone)
         .single();
 
@@ -559,10 +663,11 @@ class SalesApiService {
         console.log('📝 Создаем новый лид для продажи...');
         
         const leadInsertData = {
-          business_id: saleData.business_id,
+          user_account_id: saleData.user_account_id,
           chat_id: saleData.client_phone,
           source_id: saleData.manual_source_id,
           creative_url: saleData.manual_creative_url || '',
+          direction_id: saleData.direction_id || null,
           created_at: new Date().toISOString()
         };
         
@@ -582,9 +687,9 @@ class SalesApiService {
         console.log('✅ Лид создан:', newLead);
       }
 
-      // Добавляем продажу в таблицу purchases (только основные поля)
+      // Добавляем продажу в таблицу purchases
       const purchaseInsertData = {
-        business_id: saleData.business_id,
+        user_account_id: saleData.user_account_id,
         client_phone: saleData.client_phone,
         amount: saleData.amount
       };
@@ -605,7 +710,7 @@ class SalesApiService {
       console.log('✅ Продажа успешно добавлена:', purchaseData);
 
       // Обновляем sale_amount в соответствующем лиде
-      await this.updateLeadSaleAmount(saleData.client_phone, saleData.business_id);
+      await this.updateLeadSaleAmount(saleData.client_phone, saleData.user_account_id);
 
       return { success: true, data: purchaseData };
 
