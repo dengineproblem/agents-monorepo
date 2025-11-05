@@ -147,7 +147,26 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
           })
         }
       );
-      const advertiserData = await advertiserResponse.json();
+      
+      const advertiserText = await advertiserResponse.text();
+      log.info({ 
+        httpStatus: advertiserResponse.status,
+        responsePreview: advertiserText.substring(0, 200)
+      }, 'TikTok advertiser raw response');
+      
+      let advertiserData: any;
+      try {
+        advertiserData = JSON.parse(advertiserText);
+      } catch (parseError: any) {
+        log.error({ 
+          error: parseError.message, 
+          rawResponse: advertiserText.substring(0, 500)
+        }, 'Failed to parse TikTok advertiser response');
+        return res.status(400).send({
+          success: false,
+          error: 'Invalid response from TikTok API'
+        });
+      }
 
       log.info({ 
         responseCode: advertiserData.code,
