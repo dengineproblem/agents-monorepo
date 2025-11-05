@@ -324,6 +324,206 @@ WHERE tiktok_access_token IS NOT NULL;
 
 ---
 
+## 🌐 TikTok API Proxy Service
+
+### Overview
+
+Для работы с TikTok Marketing API используется **отдельный proxy сервис**, который работает на хосте и проксирует запросы к TikTok API.
+
+### Architecture
+
+```
+Frontend (tiktokApi.ts)
+    ↓
+https://agent.performanteaiagency.com/tproxy
+    ↓
+Docker Nginx (agents-monorepo-nginx-1)
+    ↓
+TikTok Proxy Service на хосте (172.17.0.1:4001)
+    ↓
+TikTok Marketing API (business-api.tiktok.com)
+```
+
+### Компоненты
+
+#### 1. **TikTok Proxy Service**
+
+**Расположение:** `/opt/tiktok-proxy/index.js`  
+**Порт:** `4001`  
+**Процесс:** Node.js (PID: 1197427, пользователь: www-data)
+
+```bash
+# Проверить статус
+ps aux | grep tiktok-proxy
+
+# Проверить доступность
+curl -I http://127.0.0.1:4001/api/tiktok
+```
+
+#### 2. **Nginx Configuration**
+
+**Файл:** `nginx-production.conf`  
+**Домен:** `agent.performanteaiagency.com`
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name agent.performanteaiagency.com;
+    
+    location ^~ /tproxy {
+        # CORS для кросс-доменных запросов
+        add_header Access-Control-Allow-Origin * always;
+        add_header Access-Control-Allow-Methods GET,POST,OPTIONS always;
+        add_header Access-Control-Allow-Headers * always;
+        
+        # Проксируем на tiktok-proxy на хосте
+        proxy_pass http://172.17.0.1:4001/api/tiktok;
+        
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        
+        proxy_read_timeout 600s;
+        proxy_connect_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+}
+```
+
+**Важно:** `172.17.0.1` - это IP хоста в Docker bridge сети, позволяет контейнеру nginx обращаться к сервисам на хосте.
+
+#### 3. **Frontend Integration**
+
+**Файл:** `services/frontend/src/services/tiktokApi.ts`
+
+```typescript
+const PROXY_URL = 'https://agent.performanteaiagency.com/tproxy';
+
+// GET запрос
+const proxyUrl = new URL(PROXY_URL);
+proxyUrl.searchParams.set('endpoint', 'campaign/get/');
+proxyUrl.searchParams.set('method', 'GET');
+proxyUrl.searchParams.set('access_token', access_token);
+proxyUrl.searchParams.set('params', JSON.stringify(params));
+
+const response = await fetch(proxyUrl.toString());
+
+// POST запрос
+const response = await fetch(PROXY_URL, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    endpoint: 'report/integrated/get/',
+    method: 'POST',
+    access_token: access_token,
+    params: params
+  })
+});
+```
+
+### Поддерживаемые Endpoints
+
+**Получение кампаний:**
+```
+GET /tproxy?endpoint=campaign/get/&method=GET&access_token=XXX&params={"advertiser_id":"123"}
+```
+
+**Получение статистики:**
+```
+POST /tproxy
+Body: {
+  "endpoint": "report/integrated/get/",
+  "method": "POST",
+  "access_token": "XXX",
+  "params": {
+    "advertiser_id": "123",
+    "report_type": "BASIC",
+    "data_level": "AUCTION_CAMPAIGN",
+    ...
+  }
+}
+```
+
+**Изменение статуса кампании:**
+```
+POST /tproxy
+Body: {
+  "endpoint": "campaign/status/update/",
+  "method": "POST",
+  "access_token": "XXX",
+  "params": {
+    "advertiser_id": "123",
+    "campaign_ids": ["456"],
+    "operation_status": "ENABLE"
+  }
+}
+```
+
+### Troubleshooting
+
+#### Proxy не отвечает
+
+```bash
+# 1. Проверить процесс
+ps aux | grep tiktok-proxy
+
+# 2. Проверить порт
+sudo lsof -i :4001
+
+# 3. Проверить доступность с хоста
+curl -I http://127.0.0.1:4001/api/tiktok
+
+# 4. Проверить из контейнера nginx
+docker exec agents-monorepo-nginx-1 wget -O- http://172.17.0.1:4001/api/tiktok
+```
+
+#### Nginx не проксирует
+
+```bash
+# 1. Проверить конфигурацию
+docker exec agents-monorepo-nginx-1 nginx -t
+
+# 2. Проверить логи
+docker-compose logs nginx | grep agent.performanteaiagency
+
+# 3. Перезапустить nginx
+docker-compose restart nginx
+```
+
+#### CORS ошибки
+
+Убедитесь что в `nginx-production.conf` есть CORS headers:
+```nginx
+add_header Access-Control-Allow-Origin * always;
+add_header Access-Control-Allow-Methods GET,POST,OPTIONS always;
+add_header Access-Control-Allow-Headers * always;
+```
+
+### Monitoring
+
+**Проверка работоспособности:**
+```bash
+# Простой health check
+curl -k -I https://agent.performanteaiagency.com/tproxy
+
+# Ожидаем: HTTP/2 400 (Bad Request - нормально без параметров)
+# Если 502 - proxy не работает
+# Если 404 - nginx не настроен
+```
+
+**Логи TikTok Proxy:**
+```bash
+# Найти процесс и его логи
+ps aux | grep tiktok-proxy
+sudo journalctl -f | grep tiktok
+```
+
+### История изменений
+
+**2025-11-05:** Добавлен домен `agent.performanteaiagency.com` в Docker nginx для проксирования запросов к legacy TikTok proxy сервису на хосте. Commit: e5de3a1.
+
+---
+
 ## 🔄 Future Improvements
 
 ### Potential Enhancements:

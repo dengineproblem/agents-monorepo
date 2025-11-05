@@ -98,7 +98,24 @@ Docker nginx (контейнер)
 
 ---
 
-### **4. Другие домены (для справки)**
+### **4. `agent.performanteaiagency.com` (TikTok API Proxy)**
+
+**Назначение:** Прокси для запросов к TikTok Marketing API
+
+**Особенности:**
+- ✅ Проксирует запросы фронтенда к TikTok API через legacy сервис на хосте
+- ✅ Endpoint: `/tproxy` (GET и POST)
+- ✅ CORS headers для кросс-доменных запросов
+- ✅ Используется в `tiktokApi.ts` для получения кампаний и статистики
+
+**Backend сервис:** Legacy Node.js процесс `/opt/tiktok-proxy/index.js` (порт 4001 на хосте)  
+**Проксирование:** Docker nginx → `http://172.17.0.1:4001/api/tiktok`
+
+**Подробности:** См. `TIKTOK_OAUTH_INTEGRATION.md` → раздел "TikTok API Proxy Service"
+
+---
+
+### **5. Другие домены (для справки)**
 
 - `agents.performanteaiagency.com` - прямой доступ к agent-service API (не используется в продакшене)
 - `agent2.performanteaiagency.com` - legacy (не используется)
@@ -125,6 +142,7 @@ Docker nginx (контейнер)
 | `evolution-api` | 8080 | 8080 | WhatsApp Business API (Evolution API) |
 | `evolution-postgres` | 5432 | 5433 | БД для Evolution API |
 | `evolution-redis` | 6379 | 6380 | Cache для Evolution API |
+| `tiktok-proxy` (на хосте) | 4001 | 4001 | TikTok Marketing API proxy (legacy, не в Docker) |
 
 ### **Docker Compose файлы:**
 
@@ -877,6 +895,18 @@ docker-compose restart grafana
 ---
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
+
+**5 ноября 2025:**
+- ✅ **ДОБАВЛЕН ДОМЕН:** `agent.performanteaiagency.com` для TikTok API proxy
+- ✅ Проблема: Фронтенд не мог загружать данные из TikTok - обращался к несуществующему домену
+- ✅ Обнаружен legacy сервис `/opt/tiktok-proxy/index.js` (порт 4001 на хосте)
+- ✅ Добавлена конфигурация в `nginx-production.conf` для проксирования `/tproxy` → `http://172.17.0.1:4001/api/tiktok`
+- ✅ Настроены CORS headers для кросс-доменных запросов
+- ✅ Docker nginx теперь проксирует на сервис на хосте через IP `172.17.0.1` (Docker bridge)
+- ✅ Файл: `nginx-production.conf` (новый server block)
+- ✅ Коммит: `e5de3a1` - "feat: Add nginx config for agent.performanteaiagency.com TikTok proxy"
+- ✅ Протестировано: endpoint отвечает HTTP/2 400 (нормально без параметров), CORS работает
+- ✅ Документация: обновлены `TIKTOK_OAUTH_INTEGRATION.md` и `INFRASTRUCTURE.md`
 
 **1 ноября 2025:**
 - ✅ **КРИТИЧЕСКИЙ ФИКС:** Исправлена ошибка создания adsets в `Direction.CreateAdSetWithCreatives`
