@@ -14,9 +14,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Plus, RefreshCw, Unlink, ExternalLink } from 'lucide-react';
+import { Plus, RefreshCw, Unlink, ChevronDown, ChevronUp } from 'lucide-react';
 
 // Используем API_BASE_URL из config/api.ts (уже содержит /api в конце)
 import { API_BASE_URL } from '@/config/api';
@@ -44,6 +45,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
   const [fbAdSetId, setFbAdSetId] = useState('');
   const [isLinking, setIsLinking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   // Fetch ad sets for this direction
   const fetchAdSets = async () => {
@@ -181,100 +183,107 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">Linked Ad Sets</CardTitle>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={syncAdSets}
-              disabled={isSyncing || adsets.length === 0}
-            >
-              <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
-              Sync
-            </Button>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setLinkDialogOpen(true)}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Link Ad Set
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="text-center py-4 text-muted-foreground">
-            Loading ad sets...
-          </div>
-        ) : adsets.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <p className="mb-2">No ad sets linked yet.</p>
-            <p className="text-sm">Create ad sets in Facebook Ads Manager and link them here.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {adsets.map((adset) => (
-              <div
-                key={adset.id}
-                className="flex items-center justify-between p-3 border rounded-lg hover:bg-accent/50 transition-colors"
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CardHeader className="py-3">
+          <div className="flex items-center justify-between">
+            <CollapsibleTrigger className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+              {isOpen ? (
+                <ChevronUp className="h-4 w-4" />
+              ) : (
+                <ChevronDown className="h-4 w-4" />
+              )}
+              <CardTitle className="text-base">
+                Связанные Ad Sets
+                {!isLoading && adsets.length > 0 && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    ({adsets.length})
+                  </span>
+                )}
+              </CardTitle>
+            </CollapsibleTrigger>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={syncAdSets}
+                disabled={isSyncing || adsets.length === 0}
+                className="h-8"
               >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium">{adset.adset_name}</span>
-                    <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(adset.status)}`}>
-                      {adset.status}
-                    </span>
-                  </div>
-                  <div className="text-sm text-muted-foreground space-y-1">
-                    <div>Facebook ID: {adset.fb_adset_id}</div>
-                    <div className="flex gap-4">
-                      <span>Ads: {adset.ads_count} / 50</span>
-                      <span>Budget: ${(adset.daily_budget_cents / 100).toFixed(2)}/day</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.open(`https://business.facebook.com/adsmanager/manage/adsets?act=${adset.fb_adset_id}`, '_blank')}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => unlinkAdSet(adset.id)}
-                  >
-                    <Unlink className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            ))}
+                <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setLinkDialogOpen(true)}
+                className="h-8"
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
-        )}
-      </CardContent>
+        </CardHeader>
+        <CollapsibleContent>
+          <CardContent className="pt-0 pb-3">
+            {isLoading ? (
+              <div className="text-center py-2 text-sm text-muted-foreground">
+                Загрузка...
+              </div>
+            ) : adsets.length === 0 ? (
+              <div className="text-center py-4 text-sm text-muted-foreground">
+                <p>Нет привязанных ad sets.</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {adsets.map((adset) => (
+                  <div
+                    key={adset.id}
+                    className="flex items-center justify-between px-2 py-1.5 border rounded hover:bg-accent/50 transition-colors text-sm"
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${getStatusColor(adset.status)}`}>
+                        {adset.status}
+                      </span>
+                      <span className="font-medium truncate">{adset.adset_name}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {adset.ads_count}/50
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        ${(adset.daily_budget_cents / 100).toFixed(0)}/d
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => unlinkAdSet(adset.id)}
+                      className="h-6 w-6 p-0 opacity-60 hover:opacity-100"
+                      title="Отвязать ad set"
+                    >
+                      <Unlink className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* Link Ad Set Dialog */}
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Link Pre-Created Ad Set</DialogTitle>
+            <DialogTitle>Привязать Pre-Created Ad Set</DialogTitle>
             <DialogDescription>
-              Follow these steps to link an ad set created in Facebook Ads Manager:
+              Следуйте этим шагам, чтобы привязать ad set, созданный в Facebook Ads Manager:
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
-              <li>Go to Facebook Ads Manager</li>
-              <li>Create a new ad set in <strong>PAUSED</strong> status</li>
-              <li>Set your specific WhatsApp number in the ad set</li>
-              <li>Copy the ad set ID from the URL or ad set details</li>
-              <li>Paste it below:</li>
+              <li>Перейдите в Facebook Ads Manager</li>
+              <li>Создайте новый ad set в статусе <strong>PAUSED</strong></li>
+              <li>Укажите ваш конкретный номер WhatsApp в ad set</li>
+              <li>Скопируйте ID ad set из URL или деталей ad set</li>
+              <li>Вставьте его ниже:</li>
             </ol>
             
             <div className="space-y-2">
@@ -288,7 +297,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
                 disabled={isLinking}
               />
               <p className="text-xs text-muted-foreground">
-                The ad set must be in PAUSED status and belong to this direction's campaign.
+                Ad set должен быть в статусе PAUSED и принадлежать кампании этого направления.
               </p>
             </div>
 
@@ -301,13 +310,13 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
                 }}
                 disabled={isLinking}
               >
-                Cancel
+                Отмена
               </Button>
               <Button
                 onClick={linkAdSet}
                 disabled={isLinking || !fbAdSetId.trim()}
               >
-                {isLinking ? 'Linking...' : 'Link Ad Set'}
+                {isLinking ? 'Привязываем...' : 'Привязать Ad Set'}
               </Button>
             </div>
           </div>

@@ -882,13 +882,13 @@ const Profile: React.FC = () => {
                 <CardHeader>
                   <CardTitle className="text-lg flex items-center gap-2">
                     <DollarSign className="h-5 w-5" />
-                    Ad Set Creation Mode
+                    Режим создания Ad Sets
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
                     <div className="text-sm text-muted-foreground mb-3">
-                      Choose how ad sets are created for your campaigns
+                      Выберите, как создавать ad sets для ваших кампаний
                     </div>
                     
                     {/* Radio Group */}
@@ -908,9 +908,9 @@ const Profile: React.FC = () => {
                           className="mt-1"
                         />
                         <div className="flex-1">
-                          <div className="font-medium">Single Direction Mode (Default)</div>
+                          <div className="font-medium">Режим одного направления (по умолчанию)</div>
                           <div className="text-sm text-muted-foreground mt-1">
-                            Automatically create ad sets through Facebook API. Best for users with one business direction.
+                            Автоматическое создание ad sets через Facebook API. Подходит для пользователей с одним бизнес-направлением.
                           </div>
                         </div>
                       </label>
@@ -930,9 +930,9 @@ const Profile: React.FC = () => {
                           className="mt-1"
                         />
                         <div className="flex-1">
-                          <div className="font-medium">Multiple Directions Mode</div>
+                          <div className="font-medium">Режим нескольких направлений</div>
                           <div className="text-sm text-muted-foreground mt-1">
-                            Use pre-created ad sets with specific WhatsApp numbers. Required for multiple directions with different phone numbers.
+                            Использование заранее созданных ad sets с конкретными номерами WhatsApp. Необходимо для нескольких направлений с разными номерами телефонов.
                           </div>
                         </div>
                       </label>
@@ -941,7 +941,7 @@ const Profile: React.FC = () => {
                     {defaultAdsetMode === 'use_existing' && (
                       <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
                         <div className="text-sm text-amber-800">
-                          <strong>Important:</strong> You will need to create 10 ad sets manually in Facebook Ads Manager for each direction and link them in the Directions section.
+                          <strong>Важно:</strong> Вам нужно будет создать 10 ad sets вручную в Facebook Ads Manager для каждого направления и привязать их в разделе Направления.
                         </div>
                       </div>
                     )}
