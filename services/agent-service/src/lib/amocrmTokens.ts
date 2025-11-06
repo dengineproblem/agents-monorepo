@@ -18,6 +18,8 @@ interface UserAccountWithAmoCRM {
   amocrm_access_token: string | null;
   amocrm_refresh_token: string | null;
   amocrm_token_expires_at: string | null;
+  amocrm_client_id: string | null;
+  amocrm_client_secret: string | null;
 }
 
 /**
@@ -34,7 +36,7 @@ export async function getValidAmoCRMToken(
   // Fetch user's AmoCRM credentials
   const { data: userAccount, error } = await supabase
     .from('user_accounts')
-    .select('id, amocrm_subdomain, amocrm_access_token, amocrm_refresh_token, amocrm_token_expires_at')
+    .select('id, amocrm_subdomain, amocrm_access_token, amocrm_refresh_token, amocrm_token_expires_at, amocrm_client_id, amocrm_client_secret')
     .eq('id', userAccountId)
     .single();
 
@@ -68,10 +70,21 @@ export async function getValidAmoCRMToken(
 
   // Token expired or about to expire - refresh it
   try {
-    const tokens = await refreshAccessToken(account.amocrm_refresh_token, subdomain);
+    const tokens = await refreshAccessToken(
+      account.amocrm_refresh_token, 
+      subdomain,
+      account.amocrm_client_id || undefined,
+      account.amocrm_client_secret || undefined
+    );
 
-    // Save new tokens to database
-    await saveAmoCRMTokens(userAccountId, subdomain, tokens);
+    // Save new tokens to database (preserve client credentials)
+    await saveAmoCRMTokens(
+      userAccountId, 
+      subdomain, 
+      tokens,
+      account.amocrm_client_id || undefined,
+      account.amocrm_client_secret || undefined
+    );
 
     return {
       accessToken: tokens.access_token,
@@ -88,22 +101,34 @@ export async function getValidAmoCRMToken(
  * @param userAccountId - User account UUID
  * @param subdomain - AmoCRM subdomain
  * @param tokens - Token response from AmoCRM
+ * @param clientId - Optional client ID (for auto-created integrations)
+ * @param clientSecret - Optional client secret (for auto-created integrations)
  */
 export async function saveAmoCRMTokens(
   userAccountId: string,
   subdomain: string,
-  tokens: AmoCRMTokenResponse
+  tokens: AmoCRMTokenResponse,
+  clientId?: string,
+  clientSecret?: string
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
+  const updateData: any = {
+    amocrm_subdomain: subdomain,
+    amocrm_access_token: tokens.access_token,
+    amocrm_refresh_token: tokens.refresh_token,
+    amocrm_token_expires_at: expiresAt.toISOString()
+  };
+
+  // Save client credentials for auto-created integrations
+  if (clientId && clientSecret) {
+    updateData.amocrm_client_id = clientId;
+    updateData.amocrm_client_secret = clientSecret;
+  }
+
   const { error } = await supabase
     .from('user_accounts')
-    .update({
-      amocrm_subdomain: subdomain,
-      amocrm_access_token: tokens.access_token,
-      amocrm_refresh_token: tokens.refresh_token,
-      amocrm_token_expires_at: expiresAt.toISOString()
-    })
+    .update(updateData)
     .eq('id', userAccountId);
 
   if (error) {

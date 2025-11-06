@@ -32,6 +32,13 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
       });
     }
 
+    // Determine base URL from request headers
+    const protocol = request.headers['x-forwarded-proto'] || 'http';
+    const host = request.headers.host || 'localhost:8082';
+    const baseUrl = `${protocol}://${host}`;
+    const redirectUri = `${baseUrl}/amocrm/callback`;
+    const secretsUri = `${baseUrl}/amocrm/secrets`;
+
     const html = `<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -212,8 +219,8 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
     charset="utf-8"
     data-name="AI-таргетолог Performante"
     data-description="Автоматическая передача лидов с сайта и сквозная аналитика продаж"
-    data-redirect_uri="https://app.performanteaiagency.com/api/amocrm/callback"
-    data-secrets_uri="https://app.performanteaiagency.com/api/amocrm/secrets"
+    data-redirect_uri="${redirectUri}"
+    data-secrets_uri="${secretsUri}"
     data-scopes="crm,notifications"
     data-title="Подключить amoCRM"
     data-state="${Buffer.from(`${userAccountId}|${subdomain}`).toString('base64')}"
@@ -245,8 +252,13 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
     // Listen for success message from popup
     window.addEventListener('message', (event) => {
       // Verify origin for security
-      if (event.origin !== 'https://app.performanteaiagency.com' && 
-          event.origin !== 'https://performanteaiagency.com') {
+      const allowedOrigins = [
+        'https://app.performanteaiagency.com',
+        'https://performanteaiagency.com',
+        'http://localhost:8082',
+        'http://localhost:3001'
+      ];
+      if (!allowedOrigins.includes(event.origin)) {
         return;
       }
 

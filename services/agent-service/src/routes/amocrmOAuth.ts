@@ -236,8 +236,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
       // Exchange code for tokens (with optional credentials for auto-created integrations)
       const tokens = await exchangeCodeForToken(code, subdomain, clientId, clientSecret);
 
-      // Save tokens to database
-      await saveAmoCRMTokens(userAccountId, subdomain, tokens);
+      // Save tokens to database (with client credentials for auto-created integrations)
+      await saveAmoCRMTokens(userAccountId, subdomain, tokens, clientId, clientSecret);
 
       // Delete temporary credentials if this was an auto-created integration
       if (isAutoCreated) {
