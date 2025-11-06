@@ -374,6 +374,7 @@ const ALLOWED_TYPES = new Set([
   'PauseCampaign',
   'UpdateAdSetDailyBudget',
   'PauseAd',
+  'PauseAdset',
   // Workflows (executor manual handlers)
   'Workflow.DuplicateAndPauseOriginal',
   'Workflow.DuplicateKeepOriginalActive',
@@ -381,7 +382,9 @@ const ALLOWED_TYPES = new Set([
   'Audience.DuplicateAdSetWithAudience',
   // Direction-based adset creation (use existing campaign from direction)
   // Brain Agent работает ТОЛЬКО на уровне adsets, НЕ создает новые кампании!
-  'Direction.CreateAdSetWithCreatives'
+  'Direction.CreateAdSetWithCreatives',
+  // Use existing pre-created ad sets (for use_existing mode)
+  'Direction.UseExistingAdSetWithCreatives'
 ]);
 
 function genIdem() {
@@ -395,7 +398,7 @@ async function getUserAccount(userAccountId) {
   return await supabaseQuery('user_accounts', 
     async () => await supabase
       .from('user_accounts')
-      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id')
+      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode')
       .eq('id', userAccountId)
       .single(),
     { userAccountId }
@@ -991,6 +994,74 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '   - Используй глобальные targets.cpl_cents и targets.daily_budget_cents',
   '   - В отчете выделяй их отдельно как "Legacy кампании"',
   '',
+  '🔄 РЕЖИМЫ СОЗДАНИЯ AD SETS (КРИТИЧНО!)',
+  '- Система работает в ДВУХ режимах: "api_create" (по умолчанию) и "use_existing" (для pre-created ad sets).',
+  '- Режим определяется полем account.default_adset_mode в данных.',
+  '',
+  '📌 РЕЖИМ "api_create" (по умолчанию):',
+  '- Создаются НОВЫЕ ad sets через Facebook API при необходимости.',
+  '- Используй action: Direction.CreateAdSetWithCreatives',
+  '- Указывай daily_budget_cents для нового ad set.',
+  '- Работает как раньше - стандартная логика.',
+  '',
+  '📌 РЕЖИМ "use_existing" (для пользователей с несколькими направлениями):',
+  '- НЕ создаются новые ad sets! Используются ЗАРАНЕЕ СОЗДАННЫЕ вручную в Facebook Ads Manager.',
+  '- Каждое направление имеет список pre-created ad sets (directions[].precreated_adsets).',
+  '- Pre-created ad sets имеют статус PAUSED (выключены) до использования.',
+  '- ⚠️ АКТИВАЦИЯ ad set = СОЗДАНИЕ нового ad set (включение PAUSED → ACTIVE).',
+  '- При добавлении креативов: выбирается ОДИН PAUSED ad set, ИЗМЕНЯЮТСЯ ЕГО НАСТРОЙКИ (бюджет/аудитория), активируется, в него добавляются ads.',
+  '- Используй action: Direction.UseExistingAdSetWithCreatives.',
+  '- ✅ ВАЖНО: ВСЕГДА указывай daily_budget_cents на основе своих расчетов! Система автоматически обновит бюджет перед активацией.',
+  '- ✅ Можешь указать audience_id="use_lal_from_settings" для LAL аудитории (если account.has_lal_audience === true).',
+  '',
+  '🚨 КРИТИЧНЫЕ ПРАВИЛА ДЛЯ РЕЖИМА "use_existing":',
+  '1. ⛔ НЕ используй Direction.CreateAdSetWithCreatives! Используй ТОЛЬКО Direction.UseExistingAdSetWithCreatives!',
+  '2. ✅ ПРОВЕРЯЙ precreated_adsets[]: если пусто - ОШИБКА пользователю (нужно создать ad sets вручную).',
+  '3. ✅ ВСЕГДА указывай daily_budget_cents на основе своих расчетов! Система обновит бюджет перед активацией ad set.',
+  '4. ✅ При паузе ad set (PauseAdset) - система АВТОМАТИЧЕСКИ остановит все ads внутри для чистоты.',
+  '5. ✅ Каждый pre-created ad set имеет лимит 50 ads (soft limit). Система выбирает ad set с минимальным ads_count.',
+  '6. ✅ Можешь указать audience_id для смены аудитории (например LAL) ПЕРЕД активацией ad set.',
+  '7. ✅ В отчете упоминай если закончились доступные ad sets: "Необходимо создать новые ad sets вручную в Facebook Ads Manager".',
+  '',
+  'КАК ВЫБРАТЬ ACTION ДЛЯ КРЕАТИВОВ:',
+  '```',
+  'if (account.default_adset_mode === "use_existing") {',
+  '  // Проверить наличие доступных ad sets',
+  '  const direction = directions.find(d => d.id === direction_id);',
+  '  if (!direction.precreated_adsets || direction.precreated_adsets.length === 0) {',
+  '    // ОШИБКА: нет доступных ad sets',
+  '    planNote += "Для направления нет доступных pre-created ad sets. Пользователю нужно создать их вручную.";',
+  '    // НЕ генерировать action',
+  '  } else {',
+  '    // Использовать существующий ad set + ОБНОВИТЬ ЕГО НАСТРОЙКИ',
+  '    // РАССЧИТАЙ бюджет на основе освободившихся средств и лимитов направления!',
+  '    const calculatedBudget = /* твои расчеты на основе direction.daily_budget_cents и текущих ad sets */ 2500;',
+  '    ',
+  '    action = {',
+  '      type: "Direction.UseExistingAdSetWithCreatives",',
+  '      params: {',
+  '        direction_id: "...",',
+  '        user_creative_ids: ["uuid1", "uuid2"],',
+  '        daily_budget_cents: calculatedBudget,  // ✅ ВАЖНО: укажи на основе расчетов!',
+  '        // Опционально: audience_id: "use_lal_from_settings" для LAL',
+  '        auto_activate: true',
+  '      }',
+  '    };',
+  '  }',
+  '} else {',
+  '  // Стандартный режим - создать новый ad set',
+  '  action = {',
+  '    type: "Direction.CreateAdSetWithCreatives",',
+  '    params: {',
+  '      direction_id: "...",',
+  '      user_creative_ids: ["uuid1", "uuid2"],',
+  '      daily_budget_cents: 3000,  // ОБЯЗАТЕЛЬНО указать бюджет',
+  '      auto_activate: true',
+  '    }',
+  '  };',
+  '}',
+  '```',
+  '',
   '- Почему такие решения: Facebook допускает колебания фактических трат и задержки атрибуции (особенно в переписках WA). Поэтому мы опираемся на «плановые» дневные бюджеты и анализируем несколько таймфреймов (yesterday/today/3d/7d/30d), где today смягчает «ложно-плохое» вчера.',
   '- Почему нельзя резко поднимать бюджет: резкие апы ломают стадию обучения, расширяют аудиторию слишком быстро и повышают риск роста CPL. Поэтому ап ≤ +30%/шаг; даун до −50% допустим – это безопаснее для стоимости заявки.',
   '- Почему учитываем CTR/CPM/Frequency: CTR<1% указывает на слабую связку оффер/креатив; CPM выше медианы пиров на ≥30% — сигнал дорогого аукциона/креатива; Frequency>2 (30д) — выгорание. Эти диагностики включаются, если по CPL/QCPL нет однозначности.',
@@ -1197,12 +1268,13 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- GetCampaignStatus {"campaign_id"}',
   '- PauseCampaign {"campaign_id","status":"PAUSED"}',
   '- UpdateAdSetDailyBudget {"adset_id","daily_budget"} — снижение/повышение бюджета adset (−50% максимум)',
-  '- PauseAdset {"adsetId"} — ПОЛНАЯ ПАУЗА adset (освобождает 100% бюджета)',
+  '- PauseAdset {"adsetId"} — ПОЛНАЯ ПАУЗА adset (освобождает 100% бюджета). В режиме use_existing также автоматически останавливает все ads.',
   '- PauseAd {"ad_id","status":"PAUSED"}',
   '- Workflow.DuplicateAndPauseOriginal {"campaign_id","name?"} — дублирует кампанию и паузит оригинал (используется для реанимации)',
   '- Workflow.DuplicateKeepOriginalActive {"campaign_id","name?"} — дублирует кампанию, оригинал оставляет активным (масштабирование)',
   '- Audience.DuplicateAdSetWithAudience {"source_adset_id","audience_id","daily_budget?","name_suffix?"} — дубль ad set c заданной аудиторией (LAL3 IG Engagers 365d) без отключения Advantage+. ⚠️ ДОСТУПНО ТОЛЬКО если account.has_lal_audience === true! При audience_id="use_lal_from_settings" использует готовую LAL аудиторию из настроек пользователя.',
-  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — ПРИОРИТЕТНЫЙ инструмент для работы с креативами! СОЗДАЕТ НОВЫЙ AD SET внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах daily_budget_cents направления. КОГДА ИСПОЛЬЗОВАТЬ: (1) ВСЕГДА если есть unused_creatives с подходящим direction_id при slightly_bad/bad показателях; (2) для ротации креативов; (3) для масштабирования направления. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1-3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном adset.',
+  '- Direction.CreateAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","adset_name?","auto_activate?"} — СОЗДАЕТ НОВЫЙ AD SET через Facebook API внутри УЖЕ СУЩЕСТВУЮЩЕЙ кампании НАПРАВЛЕНИЯ. ⚠️ ИСПОЛЬЗУЕТСЯ ТОЛЬКО В РЕЖИМЕ "api_create"! КРИТИЧЕСКИ ВАЖНО: (1) используй ТОЛЬКО креативы с direction_id === указанному direction_id! (2) Креативы из scoring.unused_creatives имеют поле direction_id - фильтруй их перед использованием. (3) Следи за суммой бюджетов ad sets в пределах daily_budget_cents направления. КОГДА ИСПОЛЬЗОВАТЬ: (1) ВСЕГДА если есть unused_creatives с подходящим direction_id при slightly_bad/bad показателях; (2) для ротации креативов; (3) для масштабирования направления. ПАРАМЕТР user_creative_ids — МАССИВ! Передавай несколько креативов (1-3 штуки) ОДНИМ вызовом — они автоматически создадутся как отдельные ads в одном adset.',
+  '- Direction.UseExistingAdSetWithCreatives {"direction_id","user_creative_ids":["uuid1","uuid2"],"daily_budget_cents?","audience_id?","auto_activate?"} — ИСПОЛЬЗУЕТ ЗАРАНЕЕ СОЗДАННЫЙ PAUSED ad set из directions[].precreated_adsets. ⚠️ ИСПОЛЬЗУЕТСЯ ТОЛЬКО В РЕЖИМЕ "use_existing"! Процесс: (1) выбирает PAUSED ad set с минимальным ads_count, (2) ОБНОВЛЯЕТ ЕГО НАСТРОЙКИ (бюджет/аудиторию если указаны), (3) активирует его (PAUSED → ACTIVE), (4) создает ads внутри. ПАРАМЕТРЫ: daily_budget_cents (РЕКОМЕНДУЕТСЯ указывать на основе расчетов!), audience_id (опционально, "use_lal_from_settings" для LAL если has_lal_audience===true), auto_activate (по умолчанию true). КРИТИЧНО: Проверяй precreated_adsets[] перед использованием - если пусто, НЕ генерируй action и упомяни в planNote что нужно создать ad sets вручную.',
   '',
   'ТРЕБОВАНИЯ К ВЫВОДУ (СТРОГО)',
   '- Выведи ОДИН JSON-объект: { "planNote": string, "actions": Action[], "reportText": string } — и больше НИЧЕГО.',
@@ -1330,6 +1402,15 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   'ПРИМЕР 7 (направление: добавить ad set в СУЩЕСТВУЮЩУЮ кампанию направления)',
   'Example JSON:\n{\n  "planNote": "Направление \"Имплантация\" (direction_id: abc-123): из unused_creatives выбрал ТОЛЬКО креативы с direction_id === abc-123 (uuid-1, uuid-2). Добавляем новый ad set внутри существующей кампании направления.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<FB_CAMPAIGN_ID_ИЗ_НАПРАВЛЕНИЯ>" } },\n    { "type": "Direction.CreateAdSetWithCreatives", "params": { "direction_id": "abc-123", "user_creative_ids": ["uuid-1","uuid-2"], "daily_budget_cents": 2000, "adset_name": "Тест креативов #1", "auto_activate": false } }\n  ],\n  "reportText": "📊 Отчет\\n\\nПо направлению \"Имплантация\" запускаем тест двух креативов в новой группе объявлений внутри существующей кампании. Бюджет $20/день, статус — на паузе для проверки."\n}',
   '',
+  'ПРИМЕР 8 (use_existing режим: использовать pre-created ad set с изменением бюджета)',
+  'Example JSON:\n{\n  "planNote": "account.default_adset_mode=use_existing. Направление abc-123 имеет 3 доступных pre-created ad sets. HS bad для adset_456 → снижаем на -50% (освобождается $25). unused_creatives=2 с direction_id === abc-123. Активируем pre-created ad set с бюджетом $25 и добавляем 2 креатива.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<DIRECTION_CAMPAIGN_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_456", "daily_budget": 2500 } },\n    { "type": "Direction.UseExistingAdSetWithCreatives", "params": { "direction_id": "abc-123", "user_creative_ids": ["uuid-1", "uuid-2"], "daily_budget_cents": 2500, "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nСнижаем бюджет неэффективной группы объявлений на 50% (с $50 до $25/день). Активируем заранее подготовленную группу объявлений с бюджетом $25/день и запускаем в ней 2 свежих креатива. Facebook сам выберет лучший."\n}',
+  '',
+  'ПРИМЕР 8B (use_existing режим: с LAL аудиторией)',
+  'Example JSON:\n{\n  "planNote": "account.default_adset_mode=use_existing, has_lal_audience=true. Направление abc-123: CPL x3, нужна смена аудитории. Активируем pre-created ad set с LAL аудиторией и бюджетом $15.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<DIRECTION_CAMPAIGN_ID>" } },\n    { "type": "Direction.UseExistingAdSetWithCreatives", "params": { "direction_id": "abc-123", "user_creative_ids": ["uuid-1", "uuid-2"], "daily_budget_cents": 1500, "audience_id": "use_lal_from_settings", "auto_activate": true } }\n  ],\n  "reportText": "📊 Отчет\\n\\nТекущая кампания показывает плохие результаты (CPL в 3 раза выше целевого). Активируем заранее подготовленную группу с LAL аудиторией (3% похожих на активных подписчиков Instagram) и бюджетом $15/день. Запускаем 2 креатива для теста новой аудитории."\n}',
+  '',
+  'ПРИМЕР 9 (use_existing режим: нет доступных ad sets - ошибка)',
+  'Example JSON:\n{\n  "planNote": "account.default_adset_mode=use_existing. Направление abc-123: precreated_adsets=[]. Нет доступных ad sets! Пользователь должен создать их вручную в Facebook Ads Manager. Только снижаем бюджет плохих ad sets, новые НЕ создаем.",\n  "actions": [\n    { "type": "GetCampaignStatus", "params": { "campaign_id": "<CAMPAIGN_ID>" } },\n    { "type": "UpdateAdSetDailyBudget", "params": { "adset_id": "adset_789", "daily_budget": 1500 } }\n  ],\n  "reportText": "📊 Отчет\\n\\n⚠️ ВАЖНО: Закончились подготовленные группы объявлений для направления \\\"Имплантация\\\". Необходимо создать новые группы объявлений вручную в Facebook Ads Manager (со статусом ВЫКЛЮЧЕНО) и привязать их в настройках направления.\\n\\nТекущие действия: снижен бюджет неэффективной группы на 40% для экономии."\n}',
+  '',
   'Тул: SendActions',
   `- POST ${AGENT_URL}`,
   '- Headers: Content-Type: application/json',
@@ -1410,6 +1491,22 @@ function validateAndNormalizeActions(actions) {
         if (nb === null) throw new Error('Direction.CreateAdSetWithCreatives: daily_budget_cents must be int');
         params.daily_budget_cents = Math.max(300, Math.min(10000, nb));
       }
+    }
+    if (type === 'Direction.UseExistingAdSetWithCreatives') {
+      if (!params.direction_id) throw new Error('Direction.UseExistingAdSetWithCreatives: direction_id required');
+      const creativeIds = params.user_creative_ids;
+      if (!creativeIds || !Array.isArray(creativeIds) || creativeIds.length === 0) {
+        throw new Error('Direction.UseExistingAdSetWithCreatives: user_creative_ids array required');
+      }
+      // daily_budget_cents опциональный - если указан, ad set будет обновлен перед активацией
+      if (params.daily_budget_cents !== undefined) {
+        const nb = toInt(params.daily_budget_cents);
+        if (nb === null) throw new Error('Direction.UseExistingAdSetWithCreatives: daily_budget_cents must be int');
+        params.daily_budget_cents = Math.max(300, Math.min(10000, nb));
+      }
+    }
+    if (type === 'PauseAdset') {
+      if (!params.adsetId) throw new Error('PauseAdset: adsetId required');
     }
     cleaned.push({ type, params });
   }
@@ -2338,6 +2435,42 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }
     
     // Подготовка данных для LLM и фолбэк на детерминистический план
+    
+    // ========================================
+    // НАПРАВЛЕНИЯ БИЗНЕСА + PRE-CREATED AD SETS
+    // ========================================
+    const directionsWithAdSets = await Promise.all(directions.map(async (d) => {
+      let precreated_adsets = [];
+      
+      // Если режим use_existing - загрузить доступные PAUSED ad sets
+      if (ua?.default_adset_mode === 'use_existing') {
+        const { data: adsets } = await supabaseQuery('direction_adsets',
+          async () => await supabase
+            .from('direction_adsets')
+            .select('id, fb_adset_id, ads_count, status')
+            .eq('direction_id', d.id)
+            .eq('is_active', true)
+            .eq('status', 'PAUSED')
+            .lt('ads_count', 50)
+            .order('ads_count', { ascending: true })
+            .order('linked_at', { ascending: true }),
+          { direction_id: d.id }
+        );
+        precreated_adsets = adsets || [];
+      }
+      
+      return {
+        id: d.id,
+        name: d.name,
+        objective: d.objective,
+        fb_campaign_id: d.fb_campaign_id,
+        campaign_status: d.campaign_status,
+        daily_budget_cents: d.daily_budget_cents,
+        target_cpl_cents: d.target_cpl_cents,
+        precreated_adsets: precreated_adsets
+      };
+    }));
+    
     const llmInput = {
       userAccountId,
       ad_account_id: ua?.ad_account_id || null,
@@ -2346,23 +2479,15 @@ fastify.post('/api/brain/run', async (request, reply) => {
         report_date: date,
         dispatch: !!inputs?.dispatch,
         report_only_mode: reportOnlyMode,
-        has_lal_audience: !!ua?.ig_seed_audience_id
+        has_lal_audience: !!ua?.ig_seed_audience_id,
+        default_adset_mode: ua?.default_adset_mode || 'api_create'
       },
       limits: { min_cents: bounds.minCents, max_cents: bounds.maxCents, step_up: 0.30, step_down: 0.50 },
       targets,
       // ========================================
       // НАПРАВЛЕНИЯ БИЗНЕСА
       // ========================================
-      directions: directions.map(d => ({
-        id: d.id,
-        name: d.name,
-        objective: d.objective,
-        fb_campaign_id: d.fb_campaign_id,
-        campaign_status: d.campaign_status,
-        daily_budget_cents: d.daily_budget_cents,
-        target_cpl_cents: d.target_cpl_cents,
-        // Статистика по этому направлению будет в campaigns секции
-      })),
+      directions: directionsWithAdSets,
       // ========================================
       // SCORING DATA - от scoring agent
       // ========================================

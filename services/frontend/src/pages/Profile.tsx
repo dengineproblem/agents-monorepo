@@ -141,6 +141,10 @@ const Profile: React.FC = () => {
   const [newAudienceId, setNewAudienceId] = useState('');
   const [isSavingAudienceId, setIsSavingAudienceId] = useState(false);
 
+  // Ad Set Creation Mode
+  const [defaultAdsetMode, setDefaultAdsetMode] = useState<'api_create' | 'use_existing'>(user?.default_adset_mode || 'api_create');
+  const [isSavingAdsetMode, setIsSavingAdsetMode] = useState(false);
+
   // Handle Facebook OAuth callback
   useEffect(() => {
     const handleFacebookCallback = async () => {
@@ -749,6 +753,36 @@ const Profile: React.FC = () => {
     }
   };
 
+  const handleSaveAdsetMode = async (newMode: 'api_create' | 'use_existing') => {
+    if (!user?.id) return;
+    
+    setIsSavingAdsetMode(true);
+    try {
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({ default_adset_mode: newMode } as any)
+        .eq('id', user.id);
+      
+      if (error) {
+        console.error('Error saving ad set mode:', error);
+        toast.error(`Failed to save: ${error.message}`);
+        return;
+      }
+      
+      // Update localStorage
+      const updatedUser = { ...user, default_adset_mode: newMode };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
+      setDefaultAdsetMode(newMode);
+      toast.success('Ad set creation mode saved successfully');
+    } catch (error) {
+      console.error('Error saving ad set mode:', error);
+      toast.error('An error occurred while saving');
+    } finally {
+      setIsSavingAdsetMode(false);
+    }
+  };
+
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
       <Header onOpenDatePicker={() => {}} />
@@ -837,6 +871,78 @@ const Profile: React.FC = () => {
                           <Plus className="h-4 w-4 mr-2" />
                           {t('profile.addTelegramId')}
                         </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Ad Set Creation Mode Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <DollarSign className="h-5 w-5" />
+                    Ad Set Creation Mode
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="text-sm text-muted-foreground mb-3">
+                      Choose how ad sets are created for your campaigns
+                    </div>
+                    
+                    {/* Radio Group */}
+                    <div className="space-y-3">
+                      <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                        defaultAdsetMode === 'api_create' 
+                          ? 'border-primary bg-primary/5' 
+                          : 'border-border hover:border-primary/50'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="adset-mode"
+                          value="api_create"
+                          checked={defaultAdsetMode === 'api_create'}
+                          onChange={(e) => handleSaveAdsetMode('api_create')}
+                          disabled={isSavingAdsetMode}
+                          className="mt-1"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium">Single Direction Mode (Default)</div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            Automatically create ad sets through Facebook API. Best for users with one business direction.
+                          </div>
+                        </div>
+                      </label>
+                      
+                      <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
+                        defaultAdsetMode === 'use_existing' 
+                          ? 'border-primary bg-primary/5' 
+                          : 'border-border hover:border-primary/50'
+                      }`}>
+                        <input
+                          type="radio"
+                          name="adset-mode"
+                          value="use_existing"
+                          checked={defaultAdsetMode === 'use_existing'}
+                          onChange={(e) => handleSaveAdsetMode('use_existing')}
+                          disabled={isSavingAdsetMode}
+                          className="mt-1"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium">Multiple Directions Mode</div>
+                          <div className="text-sm text-muted-foreground mt-1">
+                            Use pre-created ad sets with specific WhatsApp numbers. Required for multiple directions with different phone numbers.
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+
+                    {defaultAdsetMode === 'use_existing' && (
+                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="text-sm text-amber-800">
+                          <strong>Important:</strong> You will need to create 10 ad sets manually in Facebook Ads Manager for each direction and link them in the Directions section.
+                        </div>
                       </div>
                     )}
                   </div>

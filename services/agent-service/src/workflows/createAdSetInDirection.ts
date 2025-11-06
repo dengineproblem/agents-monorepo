@@ -3,6 +3,11 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
 import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
+import {
+  getAvailableAdSet,
+  activateAdSet,
+  incrementAdsCount
+} from '../lib/directionAdSets.js';
 
 const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -253,10 +258,10 @@ export async function workflowCreateAdSetInDirection(
   const budget = daily_budget_cents || direction.daily_budget_cents;
   const final_adset_name = adset_name || `${direction.name} - AdSet ${new Date().toISOString().split('T')[0]}`;
 
-  // Получаем page_id из user_accounts ПЕРЕД формированием adsetBody
+  // Получаем page_id и режим создания ad sets из user_accounts ПЕРЕД формированием adsetBody
   const { data: userAccount } = await supabase
     .from('user_accounts')
-    .select('page_id, whatsapp_phone_number')
+    .select('page_id, whatsapp_phone_number, default_adset_mode')
     .eq('id', user_account_id)
     .single();
 
@@ -361,33 +366,89 @@ export async function workflowCreateAdSetInDirection(
     };
   }
 
-  log.info({
-    name: final_adset_name,
-    campaign_id: direction.fb_campaign_id,
-    daily_budget: budget,
-    optimization_goal,
-    destination_type,
-    promoted_object: adsetBody.promoted_object,
-    has_whatsapp_number: !!whatsapp_phone_number,
-    whatsapp_number_id: direction.whatsapp_phone_number_id || null,
-    userAccountId: user_account_id,
-    userAccountName: userAccountProfile?.username,
-    directionName: direction.name
-  }, 'Creating ad set for direction');
+  // ===================================================
+  // Выбор режима: создать новый ad set или использовать pre-created
+  // ===================================================
+  let adset_id: string;
+  let adset_name_final: string;
 
-  const adsetResult = await graph(
-    'POST',
-    `${normalized_ad_account_id}/adsets`,
-    accessToken,
-    toParams(adsetBody)
-  );
+  if (userAccount?.default_adset_mode === 'use_existing') {
+    // РЕЖИМ: использовать pre-created ad set
+    log.info({
+      directionId: direction.id,
+      directionName: direction.name,
+      mode: 'use_existing'
+    }, 'Using pre-created ad set mode');
 
-  const adset_id = adsetResult?.id;
-  if (!adset_id) {
-    throw new Error('Failed to create adset');
+    const availableAdSet = await getAvailableAdSet(direction.id);
+    
+    if (!availableAdSet) {
+      log.warn({
+        directionId: direction.id,
+        directionName: direction.name,
+        userAccountId: user_account_id
+      }, 'No available pre-created ad sets; cannot proceed');
+      
+      throw new Error(
+        `No pre-created ad sets available for direction "${direction.name}". ` +
+        `Please create ad sets in Facebook Ads Manager and link them in settings.`
+      );
+    }
+
+    // Активировать выбранный ad set
+    await activateAdSet(
+      availableAdSet.id,
+      availableAdSet.fb_adset_id,
+      accessToken
+    );
+
+    adset_id = availableAdSet.fb_adset_id;
+    adset_name_final = availableAdSet.adset_name;
+
+    log.info({
+      directionId: direction.id,
+      adsetId: adset_id,
+      adsetName: adset_name_final,
+      mode: 'use_existing',
+      previousAdsCount: availableAdSet.ads_count
+    }, 'Using pre-created ad set (activated)');
+
+  } else {
+    // РЕЖИМ: создать новый ad set через API (текущая логика)
+    log.info({
+      name: final_adset_name,
+      campaign_id: direction.fb_campaign_id,
+      daily_budget: budget,
+      optimization_goal,
+      destination_type,
+      promoted_object: adsetBody.promoted_object,
+      has_whatsapp_number: !!whatsapp_phone_number,
+      whatsapp_number_id: direction.whatsapp_phone_number_id || null,
+      userAccountId: user_account_id,
+      userAccountName: userAccountProfile?.username,
+      directionName: direction.name,
+      mode: 'api_create'
+    }, 'Creating new ad set via API');
+
+    const adsetResult = await graph(
+      'POST',
+      `${normalized_ad_account_id}/adsets`,
+      accessToken,
+      toParams(adsetBody)
+    );
+
+    adset_id = adsetResult?.id;
+    if (!adset_id) {
+      throw new Error('Failed to create adset');
+    }
+
+    adset_name_final = final_adset_name;
+
+    log.info({ 
+      adsetId: adset_id,
+      mode: 'api_create'
+    }, 'Ad set created successfully via API');
   }
-
-  log.info({ adsetId: adset_id }, 'Ad set created successfully');
 
   // ===================================================
   // STEP 6: Создаём Ads для каждого креатива
@@ -444,6 +505,17 @@ export async function workflowCreateAdSetInDirection(
     count: created_ads.length,
     ads: created_ads
   }, 'All ads created for direction');
+
+  // Инкрементировать счетчик ads для use_existing режима
+  if (userAccount?.default_adset_mode === 'use_existing') {
+    const newCount = await incrementAdsCount(adset_id, created_ads.length);
+    
+    log.info({
+      adsetId: adset_id,
+      adsAdded: created_ads.length,
+      newAdsCount: newCount
+    }, 'Incremented ads count for pre-created ad set');
+  }
 
   // Сохраняем маппинг всех созданных ads для трекинга лидов
   await saveAdCreativeMappingBatch(

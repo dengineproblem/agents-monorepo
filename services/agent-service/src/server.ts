@@ -8,6 +8,7 @@ import { imageRoutes } from './routes/image.js';
 import { creativeTestRoutes } from './routes/creativeTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { directionsRoutes } from './routes/directions.js';
+import directionAdSetsRoutes from './routes/directionAdSets.js';
 import { defaultSettingsRoutes } from './routes/defaultSettings.js';
 import { dialogsRoutes } from './routes/dialogs.js';
 import whatsappNumbersRoutes from './routes/whatsappNumbers.js';
@@ -21,6 +22,7 @@ import amocrmOAuthRoutes from './routes/amocrmOAuth.js';
 import amocrmWebhooks from './routes/amocrmWebhooks.js';
 import amocrmSecretsRoutes from './routes/amocrmSecrets.js';
 import amocrmConnectRoutes from './routes/amocrmConnect.js';
+import amocrmPipelinesRoutes from './routes/amocrmPipelines.js';
 import leadsRoutes from './routes/leads.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
@@ -56,6 +58,7 @@ app.register(imageRoutes, { prefix: '/api' });
 app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
 app.register(directionsRoutes, { prefix: '/api' });
+app.register(directionAdSetsRoutes, { prefix: '/api' });
 app.register(defaultSettingsRoutes, { prefix: '/api' });
 app.register(dialogsRoutes, { prefix: '/api' });
 app.register(whatsappNumbersRoutes, { prefix: '/api' });
@@ -69,6 +72,7 @@ app.register(amocrmOAuthRoutes); // AmoCRM OAuth integration
 app.register(amocrmWebhooks); // AmoCRM webhooks
 app.register(amocrmSecretsRoutes); // AmoCRM auto-generated credentials
 app.register(amocrmConnectRoutes); // AmoCRM connect page
+app.register(amocrmPipelinesRoutes); // AmoCRM pipelines management
 app.register(leadsRoutes); // Leads from website
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)

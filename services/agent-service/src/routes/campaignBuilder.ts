@@ -27,6 +27,12 @@ import {
 } from '../lib/settingsHelpers.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
+import {
+  getAvailableAdSet,
+  activateAdSet,
+  incrementAdsCount,
+  hasAvailableAdSets
+} from '../lib/directionAdSets.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -261,26 +267,89 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               };
             }
 
-            // Создаём Ad Set в существующей кампании
-            const adset = await createAdSetInCampaign({
-              campaignId: direction.fb_campaign_id,
-              adAccountId: userAccount.ad_account_id,
-              accessToken: userAccount.access_token,
-              name: `${direction.name} - ${new Date().toISOString().split('T')[0]}`,
-              dailyBudget: direction.daily_budget_cents,
-              targeting,
-              optimization_goal,
-              billing_event,
-              promoted_object,
-              start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
-            });
+            // Создаём Ad Set в существующей кампании или используем pre-created
+            let adsetId: string;
 
-            log.info({ directionId: direction.id, adsetId: adset.id, userAccountId: user_account_id, userAccountName: userAccount.username }, 'Ad set created for direction');
+            if (userAccount.default_adset_mode === 'use_existing') {
+              // РЕЖИМ: использовать pre-created ad set
+              const hasAvailable = await hasAvailableAdSets(direction.id);
+              
+              if (!hasAvailable) {
+                log.warn({
+                  directionId: direction.id,
+                  directionName: direction.name
+                }, 'No available pre-created ad sets; skipping direction in auto-launch');
+                
+                results.push({
+                  direction_id: direction.id,
+                  direction_name: direction.name,
+                  skipped: true,
+                  reason: 'No available pre-created ad sets'
+                });
+                continue;
+              }
+
+              // Получить доступный ad set
+              const availableAdSet = await getAvailableAdSet(direction.id);
+              
+              if (!availableAdSet) {
+                log.warn({ directionId: direction.id }, 'No ad set available (race condition?)');
+                results.push({
+                  direction_id: direction.id,
+                  direction_name: direction.name,
+                  skipped: true,
+                  reason: 'No ad set available (race condition)'
+                });
+                continue;
+              }
+
+              // Активировать
+              await activateAdSet(
+                availableAdSet.id,
+                availableAdSet.fb_adset_id,
+                userAccount.access_token
+              );
+
+              adsetId = availableAdSet.fb_adset_id;
+
+              log.info({
+                directionId: direction.id,
+                adsetId,
+                mode: 'use_existing',
+                userAccountId: user_account_id,
+                userAccountName: userAccount.username
+              }, 'Using pre-created ad set in auto-launch');
+
+            } else {
+              // РЕЖИМ: создать новый ad set через API
+              const adset = await createAdSetInCampaign({
+                campaignId: direction.fb_campaign_id,
+                adAccountId: userAccount.ad_account_id,
+                accessToken: userAccount.access_token,
+                name: `${direction.name} - ${new Date().toISOString().split('T')[0]}`,
+                dailyBudget: direction.daily_budget_cents,
+                targeting,
+                optimization_goal,
+                billing_event,
+                promoted_object,
+                start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
+              });
+
+              adsetId = adset.id;
+
+              log.info({ 
+                directionId: direction.id, 
+                adsetId, 
+                mode: 'api_create',
+                userAccountId: user_account_id, 
+                userAccountName: userAccount.username 
+              }, 'Ad set created for direction');
+            }
 
             // Создаём Ads с креативами (максимум 5)
             const creativesToUse = creatives.slice(0, 5);
             const ads = await createAdsInAdSet({
-              adsetId: adset.id,
+              adsetId,
               adAccountId: userAccount.ad_account_id,
               creatives: creativesToUse,
               accessToken: userAccount.access_token,
@@ -290,14 +359,25 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               campaignId: direction.fb_campaign_id,
             });
 
-            log.info({ directionId: direction.id, adsetId: adset.id, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
+            log.info({ directionId: direction.id, adsetId, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
+
+            // Инкрементировать счетчик для use_existing режима
+            if (userAccount.default_adset_mode === 'use_existing') {
+              const newCount = await incrementAdsCount(adsetId, ads.length);
+              log.info({
+                directionId: direction.id,
+                adsetId,
+                adsAdded: ads.length,
+                newAdsCount: newCount
+              }, 'Incremented ads count for pre-created ad set in auto-launch');
+            }
 
             results.push({
               direction_id: direction.id,
               direction_name: direction.name,
               campaign_id: direction.fb_campaign_id,
-              adset_id: adset.id,
-              adset_name: adset.name || `${direction.name} - Ad Set`,
+              adset_id: adsetId,
+              adset_name: `${direction.name} - Ad Set`,
               daily_budget_cents: direction.daily_budget_cents,
               ads_created: ads.length,
               creatives_used: creativesToUse.map(c => c.user_creative_id),
@@ -493,20 +573,63 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           };
         }
 
-        // Создаём Ad Set
-        const adset = await createAdSetInCampaign({
-          campaignId: direction.fb_campaign_id,
-          adAccountId: userAccount.ad_account_id,
-          accessToken: userAccount.access_token,
-          name: `${direction.name} - Ручной запуск - ${new Date().toISOString().split('T')[0]}`,
-          dailyBudget: finalBudget,
-          targeting: finalTargeting,
-          optimization_goal,
-          billing_event,
-          promoted_object,
-        });
+        // Создаём Ad Set или используем pre-created
+        let adsetId: string;
 
-        log.info({ adsetId: adset.id }, 'Manual launch ad set created');
+        if (userAccount.default_adset_mode === 'use_existing') {
+          // РЕЖИМ: использовать pre-created ad set
+          const availableAdSet = await getAvailableAdSet(direction.id);
+          
+          if (!availableAdSet) {
+            log.warn({
+              directionId: direction.id,
+              directionName: direction.name,
+              userAccountId: user_account_id
+            }, 'No available pre-created ad sets for manual launch');
+            
+            return reply.status(400).send({
+              success: false,
+              error: 'No available pre-created ad sets',
+              message: 'Please create ad sets in Facebook Ads Manager and link them to this direction in settings.',
+            });
+          }
+
+          // Активировать
+          await activateAdSet(
+            availableAdSet.id,
+            availableAdSet.fb_adset_id,
+            userAccount.access_token
+          );
+
+          adsetId = availableAdSet.fb_adset_id;
+
+          log.info({ 
+            adsetId, 
+            mode: 'use_existing',
+            directionId: direction.id 
+          }, 'Using pre-created ad set for manual launch');
+
+        } else {
+          // РЕЖИМ: создать новый ad set через API
+          const adset = await createAdSetInCampaign({
+            campaignId: direction.fb_campaign_id,
+            adAccountId: userAccount.ad_account_id,
+            accessToken: userAccount.access_token,
+            name: `${direction.name} - Ручной запуск - ${new Date().toISOString().split('T')[0]}`,
+            dailyBudget: finalBudget,
+            targeting: finalTargeting,
+            optimization_goal,
+            billing_event,
+            promoted_object,
+          });
+
+          adsetId = adset.id;
+
+          log.info({ 
+            adsetId, 
+            mode: 'api_create' 
+          }, 'Manual launch ad set created');
+        }
 
         // Создаём Ads с выбранными креативами
         const creativesForAds = creatives.map(c => ({
@@ -519,7 +642,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         }));
 
         const ads = await createAdsInAdSet({
-          adsetId: adset.id,
+          adsetId,
           adAccountId: userAccount.ad_account_id,
           creatives: creativesForAds,
           accessToken: userAccount.access_token,
@@ -531,14 +654,24 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         log.info({ adsCount: ads.length }, 'Manual launch ads created');
 
+        // Инкрементировать счетчик для use_existing режима
+        if (userAccount.default_adset_mode === 'use_existing') {
+          const newCount = await incrementAdsCount(adsetId, ads.length);
+          log.info({
+            adsetId,
+            adsAdded: ads.length,
+            newAdsCount: newCount
+          }, 'Incremented ads count for pre-created ad set in manual launch');
+        }
+
         return reply.send({
           success: true,
           message: `Реклама запущена: создано ${ads.length} объявлений`,
           direction_id: direction.id,
           direction_name: direction.name,
           campaign_id: direction.fb_campaign_id,
-          adset_id: adset.id,
-          adset_name: adset.name || `${direction.name} - Ad Set`,
+          adset_id: adsetId,
+          adset_name: `${direction.name} - Ad Set`,
           ads_created: ads.length,
           ads: ads.map(ad => ({
             ad_id: ad.id,

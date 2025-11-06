@@ -8,6 +8,7 @@ import { workflowDuplicateAndPauseOriginal, workflowDuplicateKeepOriginalActive,
 import { workflowCreateCampaignWithCreative } from '../workflows/createCampaignWithCreative.js';
 import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
+import { getAvailableAdSet, activateAdSet, incrementAdsCount, deactivateAdSetWithAds } from '../lib/directionAdSets.js';
 
 const AuthHeader = z.string().startsWith('Bearer ').optional();
 
@@ -186,7 +187,28 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
     }
     case 'PauseCampaign':  return fb.pauseCampaign((action as any).params.campaignId, token);
     case 'ResumeCampaign': return fb.resumeCampaign((action as any).params.campaignId, token);
-    case 'PauseAdset':     return fb.pauseAdset((action as any).params.adsetId, token);
+    
+    case 'PauseAdset': {
+      const adsetId = (action as any).params.adsetId;
+      
+      // Проверить режим работы пользователя
+      if (ctx?.userAccountId) {
+        const { data: userAccount } = await supabase
+          .from('user_accounts')
+          .select('default_adset_mode')
+          .eq('id', ctx.userAccountId)
+          .single();
+
+        if (userAccount?.default_adset_mode === 'use_existing') {
+          // В режиме use_existing нужно также остановить все ads
+          return deactivateAdSetWithAds(adsetId, token);
+        }
+      }
+      
+      // Обычная логика - просто остановить ad set
+      return fb.pauseAdset(adsetId, token);
+    }
+    
     case 'ResumeAdset':    return fb.resumeAdset((action as any).params.adsetId, token);
     case 'PauseAd':        return fb.pauseAd((action as any).params.adId || (action as any).params.ad_id, token);
     case 'ResumeAd':       return fb.resumeAd((action as any).params.adId, token);
@@ -391,6 +413,140 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         token
       );
     }
+
+    case 'Direction.UseExistingAdSetWithCreatives': {
+      const p = (action as any).params as {
+        direction_id: string;
+        user_creative_ids: string[];
+        daily_budget_cents?: number;
+        audience_id?: string;
+        auto_activate?: boolean;
+      };
+      
+      if (!p.direction_id) throw new Error('Direction.UseExistingAdSetWithCreatives: direction_id required');
+      if (!p.user_creative_ids || !Array.isArray(p.user_creative_ids) || p.user_creative_ids.length === 0) {
+        throw new Error('Direction.UseExistingAdSetWithCreatives: user_creative_ids array required');
+      }
+      
+      // Проверить режим пользователя
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('default_adset_mode')
+        .eq('id', ctx?.userAccountId)
+        .single();
+      
+      if (userAccount?.default_adset_mode !== 'use_existing') {
+        throw new Error('Direction.UseExistingAdSetWithCreatives can only be used in use_existing mode');
+      }
+      
+      // Получить доступный PAUSED ad set
+      const availableAdSet = await getAvailableAdSet(p.direction_id);
+      if (!availableAdSet) {
+        throw new Error(`No available pre-created ad sets for direction ${p.direction_id}`);
+      }
+      
+      // ИЗМЕНИТЬ НАСТРОЙКИ AD SET ПЕРЕД АКТИВАЦИЕЙ (если указаны)
+      const updateParams: any = {};
+      
+      // 1. Изменить бюджет (если указан)
+      if (p.daily_budget_cents !== undefined) {
+        updateParams.daily_budget = p.daily_budget_cents;
+      }
+      
+      // 2. Изменить аудиторию (если указана)
+      if (p.audience_id) {
+        if (p.audience_id === 'use_lal_from_settings') {
+          // Получить LAL аудиторию из настроек пользователя
+          const { data: userAcct } = await supabase
+            .from('user_accounts')
+            .select('ig_seed_audience_id')
+            .eq('id', ctx?.userAccountId)
+            .single();
+          
+          if (userAcct?.ig_seed_audience_id) {
+            updateParams.targeting = { 
+              custom_audiences: [{ id: userAcct.ig_seed_audience_id }] 
+            };
+          }
+        } else {
+          // Использовать указанную аудиторию
+          updateParams.targeting = { 
+            custom_audiences: [{ id: p.audience_id }] 
+          };
+        }
+      }
+      
+      // Применить изменения (если есть)
+      if (Object.keys(updateParams).length > 0) {
+        await graph('POST', `${availableAdSet.fb_adset_id}`, token, updateParams);
+      }
+      
+      // Активировать ad set
+      await activateAdSet(availableAdSet.id, availableAdSet.fb_adset_id, token);
+      
+      // Получить данные направления для ad_account_id
+      const { data: direction } = await supabase
+        .from('account_directions')
+        .select('*')
+        .eq('id', p.direction_id)
+        .single();
+      
+      if (!direction) throw new Error('Direction not found');
+      
+      const { data: userAcct } = await supabase
+        .from('user_accounts')
+        .select('ad_account_id')
+        .eq('id', ctx?.userAccountId)
+        .single();
+      
+      const normalized_ad_account_id = userAcct?.ad_account_id.startsWith('act_') 
+        ? userAcct.ad_account_id 
+        : `act_${userAcct?.ad_account_id}`;
+      
+      // Создать ads для каждого креатива
+      const created_ads = [];
+      
+      for (const creativeId of p.user_creative_ids) {
+        const { data: creative } = await supabase
+          .from('user_creatives')
+          .select('*')
+          .eq('id', creativeId)
+          .single();
+        
+        if (!creative) continue;
+        
+        // Определить fb_creative_id по objective направления
+        let fb_creative_id;
+        if (direction.objective === 'whatsapp') fb_creative_id = creative.fb_creative_id_whatsapp;
+        else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
+        else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
+        
+        if (!fb_creative_id) continue;
+        
+        const adBody = {
+          name: `${creative.title} - ${new Date().toISOString().split('T')[0]}`,
+          adset_id: availableAdSet.fb_adset_id,
+          status: p.auto_activate !== false ? 'ACTIVE' : 'PAUSED',
+          creative: { creative_id: fb_creative_id }
+        };
+        
+        const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, adBody);
+        created_ads.push({ ad_id: adResult.id, user_creative_id: creativeId });
+      }
+      
+      // Инкрементировать счетчик ads
+      await incrementAdsCount(availableAdSet.fb_adset_id, created_ads.length);
+      
+      return {
+        success: true,
+        adset_id: availableAdSet.fb_adset_id,
+        ads_created: created_ads.length,
+        ads: created_ads,
+        mode: 'use_existing',
+        settings_updated: Object.keys(updateParams).length > 0,
+        updated_params: updateParams
+      };
+    }
   }
 }
 
@@ -466,6 +622,24 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
         }
         if (params.daily_budget_cents && typeof params.daily_budget_cents !== 'number') {
           issues.push('Direction.CreateAdSetWithCreatives: daily_budget_cents must be a number');
+        }
+        break;
+      }
+      case 'Direction.UseExistingAdSetWithCreatives': {
+        if (!params.direction_id) {
+          issues.push('Direction.UseExistingAdSetWithCreatives: direction_id required');
+        }
+        if (!params.user_creative_ids) {
+          issues.push('Direction.UseExistingAdSetWithCreatives: user_creative_ids required');
+        }
+        if (params.user_creative_ids && !Array.isArray(params.user_creative_ids)) {
+          issues.push('Direction.UseExistingAdSetWithCreatives: user_creative_ids must be an array');
+        }
+        if (params.user_creative_ids && Array.isArray(params.user_creative_ids) && params.user_creative_ids.length === 0) {
+          issues.push('Direction.UseExistingAdSetWithCreatives: user_creative_ids must have at least 1 creative');
+        }
+        if (params.daily_budget_cents && typeof params.daily_budget_cents !== 'number') {
+          issues.push('Direction.UseExistingAdSetWithCreatives: daily_budget_cents must be a number');
         }
         break;
       }
