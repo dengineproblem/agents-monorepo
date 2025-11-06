@@ -18,7 +18,8 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Plus, RefreshCw, Unlink, ExternalLink } from 'lucide-react';
 
-const API_URL = 'https://performanteaiagency.com/api';
+// Используем API_BASE_URL из config/api.ts (уже содержит /api в конце)
+import { API_BASE_URL } from '@/config/api';
 
 interface DirectionAdSet {
   id: string;
@@ -48,9 +49,10 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
   const fetchAdSets = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/directions/${directionId}/adsets?user_account_id=${userAccountId}`
-      );
+      const url = `${API_BASE_URL}/directions/${directionId}/adsets?user_account_id=${userAccountId}`;
+      console.log('[DirectionAdSets] Fetching from:', url);
+      console.log('[DirectionAdSets] API_BASE_URL:', API_BASE_URL);
+      const response = await fetch(url);
       
       if (!response.ok) {
         throw new Error('Failed to fetch ad sets');
@@ -76,7 +78,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
     setIsLinking(true);
     try {
       const response = await fetch(
-        `${API_URL}/api/directions/${directionId}/link-adset`,
+        `${API_BASE_URL}/directions/${directionId}/link-adset`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -113,7 +115,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
 
     try {
       const response = await fetch(
-        `${API_URL}/api/directions/${directionId}/adsets/${adsetId}?user_account_id=${userAccountId}`,
+        `${API_BASE_URL}/directions/${directionId}/adsets/${adsetId}?user_account_id=${userAccountId}`,
         { method: 'DELETE' }
       );
 
@@ -134,7 +136,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
     setIsSyncing(true);
     try {
       const response = await fetch(
-        `${API_URL}/api/directions/${directionId}/sync-adsets`,
+        `${API_BASE_URL}/directions/${directionId}/sync-adsets`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

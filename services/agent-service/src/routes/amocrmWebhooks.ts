@@ -8,7 +8,7 @@
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { processDealWebhook } from '../workflows/amocrmSync.js';
+import { processDealWebhook, processLeadStatusChange } from '../workflows/amocrmSync.js';
 
 /**
  * AmoCRM webhook payload structure
@@ -179,20 +179,20 @@ async function processAmoCRMWebhook(
       }
     }
 
-    // Process status changes (important for won/lost deals)
+    // Process status changes (important for won/lost deals and qualification tracking)
     if (payload.leads?.status && payload.leads.status.length > 0) {
       app.log.info({
         count: payload.leads.status.length,
         userAccountId
       }, 'Processing AmoCRM lead status changes');
 
-      for (const lead of payload.leads.status) {
+      for (const statusChange of payload.leads.status) {
         try {
-          await processDealWebhook(lead, userAccountId, app);
+          await processLeadStatusChange(statusChange, userAccountId, app);
         } catch (error: any) {
           app.log.error({
             error: error.message,
-            leadId: lead.id,
+            leadId: statusChange.id,
             userAccountId
           }, 'Failed to process lead status change');
         }

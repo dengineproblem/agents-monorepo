@@ -1170,7 +1170,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       console.log('Запускаем рекламу для всех активных направлений:', { userId });
 
       // Отправляем запрос на новый endpoint (v2) - создаст кампании для всех активных направлений
-      const response = await fetch(`${API_BASE_URL}/api/campaign-builder/auto-launch-v2`, {
+      const response = await fetch(`${API_BASE_URL}/campaign-builder/auto-launch-v2`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

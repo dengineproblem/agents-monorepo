@@ -1,13 +1,12 @@
 // API Configuration
-// Локально: http://localhost:8082
-// Продакшн: https://agents.performanteaiagency.com
-
-// В режиме разработки используем пустую строку (относительные пути),
-// Vite proxy перенаправит /api на localhost:8082
+// API_BASE_URL всегда СОДЕРЖИТ /api в конце (полный путь до API endpoints)
+// В сервисах НЕ добавляется /api/ в начале пути
+// Локально: http://localhost:8082/api
+// Продакшн: https://app.performanteaiagency.com/api
 export const API_BASE_URL = 
   import.meta.env.VITE_API_BASE_URL !== undefined
     ? import.meta.env.VITE_API_BASE_URL
-    : (import.meta.env.DEV ? '' : 'https://agents.performanteaiagency.com');
+    : (import.meta.env.DEV ? 'http://localhost:8082/api' : 'https://app.performanteaiagency.com/api');
 
 // Analytics API (отдельный сервис на порту 7081)
 // Локально: http://localhost:7081

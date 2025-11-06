@@ -281,12 +281,12 @@ ARG BUILD_MODE=production
 
 RUN if [ "$BUILD_MODE" = "appreview" ]; then \
       echo "VITE_APP_REVIEW_MODE=true" > .env.local && \
-      echo "VITE_API_URL=https://performanteaiagency.com/api" >> .env.local && \
+      echo "VITE_API_BASE_URL=https://performanteaiagency.com/api" >> .env.local && \
       echo "VITE_FB_APP_ID=1441781603583445" >> .env.local && \
       echo "VITE_FB_REDIRECT_URI=https://performanteaiagency.com/profile" >> .env.local; \
     else \
       echo "VITE_APP_REVIEW_MODE=false" > .env.local && \
-      echo "VITE_API_URL=https://app.performanteaiagency.com/api" >> .env.local && \
+      echo "VITE_API_BASE_URL=https://app.performanteaiagency.com/api" >> .env.local && \
       echo "VITE_FB_APP_ID=1441781603583445" >> .env.local && \
       echo "VITE_FB_REDIRECT_URI=https://app.performanteaiagency.com/profile" >> .env.local; \
     fi
@@ -312,7 +312,7 @@ frontend-appreview:
 | Переменная | Production | App Review |
 |------------|-----------|------------|
 | `VITE_APP_REVIEW_MODE` | `false` | `true` |
-| `VITE_API_URL` | `https://app.performanteaiagency.com/api` | `https://performanteaiagency.com/api` |
+| `VITE_API_BASE_URL` | `https://app.performanteaiagency.com/api` | `https://performanteaiagency.com/api` |
 | `VITE_FB_REDIRECT_URI` | `https://app.performanteaiagency.com/profile` | `https://performanteaiagency.com/profile` |
 
 ### **Логика в коде:**
@@ -528,7 +528,7 @@ docker-compose restart agent-service
 
 ### **❌ ПРОБЛЕМА: "CORS error" в браузере**
 
-**Причина:** Неправильный `VITE_API_URL` в frontend
+**Причина:** Неправильный `VITE_API_BASE_URL` в frontend
 
 **Решение:**
 ```bash
@@ -896,6 +896,18 @@ docker-compose restart grafana
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
 
+**6 ноября 2025:**
+- ✅ **КРИТИЧЕСКИЙ ФИКС:** Решена проблема дублирования `/api/api/` в URL запросах
+- ✅ Проблема: При локальной разработке и добавлении новых API сервисов постоянно возникала ошибка двойного `/api/api/`
+- ✅ Причина: Несогласованность между `API_BASE_URL` (содержал `/api`) и API сервисами (добавляли `/api/` в пути)
+- ✅ Решение: Установлен единый стандарт - `API_BASE_URL` ВСЕГДА содержит `/api`, сервисы НЕ добавляют `/api/`
+- ✅ Исправлены все API сервисы (9 файлов): `directionsApi.ts`, `whatsappApi.ts`, `defaultSettingsApi.ts`, `manualLaunchApi.ts`, `DirectionAdSets.tsx`, `VideoUpload.tsx`, `Creatives.tsx`, `Header.tsx`, `FacebookConnect.tsx`
+- ✅ Обновлена конфигурация: `config/api.ts`, `.env.local`, `Dockerfile`
+- ✅ Создан документ `FRONTEND_API_CONVENTIONS.md` с правилами работы с API
+- ✅ Добавлена интеграция `DirectionAdSets` компонента для управления pre-created ad sets
+- ✅ Протестировано локально - все работает корректно
+- ✅ **ВАЖНО:** Изменения полностью совместимы с production (nginx убирает `/api`, поэтому конечные URL не изменились)
+
 **5 ноября 2025:**
 - ✅ **ДОБАВЛЕН ДОМЕН:** `agent.performanteaiagency.com` для TikTok API proxy
 - ✅ Проблема: Фронтенд не мог загружать данные из TikTok - обращался к несуществующему домену
@@ -939,9 +951,14 @@ docker-compose restart grafana
 - ✅ Добавлена интеграция Evolution API для WhatsApp Business
 - ✅ Создана инфраструктура для работы с несколькими WhatsApp номерами
 - ✅ Выполнены миграции БД (013-016) для поддержки direction_id, creative_id, WhatsApp instances
+- ✅ Выполнены миграции БД (028-029) для поддержки pre-created ad sets:
+  - 028: Добавлена колонка `default_adset_mode` ('api_create' | 'use_existing') в таблицу `user_accounts`
+  - 029: Создана таблица `direction_adsets` для связи Facebook ad sets с directions
 - ✅ Добавлены новые сервисы: evolution-api (порт 8080), evolution-postgres (5433), evolution-redis (6380)
 - ✅ Обновлен nginx-production.conf с маршрутом /evolution/
 - ✅ Добавлены роуты в agent-service: /api/webhooks/evolution, /api/whatsapp/instances
+- ✅ Добавлены роуты для управления pre-created ad sets: `/api/directions/:id/adsets`, `/api/directions/:id/link-adset`, `/api/directions/:id/sync-adsets`
+- ✅ Добавлен новый action в AgentBrain: `Direction.UseExistingAdSetWithCreatives` для работы с pre-created ad sets
 
 **25 октября 2025:**
 - ✅ Добавлен Python 3.12.12 + Pillow 11.0.0 в n8n контейнер

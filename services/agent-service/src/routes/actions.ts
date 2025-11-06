@@ -10,6 +10,25 @@ import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 import { getAvailableAdSet, activateAdSet, incrementAdsCount, deactivateAdSetWithAds } from '../lib/directionAdSets.js';
 
+/**
+ * Helper: конвертирует объекты в параметры для Facebook API
+ * Facebook ожидает вложенные объекты как JSON-строки
+ */
+function toParams(obj: any): any {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined || v === null) continue;
+    
+    // Для объектов и массивов - JSON.stringify
+    if (typeof v === 'object' && v !== null) {
+      out[k] = JSON.stringify(v);
+    } else {
+      out[k] = String(v);
+    }
+  }
+  return out;
+}
+
 const AuthHeader = z.string().startsWith('Bearer ').optional();
 
 export async function actionsRoutes(app: FastifyInstance) {
@@ -478,7 +497,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       
       // Применить изменения (если есть)
       if (Object.keys(updateParams).length > 0) {
-        await graph('POST', `${availableAdSet.fb_adset_id}`, token, updateParams);
+        await graph('POST', `${availableAdSet.fb_adset_id}`, token, toParams(updateParams));
       }
       
       // Активировать ad set
@@ -530,7 +549,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           creative: { creative_id: fb_creative_id }
         };
         
-        const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, adBody);
+        const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, toParams(adBody));
         created_ads.push({ ad_id: adResult.id, user_creative_id: creativeId });
       }
       

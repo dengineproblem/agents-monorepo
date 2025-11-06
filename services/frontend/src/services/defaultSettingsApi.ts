@@ -16,7 +16,7 @@ export const defaultSettingsApi = {
   async get(directionId: string): Promise<DefaultAdSettings | null> {
     try {
       console.log('[defaultSettingsApi.get] Загрузка настроек для direction:', directionId);
-      const response = await fetch(`${API_BASE_URL}/api/default-settings?directionId=${directionId}`);
+      const response = await fetch(`${API_BASE_URL}/default-settings?directionId=${directionId}`);
       
       if (!response.ok) {
         console.error('[defaultSettingsApi.get] HTTP ошибка:', response.status);
@@ -43,7 +43,7 @@ export const defaultSettingsApi = {
   async save(input: CreateDefaultSettingsInput): Promise<{ success: boolean; settings?: DefaultAdSettings; error?: string }> {
     try {
       console.log('[defaultSettingsApi.save] Сохранение настроек:', input);
-      const response = await fetch(`${API_BASE_URL}/api/default-settings`, {
+      const response = await fetch(`${API_BASE_URL}/default-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -69,7 +69,7 @@ export const defaultSettingsApi = {
   async update(id: string, updates: UpdateDefaultSettingsInput): Promise<{ success: boolean; settings?: DefaultAdSettings; error?: string }> {
     try {
       console.log('[defaultSettingsApi.update] Обновление настроек:', id, updates);
-      const response = await fetch(`${API_BASE_URL}/api/default-settings/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/default-settings/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -95,7 +95,7 @@ export const defaultSettingsApi = {
   async delete(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       console.log('[defaultSettingsApi.delete] Удаление настроек:', id);
-      const response = await fetch(`${API_BASE_URL}/api/default-settings/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/default-settings/${id}`, {
         method: 'DELETE',
       });
 

@@ -24,7 +24,7 @@ RUN if [ "$BUILD_MODE" = "appreview" ]; then \
       echo "VITE_FB_REDIRECT_URI=https://performanteaiagency.com/profile" >> .env.local; \
     elif [ "$BUILD_MODE" = "development" ]; then \
       echo "VITE_APP_REVIEW_MODE=false" > .env.local && \
-      echo "VITE_API_BASE_URL=http://localhost:8082" >> .env.local && \
+      echo "VITE_API_BASE_URL=http://localhost:8082/api" >> .env.local && \
       echo "VITE_FB_APP_ID=1441781603583445" >> .env.local && \
       echo "VITE_FB_REDIRECT_URI=http://localhost:3001/profile" >> .env.local; \
     else \

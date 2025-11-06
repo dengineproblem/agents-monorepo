@@ -16,7 +16,7 @@ export const directionsApi = {
     try {
       console.log('[directionsApi.list] Запрос направлений для user_account_id:', userAccountId);
       
-      const response = await fetch(`${API_BASE_URL}/api/directions?userAccountId=${userAccountId}`);
+      const response = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`);
       
       console.log('[directionsApi.list] HTTP статус:', response.status);
       
@@ -51,7 +51,7 @@ export const directionsApi = {
     error?: string;
   }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/directions`, {
+      const response = await fetch(`${API_BASE_URL}/directions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -90,7 +90,7 @@ export const directionsApi = {
     payload: UpdateDirectionPayload
   ): Promise<{ success: boolean; direction?: Direction; error?: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/directions/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/directions/${id}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -125,7 +125,7 @@ export const directionsApi = {
    */
   async delete(id: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/directions/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/directions/${id}`, {
         method: 'DELETE',
       });
       

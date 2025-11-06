@@ -445,3 +445,208 @@ export async function getAccountInfo(
     endpoint: 'account'
   });
 }
+
+/**
+ * AmoCRM Pipeline structure
+ */
+export interface AmoCRMPipeline {
+  id: number;
+  name: string;
+  sort: number;
+  is_main: boolean;
+  is_unsorted_on: boolean;
+  is_archive: boolean;
+  account_id: number;
+  _embedded: {
+    statuses: AmoCRMPipelineStatus[];
+  };
+}
+
+/**
+ * AmoCRM Pipeline Status (Stage)
+ */
+export interface AmoCRMPipelineStatus {
+  id: number;
+  name: string;
+  sort: number;
+  is_editable: boolean;
+  pipeline_id: number;
+  color: string;
+  type: number;
+  account_id: number;
+}
+
+/**
+ * Get all pipelines (воронки) with their stages (этапы)
+ *
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @returns Array of pipelines with embedded statuses
+ */
+export async function getPipelines(
+  subdomain: string,
+  accessToken: string
+): Promise<AmoCRMPipeline[]> {
+  const response = await amocrmRequest<{ _embedded: { pipelines: AmoCRMPipeline[] } }>({
+    subdomain,
+    accessToken,
+    endpoint: 'leads/pipelines'
+  });
+
+  return response._embedded?.pipelines || [];
+}
+
+/**
+ * Get leads by list of IDs (массовое получение)
+ *
+ * @param leadIds - Array of lead IDs
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @param limit - Limit per page (max 250)
+ * @returns Array of leads
+ */
+export async function getLeadsByIds(
+  leadIds: number[],
+  subdomain: string,
+  accessToken: string,
+  limit: number = 250
+): Promise<AmoCRMLead[]> {
+  if (leadIds.length === 0) return [];
+
+  // Split into chunks of 250 (API limit)
+  const chunks: number[][] = [];
+  for (let i = 0; i < leadIds.length; i += limit) {
+    chunks.push(leadIds.slice(i, i + limit));
+  }
+
+  const allLeads: AmoCRMLead[] = [];
+
+  for (const chunk of chunks) {
+    const query: Record<string, string | number> = {
+      limit
+    };
+
+    // Add filter[id][] for each ID
+    chunk.forEach((id, index) => {
+      query[`filter[id][${index}]`] = id;
+    });
+
+    const response = await amocrmRequest<{ _embedded: { leads: AmoCRMLead[] } }>({
+      subdomain,
+      accessToken,
+      endpoint: 'leads',
+      query
+    });
+
+    const leads = response._embedded?.leads || [];
+    allLeads.push(...leads);
+  }
+
+  return allLeads;
+}
+
+/**
+ * Get contact with phone number
+ *
+ * @param contactId - Contact ID
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @returns Contact with custom fields
+ */
+export async function getContact(
+  contactId: number,
+  subdomain: string,
+  accessToken: string
+): Promise<AmoCRMContact> {
+  return amocrmRequest<AmoCRMContact>({
+    subdomain,
+    accessToken,
+    endpoint: `contacts/${contactId}`
+  });
+}
+
+/**
+ * Extract phone number from contact's custom fields
+ *
+ * @param contact - AmoCRM contact
+ * @returns Normalized phone number or null
+ */
+export function extractPhoneFromContact(contact: AmoCRMContact): string | null {
+  const phoneField = contact.custom_fields_values?.find(
+    field => field.field_code === 'PHONE'
+  );
+
+  if (!phoneField?.values?.[0]?.value) {
+    return null;
+  }
+
+  return String(phoneField.values[0].value);
+}
+
+/**
+ * Subscribe to webhooks
+ *
+ * @param destination - Webhook URL
+ * @param settings - Array of webhook events
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @returns Created webhook
+ */
+export async function subscribeWebhook(
+  destination: string,
+  settings: string[],
+  subdomain: string,
+  accessToken: string
+): Promise<any> {
+  return amocrmRequest({
+    subdomain,
+    accessToken,
+    method: 'POST',
+    endpoint: 'webhooks',
+    body: {
+      destination,
+      settings,
+      sort: 10
+    }
+  });
+}
+
+/**
+ * Get list of subscribed webhooks
+ *
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @returns Array of webhooks
+ */
+export async function getWebhooks(
+  subdomain: string,
+  accessToken: string
+): Promise<any[]> {
+  const response = await amocrmRequest<{ _embedded: { webhooks: any[] } }>({
+    subdomain,
+    accessToken,
+    endpoint: 'webhooks'
+  });
+
+  return response._embedded?.webhooks || [];
+}
+
+/**
+ * Unsubscribe from webhook
+ *
+ * @param webhookId - Webhook ID
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ */
+export async function unsubscribeWebhook(
+  webhookId: string,
+  subdomain: string,
+  accessToken: string
+): Promise<void> {
+  await amocrmRequest({
+    subdomain,
+    accessToken,
+    method: 'DELETE',
+    endpoint: `webhooks/${webhookId}`
+  });
+}

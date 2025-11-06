@@ -8,7 +8,23 @@
 
 import { supabase } from './supabase.js';
 import { graph } from '../adapters/facebook.js';
-import log from './logger.js';
+import { logger } from './logger.js';
+
+/**
+ * Helper: конвертирует объекты в параметры для Facebook API
+ */
+function toParams(obj: any): any {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v === 'object' && v !== null) {
+      out[k] = JSON.stringify(v);
+    } else {
+      out[k] = String(v);
+    }
+  }
+  return out;
+}
 
 /**
  * Получить доступный PAUSED ad set для направления
@@ -40,12 +56,12 @@ export async function getAvailableAdSet(directionId: string): Promise<{
     .limit(1);
 
   if (error) {
-    log.error({ error, directionId }, 'Error fetching available ad set');
+    logger.error({ error, directionId }, 'Error fetching available ad set');
     return null;
   }
 
   if (!adsets || adsets.length === 0) {
-    log.warn({ directionId }, 'No available ad sets found');
+    logger.warn({ directionId }, 'No available ad sets found');
     return null;
   }
 
@@ -70,9 +86,9 @@ export async function activateAdSet(
 ): Promise<void> {
   try {
     // 1. Активировать в Facebook
-    await graph('POST', `${fbAdSetId}`, accessToken, { status: 'ACTIVE' });
+    await graph('POST', `${fbAdSetId}`, accessToken, toParams({ status: 'ACTIVE' }));
 
-    log.info({ fbAdSetId }, 'Activated ad set in Facebook');
+    logger.info({ fbAdSetId }, 'Activated ad set in Facebook');
 
     // 2. Обновить в БД
     const { error } = await supabase
@@ -84,13 +100,13 @@ export async function activateAdSet(
       .eq('id', adsetId);
 
     if (error) {
-      log.error({ error, adsetId }, 'Error updating ad set status in DB');
+      logger.error({ error, adsetId }, 'Error updating ad set status in DB');
       throw error;
     }
 
-    log.info({ adsetId, fbAdSetId }, 'Ad set activated successfully');
+    logger.info({ adsetId, fbAdSetId }, 'Ad set activated successfully');
   } catch (error) {
-    log.error({ error, adsetId, fbAdSetId }, 'Error activating ad set');
+    logger.error({ error, adsetId, fbAdSetId }, 'Error activating ad set');
     throw error;
   }
 }
@@ -122,23 +138,23 @@ export async function deactivateAdSetWithAds(
 
     const ads = adsResponse.data || [];
 
-    log.info({ fbAdSetId, adsCount: ads.length }, 'Fetched ads from ad set');
+    logger.info({ fbAdSetId, adsCount: ads.length }, 'Fetched ads from ad set');
 
     // 2. Остановить все ACTIVE ads
     let pausedCount = 0;
     for (const ad of ads) {
       if (ad.status === 'ACTIVE') {
-        await graph('POST', `${ad.id}`, accessToken, { status: 'PAUSED' });
+        await graph('POST', `${ad.id}`, accessToken, toParams({ status: 'PAUSED' }));
         pausedCount++;
       }
     }
 
-    log.info({ fbAdSetId, pausedCount }, 'Paused active ads in ad set');
+    logger.info({ fbAdSetId, pausedCount }, 'Paused active ads in ad set');
 
     // 3. Остановить сам ad set
-    await graph('POST', `${fbAdSetId}`, accessToken, { status: 'PAUSED' });
+    await graph('POST', `${fbAdSetId}`, accessToken, toParams({ status: 'PAUSED' }));
 
-    log.info({ fbAdSetId }, 'Paused ad set in Facebook');
+    logger.info({ fbAdSetId }, 'Paused ad set in Facebook');
 
     // 4. Обновить в БД
     const { error } = await supabase
@@ -147,14 +163,14 @@ export async function deactivateAdSetWithAds(
       .eq('fb_adset_id', fbAdSetId);
 
     if (error) {
-      log.error({ error, fbAdSetId }, 'Error updating ad set status in DB after pause');
+      logger.error({ error, fbAdSetId }, 'Error updating ad set status in DB after pause');
       throw error;
     }
 
-    log.info({ fbAdSetId, totalAds: ads.length, pausedAds: pausedCount }, 
+    logger.info({ fbAdSetId, totalAds: ads.length, pausedAds: pausedCount }, 
       'Ad set and all its ads deactivated successfully');
   } catch (error) {
-    log.error({ error, fbAdSetId }, 'Error deactivating ad set with ads');
+    logger.error({ error, fbAdSetId }, 'Error deactivating ad set with ads');
     throw error;
   }
 }
@@ -179,14 +195,14 @@ export async function incrementAdsCount(
     });
 
     if (error) {
-      log.error({ error, fbAdSetId, count }, 'Error incrementing ads count');
+      logger.error({ error, fbAdSetId, count }, 'Error incrementing ads count');
       throw error;
     }
 
-    log.info({ fbAdSetId, count, newCount: data }, 'Incremented ads count');
+    logger.info({ fbAdSetId, count, newCount: data }, 'Incremented ads count');
     return data;
   } catch (error) {
-    log.error({ error, fbAdSetId, count }, 'Error in incrementAdsCount');
+    logger.error({ error, fbAdSetId, count }, 'Error in incrementAdsCount');
     throw error;
   }
 }

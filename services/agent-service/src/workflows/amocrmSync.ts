@@ -13,6 +13,9 @@ import {
   findContactByPhone,
   createContact,
   createLead,
+  getLead,
+  getContact,
+  extractPhoneFromContact,
   AmoCRMContact,
   AmoCRMLead,
   AmoCRMCustomFieldValue
@@ -452,5 +455,241 @@ export async function processDealWebhook(
     });
 
     throw error;
+  }
+}
+
+/**
+ * Process lead status change webhook (status_lead event)
+ * 
+ * Updates lead's current pipeline/status and qualification status
+ * Records change in history table
+ * 
+ * @param statusChange - Status change data from webhook
+ * @param userAccountId - User account UUID
+ * @param app - Fastify instance for logging
+ */
+export async function processLeadStatusChange(
+  statusChange: any,
+  userAccountId: string,
+  app: FastifyInstance
+): Promise<void> {
+  try {
+    const amocrmLeadId = statusChange.id;
+    const oldPipelineId = statusChange.old_pipeline_id;
+    const newPipelineId = statusChange.pipeline_id;
+    const oldStatusId = statusChange.old_status_id;
+    const newStatusId = statusChange.status_id;
+
+    app.log.info({
+      amocrmLeadId,
+      oldStatusId,
+      newStatusId,
+      oldPipelineId,
+      newPipelineId,
+      userAccountId
+    }, 'Processing lead status change');
+
+    // 1. Find our lead by amocrm_lead_id
+    const { data: lead, error: leadError } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('amocrm_lead_id', amocrmLeadId)
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    if (leadError) {
+      throw new Error(`Error finding lead: ${leadError.message}`);
+    }
+
+    if (!lead) {
+      app.log.warn({
+        amocrmLeadId,
+        userAccountId
+      }, 'Lead not found for status change - skipping');
+      return;
+    }
+
+    // 2. Check if new status is qualified
+    const { data: stageData } = await supabase
+      .from('amocrm_pipeline_stages')
+      .select('is_qualified_stage')
+      .eq('user_account_id', userAccountId)
+      .eq('pipeline_id', newPipelineId)
+      .eq('status_id', newStatusId)
+      .maybeSingle();
+
+    const isQualified = stageData?.is_qualified_stage || false;
+
+    // 3. Update lead's current status and qualification
+    const { error: updateError } = await supabase
+      .from('leads')
+      .update({
+        current_pipeline_id: newPipelineId,
+        current_status_id: newStatusId,
+        is_qualified: isQualified,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', lead.id);
+
+    if (updateError) {
+      throw new Error(`Failed to update lead status: ${updateError.message}`);
+    }
+
+    app.log.info({
+      leadId: lead.id,
+      amocrmLeadId,
+      newStatusId,
+      isQualified
+    }, 'Updated lead status and qualification');
+
+    // 4. Record status change in history
+    const { error: historyError } = await supabase
+      .from('amocrm_lead_status_history')
+      .insert({
+        lead_id: lead.id,
+        amocrm_lead_id: amocrmLeadId,
+        from_pipeline_id: oldPipelineId,
+        to_pipeline_id: newPipelineId,
+        from_status_id: oldStatusId,
+        to_status_id: newStatusId,
+        webhook_data: statusChange,
+        changed_at: new Date().toISOString()
+      });
+
+    if (historyError) {
+      app.log.error({
+        error: historyError.message,
+        leadId: lead.id
+      }, 'Failed to record status history - continuing anyway');
+    }
+
+    // 5. If moved to won/lost status, also update sales
+    if (newStatusId === 142 || newStatusId === 143) {
+      // Status 142 = won, 143 = lost
+      await handleDealClosureFromStatusChange(
+        amocrmLeadId,
+        newStatusId,
+        userAccountId,
+        app
+      );
+    }
+
+  } catch (error: any) {
+    app.log.error({
+      error: error.message,
+      statusChange,
+      userAccountId
+    }, 'Error processing lead status change');
+    throw error;
+  }
+}
+
+/**
+ * Handle deal closure when status changes to won (142) or lost (143)
+ * 
+ * @param amocrmLeadId - AmoCRM lead ID
+ * @param statusId - New status ID (142 or 143)
+ * @param userAccountId - User account UUID
+ * @param app - Fastify instance for logging
+ */
+async function handleDealClosureFromStatusChange(
+  amocrmLeadId: number,
+  statusId: number,
+  userAccountId: string,
+  app: FastifyInstance
+): Promise<void> {
+  try {
+    // Get full lead data from amoCRM to get price and contacts
+    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+    const amocrmLead = await getLead(amocrmLeadId, subdomain, accessToken);
+
+    // Find our lead
+    const { data: lead } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('amocrm_lead_id', amocrmLeadId)
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    if (!lead) {
+      app.log.warn({ amocrmLeadId }, 'Lead not found for deal closure');
+      return;
+    }
+
+    // Extract client info
+    let clientPhone = '';
+    let clientName = 'Unknown';
+    
+    if (lead.source_type === 'website' || lead.source_type === 'manual') {
+      clientPhone = lead.phone || '';
+      clientName = lead.name || 'Клиент с сайта';
+    } else {
+      clientPhone = lead.chat_id?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
+      clientName = lead.chat_id || 'Unknown';
+    }
+
+    // If no phone yet, try to get from amoCRM contacts
+    if (!clientPhone && amocrmLead._embedded?.contacts?.[0]) {
+      const contactId = amocrmLead._embedded.contacts[0].id;
+      if (contactId) {
+        const contact = await getContact(contactId, subdomain, accessToken);
+        const phone = extractPhoneFromContact(contact);
+        if (phone) {
+          clientPhone = phone;
+        }
+      }
+    }
+
+    const amount = amocrmLead.price || 0;
+    const status = statusId === 142 ? 'paid' : 'pending'; // 142 = won
+
+    // Create or update sale
+    const { data: existingSale } = await supabase
+      .from('sales')
+      .select('*')
+      .eq('amocrm_deal_id', amocrmLeadId)
+      .maybeSingle();
+
+    const saleData = {
+      client_phone: clientPhone,
+      client_name: clientName,
+      amount: amount / 100, // Convert cents if needed
+      currency: 'RUB',
+      status,
+      sale_date: new Date().toISOString().split('T')[0],
+      amocrm_deal_id: amocrmLeadId,
+      amocrm_pipeline_id: amocrmLead.pipeline_id,
+      amocrm_status_id: statusId,
+      created_by: userAccountId,
+      updated_at: new Date().toISOString()
+    };
+
+    if (existingSale) {
+      await supabase
+        .from('sales')
+        .update(saleData)
+        .eq('id', existingSale.id);
+
+      app.log.info({ saleId: existingSale.id, statusId }, 'Updated sale from status change');
+    } else {
+      const { data: newSale } = await supabase
+        .from('sales')
+        .insert({
+          ...saleData,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      app.log.info({ saleId: newSale?.id, statusId }, 'Created sale from status change');
+    }
+
+  } catch (error: any) {
+    app.log.error({
+      error: error.message,
+      amocrmLeadId,
+      statusId
+    }, 'Error handling deal closure from status change');
+    // Don't throw - this is a secondary operation
   }
 }

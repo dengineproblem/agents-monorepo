@@ -28,7 +28,7 @@ export const whatsappApi = {
    */
   async getNumbers(userAccountId: string): Promise<WhatsAppNumber[]> {
     const response = await fetch(
-      `${API_BASE_URL}/api/whatsapp-numbers?userAccountId=${userAccountId}`
+      `${API_BASE_URL}/whatsapp-numbers?userAccountId=${userAccountId}`
     );
     if (!response.ok) {
       throw new Error('Failed to fetch WhatsApp numbers');
@@ -44,7 +44,7 @@ export const whatsappApi = {
     userAccountId: string,
     phoneNumberId: string
   ): Promise<WhatsAppInstanceResponse> {
-    const response = await fetch(`${API_BASE_URL}/api/whatsapp/instances/create`, {
+    const response = await fetch(`${API_BASE_URL}/whatsapp/instances/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userAccountId, phoneNumberId }),
@@ -60,7 +60,7 @@ export const whatsappApi = {
    */
   async getInstanceStatus(instanceName: string): Promise<{ status: string }> {
     const response = await fetch(
-      `${API_BASE_URL}/api/whatsapp/instances/${instanceName}/status`
+      `${API_BASE_URL}/whatsapp/instances/${instanceName}/status`
     );
     if (!response.ok) {
       throw new Error('Failed to get instance status');
@@ -74,7 +74,7 @@ export const whatsappApi = {
    */
   async disconnectInstance(instanceName: string): Promise<void> {
     const response = await fetch(
-      `${API_BASE_URL}/api/whatsapp/instances/${instanceName}`,
+      `${API_BASE_URL}/whatsapp/instances/${instanceName}`,
       { method: 'DELETE' }
     );
     if (!response.ok) {

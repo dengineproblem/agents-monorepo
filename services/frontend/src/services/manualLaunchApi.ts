@@ -43,7 +43,7 @@ export async function manualLaunchAds(
   request: ManualLaunchRequest
 ): Promise<ManualLaunchResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/campaign-builder/manual-launch`, {
+    const response = await fetch(`${API_BASE_URL}/campaign-builder/manual-launch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

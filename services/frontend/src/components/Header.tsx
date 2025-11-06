@@ -194,8 +194,7 @@ const Header: React.FC<HeaderProps> = ({
       }
 
       // Вызываем backend endpoint /facebook/validate
-      const API_URL = import.meta.env.VITE_API_URL || 'https://performanteaiagency.com/api';
-      const response = await fetch(`${API_URL}/facebook/validate`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082/api'}/facebook/validate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

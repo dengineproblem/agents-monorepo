@@ -498,7 +498,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         payload.force = true;
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/creative-test/start`, {
+      const response = await fetch(`${API_BASE_URL}/creative-test/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -550,7 +550,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/creative-test/${creativeId}?user_id=${userId}`, {
+      const response = await fetch(`${API_BASE_URL}/creative-test/${creativeId}?user_id=${userId}`, {
         method: 'DELETE',
       });
 

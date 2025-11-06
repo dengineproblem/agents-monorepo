@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,6 +10,8 @@ import { useDirections } from '@/hooks/useDirections';
 import { CreateDirectionDialog } from './CreateDirectionDialog';
 import { EditDirectionDialog } from './EditDirectionDialog';
 import { DeleteDirectionAlert } from './DeleteDirectionAlert';
+import { DirectionAdSets } from '../DirectionAdSets';
+import { supabase } from '@/integrations/supabase/client';
 import type { Direction, CreateDefaultSettingsInput } from '@/types/direction';
 import { OBJECTIVE_LABELS } from '@/types/direction';
 
@@ -25,6 +27,26 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteAlertOpen, setDeleteAlertOpen] = useState(false);
   const [selectedDirection, setSelectedDirection] = useState<Direction | null>(null);
+  const [adsetMode, setAdsetMode] = useState<'api_create' | 'use_existing'>('api_create');
+
+  // Загрузить режим ad set creation
+  useEffect(() => {
+    const loadAdsetMode = async () => {
+      if (!userAccountId) return;
+      
+      const { data, error } = await supabase
+        .from('user_accounts')
+        .select('default_adset_mode')
+        .eq('id', userAccountId)
+        .single();
+      
+      if (data && !error) {
+        setAdsetMode(data.default_adset_mode || 'api_create');
+      }
+    };
+    
+    loadAdsetMode();
+  }, [userAccountId]);
 
   // Отладка
   React.useEffect(() => {
@@ -229,6 +251,16 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
                       </Button>
                     </div>
                   </div>
+                  
+                  {/* Pre-created Ad Sets Management (только для use_existing режима) */}
+                  {adsetMode === 'use_existing' && userAccountId && (
+                    <div className="mt-4 pt-4 border-t">
+                      <DirectionAdSets 
+                        directionId={direction.id} 
+                        userAccountId={userAccountId} 
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
               
