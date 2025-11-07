@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 
 export interface ROIData {
   totalRevenue: number;
@@ -47,7 +48,7 @@ class SalesApiService {
   // Получение списка направлений пользователя
   async getDirections(userAccountId: string): Promise<{ data: Direction[]; error: any }> {
     try {
-      const response = await fetch(`/api/directions?userAccountId=${userAccountId}`);
+      const response = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`);
       const result = await response.json();
       
       if (!result.success) {

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Phone, Plus, Star, Trash2, Edit2, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '@/config/api';
 
 interface WhatsAppNumber {
   id: string;
@@ -64,7 +65,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
     }
 
     try {
-      const response = await fetch('/api/whatsapp-numbers', {
+      const response = await fetch(`${API_BASE_URL}/whatsapp-numbers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -90,7 +91,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
   // Установить дефолтным
   const handleSetDefault = async (id: string) => {
     try {
-      const response = await fetch(`/api/whatsapp-numbers/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/whatsapp-numbers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_default: true }),
@@ -110,7 +111,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
     if (!confirm('Удалить этот номер?')) return;
 
     try {
-      const response = await fetch(`/api/whatsapp-numbers/${id}?userAccountId=${userAccountId}`, {
+      const response = await fetch(`${API_BASE_URL}/whatsapp-numbers/${id}?userAccountId=${userAccountId}`, {
         method: 'DELETE',
       });
 
@@ -141,7 +142,7 @@ const WhatsAppNumbersCard: React.FC<WhatsAppNumbersCardProps> = ({ userAccountId
   // Сохранить label
   const saveLabel = async (id: string) => {
     try {
-      const response = await fetch(`/api/whatsapp-numbers/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/whatsapp-numbers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: formData.label || null }),
