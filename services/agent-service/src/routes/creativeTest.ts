@@ -266,19 +266,45 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       const shouldComplete = insights.impressions >= test.test_impressions_limit;
 
       if (shouldComplete) {
-        app.log.info(`Test ${test_id} reached ${insights.impressions} impressions, pausing AdSet and triggering analyzer`);
+        app.log.info(`Test ${test_id} reached ${insights.impressions} impressions, pausing ad set/campaign and triggering analyzer`);
         
-        // ПАУЗИМ ADSET ЧЕРЕЗ FACEBOOK API
+        // Проверяем режим пользователя
+        const { data: userAccountWithMode } = await supabase
+          .from('user_accounts')
+          .select('default_adset_mode')
+          .eq('id', test.user_id)
+          .single();
+        
+        const isUseExistingMode = userAccountWithMode?.default_adset_mode === 'use_existing';
+        
+        // ПАУЗИМ в зависимости от режима
+        let pauseSuccess = false;
         try {
-          const pauseUrl = `https://graph.facebook.com/v20.0/${test.adset_id}`;
-          await axios.post(pauseUrl, new URLSearchParams({
-            access_token: accessToken,
-            status: 'PAUSED'
-          }));
-          
-          app.log.info(`AdSet ${test.adset_id} paused successfully`);
+          if (isUseExistingMode) {
+            // РЕЖИМ use_existing: деактивируем adset и все ads внутри
+            if (!test.adset_id) {
+              throw new Error('Test has no adset_id');
+            }
+            
+            const { deactivateAdSetWithAds } = await import('../lib/directionAdSets.js');
+            await deactivateAdSetWithAds(test.adset_id, accessToken);
+            
+            app.log.info(`AdSet ${test.adset_id} and all ads paused successfully (use_existing mode)`);
+            pauseSuccess = true;
+            
+          } else {
+            // РЕЖИМ api_create: паузим adset через прямой вызов API
+            const pauseUrl = `https://graph.facebook.com/v20.0/${test.adset_id}`;
+            await axios.post(pauseUrl, new URLSearchParams({
+              access_token: accessToken,
+              status: 'PAUSED'
+            }));
+            
+            app.log.info(`AdSet ${test.adset_id} paused successfully (api_create mode)`);
+            pauseSuccess = true;
+          }
         } catch (pauseError: any) {
-          app.log.error(`Failed to pause AdSet ${test.adset_id}:`, pauseError.message);
+          app.log.error(`Failed to pause test ${test_id}:`, pauseError.message);
           // Продолжаем даже если пауза не удалась
         }
         
@@ -294,7 +320,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
             success: true,
             ready_for_analysis: true,
             analyzed: true,
-            adset_paused: true,
+            pause_success: pauseSuccess,
             insights,
             analysis: analyzerResponse.data.analysis
           });
@@ -306,7 +332,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
             success: true,
             ready_for_analysis: true,
             analyzed: false,
-            adset_paused: true,
+            pause_success: pauseSuccess,
             analyzer_error: analyzerError.message,
             insights
           });
@@ -358,7 +384,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       if (tests && tests.length > 0) {
         const { data: userAccount, error: userAccountError } = await supabase
           .from('user_accounts')
-          .select('access_token')
+          .select('access_token, default_adset_mode')
           .eq('id', String(user_id))
           .single();
 
@@ -366,35 +392,64 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           app.log.warn({ user_id }, 'Cannot pause creative test assets: no access_token');
         } else {
           const accessToken = userAccount.access_token;
+          const isUseExistingMode = userAccount.default_adset_mode === 'use_existing';
 
           for (const test of tests) {
-            app.log.info({ campaign_id: test.campaign_id, adset_id: test.adset_id, ad_id: test.ad_id }, 'Pausing creative test Facebook objects');
-            
-            try {
-              if (test.campaign_id) {
-                await graph('POST', `${test.campaign_id}`, accessToken, { status: 'PAUSED' });
-                app.log.info({ campaign_id: test.campaign_id }, 'Creative test campaign paused');
+            if (isUseExistingMode) {
+              // В режиме use_existing - деактивируем только adset и все ads внутри
+              app.log.info({ 
+                adset_id: test.adset_id,
+                mode: 'use_existing' 
+              }, 'Deactivating creative test ad set (use_existing mode)');
+              
+              try {
+                if (test.adset_id) {
+                  const { deactivateAdSetWithAds } = await import('../lib/directionAdSets.js');
+                  await deactivateAdSetWithAds(test.adset_id, accessToken);
+                  app.log.info({ adset_id: test.adset_id }, 'Creative test ad set and ads deactivated');
+                }
+              } catch (pauseError: any) {
+                app.log.warn({ 
+                  message: pauseError.message, 
+                  fb: pauseError.fb, 
+                  adset_id: test.adset_id 
+                }, 'Failed to deactivate creative test ad set');
               }
-            } catch (pauseError: any) {
-              app.log.warn({ message: pauseError.message, fb: pauseError.fb, campaign_id: test.campaign_id }, 'Failed to pause creative test campaign');
-            }
+            } else {
+              // В режиме api_create - останавливаем кампанию, adset, ad (старая логика)
+              app.log.info({ 
+                campaign_id: test.campaign_id, 
+                adset_id: test.adset_id, 
+                ad_id: test.ad_id,
+                mode: 'api_create' 
+              }, 'Pausing creative test Facebook objects (api_create mode)');
+              
+              try {
+                if (test.campaign_id) {
+                  await graph('POST', `${test.campaign_id}`, accessToken, { status: 'PAUSED' });
+                  app.log.info({ campaign_id: test.campaign_id }, 'Creative test campaign paused');
+                }
+              } catch (pauseError: any) {
+                app.log.warn({ message: pauseError.message, fb: pauseError.fb, campaign_id: test.campaign_id }, 'Failed to pause creative test campaign');
+              }
 
-            try {
-              if (test.adset_id) {
-                await graph('POST', `${test.adset_id}`, accessToken, { status: 'PAUSED' });
-                app.log.info({ adset_id: test.adset_id }, 'Creative test ad set paused');
+              try {
+                if (test.adset_id) {
+                  await graph('POST', `${test.adset_id}`, accessToken, { status: 'PAUSED' });
+                  app.log.info({ adset_id: test.adset_id }, 'Creative test ad set paused');
+                }
+              } catch (pauseError: any) {
+                app.log.warn({ message: pauseError.message, fb: pauseError.fb, adset_id: test.adset_id }, 'Failed to pause creative test ad set');
               }
-            } catch (pauseError: any) {
-              app.log.warn({ message: pauseError.message, fb: pauseError.fb, adset_id: test.adset_id }, 'Failed to pause creative test ad set');
-            }
 
-            try {
-              if (test.ad_id) {
-                await graph('POST', `${test.ad_id}`, accessToken, { status: 'PAUSED' });
-                app.log.info({ ad_id: test.ad_id }, 'Creative test ad paused');
+              try {
+                if (test.ad_id) {
+                  await graph('POST', `${test.ad_id}`, accessToken, { status: 'PAUSED' });
+                  app.log.info({ ad_id: test.ad_id }, 'Creative test ad paused');
+                }
+              } catch (pauseError: any) {
+                app.log.warn({ message: pauseError.message, fb: pauseError.fb, ad_id: test.ad_id }, 'Failed to pause creative test ad');
               }
-            } catch (pauseError: any) {
-              app.log.warn({ message: pauseError.message, fb: pauseError.fb, ad_id: test.ad_id }, 'Failed to pause creative test ad');
             }
           }
         }

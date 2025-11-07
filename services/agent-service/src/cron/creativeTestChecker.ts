@@ -72,27 +72,58 @@ export function startCreativeTestCron(app: FastifyInstance) {
           
           // Проверяем условие завершения
           if (insights.impressions >= test.test_impressions_limit) {
-            app.log.info(`[Cron] Test ${test.id} reached limit (${insights.impressions}/${test.test_impressions_limit}), pausing Campaign and triggering analyzer`);
+            app.log.info(`[Cron] Test ${test.id} reached limit (${insights.impressions}/${test.test_impressions_limit}), pausing ad set/campaign and triggering analyzer`);
             
-            let campaignPaused = false;
+            let pauseSuccess = false;
             let analyzerSuccess = false;
             
-            // ПАУЗИМ CAMPAIGN (не adset, а всю кампанию!)
+            // Проверяем режим пользователя
+            const { data: userAccountWithMode } = await supabase
+              .from('user_accounts')
+              .select('default_adset_mode')
+              .eq('id', test.user_id)
+              .single();
+            
+            const isUseExistingMode = userAccountWithMode?.default_adset_mode === 'use_existing';
+            
+            // ПАУЗИМ в зависимости от режима
             try {
-              if (!test.campaign_id) {
-                throw new Error('Test has no campaign_id');
+              if (isUseExistingMode) {
+                // РЕЖИМ use_existing: деактивируем adset и все ads внутри
+                if (!test.adset_id) {
+                  throw new Error('Test has no adset_id');
+                }
+                
+                const { deactivateAdSetWithAds } = await import('../lib/directionAdSets.js');
+                await deactivateAdSetWithAds(test.adset_id, userAccount.access_token);
+                
+                app.log.info({ 
+                  adsetId: test.adset_id,
+                  mode: 'use_existing' 
+                }, `[Cron] Ad set and all ads paused successfully`);
+                pauseSuccess = true;
+                
+              } else {
+                // РЕЖИМ api_create: паузим всю кампанию (старая логика)
+                if (!test.campaign_id) {
+                  throw new Error('Test has no campaign_id');
+                }
+                
+                const pauseResponse = await fb.pauseCampaign(test.campaign_id, userAccount.access_token);
+                
+                app.log.info({ 
+                  pauseResponse,
+                  mode: 'api_create' 
+                }, `[Cron] Campaign ${test.campaign_id} paused successfully`);
+                pauseSuccess = true;
               }
-              
-              const pauseResponse = await fb.pauseCampaign(test.campaign_id, userAccount.access_token);
-              
-              app.log.info({ pauseResponse }, `[Cron] Campaign ${test.campaign_id} paused successfully`);
-              campaignPaused = true;
             } catch (pauseError: any) {
               app.log.error({
                 message: pauseError.message,
                 response: pauseError.response?.data,
-                status: pauseError.response?.status
-              }, `[Cron] Failed to pause Campaign ${test.campaign_id}`);
+                status: pauseError.response?.status,
+                mode: isUseExistingMode ? 'use_existing' : 'api_create'
+              }, `[Cron] Failed to pause creative test ${test.id}`);
             }
             
             // ВЫЗЫВАЕМ ANALYZER
@@ -130,7 +161,7 @@ export function startCreativeTestCron(app: FastifyInstance) {
                 })
                 .eq('id', test.id);
               
-              app.log.info(`[Cron] Test ${test.id} marked as completed. Campaign paused: ${campaignPaused}, Analyzer success: ${analyzerSuccess}`);
+              app.log.info(`[Cron] Test ${test.id} marked as completed. Pause success: ${pauseSuccess}, Analyzer success: ${analyzerSuccess}`);
             } catch (updateError: any) {
               app.log.error(`[Cron] Failed to update test status:`, updateError);
             }

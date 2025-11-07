@@ -94,6 +94,23 @@ export async function workflowStartCreativeTest(
   }
 
   // ===================================================
+  // STEP 1.5: Получаем режим работы пользователя
+  // ===================================================
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('default_adset_mode')
+    .eq('id', user_id)
+    .single();
+
+  const isUseExistingMode = userAccount?.default_adset_mode === 'use_existing';
+
+  log.info({
+    user_id,
+    adset_mode: userAccount?.default_adset_mode || 'api_create',
+    isUseExistingMode
+  }, 'Creative test adset mode determined');
+
+  // ===================================================
   // STEP 2: Получаем креатив из Supabase
   // ===================================================
   const { data: creative, error: creativeError } = await supabase
@@ -113,101 +130,170 @@ export async function workflowStartCreativeTest(
     throw new Error('Creative does not have WhatsApp creative ID');
   }
 
+  // Получаем direction для креатива
+  const { data: direction } = await supabase
+    .from('account_directions')
+    .select('*')
+    .eq('id', creative.direction_id)
+    .single();
+
+  if (!direction) {
+    throw new Error(`Direction not found for creative: ${creative.direction_id}`);
+  }
+
   log.info({
     creative_id: creative.id,
     title: creative.title,
     status: creative.status,
-    media_type: creative.media_type
-  }, 'Creative found for test');
-
-  // ===================================================
-  // STEP 3: Получаем дефолтные настройки таргетинга
-  // ===================================================
-  const defaultSettings = await getDirectionSettings(creative.direction_id);
-  const targeting = buildTargeting(defaultSettings, 'whatsapp');
-
-  log.info({
-    directionId: creative.direction_id,
-    hasSettings: Boolean(defaultSettings)
-  }, 'Using direction targeting for creative test');
+    media_type: creative.media_type,
+    direction_id: direction.id,
+    direction_name: direction.name
+  }, 'Creative and direction loaded for test');
 
   // Нормализуем ad_account_id
   const normalized_ad_account_id = ad_account_id.startsWith('act_')
     ? ad_account_id
     : `act_${ad_account_id}`;
 
-  // ===================================================
-  // STEP 4: Создаем Campaign
-  // ===================================================
-  // Формат: ТЕСТ | Ad: {ad_id} | {дата} | {название}
-  // Это позволит Brain Agent распознать тестовые кампании и игнорировать их
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  const campaign_name = `ТЕСТ | Ad: ${user_creative_id.slice(0, 8)} | ${today} | ${creative.title || 'Creative'}`;
+  let campaign_id: string;
+  let adset_id: string;
 
-  const campaignBody: any = {
-    name: campaign_name,
-    objective: 'OUTCOME_ENGAGEMENT',
-    special_ad_categories: [],  // Требуется Facebook API (будет JSON.stringify в toParams)
-    status: 'ACTIVE'  // Сразу активируем
-  };
+  if (isUseExistingMode) {
+    // ===================================================
+    // РЕЖИМ: use_existing
+    // Используем существующую кампанию направления и свободный adset
+    // ===================================================
+    
+    log.info({
+      direction_id: direction.id,
+      direction_name: direction.name,
+      fb_campaign_id: direction.fb_campaign_id,
+      mode: 'use_existing'
+    }, 'Creative test in use_existing mode');
 
-  log.info({ campaign_name }, 'Creating campaign for creative test');
+    // Проверяем что у направления есть кампания
+    if (!direction.fb_campaign_id) {
+      throw new Error(
+        `Direction "${direction.name}" has no campaign. ` +
+        `Please create a campaign for this direction first.`
+      );
+    }
 
-  const campaignResult = await graph(
-    'POST',
-    `${normalized_ad_account_id}/campaigns`,
-    accessToken,
-    toParams(campaignBody)  // Используем toParams для правильной сериализации
-  );
+    campaign_id = direction.fb_campaign_id;
 
-  const campaign_id = campaignResult?.id;
-  if (!campaign_id) {
-    throw new Error('Failed to create campaign');
+    log.info({ campaign_id }, 'Using existing campaign from direction');
+
+    // Получаем доступный PAUSED adset
+    const { getAvailableAdSet, activateAdSet } = await import('../lib/directionAdSets.js');
+    const availableAdSet = await getAvailableAdSet(direction.id);
+
+    if (!availableAdSet) {
+      throw new Error(
+        `No available pre-created ad sets for direction "${direction.name}". ` +
+        `Please create ad sets in Facebook Ads Manager and link them in settings, ` +
+        `or switch to api_create mode.`
+      );
+    }
+
+    adset_id = availableAdSet.fb_adset_id;
+
+    log.info({
+      adset_id,
+      adset_name: availableAdSet.adset_name,
+      ads_count: availableAdSet.ads_count,
+      direction_id: direction.id
+    }, 'Found available pre-created ad set for creative test');
+
+    // Активируем adset (PAUSED -> ACTIVE)
+    await activateAdSet(
+      availableAdSet.id,
+      availableAdSet.fb_adset_id,
+      accessToken
+    );
+
+    log.info({ adset_id }, 'Activated pre-created ad set for creative test');
+
+  } else {
+    // ===================================================
+    // РЕЖИМ: api_create (текущая логика)
+    // Создаём новую тестовую кампанию и adset
+    // ===================================================
+    
+    log.info({ mode: 'api_create' }, 'Creative test in api_create mode');
+
+    // Получаем дефолтные настройки таргетинга
+    const defaultSettings = await getDirectionSettings(creative.direction_id);
+    const targeting = buildTargeting(defaultSettings, 'whatsapp');
+
+    log.info({
+      directionId: creative.direction_id,
+      hasSettings: Boolean(defaultSettings)
+    }, 'Using direction targeting for creative test');
+
+    // Создаем Campaign
+    const today = new Date().toISOString().split('T')[0];
+    const campaign_name = `ТЕСТ | Ad: ${user_creative_id.slice(0, 8)} | ${today} | ${creative.title || 'Creative'}`;
+
+    const campaignBody: any = {
+      name: campaign_name,
+      objective: 'OUTCOME_ENGAGEMENT',
+      special_ad_categories: [],
+      status: 'ACTIVE'
+    };
+
+    log.info({ campaign_name }, 'Creating campaign for creative test');
+
+    const campaignResult = await graph(
+      'POST',
+      `${normalized_ad_account_id}/campaigns`,
+      accessToken,
+      toParams(campaignBody)
+    );
+
+    campaign_id = campaignResult?.id;
+    if (!campaign_id) {
+      throw new Error('Failed to create campaign');
+    }
+
+    log.info({ campaign_id }, 'Creative test campaign created');
+
+    // Создаем AdSet
+    const adsetBody: any = {
+      name: `${campaign_name} - AdSet`,
+      campaign_id,
+      status: 'ACTIVE',
+      billing_event: 'IMPRESSIONS',
+      optimization_goal: 'CONVERSATIONS',
+      daily_budget: 2000,
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      targeting,
+      destination_type: 'WHATSAPP',
+      promoted_object: context.skip_whatsapp_number_in_api !== false
+        ? {
+            page_id: String(page_id)
+          }
+        : {
+            page_id: String(page_id),
+            ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+          }
+    };
+
+    log.info({ campaign_id }, 'Creating ad set for creative test');
+
+    const adsetResult = await graph(
+      'POST',
+      `${normalized_ad_account_id}/adsets`,
+      accessToken,
+      toParams(adsetBody)
+    );
+
+    adset_id = adsetResult?.id;
+    if (!adset_id) {
+      throw new Error('Failed to create adset');
+    }
+
+    log.info({ adset_id }, 'Creative test ad set created');
   }
-
-  log.info({ campaign_id }, 'Creative test campaign created');
-
-  // ===================================================
-  // STEP 5: Создаем AdSet ($20/день)
-  // ===================================================
-  const adsetBody: any = {
-    name: `${campaign_name} - AdSet`,
-    campaign_id,
-    status: 'ACTIVE',
-    billing_event: 'IMPRESSIONS',
-    optimization_goal: 'CONVERSATIONS',
-    daily_budget: 2000,  // $20 = 2000 центов
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-    targeting,
-    destination_type: 'WHATSAPP',
-    // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
-    promoted_object: context.skip_whatsapp_number_in_api !== false
-      ? {
-          page_id: String(page_id)
-          // whatsapp_phone_number намеренно НЕ передается (новая логика)
-        }
-      : {
-          page_id: String(page_id),
-          ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
-          // старая логика для обратной совместимости
-        }
-  };
-
-  log.info({ campaign_id }, 'Creating ad set for creative test');
-
-  const adsetResult = await graph(
-    'POST',
-    `${normalized_ad_account_id}/adsets`,
-    accessToken,
-    toParams(adsetBody)  // Используем toParams
-  );
-
-  const adset_id = adsetResult?.id;
-  if (!adset_id) {
-    throw new Error('Failed to create adset');
-  }
-
-  log.info({ adset_id }, 'Creative test ad set created');
 
   // ===================================================
   // STEP 6: Создаем Ad
@@ -239,7 +325,7 @@ export async function workflowStartCreativeTest(
   await saveAdCreativeMapping({
     ad_id,
     user_creative_id,
-    direction_id: null, // У creative test нет direction
+    direction_id: direction.id, // Теперь у нас есть direction
     user_id,
     adset_id,
     campaign_id,
@@ -248,7 +334,20 @@ export async function workflowStartCreativeTest(
   });
 
   // ===================================================
-  // STEP 7: НЕ используем Facebook Auto Rules
+  // STEP 7: Инкрементируем счетчик ads для use_existing режима
+  // ===================================================
+  if (isUseExistingMode) {
+    const { incrementAdsCount } = await import('../lib/directionAdSets.js');
+    await incrementAdsCount(adset_id, 1);
+    
+    log.info({
+      adset_id,
+      mode: 'use_existing'
+    }, 'Incremented ads count for pre-created ad set');
+  }
+
+  // ===================================================
+  // STEP 8: НЕ используем Facebook Auto Rules
   // ===================================================
   // Facebook Auto Rules применяются глобально и могут затронуть другие кампании!
   // Вместо этого используем cron который будет проверять impressions и паузить AdSet вручную
@@ -282,7 +381,10 @@ export async function workflowStartCreativeTest(
     throw new Error('Failed to save test record to database');
   }
 
-  log.info({ testId: testRecord.id }, 'Creative test started successfully');
+  log.info({ 
+    testId: testRecord.id,
+    mode: isUseExistingMode ? 'use_existing' : 'api_create'
+  }, 'Creative test started successfully');
 
   return {
     success: true,
@@ -291,6 +393,8 @@ export async function workflowStartCreativeTest(
     adset_id,
     ad_id,
     rule_id,
+    mode: isUseExistingMode ? 'use_existing' : 'api_create',
+    direction_id: direction.id,
     message: `Creative test started. Budget: $20/day, Target: 1000 impressions`
   };
 }
