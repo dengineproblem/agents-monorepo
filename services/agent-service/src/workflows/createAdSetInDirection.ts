@@ -429,7 +429,7 @@ export async function workflowCreateAdSetInDirection(
 
   } else {
     // РЕЖИМ: создать новый ad set через API (текущая логика)
-    const skipWhatsAppNumber = userAccount.skip_whatsapp_number_in_api !== false;
+    const skipWhatsAppNumber = userAccount?.skip_whatsapp_number_in_api !== false;
     log.info({
       name: final_adset_name,
       campaign_id: direction.fb_campaign_id,

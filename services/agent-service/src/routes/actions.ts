@@ -172,7 +172,7 @@ export async function actionsRoutes(app: FastifyInstance) {
   });
 }
 
-type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string };
+type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean };
 type ResolveErr = { ok: false; message: string };
 
 async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string }): Promise<ResolveOk | ResolveErr> {
