@@ -1169,7 +1169,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
       console.log('Запускаем рекламу для всех активных направлений:', { userId });
 
-      // Отправляем запрос на новый endpoint (v2) - создаст кампании для всех активных направлений
+      // Отправляем запрос на автолонч v2 (берет первые 5 креативов)
       const response = await fetch(`${API_BASE_URL}/campaign-builder/auto-launch-v2`, {
         method: 'POST',
         headers: {
@@ -1177,7 +1177,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         },
         body: JSON.stringify({
           user_account_id: userId,
-          start_mode: autoStartMode,
+          objective: 'whatsapp', // Указываем objective для AI-агента
+          auto_activate: false, // Создаем в паузе для проверки
         }),
       });
 
