@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { Plus, RefreshCw, Unlink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, RefreshCw, Unlink, ChevronDown, ChevronUp, X } from 'lucide-react';
 
 // Используем API_BASE_URL из config/api.ts (уже содержит /api в конце)
 import { API_BASE_URL } from '@/config/api';
@@ -42,10 +42,11 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
   const [adsets, setAdsets] = useState<DirectionAdSet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-  const [fbAdSetId, setFbAdSetId] = useState('');
+  const [fbAdSetIds, setFbAdSetIds] = useState<string[]>(['']);
   const [isLinking, setIsLinking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const MAX_ADSETS = 20;
 
   // Fetch ad sets for this direction
   const fetchAdSets = async () => {
@@ -70,48 +71,100 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
     }
   };
 
-  // Link a new ad set
-  const linkAdSet = async () => {
-    if (!fbAdSetId.trim()) {
-      toast.error('Please enter an ad set ID');
+  // Link multiple ad sets
+  const linkAdSets = async () => {
+    const validIds = fbAdSetIds.filter(id => id.trim());
+    
+    if (validIds.length === 0) {
+      toast.error('Введите хотя бы один Ad Set ID');
+      return;
+    }
+
+    // Check if adding these would exceed the limit
+    if (adsets.length + validIds.length > MAX_ADSETS) {
+      toast.error(`Можно добавить максимум ${MAX_ADSETS} ad sets. У вас уже ${adsets.length}.`);
       return;
     }
 
     setIsLinking(true);
+    let successCount = 0;
+    let failCount = 0;
+
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/directions/${directionId}/link-adset`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            fb_adset_id: fbAdSetId.trim(),
-            user_account_id: userAccountId
-          })
+      for (const fbAdSetId of validIds) {
+        try {
+          const response = await fetch(
+            `${API_BASE_URL}/directions/${directionId}/link-adset`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                fb_adset_id: fbAdSetId.trim(),
+                user_account_id: userAccountId
+              })
+            }
+          );
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            // Special handling for status errors
+            if (data.current_status) {
+              throw new Error(`Ad Set ${fbAdSetId}: ${data.error} (текущий статус: ${data.current_status})`);
+            }
+            throw new Error(data.error || 'Failed to link ad set');
+          }
+
+          successCount++;
+        } catch (error: any) {
+          console.error(`Error linking ad set ${fbAdSetId}:`, error);
+          toast.error(error.message || `Ошибка при привязке ${fbAdSetId}`);
+          failCount++;
         }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to link ad set');
       }
 
-      toast.success('Ad set linked successfully!');
+      if (successCount > 0 && failCount === 0) {
+        toast.success(`Успешно привязано ad sets: ${successCount}`);
+      } else if (successCount > 0 && failCount > 0) {
+        toast.warning(`Привязано: ${successCount}, не удалось: ${failCount}`);
+      }
+
       setLinkDialogOpen(false);
-      setFbAdSetId('');
+      setFbAdSetIds(['']);
       fetchAdSets();
     } catch (error: any) {
-      console.error('Error linking ad set:', error);
-      toast.error(error.message || 'Failed to link ad set');
+      console.error('Error linking ad sets:', error);
+      toast.error(error.message || 'Ошибка при привязке ad sets');
     } finally {
       setIsLinking(false);
     }
   };
 
+  // Add new Ad Set ID input
+  const addAdSetIdInput = () => {
+    if (fbAdSetIds.length < MAX_ADSETS) {
+      setFbAdSetIds([...fbAdSetIds, '']);
+    }
+  };
+
+  // Remove Ad Set ID input
+  const removeAdSetIdInput = (index: number) => {
+    if (fbAdSetIds.length > 1) {
+      const newIds = fbAdSetIds.filter((_, i) => i !== index);
+      setFbAdSetIds(newIds);
+    }
+  };
+
+  // Update Ad Set ID
+  const updateAdSetId = (index: number, value: string) => {
+    const newIds = [...fbAdSetIds];
+    newIds[index] = value;
+    setFbAdSetIds(newIds);
+  };
+
   // Unlink an ad set
   const unlinkAdSet = async (adsetId: string) => {
-    if (!confirm('Are you sure you want to unlink this ad set?')) {
+    if (!confirm('Вы уверены, что хотите отвязать этот ad set?')) {
       return;
     }
 
@@ -122,14 +175,14 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       );
 
       if (!response.ok) {
-        throw new Error('Failed to unlink ad set');
+        throw new Error('Не удалось отвязать ad set');
       }
 
-      toast.success('Ad set unlinked');
+      toast.success('Ad set успешно отвязан');
       fetchAdSets();
     } catch (error) {
       console.error('Error unlinking ad set:', error);
-      toast.error('Failed to unlink ad set');
+      toast.error('Не удалось отвязать ad set');
     }
   };
 
@@ -214,8 +267,13 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setLinkDialogOpen(true)}
+                onClick={() => {
+                  setFbAdSetIds(['']);
+                  setLinkDialogOpen(true);
+                }}
+                disabled={adsets.length >= MAX_ADSETS}
                 className="h-8"
+                title={adsets.length >= MAX_ADSETS ? `Достигнут лимит ${MAX_ADSETS} ad sets` : 'Добавить ad sets'}
               >
                 <Plus className="h-3.5 w-3.5" />
               </Button>
@@ -268,37 +326,73 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
         </CollapsibleContent>
       </Collapsible>
 
-      {/* Link Ad Set Dialog */}
+      {/* Link Ad Sets Dialog */}
       <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Привязать Pre-Created Ad Set</DialogTitle>
+            <DialogTitle>Привязать Pre-Created Ad Sets</DialogTitle>
             <DialogDescription>
-              Следуйте этим шагам, чтобы привязать ad set, созданный в Facebook Ads Manager:
+              Следуйте этим шагам, чтобы привязать ad sets, созданные в Facebook Ads Manager:
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <ol className="list-decimal list-inside space-y-2 text-sm text-muted-foreground">
               <li>Перейдите в Facebook Ads Manager</li>
-              <li>Создайте новый ad set в статусе <strong>PAUSED</strong></li>
-              <li>Укажите ваш конкретный номер WhatsApp в ad set</li>
-              <li>Скопируйте ID ad set из URL или деталей ad set</li>
-              <li>Вставьте его ниже:</li>
+              <li>Создайте новые ad sets и установите статус <strong>PAUSED</strong></li>
+              <li>Укажите ваш конкретный номер WhatsApp в каждом ad set</li>
+              <li>Скопируйте ID ad sets из URL или деталей ad set</li>
+              <li>Вставьте их ниже (до {MAX_ADSETS} ad sets):</li>
             </ol>
             
-            <div className="space-y-2">
-              <Label htmlFor="fb-adset-id">Facebook Ad Set ID</Label>
-              <Input
-                id="fb-adset-id"
-                type="text"
-                placeholder="120232923985510449"
-                value={fbAdSetId}
-                onChange={(e) => setFbAdSetId(e.target.value)}
-                disabled={isLinking}
-              />
-              <p className="text-xs text-muted-foreground">
-                Ad set должен быть в статусе PAUSED и принадлежать кампании этого направления.
-              </p>
+            <div className="space-y-3">
+              <Label>Facebook Ad Set IDs</Label>
+              {fbAdSetIds.map((id, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    type="text"
+                    placeholder="120232923985510449"
+                    value={id}
+                    onChange={(e) => updateAdSetId(index, e.target.value)}
+                    disabled={isLinking}
+                    className="flex-1"
+                  />
+                  {fbAdSetIds.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeAdSetIdInput(index)}
+                      disabled={isLinking}
+                      className="h-9 w-9 p-0"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              
+              {fbAdSetIds.length < MAX_ADSETS && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={addAdSetIdInput}
+                  disabled={isLinking}
+                  className="w-full"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Добавить еще Ad Set ID
+                </Button>
+              )}
+              
+              <div className="text-xs space-y-1">
+                <p className="text-muted-foreground">
+                  <strong>Требования:</strong>
+                </p>
+                <ul className="list-disc list-inside text-muted-foreground ml-2 space-y-0.5">
+                  <li>Статус: <strong className="text-foreground">PAUSED</strong> (не ACTIVE, не ARCHIVED, не DELETED)</li>
+                  <li>Принадлежат кампании этого направления</li>
+                  <li>Лимит: {MAX_ADSETS} ad sets на направление</li>
+                </ul>
+              </div>
             </div>
 
             <div className="flex justify-end gap-2">
@@ -306,17 +400,17 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
                 variant="outline"
                 onClick={() => {
                   setLinkDialogOpen(false);
-                  setFbAdSetId('');
+                  setFbAdSetIds(['']);
                 }}
                 disabled={isLinking}
               >
                 Отмена
               </Button>
               <Button
-                onClick={linkAdSet}
-                disabled={isLinking || !fbAdSetId.trim()}
+                onClick={linkAdSets}
+                disabled={isLinking || !fbAdSetIds.some(id => id.trim())}
               >
-                {isLinking ? 'Привязываем...' : 'Привязать Ad Set'}
+                {isLinking ? 'Привязываем...' : `Привязать Ad Sets (${fbAdSetIds.filter(id => id.trim()).length})`}
               </Button>
             </div>
           </div>
