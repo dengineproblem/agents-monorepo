@@ -234,6 +234,40 @@ http://localhost:8082/api  ✅
 
 ---
 
+## 🗑️ DEPRECATED: Устаревшие переменные окружения
+
+**Дата**: 2025-11-07
+
+Следующие переменные **больше не используются** и были заменены на `API_BASE_URL`:
+
+| Переменная | Статус | Замена |
+|------------|--------|--------|
+| `VITE_PROCESS_IMAGE_URL` | ❌ **УДАЛЕНА** | `${API_BASE_URL}/process-image` |
+| `VITE_N8N_CREATIVE_WEBHOOK_URL` | ❌ **УДАЛЕНА** | `${API_BASE_URL}/process-video` |
+| `VITE_TIKTOK_PROXY_URL` | ✅ **АКТИВНА** | Внешний прокси, не наш API |
+
+**Причина удаления:**
+- Нарушали правила единого стандарта API_BASE_URL
+- Содержали жестко зашитые URL с `/api/` в пути
+- Создавали путаницу и дублирование `/api/api/`
+
+**Что изменилось в коде:**
+
+```typescript
+// ❌ БЫЛО (неправильно)
+const videoEndpoint = (import.meta as any).env?.VITE_N8N_CREATIVE_WEBHOOK_URL 
+  || 'http://localhost:8082/api/process-video';
+
+// ✅ СТАЛО (правильно)
+import { API_BASE_URL } from '@/config/api';
+const videoEndpoint = `${API_BASE_URL}/process-video`;
+```
+
+**Файлы где были изменения:**
+- ✅ `services/frontend/src/services/creativesApi.ts` (строки 193-197)
+
+---
+
 ## ✅ ФАЙЛЫ для проверки
 
 При изменении API конвенций проверь эти файлы:
@@ -248,7 +282,7 @@ http://localhost:8082/api  ✅
 - ✅ `services/frontend/src/services/whatsappApi.ts`
 - ✅ `services/frontend/src/services/defaultSettingsApi.ts`
 - ✅ `services/frontend/src/services/manualLaunchApi.ts`
-- ✅ `services/frontend/src/services/creativesApi.ts`
+- ✅ `services/frontend/src/services/creativesApi.ts` ⭐️ **ИСПРАВЛЕНО** - теперь использует `API_BASE_URL`
 - ✅ `services/frontend/src/services/creativeAnalyticsApi.ts`
 - ✅ `services/frontend/src/services/tiktokApi.ts`
 - ✅ `services/frontend/src/services/facebookApi.ts`

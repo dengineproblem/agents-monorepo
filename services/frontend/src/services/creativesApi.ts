@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { API_BASE_URL } from '@/config/api';
 
 export type UserCreative = {
   id: string;
@@ -190,9 +191,10 @@ export const creativesApi = {
     directionId?: string | null
   ): Promise<boolean> {
     // Выбираем эндпоинт по типу файла
+    // ✅ Следуем правилам: API_BASE_URL уже содержит /api, не добавляем его в путь
     const isImage = (file?.type || '').startsWith('image/');
-    const imageEndpoint = (import.meta as any).env?.VITE_PROCESS_IMAGE_URL || 'http://localhost:8082/process-image';
-    const videoEndpoint = (import.meta as any).env?.VITE_N8N_CREATIVE_WEBHOOK_URL || 'http://localhost:8082/api/process-video';
+    const imageEndpoint = `${API_BASE_URL}/process-image`;
+    const videoEndpoint = `${API_BASE_URL}/process-video`;
     const webhookUrl = isImage ? imageEndpoint : videoEndpoint;
     const userId = getUserId();
     if (!userId) return false;
