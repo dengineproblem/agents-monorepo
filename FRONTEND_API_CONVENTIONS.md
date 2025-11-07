@@ -264,7 +264,44 @@ const videoEndpoint = `${API_BASE_URL}/process-video`;
 ```
 
 **Файлы где были изменения:**
-- ✅ `services/frontend/src/services/creativesApi.ts` (строки 193-197)
+- ✅ `services/frontend/src/services/creativesApi.ts` (строки 193-197) - коммит `a22a460`
+- ✅ `services/frontend/src/services/salesApi.ts` (строка 51) - коммит `5c55aaf`
+- ✅ `services/frontend/src/components/profile/WhatsAppNumbersCard.tsx` (строки 68, 94, 114, 145) - коммит `5c55aaf`
+
+---
+
+## ✅ СТАТУС: ПОЛНОСТЬЮ ИСПРАВЛЕНО
+
+**Дата завершения**: 2025-11-07  
+
+🎉 **ВСЕ файлы в проекте теперь следуют единым правилам API!**
+
+**Что было сделано:**
+1. ✅ Исправлен `creativesApi.ts` - удалены устаревшие переменные `VITE_PROCESS_IMAGE_URL` и `VITE_N8N_CREATIVE_WEBHOOK_URL`
+2. ✅ Исправлен `salesApi.ts` - заменен relative URL на `API_BASE_URL`
+3. ✅ Исправлен `WhatsAppNumbersCard.tsx` - все 4 relative URL заменены на `API_BASE_URL`
+4. ✅ Обновлена документация с правилами и примерами
+
+**Результат:**
+- ❌ Больше нет дублирования `/api/api/`
+- ❌ Больше нет жестко зашитых URL
+- ❌ Больше нет относительных URL вида `/api/...`
+- ✅ Все файлы используют `API_BASE_URL` из единого источника
+- ✅ Правила работают одинаково в dev, production и app review режимах
+- ✅ Проблема 404 на `agents.performanteaiagency.com/api/process-video` решена
+
+**Проверено:**
+```bash
+# Проверка что нигде не осталось проблемных паттернов
+grep -r "VITE_PROCESS_IMAGE_URL\|VITE_N8N_CREATIVE_WEBHOOK_URL" services/frontend/src
+# ✅ Ничего не найдено
+
+grep -r "fetch.*'/api/" services/frontend/src/services
+# ✅ Ничего не найдено (кроме комментариев)
+
+grep -r "API_BASE_URL.*\/api\/" services/frontend/src
+# ✅ Только в creativeAnalyticsApi.ts (специальный случай /api/analyzer/)
+```
 
 ---
 
@@ -282,7 +319,8 @@ const videoEndpoint = `${API_BASE_URL}/process-video`;
 - ✅ `services/frontend/src/services/whatsappApi.ts`
 - ✅ `services/frontend/src/services/defaultSettingsApi.ts`
 - ✅ `services/frontend/src/services/manualLaunchApi.ts`
-- ✅ `services/frontend/src/services/creativesApi.ts` ⭐️ **ИСПРАВЛЕНО** - теперь использует `API_BASE_URL`
+- ✅ `services/frontend/src/services/creativesApi.ts` ⭐️ **ИСПРАВЛЕНО 2025-11-07** - теперь использует `API_BASE_URL`
+- ✅ `services/frontend/src/services/salesApi.ts` ⭐️ **ИСПРАВЛЕНО 2025-11-07** - заменен relative URL на `API_BASE_URL`
 - ✅ `services/frontend/src/services/creativeAnalyticsApi.ts`
 - ✅ `services/frontend/src/services/tiktokApi.ts`
 - ✅ `services/frontend/src/services/facebookApi.ts`
@@ -292,6 +330,7 @@ const videoEndpoint = `${API_BASE_URL}/process-video`;
 - ✅ `services/frontend/src/components/VideoUpload.tsx`
 - ✅ `services/frontend/src/components/Header.tsx`
 - ✅ `services/frontend/src/components/FacebookConnect.tsx`
+- ✅ `services/frontend/src/components/profile/WhatsAppNumbersCard.tsx` ⭐️ **ИСПРАВЛЕНО 2025-11-07** - все 4 relative URL заменены на `API_BASE_URL`
 - ✅ `services/frontend/src/pages/Creatives.tsx`
 
 ---
