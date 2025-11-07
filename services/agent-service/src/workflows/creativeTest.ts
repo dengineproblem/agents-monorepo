@@ -31,6 +31,7 @@ type CreativeTestContext = {
   page_id?: string;
   instagram_id?: string;
   whatsapp_phone_number?: string;
+  skip_whatsapp_number_in_api?: boolean;
 };
 
 /**
@@ -179,10 +180,17 @@ export async function workflowStartCreativeTest(
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     targeting,
     destination_type: 'WHATSAPP',
-    promoted_object: {
-      page_id: String(page_id),
-      ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
-    }
+    // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
+    promoted_object: context.skip_whatsapp_number_in_api !== false
+      ? {
+          page_id: String(page_id)
+          // whatsapp_phone_number намеренно НЕ передается (новая логика)
+        }
+      : {
+          page_id: String(page_id),
+          ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+          // старая логика для обратной совместимости
+        }
   };
 
   log.info({ campaign_id }, 'Creating ad set for creative test');

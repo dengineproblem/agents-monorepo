@@ -261,7 +261,7 @@ export async function workflowCreateAdSetInDirection(
   // Получаем page_id и режим создания ad sets из user_accounts ПЕРЕД формированием adsetBody
   const { data: userAccount } = await supabase
     .from('user_accounts')
-    .select('page_id, whatsapp_phone_number, default_adset_mode')
+    .select('page_id, whatsapp_phone_number, default_adset_mode, skip_whatsapp_number_in_api')
     .eq('id', user_account_id)
     .single();
 
@@ -358,12 +358,26 @@ export async function workflowCreateAdSetInDirection(
 
   // Для WhatsApp добавляем destination_type и promoted_object ВМЕСТЕ
   // Это критично! Facebook требует promoted_object если указан destination_type
+  //
+  // WORKAROUND для Facebook API bug 2446885:
+  // Если skip_whatsapp_number_in_api = true (по умолчанию) - НЕ отправляем номер
+  // Если skip_whatsapp_number_in_api = false - отправляем номер (старая логика для обратной совместимости)
   if (direction.objective === 'whatsapp' && userAccount?.page_id) {
     adsetBody.destination_type = 'WHATSAPP';
-    adsetBody.promoted_object = {
-      page_id: String(userAccount.page_id),
-      ...(whatsapp_phone_number && { whatsapp_phone_number })
-    };
+
+    if (userAccount.skip_whatsapp_number_in_api !== false) {
+      // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер, Facebook подставит дефолтный
+      adsetBody.promoted_object = {
+        page_id: String(userAccount.page_id)
+        // whatsapp_phone_number намеренно НЕ передается
+      };
+    } else {
+      // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер с fallback
+      adsetBody.promoted_object = {
+        page_id: String(userAccount.page_id),
+        ...(whatsapp_phone_number && { whatsapp_phone_number })
+      };
+    }
   }
 
   // ===================================================
@@ -415,6 +429,7 @@ export async function workflowCreateAdSetInDirection(
 
   } else {
     // РЕЖИМ: создать новый ad set через API (текущая логика)
+    const skipWhatsAppNumber = userAccount.skip_whatsapp_number_in_api !== false;
     log.info({
       name: final_adset_name,
       campaign_id: direction.fb_campaign_id,
@@ -422,13 +437,18 @@ export async function workflowCreateAdSetInDirection(
       optimization_goal,
       destination_type,
       promoted_object: adsetBody.promoted_object,
-      has_whatsapp_number: !!whatsapp_phone_number,
+      whatsapp_number_in_db: whatsapp_phone_number || null,
+      whatsapp_number_sent_to_fb: skipWhatsAppNumber ? null : (whatsapp_phone_number || null),
       whatsapp_number_id: direction.whatsapp_phone_number_id || null,
+      skip_whatsapp_number_in_api: skipWhatsAppNumber,
+      facebook_will_use_page_default: direction.objective === 'whatsapp' && skipWhatsAppNumber,
       userAccountId: user_account_id,
       userAccountName: userAccountProfile?.username,
       directionName: direction.name,
       mode: 'api_create'
-    }, 'Creating new ad set via API');
+    }, skipWhatsAppNumber
+      ? 'Creating new ad set via API (WhatsApp number NOT sent - Facebook will use page default)'
+      : 'Creating new ad set via API (WhatsApp number sent with fallback - old behavior)');
 
     const adsetResult = await graph(
       'POST',

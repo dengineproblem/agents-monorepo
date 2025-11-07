@@ -248,12 +248,21 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             let promoted_object;
 
             if (direction.objective === 'whatsapp') {
-              // Получаем WhatsApp номер с 4-tier fallback (может вернуть null)
-              const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
-              promoted_object = {
-                page_id: userAccount.page_id,
-                ...(whatsapp_phone_number && { whatsapp_phone_number })
-              };
+              // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
+              if (userAccount.skip_whatsapp_number_in_api !== false) {
+                // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер
+                promoted_object = {
+                  page_id: userAccount.page_id
+                  // whatsapp_phone_number намеренно НЕ передается
+                };
+              } else {
+                // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер с fallback
+                const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+                promoted_object = {
+                  page_id: userAccount.page_id,
+                  ...(whatsapp_phone_number && { whatsapp_phone_number })
+                };
+              }
             } else if (direction.objective === 'instagram_traffic') {
               // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
               // Ссылка уже в креативе в call_to_action
@@ -554,12 +563,21 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // Формируем promoted_object
         let promoted_object;
         if (direction.objective === 'whatsapp') {
-          // Получаем WhatsApp номер с 4-tier fallback (может вернуть null)
-          const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
-          promoted_object = {
-            page_id: userAccount.page_id,
-            ...(whatsapp_phone_number && { whatsapp_phone_number })
-          };
+          // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
+          if (userAccount.skip_whatsapp_number_in_api !== false) {
+            // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер
+            promoted_object = {
+              page_id: userAccount.page_id
+              // whatsapp_phone_number намеренно НЕ передается
+            };
+          } else {
+            // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер с fallback
+            const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+            promoted_object = {
+              page_id: userAccount.page_id,
+              ...(whatsapp_phone_number && { whatsapp_phone_number })
+            };
+          }
         } else if (direction.objective === 'instagram_traffic') {
           // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
           // Ссылка уже в креативе в call_to_action
@@ -821,34 +839,130 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         }
 
         // ===================================================
-        // STEP 3: Запускаем Campaign Builder LLM
+        // STEP 3: Определяем режим работы
         // ===================================================
-        log.info({ userAccountId: userAccount.id, objective }, 'Building campaign action...');
-        
-        const input: CampaignBuilderInput = {
-          user_account_id,
-          objective,
-          campaign_name,
-          requested_budget_cents,
-          additional_context,
-        };
 
-        let action;
-        try {
-          action = await buildCampaignAction(input);
-          
-          // Применяем auto_activate из запроса
-          action.params.auto_activate = auto_activate || false;
-        } catch (error: any) {
-        log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Failed to build campaign action');
-          return reply.status(400).send({
-            success: false,
-            error: error.message || 'Failed to build campaign action',
-            stage: 'planning',
+        // Проверяем есть ли активные направления
+        const { data: activeDirections } = await supabase
+          .from('account_directions')
+          .select('*')
+          .eq('user_account_id', user_account_id)
+          .eq('is_active', true)
+          .eq('objective', objective);
+
+        const hasDirections = activeDirections && activeDirections.length > 0;
+
+        if (hasDirections) {
+          // НОВЫЙ РЕЖИМ: Работа с directions
+          log.info({ 
+            directionCount: activeDirections.length,
+            mode: 'directions' 
+          }, 'Using directions mode');
+
+          const results = [];
+
+          for (const direction of activeDirections) {
+            log.info({
+              directionId: direction.id,
+              directionName: direction.name,
+              objective: direction.objective,
+            }, 'Processing direction with AI');
+
+            try {
+              // Запускаем AI для каждого направления
+              const action = await buildCampaignAction({
+                user_account_id,
+                direction_id: direction.id,
+                objective: direction.objective,
+                campaign_name: direction.name,
+                requested_budget_cents: direction.daily_budget_cents,
+              });
+
+              action.params.auto_activate = auto_activate || false;
+
+              log.info({ 
+                directionId: direction.id,
+                action: action.type,
+                creativesSelected: action.params.user_creative_ids?.length 
+              }, 'AI selected creatives for direction');
+
+              // Выполняем action
+              const envelope = {
+                idempotencyKey: `ai-autolaunch-${direction.id}-${Date.now()}`,
+                account: {
+                  userAccountId: user_account_id,
+                  whatsappPhoneNumber: userAccount.whatsapp_phone_number,
+                },
+                actions: [action],
+                source: 'ai-campaign-builder',
+              };
+
+              const actionsResponse = await request.server.inject({
+                method: 'POST',
+                url: '/api/agent/actions',
+                payload: envelope,
+              });
+
+              if (actionsResponse.statusCode === 202) {
+                const executionResult = JSON.parse(actionsResponse.body);
+                results.push({
+                  direction_id: direction.id,
+                  direction_name: direction.name,
+                  success: true,
+                  action: action.type,
+                  creatives_count: action.params.user_creative_ids?.length,
+                  reasoning: action.reasoning,
+                  execution_id: executionResult.executionId,
+                });
+              } else {
+                throw new Error(`Failed to execute: ${actionsResponse.statusCode}`);
+              }
+            } catch (error: any) {
+              log.error({ 
+                err: error, 
+                directionId: direction.id 
+              }, 'Failed to process direction');
+              
+              results.push({
+                direction_id: direction.id,
+                direction_name: direction.name,
+                success: false,
+                error: error.message,
+              });
+            }
+          }
+
+          return reply.send({
+            success: true,
+            mode: 'directions',
+            results,
           });
-        }
+        } else {
+          // LEGACY РЕЖИМ: Без directions (старая логика)
+          log.info({ mode: 'legacy' }, 'Using legacy mode without directions');
 
-        log.info({ action }, 'Action created from LLM');
+          const input: CampaignBuilderInput = {
+            user_account_id,
+            objective,
+            campaign_name,
+            requested_budget_cents,
+            additional_context,
+          };
+
+          let action;
+          try {
+            action = await buildCampaignAction(input);
+            action.params.auto_activate = auto_activate || false;
+          } catch (error: any) {
+            log.error({ err: error }, 'Failed to build campaign action');
+            return reply.status(400).send({
+              success: false,
+              error: error.message || 'Failed to build campaign action',
+              stage: 'planning',
+            });
+          }
+
+          log.info({ action }, 'Action created from LLM');
 
         // ===================================================
         // STEP 4: Выполняем action через систему actions
@@ -951,6 +1065,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           status: auto_activate ? 'ACTIVE' : 'PAUSED',
           message: campaignResult.message || `Campaign created successfully`,
         });
+        }
       } catch (error: any) {
         log.error({ err: error, userAccountId: user_account_id }, 'Unexpected error in auto-launch API');
         return reply.status(500).send({

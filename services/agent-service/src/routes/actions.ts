@@ -117,21 +117,23 @@ export async function actionsRoutes(app: FastifyInstance) {
           let result: any;
           // Force manual handler for PauseAd (accepts ad_id/adId)
           if (act.type === 'PauseAd') {
-            result = await handleAction(act as any, accessToken, { 
+            result = await handleAction(act as any, accessToken, {
               pageId: tokenInfo.pageId,
               userAccountId: account.userAccountId,
               adAccountId: resolvedAdAccountId ?? undefined,
-              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber
+              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
+              skipWhatsAppNumberInApi: tokenInfo.skipWhatsAppNumberInApi
             });
           } else if (spec) {
             result = await executeByManifest(act.type, act.params as any, accessToken);
           } else {
-            result = await handleAction(act as any, accessToken, { 
+            result = await handleAction(act as any, accessToken, {
               pageId: tokenInfo.pageId,
               userAccountId: account.userAccountId,
               adAccountId: resolvedAdAccountId ?? undefined,
               instagramId: tokenInfo.instagramId,
-              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber
+              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
+              skipWhatsAppNumberInApi: tokenInfo.skipWhatsAppNumberInApi
             });
           }
 
@@ -182,7 +184,7 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
   }
   const { data, error } = await supabase
     .from('user_accounts')
-    .select('access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
+    .select('access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number, skip_whatsapp_number_in_api')
     .eq('id', account.userAccountId)
     .maybeSingle();
 
@@ -194,11 +196,12 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
     adAccountId: (data as any).ad_account_id || account.adAccountId,
     pageId: (data as any).page_id || undefined,
     instagramId: (data as any).instagram_id || undefined,
-    whatsappPhoneNumber: account.whatsappPhoneNumber || (data as any).whatsapp_phone_number || undefined
+    whatsappPhoneNumber: account.whatsappPhoneNumber || (data as any).whatsapp_phone_number || undefined,
+    skipWhatsAppNumberInApi: (data as any).skip_whatsapp_number_in_api
   };
 }
 
-async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string }) {
+async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean }) {
   switch ((action as any).type) {
     case 'GetCampaignStatus': {
       const p = (action as any).params as { campaign_id: string };
@@ -276,26 +279,24 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       if (!ctx?.userAccountId || !ctx?.adAccountId) {
         throw new Error('CreateCampaignWithCreative: userAccountId and adAccountId required in context');
       }
-      
-      // Получаем WhatsApp номер с приоритетом направления (для WhatsApp objective)
-      let whatsapp_phone_number = ctx.whatsappPhoneNumber;
-      
-      if (p.objective === 'WhatsApp' && creative_ids.length > 0) {
-        // Получаем первый креатив для определения direction_id
+
+      // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
+      let whatsapp_phone_number;
+      if (ctx.skipWhatsAppNumberInApi === false && p.objective === 'WhatsApp' && creative_ids.length > 0) {
+        // СТАРАЯ ЛОГИКА (обратная совместимость): получаем номер с fallback
         const { data: firstCreative } = await supabase
           .from('user_creatives')
           .select('direction_id')
           .eq('id', creative_ids[0])
           .single();
-        
+
         if (firstCreative?.direction_id) {
-          // 1. Приоритет: номер из направления
           const { data: direction } = await supabase
             .from('account_directions')
             .select('whatsapp_phone_number_id')
             .eq('id', firstCreative.direction_id)
             .single();
-          
+
           if (direction?.whatsapp_phone_number_id) {
             const { data: phoneNumber } = await supabase
               .from('whatsapp_phone_numbers')
@@ -303,19 +304,12 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
               .eq('id', direction.whatsapp_phone_number_id)
               .eq('is_active', true)
               .single();
-            
+
             if (phoneNumber?.phone_number) {
               whatsapp_phone_number = phoneNumber.phone_number;
-              console.log('[Brain Agent] Using WhatsApp number from direction:', {
-                creativeId: creative_ids[0],
-                directionId: firstCreative.direction_id,
-                phone_number: whatsapp_phone_number,
-                source: 'direction'
-              });
             }
           }
-          
-          // 2. Fallback: дефолтный номер пользователя
+
           if (!whatsapp_phone_number) {
             const { data: defaultNumber } = await supabase
               .from('whatsapp_phone_numbers')
@@ -324,28 +318,24 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
               .eq('is_default', true)
               .eq('is_active', true)
               .single();
-            
+
             if (defaultNumber?.phone_number) {
               whatsapp_phone_number = defaultNumber.phone_number;
-              console.log('[Brain Agent] Using default WhatsApp number:', {
-                creativeId: creative_ids[0],
-                phone_number: whatsapp_phone_number,
-                source: 'default'
-              });
             }
           }
-        }
-        
-        // 3. Fallback: ctx.whatsappPhoneNumber уже установлен выше (legacy из user_accounts)
-        if (whatsapp_phone_number && whatsapp_phone_number === ctx.whatsappPhoneNumber) {
-          console.log('[Brain Agent] Using legacy WhatsApp number:', {
-            creativeId: creative_ids[0],
-            phone_number: whatsapp_phone_number,
-            source: 'user_accounts'
-          });
+
+          if (!whatsapp_phone_number) {
+            whatsapp_phone_number = ctx.whatsappPhoneNumber;
+          }
         }
       }
-      
+
+      const skipWhatsAppNumber = ctx.skipWhatsAppNumberInApi !== false;
+      console.log('[Brain Agent] CreateCampaignWithCreative:', {
+        skip_whatsapp_number_in_api: skipWhatsAppNumber,
+        whatsapp_number_sent: skipWhatsAppNumber ? null : (whatsapp_phone_number || null)
+      });
+
       return workflowCreateCampaignWithCreative(
         {
           user_creative_ids: creative_ids,
@@ -363,6 +353,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           user_account_id: ctx.userAccountId,
           ad_account_id: ctx.adAccountId,
           whatsapp_phone_number,
+          skip_whatsapp_number_in_api: ctx.skipWhatsAppNumberInApi
         },
         token
       );
@@ -431,6 +422,72 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         },
         token
       );
+    }
+
+    case 'Direction.CreateMultipleAdSets': {
+      const p = (action as any).params as {
+        direction_id: string;
+        adsets: Array<{
+          user_creative_ids: string[];
+          adset_name?: string;
+          daily_budget_cents?: number;
+        }>;
+        auto_activate?: boolean;
+      };
+      
+      if (!p.direction_id) throw new Error('Direction.CreateMultipleAdSets: direction_id required');
+      if (!p.adsets || !Array.isArray(p.adsets) || p.adsets.length === 0) {
+        throw new Error('Direction.CreateMultipleAdSets: adsets array required');
+      }
+      
+      // Обработать каждый adset - создать через API
+      const results = [];
+      
+      if (!ctx?.userAccountId || !ctx?.adAccountId) {
+        throw new Error('Direction.CreateMultipleAdSets: missing user context');
+      }
+      
+      for (const adsetConfig of p.adsets) {
+        try {
+          const result = await workflowCreateAdSetInDirection(
+            {
+              direction_id: p.direction_id,
+              user_creative_ids: adsetConfig.user_creative_ids,
+              daily_budget_cents: adsetConfig.daily_budget_cents || 1000,
+              adset_name: adsetConfig.adset_name,
+              auto_activate: p.auto_activate,
+              start_mode: (action as any).params?.start_mode || 'now'
+            },
+            {
+              user_account_id: ctx.userAccountId,
+              ad_account_id: ctx.adAccountId
+            },
+            token
+          );
+          
+          results.push({
+            success: true,
+            adset_id: result.adset_id,
+            adset_name: adsetConfig.adset_name || `AdSet ${results.length + 1}`,
+            ads_created: result.ads.length,
+            creatives_count: adsetConfig.user_creative_ids.length
+          });
+        } catch (error: any) {
+          results.push({
+            success: false,
+            error: error.message,
+            adset_config: adsetConfig
+          });
+        }
+      }
+      
+      return {
+        success: true,
+        mode: 'api_create_multiple',
+        total_adsets: results.length,
+        total_ads: results.reduce((sum, r) => sum + (r.ads_created || 0), 0),
+        adsets: results
+      };
     }
 
     case 'Direction.UseExistingAdSetWithCreatives': {
@@ -566,6 +623,128 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         updated_params: updateParams
       };
     }
+
+    case 'Direction.UseMultipleExistingAdSets': {
+      const p = (action as any).params as {
+        direction_id: string;
+        adsets: Array<{
+          user_creative_ids: string[];
+          adset_name?: string;
+          daily_budget_cents?: number;
+        }>;
+        auto_activate?: boolean;
+      };
+      
+      if (!p.direction_id) throw new Error('Direction.UseMultipleExistingAdSets: direction_id required');
+      if (!p.adsets || !Array.isArray(p.adsets) || p.adsets.length === 0) {
+        throw new Error('Direction.UseMultipleExistingAdSets: adsets array required');
+      }
+      
+      // Проверить режим пользователя
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('default_adset_mode, ad_account_id')
+        .eq('id', ctx?.userAccountId)
+        .single();
+      
+      if (userAccount?.default_adset_mode !== 'use_existing') {
+        throw new Error('Direction.UseMultipleExistingAdSets can only be used in use_existing mode');
+      }
+      
+      const normalized_ad_account_id = userAccount?.ad_account_id.startsWith('act_') 
+        ? userAccount.ad_account_id 
+        : `act_${userAccount?.ad_account_id}`;
+      
+      // Получить данные направления
+      const { data: direction } = await supabase
+        .from('account_directions')
+        .select('*')
+        .eq('id', p.direction_id)
+        .single();
+      
+      if (!direction) throw new Error('Direction not found');
+      
+      // Обработать каждый adset
+      const results = [];
+      
+      for (const adsetConfig of p.adsets) {
+        // Получить доступный PAUSED ad set
+        const availableAdSet = await getAvailableAdSet(p.direction_id);
+        if (!availableAdSet) {
+          results.push({
+            success: false,
+            error: 'No more available pre-created ad sets',
+            adset_config: adsetConfig
+          });
+          continue;
+        }
+        
+        // ИЗМЕНИТЬ НАСТРОЙКИ AD SET (если указаны)
+        const updateParams: any = {};
+        
+        if (adsetConfig.daily_budget_cents !== undefined) {
+          updateParams.daily_budget = adsetConfig.daily_budget_cents;
+        }
+        
+        // Применить изменения
+        if (Object.keys(updateParams).length > 0) {
+          await graph('POST', `${availableAdSet.fb_adset_id}`, token, toParams(updateParams));
+        }
+        
+        // Активировать ad set
+        await activateAdSet(availableAdSet.id, availableAdSet.fb_adset_id, token);
+        
+        // Создать ads для каждого креатива
+        const created_ads = [];
+        
+        for (const creativeId of adsetConfig.user_creative_ids) {
+          const { data: creative } = await supabase
+            .from('user_creatives')
+            .select('*')
+            .eq('id', creativeId)
+            .single();
+          
+          if (!creative) continue;
+          
+          // Определить fb_creative_id по objective направления
+          let fb_creative_id;
+          if (direction.objective === 'whatsapp') fb_creative_id = creative.fb_creative_id_whatsapp;
+          else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
+          else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
+          
+          if (!fb_creative_id) continue;
+          
+          const adBody = {
+            name: `${creative.title} - ${new Date().toISOString().split('T')[0]}`,
+            adset_id: availableAdSet.fb_adset_id,
+            status: p.auto_activate !== false ? 'ACTIVE' : 'PAUSED',
+            creative: { creative_id: fb_creative_id }
+          };
+          
+          const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, toParams(adBody));
+          created_ads.push({ ad_id: adResult.id, user_creative_id: creativeId });
+        }
+        
+        // Инкрементировать счетчик ads
+        await incrementAdsCount(availableAdSet.fb_adset_id, created_ads.length);
+        
+        results.push({
+          success: true,
+          adset_id: availableAdSet.fb_adset_id,
+          adset_name: adsetConfig.adset_name || availableAdSet.adset_name,
+          ads_created: created_ads.length,
+          ads: created_ads
+        });
+      }
+      
+      return {
+        success: true,
+        mode: 'use_existing_multiple',
+        total_adsets: results.length,
+        total_ads: results.reduce((sum, r) => sum + (r.ads_created || 0), 0),
+        adsets: results
+      };
+    }
   }
 }
 
@@ -644,6 +823,29 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
         }
         break;
       }
+      case 'Direction.CreateMultipleAdSets': {
+        if (!params.direction_id) {
+          issues.push('Direction.CreateMultipleAdSets: direction_id required');
+        }
+        if (!params.adsets) {
+          issues.push('Direction.CreateMultipleAdSets: adsets array required');
+        }
+        if (params.adsets && !Array.isArray(params.adsets)) {
+          issues.push('Direction.CreateMultipleAdSets: adsets must be an array');
+        }
+        if (params.adsets && Array.isArray(params.adsets) && params.adsets.length === 0) {
+          issues.push('Direction.CreateMultipleAdSets: adsets must have at least 1 adset');
+        }
+        // Validate each adset config
+        if (params.adsets && Array.isArray(params.adsets)) {
+          params.adsets.forEach((adset: any, idx: number) => {
+            if (!adset.user_creative_ids || !Array.isArray(adset.user_creative_ids) || adset.user_creative_ids.length === 0) {
+              issues.push(`Direction.CreateMultipleAdSets: adsets[${idx}] must have user_creative_ids array`);
+            }
+          });
+        }
+        break;
+      }
       case 'Direction.UseExistingAdSetWithCreatives': {
         if (!params.direction_id) {
           issues.push('Direction.UseExistingAdSetWithCreatives: direction_id required');
@@ -659,6 +861,29 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
         }
         if (params.daily_budget_cents && typeof params.daily_budget_cents !== 'number') {
           issues.push('Direction.UseExistingAdSetWithCreatives: daily_budget_cents must be a number');
+        }
+        break;
+      }
+      case 'Direction.UseMultipleExistingAdSets': {
+        if (!params.direction_id) {
+          issues.push('Direction.UseMultipleExistingAdSets: direction_id required');
+        }
+        if (!params.adsets) {
+          issues.push('Direction.UseMultipleExistingAdSets: adsets array required');
+        }
+        if (params.adsets && !Array.isArray(params.adsets)) {
+          issues.push('Direction.UseMultipleExistingAdSets: adsets must be an array');
+        }
+        if (params.adsets && Array.isArray(params.adsets) && params.adsets.length === 0) {
+          issues.push('Direction.UseMultipleExistingAdSets: adsets must have at least 1 adset');
+        }
+        // Validate each adset config
+        if (params.adsets && Array.isArray(params.adsets)) {
+          params.adsets.forEach((adset: any, idx: number) => {
+            if (!adset.user_creative_ids || !Array.isArray(adset.user_creative_ids) || adset.user_creative_ids.length === 0) {
+              issues.push(`Direction.UseMultipleExistingAdSets: adsets[${idx}] must have user_creative_ids array`);
+            }
+          });
         }
         break;
       }

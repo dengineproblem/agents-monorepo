@@ -26,6 +26,7 @@ type CreateCampaignContext = {
   user_account_id: string;
   ad_account_id: string;
   whatsapp_phone_number?: string; // Номер WhatsApp из Supabase (если есть)
+  skip_whatsapp_number_in_api?: boolean; // Флаг workaround для bug 2446885
 };
 
 // Helpers from campaignDuplicate
@@ -263,21 +264,34 @@ export async function workflowCreateCampaignWithCreative(
   };
 
   // Для WhatsApp добавляем promoted_object и destination_type
+  // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
   if (objective === 'WhatsApp' && page_id) {
     adsetBody.destination_type = 'WHATSAPP';
-    adsetBody.promoted_object = {
-      page_id: String(page_id),
-      ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
-    };
+
+    if (context.skip_whatsapp_number_in_api !== false) {
+      // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер
+      adsetBody.promoted_object = {
+        page_id: String(page_id)
+        // whatsapp_phone_number намеренно НЕ передается
+      };
+    } else {
+      // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер
+      adsetBody.promoted_object = {
+        page_id: String(page_id),
+        ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+      };
+    }
   }
 
+  const skipWhatsAppNumber = context.skip_whatsapp_number_in_api !== false;
   console.log('[CreateCampaignWithCreative] Creating adset:', {
     campaign_id,
     name: finalAdsetName,
     optimization_goal,
     destination_type: adsetBody.destination_type,
     promoted_object: adsetBody.promoted_object,
-    has_whatsapp_number: !!context.whatsapp_phone_number
+    skip_whatsapp_number_in_api: skipWhatsAppNumber,
+    whatsapp_number_sent: skipWhatsAppNumber ? null : (context.whatsapp_phone_number || null)
   });
 
   const adsetResult = await withStep(
