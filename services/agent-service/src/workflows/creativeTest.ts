@@ -155,6 +155,9 @@ export async function workflowStartCreativeTest(
     ? ad_account_id
     : `act_${ad_account_id}`;
 
+  // Дата для использования в названиях (используется в обоих режимах)
+  const today = new Date().toISOString().split('T')[0];
+
   let campaign_id: string;
   let adset_id: string;
 
@@ -231,7 +234,6 @@ export async function workflowStartCreativeTest(
     }, 'Using direction targeting for creative test');
 
     // Создаем Campaign
-    const today = new Date().toISOString().split('T')[0];
     const campaign_name = `ТЕСТ | Ad: ${user_creative_id.slice(0, 8)} | ${today} | ${creative.title || 'Creative'}`;
 
     const campaignBody: any = {
@@ -298,8 +300,13 @@ export async function workflowStartCreativeTest(
   // ===================================================
   // STEP 6: Создаем Ad
   // ===================================================
+  // Формируем название ad для обоих режимов
+  const ad_name = isUseExistingMode
+    ? `Creative Test - ${creative.title || user_creative_id.slice(0, 8)} - ${today}`
+    : `ТЕСТ | Ad: ${user_creative_id.slice(0, 8)} | ${today} | ${creative.title || 'Creative'} - Ad`;
+
   const adBody: any = {
-    name: `${campaign_name} - Ad`,
+    name: ad_name,
     adset_id,
     status: 'ACTIVE',
     creative: { creative_id: fb_creative_id }
