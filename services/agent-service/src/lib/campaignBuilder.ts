@@ -84,19 +84,26 @@ export type CampaignPlan = {
 };
 
 export type CampaignAction = {
-  type: 'CreateCampaignWithCreative' | 'CreateMultipleAdSets';
+  type: 'Direction.CreateAdSetWithCreatives' | 'Direction.CreateMultipleAdSets' | 'Direction.UseExistingAdSetWithCreatives' | 'Direction.UseMultipleExistingAdSets' | 'CreateCampaignWithCreative' | 'CreateMultipleAdSets';
   params: {
-    user_creative_ids?: string[]; // Для single adset
-    objective?: 'WhatsApp' | 'Instagram' | 'SiteLeads'; // Для single adset
-    campaign_name: string;
-    daily_budget_cents?: number; // Для single adset
-    adsets?: Array<{ // Для multiple adsets
-      user_creative_ids: string[];
-      adset_name: string;
-      daily_budget_cents: number;
-    }>;
-    use_default_settings?: boolean;
+    // Для Direction actions
+    direction_id?: string;
+    
+    // Общие поля
+    user_creative_ids?: string[];
+    daily_budget_cents?: number;
+    adset_name?: string;
     auto_activate?: boolean;
+    
+    // Legacy поля
+    objective?: 'WhatsApp' | 'Instagram' | 'SiteLeads';
+    campaign_name?: string;
+    use_default_settings?: boolean;
+    adsets?: Array<{
+      user_creative_ids: string[];
+      adset_name?: string; // Опциональное имя для идентификации
+      daily_budget_cents?: number; // Опциональный бюджет (для api_create режима)
+    }>;
   };
   selected_creatives?: Array<{
     user_creative_id: string;
@@ -120,9 +127,39 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
 
 ВХОДНЫЕ ДАННЫЕ:
 1. available_creatives — список готовых креативов с их скорингом и историей
-2. budget_constraints — ограничения по бюджету пользователя
-3. objective — цель кампании (whatsapp/instagram_traffic/site_leads)
-4. user_context — дополнительная информация от пользователя
+   ВАЖНО: Это уже ОТФИЛЬТРОВАННЫЙ топ-список (max 20 креативов из всех доступных)
+   Креативы отсортированы по performance: лучшие по CPL/CTR/CPM идут первыми
+2. aggregated_metrics — агрегированные метрики по ВСЕМ креативам пользователя:
+   - total_creatives_count: сколько всего креативов было до фильтрации
+   - creatives_with_performance: сколько креативов имеют history
+   - avg_cpl_cents, median_ctr, avg_cpm_cents: средние показатели
+   - best_cpl_cents, worst_cpl_cents: диапазон CPL
+   Используй эти данные для понимания общего контекста
+3. budget_constraints — ограничения по бюджету пользователя
+4. objective — цель кампании (whatsapp/instagram_traffic/site_leads)
+5. user_context — дополнительная информация от пользователя
+6. direction_info — информация о направлении (если работаем с directions)
+
+СИСТЕМА НАПРАВЛЕНИЙ (DIRECTIONS):
+
+В системе используются НАПРАВЛЕНИЯ - логические группы креативов с настройками:
+- У каждого direction уже есть СУЩЕСТВУЮЩАЯ кампания (fb_campaign_id)
+- У каждого direction свой бюджет (daily_budget_cents)
+- У каждого direction свой objective (whatsapp/instagram_traffic/site_leads)
+- Креативы привязаны к directions через direction_id
+
+ДВА РЕЖИМА СОЗДАНИЯ AD SETS:
+
+1. api_create (создать новый adset через API):
+   - Используй action: "Direction.CreateAdSetWithCreatives"
+   - Создает новый adset в СУЩЕСТВУЮЩЕЙ кампании направления
+   - Применяет default_settings направления
+
+2. use_existing (использовать pre-created adset):
+   - Используй action: "Direction.UseExistingAdSetWithCreatives"
+   - Находит готовый PAUSED adset из direction_adsets
+   - Добавляет креативы в готовый adset
+   - Активирует adset
 
 КРИТЕРИИ ВЫБОРА КРЕАТИВОВ (только для ПРИОРИТИЗАЦИИ, не для отказа):
 1. **Risk Score** (0-100) — используй для приоритета КОГДА ЕСТЬ ВЫБОР:
@@ -144,51 +181,106 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
    - Если это единственный креатив → используем его
    - Если есть выбор → даем приоритет креативам со scoring
 
-ЛОГИКА ФОРМИРОВАНИЯ ADSET:
-1. **Минимальный бюджет на adset**: $10/день
-2. **Минимум креативов в adset**: 1 креатив (если больше нет)
-3. **Оптимально**: 2-3 креатива в adset (для A/B тестирования)
-4. **Максимум**: 5 креативов в одном adset
+ВАЖНО О МЕТРИКАХ КРЕАТИВОВ (PERFORMANCE):
 
-СТРАТЕГИЯ СОЗДАНИЯ ADSETS:
-1. **Если креативов 1-4** → создать 1 adset со ВСЕМИ креативами
-   - Весь доступный бюджет на этот adset
-   - Пример: 1 креатив + $45 = 1 adset с $45/день
-   - Пример: 3 креатива + $45 = 1 adset с $45/день
-   
-2. **Если креативов 5-6** → создать 2 adset:
-   - Раздели креативы поровну (по 2-3 в каждом)
-   - Раздели бюджет поровну между adset
-   - Пример: 6 креативов + $45 = 2 adset по $22.5 (по 3 креатива)
-   
-3. **Если креативов 7+** → создать 2 adset:
-   - Раздели креативы: лучшие (low risk) vs тестовые (medium/high)
-   - Раздели бюджет поровну между adset
-   - Пример: 8 креативов + $100 = 2 adset по $50 (по 4 креатива)
+Если креатив имеет поле "performance" с данными - это означает что он УЖЕ использовался:
+- impressions > 0 - креатив показывался
+- ctr - click-through rate (хороший > 1.5%)
+- cpm - cost per 1000 impressions (хороший < $8)
+- cpl - cost per lead (сравни с target_cpl из budget_constraints)
+- spend - сколько потрачено денег
 
-РАСПРЕДЕЛЕНИЕ БЮДЖЕТА (КРИТИЧЕСКИ ВАЖНО):
-1. **ИСПОЛЬЗУЙ ВЕСЬ доступный бюджет (available_budget_cents)** - чем больше бюджет, тем быстрее получим данные!
-2. Минимум на КАЖДЫЙ adset: $10/день (1000 центов) - это ограничение Facebook
-3. Если не указан requested_budget_cents → используй ВЕСЬ available_budget_cents
-4. Если указан requested_budget_cents → используй его полностью (не меньше!)
+ПРИОРИТИЗАЦИЯ С УЧЕТОМ PERFORMANCE:
+1. Креативы с хорошим CPL (< target_cpl) - ВЫСОКИЙ ПРИОРИТЕТ
+2. Креативы с хорошим CTR (> 2%) - СРЕДНИЙ-ВЫСОКИЙ ПРИОРИТЕТ
+3. Креативы с низким CPM (< $6) - СРЕДНИЙ ПРИОРИТЕТ
+4. Креативы БЕЗ performance (новые) - ТЕСТОВЫЙ ПРИОРИТЕТ
+
+СТРАТЕГИЯ ПРИ НАЛИЧИИ PERFORMANCE:
+- Если есть креативы с CPL < target_cpl → используй их в первую очередь
+- Добавь 1-2 новых креатива для тестирования
+- Не используй креативы с CPL > target_cpl * 1.5 (если есть альтернативы)
+
+АДАПТИВНАЯ ЛОГИКА ФОРМИРОВАНИЯ ADSETS:
+
+КОЛИЧЕСТВО ADSETS ОПРЕДЕЛЯЕТСЯ БЮДЖЕТОМ (фиксированно $10 на adset):
+- $10-19 → 1 adset по $10-19
+- $20-29 → 2 adset по $10-14.5
+- $30-39 → 3 adset по $10-13
+- $40-49 → 4 adset по $10-12.25
+- $50-59 → 5 adset по $10-11.8
+- $60+ → floor(budget / 10) adsets, распределяй бюджет равномерно
+
+КЛАССИФИКАЦИЯ КРЕАТИВОВ ПО СИЛЕ:
+1. **СИЛЬНЫЕ**: performance != null И (CTR > 1.2% ИЛИ CPL < target_cpl)
+2. **СРЕДНИЕ**: performance != null И средние показатели
+3. **НОВЫЕ**: performance == null (тестовый приоритет)
+4. **СЛАБЫЕ**: performance != null И показатели ниже среднего
+
+СТРАТЕГИЯ РАСПРЕДЕЛЕНИЯ КРЕАТИВОВ:
+
+ПРИОРИТЕТ #1: Использовать ВСЕ доступные креативы по возможности
+ПРИОРИТЕТ #2: Повторять креативы ТОЛЬКО если adsets > креативов
+
+АЛГОРИТМ:
+1. Определи N_adsets = floor(budget_usd / 10)
+2. Сортируй креативы: [сильные, средние, новые, слабые]
+3. Если креативов >= N_adsets:
+   → Распределяй ВСЕ креативы по adsets БЕЗ повторений
+   → "Звезда" (сильный) в начале каждого adset, потом слабее
+   
+4. Если креативов < N_adsets:
+   → Распределяй все креативы по первым adsets
+   → Повторяй сильнейшие для заполнения оставшихся adsets
 
 ПРИМЕРЫ РАСПРЕДЕЛЕНИЯ:
-- Бюджет $45, 1 креатив → 1 adset с $45/день ✅
-- Бюджет $45, 2 креатива → 1 adset с $45/день (оба креатива) ✅
-- Бюджет $45, 3 креатива → 1 adset с $45/день (все 3) ✅
-- Бюджет $45, 6 креативов → 2 adset по $22.5 (по 3 креатива в каждом) ✅
-- Бюджет $100, 4 креатива → 2 adset по $50 (по 2 креатива в каждом) ✅
+
+$40 (4 adset), 1 креатив:
+  Adset 1: [A] — $10
+  Adset 2: [A] — $10 ← повторяем
+  Adset 3: [A] — $10 ← повторяем
+  Adset 4: [A] — $10 ← повторяем
+
+$40 (4 adset), 3 креатива (A-сильный, B-средний, C-новый):
+  Adset 1: [A] — $10
+  Adset 2: [B] — $10
+  Adset 3: [C] — $10
+  Adset 4: [A] — $10 ← повторяем сильнейшего
+
+$40 (4 adset), 9 креативов (5 сильных, 4 слабых):
+  Adset 1: [сильный1, слабый1, слабый2] — $10
+  Adset 2: [сильный2, слабый3] — $10
+  Adset 3: [сильный3, слабый4] — $10
+  Adset 4: [сильный4, сильный5] — $10
+  ✅ Все 9 использованы БЕЗ повторений
+
+$50 (5 adset), 15 креативов:
+  Adset 1: [топ-3 креатива] — $10
+  Adset 2: [следующие 3] — $10
+  Adset 3: [следующие 3] — $10
+  Adset 4: [следующие 3] — $10
+  Adset 5: [последние 3] — $10
+  ✅ Все 15 использованы
+
+$20 (2 adset), 10 креативов:
+  Adset 1: [топ-5 креативов] — $10
+  Adset 2: [следующие 5] — $10
+  ✅ Все 10 использованы
+
+СОСТАВ ADSET:
+- Минимум: 1 креатив (если только 1 доступен)
+- Оптимум: 2-4 креатива
+- Максимум: 5 креативов
 
 ПРАВИЛА:
-1. ✅ ОБЯЗАТЕЛЬНО: Выбирай ТОЛЬКО креативы с нужным fb_creative_id для objective
-2. ✅ ОБЯЗАТЕЛЬНО: Каждый adset минимум $10/день (1000 центов)
-3. ✅ ОБЯЗАТЕЛЬНО: ИСПОЛЬЗУЙ ВЕСЬ доступный бюджет - не экономь!
-4. ✅ ОБЯЗАТЕЛЬНО: Не превышай available_budget_cents
-5. ✅ Если креативов 1-4 → один adset со ВСЕМ бюджетом
-6. ✅ Если креативов 5+ → раздели на 2 adset, распределив бюджет поровну
-7. 💡 ПРИОРИТЕТ (при наличии выбора): Low risk > Medium risk > High risk
-8. 💡 ПРИОРИТЕТ (при наличии выбора): Креативы со scoring > без scoring
-9. ⚠️ ВАЖНО: Если пользователь запросил кампанию и есть хоть один подходящий креатив → создавай кампанию даже без scoring данных!
+1. ✅ ОБЯЗАТЕЛЬНО: Количество adsets = floor(budget_usd / 10), НЕ зависит от креативов
+2. ✅ ОБЯЗАТЕЛЬНО: Используй ВСЕ креативы, не игнорируй слабые
+3. ✅ ОБЯЗАТЕЛЬНО: Повторяй креативы только если adsets > креативов
+4. ✅ ОБЯЗАТЕЛЬНО: Бюджет $10 на каждый adset (или равномерно)
+5. ✅ ОБЯЗАТЕЛЬНО: Распределяй весь доступный бюджет полностью
+6. 💡 ПРИОРИТЕТ: Сильные креативы в начало каждого adset
+7. 💡 ПРИОРИТЕТ: Сортировка по performance: CTR > 1.2% и CPL < target
+8. ⚠️ ВАЖНО: Даже если все креативы слабые/новые — используй их все!
 
 ФОРМАТ ОТВЕТА (строго JSON):
 
@@ -225,7 +317,7 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
   "confidence": "high"
 }
 
-Вариант 2: НЕСКОЛЬКО ADSET (если есть 3+ креатива и бюджет $20+):
+Вариант 2: НЕСКОЛЬКО ADSETS (бюджет $20+ → автоматически создаём N adsets по $10):
 {
   "type": "CreateMultipleAdSets",
   "params": {
@@ -233,13 +325,18 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
     "objective": "WhatsApp",
     "adsets": [
       {
-        "user_creative_ids": ["uuid-1", "uuid-2", "uuid-3"],
-        "adset_name": "Test 1",
+        "user_creative_ids": ["uuid-1", "uuid-4"],
+        "adset_name": "Set 1 - Top performers",
         "daily_budget_cents": 1000
       },
       {
-        "user_creative_ids": ["uuid-4", "uuid-5", "uuid-6"],
-        "adset_name": "Test 2",
+        "user_creative_ids": ["uuid-2", "uuid-5"],
+        "adset_name": "Set 2 - Medium + Test",
+        "daily_budget_cents": 1000
+      },
+      {
+        "user_creative_ids": ["uuid-3", "uuid-6"],
+        "adset_name": "Set 3 - New creatives",
         "daily_budget_cents": 1000
       }
     ],
@@ -254,17 +351,179 @@ const CAMPAIGN_BUILDER_SYSTEM_PROMPT = `
     },
     ...остальные 5 креативов
   ],
-  "reasoning": "Создано 2 adset по $10 каждый. Test 1 с проверенными креативами, Test 2 с новыми для теста. Каждый adset будет создан как отдельная кампания.",
+  "reasoning": "Бюджет $30 → 3 adsets по $10. Все 6 креативов распределены. Сильные в начале каждого adset, слабые в паре с сильными.",
   "estimated_cpl": 2.10,
   "confidence": "high"
 }
 
-ВАЖНО:
+ФОРМАТ ОТВЕТА ДЛЯ DIRECTIONS:
+
+Если передан direction_info - используй эти форматы:
+
+Вариант 3: DIRECTION с режимом api_create (создание нового adset):
+{
+  "type": "Direction.CreateAdSetWithCreatives",
+  "params": {
+    "direction_id": "uuid-направления",
+    "user_creative_ids": ["uuid-1", "uuid-2", "uuid-3"],
+    "daily_budget_cents": 4500,
+    "adset_name": "AI Test 2025-11-07",
+    "auto_activate": false
+  },
+  "selected_creatives": [
+    {
+      "user_creative_id": "uuid-1",
+      "title": "Креатив 1",
+      "reason": "Хороший CPL $1.80 (ниже target $2.00)"
+    },
+    {
+      "user_creative_id": "uuid-2",
+      "title": "Креатив 2",
+      "reason": "Хороший CTR 2.5%"
+    },
+    {
+      "user_creative_id": "uuid-3",
+      "title": "Креатив 3",
+      "reason": "Новый креатив для тестирования"
+    }
+  ],
+  "reasoning": "Бюджет $45 → 4 adsets возможно, но в api_create режиме создаём ОДИН adset. Используем топ-5 креативов (максимум).",
+  "estimated_cpl": 2.00,
+  "confidence": "high"
+}
+
+Вариант 3.5: DIRECTION с api_create (НЕСКОЛЬКО новых adsets):
+{
+  "type": "Direction.CreateMultipleAdSets",
+  "params": {
+    "direction_id": "uuid-направления",
+    "adsets": [
+      {
+        "user_creative_ids": ["uuid-1", "uuid-4"],
+        "daily_budget_cents": 1000,
+        "adset_name": "Set 1 - Top performers"
+      },
+      {
+        "user_creative_ids": ["uuid-2", "uuid-5", "uuid-6"],
+        "daily_budget_cents": 1000,
+        "adset_name": "Set 2 - Medium + Test"
+      },
+      {
+        "user_creative_ids": ["uuid-3"],
+        "daily_budget_cents": 1000,
+        "adset_name": "Set 3 - New"
+      }
+    ],
+    "auto_activate": false
+  },
+  "selected_creatives": [
+    {
+      "user_creative_id": "uuid-1",
+      "title": "Креатив 1",
+      "reason": "Топ CTR 2.5% - лидер adset 1"
+    },
+    {
+      "user_creative_id": "uuid-2",
+      "title": "Креатив 2",
+      "reason": "Средний CTR 1.3% - лидер adset 2"
+    },
+    ...остальные креативы
+  ],
+  "reasoning": "Бюджет $30 → 3 adsets по $10. Распределили 6 креативов: сильные в начале каждого adset.",
+  "estimated_cpl": 2.00,
+  "confidence": "high"
+}
+
+Вариант 4: DIRECTION с режимом use_existing (один готовый adset):
+{
+  "type": "Direction.UseExistingAdSetWithCreatives",
+  "params": {
+    "direction_id": "uuid-направления",
+    "user_creative_ids": ["uuid-1", "uuid-2"],
+    "auto_activate": false
+  },
+  "selected_creatives": [
+    {
+      "user_creative_id": "uuid-1",
+      "title": "Креатив 1",
+      "reason": "Лучший CPL $1.50"
+    },
+    {
+      "user_creative_id": "uuid-2",
+      "title": "Креатив 2",
+      "reason": "Хороший CTR 2.8%"
+    }
+  ],
+  "reasoning": "Используем один pre-created adset, выбрано 2 лучших креатива",
+  "estimated_cpl": 1.80,
+  "confidence": "high"
+}
+
+Вариант 5: DIRECTION с режимом use_existing (НЕСКОЛЬКО готовых adsets):
+{
+  "type": "Direction.UseMultipleExistingAdSets",
+  "params": {
+    "direction_id": "uuid-направления",
+    "adsets": [
+      {
+        "user_creative_ids": ["uuid-1", "uuid-4"],
+        "adset_name": "Strong performers"
+      },
+      {
+        "user_creative_ids": ["uuid-2", "uuid-5", "uuid-6"],
+        "adset_name": "Medium + Test"
+      },
+      {
+        "user_creative_ids": ["uuid-3"],
+        "adset_name": "New creatives"
+      }
+    ],
+    "auto_activate": false
+  },
+  "selected_creatives": [
+    {
+      "user_creative_id": "uuid-1",
+      "title": "Креатив 1",
+      "reason": "Топ CTR 2.5% - лидер adset 1"
+    },
+    {
+      "user_creative_id": "uuid-2",
+      "title": "Креатив 2",
+      "reason": "Средний CTR 1.3% - лидер adset 2"
+    },
+    {
+      "user_creative_id": "uuid-3",
+      "title": "Креатив 3",
+      "reason": "Новый для теста - adset 3"
+    },
+    ...остальные креативы
+  ],
+  "reasoning": "Бюджет $30 → 3 готовых adsets. Распределили 6 креативов: сильные в начале каждого adset.",
+  "estimated_cpl": 1.90,
+  "confidence": "high"
+}
+
+ВАЖНО - ВЫБОР ACTION TYPE:
+
+1. LEGACY РЕЖИМ (без direction_info):
+   - Бюджет $10-19 → "CreateCampaignWithCreative" (1 adset)
+   - Бюджет $20+ → "CreateMultipleAdSets" (floor(budget/10) adsets)
+
+2. DIRECTION РЕЖИМ с api_create:
+   - Бюджет < $20 → "Direction.CreateAdSetWithCreatives" (1 adset)
+   - Бюджет $20+ → "Direction.CreateMultipleAdSets" (floor(budget/10) adsets)
+   - ИСПОЛЬЗУЙ АДАПТИВНУЮ ЛОГИКУ: бюджет $50 → 5 adsets, распределяй ВСЕ креативы!
+
+3. DIRECTION РЕЖИМ с use_existing:
+   - Бюджет < $20 → "Direction.UseExistingAdSetWithCreatives" (1 готовый adset)
+   - Бюджет $20+ → "Direction.UseMultipleExistingAdSets" (floor(budget/10) готовых adsets)
+   - ИСПОЛЬЗУЙ АДАПТИВНУЮ ЛОГИКУ: бюджет $50 → 5 готовых adsets
+
+ДОПОЛНИТЕЛЬНО:
 - objective в params должен быть "WhatsApp", "Instagram" или "SiteLeads" (с заглавной буквы!)
 - Минимальный бюджет на каждый adset: 1000 центов ($10)
 - use_default_settings = true (используем дефолтные настройки таргетинга)
 - auto_activate = false (создаем в PAUSED для проверки)
-- Используй CreateMultipleAdSets только если есть 3+ креатива И бюджет $20+
 
 ЕСЛИ НЕВОЗМОЖНО СОЗДАТЬ КАМПАНИЮ:
 Верни объект с полем "error" и объяснением:
@@ -595,7 +854,7 @@ export async function getAvailableCreatives(
     log.info({ count: filteredCreatives.length, objective }, 'Filtered creatives for objective');
   }
 
-  // Получаем скоры для креативов (если есть)
+  // Получаем fb_creative_id для каждого креатива
   const creativeIds = filteredCreatives.map((c) => {
     switch (objective) {
       case 'whatsapp':
@@ -607,21 +866,46 @@ export async function getAvailableCreatives(
       default:
         return null;
     }
-  }).filter(Boolean);
+  }).filter(Boolean) as string[];
 
-  const { data: scores, error: scoresError } = await supabase
+  // 1. Пытаемся получить из creative_scores (если есть)
+  const { data: scores } = await supabase
     .from('creative_scores')
     .select('*')
     .eq('user_account_id', userAccountId)
     .eq('level', 'creative')
-    .in('creative_id', creativeIds as string[])
+    .in('creative_id', creativeIds)
     .order('date', { ascending: false });
 
-  if (scoresError) {
-    log.warn({ err: scoresError, userAccountId }, 'Error fetching scores');
+  // 2. Получаем метрики из creative_metrics_history
+  const metricsMap = await getCreativeMetrics(userAccountId, creativeIds);
+
+  // 3. Для креативов без метрик в history - запрашиваем из Facebook API
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('ad_account_id, access_token')
+    .eq('id', userAccountId)
+    .single();
+
+  const freshMetricsMap = new Map();
+
+  if (userAccount && userAccount.access_token) {
+    for (const creativeId of creativeIds) {
+      if (!metricsMap.has(creativeId)) {
+        const insights = await fetchCreativeInsightsLight(
+          userAccount.ad_account_id,
+          userAccount.access_token,
+          creativeId
+        );
+        
+        if (insights) {
+          freshMetricsMap.set(creativeId, insights);
+        }
+      }
+    }
   }
 
-  // Объединяем креативы со скорами
+  // Объединяем креативы со скорами и метриками
   const result: AvailableCreative[] = filteredCreatives.map((creative) => {
     let fbCreativeId: string | null = null;
     switch (objective) {
@@ -636,8 +920,8 @@ export async function getAvailableCreatives(
         break;
     }
 
-    // Находим последний скор для этого креатива
     const score = scores?.find((s) => s.creative_id === fbCreativeId);
+    const metrics = metricsMap.get(fbCreativeId!) || freshMetricsMap.get(fbCreativeId!);
 
     return {
       user_creative_id: creative.id,
@@ -651,11 +935,16 @@ export async function getAvailableCreatives(
       risk_level: score?.risk_level,
       creative_score: score?.creative_score,
       recommendations: score?.recommendations,
-      // Performance будет добавлена позже, если нужно
+      // Performance metrics - ТЕПЕРЬ ЗАПОЛНЕНО!
+      performance: metrics || null,
     };
   });
 
-  log.info({ count: result.length }, 'Prepared creatives with scoring data');
+  log.info({ 
+    count: result.length,
+    withMetrics: result.filter(r => r.performance).length 
+  }, 'Prepared creatives with metrics');
+
   return result;
 }
 
@@ -733,6 +1022,303 @@ export async function getBudgetConstraints(
   return constraints;
 }
 
+/**
+ * Preprocessing: сортирует и фильтрует креативы для LLM
+ * Чтобы не передавать 50+ креативов со всеми метриками
+ */
+function preprocessCreativesForLLM(
+  creatives: AvailableCreative[],
+  maxCreatives: number = 20
+): {
+  filtered_creatives: AvailableCreative[];
+  aggregated_metrics: {
+    total_creatives_count: number;
+    creatives_with_performance: number;
+    avg_cpl_cents: number | null;
+    median_ctr: number | null;
+    avg_cpm_cents: number | null;
+    best_cpl_cents: number | null;
+    worst_cpl_cents: number | null;
+  };
+} {
+  log.info({ total: creatives.length, maxCreatives }, 'Preprocessing creatives for LLM');
+
+  // Разделяем на креативы с и без performance данных
+  const withPerformance = creatives.filter(c => c.performance !== null);
+  const withoutPerformance = creatives.filter(c => c.performance === null);
+
+  log.info({ 
+    withPerformance: withPerformance.length, 
+    withoutPerformance: withoutPerformance.length 
+  }, 'Creatives split by performance data');
+
+  // Сортируем креативы с performance по приоритету:
+  // 1. CPL (если есть) - меньше лучше
+  // 2. CTR - больше лучше
+  // 3. CPM - меньше лучше
+  withPerformance.sort((a, b) => {
+    const aCpl = a.performance?.avg_cpl;
+    const bCpl = b.performance?.avg_cpl;
+    const aCtr = a.performance?.avg_ctr || 0;
+    const bCtr = b.performance?.avg_ctr || 0;
+    const aCpm = a.performance?.avg_cpm || 999999;
+    const bCpm = b.performance?.avg_cpm || 999999;
+
+    // Приоритет 1: CPL (если есть у обоих)
+    if (aCpl && bCpl) {
+      return aCpl - bCpl;
+    }
+    // Если только у одного есть CPL - он лучше
+    if (aCpl && !bCpl) return -1;
+    if (!aCpl && bCpl) return 1;
+
+    // Приоритет 2: CTR (выше - лучше)
+    if (Math.abs(aCtr - bCtr) > 0.001) {
+      return bCtr - aCtr;
+    }
+
+    // Приоритет 3: CPM (ниже - лучше)
+    return aCpm - bCpm;
+  });
+
+  // Вычисляем агрегированные метрики ДО фильтрации
+  const cpls = withPerformance
+    .map(c => c.performance?.avg_cpl)
+    .filter((cpl): cpl is number => cpl !== null && cpl !== undefined);
+  
+  const ctrs = withPerformance
+    .map(c => c.performance?.avg_ctr)
+    .filter((ctr): ctr is number => ctr !== null && ctr !== undefined);
+  
+  const cpms = withPerformance
+    .map(c => c.performance?.avg_cpm)
+    .filter((cpm): cpm is number => cpm !== null && cpm !== undefined);
+
+  const aggregatedMetrics = {
+    total_creatives_count: creatives.length,
+    creatives_with_performance: withPerformance.length,
+    avg_cpl_cents: cpls.length > 0 ? Math.round(cpls.reduce((a, b) => a + b, 0) / cpls.length) : null,
+    median_ctr: ctrs.length > 0 ? ctrs.sort((a, b) => a - b)[Math.floor(ctrs.length / 2)] : null,
+    avg_cpm_cents: cpms.length > 0 ? Math.round(cpms.reduce((a, b) => a + b, 0) / cpms.length) : null,
+    best_cpl_cents: cpls.length > 0 ? Math.min(...cpls) : null,
+    worst_cpl_cents: cpls.length > 0 ? Math.max(...cpls) : null,
+  };
+
+  log.info({ aggregatedMetrics }, 'Aggregated metrics calculated');
+
+  // Формируем финальный список: топ креативов с performance + часть новых
+  const topPerforming = withPerformance.slice(0, Math.floor(maxCreatives * 0.7)); // 70% - лучшие по метрикам
+  const newCreatives = withoutPerformance.slice(0, Math.floor(maxCreatives * 0.3)); // 30% - новые для тестирования
+
+  const filteredCreatives = [...topPerforming, ...newCreatives];
+
+  log.info({ 
+    filtered: filteredCreatives.length,
+    topPerforming: topPerforming.length,
+    newCreatives: newCreatives.length
+  }, 'Creatives filtered for LLM');
+
+  return {
+    filtered_creatives: filteredCreatives,
+    aggregated_metrics: aggregatedMetrics
+  };
+}
+
+/**
+ * Получить метрики креативов из creative_metrics_history
+ */
+export async function getCreativeMetrics(
+  userAccountId: string,
+  fbCreativeIds: string[]
+): Promise<Map<string, any>> {
+  if (fbCreativeIds.length === 0) return new Map();
+  
+  // Получаем последние метрики для каждого креатива
+  const { data: metrics } = await supabase
+    .from('creative_metrics_history')
+    .select('*')
+    .eq('user_account_id', userAccountId)
+    .in('creative_id', fbCreativeIds)
+    .order('date', { ascending: false });
+  
+  // Группируем по creative_id, берем последнюю запись
+  const metricsMap = new Map();
+  
+  if (metrics && metrics.length > 0) {
+    for (const metric of metrics) {
+      if (!metricsMap.has(metric.creative_id)) {
+        metricsMap.set(metric.creative_id, {
+          impressions: metric.impressions || 0,
+          reach: metric.reach || 0,
+          spend: metric.spend || 0,
+          ctr: metric.ctr || 0,
+          cpm: metric.cpm || 0,
+          frequency: metric.frequency || 0,
+          clicks: metric.clicks || 0,
+          quality_ranking: metric.quality_ranking,
+          engagement_rate_ranking: metric.engagement_rate_ranking,
+          date: metric.date
+        });
+      }
+    }
+  }
+  
+  return metricsMap;
+}
+
+/**
+ * Легкая версия scoring - получает метрики только для нужных креативов
+ * 
+ * АЛГОРИТМ (как в agent-brain):
+ * 1. Найти все ads использующие этот creative
+ * 2. Получить insights для каждого ad
+ * 3. Агрегировать метрики
+ */
+export async function fetchCreativeInsightsLight(
+  adAccountId: string,
+  accessToken: string,
+  fbCreativeId: string
+): Promise<any | null> {
+  try {
+    const normalizedAdAccountId = adAccountId.startsWith('act_') 
+      ? adAccountId 
+      : `act_${adAccountId}`;
+    
+    // ШАГ 1: Найти все ads использующие этот creative
+    const adsUrl = `https://graph.facebook.com/v20.0/${normalizedAdAccountId}/ads`;
+    const adsParams = new URLSearchParams({
+      fields: 'id,name,status,effective_status,creative{id}',
+      limit: '500',
+      access_token: accessToken
+    });
+    
+    const adsRes = await fetch(`${adsUrl}?${adsParams.toString()}`);
+    if (!adsRes.ok) {
+      log.warn({ fbCreativeId, status: adsRes.status }, 'Failed to fetch ads');
+      return null;
+    }
+    
+    const adsJson = await adsRes.json();
+    const allAds = adsJson.data || [];
+    
+    // Фильтруем ads с нашим creative_id
+    const adsWithCreative = allAds.filter((ad: any) => ad.creative?.id === fbCreativeId);
+    
+    if (adsWithCreative.length === 0) {
+      log.info({ fbCreativeId, totalAds: allAds.length }, 'No ads found using this creative');
+      return null;
+    }
+    
+    log.info({ 
+      fbCreativeId, 
+      adsFound: adsWithCreative.length 
+    }, 'Found ads with creative');
+    
+    // ШАГ 2: Получить insights для каждого ad
+    const fields = [
+      'impressions',
+      'reach',
+      'spend',
+      'ctr',
+      'cpm',
+      'frequency',
+      'clicks',
+      'actions'
+    ].join(',');
+    
+    const allInsights = [];
+    
+    for (const ad of adsWithCreative) {
+      const insightsUrl = `https://graph.facebook.com/v20.0/${ad.id}/insights`;
+      const insightsParams = new URLSearchParams({
+        fields,
+        date_preset: 'last_30d',
+        access_token: accessToken
+      });
+      
+      try {
+        const insightsRes = await fetch(`${insightsUrl}?${insightsParams.toString()}`);
+        if (insightsRes.ok) {
+          const insightsJson = await insightsRes.json();
+          if (insightsJson.data && insightsJson.data.length > 0) {
+            allInsights.push(...insightsJson.data);
+          }
+        }
+      } catch (error: any) {
+        log.warn({ adId: ad.id, error: error.message }, 'Failed to fetch ad insights');
+      }
+    }
+    
+    if (allInsights.length === 0) {
+      log.info({ fbCreativeId, adsChecked: adsWithCreative.length }, 'No insights found for ads');
+      return null;
+    }
+    
+    // ШАГ 3: Агрегируем метрики
+    const aggregated = {
+      impressions: 0,
+      reach: 0,
+      spend: 0,
+      clicks: 0,
+      frequency: 0,
+      leads: 0
+    };
+    
+    for (const insight of allInsights) {
+      aggregated.impressions += parseInt(insight.impressions || 0);
+      aggregated.reach += parseInt(insight.reach || 0);
+      aggregated.spend += parseFloat(insight.spend || 0);
+      aggregated.clicks += parseInt(insight.clicks || 0);
+      
+      // Извлекаем leads из actions
+      const actions = insight.actions || [];
+      const leadAction = actions.find((a: any) => a.action_type === 'lead');
+      if (leadAction) {
+        aggregated.leads += parseInt(leadAction.value || 0);
+      }
+    }
+    
+    // Рассчитываем средние метрики
+    const ctr = aggregated.impressions > 0 
+      ? (aggregated.clicks / aggregated.impressions) * 100 
+      : 0;
+      
+    const cpm = aggregated.impressions > 0 
+      ? (aggregated.spend / aggregated.impressions) * 1000 
+      : 0;
+      
+    const cpl = aggregated.leads > 0 
+      ? aggregated.spend / aggregated.leads 
+      : null;
+    
+    log.info({
+      fbCreativeId,
+      adsProcessed: adsWithCreative.length,
+      insightsRecords: allInsights.length,
+      aggregated: {
+        impressions: aggregated.impressions,
+        spend: aggregated.spend,
+        leads: aggregated.leads,
+        cpl
+      }
+    }, 'Creative insights aggregated');
+    
+    return {
+      impressions: aggregated.impressions,
+      reach: aggregated.reach,
+      spend: aggregated.spend,
+      ctr: parseFloat(ctr.toFixed(2)),
+      cpm: parseFloat(cpm.toFixed(2)),
+      clicks: aggregated.clicks,
+      leads: aggregated.leads,
+      cpl: cpl ? parseFloat(cpl.toFixed(2)) : null
+    };
+  } catch (error: any) {
+    log.error({ err: error, fbCreativeId }, 'Error fetching creative insights');
+    return null;
+  }
+}
+
 // ========================================
 // LLM INTERACTION
 // ========================================
@@ -745,9 +1331,31 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
 
   const { data: userAccountProfile } = await supabase
     .from('user_accounts')
-    .select('username')
+    .select('username, default_adset_mode')
     .eq('id', user_account_id)
     .single();
+
+  // НОВОЕ: Получить информацию о направлении
+  let directionInfo = null;
+  
+  if (direction_id) {
+    const { data: direction } = await supabase
+      .from('account_directions')
+      .select('*')
+      .eq('id', direction_id)
+      .single();
+    
+    if (direction) {
+      directionInfo = {
+        id: direction.id,
+        name: direction.name,
+        objective: direction.objective,
+        daily_budget_cents: direction.daily_budget_cents,
+        fb_campaign_id: direction.fb_campaign_id,
+        adset_mode: userAccountProfile?.default_adset_mode || 'api_create'
+      };
+    }
+  }
 
   const availableCreatives = await getAvailableCreatives(user_account_id, objective, direction_id);
   const budgetConstraints = await getBudgetConstraints(user_account_id, direction_id);
@@ -762,11 +1370,21 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
     objective,
     directionId: direction_id,
     creativeCount: availableCreatives.length,
+    withMetrics: availableCreatives.filter(c => c.performance).length,
     requestedBudgetCents: requested_budget_cents,
-  }, 'Building campaign action');
+  }, 'Building campaign action with metrics');
+
+  // Preprocessing: фильтруем и сортируем креативы для LLM
+  const { filtered_creatives, aggregated_metrics } = preprocessCreativesForLLM(availableCreatives, 20);
+
+  log.info({
+    original_count: availableCreatives.length,
+    filtered_count: filtered_creatives.length,
+    aggregated: aggregated_metrics
+  }, 'Creatives preprocessed for LLM');
 
   const llmInput = {
-    available_creatives: availableCreatives.map((c) => ({
+    available_creatives: filtered_creatives.map((c) => ({
       user_creative_id: c.user_creative_id,
       title: c.title,
       created_at: c.created_at,
@@ -776,6 +1394,7 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
       recommendations: c.recommendations,
       performance: c.performance,
     })),
+    aggregated_metrics, // НОВОЕ: агрегированные метрики для контекста
     budget_constraints: {
       available_budget_cents: budgetConstraints.available_budget_cents,
       available_budget_usd: budgetConstraints.available_budget_cents / 100,
@@ -786,16 +1405,19 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
       target_cpl_cents: budgetConstraints.default_cpl_target_cents,
       target_cpl_usd: budgetConstraints.default_cpl_target_cents / 100,
     },
+    direction_info: directionInfo, // НОВОЕ!
     objective: objectiveToLLMFormat(objective),
     requested_campaign_name: campaign_name,
     requested_budget_cents,
     user_context: additional_context,
   };
 
-  log.debug({
+  log.info({
     creativesCount: llmInput.available_creatives.length,
     budgetConstraints: llmInput.budget_constraints,
-  }, 'LLM input prepared');
+    direction_info: llmInput.direction_info,
+    creatives: llmInput.available_creatives,
+  }, 'LLM input prepared (FULL DATA)');
 
   // Вызов OpenAI API
   const openaiApiKey = process.env.OPENAI_API_KEY;
@@ -840,7 +1462,9 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
   }
 
   const apiResponse = await response.json();
-  log.info('OpenAI API response received');
+  log.info({ 
+    rawResponse: apiResponse 
+  }, 'OpenAI API response received (RAW)');
 
   // Извлекаем текст из Responses API
   const message = apiResponse.output?.find((o: any) => o.type === 'message');
@@ -875,14 +1499,37 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
   }
 
   // Валидация action
-  if (action.type !== 'CreateCampaignWithCreative' && action.type !== 'CreateMultipleAdSets') {
+  const validActionTypes = [
+    'CreateCampaignWithCreative',
+    'CreateMultipleAdSets',
+    'Direction.CreateAdSetWithCreatives',
+    'Direction.CreateMultipleAdSets',
+    'Direction.UseExistingAdSetWithCreatives',
+    'Direction.UseMultipleExistingAdSets'
+  ];
+  
+  if (!validActionTypes.includes(action.type)) {
     log.error({ action }, 'Invalid action type from LLM');
     throw new Error('LLM returned invalid action type');
   }
 
-  if (!action.params || !action.params.campaign_name) {
+  if (!action.params) {
     log.error({ action }, 'Invalid action structure from LLM');
     throw new Error('Invalid action structure from LLM');
+  }
+  
+  // Для Direction actions проверяем direction_id
+  if (action.type.startsWith('Direction.')) {
+    if (!action.params.direction_id) {
+      log.error({ action }, 'Direction action missing direction_id');
+      throw new Error('Direction action must have direction_id');
+    }
+  } else {
+    // Для legacy actions проверяем campaign_name
+    if (!action.params.campaign_name) {
+      log.error({ action }, 'Legacy action missing campaign_name');
+      throw new Error('Legacy action must have campaign_name');
+    }
   }
 
   // Валидация для single adset
