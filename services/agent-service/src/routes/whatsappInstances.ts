@@ -16,7 +16,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
   /**
    * POST /api/whatsapp/instances/create - Create new WhatsApp instance and get QR code
    */
-  app.post('/api/whatsapp/instances/create', async (request, reply) => {
+  app.post('/whatsapp/instances/create', async (request, reply) => {
     try {
       const body = CreateInstanceSchema.parse(request.body);
       const { userAccountId } = body;
@@ -102,7 +102,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
   /**
    * GET /api/whatsapp/instances/:instanceName/status - Get instance status
    */
-  app.get('/api/whatsapp/instances/:instanceName/status', async (request, reply) => {
+  app.get('/whatsapp/instances/:instanceName/status', async (request, reply) => {
     const { instanceName } = request.params as any;
 
     try {
@@ -129,7 +129,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
   /**
    * GET /api/whatsapp/instances - List all instances for user
    */
-  app.get('/api/whatsapp/instances', async (request, reply) => {
+  app.get('/whatsapp/instances', async (request, reply) => {
     const { userAccountId } = request.query as any;
 
     if (!userAccountId) {
@@ -160,7 +160,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
   /**
    * DELETE /api/whatsapp/instances/:instanceName - Disconnect and delete instance
    */
-  app.delete('/api/whatsapp/instances/:instanceName', async (request, reply) => {
+  app.delete('/whatsapp/instances/:instanceName', async (request, reply) => {
     const { instanceName } = request.params as any;
 
     try {
@@ -201,7 +201,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
   /**
    * POST /api/whatsapp/instances/:instanceName/refresh-qr - Refresh QR code for instance
    */
-  app.post('/api/whatsapp/instances/:instanceName/refresh-qr', async (request, reply) => {
+  app.post('/whatsapp/instances/:instanceName/refresh-qr', async (request, reply) => {
     const { instanceName } = request.params as any;
 
     try {

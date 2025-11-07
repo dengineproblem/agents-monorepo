@@ -17,11 +17,12 @@ const StartTestSchema = z.object({
 export async function creativeTestRoutes(app: FastifyInstance) {
   
   /**
-   * POST /api/creative-test/start
+   * POST /creative-test/start
    * 
    * Запускает быстрый тест креатива на 1000 показов
+   * (nginx проксирует /api/creative-test/start → /creative-test/start)
    */
-  app.post('/api/creative-test/start', async (req, reply) => {
+  app.post('/creative-test/start', async (req, reply) => {
     try {
       const parsed = StartTestSchema.safeParse(req.body);
       
@@ -138,11 +139,11 @@ export async function creativeTestRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /api/creative-test/results/:user_creative_id
+   * GET /creative-test/results/:user_creative_id
    * 
    * Получает результаты теста креатива
    */
-  app.get('/api/creative-test/results/:user_creative_id', async (req, reply) => {
+  app.get('/creative-test/results/:user_creative_id', async (req, reply) => {
     try {
       const { user_creative_id } = req.params as { user_creative_id: string };
 
@@ -174,11 +175,11 @@ export async function creativeTestRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /api/creative-test/status
+   * GET /creative-test/status
    * 
    * Получает все активные тесты (для cron)
    */
-  app.get('/api/creative-test/status', async (req, reply) => {
+  app.get('/creative-test/status', async (req, reply) => {
     try {
       const { data: runningTests, error } = await supabase
         .from('creative_tests')
@@ -210,7 +211,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
    * 
    * Проверяет статус теста и обновляет метрики (для cron)
    */
-  app.post('/api/creative-test/check/:test_id', async (req, reply) => {
+  app.post('/creative-test/check/:test_id', async (req, reply) => {
     try {
       const { test_id } = req.params as { test_id: string };
 
@@ -332,7 +333,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
    * 
    * Сбрасывает результаты теста креатива
    */
-  app.delete('/api/creative-test/:user_creative_id', async (req, reply) => {
+  app.delete('/creative-test/:user_creative_id', async (req, reply) => {
     try {
       const { user_creative_id } = req.params as { user_creative_id: string };
       const user_id = (req.query as any)?.user_id;

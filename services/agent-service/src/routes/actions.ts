@@ -32,7 +32,7 @@ function toParams(obj: any): any {
 const AuthHeader = z.string().startsWith('Bearer ').optional();
 
 export async function actionsRoutes(app: FastifyInstance) {
-  app.post('/api/agent/actions', async (req, reply) => {
+  app.post('/agent/actions', async (req, reply) => {
     try {
       const _auth = AuthHeader.safeParse(req.headers['authorization'] as any);
 

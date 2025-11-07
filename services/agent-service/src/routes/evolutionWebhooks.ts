@@ -10,7 +10,7 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
    * Evolution API webhook endpoint
    * Receives WhatsApp message events from Evolution API
    */
-  app.post('/api/webhooks/evolution', async (request, reply) => {
+  app.post('/webhooks/evolution', async (request, reply) => {
     try {
       const event = request.body as any;
 

@@ -38,7 +38,7 @@ export default async function bizonWebhooks(app: FastifyInstance) {
    * The user_id query parameter identifies which user account owns the webinar
    * This should be configured in Bizon365 webhook settings
    */
-  app.post('/api/webhooks/bizon', async (request, reply) => {
+  app.post('/webhooks/bizon', async (request, reply) => {
     try {
       const payload = request.body as BizonWebhookPayload;
       const userAccountId = (request.query as any)['user_id'] as string | undefined;
