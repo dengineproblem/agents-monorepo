@@ -304,5 +304,147 @@ const url = `${API_BASE_URL}/api/directions`;
 
 ---
 
-**Следуй этим правилам и проблема `/api/api/` никогда не возникнет!** 🎯
+## 🔧 BACKEND: Регистрация роутов в server.ts
+
+### ⚠️ ВАЖНОЕ ПРАВИЛО: НЕ добавляйте `prefix: '/api'`
+
+**Причина**: Nginx убирает `/api` перед проксированием в agent-service.
+
+**nginx-production.conf**:
+```nginx
+location /api/ {
+    # Убираем /api из пути при проксировании
+    rewrite ^/api/(.*)$ /$1 break;
+    proxy_pass http://agent-service:8082;
+}
+```
+
+**Что происходит**:
+1. Клиент запрашивает: `GET /api/directions`
+2. Nginx перенаправляет: `GET /directions` (убрал `/api`)
+3. Agent-service ищет роут: `/directions`
+
+### ✅ ПРАВИЛЬНАЯ регистрация роутов
+
+```typescript
+// ✅ ПРАВИЛЬНО - БЕЗ prefix: '/api'
+app.register(directionsRoutes);              // Роут: /directions
+app.register(whatsappNumbersRoutes);         // Роут: /whatsapp-numbers
+app.register(defaultSettingsRoutes);         // Роут: /default-settings
+
+// ✅ ПРАВИЛЬНО - с кастомным префиксом (не /api)
+app.register(campaignBuilderRoutes, { prefix: '/campaign-builder' });
+```
+
+### ❌ НЕПРАВИЛЬНАЯ регистрация роутов
+
+```typescript
+// ❌ НЕПРАВИЛЬНО - с prefix: '/api'
+app.register(directionsRoutes, { prefix: '/api' });
+// Результат: роут = /api/directions
+// Nginx отправит: GET /directions  
+// Agent-service ищет: /api/directions → 404 NOT FOUND ❌
+```
+
+### 📝 Пример в services/agent-service/src/server.ts
+
+```typescript
+// ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
+// См. nginx-production.conf: rewrite ^/api/(.*)$ /$1 break;
+
+app.register(actionsRoutes);                   // ✅ /actions
+app.register(videoRoutes);                     // ✅ /video  
+app.register(imageRoutes);                     // ✅ /image
+app.register(directionsRoutes);                // ✅ /directions
+app.register(whatsappNumbersRoutes);           // ✅ /whatsapp-numbers
+app.register(campaignBuilderRoutes, {          // ✅ /campaign-builder
+  prefix: '/campaign-builder' 
+});
+
+// Исключения: роуты без /api префикса в nginx
+app.register(facebookWebhooks);                // /webhooks/facebook
+app.register(amocrmOAuthRoutes);               // /amocrm/auth, /amocrm/callback
+```
+
+### 🔍 КАК ПРОВЕРИТЬ backend роуты
+
+```bash
+# 1. Проверить что роут зарегистрирован БЕЗ /api
+docker exec agents-monorepo-agent-service-1 grep "app.get\|app.post" /app/dist/routes/directions.js | head -5
+
+# Должно быть:
+# app.get('/directions', ...)      ✅
+# НЕ: app.get('/api/directions', ...)  ❌
+
+# 2. Проверить регистрацию в server.ts
+docker exec agents-monorepo-agent-service-1 grep "directionsRoutes" /app/dist/server.js
+
+# Должно быть:
+# app.register(directionsRoutes);              ✅
+# НЕ: app.register(directionsRoutes, { prefix: '/api' });  ❌
+
+# 3. Тест через прямой запрос к agent-service (минуя nginx)
+curl http://localhost:8082/directions?userAccountId=xxx    # ✅ Должен работать
+curl http://localhost:8082/api/directions?userAccountId=xxx  # ❌ Должен быть 404
+
+# 4. Тест через nginx (production)
+curl https://app.performanteaiagency.com/api/directions?userAccountId=xxx  # ✅
+```
+
+### 📋 ЧЕКЛИСТ при добавлении нового backend роута
+
+- [ ] **НЕ добавлять** `prefix: '/api'` в `app.register()`
+- [ ] **Определить** роут внутри файла БЕЗ `/api`: `app.get('/my-endpoint', ...)`
+- [ ] **Зарегистрировать** в server.ts БЕЗ префикса: `app.register(myRoutes);`
+- [ ] **Протестировать** напрямую: `curl http://localhost:8082/my-endpoint`
+- [ ] **Протестировать** через nginx: `curl https://app.../api/my-endpoint`
+
+---
+
+## 📊 ПОЛНАЯ КАРТИНА: Frontend → Nginx → Backend
+
+```
+Frontend запрос:
+  fetch(`${API_BASE_URL}/directions`)
+  → GET https://app.performanteaiagency.com/api/directions
+
+        ↓
+
+Nginx (nginx-production.conf):
+  location /api/ {
+    rewrite ^/api/(.*)$ /$1 break;     ← Убирает /api
+    proxy_pass http://agent-service:8082;
+  }
+  → GET http://agent-service:8082/directions
+
+        ↓
+
+Backend (server.ts):
+  app.register(directionsRoutes);      ← БЕЗ prefix: '/api'
+
+        ↓
+
+Route handler (directions.ts):
+  app.get('/directions', ...)          ← БЕЗ /api в пути
+  → 200 OK ✅
+```
+
+### ✅ ЧТО РАБОТАЕТ
+
+| Frontend | Nginx получает | Nginx отправляет в backend | Backend роут | Результат |
+|----------|---------------|---------------------------|--------------|-----------|
+| `/api/directions` | `/api/directions` | `/directions` | `/directions` | ✅ 200 OK |
+| `/api/whatsapp-numbers` | `/api/whatsapp-numbers` | `/whatsapp-numbers` | `/whatsapp-numbers` | ✅ 200 OK |
+| `/api/campaign-builder/...` | `/api/campaign-builder/...` | `/campaign-builder/...` | `/campaign-builder/...` | ✅ 200 OK |
+
+### ❌ ЧТО НЕ РАБОТАЕТ
+
+| Frontend | Nginx получает | Nginx отправляет в backend | Backend роут | Результат |
+|----------|---------------|---------------------------|--------------|-----------|
+| `/api/directions` | `/api/directions` | `/directions` | `/api/directions` | ❌ 404 NOT FOUND |
+| `/api/api/directions` | `/api/api/directions` | `/api/directions` | `/directions` | ❌ 404 NOT FOUND |
+
+---
+
+**Следуй этим правилам и проблема `/api/api/` или 404 роутов никогда не возникнет!** 🎯
 

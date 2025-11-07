@@ -52,28 +52,30 @@ app.register(cors, {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 });
+// ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
+// См. nginx-production.conf: rewrite ^/api/(.*)$ /$1 break;
 app.register(actionsRoutes);
-app.register(videoRoutes, { prefix: '/api' });
-app.register(imageRoutes, { prefix: '/api' });
+app.register(videoRoutes);
+app.register(imageRoutes);
 app.register(creativeTestRoutes);
-app.register(campaignBuilderRoutes, { prefix: '/api/campaign-builder' });
-app.register(directionsRoutes, { prefix: '/api' });
-app.register(directionAdSetsRoutes, { prefix: '/api' });
-app.register(defaultSettingsRoutes, { prefix: '/api' });
-app.register(dialogsRoutes, { prefix: '/api' });
-app.register(whatsappNumbersRoutes, { prefix: '/api' });
-app.register(facebookWebhooks); // Без префикса - nginx уже убирает /api
-app.register(tiktokOAuthRoutes); // TikTok OAuth integration
-app.register(evolutionWebhooks); // Evolution API webhooks
-app.register(greenApiWebhooks); // GreenAPI webhooks
-app.register(bizonWebhooks); // Bizon365 webinar webhooks
-app.register(whatsappInstances); // WhatsApp instance management
-app.register(amocrmOAuthRoutes); // AmoCRM OAuth integration
-app.register(amocrmWebhooks); // AmoCRM webhooks
-app.register(amocrmSecretsRoutes); // AmoCRM auto-generated credentials
-app.register(amocrmConnectRoutes); // AmoCRM connect page
-app.register(amocrmPipelinesRoutes); // AmoCRM pipelines management
-app.register(leadsRoutes); // Leads from website
+app.register(campaignBuilderRoutes, { prefix: '/campaign-builder' });
+app.register(directionsRoutes);
+app.register(directionAdSetsRoutes);
+app.register(defaultSettingsRoutes);
+app.register(dialogsRoutes);
+app.register(whatsappNumbersRoutes);
+app.register(facebookWebhooks);
+app.register(tiktokOAuthRoutes);
+app.register(evolutionWebhooks);
+app.register(greenApiWebhooks);
+app.register(bizonWebhooks);
+app.register(whatsappInstances);
+app.register(amocrmOAuthRoutes);
+app.register(amocrmWebhooks);
+app.register(amocrmSecretsRoutes);
+app.register(amocrmConnectRoutes);
+app.register(amocrmPipelinesRoutes);
+app.register(leadsRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
