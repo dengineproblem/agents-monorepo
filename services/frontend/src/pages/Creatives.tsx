@@ -132,14 +132,14 @@ const formatSeconds = (seconds: number | null | undefined) => {
 // Генерация цвета для направления на основе его ID
 const getDirectionColor = (directionId: string): string => {
   const colors = [
-    "bg-gray-100 text-gray-700 dark:bg-gray-800/40 dark:text-gray-300",
-    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200",
+    "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
     "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200",
     "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
     "bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-200",
     "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-200",
     "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200",
-    "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
+    "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-200",
+    "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-200",
   ];
   
   // Используем хеш от ID для выбора цвета
@@ -154,14 +154,14 @@ const getDirectionColor = (directionId: string): string => {
 // Генерация цвета кружка (hex) для направления
 const getDirectionDotColor = (directionId: string): string => {
   const colors = [
-    "#6B7280", // gray
-    "#10B981", // emerald
+    "#3B82F6", // blue
     "#A855F7", // purple
     "#F59E0B", // amber
     "#EC4899", // pink
     "#06B6D4", // cyan
     "#6366F1", // indigo
-    "#F43F5E", // rose
+    "#14B8A6", // teal
+    "#F97316", // orange
   ];
 
   let hash = 0;
