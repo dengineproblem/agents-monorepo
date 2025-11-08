@@ -239,7 +239,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         identitiesCount: identityData.data?.identity_list?.length || 0
       }, 'TikTok identity info response');
 
-      // Find TT_USER identity_id
+      // Find identity_id - prefer BC_AUTH_TT (authorized through Business Center)
       let identity_id = '';
 
       if (identityData.code === 0 && identityData.data?.identity_list) {
@@ -250,23 +250,33 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
           identitiesPreview: JSON.stringify(identities.slice(0, 3), null, 2)
         }, 'TikTok identities list received');
 
-        // Try to find TT_USER identity first
+        // Try to find BC_AUTH_TT identity first (authorized through Business Center)
+        // This is the correct identity for creating ads
+        const bcAuthIdentity = identities.find((id: any) =>
+          id.identity_type === 'BC_AUTH_TT' && id.identity_authorized_bc_id
+        );
+
+        // Fallback to TT_USER if BC_AUTH_TT not found
         const ttUserIdentity = identities.find((id: any) => id.identity_type === 'TT_USER');
 
-        if (ttUserIdentity) {
-          identity_id = ttUserIdentity.identity_id || '';
+        const selectedIdentity = bcAuthIdentity || ttUserIdentity;
+
+        if (selectedIdentity) {
+          identity_id = selectedIdentity.identity_id || '';
 
           log.info({
             identity_id,
-            identity_type: ttUserIdentity.identity_type,
-            fullIdentity: JSON.stringify(ttUserIdentity, null, 2),
+            identity_type: selectedIdentity.identity_type,
+            identity_authorized_bc_id: selectedIdentity.identity_authorized_bc_id,
+            display_name: selectedIdentity.display_name,
+            fullIdentity: JSON.stringify(selectedIdentity, null, 2),
             totalIdentities: identities.length
-          }, 'TikTok TT_USER identity found');
+          }, 'TikTok identity selected');
         } else {
           log.warn({
             business_id,
             availableTypes: identities.map((id: any) => id.identity_type)
-          }, 'No TT_USER identity found for advertiser');
+          }, 'No suitable identity found for advertiser');
         }
       } else {
         log.warn({
