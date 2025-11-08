@@ -236,14 +236,14 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
       log.info({
         responseCode: identityData.code,
         hasData: !!identityData.data,
-        identitiesCount: identityData.data?.list?.length || 0
+        identitiesCount: identityData.data?.identity_list?.length || 0
       }, 'TikTok identity info response');
 
       // Find TT_USER identity_id
       let identity_id = '';
 
-      if (identityData.code === 0 && identityData.data?.list) {
-        const identities = identityData.data.list;
+      if (identityData.code === 0 && identityData.data?.identity_list) {
+        const identities = identityData.data.identity_list;
 
         log.info({
           identitiesCount: identities.length,
