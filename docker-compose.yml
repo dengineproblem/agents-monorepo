@@ -157,8 +157,9 @@ services:
       - CACHE_REDIS_ENABLED=true
       - CACHE_REDIS_URI=redis://evolution-redis:6379/0
       - WEBHOOK_GLOBAL_ENABLED=true
-      - WEBHOOK_GLOBAL_URL=http://agent-service:8082/api/webhooks/evolution
+      - WEBHOOK_GLOBAL_URL=http://agent-service:8082/webhooks/evolution
       - WEBHOOK_EVENTS_MESSAGES_UPSERT=true
+      - WEBHOOK_EVENTS_APPLICATION_STARTUP=false
       - WEBHOOK_EVENTS_CONNECTION_UPDATE=true
       - WEBHOOK_EVENTS_QRCODE_UPDATED=true
       - CONFIG_SESSION_PHONE_CLIENT=Evolution API
