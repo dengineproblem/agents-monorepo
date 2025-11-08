@@ -245,6 +245,11 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
       if (identityData.code === 0 && identityData.data?.list) {
         const identities = identityData.data.list;
 
+        log.info({
+          identitiesCount: identities.length,
+          identitiesPreview: JSON.stringify(identities.slice(0, 3), null, 2)
+        }, 'TikTok identities list received');
+
         // Try to find TT_USER identity first
         const ttUserIdentity = identities.find((id: any) => id.identity_type === 'TT_USER');
 
@@ -253,16 +258,22 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
 
           log.info({
             identity_id,
+            identity_type: ttUserIdentity.identity_type,
+            fullIdentity: JSON.stringify(ttUserIdentity, null, 2),
             totalIdentities: identities.length
           }, 'TikTok TT_USER identity found');
         } else {
-          log.warn({ business_id }, 'No TT_USER identity found for advertiser');
+          log.warn({
+            business_id,
+            availableTypes: identities.map((id: any) => id.identity_type)
+          }, 'No TT_USER identity found for advertiser');
         }
       } else {
         log.warn({
           error: identityData.message || 'Unknown error',
-          code: identityData.code
-        }, 'Failed to get TikTok identities - will use advertiser info as fallback');
+          code: identityData.code,
+          fullResponse: JSON.stringify(identityData, null, 2)
+        }, 'Failed to get TikTok identities');
       }
 
       log.info({
