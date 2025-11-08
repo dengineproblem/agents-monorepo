@@ -75,6 +75,7 @@ curl http://localhost:8080/health
 ### Backend
 - **Общий обзор:** [PROJECT_OVERVIEW_RU.md](./PROJECT_OVERVIEW_RU.md) - Полное описание архитектуры
 - **Campaign Builder Agent:** [CAMPAIGN_BUILDER_AGENT.md](./CAMPAIGN_BUILDER_AGENT.md) - 🆕 Автоматический запуск рекламы
+- **AmoCRM Воронка продаж:** [AMOCRM_FUNNEL_ANALYTICS.md](./AMOCRM_FUNNEL_ANALYTICS.md) - 🆕 Аналитика по этапам воронки
 - **Обработка видео:** [VIDEO_PROCESSING_API.md](./VIDEO_PROCESSING_API.md) - Полная документация API
 - **Быстрый старт видео:** [VIDEO_QUICK_START.md](./VIDEO_QUICK_START.md) - Краткий гайд
 - **Тестирование создания кампаний:** [TEST_CREATE_CAMPAIGN.md](./TEST_CREATE_CAMPAIGN.md)

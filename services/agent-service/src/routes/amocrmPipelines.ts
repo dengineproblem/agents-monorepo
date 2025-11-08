@@ -348,5 +348,185 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * POST /amocrm/sync-leads
+   * Manually sync leads statuses from AmoCRM
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *
+   * Returns: { success: boolean, total: number, updated: number, errors: number }
+   */
+  app.post('/amocrm/sync-leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId?: string };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'missing_user_account_id'
+        });
+      }
+
+      app.log.info({ userAccountId }, 'Manual AmoCRM leads sync triggered');
+
+      // Import sync function dynamically to avoid circular dependencies
+      const { syncLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
+
+      // Execute sync
+      const result = await syncLeadsFromAmoCRM(userAccountId, app);
+
+      return reply.send(result);
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error syncing leads from AmoCRM');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /amocrm/creative-funnel-stats
+   * Get funnel stage distribution for a specific creative
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *   - creativeId: UUID of creative
+   *   - directionId: (optional) Filter by direction
+   *   - dateFrom: (optional) Filter leads from date
+   *   - dateTo: (optional) Filter leads to date
+   *
+   * Returns: { total_leads, stages: [{stage_name, pipeline_name, count, percentage, color, sort_order}] }
+   */
+  app.get('/amocrm/creative-funnel-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, creativeId, directionId, dateFrom, dateTo } = request.query as {
+        userAccountId?: string;
+        creativeId?: string;
+        directionId?: string;
+        dateFrom?: string;
+        dateTo?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'missing_user_account_id'
+        });
+      }
+
+      if (!creativeId) {
+        return reply.code(400).send({
+          error: 'missing_creative_id'
+        });
+      }
+
+      app.log.info({ userAccountId, creativeId, directionId }, 'Fetching creative funnel stats');
+
+      // Build SQL query for leads
+      let query = supabase
+        .from('leads')
+        .select('current_status_id, current_pipeline_id')
+        .eq('user_account_id', userAccountId)
+        .eq('creative_id', creativeId)
+        .not('amocrm_lead_id', 'is', null)
+        .not('current_status_id', 'is', null);
+
+      if (directionId) {
+        query = query.eq('direction_id', directionId);
+      }
+
+      if (dateFrom) {
+        query = query.gte('created_at', dateFrom);
+      }
+
+      if (dateTo) {
+        query = query.lte('created_at', dateTo);
+      }
+
+      const { data: leads, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to fetch leads: ${error.message}`);
+      }
+
+      if (!leads || leads.length === 0) {
+        return reply.send({
+          total_leads: 0,
+          stages: []
+        });
+      }
+
+      // Get unique status IDs
+      const statusIds = [...new Set(leads.map(l => l.current_status_id).filter(Boolean))];
+
+      // Fetch stage information for these statuses
+      const { data: stages, error: stagesError } = await supabase
+        .from('amocrm_pipeline_stages')
+        .select('status_id, pipeline_name, status_name, status_color, sort_order')
+        .eq('user_account_id', userAccountId)
+        .in('status_id', statusIds);
+
+      if (stagesError) {
+        throw new Error(`Failed to fetch stages: ${stagesError.message}`);
+      }
+
+      // Create stages map
+      const stagesMap = new Map(
+        (stages || []).map(s => [s.status_id, s])
+      );
+
+      // Group by stage
+      const stageMap = new Map<number, {
+        stage_name: string;
+        pipeline_name: string;
+        color: string;
+        sort_order: number;
+        count: number;
+      }>();
+
+      for (const lead of leads) {
+        const statusId = lead.current_status_id;
+        if (!statusId) continue;
+
+        const stageInfo = stagesMap.get(statusId);
+        if (!stageInfo) continue;
+
+        if (!stageMap.has(statusId)) {
+          stageMap.set(statusId, {
+            stage_name: stageInfo.status_name,
+            pipeline_name: stageInfo.pipeline_name,
+            color: stageInfo.status_color,
+            sort_order: stageInfo.sort_order,
+            count: 0
+          });
+        }
+
+        const stage = stageMap.get(statusId)!;
+        stage.count++;
+      }
+
+      // Convert to array and calculate percentages
+      const totalLeads = leads.length;
+      const stagesArray = Array.from(stageMap.values()).map(stage => ({
+        ...stage,
+        percentage: Math.round((stage.count / totalLeads) * 100)
+      })).sort((a, b) => a.sort_order - b.sort_order);
+
+      return reply.send({
+        total_leads: totalLeads,
+        stages: stagesArray
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching creative funnel stats');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
 }
+
 

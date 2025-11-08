@@ -7,6 +7,7 @@ import { logger as baseLogger } from './lib/logger.js';
 import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
 import { supabase, supabaseQuery } from './lib/supabaseClient.js';
+import { startAmoCRMLeadsSyncCron } from './amocrmLeadsSyncCron.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
@@ -3288,6 +3289,9 @@ if (CRON_ENABLED) {
   });
   
   fastify.log.info({ where: 'cron', schedule: CRON_SCHEDULE, timezone: 'Asia/Almaty', status: 'scheduled' });
+  
+  // Start AmoCRM leads sync cron (every hour)
+  startAmoCRMLeadsSyncCron();
 } else {
   fastify.log.info({ where: 'cron', status: 'disabled' });
 }

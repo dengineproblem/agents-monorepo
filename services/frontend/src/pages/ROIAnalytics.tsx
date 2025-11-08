@@ -32,6 +32,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import SalesList from '@/components/SalesList';
+import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
+import { Filter } from 'lucide-react';
 
 const ROIAnalytics: React.FC = () => {
   const [roiData, setRoiData] = useState<ROIData | null>(null);
@@ -41,6 +43,10 @@ const ROIAnalytics: React.FC = () => {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [selectedDirectionId, setSelectedDirectionId] = useState<string | null>(null);
   const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false);
+  
+  // Funnel modal state
+  const [funnelModalOpen, setFunnelModalOpen] = useState(false);
+  const [selectedCreative, setSelectedCreative] = useState<{ id: string; name: string } | null>(null);
   
 
 
@@ -148,6 +154,11 @@ const ROIAnalytics: React.FC = () => {
   const getROIBadgeClass = (roi: number) => {
     if (roi > 0) return 'bg-green-100 text-green-800 border-green-300';
     return '';
+  };
+
+  const handleOpenFunnelModal = (creativeId: string, creativeName: string) => {
+    setSelectedCreative({ id: creativeId, name: creativeName });
+    setFunnelModalOpen(true);
   };
 
   if (loading) {
@@ -381,6 +392,7 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Лиды</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсии</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсия %</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Воронка</th>
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ссылка</th>
                           </tr>
                         </thead>
@@ -415,6 +427,15 @@ const ROIAnalytics: React.FC = () => {
                                   `${((campaign.conversions / campaign.leads) * 100).toFixed(1)}%` 
                                   : '0%'
                                 }
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <button
+                                  onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
+                                  className="inline-flex items-center justify-center text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                                  title="View funnel distribution"
+                                >
+                                  <Filter className="h-4 w-4" />
+                                </button>
                               </td>
                               <td className="py-2 px-3 text-center">
                                 {campaign.creative_url ? (
@@ -455,17 +476,26 @@ const ROIAnalytics: React.FC = () => {
                           {formatPercent(campaign.roi)}
                         </Badge>
                       </div>
-                      {campaign.creative_url && (
-                        <a 
-                          href={campaign.creative_url} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="text-xs text-foreground hover:text-foreground/70 flex items-center gap-1 mb-3 transition-colors font-medium"
+                      <div className="flex gap-2 mb-3">
+                        {campaign.creative_url && (
+                          <a 
+                            href={campaign.creative_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs text-foreground hover:text-foreground/70 flex items-center gap-1 transition-colors font-medium"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            Посмотреть креатив
+                          </a>
+                        )}
+                        <button
+                          onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
+                          className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1 transition-colors font-medium"
                         >
-                          <ExternalLink className="h-3 w-3" />
-                          Посмотреть креатив
-                        </a>
-                      )}
+                          <Filter className="h-3 w-3" />
+                          Воронка
+                        </button>
+                      </div>
                       <div className="space-y-1.5">
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Выручка:</span>
@@ -524,6 +554,18 @@ const ROIAnalytics: React.FC = () => {
 
         {/* Список продаж */}
         {userAccountId && <SalesList userAccountId={userAccountId} />}
+
+        {/* Funnel Modal */}
+        {selectedCreative && (
+          <CreativeFunnelModal
+            isOpen={funnelModalOpen}
+            onClose={() => setFunnelModalOpen(false)}
+            creativeId={selectedCreative.id}
+            creativeName={selectedCreative.name}
+            userAccountId={userAccountId}
+            directionId={selectedDirectionId || undefined}
+          />
+        )}
       </div>
     </div>
   );
