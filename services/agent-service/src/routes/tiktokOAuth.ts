@@ -284,7 +284,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         .update({
           tiktok_access_token: access_token,
           tiktok_business_id: business_id,
-          tiktok_account_id: identity_id || account_name, // Use identity_id if available, fallback to account_name
+          tiktok_account_id: identity_id, // TT_USER identity_id only
           updated_at: new Date().toISOString()
         })
         .eq('id', userId);
