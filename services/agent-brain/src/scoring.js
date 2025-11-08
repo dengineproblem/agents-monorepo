@@ -658,7 +658,7 @@ export async function runScoringAgent(userAccount, options = {}) {
     // ========================================
     
     logger.info({ where: 'scoring_agent', phase: 'fetching_adsets' });
-    
+
     // Fetch данные: daily breakdown (для трендов) + агрегированные actions (для WhatsApp) + diagnostics
     const [dailyData, actionsData, diagnostics] = await Promise.all([
       fetchAdsetsDaily(ad_account_id, access_token, 14),

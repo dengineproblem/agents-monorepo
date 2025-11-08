@@ -352,7 +352,9 @@ const FB_API_VERSION = 'v20.0';
 const MODEL = process.env.BRAIN_MODEL || 'gpt-5';
 const USE_LLM = String(process.env.BRAIN_USE_LLM || 'true').toLowerCase() === 'true';
 const CAN_USE_LLM = USE_LLM && Boolean(process.env.OPENAI_API_KEY);
-const AGENT_URL = (process.env.AGENT_SERVICE_URL || '').replace(/\/+$/,'') + '/api/agent/actions';
+// ВАЖНО: БЕЗ /api/ потому что agent-brain обращается к agent-service НАПРЯМУЮ (минуя nginx)
+// Nginx убирает /api/ только для внешних запросов, но внутри Docker сети роуты БЕЗ /api/
+const AGENT_URL = (process.env.AGENT_SERVICE_URL || '').replace(/\/+$/,'') + '/agent/actions';
 const BRAIN_DRY_RUN = String(process.env.BRAIN_DRY_RUN || 'false').toLowerCase() === 'true';
 const BRAIN_MAX_ACTIONS_PER_RUN = Number(process.env.BRAIN_MAX_ACTIONS_PER_RUN || '5');
 const BRAIN_DEBUG_LLM = String(process.env.BRAIN_DEBUG_LLM || 'false').toLowerCase() === 'true';
@@ -1574,7 +1576,7 @@ async function sendTelegram(chatId, text, token) {
       
       // Создаём AbortController для таймаута
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаут
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут
       
       try {
         const r = await fetch(fullUrl, {
