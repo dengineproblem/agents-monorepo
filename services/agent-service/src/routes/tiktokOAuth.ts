@@ -239,7 +239,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         identitiesCount: identityData.data?.identity_list?.length || 0
       }, 'TikTok identity info response');
 
-      // Find identity_id - prefer BC_AUTH_TT (authorized through Business Center)
+      // Find TT_USER identity_id
       let identity_id = '';
 
       if (identityData.code === 0 && identityData.data?.identity_list) {
@@ -250,35 +250,23 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
           identitiesPreview: JSON.stringify(identities.slice(0, 3), null, 2)
         }, 'TikTok identities list received');
 
-        // Find all BC_AUTH_TT identities (authorized through Business Center)
-        const bcAuthIdentities = identities.filter((id: any) =>
-          id.identity_type === 'BC_AUTH_TT' && id.identity_authorized_bc_id
-        );
-
-        // Take SECOND BC_AUTH_TT if exists, otherwise take first BC_AUTH_TT, otherwise fallback to TT_USER
-        const bcAuthIdentity = bcAuthIdentities.length > 1 ? bcAuthIdentities[1] : bcAuthIdentities[0];
-
-        // Fallback to TT_USER if BC_AUTH_TT not found
+        // Try to find TT_USER identity first
         const ttUserIdentity = identities.find((id: any) => id.identity_type === 'TT_USER');
 
-        const selectedIdentity = bcAuthIdentity || ttUserIdentity;
-
-        if (selectedIdentity) {
-          identity_id = selectedIdentity.identity_id || '';
+        if (ttUserIdentity) {
+          identity_id = ttUserIdentity.identity_id || '';
 
           log.info({
             identity_id,
-            identity_type: selectedIdentity.identity_type,
-            identity_authorized_bc_id: selectedIdentity.identity_authorized_bc_id,
-            display_name: selectedIdentity.display_name,
-            fullIdentity: JSON.stringify(selectedIdentity, null, 2),
+            identity_type: ttUserIdentity.identity_type,
+            fullIdentity: JSON.stringify(ttUserIdentity, null, 2),
             totalIdentities: identities.length
-          }, 'TikTok identity selected');
+          }, 'TikTok TT_USER identity found');
         } else {
           log.warn({
             business_id,
             availableTypes: identities.map((id: any) => id.identity_type)
-          }, 'No suitable identity found for advertiser');
+          }, 'No TT_USER identity found for advertiser');
         }
       } else {
         log.warn({
