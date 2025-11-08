@@ -250,11 +250,13 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
           identitiesPreview: JSON.stringify(identities.slice(0, 3), null, 2)
         }, 'TikTok identities list received');
 
-        // Try to find BC_AUTH_TT identity first (authorized through Business Center)
-        // This is the correct identity for creating ads
-        const bcAuthIdentity = identities.find((id: any) =>
+        // Find all BC_AUTH_TT identities (authorized through Business Center)
+        const bcAuthIdentities = identities.filter((id: any) =>
           id.identity_type === 'BC_AUTH_TT' && id.identity_authorized_bc_id
         );
+
+        // Take SECOND BC_AUTH_TT if exists, otherwise take first BC_AUTH_TT, otherwise fallback to TT_USER
+        const bcAuthIdentity = bcAuthIdentities.length > 1 ? bcAuthIdentities[1] : bcAuthIdentities[0];
 
         // Fallback to TT_USER if BC_AUTH_TT not found
         const ttUserIdentity = identities.find((id: any) => id.identity_type === 'TT_USER');
