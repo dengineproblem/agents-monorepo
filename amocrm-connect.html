@@ -191,12 +191,13 @@
   <script>
     // Generate unique state for this session
     function generateState() {
-      // Get userAccountId from URL parameter or use placeholder
+      // Get userAccountId and subdomain from URL parameters
       const urlParams = new URLSearchParams(window.location.search);
       const userAccountId = urlParams.get('userAccountId') || 'REPLACE_WITH_USER_ID';
+      const subdomain = urlParams.get('subdomain') || 'performanteaiagency';
       
-      // Encode userAccountId in state (base64)
-      return btoa(userAccountId);
+      // Encode userAccountId|subdomain in state (base64)
+      return btoa(`${userAccountId}|${subdomain}`);
     }
 
     // Set state when page loads
