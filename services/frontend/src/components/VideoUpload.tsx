@@ -128,7 +128,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [dailyBudget, setDailyBudget] = useState(10); // по умолчанию 10$ (используется в форме изображений)
   const [dailyBudgetInstagram, setDailyBudgetInstagram] = useState(10); // Instagram (USD)
-  const [dailyBudgetTiktok, setDailyBudgetTiktok] = useState(1000); // TikTok (KZT)
+  const [dailyBudgetTiktok, setDailyBudgetTiktok] = useState(2500); // TikTok (KZT)
   const [startType, setStartType] = useState<'now' | 'midnight'>('midnight');
   const [cityPopoverOpen, setCityPopoverOpen] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState('KZ');
@@ -521,7 +521,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           setSelectedCities([]);
           setDailyBudget(10);
           setDailyBudgetInstagram(10);
-          setDailyBudgetTiktok(1000);
+          setDailyBudgetTiktok(2500);
           setStartType('midnight');
           setAgeMin(18);
           setAgeMax(65);
@@ -565,7 +565,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           setSelectedCities([]);
           setDailyBudget(10);
           setDailyBudgetInstagram(10);
-          setDailyBudgetTiktok(1000);
+          setDailyBudgetTiktok(2500);
           setStartType('midnight');
           setAgeMin(18);
           setAgeMax(65);
@@ -613,7 +613,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setSelectedCities([]);
         setDailyBudget(10);
         setDailyBudgetInstagram(10);
-        setDailyBudgetTiktok(1000);
+        setDailyBudgetTiktok(2500);
         setStartType('midnight');
         setAgeMin(18);
         setAgeMax(65);
@@ -768,7 +768,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     setDailyBudgetInstagram(prev => Math.max(1, prev + delta));
   };
   const handleTiktokBudgetChange = (delta: number) => {
-    setDailyBudgetTiktok(prev => Math.max(100, prev + delta * 100));
+    setDailyBudgetTiktok(prev => Math.max(2500, prev + delta * 100));
   };
 
   const getGendersArray = (): number[] => {
@@ -796,8 +796,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         return;
       }
     } else if (placement === 'tiktok') {
-      if (!dailyBudgetTiktok || Number(dailyBudgetTiktok) <= 0) {
-        toast.error('Пожалуйста, укажите суточный бюджет для TikTok (KZT)');
+      if (!dailyBudgetTiktok || Number(dailyBudgetTiktok) < 2500) {
+        toast.error('Минимальный бюджет для TikTok - 2500₸ в день');
         return;
       }
     } else if (placement === 'both') {
@@ -805,8 +805,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         toast.error('Пожалуйста, укажите суточный бюджет для Instagram (USD)');
         return;
       }
-      if (!dailyBudgetTiktok || Number(dailyBudgetTiktok) <= 0) {
-        toast.error('Пожалуйста, укажите суточный бюджет для TikTok (KZT)');
+      if (!dailyBudgetTiktok || Number(dailyBudgetTiktok) < 2500) {
+        toast.error('Минимальный бюджет для TikTok - 2500₸ в день');
         return;
       }
     }
@@ -2046,14 +2046,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   <div className="flex flex-col gap-2 mb-2">
                     <label className="font-medium text-sm">{t('video.dailyBudgetTikTok')}</label>
                     <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 100}>-</Button>
+                      <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 2500}>-</Button>
                       <input
                         type="number"
                         min="100"
                         className="border rounded px-2 py-1 bg-background w-32 text-center"
                         placeholder="Бюджет, ₸"
                         value={dailyBudgetTiktok}
-                        onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 100)}
+                        onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 2500)}
                         disabled={isUploading}
                       />
                       <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(1)} disabled={isUploading}>+</Button>
@@ -2101,14 +2101,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                       <div>
                         <div className="text-xs text-muted-foreground mb-1">TikTok (₸)</div>
                         <div className="flex items-center gap-2">
-                          <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 100}>-</Button>
+                          <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 2500}>-</Button>
                           <input
                             type="number"
                             min="100"
                             className="border rounded px-2 py-1 bg-background w-32 text-center"
                             placeholder="₸"
                             value={dailyBudgetTiktok}
-                            onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 100)}
+                            onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 2500)}
                             disabled={isUploading}
                           />
                           <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(1)} disabled={isUploading}>+</Button>
@@ -2595,14 +2595,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
               <div className="flex flex-col gap-2 mb-2">
                 <label className="font-medium text-sm">Суточный бюджет TikTok (₸)</label>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 100}>-</Button>
+                  <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 2500}>-</Button>
                   <input
                     type="number"
                     min="100"
                     className="border rounded px-2 py-1 bg-background w-32 text-center"
                     placeholder="Бюджет, ₸"
                     value={dailyBudgetTiktok}
-                    onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 100)}
+                    onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 2500)}
                     disabled={isUploading}
                   />
                   <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(1)} disabled={isUploading}>+</Button>
@@ -2632,14 +2632,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   <div>
                     <div className="text-xs text-muted-foreground mb-1">TikTok (₸)</div>
                     <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 100}>-</Button>
+                      <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(-1)} disabled={isUploading || dailyBudgetTiktok <= 2500}>-</Button>
                       <input
                         type="number"
                         min="100"
                         className="border rounded px-2 py-1 bg-background w-32 text-center"
                         placeholder="₸"
                         value={dailyBudgetTiktok}
-                        onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 100)}
+                        onChange={e => setDailyBudgetTiktok(Number(e.target.value.replace(/[^0-9]/g, '')) || 2500)}
                         disabled={isUploading}
                       />
                       <Button variant="outline" size="icon" onClick={() => handleTiktokBudgetChange(1)} disabled={isUploading}>+</Button>

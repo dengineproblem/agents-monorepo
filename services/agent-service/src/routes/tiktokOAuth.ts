@@ -179,7 +179,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
       }
 
       const advertisers = advertiserData.data?.list || [];
-      
+
       if (advertisers.length === 0) {
         log.warn({ userId }, 'No TikTok advertiser accounts found');
         return res.status(400).send({
@@ -193,11 +193,83 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
       const business_id = firstAdvertiser.advertiser_id;
       const account_name = firstAdvertiser.advertiser_name;
 
-      log.info({ 
-        userId, 
-        business_id, 
+      log.info({
+        userId,
+        business_id,
         account_name,
-        advertisers_count: advertisers.length 
+        advertisers_count: advertisers.length
+      }, 'TikTok advertiser account retrieved');
+
+      // Get identity list for the advertiser to find TT_USER identity_id
+      const identityUrl = new URL('https://business-api.tiktok.com/open_api/v1.3/identity/get/');
+      identityUrl.searchParams.set('advertiser_id', business_id);
+      identityUrl.searchParams.set('app_id', TIKTOK_APP_ID);
+      identityUrl.searchParams.set('secret', TIKTOK_APP_SECRET);
+
+      log.info({ business_id }, 'Fetching TikTok identity list');
+
+      const identityResponse = await fetch(identityUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'Access-Token': access_token
+        }
+      });
+
+      const identityText = await identityResponse.text();
+      log.info({
+        httpStatus: identityResponse.status,
+        responsePreview: identityText.substring(0, 200)
+      }, 'TikTok identity raw response');
+
+      let identityData: any;
+      try {
+        identityData = JSON.parse(identityText);
+      } catch (parseError: any) {
+        log.error({
+          error: parseError.message,
+          rawResponse: identityText.substring(0, 500)
+        }, 'Failed to parse TikTok identity response');
+        // Continue without identity - will use account_name as fallback
+        identityData = { code: -1, data: { list: [] } };
+      }
+
+      log.info({
+        responseCode: identityData.code,
+        hasData: !!identityData.data,
+        identitiesCount: identityData.data?.list?.length || 0
+      }, 'TikTok identity info response');
+
+      // Find TT_USER identity_id
+      let identity_id = '';
+
+      if (identityData.code === 0 && identityData.data?.list) {
+        const identities = identityData.data.list;
+
+        // Try to find TT_USER identity first
+        const ttUserIdentity = identities.find((id: any) => id.identity_type === 'TT_USER');
+
+        if (ttUserIdentity) {
+          identity_id = ttUserIdentity.identity_id || '';
+
+          log.info({
+            identity_id,
+            totalIdentities: identities.length
+          }, 'TikTok TT_USER identity found');
+        } else {
+          log.warn({ business_id }, 'No TT_USER identity found for advertiser');
+        }
+      } else {
+        log.warn({
+          error: identityData.message || 'Unknown error',
+          code: identityData.code
+        }, 'Failed to get TikTok identities - will use advertiser info as fallback');
+      }
+
+      log.info({
+        userId,
+        business_id,
+        account_name,
+        identity_id
       }, 'TikTok OAuth successful');
 
       // Save to database
@@ -212,7 +284,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         .update({
           tiktok_access_token: access_token,
           tiktok_business_id: business_id,
-          tiktok_account_id: account_name,
+          tiktok_account_id: identity_id || account_name, // Use identity_id if available, fallback to account_name
           updated_at: new Date().toISOString()
         })
         .eq('id', userId);
@@ -235,6 +307,7 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
         access_token,
         business_id,
         account_id: account_name,
+        identity_id: identity_id,
         advertisers: advertisers.map((adv: any) => ({
           id: adv.advertiser_id,
           name: adv.advertiser_name
