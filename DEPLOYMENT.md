@@ -1,276 +1,365 @@
-# Деплой сервиса обработки видео
+# CRM Deployment Guide
 
-## 🌐 Ваши домены
+Инструкция по развертыванию WhatsApp CRM в production.
 
-- **Agent Brain (Scoring):** `https://brain2.performanteaiagency.com`
-- **Agent Service (Video):** `https://agents.performanteaiagency.com` ⭐ Новый
+## Предварительные требования
 
-## 📋 Шаги для деплоя
+✅ Docker и Docker Compose установлены
+✅ Nginx с SSL сертификатами (Let's Encrypt)
+✅ Доступ к серверу через SSH
+✅ Git репозиторий настроен
+✅ Supabase проект создан
+✅ Evolution API работает
+✅ OpenAI API key есть
 
-### 1. Настройка DNS
+## 1. Подготовка сервера
 
-Добавьте A-запись в DNS для `performanteaiagency.com`:
-
-```
-Type: A
-Name: agents
-Value: [IP вашего сервера]
-TTL: 300
-```
-
-### 2. Установка на сервере
+### Обновить код
 
 ```bash
-# Подключитесь к серверу
-ssh user@your-server
-
-# Клонируйте репозиторий
-git clone <your-repo> /opt/agents-monorepo
-cd /opt/agents-monorepo
-
-# Настройте переменные окружения
-cp env.brain.example .env.brain
-cp env.brain.example .env.agent
-
-# Отредактируйте .env.agent
-nano .env.agent
+cd ~/agents-monorepo
+git pull origin main
 ```
 
-Добавьте в `.env.agent`:
-```bash
-# OpenAI для транскрибации
-OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Facebook API
-FB_API_VERSION=v20.0
-FB_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# Supabase
-SUPABASE_URL=https://xxxxxx.supabase.co
-SUPABASE_SERVICE_ROLE=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
-# Server
-PORT=8080
-```
-
-### 3. Запуск через Docker
+### Создать .env.crm
 
 ```bash
-# Запустите сервисы
-docker-compose up -d --build
-
-# Проверьте статус
-docker-compose ps
-
-# Проверьте логи
-docker-compose logs -f agent-service
+cd ~/agents-monorepo
+cp .env.crm.example .env.crm
+nano .env.crm
 ```
 
-### 4. Установка Nginx
+Заполнить:
+```bash
+PORT=8084
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_KEY=your-service-key-here
+EVOLUTION_DB_HOST=evolution-postgres
+EVOLUTION_DB_PORT=5432
+EVOLUTION_DB_NAME=evolution
+EVOLUTION_DB_USER=evolution
+EVOLUTION_DB_PASSWORD=your-evolution-db-password
+OPENAI_API_KEY=sk-your-openai-key
+```
+
+## 2. Сборка Docker образов
+
+### Backend
 
 ```bash
-# Установите nginx
-sudo apt update
-sudo apt install nginx
-
-# Скопируйте конфиг
-sudo cp nginx.conf /etc/nginx/sites-available/agents
-
-# Создайте симлинк
-sudo ln -s /etc/nginx/sites-available/agents /etc/nginx/sites-enabled/
-
-# Проверьте конфигурацию
-sudo nginx -t
-
-# Перезагрузите nginx
-sudo systemctl reload nginx
+docker-compose build crm-backend
 ```
 
-### 5. Настройка SSL (Let's Encrypt)
+Проверка:
+```bash
+docker images | grep crm-backend
+```
+
+### Frontend
 
 ```bash
-# Установите certbot
-sudo apt install certbot python3-certbot-nginx
-
-# Получите сертификат для нового домена
-sudo certbot --nginx -d agents.performanteaiagency.com
-
-# Автообновление сертификатов уже настроено через cron
+docker-compose build crm-frontend
 ```
 
-### 6. Проверка работы
+Проверка:
+```bash
+docker images | grep crm-frontend
+```
+
+## 3. Запуск сервисов
+
+### Запустить backend
+
+```bash
+docker-compose up -d crm-backend
+```
+
+Проверить логи:
+```bash
+docker-compose logs -f crm-backend
+```
+
+Проверить health:
+```bash
+curl http://localhost:8084/health
+# Должно вернуть: {"ok":true,"service":"crm-backend"}
+```
+
+### Запустить frontend
+
+```bash
+docker-compose up -d crm-frontend
+```
+
+Проверить:
+```bash
+docker-compose ps | grep crm
+curl http://localhost:3003
+```
+
+## 4. Обновить nginx
+
+```bash
+docker-compose restart nginx
+```
+
+Проверить конфигурацию:
+```bash
+docker exec nginx nginx -t
+```
+
+Проверить логи nginx:
+```bash
+docker-compose logs nginx | grep crm
+```
+
+## 5. Проверка работы
+
+### Backend API
 
 ```bash
 # Health check
-curl https://agents.performanteaiagency.com/health
+curl https://app.performanteaiagency.com/api/crm/health
 
-# Должен вернуть: {"ok":true}
+# Get analysis (замените UUID)
+curl "https://app.performanteaiagency.com/api/crm/dialogs/analysis?userAccountId=YOUR-UUID"
 ```
 
-## 🎯 Webhook URL
+### Frontend
 
-После деплоя ваш webhook URL будет:
+Открыть в браузере:
+- https://app.performanteaiagency.com/crm/
 
-```
-https://agents.performanteaiagency.com/process-video
-```
+Проверить:
+- ✅ Sidebar отображается
+- ✅ Навигация между страницами работает
+- ✅ Нет ошибок в консоли браузера
 
-## 🧪 Тестирование
+## 6. Обновить Evolution webhook (ВАЖНО!)
+
+Webhook должен указывать на crm-backend вместо agent-service.
 
 ```bash
-# Локальный тест (с вашего компьютера)
-export PAGE_ACCESS_TOKEN='ваш_токен'
-export API_URL='https://agents.performanteaiagency.com'
-
-./test-video-upload.sh ./test-video.mp4
+curl -X POST https://evolution.performanteaiagency.com/webhook/set/YOUR_INSTANCE_NAME \
+  -H "apikey: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "http://crm-backend:8084/webhooks/evolution",
+    "webhook_by_events": false,
+    "events": ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"]
+  }'
 ```
 
-Или через curl:
+Проверить webhook:
+```bash
+curl https://evolution.performanteaiagency.com/webhook/find/YOUR_INSTANCE_NAME \
+  -H "apikey: YOUR_API_KEY"
+```
+
+## 7. Мониторинг
+
+### Логи через Docker
 
 ```bash
-curl -X POST https://agents.performanteaiagency.com/process-video \
-  -F "video=@video.mp4" \
-  -F "user_id=123e4567-e89b-12d3-a456-426614174000" \
-  -F "ad_account_id=act_123456789" \
-  -F "page_id=987654321" \
-  -F "instagram_id=17841400000000000" \
-  -F "page_access_token=EAAxxxxx" \
-  -F "description=Тестовое видео" \
-  -F "language=ru"
+# Все логи crm-backend
+docker-compose logs -f crm-backend
+
+# Последние 100 строк
+docker-compose logs --tail=100 crm-backend
+
+# Логи с timestamp
+docker-compose logs -t crm-backend
 ```
 
-## 📊 Мониторинг
+### Логи через Grafana
 
-### Проверка статуса сервисов
+1. Открыть Grafana: http://your-server:3000
+2. Перейти в Explore
+3. Выбрать Loki data source
+4. Запрос:
+   ```
+   {container_name="crm-backend"}
+   ```
+
+### Метрики
+
+Проверить:
+- Количество запросов к API
+- Время ответа endpoints
+- Ошибки (4xx, 5xx)
+- Использование памяти/CPU
+
+## 8. Troubleshooting
+
+### Backend не запускается
 
 ```bash
-# Docker containers
-docker-compose ps
+# Проверить логи
+docker-compose logs crm-backend | tail -50
 
-# Логи agent-service
-docker-compose logs -f agent-service
+# Проверить зависимости
+docker-compose ps evolution-postgres
+docker exec evolution-postgres pg_isready
 
-# Логи agent-brain
-docker-compose logs -f agent-brain
-
-# Nginx логи
-sudo tail -f /var/log/nginx/agents_access.log
-sudo tail -f /var/log/nginx/agents_error.log
+# Перезапустить
+docker-compose restart crm-backend
 ```
 
-### Использование ресурсов
+### Frontend показывает 502
 
 ```bash
-# Использование памяти и CPU
-docker stats
+# Проверить что frontend запущен
+docker-compose ps crm-frontend
 
-# Disk space
-df -h
-du -sh /opt/agents-monorepo/*
+# Проверить логи nginx
+docker-compose logs nginx | grep crm-frontend
+
+# Проверить внутренний порт
+docker exec crm-frontend wget -O- http://localhost:80 || echo "Failed"
 ```
 
-## 🔧 Обслуживание
-
-### Обновление кода
+### API не работает
 
 ```bash
-cd /opt/agents-monorepo
-git pull
-docker-compose up -d --build
+# Проверить proxy в nginx
+docker exec nginx cat /etc/nginx/nginx.conf | grep -A 10 "api/crm"
+
+# Проверить связь между контейнерами
+docker exec nginx ping -c 3 crm-backend
+
+# Проверить endpoint напрямую
+docker exec nginx curl http://crm-backend:8084/health
 ```
 
-### Перезапуск сервисов
+### Supabase ошибки
 
 ```bash
-# Перезапуск всех сервисов
-docker-compose restart
+# Проверить переменные
+docker exec crm-backend env | grep SUPABASE
 
-# Перезапуск только agent-service
-docker-compose restart agent-service
+# Тест подключения (нужен npm install node-fetch)
+docker exec crm-backend node -e "
+const fetch = require('node-fetch');
+fetch(process.env.SUPABASE_URL + '/rest/v1/', {
+  headers: { 'apikey': process.env.SUPABASE_SERVICE_KEY }
+}).then(r => console.log('OK:', r.status)).catch(e => console.error('Error:', e));
+"
 ```
 
-### Очистка временных файлов
+### OpenAI API ошибки
 
 ```bash
-# Очистка Docker
-docker system prune -a
+# Проверить квоту
+curl https://api.openai.com/v1/models \
+  -H "Authorization: Bearer YOUR_KEY" | jq .
 
-# Очистка /tmp (если накопились файлы)
-sudo find /tmp -name "video_*.mp4" -mtime +1 -delete
-sudo find /tmp -name "audio_*.wav" -mtime +1 -delete
+# Проверить ключ в контейнере
+docker exec crm-backend env | grep OPENAI
 ```
 
-## 🚨 Troubleshooting
+## 9. Rollback
 
-### Проблема: 502 Bad Gateway
+Если что-то пошло не так:
 
 ```bash
-# Проверьте, запущен ли agent-service
-docker-compose ps
+# Остановить новые сервисы
+docker-compose stop crm-backend crm-frontend
 
-# Проверьте логи
-docker-compose logs agent-service
+# Вернуть предыдущую версию кода
+git reset --hard HEAD^
 
-# Перезапустите
-docker-compose restart agent-service
+# Пересобрать
+docker-compose build
+docker-compose up -d
+
+# Восстановить nginx
+docker-compose restart nginx
 ```
 
-### Проблема: Timeout при загрузке видео
+## 10. Обновление (после первого деплоя)
 
-Увеличьте таймауты в nginx.conf:
+```bash
+cd ~/agents-monorepo
+git pull origin main
+docker-compose build crm-backend crm-frontend
+docker-compose up -d crm-backend crm-frontend
+docker-compose restart nginx
+
+# Проверить
+curl https://app.performanteaiagency.com/api/crm/health
+```
+
+## 11. Масштабирование
+
+### Запустить несколько инстансов backend
+
+```yaml
+# В docker-compose.yml
+crm-backend:
+  deploy:
+    replicas: 3
+```
+
+### Load balancing (nginx)
+
 ```nginx
-proxy_read_timeout 900s;
-client_body_timeout 900s;
+upstream crm_backend {
+    server crm-backend:8084 max_fails=3 fail_timeout=30s;
+    server crm-backend-2:8084 max_fails=3 fail_timeout=30s;
+    server crm-backend-3:8084 max_fails=3 fail_timeout=30s;
+}
+
+location /api/crm/ {
+    proxy_pass http://crm_backend;
+}
 ```
 
-### Проблема: FFmpeg не найден
+## 12. Backup
+
+### База данных (Supabase)
+
+Автоматические бэкапы настроены в Supabase Dashboard.
+
+Ручной бэкап:
+```bash
+# Экспорт таблицы dialog_analysis
+curl https://your-project.supabase.co/rest/v1/dialog_analysis \
+  -H "apikey: YOUR_KEY" > dialog_analysis_backup.json
+```
+
+### Evolution DB
 
 ```bash
-# Проверьте в контейнере
-docker-compose exec agent-service which ffmpeg
-
-# Если не найден, пересоберите образ
-docker-compose up -d --build agent-service
+docker exec evolution-postgres pg_dump -U evolution evolution > backup.sql
 ```
 
-## 📝 Резервное копирование
+## 13. Security Checklist
 
-### База данных
+- ✅ SSL сертификаты установлены
+- ✅ .env файлы не в git
+- ✅ API keys не в логах
+- ✅ CORS настроен правильно
+- ✅ Rate limiting включен (nginx)
+- ✅ Firewall настроен (только 80, 443, 22)
+- ✅ Supabase Row Level Security (RLS) включен
 
-Supabase автоматически делает бэкапы, но можно создать ручной:
+## 14. Post-Deployment Checklist
 
-```bash
-# Через Supabase Dashboard
-# Settings → Database → Create backup
-```
+- [ ] Backend health check работает
+- [ ] Frontend открывается
+- [ ] API endpoints отвечают
+- [ ] Evolution webhook обновлен
+- [ ] Логи мониторятся в Grafana
+- [ ] Alerts настроены
+- [ ] Backup расписание проверено
+- [ ] Documentation обновлена
 
-### Конфигурация
+## Контакты для поддержки
 
-```bash
-# Создайте backup переменных окружения
-cp .env.agent .env.agent.backup
-cp .env.brain .env.brain.backup
-```
+- Grafana: http://your-server:3000
+- Supabase: https://app.supabase.com
+- Evolution API: https://evolution.performanteaiagency.com
 
-## 🔐 Безопасность
+---
 
-- ✅ HTTPS через Let's Encrypt
-- ✅ Закрытые переменные окружения
-- ✅ Rate limiting через nginx (опционально)
-- ✅ Firewall настройки
-
-### Настройка Firewall (UFW)
-
-```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 22/tcp
-sudo ufw enable
-```
-
-## 📞 Контакты и поддержка
-
-После успешного деплоя сохраните:
-- URLs всех сервисов
-- Учетные данные
-- Backup переменных окружения
+**Готово!** 🚀 CRM развернута и работает.

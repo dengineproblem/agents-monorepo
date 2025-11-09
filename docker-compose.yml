@@ -48,9 +48,94 @@ services:
       - FB_VALIDATE_ONLY=false
       - CAMPAIGN_BUILDER_MODEL=gpt-4o
       - ANALYZER_URL=http://creative-analyzer:7081
+      - CHATBOT_SERVICE_URL=http://chatbot-service:8083
     ports:
       - "8082:8082"
     restart: unless-stopped
+    depends_on:
+      - chatbot-service
+
+  # AI Chatbot Service
+  chatbot-service:
+    build: ./services/chatbot-service
+    labels:
+      logging: "promtail"
+    env_file:
+      - ./.env.chatbot
+    environment:
+      - PORT=8083
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis-chatbot:6379
+      - EVOLUTION_API_URL=http://evolution-api:8080
+    ports:
+      - "8083:8083"
+    restart: unless-stopped
+    depends_on:
+      - redis-chatbot
+
+  # Redis for Chatbot (message queues, reactivation campaigns)
+  redis-chatbot:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6381:6379"
+    volumes:
+      - redis-chatbot-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Chatbot Worker (reactivation campaigns, cron jobs)
+  chatbot-worker:
+    build: ./services/chatbot-service
+    command: npm run worker
+    labels:
+      logging: "promtail"
+    env_file:
+      - ./.env.chatbot
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis-chatbot:6379
+      - EVOLUTION_API_URL=http://evolution-api:8080
+    restart: unless-stopped
+    depends_on:
+      - redis-chatbot
+      - chatbot-service
+
+  # CRM Backend Service (Dialog Analysis)
+  crm-backend:
+    build: ./services/crm-backend
+    labels:
+      logging: "promtail"
+    env_file:
+      - ./.env.crm
+    environment:
+      - PORT=8084
+      - NODE_ENV=production
+      - EVOLUTION_DB_HOST=evolution-postgres
+      - EVOLUTION_DB_PORT=5432
+      - EVOLUTION_DB_NAME=evolution
+      - EVOLUTION_DB_USER=evolution
+    ports:
+      - "8084:8084"
+    restart: unless-stopped
+    depends_on:
+      - evolution-postgres
+
+  # CRM Frontend
+  crm-frontend:
+    build: ./services/crm-frontend
+    environment:
+      - NODE_ENV=production
+    ports:
+      - "3003:80"
+    restart: unless-stopped
+    depends_on:
+      - crm-backend
+      - chatbot-service
 
   # Production frontend (app.performanteaiagency.com)
   frontend:
@@ -202,3 +287,4 @@ volumes:
   grafana-data:
   evolution-redis-data:
   evolution-postgres-data:
+  redis-chatbot-data:
