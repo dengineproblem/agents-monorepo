@@ -8,14 +8,17 @@ const BusinessProfileSchema = z.object({
   business_industry: z.string().min(1, 'Укажите сферу деятельности'),
   business_description: z.string().min(3, 'Минимум 3 символа'),
   target_audience: z.string().min(3, 'Минимум 3 символа'),
-  main_challenges: z.string().min(3, 'Минимум 3 символа'),
   funnel_stages: z.array(z.string()).optional(),
   
-  // New personalization fields
+  // Funnel personalization
   funnel_stages_description: z.string().min(3, 'Минимум 3 символа').optional(),
   stage_transition_criteria: z.string().min(3, 'Минимум 3 символа').optional(),
-  positive_signals: z.string().min(3, 'Минимум 3 символа').optional(),
-  negative_signals: z.string().min(3, 'Минимум 3 символа').optional(),
+  
+  // Client profiles and signals
+  ideal_client_profile: z.string().min(3, 'Минимум 3 символа').optional(),
+  non_target_profile: z.string().min(3, 'Минимум 3 символа').optional(),
+  client_pains: z.string().min(3, 'Минимум 3 символа').optional(),
+  interest_and_objections: z.string().min(3, 'Минимум 3 символа').optional(),
 });
 
 export async function businessProfileRoutes(app: FastifyInstance) {
@@ -60,12 +63,13 @@ export async function businessProfileRoutes(app: FastifyInstance) {
           business_industry: body.business_industry,
           business_description: body.business_description,
           target_audience: body.target_audience,
-          main_challenges: body.main_challenges,
           funnel_stages: body.funnel_stages,
           funnel_stages_description: body.funnel_stages_description,
           stage_transition_criteria: body.stage_transition_criteria,
-          positive_signals: body.positive_signals,
-          negative_signals: body.negative_signals,
+          ideal_client_profile: body.ideal_client_profile,
+          non_target_profile: body.non_target_profile,
+          client_pains: body.client_pains,
+          interest_and_objections: body.interest_and_objections,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'user_account_id'
@@ -86,11 +90,12 @@ export async function businessProfileRoutes(app: FastifyInstance) {
           business_industry: body.business_industry,
           business_description: body.business_description,
           target_audience: body.target_audience,
-          main_challenges: body.main_challenges,
           funnel_stages_description: body.funnel_stages_description,
           stage_transition_criteria: body.stage_transition_criteria,
-          positive_signals: body.positive_signals,
-          negative_signals: body.negative_signals,
+          ideal_client_profile: body.ideal_client_profile,
+          non_target_profile: body.non_target_profile,
+          client_pains: body.client_pains,
+          interest_and_objections: body.interest_and_objections,
         });
 
         // Save context to profile

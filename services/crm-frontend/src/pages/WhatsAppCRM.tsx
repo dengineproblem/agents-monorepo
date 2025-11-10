@@ -7,11 +7,12 @@ import { AddLeadModal } from '@/components/whatsapp-crm/AddLeadModal';
 import { DialogDetailModal } from '@/components/dialogs/DialogDetailModal';
 import { DialogFilters } from '@/components/dialogs/DialogFilters';
 import { OnboardingModal } from '@/components/onboarding/OnboardingModal';
+import { LoadLeadsModal } from '@/components/dialogs/LoadLeadsModal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { dialogAnalysisService } from '@/services/dialogAnalysisService';
 import { DialogAnalysis, DialogFilters as DialogFiltersType, FunnelStage } from '@/types/dialogAnalysis';
-import { Plus, Download, RefreshCw } from 'lucide-react';
+import { Plus, Download, RefreshCw, Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 export function WhatsAppCRM() {
@@ -25,6 +26,7 @@ export function WhatsAppCRM() {
   const [selectedDialog, setSelectedDialog] = useState<DialogAnalysis | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isLoadLeadsModalOpen, setIsLoadLeadsModalOpen] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   // Fetch leads
@@ -116,6 +118,34 @@ export function WhatsAppCRM() {
     },
   });
 
+  // Analyze dialogs mutation
+  const analyzeDialogsMutation = useMutation({
+    mutationFn: async ({ instanceName, maxDialogs }: { instanceName: string; maxDialogs: number }) => {
+      return dialogAnalysisService.analyzeDialogs({
+        userAccountId,
+        instanceName,
+        minIncoming: 3,
+        maxDialogs,
+      });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      queryClient.invalidateQueries({ queryKey: ['lead-stats'] });
+      setIsLoadLeadsModalOpen(false);
+      toast({ 
+        title: '✅ Анализ запущен!',
+        description: `Найдено диалогов: ${data.dialogsFound || 0}. Обновите страницу через минуту.`
+      });
+    },
+    onError: (error: any) => {
+      toast({ 
+        title: 'Ошибка при анализе',
+        description: error.message,
+        variant: 'destructive' 
+      });
+    },
+  });
+
   // Handlers
   const handleMoveCard = (leadId: string, newStage: FunnelStage) => {
     updateStageMutation.mutate({ leadId, newStage });
@@ -165,6 +195,14 @@ export function WhatsAppCRM() {
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold">WhatsApp CRM</h1>
           <div className="flex gap-2">
+            <Button 
+              onClick={() => setIsLoadLeadsModalOpen(true)} 
+              variant="default" 
+              size="sm"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Загрузить лиды из WhatsApp
+            </Button>
             <Button onClick={() => refetch()} variant="outline" size="sm">
               <RefreshCw className="h-4 w-4 mr-2" />
               Обновить
@@ -233,6 +271,15 @@ export function WhatsAppCRM() {
         )}
 
         {/* Modals */}
+        <LoadLeadsModal
+          open={isLoadLeadsModalOpen}
+          onClose={() => setIsLoadLeadsModalOpen(false)}
+          onSubmit={(instanceName, maxDialogs) => {
+            analyzeDialogsMutation.mutate({ instanceName, maxDialogs });
+          }}
+          isLoading={analyzeDialogsMutation.isPending}
+        />
+
         <AddLeadModal
           open={isAddModalOpen}
           onClose={() => setIsAddModalOpen(false)}

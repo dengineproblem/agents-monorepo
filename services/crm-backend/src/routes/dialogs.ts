@@ -32,6 +32,46 @@ const ExportCsvSchema = z.object({
 export async function dialogsRoutes(app: FastifyInstance) {
   
   /**
+   * GET /dialogs/test-instance
+   * Test endpoint to check Supabase connection
+   */
+  app.get('/dialogs/test-instance', async (request, reply) => {
+    try {
+      const userAccountId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
+      const instanceName = 'instance_0f559eb0_1761736509038';
+      
+      // Test 1: Get all instances
+      const { data: allInstances, error: allError } = await supabase
+        .from('whatsapp_instances')
+        .select('*')
+        .limit(5);
+      
+      // Test 2: Get specific instance
+      const { data: specificInstance, error: specificError } = await supabase
+        .from('whatsapp_instances')
+        .select('*')
+        .eq('instance_name', instanceName)
+        .eq('user_account_id', userAccountId)
+        .maybeSingle();
+      
+      return reply.send({
+        allInstances: {
+          data: allInstances,
+          error: allError?.message,
+          count: allInstances?.length || 0
+        },
+        specificInstance: {
+          data: specificInstance,
+          error: specificError?.message,
+          found: !!specificInstance
+        }
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+  
+  /**
    * POST /dialogs/analyze
    * Analyze WhatsApp dialogs for a specific instance
    */
@@ -43,6 +83,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
       app.log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
       // Verify that instance belongs to user
+      app.log.info({ instanceName, userAccountId }, 'Checking instance in database');
+      
       const { data: instance, error: instanceError } = await supabase
         .from('whatsapp_instances')
         .select('id, instance_name')
@@ -50,9 +92,25 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .eq('user_account_id', userAccountId)
         .maybeSingle();
 
+      app.log.info({ 
+        instance, 
+        instanceError: instanceError?.message, 
+        hasError: !!instanceError,
+        hasInstance: !!instance 
+      }, 'Instance check result');
+
       if (instanceError || !instance) {
+        app.log.error({ instanceError, instanceName, userAccountId }, 'Instance verification failed');
         return reply.status(404).send({ 
-          error: 'Instance not found or does not belong to user' 
+          error: 'Instance not found or does not belong to user',
+          details: instanceError?.message,
+          debug: {
+            instanceName,
+            userAccountId,
+            hasInstance: !!instance,
+            hasError: !!instanceError,
+            errorMessage: instanceError?.message
+          }
         });
       }
 
@@ -79,10 +137,18 @@ export async function dialogsRoutes(app: FastifyInstance) {
         });
       }
       
-      app.log.error({ error: error.message }, 'Dialog analysis failed');
+      app.log.error({ 
+        error: error.message, 
+        stack: error.stack,
+        name: error.name,
+        fullError: JSON.stringify(error, Object.getOwnPropertyNames(error))
+      }, 'Dialog analysis failed');
+      
       return reply.status(500).send({ 
         error: 'Analysis failed', 
-        message: error.message 
+        message: error.message || 'Unknown error',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+        details: error.toString()
       });
     }
   });

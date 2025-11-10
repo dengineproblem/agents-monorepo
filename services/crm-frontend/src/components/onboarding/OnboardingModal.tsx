@@ -21,9 +21,10 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
     target_audience: '',
     funnel_stages_description: '',
     stage_transition_criteria: '',
-    positive_signals: '',
-    negative_signals: '',
-    main_challenges: '',
+    ideal_client_profile: '',
+    non_target_profile: '',
+    client_pains: '',
+    interest_and_objections: '',
   });
 
   const handleSubmit = async () => {
@@ -65,9 +66,10 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
     formData.funnel_stages_description.length >= 3 && 
     formData.stage_transition_criteria.length >= 3;
   const isStep3Valid = 
-    formData.positive_signals.length >= 3 && 
-    formData.negative_signals.length >= 3 &&
-    formData.main_challenges.length >= 3;
+    formData.ideal_client_profile.length >= 3 && 
+    formData.non_target_profile.length >= 3 &&
+    formData.client_pains.length >= 3 &&
+    formData.interest_and_objections.length >= 3;
 
   return (
     <Dialog open={open} onOpenChange={() => {}}>
@@ -75,8 +77,8 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
         <DialogHeader>
           <DialogTitle>Добро пожаловать в WhatsApp CRM! 🎉</DialogTitle>
           <DialogDescription>
-            Ответьте на несколько вопросов, чтобы мы могли лучше анализировать ваших лидов.
-            Это займет всего 2 минуты.
+            Ответьте на 9 вопросов, чтобы AI точно анализировал ваших лидов с учётом специфики вашего бизнеса.
+            Это займет 3-4 минуты.
           </DialogDescription>
         </DialogHeader>
 
@@ -204,25 +206,25 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
           {step === 3 && (
             <div className="space-y-4">
               <div className="text-sm text-gray-500 mb-4">
-                Шаг 3 из 3: Сигналы и задачи
+                Шаг 3 из 3: Сигналы и характеристики
               </div>
 
               <div>
-                <Label htmlFor="positive">
-                  6. Позитивные сигналы заинтересованности *
+                <Label htmlFor="ideal">
+                  6. Опишите идеального клиента *
                 </Label>
                 <Textarea
-                  id="positive"
-                  placeholder='Например: "хочу узнать подробнее", "какие результаты", "сколько стоит", "когда можем начать", "интересно"...'
-                  value={formData.positive_signals}
-                  onChange={(e) => setFormData({ ...formData, positive_signals: e.target.value })}
+                  id="ideal"
+                  placeholder="Например: B2B, владелец стоматологической клиники, есть отдел продаж, готов инвестировать от 500к/мес"
+                  value={formData.ideal_client_profile}
+                  onChange={(e) => setFormData({ ...formData, ideal_client_profile: e.target.value })}
                   rows={3}
                   className="mt-2"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Минимум 3 символа. Какие фразы/вопросы говорят о том, что клиент заинтересован?
+                  Минимум 3 символа. Сегмент, ниша, должность, характеристики
                 </p>
-                {formData.positive_signals.length > 0 && formData.positive_signals.length < 3 && (
+                {formData.ideal_client_profile.length > 0 && formData.ideal_client_profile.length < 3 && (
                   <p className="text-xs text-red-500 mt-1">
                     ⚠️ Слишком коротко, добавьте детали
                   </p>
@@ -230,21 +232,21 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
               </div>
 
               <div>
-                <Label htmlFor="negative">
-                  7. Типичные возражения клиентов *
+                <Label htmlFor="nontarget">
+                  7. Кто точно не подходит как клиент *
                 </Label>
                 <Textarea
-                  id="negative"
-                  placeholder='Например: "дорого", "подумаю", "нет бюджета", "не подходит", "не интересно"...'
-                  value={formData.negative_signals}
-                  onChange={(e) => setFormData({ ...formData, negative_signals: e.target.value })}
+                  id="nontarget"
+                  placeholder="Например: B2C клиенты, начинающие без бюджета, сотрудники без полномочий"
+                  value={formData.non_target_profile}
+                  onChange={(e) => setFormData({ ...formData, non_target_profile: e.target.value })}
                   rows={3}
                   className="mt-2"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Минимум 3 символа. Какие возражения чаще всего озвучивают клиенты?
+                  Минимум 3 символа. Кого мы НЕ хотим видеть в качестве клиента
                 </p>
-                {formData.negative_signals.length > 0 && formData.negative_signals.length < 3 && (
+                {formData.non_target_profile.length > 0 && formData.non_target_profile.length < 3 && (
                   <p className="text-xs text-red-500 mt-1">
                     ⚠️ Слишком коротко, добавьте детали
                   </p>
@@ -252,21 +254,43 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
               </div>
 
               <div>
-                <Label htmlFor="challenges">
-                  8. Главные задачи вашего бизнеса *
+                <Label htmlFor="pains">
+                  8. Типичные боли и запросы идеальных клиентов *
                 </Label>
                 <Textarea
-                  id="challenges"
-                  placeholder="Например: увеличить поток записей, улучшить конверсию из лидов, привлечь больше клиентов..."
-                  value={formData.main_challenges}
-                  onChange={(e) => setFormData({ ...formData, main_challenges: e.target.value })}
+                  id="pains"
+                  placeholder="Например: 'мало заявок', 'высокая стоимость лида', 'реклама не работает', 'нужно масштабироваться'"
+                  value={formData.client_pains}
+                  onChange={(e) => setFormData({ ...formData, client_pains: e.target.value })}
                   rows={3}
                   className="mt-2"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Минимум 3 символа. Что для вас наиболее важно сейчас?
+                  Минимум 3 символа. Какие проблемы они хотят решить?
                 </p>
-                {formData.main_challenges.length > 0 && formData.main_challenges.length < 3 && (
+                {formData.client_pains.length > 0 && formData.client_pains.length < 3 && (
+                  <p className="text-xs text-red-500 mt-1">
+                    ⚠️ Слишком коротко, добавьте детали
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="signals">
+                  9. Фразы интереса и типичные возражения *
+                </Label>
+                <Textarea
+                  id="signals"
+                  placeholder="Интерес: 'хочу узнать подробнее', 'сколько стоит', 'когда можем начать'. Возражения: 'дорого', 'подумаю', 'нет бюджета'"
+                  value={formData.interest_and_objections}
+                  onChange={(e) => setFormData({ ...formData, interest_and_objections: e.target.value })}
+                  rows={4}
+                  className="mt-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Минимум 3 символа. Что говорят заинтересованные клиенты и какие возражения озвучивают
+                </p>
+                {formData.interest_and_objections.length > 0 && formData.interest_and_objections.length < 3 && (
                   <p className="text-xs text-red-500 mt-1">
                     ⚠️ Слишком коротко, добавьте детали
                   </p>
