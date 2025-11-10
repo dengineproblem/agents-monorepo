@@ -1826,11 +1826,43 @@ export async function createAdsInAdSet(params: {
 
   for (const creative of creatives) {
     const creativeId = getCreativeIdForObjective(creative, objective);
-    
+
     if (!creativeId) {
-      log.warn({ creativeId: creative.user_creative_id, objective }, 'No Facebook creative ID for creative');
+      log.warn({
+        userCreativeId: creative.user_creative_id,
+        creativeTitle: creative.title,
+        objective,
+        availableCreativeIds: {
+          whatsapp: creative.fb_creative_id_whatsapp,
+          instagram_traffic: creative.fb_creative_id_instagram_traffic,
+          site_leads: creative.fb_creative_id_site_leads
+        }
+      }, 'No Facebook creative ID for creative');
       continue;
     }
+
+    const adPayload = {
+      access_token: accessToken,
+      name: `Ad - ${creative.title}`,
+      adset_id: adsetId,
+      creative: { creative_id: creativeId },
+      status: 'ACTIVE',
+    };
+
+    log.info({
+      userCreativeId: creative.user_creative_id,
+      creativeTitle: creative.title,
+      fbCreativeId: creativeId,
+      adsetId,
+      adAccountId: normalizedAdAccountId,
+      objective,
+      adPayload: {
+        name: adPayload.name,
+        adset_id: adPayload.adset_id,
+        creative: adPayload.creative,
+        status: adPayload.status
+      }
+    }, 'Attempting to create ad in Facebook');
 
     try {
       const response = await fetch(
@@ -1838,24 +1870,36 @@ export async function createAdsInAdSet(params: {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            access_token: accessToken,
-            name: `Ad - ${creative.title}`,
-            adset_id: adsetId,
-            creative: { creative_id: creativeId },
-            status: 'ACTIVE',
-          }),
+          body: JSON.stringify(adPayload),
         }
       );
 
       if (!response.ok) {
         const error = await response.json();
-        log.error({ err: error, creativeId: creative.user_creative_id }, 'Failed to create ad');
+        log.error({
+          err: error,
+          userCreativeId: creative.user_creative_id,
+          creativeTitle: creative.title,
+          fbCreativeId: creativeId,
+          adsetId,
+          statusCode: response.status,
+          errorCode: error.error?.code,
+          errorSubcode: error.error?.error_subcode,
+          errorMessage: error.error?.message,
+          errorUserTitle: error.error?.error_user_title,
+          errorUserMsg: error.error?.error_user_msg
+        }, 'Failed to create ad');
         continue;
       }
 
       const ad = await response.json();
-      log.info({ adId: ad.id, creativeId: creative.user_creative_id }, 'Ad created successfully');
+      log.info({
+        adId: ad.id,
+        adName: ad.name,
+        userCreativeId: creative.user_creative_id,
+        creativeTitle: creative.title,
+        fbCreativeId: creativeId
+      }, 'Ad created successfully');
       ads.push(ad);
 
       // Сохраняем маппинг для трекинга лидов (если есть userId)
@@ -1872,9 +1916,25 @@ export async function createAdsInAdSet(params: {
         });
       }
     } catch (error: any) {
-      log.error({ err: error, adsetId, creativeId: creative.user_creative_id }, 'Error creating ad');
+      log.error({
+        err: error,
+        userCreativeId: creative.user_creative_id,
+        creativeTitle: creative.title,
+        fbCreativeId: creativeId,
+        adsetId,
+        errorMessage: error.message,
+        errorStack: error.stack
+      }, 'Error creating ad (exception caught)');
     }
   }
+
+  log.info({
+    adsetId,
+    totalCreatives: creatives.length,
+    successfulAds: ads.length,
+    failedAds: creatives.length - ads.length,
+    adsCreated: ads.map(ad => ({ id: ad.id, name: ad.name }))
+  }, 'Finished creating ads in ad set');
 
   return ads;
 }
