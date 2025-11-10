@@ -18,6 +18,7 @@ import {
   getTempCredentials,
   deleteTempCredentials
 } from '../lib/amocrmTempCredentials.js';
+import { registerAmoCRMWebhook } from '../lib/amocrmWebhook.js';
 
 const AMOCRM_CLIENT_ID = process.env.AMOCRM_CLIENT_ID;
 const AMOCRM_REDIRECT_URI = process.env.AMOCRM_REDIRECT_URI;
@@ -256,6 +257,19 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
         }, 'AmoCRM connected successfully');
       } catch (error) {
         app.log.warn({ error }, 'Connected to AmoCRM but failed to fetch account info');
+      }
+
+      // Automatically register webhook for real-time lead status updates
+      try {
+        await registerAmoCRMWebhook(userAccountId, subdomain, tokens.access_token);
+        app.log.info({ userAccountId, subdomain }, 'AmoCRM webhook registered successfully');
+      } catch (error: any) {
+        app.log.error({ 
+          error: error.message, 
+          userAccountId, 
+          subdomain 
+        }, 'Failed to register AmoCRM webhook - user can register it manually later');
+        // Don't fail the OAuth flow if webhook registration fails
       }
 
       // Return success page (or redirect to frontend)

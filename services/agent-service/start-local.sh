@@ -7,3 +7,5 @@ set +a
 # Start agent-service
 node dist/server.js
 
+
+

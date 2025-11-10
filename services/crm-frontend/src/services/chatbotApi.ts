@@ -26,6 +26,12 @@ export const chatbotApi = {
   },
   
   // Документы
+  async getDocuments(userId: string) {
+    const response = await fetch(`${API_BASE_URL}/documents?userId=${userId}`);
+    if (!response.ok) throw new Error('Failed to fetch documents');
+    return response.json();
+  },
+  
   async uploadDocument(file: File, userId: string) {
     const formData = new FormData();
     formData.append('file', file);

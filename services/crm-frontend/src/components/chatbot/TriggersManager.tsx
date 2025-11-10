@@ -28,11 +28,14 @@ export function TriggersManager() {
     response: '',
     enabled: true,
   });
+  
+  // Hardcoded user account ID - в реальном приложении получать из auth
+  const userAccountId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
   // Fetch triggers
   const { data: triggers = [], isLoading } = useQuery({
-    queryKey: ['chatbot-triggers'],
-    queryFn: () => chatbotApi.getTriggers(),
+    queryKey: ['chatbot-triggers', userAccountId],
+    queryFn: () => chatbotApi.getTriggers(userAccountId),
   });
 
   // Create trigger mutation
@@ -40,7 +43,7 @@ export function TriggersManager() {
     mutationFn: (data: { keyword: string; response: string; enabled: boolean }) =>
       chatbotApi.createTrigger(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatbot-triggers'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-triggers', userAccountId] });
       toast({ title: 'Триггер создан' });
       handleCloseModal();
     },
@@ -54,7 +57,7 @@ export function TriggersManager() {
     mutationFn: ({ id, data }: { id: string; data: Partial<Trigger> }) =>
       chatbotApi.updateTrigger(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatbot-triggers'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-triggers', userAccountId] });
       toast({ title: 'Триггер обновлён' });
       handleCloseModal();
     },
@@ -67,7 +70,7 @@ export function TriggersManager() {
   const deleteMutation = useMutation({
     mutationFn: (id: string) => chatbotApi.deleteTrigger(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatbot-triggers'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-triggers', userAccountId] });
       toast({ title: 'Триггер удалён' });
     },
     onError: () => {

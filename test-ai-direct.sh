@@ -49,3 +49,5 @@ echo "   - 'selected_creatives' с reasoning"
 echo ""
 echo "📄 Полный ответ сохранен в /tmp/ai-autolaunch-response.txt"
 
+
+

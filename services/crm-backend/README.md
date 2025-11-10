@@ -206,3 +206,4 @@ const { data, error } = await supabase
 - Распределение hot/warm/cold
 - Время анализа одного диалога
 
+

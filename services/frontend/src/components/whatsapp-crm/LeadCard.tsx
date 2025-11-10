@@ -10,7 +10,9 @@ import {
   Calendar,
   TrendingUp,
   User,
-  Briefcase
+  Briefcase,
+  Bot,
+  Pause
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -82,6 +84,22 @@ export function LeadCard({ lead, onClick, onEdit, onDelete }: LeadCardProps) {
             <Badge variant="outline" className="flex-shrink-0">
               {lead.score ?? '—'}
             </Badge>
+            {/* Bot Status Indicator */}
+            {lead.assigned_to_human && (
+              <div className="flex items-center" title="Менеджер в работе">
+                <User className="h-4 w-4 text-orange-500" />
+              </div>
+            )}
+            {lead.bot_paused && (
+              <div className="flex items-center" title="Бот на паузе">
+                <Pause className="h-4 w-4 text-gray-500" />
+              </div>
+            )}
+            {!lead.assigned_to_human && !lead.bot_paused && (
+              <div className="flex items-center" title="Бот активен">
+                <Bot className="h-4 w-4 text-green-500" />
+              </div>
+            )}
           </div>
           
           {(onEdit || onDelete) && (

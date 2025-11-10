@@ -10,11 +10,14 @@ import { RefreshCw, Save, Loader2 } from 'lucide-react';
 export function PromptEditor() {
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState('');
+  
+  // Hardcoded user account ID - в реальном приложении получать из auth
+  const userAccountId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
   // Fetch current configuration
   const { data: config, isLoading } = useQuery({
-    queryKey: ['chatbot-config'],
-    queryFn: () => chatbotApi.getConfiguration(),
+    queryKey: ['chatbot-config', userAccountId],
+    queryFn: () => chatbotApi.getConfiguration(userAccountId),
   });
 
   // Set prompt when config loads
@@ -27,9 +30,9 @@ export function PromptEditor() {
   // Update configuration mutation
   const updateConfigMutation = useMutation({
     mutationFn: (systemPrompt: string) =>
-      chatbotApi.updateConfiguration({ systemPrompt }),
+      chatbotApi.updateConfiguration(userAccountId, { systemPrompt }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatbot-config'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-config', userAccountId] });
       toast({ title: 'Промпт сохранён' });
     },
     onError: () => {
@@ -39,10 +42,10 @@ export function PromptEditor() {
 
   // Regenerate prompt mutation
   const regenerateMutation = useMutation({
-    mutationFn: () => chatbotApi.regeneratePrompt(),
+    mutationFn: () => chatbotApi.regeneratePrompt(userAccountId),
     onSuccess: (data) => {
       setPrompt(data.systemPrompt);
-      queryClient.invalidateQueries({ queryKey: ['chatbot-config'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-config', userAccountId] });
       toast({ title: 'Промпт регенерирован из документов' });
     },
     onError: () => {

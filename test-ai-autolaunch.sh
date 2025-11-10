@@ -72,3 +72,5 @@ echo "   - 'reasoning' от LLM"
 echo "   - 'confidence: high|medium|low'"
 echo ""
 
+
+

@@ -143,17 +143,188 @@ Docker nginx (контейнер)
 | `evolution-postgres` | 5432 | 5433 | БД для Evolution API |
 | `evolution-redis` | 6379 | 6380 | Cache для Evolution API |
 | `tiktok-proxy` (на хосте) | 4001 | 4001 | TikTok Marketing API proxy (legacy, не в Docker) |
+| `crm-backend` | 8084 | 8084 | Backend анализа WhatsApp диалогов |
+| `crm-frontend` | 80 | 3003 | Frontend CRM (nginx в контейнере) |
+| `chatbot-service` | 8083 | 8083 | Чатбот автоматизация |
+| `chatbot-worker` | - | - | Worker для reactivation campaigns |
+| `redis-chatbot` | 6379 | 6381 | Cache для chatbot |
+
+**Локальная разработка (без Docker):**
+- crm-backend: 8084 (то же)
+- crm-frontend: 5174 (Vite dev server)
+- chatbot-service: 8083 (то же)
 
 ### **Docker Compose файлы:**
 
 - **Основной:** `/root/agents-monorepo/docker-compose.yml` (все сервисы агентов, фронтенды, nginx)
   - Сеть: `agents-monorepo_default`
-  - Контейнеры: nginx, frontend, frontend-appreview, agent-service, agent-brain, creative-analyzer, loki, promtail, grafana, evolution-api, evolution-postgres, evolution-redis
+  - Контейнеры: nginx, frontend, frontend-appreview, agent-service, agent-brain, creative-analyzer, loki, promtail, grafana, evolution-api, evolution-postgres, evolution-redis, crm-backend, crm-frontend, chatbot-service, chatbot-worker, redis-chatbot
   
 - **N8N (отдельный):** `/root/docker-compose.yml` (n8n + postgres)
   - Сеть: `root_default`
   - Контейнеры: n8n, postgres
   - **ВАЖНО:** n8n также подключен к `agents-monorepo_default` через `docker network connect` для связи с nginx
+
+---
+
+## 📱 WHATSAPP CRM & CHATBOT
+
+### **Архитектура системы**
+
+WhatsApp CRM - это отдельная подсистема для управления лидами из WhatsApp с AI-анализом диалогов.
+
+**Компоненты:**
+
+1. **crm-backend** (Fastify + TypeScript)
+   - Анализ WhatsApp диалогов с помощью OpenAI GPT-5-mini
+   - Квалификация лидов (hot/warm/cold)
+   - Скоринг (0-100) и определение этапа воронки
+   - REST API для фронтенда
+   - **Порт:** 8084
+   - **Источник данных:** Evolution PostgreSQL (сообщения WhatsApp)
+   - **Хранилище:** Supabase (результаты анализа в таблице `dialog_analysis`)
+
+2. **crm-frontend** (React + Vite + shadcn/ui)
+   - Kanban CRM с Drag & Drop (7 этапов воронки)
+   - Управление лидами, фильтрация, экспорт в CSV
+   - Настройки чатбота (промпт, документы, триггеры)
+   - Реактивация campaigns
+   - **Порт (dev):** 5174 (Vite dev server)
+   - **Порт (production):** 3003 (nginx в контейнере)
+
+3. **chatbot-service** (Node.js + Supabase)
+   - Автоматизация диалогов WhatsApp
+   - Триггеры и реактивация холодных лидов
+   - Управление конфигурацией бота
+   - **Порт:** 8083
+
+4. **chatbot-worker**
+   - Background worker для cron jobs
+   - Reactivation campaigns (массовая рассылка)
+   - **Порт:** нет (внутренний процесс)
+
+5. **redis-chatbot**
+   - Cache для chatbot
+   - **Порт:** 6381 (внешний), 6379 (внутри)
+
+**Зависимости:**
+- **Evolution API** (8080) - источник WhatsApp сообщений
+- **Supabase** - хранилище результатов анализа
+- **OpenAI** - AI анализ диалогов
+
+### **API Endpoints**
+
+#### **CRM Backend** (`/api/crm/*`)
+
+Все запросы проксируются через nginx:
+- Клиент: `https://app.performanteaiagency.com/api/crm/dialogs/stats`
+- Nginx rewrite: убирает `/api/crm`
+- Backend получает: `/dialogs/stats`
+
+**Endpoints:**
+- `POST /dialogs/analyze` - запустить AI анализ диалогов для instance
+  - Body: `{ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }`
+  - Response: статистика анализа (total, hot, warm, cold)
+
+- `GET /dialogs/analysis` - получить проанализированные лиды с фильтрами
+  - Query: `userAccountId`, `instanceName`, `interestLevel`, `minScore`, `funnelStage`
+  - Response: массив лидов
+
+- `GET /dialogs/stats` - статистика по лидам (hot/warm/cold/total)
+  - Query: `userAccountId`
+  - Response: `{ hot: 10, warm: 20, cold: 15, total: 45 }`
+
+- `POST /dialogs/leads` - создать лид вручную
+  - Body: `{ userAccountId, phoneNumber, contactName, funnelStage, ... }`
+
+- `PATCH /dialogs/leads/:id` - обновить лид (этап воронки, статус бота)
+  - Body: `{ funnelStage, botStatus, score, ... }`
+
+- `DELETE /dialogs/analysis/:id` - удалить лид
+
+- `GET /dialogs/export-csv` - экспорт лидов в CSV
+  - Query: `userAccountId` + фильтры
+  - Response: CSV файл
+
+#### **Chatbot Service** (`/api/chatbot/*`)
+
+**Endpoints:**
+- `GET /stats` - статистика бота (активные диалоги, сообщений/день)
+- `GET /configuration/:userId` - получить конфигурацию бота
+- `PUT /configuration/:configId` - обновить конфигурацию
+- `POST /documents/upload` - загрузить документ для RAG
+- `DELETE /documents/:fileId` - удалить документ
+- `POST /regenerate-prompt` - регенерировать промпт из документов
+- `GET /triggers` - список триггеров
+- `POST /triggers` - создать триггер
+- `PUT /triggers/:id` - обновить триггер
+- `DELETE /triggers/:id` - удалить триггер
+- `GET /reactivation/queue` - очередь рассылки (top 300 cold leads)
+- `POST /reactivation/start` - запустить reactivation campaign
+- `DELETE /reactivation/cancel` - отменить reactivation campaign
+
+### **Nginx маршрутизация**
+
+**Production** (`app.performanteaiagency.com` и `performanteaiagency.com`):
+
+```nginx
+# CRM Frontend (статика)
+location /crm/ {
+    proxy_pass http://crm-frontend:80/;
+}
+
+# CRM Backend API
+location /api/crm/ {
+    rewrite ^/api/crm/(.*)$ /$1 break;
+    proxy_pass http://crm-backend:8084;
+}
+
+# Chatbot Service API
+location /api/chatbot/ {
+    rewrite ^/api/chatbot/(.*)$ /$1 break;
+    proxy_pass http://chatbot-service:8083;
+}
+```
+
+**Локальная разработка** (Vite proxy в `vite.config.ts`):
+
+```typescript
+proxy: {
+  '/api/crm': {
+    target: 'http://localhost:8084',
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/api\/crm/, ''),
+  },
+  '/api/chatbot': {
+    target: 'http://localhost:8083',
+    changeOrigin: true,
+    rewrite: (path) => path.replace(/^\/api\/chatbot/, ''),
+  },
+}
+```
+
+### **Система скоринга лидов**
+
+**Базовый score по этапу воронки:**
+- `new_lead`: 5
+- `not_qualified`: 15
+- `qualified`: 30
+- `consultation_booked`: 40
+- `consultation_completed`: 55
+- `deal_closed`: 75
+- `deal_lost`: 0
+
+**Модификаторы:**
+- Медицина: +15
+- Инфобизнес: +10
+- Владелец бизнеса: +10
+- Бюджет указан: +10
+- Таргетолог/SMM: -30
+
+**Interest Level:**
+- **HOT (75-100)**: Записан на консультацию или готов записаться
+- **WARM (40-74)**: Есть интерес, но не готов к действию
+- **COLD (0-39)**: Слабый интерес или нецелевая ниша
 
 ---
 

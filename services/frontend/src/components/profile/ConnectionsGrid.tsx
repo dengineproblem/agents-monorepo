@@ -12,22 +12,33 @@ const TikTokIcon = () => (
   </svg>
 );
 
+// AmoCRM icon SVG
+const AmoCRMIcon = () => (
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 18c-3.86-.92-7-5.17-7-9V8.5l7-3.5 7 3.5V11c0 3.83-3.14 8.08-7 9z"/>
+    <circle cx="12" cy="12" r="3" fill="currentColor"/>
+  </svg>
+);
+
 export interface ConnectionItem {
-  id: 'instagram' | 'tiktok';
+  id: 'instagram' | 'tiktok' | 'amocrm';
   title: string;
   connected: boolean;
   onClick: () => void;
   disabled?: boolean;
+  badge?: string;
 }
 
 const brandBg: Record<ConnectionItem['id'], string> = {
   instagram: 'bg-gradient-to-br from-purple-500/10 to-pink-500/10 text-pink-600',
   tiktok: 'bg-gradient-to-br from-cyan-500/10 to-blue-500/10 text-cyan-600',
+  amocrm: 'bg-gradient-to-br from-green-500/10 to-emerald-500/10 text-green-600',
 };
 
 const brandIcon: Record<ConnectionItem['id'], React.ReactNode> = {
   instagram: <Instagram className="h-5 w-5" />,
   tiktok: <TikTokIcon />,
+  amocrm: <AmoCRMIcon />,
 };
 
 interface ConnectionsGridProps {
@@ -63,6 +74,11 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                       <>
                         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
                         <span className="text-emerald-600">{t('profile.connected')}</span>
+                        {it.badge && (
+                          <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium">
+                            {it.badge}
+                          </span>
+                        )}
                       </>
                     ) : (
                       <>

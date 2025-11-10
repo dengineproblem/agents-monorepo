@@ -1,8 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
+import axios from 'axios';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
+const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
 
 export default async function evolutionWebhooks(app: FastifyInstance) {
 
@@ -183,6 +185,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     userAccountId: instanceData.user_account_id,
     whatsappPhoneNumberId: finalWhatsappPhoneNumberId,
     instancePhone: instanceData.phone_number,
+    instanceName: instance,
     clientPhone,
     sourceId: finalSourceId,
     creativeId,      // Pass resolved value
@@ -296,6 +299,7 @@ async function processAdLead(params: {
   userAccountId: string;
   whatsappPhoneNumberId?: string;
   instancePhone: string;
+  instanceName: string;
   clientPhone: string;
   sourceId: string;
   creativeId: string | null;   // NEW
@@ -309,6 +313,7 @@ async function processAdLead(params: {
     userAccountId,
     whatsappPhoneNumberId,
     instancePhone,
+    instanceName,
     clientPhone,
     sourceId,
     creativeId,
@@ -375,6 +380,93 @@ async function processAdLead(params: {
     } else {
       app.log.info({ leadId: newLead?.id }, 'Created new lead from ad');
     }
+  }
+
+  // НОВОЕ: Создать/обновить запись в dialog_analysis для чат-бота
+  await upsertDialogAnalysis({
+    userAccountId,
+    instanceName,
+    contactPhone: clientPhone,
+    messageText,
+    timestamp
+  }, app);
+
+  // НОВОЕ: Проверить, должен ли бот ответить
+  await tryBotResponse(clientPhone, instanceName, messageText, app);
+}
+
+/**
+ * Создать или обновить запись в dialog_analysis
+ */
+async function upsertDialogAnalysis(params: {
+  userAccountId: string;
+  instanceName: string;
+  contactPhone: string;
+  messageText: string;
+  timestamp: Date;
+}, app: FastifyInstance) {
+  const { userAccountId, instanceName, contactPhone, messageText, timestamp } = params;
+
+  // Проверить существование записи
+  const { data: existing } = await supabase
+    .from('dialog_analysis')
+    .select('id')
+    .eq('contact_phone', contactPhone)
+    .eq('instance_name', instanceName)
+    .maybeSingle();
+
+  if (existing) {
+    // Обновить существующую запись
+    await supabase
+      .from('dialog_analysis')
+      .update({
+        last_message: messageText,
+        analyzed_at: timestamp.toISOString()
+      })
+      .eq('id', existing.id);
+  } else {
+    // Создать новую запись
+    await supabase
+      .from('dialog_analysis')
+      .insert({
+        user_account_id: userAccountId,
+        instance_name: instanceName,
+        contact_phone: contactPhone,
+        last_message: messageText,
+        funnel_stage: 'new_lead',
+        interest_level: 'unknown',
+        analyzed_at: timestamp.toISOString()
+      });
+  }
+}
+
+/**
+ * Попытаться ответить через бота (вызов chatbot-service)
+ */
+async function tryBotResponse(
+  contactPhone: string,
+  instanceName: string,
+  messageText: string,
+  app: FastifyInstance
+) {
+  try {
+    // Вызвать chatbot-service для обработки сообщения
+    await axios.post(`${CHATBOT_SERVICE_URL}/process-message`, {
+      contactPhone,
+      instanceName,
+      messageText
+    }, {
+      timeout: 5000,
+      validateStatus: () => true // Не бросать ошибку на любой статус
+    });
+    
+    app.log.debug({ contactPhone, instanceName }, 'Sent message to chatbot-service');
+  } catch (error: any) {
+    app.log.error({ 
+      error: error.message, 
+      contactPhone, 
+      instanceName 
+    }, 'Error calling chatbot-service');
   }
 }
 

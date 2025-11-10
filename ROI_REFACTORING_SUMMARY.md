@@ -250,3 +250,5 @@ cd services/frontend && npm run build
 **Автор:** AI Agent  
 **Дата завершения:** 2025-11-05
 
+
+

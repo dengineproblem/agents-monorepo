@@ -55,3 +55,5 @@ echo "1. Убедитесь что agent-service запущен на порту 
 echo "2. Запустите: bash test-empty-actions-fix.sh"
 
 
+
+

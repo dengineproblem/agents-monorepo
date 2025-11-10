@@ -258,3 +258,4 @@ curl -X POST "https://app.performanteaiagency.com/api/amocrm/sync-leads?userAcco
 3. Синхронизацию воронок (`/api/amocrm/sync-pipelines`)
 4. Логи сервисов (см. раздел Диагностика)
 
+

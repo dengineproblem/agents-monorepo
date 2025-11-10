@@ -41,3 +41,5 @@ echo "   http://localhost:8081/profile"
 echo ""
 echo "   И проверьте консоль браузера (F12 → Console)"
 
+
+

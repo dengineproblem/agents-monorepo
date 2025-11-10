@@ -17,7 +17,7 @@ export function WhatsAppCRM() {
   const queryClient = useQueryClient();
   
   // Hardcoded user account ID - в реальном приложении получать из auth
-  const userAccountId = 'test-user-account';
+  const userAccountId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
   
   // State
   const [filters, setFilters] = useState<DialogFiltersType>({});

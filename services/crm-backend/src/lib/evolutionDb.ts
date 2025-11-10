@@ -1,5 +1,9 @@
 import pg from 'pg';
+import dotenv from 'dotenv';
 import { createLogger } from './logger.js';
+
+// Load environment variables
+dotenv.config();
 
 const { Pool } = pg;
 const log = createLogger({ module: 'evolutionDb' });

@@ -35,3 +35,5 @@ CREATE INDEX idx_user_accounts_adset_mode
 -- Все существующие пользователи автоматически получат default_adset_mode = 'api_create'
 -- Это гарантирует 100% обратную совместимость
 
+
+

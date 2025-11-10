@@ -26,3 +26,5 @@ cat greenapi_history_${MINUTES}min.json | jq '. | length'
 echo ""
 echo "📁 Файл сохранен: greenapi_history_${MINUTES}min.json"
 
+
+

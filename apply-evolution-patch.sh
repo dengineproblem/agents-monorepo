@@ -92,3 +92,5 @@ echo "1. Build Docker image: docker build -t atendai/evolution-api:2.3.6-ad-meta
 echo "2. Update docker-compose.yml in agents-monorepo"
 echo "3. Restart Evolution API container"
 
+
+

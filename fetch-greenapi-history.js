@@ -272,3 +272,5 @@ function printStatistics(totalMessages, messagesWithAds, phoneToAds) {
   console.log('='.repeat(60));
 }
 
+
+

@@ -10,18 +10,21 @@ export function DocumentUploader() {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  
+  // Hardcoded user account ID - в реальном приложении получать из auth
+  const userAccountId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
   // Fetch documents
   const { data: documents = [], isLoading } = useQuery({
-    queryKey: ['chatbot-documents'],
-    queryFn: () => chatbotApi.getDocuments(),
+    queryKey: ['chatbot-documents', userAccountId],
+    queryFn: () => chatbotApi.getDocuments(userAccountId),
   });
 
   // Upload mutation
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => chatbotApi.uploadDocument(file),
+    mutationFn: (file: File) => chatbotApi.uploadDocument(file, userAccountId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatbot-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-documents', userAccountId] });
       toast({ title: 'Документ загружен' });
     },
     onError: () => {
@@ -33,7 +36,7 @@ export function DocumentUploader() {
   const deleteMutation = useMutation({
     mutationFn: (documentId: string) => chatbotApi.deleteDocument(documentId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['chatbot-documents'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-documents', userAccountId] });
       toast({ title: 'Документ удалён' });
     },
     onError: () => {

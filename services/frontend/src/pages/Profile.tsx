@@ -20,6 +20,7 @@ import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionC
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
+import { API_BASE_URL } from '@/config/api';
  
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
@@ -144,6 +145,15 @@ const Profile: React.FC = () => {
   // Ad Set Creation Mode
   const [defaultAdsetMode, setDefaultAdsetMode] = useState<'api_create' | 'use_existing'>(user?.default_adset_mode || 'api_create');
   const [isSavingAdsetMode, setIsSavingAdsetMode] = useState(false);
+
+  // AmoCRM Integration
+  const [amocrmConnected, setAmocrmConnected] = useState(false);
+  const [amocrmSubdomain, setAmocrmSubdomain] = useState('');
+  const [amocrmWebhookActive, setAmocrmWebhookActive] = useState(false);
+  const [amocrmModal, setAmocrmModal] = useState(false);
+  const [amocrmConnectModal, setAmocrmConnectModal] = useState(false);
+  const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
+  const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -287,6 +297,44 @@ const Profile: React.FC = () => {
     };
 
     loadUserData();
+  }, [user?.id]);
+
+  // Load AmoCRM status
+  useEffect(() => {
+    const loadAmoCRMStatus = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/amocrm/status?userAccountId=${user.id}`);
+        if (!response.ok) {
+          console.error('Failed to load AmoCRM status');
+          return;
+        }
+        
+        const data = await response.json();
+        console.log('AmoCRM status loaded:', data);
+        setAmocrmConnected(data.connected);
+        setAmocrmSubdomain(data.subdomain || '');
+        
+        if (data.connected) {
+          // Check webhook status
+          try {
+            const webhookRes = await fetch(`${API_BASE_URL}/amocrm/webhook-status?userAccountId=${user.id}`);
+            if (webhookRes.ok) {
+              const webhookData = await webhookRes.json();
+              console.log('Webhook status:', webhookData);
+              setAmocrmWebhookActive(webhookData.registered);
+            }
+          } catch (error) {
+            console.error('Failed to check webhook status:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load AmoCRM status:', error);
+      }
+    };
+    
+    loadAmoCRMStatus();
   }, [user?.id]);
 
   const tarifBadge = useMemo(() => {
@@ -783,6 +831,69 @@ const Profile: React.FC = () => {
     }
   };
 
+  // AmoCRM handlers
+  const handleAmoCRMConnect = () => {
+    if (amocrmConnected) {
+      setAmocrmModal(true); // Open management modal
+    } else {
+      setAmocrmConnectModal(true); // Open connection modal
+    }
+  };
+
+  const handleAmoCRMConnectSubmit = () => {
+    if (!user?.id || !amocrmInputSubdomain.trim()) return;
+    
+    const url = `${API_BASE_URL}/amocrm/auth?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
+    window.location.href = url;
+  };
+
+  const handleAmoCRMDisconnect = async () => {
+    if (!user?.id) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/amocrm/disconnect?userAccountId=${user.id}`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        setAmocrmConnected(false);
+        setAmocrmWebhookActive(false);
+        setAmocrmSubdomain('');
+        toast.success('AmoCRM отключен');
+        setAmocrmModal(false);
+      } else {
+        toast.error('Ошибка при отключении AmoCRM');
+      }
+    } catch (error) {
+      console.error('Error disconnecting AmoCRM:', error);
+      toast.error('Ошибка при отключении AmoCRM');
+    }
+  };
+
+  const handleAmoCRMSync = async () => {
+    if (!user?.id) return;
+    
+    setIsSyncingAmocrm(true);
+    try {
+      toast.info('Синхронизация запущена...');
+      const response = await fetch(`${API_BASE_URL}/amocrm/sync-leads?userAccountId=${user.id}`, {
+        method: 'POST'
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        toast.success(`Синхронизировано: обновлено ${data.updated} лидов из ${data.total}`);
+      } else {
+        toast.error('Ошибка синхронизации');
+      }
+    } catch (error) {
+      console.error('Error syncing AmoCRM:', error);
+      toast.error('Ошибка синхронизации');
+    } finally {
+      setIsSyncingAmocrm(false);
+    }
+  };
+
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
       <Header onOpenDatePicker={() => {}} />
@@ -1093,6 +1204,13 @@ const Profile: React.FC = () => {
                 },
                 disabled: false,
               }] : []),
+              {
+                id: 'amocrm',
+                title: 'AmoCRM',
+                connected: amocrmConnected,
+                onClick: handleAmoCRMConnect,
+                badge: amocrmConnected && amocrmWebhookActive ? 'Webhook' : undefined,
+              },
             ]}
           />
         </div>
@@ -1553,6 +1671,83 @@ const Profile: React.FC = () => {
                   {t('action.save')}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* AmoCRM Connection Modal */}
+        <Dialog open={amocrmConnectModal} onOpenChange={setAmocrmConnectModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Подключить AmoCRM</DialogTitle>
+              <DialogDescription>
+                Введите поддомен вашего аккаунта AmoCRM (например: mycompany)
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <Label htmlFor="subdomain">Поддомен AmoCRM</Label>
+                <div className="flex items-center gap-2 mt-2">
+                  <Input
+                    id="subdomain"
+                    placeholder="mycompany"
+                    value={amocrmInputSubdomain}
+                    onChange={(e) => setAmocrmInputSubdomain(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && amocrmInputSubdomain.trim()) {
+                        handleAmoCRMConnectSubmit();
+                      }
+                    }}
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">.amocrm.ru</span>
+                </div>
+              </div>
+              <Button
+                onClick={handleAmoCRMConnectSubmit}
+                disabled={!amocrmInputSubdomain.trim()}
+                className="w-full"
+              >
+                Подключить
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* AmoCRM Management Modal */}
+        <Dialog open={amocrmModal} onOpenChange={setAmocrmModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>AmoCRM подключен</DialogTitle>
+              <DialogDescription>
+                Аккаунт: {amocrmSubdomain}.amocrm.ru
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-4">
+              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className={`h-2 w-2 rounded-full ${amocrmWebhookActive ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                  <span className="text-sm">
+                    Вебхук {amocrmWebhookActive ? 'активен' : 'не настроен'}
+                  </span>
+                </div>
+              </div>
+              
+              <Button 
+                onClick={handleAmoCRMSync} 
+                variant="outline" 
+                className="w-full"
+                disabled={isSyncingAmocrm}
+              >
+                {isSyncingAmocrm ? 'Синхронизация...' : 'Синхронизировать данные вручную'}
+              </Button>
+              
+              <Button 
+                onClick={handleAmoCRMDisconnect} 
+                variant="destructive" 
+                className="w-full"
+              >
+                Отключить AmoCRM
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

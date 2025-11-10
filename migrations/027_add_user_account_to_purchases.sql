@@ -68,3 +68,5 @@ ALTER TABLE purchases
 
 COMMENT ON TABLE purchases IS 'Customer purchases. Use user_account_id for filtering, business_id is legacy.';
 
+
+

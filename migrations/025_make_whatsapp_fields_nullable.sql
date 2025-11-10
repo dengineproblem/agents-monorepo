@@ -30,3 +30,5 @@ WHERE chat_id IS NOT NULL
 -- The constraint from migration 024 should ensure at least one contact method exists:
 -- CHECK (chat_id IS NOT NULL OR phone IS NOT NULL OR email IS NOT NULL)
 
+
+

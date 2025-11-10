@@ -16,3 +16,5 @@ COMMENT ON COLUMN user_accounts.amocrm_client_secret IS 'AmoCRM integration clie
 -- Note: These fields are populated during OAuth callback for auto-created integrations
 -- They are required for token refresh operations
 
+
+

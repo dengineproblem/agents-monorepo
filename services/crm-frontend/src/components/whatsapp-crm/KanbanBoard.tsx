@@ -43,3 +43,4 @@ export function KanbanBoard({ leads, onMoveCard, onCardClick, onEdit, onDelete }
   );
 }
 
+

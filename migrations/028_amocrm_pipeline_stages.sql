@@ -181,3 +181,5 @@ GRANT ALL ON amocrm_lead_status_history TO service_role;
 COMMENT ON TABLE amocrm_pipeline_stages IS 
   'Pipeline stages from amoCRM. System statuses: 142=won (qualified), 143=lost (not qualified)';
 
+
+

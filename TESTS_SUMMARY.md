@@ -107,3 +107,5 @@ processAdLead(): ✅ Корректно обновлена
 
 См. подробный отчет: `EVOLUTION_MIGRATION_TEST_REPORT.md`
 
+
+

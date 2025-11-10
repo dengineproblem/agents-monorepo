@@ -1,8 +1,11 @@
 /**
  * AmoCRM Leads Sync Cron Job
  * 
- * Автоматически синхронизирует статусы лидов из AmoCRM каждый час
- * для всех пользователей с подключенным AmoCRM
+ * Автоматически синхронизирует статусы лидов из AmoCRM каждые 6 часов
+ * для всех пользователей с подключенным AmoCRM.
+ * 
+ * Служит fallback вариантом на случай проблем с вебхуками.
+ * Основной способ синхронизации - через AmoCRM webhooks в реальном времени.
  * 
  * @module amocrmLeadsSyncCron
  */
@@ -15,7 +18,9 @@ import { supabase } from './lib/supabaseClient.js';
 const log = createLogger('amocrmLeadsSyncCron');
 
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://agent-service:8082';
-const CRON_SCHEDULE = '0 * * * *'; // Every hour at minute 0
+// Каждые 6 часов (00:00, 06:00, 12:00, 18:00)
+// Можно настроить через переменную окружения AMOCRM_LEADS_SYNC_CRON_SCHEDULE
+const CRON_SCHEDULE = process.env.AMOCRM_LEADS_SYNC_CRON_SCHEDULE || '0 */6 * * *';
 
 /**
  * Синхронизирует лиды для всех пользователей с подключенным AmoCRM

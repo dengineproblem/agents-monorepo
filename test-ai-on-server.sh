@@ -29,3 +29,5 @@ echo "Теперь на сервере выполните:"
 echo "  docker-compose logs agent-service --tail 100 | grep -E '(Building campaign action|Calling OpenAI|Action created from LLM|selected_creatives|reasoning)'"
 echo ""
 
+
+

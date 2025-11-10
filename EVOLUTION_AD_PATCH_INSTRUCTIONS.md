@@ -120,3 +120,5 @@ docker-compose up -d evolution-api
 - TypeScript без ошибок
 - Обратно совместимо с существующим кодом
 
+
+

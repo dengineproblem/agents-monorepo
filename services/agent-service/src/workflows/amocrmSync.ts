@@ -490,7 +490,7 @@ export async function processLeadStatusChange(
     }, 'Processing lead status change');
 
     // 1. Find our lead by amocrm_lead_id
-    const { data: lead, error: leadError } = await supabase
+    let { data: lead, error: leadError } = await supabase
       .from('leads')
       .select('*')
       .eq('amocrm_lead_id', amocrmLeadId)
@@ -501,11 +501,67 @@ export async function processLeadStatusChange(
       throw new Error(`Error finding lead: ${leadError.message}`);
     }
 
+    // 2. If not found by amocrm_lead_id, try to find by phone number
     if (!lead) {
-      app.log.warn({
+      app.log.info({ amocrmLeadId }, 'Lead not found by amocrm_lead_id, trying to find by phone');
+      
+      try {
+        const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+        const amocrmLead = await getLead(amocrmLeadId, subdomain, accessToken);
+        
+        // Get phone from contact
+        const contactId = amocrmLead._embedded?.contacts?.[0]?.id;
+        if (contactId) {
+          const contact = await getContact(contactId, subdomain, accessToken);
+          const rawPhone = extractPhoneFromContact(contact);
+          
+          if (rawPhone) {
+            const normalizedPhone = normalizePhone(rawPhone);
+            
+            app.log.info({ 
+              amocrmLeadId, 
+              contactId, 
+              normalizedPhone 
+            }, 'Found phone for lead, searching in local database');
+            
+            // Search by phone or chat_id containing phone
+            const { data: foundLead } = await supabase
+              .from('leads')
+              .select('*')
+              .eq('user_account_id', userAccountId)
+              .or(`phone.eq.${normalizedPhone},chat_id.like.%${normalizedPhone}%`)
+              .maybeSingle();
+            
+            if (foundLead) {
+              lead = foundLead;
+              
+              // Update amocrm_lead_id for future webhook processing
+              await supabase
+                .from('leads')
+                .update({ amocrm_lead_id: amocrmLeadId })
+                .eq('id', foundLead.id);
+              
+              app.log.info({ 
+                leadId: foundLead.id, 
+                amocrmLeadId, 
+                phone: normalizedPhone 
+              }, 'Found lead by phone and linked amocrm_lead_id');
+            }
+          }
+        }
+      } catch (error: any) {
+        app.log.warn({ 
+          error: error.message, 
+          amocrmLeadId 
+        }, 'Failed to find lead by phone');
+      }
+    }
+
+    if (!lead) {
+      app.log.info({
         amocrmLeadId,
         userAccountId
-      }, 'Lead not found for status change - skipping');
+      }, 'Lead not found in local database - skipping');
       return;
     }
 

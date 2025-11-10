@@ -429,3 +429,5 @@ docker-compose logs promtail --tail 50
 **Понятность для не-программиста:** Да ✅
 
 
+
+

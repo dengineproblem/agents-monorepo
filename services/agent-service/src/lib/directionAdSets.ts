@@ -53,7 +53,7 @@ export async function getAvailableAdSet(directionId: string): Promise<{
     .lt('ads_count', 50)
     .order('ads_count', { ascending: true })
     .order('linked_at', { ascending: true })
-    .limit(1);
+    .limit(10); // Берём больше чтобы проверить статусы в Facebook
 
   if (error) {
     logger.error({ error, directionId }, 'Error fetching available ad set');
@@ -85,12 +85,35 @@ export async function activateAdSet(
   accessToken: string
 ): Promise<void> {
   try {
-    // 1. Активировать в Facebook
+    // 1. Проверить текущий статус в Facebook
+    const adsetInfo = await graph('GET', `${fbAdSetId}`, accessToken, {
+      fields: 'id,name,status,promoted_object'
+    });
+
+    logger.info({ 
+      fbAdSetId, 
+      currentStatus: adsetInfo.status,
+      name: adsetInfo.name 
+    }, 'Checking ad set status before activation');
+
+    // 2. Проверка: если ARCHIVED - нельзя активировать
+    if (adsetInfo.status === 'ARCHIVED') {
+      // Пометить в БД как неактивный
+      await supabase
+        .from('direction_adsets')
+        .update({ is_active: false })
+        .eq('id', adsetId);
+
+      logger.warn({ fbAdSetId, adsetId }, 'Ad set is ARCHIVED in Facebook, marked as inactive in DB');
+      throw new Error(`Ad set ${fbAdSetId} is ARCHIVED and cannot be activated. Create a new ad set in Facebook Ads Manager.`);
+    }
+
+    // 3. Активировать в Facebook
     await graph('POST', `${fbAdSetId}`, accessToken, toParams({ status: 'ACTIVE' }));
 
     logger.info({ fbAdSetId }, 'Activated ad set in Facebook');
 
-    // 2. Обновить в БД
+    // 4. Обновить в БД
     const { error } = await supabase
       .from('direction_adsets')
       .update({

@@ -332,6 +332,7 @@ grep -r "API_BASE_URL.*\/api\/" services/frontend/src
 - ✅ `services/frontend/src/components/FacebookConnect.tsx`
 - ✅ `services/frontend/src/components/profile/WhatsAppNumbersCard.tsx` ⭐️ **ИСПРАВЛЕНО 2025-11-07** - все 4 relative URL заменены на `API_BASE_URL`
 - ✅ `services/frontend/src/pages/Creatives.tsx`
+- ✅ `services/frontend/src/pages/Profile.tsx` ⭐️ **ИСПРАВЛЕНО 2025-11-08** - AmoCRM endpoints используют `API_BASE_URL`
 
 ---
 
@@ -437,6 +438,9 @@ app.register(campaignBuilderRoutes, {          // ✅ /campaign-builder
 // Исключения: роуты без /api префикса в nginx
 app.register(facebookWebhooks);                // /webhooks/facebook
 app.register(amocrmOAuthRoutes);               // /amocrm/auth, /amocrm/callback
+app.register(amocrmWebhooksRoutes);            // /webhooks/amocrm
+app.register(amocrmPipelinesRoutes);           // /amocrm/pipelines
+app.register(amocrmManagementRoutes);          // /amocrm/webhook-status, /amocrm/sync-leads
 ```
 
 ### 🔍 КАК ПРОВЕРИТЬ backend роуты
@@ -520,4 +524,311 @@ Route handler (directions.ts):
 ---
 
 **Следуй этим правилам и проблема `/api/api/` или 404 роутов никогда не возникнет!** 🎯
+
+---
+
+## 📱 CRM & CHATBOT API
+
+WhatsApp CRM использует отдельные API endpoints с собственными префиксами.
+
+### **Переменные окружения для CRM Frontend**
+
+CRM Frontend НЕ использует `API_BASE_URL` из основного frontend. Вместо этого использует прямые пути через Vite proxy.
+
+#### Локальная разработка (`.env` в `services/crm-frontend/`)
+
+```bash
+VITE_CRM_BACKEND_URL=http://localhost:8084
+VITE_CHATBOT_API_URL=http://localhost:8083
+```
+
+**⚠️ ВАЖНО:** Эти переменные НЕ используются напрямую в коде - они для справки. В коде используются прямые пути `/api/crm` и `/api/chatbot`, которые проксируются через Vite.
+
+#### Production
+
+В production переменные окружения не нужны - запросы идут через общий nginx:
+- `/api/crm/*` → crm-backend:8084
+- `/api/chatbot/*` → chatbot-service:8083
+
+### **Vite Proxy конфигурация**
+
+Файл: `services/crm-frontend/vite.config.ts`
+
+```typescript
+export default defineConfig({
+  server: {
+    host: "::",
+    port: 5174,
+    proxy: {
+      // CRM Backend API
+      '/api/crm': {
+        target: 'http://localhost:8084',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/crm/, ''),
+      },
+      // Chatbot Service API
+      '/api/chatbot': {
+        target: 'http://localhost:8083',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/chatbot/, ''),
+      },
+    },
+  },
+});
+```
+
+### **Правила для CRM API сервисов**
+
+#### ✅ ПРАВИЛЬНО
+
+```typescript
+// services/crm-frontend/src/services/dialogAnalysisService.ts
+
+const CRM_API_BASE = '/api/crm';  // ✅ Без домена, только путь
+
+export async function getDialogStats(userAccountId: string) {
+  const response = await fetch(
+    `${CRM_API_BASE}/dialogs/stats?userAccountId=${userAccountId}`
+  );
+  return response.json();
+}
+```
+
+```typescript
+// services/crm-frontend/src/services/chatbotApi.ts
+
+const CHATBOT_API_BASE = '/api/chatbot';  // ✅ Без домена, только путь
+
+export async function getChatbotStats(userId: string) {
+  const response = await fetch(`${CHATBOT_API_BASE}/stats?userId=${userId}`);
+  return response.json();
+}
+```
+
+#### ❌ НЕПРАВИЛЬНО
+
+```typescript
+// ❌ НЕ добавляй домен - proxy не сработает
+const CRM_API_BASE = 'http://localhost:8084/api/crm';
+
+// ❌ НЕ добавляй двойной /api/
+fetch(`${CRM_API_BASE}/api/dialogs/stats`);  // → /api/crm/api/dialogs/stats
+
+// ❌ НЕ используй относительные пути без префикса
+fetch('/dialogs/stats');  // → не попадет в proxy
+```
+
+### **Nginx конфигурация для CRM (production)**
+
+Файл: `nginx-production.conf`
+
+```nginx
+# CRM Backend API (должен быть ПЕРЕД общим /api/)
+location /api/crm/ {
+    # Убираем /api/crm из пути при проксировании
+    rewrite ^/api/crm/(.*)$ /$1 break;
+    proxy_pass http://crm-backend:8084;
+    proxy_http_version 1.1;
+    
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # Таймауты для длительных операций (dialog analysis может занять время)
+    proxy_read_timeout 600s;
+    proxy_connect_timeout 600s;
+    proxy_send_timeout 600s;
+}
+
+# Chatbot Service API (должен быть ПЕРЕД общим /api/)
+location /api/chatbot/ {
+    # Убираем /api/chatbot из пути при проксировании
+    rewrite ^/api/chatbot/(.*)$ /$1 break;
+    proxy_pass http://chatbot-service:8083;
+    proxy_http_version 1.1;
+    
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    
+    # Таймауты для длительных операций
+    proxy_read_timeout 300s;
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+}
+
+# CRM Frontend (статика)
+location /crm/ {
+    proxy_pass http://crm-frontend:80/;
+    proxy_http_version 1.1;
+    
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**⚠️ ВАЖНО:** Блоки `/api/crm/` и `/api/chatbot/` должны быть ПЕРЕД общим блоком `/api/`, иначе они не сработают (nginx использует первое совпадение).
+
+### **Backend: Регистрация роутов**
+
+#### CRM Backend (`services/crm-backend/src/server.ts`)
+
+```typescript
+// ✅ ПРАВИЛЬНО - БЕЗ prefix
+app.register(dialogsRoutes);  // Роуты: /dialogs/*
+
+// Nginx убирает /api/crm, поэтому backend получает /dialogs/stats
+```
+
+#### Chatbot Service (`services/chatbot-service/src/server.ts`)
+
+```typescript
+// ✅ ПРАВИЛЬНО - БЕЗ prefix
+app.register(statsRoutes);          // /stats
+app.register(configurationRoutes);  // /configuration/*
+app.register(triggersRoutes);       // /triggers/*
+app.register(reactivationRoutes);   // /reactivation/*
+
+// Nginx убирает /api/chatbot, поэтому backend получает /stats, /triggers/*, etc.
+```
+
+### **Полная картина: Frontend → Nginx → Backend**
+
+#### CRM Backend
+
+```
+Frontend:
+  fetch('/api/crm/dialogs/stats?userAccountId=xxx')
+
+        ↓ (dev: Vite proxy)
+
+Vite dev server:
+  proxy: { '/api/crm': { target: 'http://localhost:8084', rewrite: ... } }
+  → GET http://localhost:8084/dialogs/stats
+
+        ↓ (production: Nginx)
+
+Nginx:
+  location /api/crm/ { rewrite ^/api/crm/(.*)$ /$1 break; ... }
+  → GET http://crm-backend:8084/dialogs/stats
+
+        ↓
+
+Backend (server.ts):
+  app.register(dialogsRoutes);  // БЕЗ prefix
+
+        ↓
+
+Route handler (dialogs.ts):
+  app.get('/dialogs/stats', ...)  // БЕЗ /api/crm
+  → 200 OK ✅
+```
+
+#### Chatbot Service
+
+```
+Frontend:
+  fetch('/api/chatbot/configuration/user123')
+
+        ↓ (dev: Vite proxy)
+
+Vite dev server:
+  proxy: { '/api/chatbot': { target: 'http://localhost:8083', rewrite: ... } }
+  → GET http://localhost:8083/configuration/user123
+
+        ↓ (production: Nginx)
+
+Nginx:
+  location /api/chatbot/ { rewrite ^/api/chatbot/(.*)$ /$1 break; ... }
+  → GET http://chatbot-service:8083/configuration/user123
+
+        ↓
+
+Backend (server.ts):
+  app.register(configurationRoutes);  // БЕЗ prefix
+
+        ↓
+
+Route handler:
+  app.get('/configuration/:userId', ...)  // БЕЗ /api/chatbot
+  → 200 OK ✅
+```
+
+### **Таблица портов CRM**
+
+| Сервис | Локальная разработка | Production (Docker) |
+|--------|---------------------|---------------------|
+| crm-backend | 8084 | 8084 |
+| crm-frontend | 5174 (Vite) | 3003 (nginx) |
+| chatbot-service | 8083 | 8083 |
+
+### **Чеклист при добавлении CRM API endpoint**
+
+- [ ] **Frontend:** Использовать `/api/crm/*` или `/api/chatbot/*` (без домена)
+- [ ] **Backend:** Определить роут БЕЗ `/api/crm` или `/api/chatbot`
+- [ ] **Backend:** НЕ добавлять prefix при регистрации роута
+- [ ] **Vite:** Проверить proxy в `vite.config.ts`
+- [ ] **Nginx:** Проверить что блоки `/api/crm/` и `/api/chatbot/` ПЕРЕД `/api/`
+- [ ] **Протестировать локально:** `curl http://localhost:8084/dialogs/stats` (напрямую)
+- [ ] **Протестировать через Vite:** `curl http://localhost:5174/api/crm/dialogs/stats`
+
+### **Пример: Добавление нового endpoint**
+
+Допустим, нужно добавить endpoint для получения истории изменений лида.
+
+#### 1. Backend (crm-backend)
+
+```typescript
+// services/crm-backend/src/routes/dialogs.ts
+
+// ✅ ПРАВИЛЬНО - роут БЕЗ /api/crm
+app.get('/dialogs/leads/:id/history', async (request, reply) => {
+  const { id } = request.params;
+  // ... логика
+  return { history: [...] };
+});
+```
+
+#### 2. Frontend (crm-frontend)
+
+```typescript
+// services/crm-frontend/src/services/dialogAnalysisService.ts
+
+const CRM_API_BASE = '/api/crm';
+
+export async function getLeadHistory(leadId: string) {
+  // ✅ ПРАВИЛЬНО - путь с /api/crm
+  const response = await fetch(`${CRM_API_BASE}/dialogs/leads/${leadId}/history`);
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch lead history');
+  }
+  
+  return response.json();
+}
+```
+
+#### 3. Проверка
+
+```bash
+# Локально (прямо в backend)
+curl http://localhost:8084/dialogs/leads/123/history
+# → 200 OK ✅
+
+# Через Vite proxy
+curl http://localhost:5174/api/crm/dialogs/leads/123/history
+# → 200 OK ✅
+
+# Production (через nginx)
+curl https://app.performanteaiagency.com/api/crm/dialogs/leads/123/history
+# → 200 OK ✅
+```
+
+---
+
+**CRM & Chatbot API следуют тем же правилам, что и основной API, но с отдельными префиксами `/api/crm` и `/api/chatbot`.** 🎯
 

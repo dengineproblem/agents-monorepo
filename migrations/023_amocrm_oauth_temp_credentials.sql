@@ -49,3 +49,5 @@ COMMENT ON COLUMN amocrm_oauth_temp_credentials.client_secret IS 'AmoCRM integra
 COMMENT ON COLUMN amocrm_oauth_temp_credentials.user_account_id IS 'Optional: user account ID if state contains it';
 COMMENT ON COLUMN amocrm_oauth_temp_credentials.expires_at IS 'Expiration time (10 minutes from creation)';
 
+
+

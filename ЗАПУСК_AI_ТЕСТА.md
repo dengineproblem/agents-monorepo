@@ -132,3 +132,5 @@ cd /Users/anatolijstepanov/agents-monorepo
 
 Выберите Вариант 1 или 2 и следуйте инструкциям выше.
 
+
+
