@@ -1,6 +1,6 @@
 import { DialogAnalysis, DialogFilters, FunnelStage } from '@/types/dialogAnalysis';
 
-const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api';
+const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 
 export const dialogAnalysisService = {
   // Analyze dialogs
@@ -101,6 +101,57 @@ export const dialogAnalysisService = {
       method: 'DELETE'
     });
     if (!response.ok) throw new Error('Failed to delete lead');
+    return response.json();
+  },
+
+  // Upload audio
+  async uploadAudio(leadId: string, audioFile: File, userAccountId: string) {
+    const formData = new FormData();
+    formData.append('audio', audioFile);
+    formData.append('userAccountId', userAccountId);
+
+    const response = await fetch(`${API_BASE_URL}/dialogs/leads/${leadId}/audio`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to upload audio');
+    }
+    
+    return response.json();
+  },
+
+  // Update notes
+  async updateNotes(leadId: string, notes: string, userAccountId: string) {
+    const response = await fetch(`${API_BASE_URL}/dialogs/leads/${leadId}/notes`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notes, userAccountId }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to update notes');
+    }
+    
+    return response.json();
+  },
+
+  // Toggle autopilot
+  async toggleAutopilot(leadId: string, autopilotEnabled: boolean, userAccountId: string) {
+    const response = await fetch(`${API_BASE_URL}/dialogs/leads/${leadId}/autopilot`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ autopilotEnabled, userAccountId }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to toggle autopilot');
+    }
+    
     return response.json();
   }
 };

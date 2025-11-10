@@ -9,6 +9,7 @@ import { campaignRoutes } from './routes/campaign.js';
 import { startReactivationCron } from './cron/reactivationCron.js';
 import { startCampaignCron } from './cron/campaignCron.js';
 import { startReactivationWorker } from './workers/reactivationWorker.js';
+import { startCampaignWorker } from './workers/campaignWorker.js';
 import pino from 'pino';
 
 // Load env from Docker path or local path
@@ -121,6 +122,9 @@ startCampaignCron();
 // Запускаем worker для отправки реанимационных сообщений (каждую минуту)
 // @ts-ignore - Type mismatch between fastify and pino logger
 startReactivationWorker(app);
+
+// Запускаем worker для автоматической отправки campaign сообщений (каждые 5 минут)
+startCampaignWorker();
 
 app.listen({ host: '0.0.0.0', port: PORT }).then(() => {
   console.log(`🤖 Chatbot Service listening on http://0.0.0.0:${PORT}`);

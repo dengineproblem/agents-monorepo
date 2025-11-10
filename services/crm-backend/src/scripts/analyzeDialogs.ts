@@ -2,6 +2,7 @@ import { OpenAI } from 'openai';
 import { getInstanceMessages } from '../lib/evolutionDb.js';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { getDefaultContext, formatContextForPrompt, type PersonalizedContext } from '../lib/promptGenerator.js';
 
 const log = createLogger({ module: 'analyzeDialogs' });
 
@@ -9,8 +10,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!
 });
 
-// Промпт для GPT-5-mini
-const ANALYSIS_PROMPT = `Ты — Динар, менеджер Performante (маркетинг для клиник).
+// Базовый промпт (общий для всех)
+const BASE_ANALYSIS_PROMPT = `Ты — менеджер по продажам, анализирующий WhatsApp переписку.
 
 Проанализируй диалог WhatsApp. Формат:
 
@@ -41,130 +42,28 @@ S: — системное сообщение
   "reasoning": string
 }
 
-КВАЛИФИКАЦИОННЫЕ ВОПРОСЫ (4 вопроса):
-1. is_owner - Владелец бизнеса?
-2. has_sales_dept - Есть отдел продаж?
-3. uses_ads_now - Запускает ли рекламу?
-4. ad_budget - Бюджет на рекламу (текст: "50000", "100-200к", "не сказал" или null)
-
-qualification_complete = true ТОЛЬКО если ВСЕ 4 поля выше заполнены (не null).
-
-ЭТАПЫ ВОРОНКИ (определи правильный этап):
-- "not_qualified" - НЕ ответил на все 4 квалификационных вопроса
-- "qualified" - ОТВЕТИЛ на все 4 вопроса, но еще не записан
-- "consultation_booked" - Записан на консультацию (есть дата/время или подтверждение)
+ЭТАПЫ ВОРОНКИ:
+- "not_qualified" - НЕ ответил на квалификационные вопросы
+- "qualified" - ОТВЕТИЛ на вопросы, но еще не записан
+- "consultation_booked" - Записан на консультацию
 - "consultation_completed" - Консультация состоялась
 - "deal_closed" - Согласился работать, подписал договор, оплатил
-- "deal_lost" - Отказался, не подошло, пропал, не отвечает
+- "deal_lost" - Отказался, не подошло, пропал
 
-СИСТЕМА СКОРИНГА (строго следуй правилам):
+БАЗОВАЯ СИСТЕМА СКОРИНГА:
+- Этапы воронки: not_qualified(15), qualified(30), consultation_booked(40), consultation_completed(55), deal_closed(75), deal_lost(0)
+- Владелец (+10), Указал бюджет (+10), Быстро отвечает (+5)
+- Возражения (-15), "Подумаю" (-20), Долго не отвечает (-15)
+- Interest level: HOT(75-100), WARM(40-74), COLD(0-39)
 
-=== БАЗОВЫЙ SCORE по этапу воронки ===
-- new_lead: 5 баллов (базовый)
-- not_qualified: 15 баллов (+10)
-- qualified: 30 баллов (+15)
-- consultation_booked: 40 баллов (+10)
-- consultation_completed: 55 баллов (+15)
-- deal_closed: 75 баллов (+20)
-- deal_lost: 0 баллов
+<<<PERSONALIZED_CONTEXT>>>
 
-=== ОПРЕДЕЛЕНИЕ МЕДИЦИНСКОЙ НИШИ (is_medical) ===
+<<<BUSINESS_PROFILE_CONTEXT>>>
 
-is_medical = true если бизнес относится к:
-- Стоматология, стоматологические клиники
-- Косметология, косметологические клиники
-- Медицинские клиники любого профиля
-- Медицинские центры
-- Реабилитационные центры
-- Физиотерапия
-- Wellness центры с медицинским уклоном
-- Пластическая хирургия
-- Лазерная медицина
-- Любые медицинские услуги
+ИСТОРИЯ ПЕРЕПИСКИ:
+<<<DIALOG>>>
 
-is_medical = false для всех остальных (салоны красоты, SPA, фитнес, инфобизнес и т.д.)
-
-=== МОДИФИКАТОРЫ НИШИ (критично важно!) ===
-
-ЦЕЛЕВЫЕ НИШИ (+баллы):
-+ Медицина (is_medical = true): +15
-+ Инфобизнес (курсы, обучение, коучинг, тренинги): +10
-+ Салоны красоты, SPA, фитнес: +10
-
-НЕ ЦЕЛЕВЫЕ НИШИ (-баллы):
-- Таргетологи, SMM-специалисты, маркетологи: -30 (НЕ наша аудитория!)
-- Агентства (конкуренты): -25
-- Фриланс услуги (дизайн, разработка, копирайтинг): -15
-- Розничная торговля товарами: -10
-
-=== МОДИФИКАТОРЫ ПОВЕДЕНИЯ ===
-
-ПЛЮСЫ (+баллы):
-+ Владелец бизнеса (is_owner = true): +10
-+ Указал бюджет (ad_budget): +10
-+ Бюджет >100к: +5 дополнительно
-+ Активно задает вопросы про результаты/кейсы: +10
-+ Отправил Instagram: +5
-+ Быстро отвечает (<1 часа между сообщениями): +5
-+ Говорит "хочу записаться", "когда можно", называет время: +20
-+ Спрашивает про гарантии/как работаете: +5
-
-МИНУСЫ (-баллы):
-- Возражения ("дорого", "не подходит", "не уверен"): -15
-- "Подумаю", "потом перезвоню", "посоветуюсь": -20
-- Не владелец, есть отдел продаж: -5
-- Нет бюджета на рекламу: -10
-- Долго не отвечает (>24 часа): -15
-- Односложные ответы ("да", "ок"): -10
-- Игнорирует вопросы агента: -20
-- Просто спрашивает цены: 0 (нейтрально, базовый вопрос)
-
-=== INTEREST LEVEL (по итоговому score) ===
-
-HOT (75-100): 
-ТОЛЬКО если записан на консультацию ИЛИ прямо сейчас готов записаться ИЛИ сделка закрыта.
-Признаки: конкретные действия, называет время, подтверждает встречу.
-
-WARM (40-74):
-Есть интерес, но НЕ готов записаться. Задает вопросы, но откладывает решение.
-"Подумаю", "перезвоню" = максимум WARM.
-
-COLD (0-39):
-Слабый интерес, не целевая ниша, возражения, пропал, отказался.
-Таргетолог/агентство = автоматически максимум WARM (даже если интерес есть).
-
-=== ПРАВИЛА ===
-1. HOT ТОЛЬКО если ЗАПИСАЛСЯ или ПРЯМО СЕЙЧАС готов
-2. Вопрос про цены = 0 баллов (нейтрально)
-3. Таргетолог/SMM = максимум WARM, даже с интересом
-4. "Подумаю" = НИКОГДА не HOT
-5. Нет конкретных действий = не HOT
-
-ПРИМЕРЫ РАСЧЕТА SCORE:
-
-Пример 1: Стоматология, прошел консультацию, владелец
-= 55 (consultation_completed) + 15 (is_medical) + 10 (is_owner) = 80 → HOT
-
-Пример 2: Салон красоты, прошел консультацию
-= 55 (consultation_completed) + 10 (салон) = 65 → WARM
-
-Пример 3: Инфобизнес, записан на консультацию
-= 40 (consultation_booked) + 10 (инфобизнес) = 50 → WARM
-
-Пример 4: Таргетолог, квалифицирован
-= 30 (qualified) - 30 (таргетолог) = 0 → COLD
-
-ИНСТРУКЦИИ:
-- instagram_url: извлеки ссылку (instagram.com/username, @username)
-- ad_budget: извлеки сумму ("50 тысяч", "100-200к")
-- Определи этап воронки
-- Рассчитай score: базовый + модификаторы ниши + модификаторы поведения
-- interest_level определи строго по итоговому score
-- next_message: персонализируй (до 50 слов), побуждай к следующему шагу
-
-Диалог:
-
-<<<DIALOG>>>`;
+Пересчитай score, interest_level, funnel_stage с учетом ВСЕГО контекста.`;
 
 interface Message {
   remote_jid: string;
@@ -328,15 +227,24 @@ function formatDialogCompact(contact: Contact): string {
 /**
  * Analyze single dialog with GPT-5-mini
  */
-async function analyzeDialog(contact: Contact): Promise<AnalysisResult> {
+async function analyzeDialog(
+  contact: Contact,
+  personalizedContext: string,
+  businessProfileContext: string
+): Promise<AnalysisResult> {
   const dialogText = formatDialogCompact(contact);
-  const prompt = ANALYSIS_PROMPT.replace('<<<DIALOG>>>', dialogText);
+  
+  // Build final prompt with personalized context
+  const prompt = BASE_ANALYSIS_PROMPT
+    .replace('<<<PERSONALIZED_CONTEXT>>>', personalizedContext)
+    .replace('<<<BUSINESS_PROFILE_CONTEXT>>>', businessProfileContext)
+    .replace('<<<DIALOG>>>', dialogText);
 
   log.info({ phone: contact.phone, messageCount: contact.messages.length }, 'Analyzing dialog');
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-5-mini',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are a helpful assistant that analyzes WhatsApp dialogs and returns structured JSON.' },
         { role: 'user', content: prompt }
@@ -472,6 +380,35 @@ export async function analyzeDialogs(params: {
   log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
   try {
+    // Get business profile for personalized context
+    const { data: profile } = await supabase
+      .from('business_profile')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    let personalizedContext = '';
+    if (profile?.personalized_context) {
+      personalizedContext = formatContextForPrompt(profile.personalized_context as PersonalizedContext);
+      log.info({ userAccountId }, 'Using personalized context from profile');
+    } else {
+      // Use default context
+      const defaultContext = getDefaultContext();
+      personalizedContext = formatContextForPrompt(defaultContext);
+      log.info({ userAccountId }, 'Using default context (no profile found)');
+    }
+
+    let businessProfileContext = '';
+    if (profile) {
+      businessProfileContext = `
+КОНТЕКСТ БИЗНЕСА ПОЛЬЗОВАТЕЛЯ:
+- Сфера: ${profile.business_industry}
+- Описание: ${profile.business_description}
+- Целевая аудитория: ${profile.target_audience}
+- Задачи: ${profile.main_challenges}
+`;
+    }
+
     // 1. Get messages from Evolution PostgreSQL (limited to top N most active contacts)
     const messages = await getInstanceMessages(instanceName, maxContacts);
     log.info({ messageCount: messages.length, maxContacts }, 'Retrieved messages from Evolution DB');
@@ -521,7 +458,7 @@ export async function analyzeDialogs(params: {
 
     for (const contact of contactsToAnalyze) {
       try {
-        let analysis = await analyzeDialog(contact);
+        let analysis = await analyzeDialog(contact, personalizedContext, businessProfileContext);
         
         // Post-processing: Check if should be qualified
         if (

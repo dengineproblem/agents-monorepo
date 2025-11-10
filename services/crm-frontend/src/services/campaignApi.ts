@@ -237,6 +237,29 @@ export async function toggleLeadAutopilot(leadId: string, userId: string, enable
   });
 }
 
+// ===== Campaign Stats =====
+
+export interface CampaignStats {
+  allTime: {
+    total: number;
+    pending: number;
+    sent: number;
+    failed: number;
+    copied: number;
+  };
+  today: {
+    total: number;
+    sent: number;
+  };
+}
+
+export async function getCampaignStats(userId: string): Promise<CampaignStats> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/stats?userAccountId=${userId}`
+  );
+  return data;
+}
+
 export const campaignApi = {
   // Settings
   getCampaignSettings,
@@ -260,5 +283,8 @@ export const campaignApi = {
   uploadLeadAudio,
   updateLeadNotes,
   toggleLeadAutopilot,
+  
+  // Stats
+  getCampaignStats,
 };
 

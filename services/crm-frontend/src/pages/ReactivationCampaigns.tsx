@@ -2,7 +2,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { DailyCampaignQueue } from '@/components/campaigns/DailyCampaignQueue';
 import { TemplateManager } from '@/components/campaigns/TemplateManager';
 import { CampaignSettings } from '@/components/campaigns/CampaignSettings';
-import { BotStatsDashboard } from '@/components/chatbot/BotStatsDashboard';
+import { CampaignStatsDashboard } from '@/components/campaigns/CampaignStatsDashboard';
 
 export function ReactivationCampaigns() {
   return (
@@ -30,7 +30,7 @@ export function ReactivationCampaigns() {
         </TabsContent>
         
         <TabsContent value="stats">
-          <BotStatsDashboard />
+          <CampaignStatsDashboard />
         </TabsContent>
       </Tabs>
     </div>

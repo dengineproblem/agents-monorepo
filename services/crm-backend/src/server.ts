@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { dialogsRoutes } from './routes/dialogs.js';
 import { templatesRoutes } from './routes/templates.js';
 import { campaignSettingsRoutes } from './routes/campaignSettings.js';
+import { businessProfileRoutes } from './routes/businessProfile.js';
 import { logger } from './lib/logger.js';
 
 dotenv.config();
@@ -38,6 +39,7 @@ app.register(multipart, {
 app.register(dialogsRoutes);
 app.register(templatesRoutes);
 app.register(campaignSettingsRoutes);
+app.register(businessProfileRoutes);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

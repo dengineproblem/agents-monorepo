@@ -12,8 +12,8 @@ const GenerateQueueSchema = z.object({
 
 const TodayQueueSchema = z.object({
   userAccountId: z.string().uuid(),
-  limit: z.number().int().min(1).max(100).optional().default(20),
-  offset: z.number().int().min(0).optional().default(0),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
+  offset: z.coerce.number().int().min(0).optional().default(0),
   status: z.enum(['pending', 'sent', 'failed', 'copied']).optional(),
 });
 
@@ -135,8 +135,8 @@ export async function campaignRoutes(app: FastifyInstance) {
           )
         `)
         .eq('user_account_id', userAccountId)
-        .gte('scheduled_at', startOfDay.toISOString())
-        .order('scheduled_at', { ascending: true })
+        .gte('created_at', startOfDay.toISOString())
+        .order('created_at', { ascending: true })
         .range(offset, offset + limit - 1);
 
       if (status) {
@@ -154,7 +154,7 @@ export async function campaignRoutes(app: FastifyInstance) {
         .from('campaign_messages')
         .select('id', { count: 'exact', head: true })
         .eq('user_account_id', userAccountId)
-        .gte('scheduled_at', startOfDay.toISOString());
+        .gte('created_at', startOfDay.toISOString());
 
       if (status) {
         countQuery = countQuery.eq('status', status);
@@ -390,6 +390,69 @@ export async function campaignRoutes(app: FastifyInstance) {
       app.log.error({ error: error.message }, 'Failed to preview queue');
       return reply.status(500).send({ 
         error: 'Failed to preview queue', 
+        message: error.message 
+      });
+    }
+  });
+
+  /**
+   * GET /campaign/stats
+   * Get campaign statistics
+   */
+  app.get('/campaign/stats', async (request, reply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      // Get message stats
+      const { data: messages, error: messagesError } = await supabase
+        .from('campaign_messages')
+        .select('status')
+        .eq('user_account_id', userAccountId);
+
+      if (messagesError) {
+        throw messagesError;
+      }
+
+      const stats = {
+        total: messages?.length || 0,
+        pending: messages?.filter(m => m.status === 'pending').length || 0,
+        sent: messages?.filter(m => m.status === 'sent').length || 0,
+        failed: messages?.filter(m => m.status === 'failed').length || 0,
+        copied: messages?.filter(m => m.status === 'copied').length || 0,
+      };
+
+      // Get today's stats
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayISO = today.toISOString();
+
+      const { data: todayMessages, error: todayError } = await supabase
+        .from('campaign_messages')
+        .select('status')
+        .eq('user_account_id', userAccountId)
+        .gte('created_at', todayISO);
+
+      if (todayError) {
+        throw todayError;
+      }
+
+      const todayStats = {
+        total: todayMessages?.length || 0,
+        sent: todayMessages?.filter(m => m.status === 'sent').length || 0,
+      };
+
+      return reply.send({ 
+        allTime: stats,
+        today: todayStats,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to get campaign stats');
+      return reply.status(500).send({ 
+        error: 'Failed to get stats', 
         message: error.message 
       });
     }

@@ -6,6 +6,7 @@ import { KanbanBoard } from '@/components/whatsapp-crm/KanbanBoard';
 import { AddLeadModal } from '@/components/whatsapp-crm/AddLeadModal';
 import { DialogDetailModal } from '@/components/dialogs/DialogDetailModal';
 import { DialogFilters } from '@/components/dialogs/DialogFilters';
+import { OnboardingModal } from '@/components/onboarding/OnboardingModal';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { dialogAnalysisService } from '@/services/dialogAnalysisService';
@@ -24,6 +25,7 @@ export function WhatsAppCRM() {
   const [selectedDialog, setSelectedDialog] = useState<DialogAnalysis | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   // Fetch leads
   const { data: leads = [], isLoading, refetch } = useQuery({
@@ -36,6 +38,43 @@ export function WhatsAppCRM() {
     queryKey: ['lead-stats', userAccountId],
     queryFn: () => dialogAnalysisService.getStats(userAccountId),
   });
+
+  // Check for business profile (onboarding)
+  const { data: profile, isLoading: profileLoading, isError: profileError } = useQuery({
+    queryKey: ['business-profile', userAccountId],
+    queryFn: async () => {
+      try {
+        const response = await fetch(`/api/crm/business-profile/${userAccountId}`);
+        
+        // Если 404 - профиля нет, это нормально
+        if (response.status === 404) {
+          return null;
+        }
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch profile');
+        }
+        
+        const data = await response.json();
+        return data.profile;
+      } catch (error) {
+        console.error('Error fetching profile:', error);
+        // При ошибке возвращаем null (покажем онбординг)
+        return null;
+      }
+    },
+  });
+
+  // Show onboarding if no profile exists
+  useEffect(() => {
+    // Ждем завершения загрузки
+    if (profileLoading) return;
+    
+    // Показываем онбординг если профиля нет или была ошибка
+    if (profile === null || profile === undefined) {
+      setNeedsOnboarding(true);
+    }
+  }, [profile, profileLoading]);
 
   // Update lead stage mutation
   const updateStageMutation = useMutation({
@@ -207,6 +246,15 @@ export function WhatsAppCRM() {
           onClose={() => {
             setIsDetailModalOpen(false);
             setSelectedDialog(null);
+          }}
+        />
+
+        <OnboardingModal
+          open={needsOnboarding}
+          userAccountId={userAccountId}
+          onComplete={() => {
+            setNeedsOnboarding(false);
+            queryClient.invalidateQueries({ queryKey: ['business-profile'] });
           }}
         />
       </div>
