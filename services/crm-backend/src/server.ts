@@ -1,8 +1,11 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { dialogsRoutes } from './routes/dialogs.js';
+import { templatesRoutes } from './routes/templates.js';
+import { campaignSettingsRoutes } from './routes/campaignSettings.js';
 import { logger } from './lib/logger.js';
 
 dotenv.config();
@@ -23,9 +26,18 @@ app.register(cors, {
   allowedHeaders: ['Content-Type', 'Authorization']
 });
 
+// Register multipart for file uploads (audio transcription)
+app.register(multipart, {
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25 MB (Whisper API limit)
+  }
+});
+
 // ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
 // См. nginx-production.conf: rewrite ^/api/crm/(.*)$ /$1 break;
 app.register(dialogsRoutes);
+app.register(templatesRoutes);
+app.register(campaignSettingsRoutes);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

@@ -5,7 +5,9 @@ import { randomUUID } from 'node:crypto';
 import chatbotRoutes from './routes/chatbot.js';
 import documentsRoutes from './routes/documents.js';
 import reactivationRoutes from './routes/reactivation.js';
+import { campaignRoutes } from './routes/campaign.js';
 import { startReactivationCron } from './cron/reactivationCron.js';
+import { startCampaignCron } from './cron/campaignCron.js';
 import { startReactivationWorker } from './workers/reactivationWorker.js';
 import pino from 'pino';
 
@@ -59,6 +61,7 @@ app.register(cors, {
 app.register(chatbotRoutes);
 app.register(documentsRoutes);
 app.register(reactivationRoutes);
+app.register(campaignRoutes);
 
 // Internal API endpoint for processing messages from agent-service
 app.post('/process-message', async (request, reply) => {
@@ -110,6 +113,10 @@ app.post('/process-message', async (request, reply) => {
 // Запускаем cron для реанимационных рассылок (ежедневно в 00:00)
 // @ts-ignore
 startReactivationCron();
+
+// Запускаем cron для campaign queue (ежедневно в 9:00)
+// @ts-ignore
+startCampaignCron();
 
 // Запускаем worker для отправки реанимационных сообщений (каждую минуту)
 // @ts-ignore - Type mismatch between fastify and pino logger

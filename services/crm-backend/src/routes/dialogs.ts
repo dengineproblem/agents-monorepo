@@ -2,6 +2,8 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { analyzeDialogs } from '../scripts/analyzeDialogs.js';
+import { transcribeAudio, validateAudioFile } from '../lib/whisperTranscription.js';
+import { reanalyzeWithAudioContext, reanalyzeWithNotes } from '../lib/reanalyzeWithContext.js';
 
 // Validation schemas
 const AnalyzeDialogsSchema = z.object({
@@ -502,6 +504,214 @@ export async function dialogsRoutes(app: FastifyInstance) {
       return reply.status(500).send({ 
         error: 'Delete failed', 
         message: error.message 
+      });
+    }
+  });
+
+  /**
+   * POST /dialogs/leads/:id/audio
+   * Upload audio file, transcribe with Whisper, and reanalyze lead
+   */
+  app.post('/dialogs/leads/:id/audio', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const data = await request.file();
+
+      if (!data) {
+        return reply.status(400).send({ error: 'No file uploaded' });
+      }
+
+      // Validate file
+      const validation = validateAudioFile(data.filename, data.file.bytesRead || 0);
+      if (!validation.valid) {
+        return reply.status(400).send({ error: validation.error });
+      }
+
+      app.log.info({ leadId: id, filename: data.filename }, 'Processing audio upload');
+
+      // Read file buffer
+      const buffer = await data.toBuffer();
+
+      // Transcribe audio with Whisper API
+      const transcript = await transcribeAudio(buffer, data.filename);
+
+      // Get current lead data
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('audio_transcripts')
+        .eq('id', id)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      // Add transcript to array
+      const audioTranscripts = Array.isArray(lead.audio_transcripts) ? lead.audio_transcripts : [];
+      audioTranscripts.push({
+        filename: data.filename,
+        transcript,
+        uploaded_at: new Date().toISOString()
+      });
+
+      // Reanalyze with audio context
+      const updatedAnalysis = await reanalyzeWithAudioContext(id, transcript);
+
+      // Update lead in database
+      const { error: updateError } = await supabase
+        .from('dialog_analysis')
+        .update({
+          audio_transcripts: audioTranscripts,
+          ...updatedAnalysis,
+          analyzed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      app.log.info({ leadId: id, transcriptLength: transcript.length }, 'Audio transcribed and lead reanalyzed');
+
+      return reply.send({
+        success: true,
+        transcript,
+        transcriptLength: transcript.length,
+        analysis: updatedAnalysis
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to process audio upload');
+      return reply.status(500).send({
+        error: 'Audio processing failed',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /dialogs/leads/:id/notes
+   * Update manual notes and reanalyze lead
+   */
+  app.patch('/dialogs/leads/:id/notes', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { notes, userAccountId } = request.body as { notes: string; userAccountId: string };
+
+      if (!notes) {
+        return reply.status(400).send({ error: 'notes field is required' });
+      }
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId field is required' });
+      }
+
+      app.log.info({ leadId: id, notesLength: notes.length }, 'Updating lead notes');
+
+      // Verify lead belongs to user
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('id, user_account_id')
+        .eq('id', id)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      if (lead.user_account_id !== userAccountId) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      // Reanalyze with notes
+      const updatedAnalysis = await reanalyzeWithNotes(id, notes);
+
+      // Update lead in database
+      const { error: updateError } = await supabase
+        .from('dialog_analysis')
+        .update({
+          manual_notes: notes,
+          ...updatedAnalysis,
+          analyzed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      app.log.info({ leadId: id }, 'Notes updated and lead reanalyzed');
+
+      return reply.send({
+        success: true,
+        analysis: updatedAnalysis
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to update notes');
+      return reply.status(500).send({
+        error: 'Notes update failed',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /dialogs/leads/:id/autopilot
+   * Toggle autopilot for specific lead
+   */
+  app.patch('/dialogs/leads/:id/autopilot', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { autopilotEnabled, userAccountId } = request.body as { 
+        autopilotEnabled: boolean; 
+        userAccountId: string; 
+      };
+
+      if (typeof autopilotEnabled !== 'boolean') {
+        return reply.status(400).send({ error: 'autopilotEnabled field is required (boolean)' });
+      }
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId field is required' });
+      }
+
+      // Verify lead belongs to user
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('id, user_account_id')
+        .eq('id', id)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      if (lead.user_account_id !== userAccountId) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      // Update autopilot setting
+      const { error: updateError } = await supabase
+        .from('dialog_analysis')
+        .update({
+          autopilot_enabled: autopilotEnabled,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      app.log.info({ leadId: id, autopilotEnabled }, 'Autopilot setting updated');
+
+      return reply.send({ success: true, autopilotEnabled });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to update autopilot');
+      return reply.status(500).send({
+        error: 'Autopilot update failed',
+        message: error.message
       });
     }
   });
