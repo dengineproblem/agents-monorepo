@@ -300,26 +300,6 @@ export async function refreshAccessToken(
 }
 
 /**
- * Get contact by ID
- *
- * @param contactId - Contact ID
- * @param subdomain - AmoCRM subdomain
- * @param accessToken - Access token
- * @returns Contact
- */
-export async function getContact(
-  contactId: number,
-  subdomain: string,
-  accessToken: string
-): Promise<AmoCRMContact> {
-  return amocrmRequest({
-    subdomain,
-    accessToken,
-    endpoint: `contacts/${contactId}`
-  });
-}
-
-/**
  * Find contact by phone number
  *
  * @param phone - Phone number to search
