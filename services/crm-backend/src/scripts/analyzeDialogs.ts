@@ -36,7 +36,6 @@ S: — системное сообщение
   "interest_level": "hot" | "warm" | "cold",
   "main_intent": "clinic_lead" | "ai_targetolog" | "marketing_analysis" | "other",
   "objection": string | null,
-  "next_message": string,
   "action": "want_call" | "want_work" | "reserve" | "none",
   "score": 0-100,
   "reasoning": string
@@ -104,7 +103,6 @@ interface AnalysisResult {
   interest_level: 'hot' | 'warm' | 'cold';
   main_intent: 'clinic_lead' | 'ai_targetolog' | 'marketing_analysis' | 'other';
   objection: string | null;
-  next_message: string;
   action: 'want_call' | 'want_work' | 'reserve' | 'none';
   score: number;
   reasoning: string;
@@ -344,7 +342,6 @@ async function saveAnalysisResult(
       interest_level: analysis.interest_level,
       main_intent: analysis.main_intent,
       objection: analysis.objection,
-      next_message: analysis.next_message,
       action: analysis.action,
       score: analysis.score,
       reasoning: analysis.reasoning,

@@ -19,6 +19,10 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
     business_industry: '',
     business_description: '',
     target_audience: '',
+    funnel_stages_description: '',
+    stage_transition_criteria: '',
+    positive_signals: '',
+    negative_signals: '',
     main_challenges: '',
   });
 
@@ -55,9 +59,14 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
 
   const isStep1Valid = 
     formData.business_industry.length >= 1 && 
-    formData.business_description.length >= 3;
+    formData.business_description.length >= 3 &&
+    formData.target_audience.length >= 3;
   const isStep2Valid = 
-    formData.target_audience.length >= 3 && 
+    formData.funnel_stages_description.length >= 3 && 
+    formData.stage_transition_criteria.length >= 3;
+  const isStep3Valid = 
+    formData.positive_signals.length >= 3 && 
+    formData.negative_signals.length >= 3 &&
     formData.main_challenges.length >= 3;
 
   return (
@@ -75,7 +84,7 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
           {step === 1 && (
             <div className="space-y-4">
               <div className="text-sm text-gray-500 mb-4">
-                Шаг 1 из 2
+                Шаг 1 из 3: Базовая информация
               </div>
               
               <div>
@@ -103,7 +112,7 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
                   placeholder="Опишите кратко, что вы предлагаете клиентам..."
                   value={formData.business_description}
                   onChange={(e) => setFormData({ ...formData, business_description: e.target.value })}
-                  rows={4}
+                  rows={3}
                   className="mt-2"
                 />
                 <p className="text-xs text-gray-500 mt-1">
@@ -114,14 +123,6 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
                     ⚠️ Слишком коротко, добавьте детали
                   </p>
                 )}
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="space-y-4">
-              <div className="text-sm text-gray-500 mb-4">
-                Шаг 2 из 2
               </div>
 
               <div>
@@ -145,10 +146,114 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
                   </p>
                 )}
               </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <div className="text-sm text-gray-500 mb-4">
+                Шаг 2 из 3: Воронка продаж
+              </div>
+
+              <div>
+                <Label htmlFor="funnel">
+                  4. Опишите этапы вашей воронки продаж *
+                </Label>
+                <Textarea
+                  id="funnel"
+                  placeholder="Например: Первый контакт → Квалификация → Консультация → Оформление сделки → Оплата"
+                  value={formData.funnel_stages_description}
+                  onChange={(e) => setFormData({ ...formData, funnel_stages_description: e.target.value })}
+                  rows={3}
+                  className="mt-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Минимум 3 символа. Через какие этапы проходит клиент от первого контакта до сделки?
+                </p>
+                {formData.funnel_stages_description.length > 0 && formData.funnel_stages_description.length < 3 && (
+                  <p className="text-xs text-red-500 mt-1">
+                    ⚠️ Слишком коротко, добавьте детали
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="criteria">
+                  5. Критерии перехода между этапами *
+                </Label>
+                <Textarea
+                  id="criteria"
+                  placeholder="Например: На квалификацию - когда ответил на вопросы о бюджете и сроках. На консультацию - когда согласился на встречу..."
+                  value={formData.stage_transition_criteria}
+                  onChange={(e) => setFormData({ ...formData, stage_transition_criteria: e.target.value })}
+                  rows={4}
+                  className="mt-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Минимум 3 символа. Что должен сделать/сказать клиент, чтобы перейти на следующий этап?
+                </p>
+                {formData.stage_transition_criteria.length > 0 && formData.stage_transition_criteria.length < 3 && (
+                  <p className="text-xs text-red-500 mt-1">
+                    ⚠️ Слишком коротко, добавьте детали
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="text-sm text-gray-500 mb-4">
+                Шаг 3 из 3: Сигналы и задачи
+              </div>
+
+              <div>
+                <Label htmlFor="positive">
+                  6. Позитивные сигналы заинтересованности *
+                </Label>
+                <Textarea
+                  id="positive"
+                  placeholder='Например: "хочу узнать подробнее", "какие результаты", "сколько стоит", "когда можем начать", "интересно"...'
+                  value={formData.positive_signals}
+                  onChange={(e) => setFormData({ ...formData, positive_signals: e.target.value })}
+                  rows={3}
+                  className="mt-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Минимум 3 символа. Какие фразы/вопросы говорят о том, что клиент заинтересован?
+                </p>
+                {formData.positive_signals.length > 0 && formData.positive_signals.length < 3 && (
+                  <p className="text-xs text-red-500 mt-1">
+                    ⚠️ Слишком коротко, добавьте детали
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <Label htmlFor="negative">
+                  7. Типичные возражения клиентов *
+                </Label>
+                <Textarea
+                  id="negative"
+                  placeholder='Например: "дорого", "подумаю", "нет бюджета", "не подходит", "не интересно"...'
+                  value={formData.negative_signals}
+                  onChange={(e) => setFormData({ ...formData, negative_signals: e.target.value })}
+                  rows={3}
+                  className="mt-2"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Минимум 3 символа. Какие возражения чаще всего озвучивают клиенты?
+                </p>
+                {formData.negative_signals.length > 0 && formData.negative_signals.length < 3 && (
+                  <p className="text-xs text-red-500 mt-1">
+                    ⚠️ Слишком коротко, добавьте детали
+                  </p>
+                )}
+              </div>
 
               <div>
                 <Label htmlFor="challenges">
-                  4. Какие задачи или проблемы вы пытаетесь решить в вашем бизнесе? *
+                  8. Главные задачи вашего бизнеса *
                 </Label>
                 <Textarea
                   id="challenges"
@@ -184,17 +289,17 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
           
           <div className="flex-1" />
           
-          {step < 2 ? (
+          {step < 3 ? (
             <Button 
               onClick={() => setStep(step + 1)} 
-              disabled={!isStep1Valid}
+              disabled={step === 1 ? !isStep1Valid : !isStep2Valid}
             >
               Далее →
             </Button>
           ) : (
             <Button 
               onClick={handleSubmit} 
-              disabled={!isStep2Valid || loading}
+              disabled={!isStep3Valid || loading}
             >
               {loading ? 'Сохранение...' : 'Завершить'}
             </Button>

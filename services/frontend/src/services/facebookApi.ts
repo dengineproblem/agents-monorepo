@@ -525,10 +525,23 @@ export const facebookApi = {
       const endpoint = `${accountId}/adspixels`;
       const params = { fields: 'id,name', limit: '100' };
       const response = await fetchFromFacebookAPI(endpoint, params);
-      return (response.data || []).map((p: any) => ({ id: String(p.id), name: p.name || p.id }));
+      const pixels = (response.data || []).map((p: any) => ({ id: String(p.id), name: p.name || p.id }));
+
+      console.log(`Получено пикселей: ${pixels.length}`);
+
+      // Не показываем ошибку если просто нет пикселей - это нормально
+      if (pixels.length === 0) {
+        console.info('В рекламном кабинете не найдено пикселей');
+      }
+
+      return pixels;
     } catch (e) {
       console.error('Не удалось получить список пикселей:', e);
-      toastT.error('failedToLoadPixels');
+      // Показываем ошибку только если это реальная ошибка API, а не просто пустой результат
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      if (!errorMessage.includes('Empty response') && !errorMessage.includes('data')) {
+        toastT.error('failedToLoadPixels');
+      }
       return [];
     }
   },

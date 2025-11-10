@@ -10,6 +10,12 @@ const BusinessProfileSchema = z.object({
   target_audience: z.string().min(3, 'Минимум 3 символа'),
   main_challenges: z.string().min(3, 'Минимум 3 символа'),
   funnel_stages: z.array(z.string()).optional(),
+  
+  // New personalization fields
+  funnel_stages_description: z.string().min(3, 'Минимум 3 символа').optional(),
+  stage_transition_criteria: z.string().min(3, 'Минимум 3 символа').optional(),
+  positive_signals: z.string().min(3, 'Минимум 3 символа').optional(),
+  negative_signals: z.string().min(3, 'Минимум 3 символа').optional(),
 });
 
 export async function businessProfileRoutes(app: FastifyInstance) {
@@ -56,6 +62,10 @@ export async function businessProfileRoutes(app: FastifyInstance) {
           target_audience: body.target_audience,
           main_challenges: body.main_challenges,
           funnel_stages: body.funnel_stages,
+          funnel_stages_description: body.funnel_stages_description,
+          stage_transition_criteria: body.stage_transition_criteria,
+          positive_signals: body.positive_signals,
+          negative_signals: body.negative_signals,
           updated_at: new Date().toISOString(),
         }, {
           onConflict: 'user_account_id'
@@ -77,6 +87,10 @@ export async function businessProfileRoutes(app: FastifyInstance) {
           business_description: body.business_description,
           target_audience: body.target_audience,
           main_challenges: body.main_challenges,
+          funnel_stages_description: body.funnel_stages_description,
+          stage_transition_criteria: body.stage_transition_criteria,
+          positive_signals: body.positive_signals,
+          negative_signals: body.negative_signals,
         });
 
         // Save context to profile

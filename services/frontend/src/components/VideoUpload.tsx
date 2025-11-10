@@ -230,12 +230,19 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   // Загружаем пиксели при выборе цели "Лиды на сайте"
   useEffect(() => {
     const loadPixels = async () => {
-      if (campaignGoal !== 'site_leads') return;
+      if (campaignGoal !== 'site_leads') {
+        // Сброс пикселей при переключении на другую цель
+        setPixels([]);
+        setPixelId('');
+        return;
+      }
       setIsLoadingPixels(true);
       try {
         const list = await facebookApi.getPixels();
-        setPixels(list || []);
+        console.log('Загружены пиксели (VideoUpload):', list);
+        setPixels(Array.isArray(list) ? list : []);
       } catch (e) {
+        console.error('Ошибка загрузки пикселей:', e);
         setPixels([]);
       } finally {
         setIsLoadingPixels(false);
@@ -1788,12 +1795,28 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     </div>
                     <div>
                       <label className="block mb-1 text-sm text-muted-foreground">Пиксель Facebook</label>
-                      <select className="border rounded px-3 py-2 w-full" value={pixelId} onChange={e => setPixelId(e.target.value)}>
-                        <option value="">Не выбран</option>
+                      <select
+                        className="border rounded px-3 py-2 w-full"
+                        value={pixelId}
+                        onChange={e => setPixelId(e.target.value)}
+                        disabled={isLoadingPixels}
+                      >
+                        <option value="">
+                          {isLoadingPixels
+                            ? 'Загрузка...'
+                            : pixels.length === 0
+                              ? 'Пиксели не найдены'
+                              : 'Не выбран'}
+                        </option>
                         {pixels.map(p => (
                           <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
                         ))}
                       </select>
+                      {pixels.length === 0 && !isLoadingPixels && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          В вашем рекламном кабинете не найдено пикселей. Вы можете продолжить без пикселя.
+                        </p>
+                      )}
                     </div>
                     <div className="md:col-span-2">
                       <label className="block mb-1 text-sm text-muted-foreground">{t('video.utmTag')}</label>
@@ -2382,12 +2405,28 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 </div>
                 <div>
                   <label className="block mb-1 text-sm text-muted-foreground">Пиксель Facebook</label>
-                  <select className="border rounded px-3 py-2 w-full" value={pixelId} onChange={e => setPixelId(e.target.value)}>
-                    <option value="">Не выбран</option>
+                  <select
+                    className="border rounded px-3 py-2 w-full"
+                    value={pixelId}
+                    onChange={e => setPixelId(e.target.value)}
+                    disabled={isLoadingPixels}
+                  >
+                    <option value="">
+                      {isLoadingPixels
+                        ? 'Загрузка...'
+                        : pixels.length === 0
+                          ? 'Пиксели не найдены'
+                          : 'Не выбран'}
+                    </option>
                     {pixels.map(p => (
                       <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
                     ))}
                   </select>
+                  {pixels.length === 0 && !isLoadingPixels && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      В вашем рекламном кабинете не найдено пикселей. Вы можете продолжить без пикселя.
+                    </p>
+                  )}
                 </div>
               </div>
             )}

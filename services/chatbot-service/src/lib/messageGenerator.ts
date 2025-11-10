@@ -32,6 +32,7 @@ interface Template {
   title: string;
   content: string;
   template_type: MessageType;
+  is_active?: boolean;
 }
 
 interface GeneratedMessage {
@@ -153,7 +154,8 @@ async function determineMessageType(lead: Lead): Promise<MessageType> {
  */
 export async function generatePersonalizedMessage(
   lead: Lead,
-  templates: Template[]
+  templates: Template[],
+  businessContext?: string
 ): Promise<GeneratedMessage> {
   try {
     log.info({ leadId: lead.id, leadName: lead.contact_name }, 'Generating personalized message');
@@ -169,9 +171,11 @@ export async function generatePersonalizedMessage(
     // 3. Build prompt
     const daysSinceLastCampaign = calculateDaysSince(lead.last_campaign_message_at);
     
-    const prompt = `Ты - менеджер Performante (маркетинг для клиник).
+    const prompt = `Ты - персональный менеджер по продажам.
 
 ЗАДАЧА: Сгенерируй персонализированное WhatsApp сообщение для реактивации клиента.
+
+${businessContext || ''}
 
 ТИП СООБЩЕНИЯ: ${messageType}
 - "selling": Продающее (предложение консультации, услуг, кейсы, результаты)
@@ -275,6 +279,48 @@ export async function generateBatchMessages(
   try {
     log.info({ userAccountId, leadsCount: leads.length }, 'Generating batch messages');
 
+    // Get business profile with personalized context
+    const { data: profile } = await supabase
+      .from('business_profile')
+      .select('personalized_context')
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    let businessContext = '';
+    if (profile?.personalized_context) {
+      const ctx = profile.personalized_context as any;
+      businessContext = `
+=== ПЕРСОНАЛИЗИРОВАННЫЙ КОНТЕКСТ БИЗНЕСА ===
+
+СПЕЦИФИКА БИЗНЕСА:
+${ctx.business_context || ''}
+
+ИДЕАЛЬНЫЙ ПРОФИЛЬ ЛИДА:
+${ctx.target_profile || ''}
+
+ОСОБЕННОСТИ ВОРОНКИ:
+${ctx.funnel_specifics || ''}
+
+${ctx.funnel_stages && ctx.funnel_stages.length > 0 ? `
+ЭТАПЫ ВОРОНКИ:
+${ctx.funnel_stages.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}
+` : ''}
+
+ПОЗИТИВНЫЕ СИГНАЛЫ:
+${ctx.positive_signals ? ctx.positive_signals.map((s: string) => `- "${s}"`).join('\n') : 'не указано'}
+
+НЕГАТИВНЫЕ СИГНАЛЫ:
+${ctx.negative_signals ? ctx.negative_signals.map((s: string) => `- "${s}"`).join('\n') : 'не указано'}
+
+МОДИФИКАТОРЫ ПРИОРИТЕТА:
+- Повышают: ${ctx.scoring_modifiers?.bonus_keywords?.join(', ') || 'не указано'}
+- Понижают: ${ctx.scoring_modifiers?.penalty_keywords?.join(', ') || 'не указано'}
+
+=== КОНЕЦ ПЕРСОНАЛИЗИРОВАННОГО КОНТЕКСТА ===
+`;
+      log.info({ userAccountId }, 'Using personalized business context for message generation');
+    }
+
     // Get all active templates for user
     const { data: templates, error: templatesError } = await supabase
       .from('campaign_templates')
@@ -293,7 +339,7 @@ export async function generateBatchMessages(
 
     for (const lead of leads) {
       try {
-        const generatedMessage = await generatePersonalizedMessage(lead, userTemplates);
+        const generatedMessage = await generatePersonalizedMessage(lead, userTemplates, businessContext);
         results.set(lead.id, generatedMessage);
       } catch (error: any) {
         log.error({ error: error.message, leadId: lead.id }, 'Failed to generate message for lead');

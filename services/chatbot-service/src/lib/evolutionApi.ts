@@ -61,7 +61,7 @@ export async function sendWhatsAppMessage(
       throw new Error(`Evolution API error: ${response.status} - ${errorText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
 
     log.info({ 
       instanceName, 
@@ -105,7 +105,7 @@ export async function checkInstanceStatus(instanceName: string): Promise<boolean
       return false;
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     
     // Check if instance is connected
     return data.state === 'open';

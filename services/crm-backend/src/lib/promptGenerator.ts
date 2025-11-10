@@ -17,6 +17,10 @@ const META_PROMPT = `Ты - эксперт по созданию промпто�
 - Описание бизнеса: <<<DESCRIPTION>>>
 - Целевая аудитория: <<<TARGET_AUDIENCE>>>
 - Главные задачи: <<<CHALLENGES>>>
+- Этапы воронки: <<<FUNNEL_STAGES>>>
+- Критерии переходов: <<<STAGE_CRITERIA>>>
+- Позитивные сигналы: <<<POSITIVE_SIGNALS>>>
+- Негативные сигналы: <<<NEGATIVE_SIGNALS>>>
 
 СОЗДАЙ JSON с персонализированным контекстом:
 
@@ -24,6 +28,11 @@ const META_PROMPT = `Ты - эксперт по созданию промпто�
   "business_context": "Краткое описание специфики бизнеса клиента (2-3 предложения)",
   "target_profile": "Описание идеального лида для этого бизнеса",
   "funnel_specifics": "Особенности воронки продаж в этой нише",
+  "funnel_stages": ["этап1", "этап2", ...],
+  "stage_transition_criteria": {
+    "этап1_к_этап2": "конкретный критерий",
+    "этап2_к_этап3": "конкретный критерий"
+  },
   "positive_signals": ["фраза 1", "фраза 2", ...],
   "negative_signals": ["фраза 1", "фраза 2", ...],
   "scoring_modifiers": {
@@ -35,10 +44,13 @@ const META_PROMPT = `Ты - эксперт по созданию промпто�
 
 ПРАВИЛА:
 1. Контекст должен быть конкретным и релевантным нише
-2. Фразы-сигналы должны быть типичными для этого бизнеса
-3. Учитывай специфику продаж в указанной сфере
-4. Modifiers должны отражать ценность клиента для этого бизнеса
-5. Все на русском языке
+2. Используй ВСЕ предоставленные данные из брифа
+3. Если клиент указал этапы воронки - используй их, иначе предложи стандартные
+4. Если клиент указал позитивные/негативные сигналы - включи их в массивы
+5. Фразы-сигналы должны быть типичными для этого бизнеса
+6. Учитывай специфику продаж в указанной сфере
+7. Modifiers должны отражать ценность клиента для этого бизнеса
+8. Все на русском языке
 
 Верни ТОЛЬКО JSON, без дополнительного текста.`;
 
@@ -47,12 +59,18 @@ export interface BusinessProfile {
   business_description: string;
   target_audience: string;
   main_challenges: string;
+  funnel_stages_description?: string;
+  stage_transition_criteria?: string;
+  positive_signals?: string;
+  negative_signals?: string;
 }
 
 export interface PersonalizedContext {
   business_context: string;
   target_profile: string;
   funnel_specifics: string;
+  funnel_stages?: string[];
+  stage_transition_criteria?: Record<string, string>;
   positive_signals: string[];
   negative_signals: string[];
   scoring_modifiers: {
@@ -76,7 +94,11 @@ export async function generatePersonalizedPromptContext(
       .replace('<<<INDUSTRY>>>', profile.business_industry)
       .replace('<<<DESCRIPTION>>>', profile.business_description)
       .replace('<<<TARGET_AUDIENCE>>>', profile.target_audience)
-      .replace('<<<CHALLENGES>>>', profile.main_challenges);
+      .replace('<<<CHALLENGES>>>', profile.main_challenges)
+      .replace('<<<FUNNEL_STAGES>>>', profile.funnel_stages_description || 'не указано')
+      .replace('<<<STAGE_CRITERIA>>>', profile.stage_transition_criteria || 'не указано')
+      .replace('<<<POSITIVE_SIGNALS>>>', profile.positive_signals || 'не указано')
+      .replace('<<<NEGATIVE_SIGNALS>>>', profile.negative_signals || 'не указано');
 
     // Call GPT to generate context
     const response = await openai.chat.completions.create({
@@ -141,7 +163,7 @@ export function getDefaultContext(): PersonalizedContext {
  * Format context to text for adding to prompt
  */
 export function formatContextForPrompt(context: PersonalizedContext): string {
-  return `
+  let formatted = `
 === ПЕРСОНАЛИЗИРОВАННЫЙ КОНТЕКСТ КЛИЕНТА ===
 
 СПЕЦИФИКА БИЗНЕСА:
@@ -152,7 +174,25 @@ ${context.target_profile}
 
 ОСОБЕННОСТИ ВОРОНКИ:
 ${context.funnel_specifics}
+`;
 
+  // Add funnel stages if available
+  if (context.funnel_stages && context.funnel_stages.length > 0) {
+    formatted += `
+ЭТАПЫ ВОРОНКИ:
+${context.funnel_stages.map((s, i) => `${i + 1}. ${s}`).join('\n')}
+`;
+  }
+
+  // Add stage transition criteria if available
+  if (context.stage_transition_criteria) {
+    formatted += `
+КРИТЕРИИ ПЕРЕХОДОВ МЕЖДУ ЭТАПАМИ:
+${Object.entries(context.stage_transition_criteria).map(([key, value]) => `- ${key}: ${value}`).join('\n')}
+`;
+  }
+
+  formatted += `
 ПОЗИТИВНЫЕ СИГНАЛЫ (признаки заинтересованности):
 ${context.positive_signals.map(s => `- "${s}"`).join('\n')}
 
@@ -168,5 +208,7 @@ ${context.qualification_hints}
 
 === КОНЕЦ ПЕРСОНАЛИЗИРОВАННОГО КОНТЕКСТА ===
 `;
+
+  return formatted;
 }
 

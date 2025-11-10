@@ -20,6 +20,10 @@ interface Lead {
   first_message: string | null;
   autopilot_enabled: boolean;
   messages: any[] | null;
+  business_type: string | null;
+  is_medical: boolean | null;
+  audio_transcripts: any[] | null;
+  manual_notes: string | null;
 }
 
 interface CampaignSettings {
@@ -97,6 +101,7 @@ function getIntervalForLead(interestLevel: string | null, settings: CampaignSett
 /**
  * Calculate time coefficient based on how long since last campaign message
  * The longer the wait since required interval, the higher the coefficient
+ * SOFTENED: Includes leads that have reached 70%+ of required interval
  */
 function calculateTimeCoefficient(
   interestLevel: string | null,
@@ -105,15 +110,25 @@ function calculateTimeCoefficient(
 ): number {
   const requiredInterval = getIntervalForLead(interestLevel, settings);
   
-  if (daysSinceLastCampaign < requiredInterval) {
-    // Not ready yet
+  // Softened criteria: include leads at 70%+ of required interval
+  const threshold = requiredInterval * 0.7;
+  
+  if (daysSinceLastCampaign < threshold) {
+    // Not ready yet - too early
     return 0;
   }
 
   // Calculate how many intervals have passed
   const intervalsPassed = daysSinceLastCampaign / requiredInterval;
   
-  // Exponential decay: 1.0 at exactly interval, 1.5 at 2x, 2.0 at 3x, etc
+  // If between 70%-100% of interval, use partial coefficient (0.5-1.0)
+  if (intervalsPassed < 1.0) {
+    // Linear interpolation from 0.5 to 1.0
+    const progress = (intervalsPassed - 0.7) / 0.3; // 0 to 1 in range [0.7, 1.0]
+    return 0.5 + progress * 0.5;
+  }
+  
+  // Exponential growth: 1.0 at exactly interval, 1.5 at 2x, 2.0 at 3x, etc
   // But cap at 3.0 to avoid too high scores
   const coeff = Math.min(1.0 + (intervalsPassed - 1) * 0.5, 3.0);
   
@@ -175,10 +190,9 @@ export async function generateDailyCampaignQueue(
     // 1. Get campaign settings
     const settings = await getCampaignSettings(userAccountId);
 
-    if (!settings.autopilot_enabled) {
-      log.info({ userAccountId }, 'Autopilot disabled, skipping queue generation');
-      return [];
-    }
+    // Note: Queue generation is independent of autopilot_enabled
+    // Autopilot only controls automatic sending via worker
+    // User can still manually generate queue and send messages
 
     // 2. Get all leads with autopilot enabled
     const { data: leads, error } = await supabase
@@ -235,8 +249,14 @@ export async function generateDailyCampaignQueue(
       };
     });
 
-    // 4. Filter: only leads ready for messaging (reactivationScore > 0)
-    const eligibleLeads = scoredLeads.filter(lead => lead.reactivationScore > 0);
+    // 4. Filter: only leads ready for messaging
+    // Use minimum threshold: base score * 0.3 to include more leads
+    const eligibleLeads = scoredLeads.filter(lead => {
+      if (lead.reactivationScore === 0) return false;
+      const baseScore = lead.score || 0;
+      const minThreshold = baseScore * 0.3;
+      return lead.reactivationScore >= minThreshold;
+    });
 
     log.info({ 
       userAccountId, 
@@ -307,9 +327,14 @@ export async function previewCampaignQueue(
       return { ...lead, reactivationScore };
     });
 
-    // Filter and sort
+    // Filter and sort (using same softened criteria as main function)
     const eligible = scoredLeads
-      .filter(l => l.reactivationScore > 0)
+      .filter(l => {
+        if (l.reactivationScore === 0) return false;
+        const baseScore = l.score || 0;
+        const minThreshold = baseScore * 0.3;
+        return l.reactivationScore >= minThreshold;
+      })
       .sort((a, b) => b.reactivationScore - a.reactivationScore);
 
     return eligible.slice(0, limit);

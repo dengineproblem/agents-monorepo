@@ -25,7 +25,7 @@ export async function transcribeAudio(
 
     // Whisper API requires a file-like object
     // We need to create a File object from the buffer
-    const file = new File([audioBuffer], filename, {
+    const file = new File([audioBuffer as any], filename, {
       type: getAudioMimeType(filename)
     });
 

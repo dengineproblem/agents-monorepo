@@ -317,6 +317,8 @@ export async function campaignRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: 'Message not found' });
       }
 
+      const leadData = campaignMessage.lead as any;
+
       // Update message status
       await supabase
         .from('campaign_messages')
@@ -331,7 +333,7 @@ export async function campaignRoutes(app: FastifyInstance) {
         .from('dialog_analysis')
         .update({
           last_campaign_message_at: new Date().toISOString(),
-          campaign_messages_count: (campaignMessage.lead.campaign_messages_count || 0) + 1,
+          campaign_messages_count: (leadData?.campaign_messages_count || 0) + 1,
         })
         .eq('id', campaignMessage.lead_id);
 

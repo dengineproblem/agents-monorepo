@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS business_profile (
   main_challenges TEXT NOT NULL,          -- Main challenges/problems
   funnel_stages JSONB,                    -- Custom funnel stages (optional)
   
+  -- New fields for personalization
+  funnel_stages_description TEXT,         -- User's funnel stages description
+  stage_transition_criteria TEXT,         -- Criteria for moving between stages
+  positive_signals TEXT,                  -- Positive signals of interest
+  negative_signals TEXT,                  -- Typical objections
+  
   -- AI-generated personalized context
   personalized_context JSONB,             -- AI-generated context for analysis prompt
   
@@ -34,5 +40,9 @@ COMMENT ON COLUMN business_profile.business_description IS 'Description of main 
 COMMENT ON COLUMN business_profile.target_audience IS 'Description of target audience';
 COMMENT ON COLUMN business_profile.main_challenges IS 'Main business challenges/goals';
 COMMENT ON COLUMN business_profile.funnel_stages IS 'Custom funnel stages if needed (JSON array)';
+COMMENT ON COLUMN business_profile.funnel_stages_description IS 'User description of their funnel stages';
+COMMENT ON COLUMN business_profile.stage_transition_criteria IS 'Criteria for moving leads between funnel stages';
+COMMENT ON COLUMN business_profile.positive_signals IS 'Phrases/signals indicating client interest';
+COMMENT ON COLUMN business_profile.negative_signals IS 'Typical client objections';
 COMMENT ON COLUMN business_profile.personalized_context IS 'AI-generated personalized context for analysis prompt';
 

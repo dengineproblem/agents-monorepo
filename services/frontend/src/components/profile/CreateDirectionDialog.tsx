@@ -78,11 +78,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   // Загрузка пикселей при выборе цели "Site Leads"
   useEffect(() => {
     const loadPixels = async () => {
-      if (objective !== 'site_leads') return;
+      if (objective !== 'site_leads') {
+        // Сброс пикселей при переключении на другую цель
+        setPixels([]);
+        setPixelId('');
+        return;
+      }
       setIsLoadingPixels(true);
       try {
         const list = await facebookApi.getPixels();
-        setPixels(list || []);
+        console.log('Загружены пиксели:', list);
+        setPixels(Array.isArray(list) ? list : []);
       } catch (e) {
         console.error('Ошибка загрузки пикселей:', e);
         setPixels([]);
@@ -610,10 +616,21 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   disabled={isSubmitting || isLoadingPixels}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={isLoadingPixels ? 'Загрузка...' : 'Выберите пиксель'} />
+                    <SelectValue placeholder={
+                      isLoadingPixels
+                        ? 'Загрузка...'
+                        : pixels.length === 0
+                          ? 'Нет доступных пикселей'
+                          : 'Выберите пиксель'
+                    } />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">Без пикселя</SelectItem>
+                    {pixels.length === 0 && !isLoadingPixels && (
+                      <SelectItem value="no-pixels" disabled>
+                        Пиксели не найдены в рекламном кабинете
+                      </SelectItem>
+                    )}
                     {pixels.map((pixel) => (
                       <SelectItem key={pixel.id} value={pixel.id}>
                         {pixel.name} ({pixel.id})
@@ -621,6 +638,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     ))}
                   </SelectContent>
                 </Select>
+                {pixels.length === 0 && !isLoadingPixels && (
+                  <p className="text-xs text-muted-foreground">
+                    В вашем рекламном кабинете не найдено пикселей. Вы можете продолжить без пикселя.
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">
