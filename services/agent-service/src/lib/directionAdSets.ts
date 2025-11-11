@@ -44,6 +44,8 @@ export async function getAvailableAdSet(directionId: string): Promise<{
   adset_name: string;
   ads_count: number;
 } | null> {
+  logger.info({ directionId }, '🔍 [USE_EXISTING] Searching for available PAUSED ad set...');
+  
   const { data: adsets, error } = await supabase
     .from('direction_adsets')
     .select('id, fb_adset_id, adset_name, ads_count, daily_budget_cents, status')
@@ -56,14 +58,33 @@ export async function getAvailableAdSet(directionId: string): Promise<{
     .limit(10); // Берём больше чтобы проверить статусы в Facebook
 
   if (error) {
-    logger.error({ error, directionId }, 'Error fetching available ad set');
+    logger.error({ error, directionId }, '❌ [USE_EXISTING] Error fetching available ad set from DB');
     return null;
   }
 
   if (!adsets || adsets.length === 0) {
-    logger.warn({ directionId }, 'No available ad sets found');
+    logger.warn({ 
+      directionId,
+      searched_filters: {
+        is_active: true,
+        status: 'PAUSED',
+        ads_count_lt: 50
+      }
+    }, '⚠️ [USE_EXISTING] No available ad sets found - check if you have PAUSED ad sets linked to this direction');
     return null;
   }
+
+  logger.info({ 
+    directionId,
+    found_count: adsets.length,
+    selected_adset: {
+      id: adsets[0].id,
+      fb_adset_id: adsets[0].fb_adset_id,
+      name: adsets[0].adset_name,
+      current_ads_count: adsets[0].ads_count,
+      daily_budget_cents: adsets[0].daily_budget_cents
+    }
+  }, '✅ [USE_EXISTING] Found available ad set (with minimum ads_count)');
 
   return adsets[0];
 }
@@ -85,34 +106,50 @@ export async function activateAdSet(
   accessToken: string
 ): Promise<void> {
   try {
+    logger.info({ 
+      adsetId, 
+      fbAdSetId 
+    }, '🔄 [USE_EXISTING] STEP 1: Checking ad set status in Facebook before activation...');
+    
     // 1. Проверить текущий статус в Facebook
     const adsetInfo = await graph('GET', `${fbAdSetId}`, accessToken, {
-      fields: 'id,name,status,promoted_object'
+      fields: 'id,name,status,promoted_object,daily_budget,targeting'
     });
 
     logger.info({ 
       fbAdSetId, 
       currentStatus: adsetInfo.status,
-      name: adsetInfo.name 
-    }, 'Checking ad set status before activation');
+      name: adsetInfo.name,
+      daily_budget: adsetInfo.daily_budget,
+      promoted_object: adsetInfo.promoted_object
+    }, '✅ [USE_EXISTING] STEP 1: Ad set info retrieved from Facebook');
 
     // 2. Проверка: если ARCHIVED - нельзя активировать
     if (adsetInfo.status === 'ARCHIVED') {
+      logger.error({ 
+        fbAdSetId, 
+        adsetId,
+        status: adsetInfo.status 
+      }, '❌ [USE_EXISTING] Ad set is ARCHIVED - cannot activate');
+      
       // Пометить в БД как неактивный
       await supabase
         .from('direction_adsets')
         .update({ is_active: false })
         .eq('id', adsetId);
 
-      logger.warn({ fbAdSetId, adsetId }, 'Ad set is ARCHIVED in Facebook, marked as inactive in DB');
       throw new Error(`Ad set ${fbAdSetId} is ARCHIVED and cannot be activated. Create a new ad set in Facebook Ads Manager.`);
     }
 
+    logger.info({ fbAdSetId }, '🔄 [USE_EXISTING] STEP 2: Activating ad set in Facebook (PAUSED → ACTIVE)...');
+    
     // 3. Активировать в Facebook
     await graph('POST', `${fbAdSetId}`, accessToken, toParams({ status: 'ACTIVE' }));
 
-    logger.info({ fbAdSetId }, 'Activated ad set in Facebook');
+    logger.info({ fbAdSetId }, '✅ [USE_EXISTING] STEP 2: Ad set activated in Facebook');
 
+    logger.info({ adsetId }, '🔄 [USE_EXISTING] STEP 3: Updating ad set status in database...');
+    
     // 4. Обновить в БД
     const { error } = await supabase
       .from('direction_adsets')
@@ -123,13 +160,17 @@ export async function activateAdSet(
       .eq('id', adsetId);
 
     if (error) {
-      logger.error({ error, adsetId }, 'Error updating ad set status in DB');
+      logger.error({ error, adsetId }, '❌ [USE_EXISTING] STEP 3: Error updating ad set status in DB');
       throw error;
     }
 
-    logger.info({ adsetId, fbAdSetId }, 'Ad set activated successfully');
+    logger.info({ 
+      adsetId, 
+      fbAdSetId,
+      new_status: 'ACTIVE'
+    }, '✅ [USE_EXISTING] STEP 3: Ad set status updated in database - ACTIVATION COMPLETE');
   } catch (error) {
-    logger.error({ error, adsetId, fbAdSetId }, 'Error activating ad set');
+    logger.error({ error, adsetId, fbAdSetId }, '❌ [USE_EXISTING] Error activating ad set');
     throw error;
   }
 }
@@ -212,20 +253,30 @@ export async function incrementAdsCount(
   count: number
 ): Promise<number> {
   try {
+    logger.info({ 
+      fbAdSetId, 
+      count 
+    }, '🔄 [USE_EXISTING] FINAL STEP: Incrementing ads_count in database...');
+    
     const { data, error } = await supabase.rpc('increment_ads_count', {
       p_fb_adset_id: fbAdSetId,
       p_count: count
     });
 
     if (error) {
-      logger.error({ error, fbAdSetId, count }, 'Error incrementing ads count');
+      logger.error({ error, fbAdSetId, count }, '❌ [USE_EXISTING] FINAL STEP: Error incrementing ads count');
       throw error;
     }
 
-    logger.info({ fbAdSetId, count, newCount: data }, 'Incremented ads count');
+    logger.info({ 
+      fbAdSetId, 
+      ads_added: count, 
+      new_total_ads_count: data 
+    }, '✅ [USE_EXISTING] FINAL STEP: ads_count incremented successfully');
+    
     return data;
   } catch (error) {
-    logger.error({ error, fbAdSetId, count }, 'Error in incrementAdsCount');
+    logger.error({ error, fbAdSetId, count }, '❌ [USE_EXISTING] FINAL STEP: Error in incrementAdsCount');
     throw error;
   }
 }

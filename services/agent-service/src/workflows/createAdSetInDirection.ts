@@ -409,23 +409,43 @@ export async function workflowCreateAdSetInDirection(
     log.info({
       directionId: direction.id,
       directionName: direction.name,
-      mode: 'use_existing'
-    }, 'Using pre-created ad set mode');
+      mode: 'use_existing',
+      userAccountId: user_account_id,
+      userAccountName: userAccountProfile?.username,
+      creatives_count: user_creative_ids.length
+    }, '🚀 [USE_EXISTING] === MODE: use_existing ACTIVATED ===');
+
+    log.info({
+      directionId: direction.id,
+      fb_campaign_id: direction.fb_campaign_id
+    }, '🔍 [USE_EXISTING] Searching for available PAUSED ad set in this direction...');
 
     const availableAdSet = await getAvailableAdSet(direction.id);
     
     if (!availableAdSet) {
-      log.warn({
+      log.error({
         directionId: direction.id,
         directionName: direction.name,
-        userAccountId: user_account_id
-      }, 'No available pre-created ad sets; cannot proceed');
+        userAccountId: user_account_id,
+        userAccountName: userAccountProfile?.username,
+        message: 'NO PAUSED AD SETS FOUND'
+      }, '❌ [USE_EXISTING] No available pre-created ad sets; cannot proceed');
       
       throw new Error(
         `No pre-created ad sets available for direction "${direction.name}". ` +
         `Please create ad sets in Facebook Ads Manager and link them in settings.`
       );
     }
+
+    log.info({
+      directionId: direction.id,
+      availableAdSet: {
+        db_id: availableAdSet.id,
+        fb_adset_id: availableAdSet.fb_adset_id,
+        name: availableAdSet.adset_name,
+        current_ads_count: availableAdSet.ads_count
+      }
+    }, '✅ [USE_EXISTING] Found available ad set - proceeding to activation...');
 
     // Активировать выбранный ad set
     await activateAdSet(
@@ -442,8 +462,10 @@ export async function workflowCreateAdSetInDirection(
       adsetId: adset_id,
       adsetName: adset_name_final,
       mode: 'use_existing',
-      previousAdsCount: availableAdSet.ads_count
-    }, 'Using pre-created ad set (activated)');
+      previousAdsCount: availableAdSet.ads_count,
+      userAccountId: user_account_id,
+      userAccountName: userAccountProfile?.username
+    }, '✅ [USE_EXISTING] Pre-created ad set activated successfully - ready to create ads');
 
   } else {
     // РЕЖИМ: создать новый ad set через API (текущая логика)
@@ -491,6 +513,17 @@ export async function workflowCreateAdSetInDirection(
   // ===================================================
   // STEP 6: Создаём Ads для каждого креатива
   // ===================================================
+  const is_use_existing_mode = userAccount?.default_adset_mode === 'use_existing';
+  const log_prefix = is_use_existing_mode ? '[USE_EXISTING]' : '[API_CREATE]';
+  
+  log.info({
+    count: creative_data.length,
+    adset_id,
+    mode: is_use_existing_mode ? 'use_existing' : 'api_create',
+    userAccountId: user_account_id,
+    userAccountName: userAccountProfile?.username
+  }, `🔧 ${log_prefix} STEP 6: Creating ${creative_data.length} ad(s) in ad set...`);
+  
   const created_ads: Array<{ 
     ad_id: string; 
     user_creative_id: string; 
@@ -498,7 +531,9 @@ export async function workflowCreateAdSetInDirection(
     media_type: string;
   }> = [];
 
-  for (const creative of creative_data) {
+  for (let i = 0; i < creative_data.length; i++) {
+    const creative = creative_data[i];
+    
     const adBody: any = {
       name: creative.ad_name,
       adset_id,
@@ -507,11 +542,14 @@ export async function workflowCreateAdSetInDirection(
     };
 
     log.info({
+      ad_index: i + 1,
+      total_ads: creative_data.length,
       ad_name: creative.ad_name,
       adset_id,
       fb_creative_id: creative.fb_creative_id,
-      media_type: creative.media_type
-    }, 'Creating ad in direction');
+      media_type: creative.media_type,
+      status: auto_activate ? 'ACTIVE' : 'PAUSED'
+    }, `🔧 ${log_prefix} Creating ad ${i + 1}/${creative_data.length}...`);
 
     const adResult = await graph(
       'POST',
@@ -522,14 +560,23 @@ export async function workflowCreateAdSetInDirection(
 
     const ad_id = adResult?.id;
     if (!ad_id) {
+      log.error({
+        creative_id: creative.user_creative_id,
+        fb_creative_id: creative.fb_creative_id,
+        adset_id,
+        ad_index: i + 1
+      }, `❌ ${log_prefix} Failed to create ad ${i + 1}/${creative_data.length}`);
+      
       throw new Error(`Failed to create ad for creative ${creative.user_creative_id}`);
     }
 
     log.info({
       ad_id,
       creative_id: creative.user_creative_id,
-      media_type: creative.media_type
-    }, 'Ad created successfully');
+      media_type: creative.media_type,
+      ad_index: i + 1,
+      total_ads: creative_data.length
+    }, `✅ ${log_prefix} Ad ${i + 1}/${creative_data.length} created successfully`);
 
     created_ads.push({
       ad_id,
@@ -541,18 +588,29 @@ export async function workflowCreateAdSetInDirection(
 
   log.info({
     count: created_ads.length,
-    ads: created_ads
-  }, 'All ads created for direction');
+    ads: created_ads.map(a => ({ ad_id: a.ad_id, creative_id: a.user_creative_id })),
+    adset_id,
+    mode: is_use_existing_mode ? 'use_existing' : 'api_create'
+  }, `✅ ${log_prefix} STEP 6: All ${created_ads.length} ad(s) created successfully in ad set`);
 
   // Инкрементировать счетчик ads для use_existing режима
   if (userAccount?.default_adset_mode === 'use_existing') {
+    log.info({
+      adsetId: adset_id,
+      ads_to_add: created_ads.length,
+      userAccountId: user_account_id,
+      userAccountName: userAccountProfile?.username
+    }, '📊 [USE_EXISTING] Updating ads_count in database...');
+    
     const newCount = await incrementAdsCount(adset_id, created_ads.length);
     
     log.info({
       adsetId: adset_id,
       adsAdded: created_ads.length,
-      newAdsCount: newCount
-    }, 'Incremented ads count for pre-created ad set');
+      newAdsCount: newCount,
+      userAccountId: user_account_id,
+      userAccountName: userAccountProfile?.username
+    }, '✅ [USE_EXISTING] ads_count updated successfully');
   }
 
   // Сохраняем маппинг всех созданных ads для трекинга лидов

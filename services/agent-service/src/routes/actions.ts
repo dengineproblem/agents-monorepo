@@ -491,6 +491,11 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
     }
 
     case 'Direction.UseExistingAdSetWithCreatives': {
+      console.log('🚀 [ACTION] Direction.UseExistingAdSetWithCreatives called', {
+        userAccountId: ctx?.userAccountId,
+        action: action
+      });
+      
       const p = (action as any).params as {
         direction_id: string;
         user_creative_ids: string[];
@@ -499,39 +504,76 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         auto_activate?: boolean;
       };
       
+      console.log('📋 [ACTION] Parameters:', {
+        direction_id: p.direction_id,
+        creatives_count: p.user_creative_ids?.length,
+        user_creative_ids: p.user_creative_ids,
+        daily_budget_cents: p.daily_budget_cents,
+        audience_id: p.audience_id,
+        auto_activate: p.auto_activate
+      });
+      
       if (!p.direction_id) throw new Error('Direction.UseExistingAdSetWithCreatives: direction_id required');
       if (!p.user_creative_ids || !Array.isArray(p.user_creative_ids) || p.user_creative_ids.length === 0) {
         throw new Error('Direction.UseExistingAdSetWithCreatives: user_creative_ids array required');
       }
       
+      console.log('🔍 [ACTION] Checking user account mode...');
       // Проверить режим пользователя
       const { data: userAccount } = await supabase
         .from('user_accounts')
-        .select('default_adset_mode')
+        .select('default_adset_mode, username')
         .eq('id', ctx?.userAccountId)
         .single();
       
+      console.log('✅ [ACTION] User account mode:', {
+        userAccountId: ctx?.userAccountId,
+        username: userAccount?.username,
+        default_adset_mode: userAccount?.default_adset_mode
+      });
+      
       if (userAccount?.default_adset_mode !== 'use_existing') {
+        console.error('❌ [ACTION] Wrong mode - cannot use this action', {
+          current_mode: userAccount?.default_adset_mode,
+          required_mode: 'use_existing'
+        });
         throw new Error('Direction.UseExistingAdSetWithCreatives can only be used in use_existing mode');
       }
       
+      console.log('🔍 [ACTION] Searching for available PAUSED ad set...');
       // Получить доступный PAUSED ad set
       const availableAdSet = await getAvailableAdSet(p.direction_id);
       if (!availableAdSet) {
+        console.error('❌ [ACTION] No available ad sets found', {
+          direction_id: p.direction_id,
+          userAccountId: ctx?.userAccountId
+        });
         throw new Error(`No available pre-created ad sets for direction ${p.direction_id}`);
       }
       
+      console.log('✅ [ACTION] Found available ad set:', {
+        id: availableAdSet.id,
+        fb_adset_id: availableAdSet.fb_adset_id,
+        name: availableAdSet.adset_name,
+        current_ads_count: availableAdSet.ads_count
+      });
+      
       // ИЗМЕНИТЬ НАСТРОЙКИ AD SET ПЕРЕД АКТИВАЦИЕЙ (если указаны)
+      console.log('🔧 [ACTION] Preparing ad set updates...');
       const updateParams: any = {};
       
       // 1. Изменить бюджет (если указан)
       if (p.daily_budget_cents !== undefined) {
         updateParams.daily_budget = p.daily_budget_cents;
+        console.log('💰 [ACTION] Will update budget:', {
+          daily_budget_cents: p.daily_budget_cents
+        });
       }
       
       // 2. Изменить аудиторию (если указана)
       if (p.audience_id) {
         if (p.audience_id === 'use_lal_from_settings') {
+          console.log('🎯 [ACTION] Loading LAL audience from settings...');
           // Получить LAL аудиторию из настроек пользователя
           const { data: userAcct } = await supabase
             .from('user_accounts')
@@ -543,23 +585,40 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
             updateParams.targeting = { 
               custom_audiences: [{ id: userAcct.ig_seed_audience_id }] 
             };
+            console.log('✅ [ACTION] LAL audience loaded:', {
+              audience_id: userAcct.ig_seed_audience_id
+            });
+          } else {
+            console.warn('⚠️ [ACTION] LAL audience requested but not found in settings');
           }
         } else {
           // Использовать указанную аудиторию
           updateParams.targeting = { 
             custom_audiences: [{ id: p.audience_id }] 
           };
+          console.log('✅ [ACTION] Custom audience will be set:', {
+            audience_id: p.audience_id
+          });
         }
       }
       
       // Применить изменения (если есть)
       if (Object.keys(updateParams).length > 0) {
+        console.log('🔧 [ACTION] Applying updates to ad set in Facebook...', {
+          updateParams
+        });
         await graph('POST', `${availableAdSet.fb_adset_id}`, token, toParams(updateParams));
+        console.log('✅ [ACTION] Ad set settings updated in Facebook');
+      } else {
+        console.log('ℹ️ [ACTION] No settings to update, using existing ad set configuration');
       }
       
+      console.log('🔄 [ACTION] Activating ad set (PAUSED → ACTIVE)...');
       // Активировать ad set
       await activateAdSet(availableAdSet.id, availableAdSet.fb_adset_id, token);
+      console.log('✅ [ACTION] Ad set activated successfully');
       
+      console.log('📋 [ACTION] Loading direction and account info...');
       // Получить данные направления для ad_account_id
       const { data: direction } = await supabase
         .from('account_directions')
@@ -567,7 +626,16 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         .eq('id', p.direction_id)
         .single();
       
-      if (!direction) throw new Error('Direction not found');
+      if (!direction) {
+        console.error('❌ [ACTION] Direction not found', { direction_id: p.direction_id });
+        throw new Error('Direction not found');
+      }
+      
+      console.log('✅ [ACTION] Direction loaded:', {
+        id: direction.id,
+        name: direction.name,
+        objective: direction.objective
+      });
       
       const { data: userAcct } = await supabase
         .from('user_accounts')
@@ -579,17 +647,26 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         ? userAcct.ad_account_id 
         : `act_${userAcct?.ad_account_id}`;
       
+      console.log('✅ [ACTION] Ad account:', { ad_account_id: normalized_ad_account_id });
+      
       // Создать ads для каждого креатива
+      console.log(`🎨 [ACTION] Creating ${p.user_creative_ids.length} ad(s)...`);
       const created_ads = [];
       
-      for (const creativeId of p.user_creative_ids) {
+      for (let i = 0; i < p.user_creative_ids.length; i++) {
+        const creativeId = p.user_creative_ids[i];
+        console.log(`🎨 [ACTION] Processing creative ${i + 1}/${p.user_creative_ids.length}:`, { creativeId });
+        
         const { data: creative } = await supabase
           .from('user_creatives')
           .select('*')
           .eq('id', creativeId)
           .single();
         
-        if (!creative) continue;
+        if (!creative) {
+          console.warn(`⚠️ [ACTION] Creative not found, skipping:`, { creativeId });
+          continue;
+        }
         
         // Определить fb_creative_id по objective направления
         let fb_creative_id;
@@ -597,7 +674,13 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
         else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
         
-        if (!fb_creative_id) continue;
+        if (!fb_creative_id) {
+          console.warn(`⚠️ [ACTION] No fb_creative_id for objective ${direction.objective}, skipping:`, { 
+            creativeId,
+            objective: direction.objective
+          });
+          continue;
+        }
         
         const adBody = {
           name: `${creative.title} - ${new Date().toISOString().split('T')[0]}`,
@@ -606,14 +689,34 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           creative: { creative_id: fb_creative_id }
         };
         
+        console.log(`🔧 [ACTION] Creating ad ${i + 1}/${p.user_creative_ids.length} in Facebook...`, {
+          ad_name: adBody.name,
+          adset_id: availableAdSet.fb_adset_id,
+          fb_creative_id,
+          status: adBody.status
+        });
+        
         const adResult = await graph('POST', `${normalized_ad_account_id}/ads`, token, toParams(adBody));
+        
+        console.log(`✅ [ACTION] Ad ${i + 1}/${p.user_creative_ids.length} created:`, {
+          ad_id: adResult.id,
+          creative_id: creativeId
+        });
+        
         created_ads.push({ ad_id: adResult.id, user_creative_id: creativeId });
       }
       
-      // Инкрементировать счетчик ads
-      await incrementAdsCount(availableAdSet.fb_adset_id, created_ads.length);
+      console.log('✅ [ACTION] All ads created:', {
+        total: created_ads.length,
+        ads: created_ads
+      });
       
-      return {
+      // Инкрементировать счетчик ads
+      console.log('📊 [ACTION] Incrementing ads_count...');
+      await incrementAdsCount(availableAdSet.fb_adset_id, created_ads.length);
+      console.log('✅ [ACTION] ads_count incremented');
+      
+      const result = {
         success: true,
         adset_id: availableAdSet.fb_adset_id,
         ads_created: created_ads.length,
@@ -622,6 +725,10 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         settings_updated: Object.keys(updateParams).length > 0,
         updated_params: updateParams
       };
+      
+      console.log('🎉 [ACTION] Direction.UseExistingAdSetWithCreatives completed successfully:', result);
+      
+      return result;
     }
 
     case 'Direction.UseMultipleExistingAdSets': {
