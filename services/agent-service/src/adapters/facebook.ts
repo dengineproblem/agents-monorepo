@@ -333,30 +333,25 @@ export async function createWebsiteLeadsCreative(
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const objectStorySpec: any = {
-    page_id: params.pageId,
-    instagram_user_id: params.instagramId,
-    video_data: {
-      video_id: params.videoId,
-      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
-      message: params.message,
-      call_to_action: {
-        type: "SIGN_UP",
-        value: {
-          link: params.siteUrl
+  const payload: any = {
+    name: "Website Leads Creative",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      video_data: {
+        video_id: params.videoId,
+        image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
+        message: params.message,
+        call_to_action: {
+          type: "SIGN_UP",
+          value: {
+            link: params.siteUrl
+          }
         }
       }
     }
-  }
-
-  const payload: any = {
-    name: "Website Leads Creative",
-    object_story_spec: objectStorySpec
   };
-
-  if (params.utm) {
-    payload.url_tags = params.utm;
-  }
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
@@ -528,30 +523,25 @@ export async function createWebsiteLeadsImageCreative(
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const objectStorySpec: any = {
-    page_id: params.pageId,
-    instagram_user_id: params.instagramId,
-    link_data: {
-      image_hash: params.imageHash,
-      message: params.message,
-      link: params.siteUrl,
-      call_to_action: {
-        type: "SIGN_UP",
-        value: {
-          link: params.siteUrl
+  const payload: any = {
+    name: "Website Leads Image Creative",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      link_data: {
+        image_hash: params.imageHash,
+        message: params.message,
+        link: params.siteUrl,
+        call_to_action: {
+          type: "SIGN_UP",
+          value: {
+            link: params.siteUrl
+          }
         }
       }
     }
-  }
-
-  const payload: any = {
-    name: "Website Leads Image Creative",
-    object_story_spec: objectStorySpec
   };
-
-  if (params.utm) {
-    payload.url_tags = params.utm;
-  }
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
