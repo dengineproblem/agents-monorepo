@@ -335,21 +335,18 @@ export async function createWebsiteLeadsCreative(
 ): Promise<{ id: string }> {
   const objectStorySpec: any = {
     page_id: params.pageId,
+    instagram_user_id: params.instagramId,
     video_data: {
       video_id: params.videoId,
+      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
       message: params.message,
       call_to_action: {
-        type: "LINK_CLICK",
+        type: "SIGN_UP",
         value: {
           link: params.siteUrl
         }
       }
     }
-  };
-
-  // Instagram ID добавляем только если он есть (для диагностики можно убрать)
-  if (params.instagramId) {
-    objectStorySpec.instagram_user_id = params.instagramId;
   }
 
   const payload: any = {
@@ -533,22 +530,18 @@ export async function createWebsiteLeadsImageCreative(
 ): Promise<{ id: string }> {
   const objectStorySpec: any = {
     page_id: params.pageId,
+    instagram_user_id: params.instagramId,
     link_data: {
       image_hash: params.imageHash,
       message: params.message,
       link: params.siteUrl,
       call_to_action: {
-        type: "LINK_CLICK",
+        type: "SIGN_UP",
         value: {
           link: params.siteUrl
         }
       }
     }
-  };
-
-  // Instagram ID добавляем только если он есть
-  if (params.instagramId) {
-    objectStorySpec.instagram_user_id = params.instagramId;
   }
 
   const payload: any = {
