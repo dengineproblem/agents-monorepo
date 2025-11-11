@@ -339,10 +339,9 @@ export async function createWebsiteLeadsCreative(
       video_id: params.videoId,
       message: params.message,
       call_to_action: {
-        type: "LEARN_MORE",
+        type: "LINK_CLICK",
         value: {
-          link: params.siteUrl,
-          link_format: "VIDEO_LPP"  // Явный формат для видео-линк постов
+          link: params.siteUrl
         }
       }
     }
@@ -537,11 +536,11 @@ export async function createWebsiteLeadsImageCreative(
     link_data: {
       image_hash: params.imageHash,
       message: params.message,
+      link: params.siteUrl,
       call_to_action: {
-        type: "LEARN_MORE",
+        type: "LINK_CLICK",
         value: {
-          link: params.siteUrl,
-          link_format: "VIDEO_LPP"  // Явный формат для линк-постов
+          link: params.siteUrl
         }
       }
     }
