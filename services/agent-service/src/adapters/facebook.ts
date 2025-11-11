@@ -20,6 +20,9 @@ const log = createLogger({ module: 'facebookAdapter' });
 // }
 
 export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: string, params: Record<string, any> = {}) {
+  console.log(`[graph] Вызов Facebook API: ${method} ${path}`);
+  console.log('[graph] Параметры:', JSON.stringify(params, null, 2));
+
   const usp = new URLSearchParams();
   usp.set('access_token', token);
   // НЕ используем appsecret_proof - токены могут быть от других приложений
@@ -32,6 +35,9 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   const url = method === 'GET'
     ? `https://graph.facebook.com/${FB_API_VERSION}/${path}?${usp.toString()}`
     : `https://graph.facebook.com/${FB_API_VERSION}/${path}`;
+
+  console.log('[graph] URL:', url.replace(/access_token=[^&]+/, 'access_token=HIDDEN'));
+  console.log('[graph] Body:', usp.toString().replace(/access_token=[^&]+/, 'access_token=HIDDEN'));
 
   // Таймаут 15 секунд для Facebook API запросов
   const controller = new AbortController();
@@ -62,8 +68,11 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   }
 
   const text = await res.text();
+  console.log('[graph] Ответ от Facebook API:', text.substring(0, 500));
+
   let json: any; try { json = JSON.parse(text); } catch { json = { raw: text }; }
   if (!res.ok) {
+    console.error('[graph] Ошибка от Facebook API:', json);
     const g = json?.error || {};
     const err: any = new Error(g?.message || text || `HTTP ${res.status}`);
     err.fb = {
@@ -73,14 +82,15 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
       type: g?.type, code: g?.code, error_subcode: g?.error_subcode, fbtrace_id: g?.fbtrace_id
     };
     const resolution = resolveFacebookError(err.fb);
-    log.error({ 
+    log.error({
       msg: resolution.msgCode,
-      meta: err.fb, 
-      resolution 
+      meta: err.fb,
+      resolution
     }, 'Graph API request failed');
     err.resolution = resolution;
     throw err;
   }
+  console.log('[graph] Успешный ответ:', json);
   return json;
 }
 
@@ -333,6 +343,16 @@ export async function createWebsiteLeadsCreative(
     utm?: string;
   }
 ): Promise<{ id: string }> {
+  console.log('[createWebsiteLeadsCreative] Входные параметры:', {
+    adAccountId,
+    videoId: params.videoId,
+    pageId: params.pageId,
+    instagramId: params.instagramId,
+    message: params.message,
+    siteUrl: params.siteUrl,
+    utm: params.utm
+  });
+
   const payload: any = {
     name: "Website Leads Creative",
     url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
@@ -353,7 +373,17 @@ export async function createWebsiteLeadsCreative(
     }
   };
 
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  console.log('[createWebsiteLeadsCreative] Payload перед отправкой:');
+  console.log(JSON.stringify(payload, null, 2));
+
+  try {
+    const result = await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    console.log('[createWebsiteLeadsCreative] Успешный ответ:', result);
+    return result;
+  } catch (error) {
+    console.error('[createWebsiteLeadsCreative] Ошибка при создании креатива:', error);
+    throw error;
+  }
 }
 
 /**
