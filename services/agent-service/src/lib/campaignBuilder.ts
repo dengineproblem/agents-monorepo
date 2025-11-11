@@ -1752,6 +1752,11 @@ export async function createAdSetInCampaign(params: {
     body.destination_type = 'INSTAGRAM_PROFILE';
   }
 
+  // Для Site Leads (OFFSITE_CONVERSIONS) добавляем destination_type
+  if (optimization_goal === 'OFFSITE_CONVERSIONS') {
+    body.destination_type = 'WEBSITE';
+  }
+
   if (promoted_object) {
     body.promoted_object = promoted_object;
   }

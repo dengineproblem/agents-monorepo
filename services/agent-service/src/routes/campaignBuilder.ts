@@ -584,11 +584,19 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           promoted_object = {
             page_id: userAccount.page_id
           };
-        } else if (direction.objective === 'site_leads' && defaultSettings?.site_url) {
-          promoted_object = {
-            link: defaultSettings.site_url,
-            ...(defaultSettings.pixel_id && { pixel_id: defaultSettings.pixel_id }),
-          };
+        } else if (direction.objective === 'site_leads') {
+          // Для Site Leads используем pixel_id и custom_event_type (как в n8n)
+          // link НЕ добавляем - это вызывает ошибку "Invalid keys \"link\""
+          if (direction.pixel_id || defaultSettings?.pixel_id) {
+            promoted_object = {
+              pixel_id: String(direction.pixel_id || defaultSettings.pixel_id),
+              custom_event_type: 'LEAD'
+            };
+          } else {
+            promoted_object = {
+              custom_event_type: 'LEAD'
+            };
+          }
         }
 
         // Создаём Ad Set или используем pre-created
