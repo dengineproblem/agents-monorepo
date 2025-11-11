@@ -642,8 +642,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   <div className="space-y-2">
                     <Label htmlFor="edit-pixel-id">Pixel ID (опционально)</Label>
                     <Select
-                      value={pixelId}
-                      onValueChange={setPixelId}
+                      value={pixelId || 'none'}
+                      onValueChange={(value) => setPixelId(value === 'none' ? '' : value)}
                       disabled={isSubmitting || isLoadingPixels}
                     >
                       <SelectTrigger>
@@ -656,7 +656,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                         } />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Без пикселя</SelectItem>
+                        <SelectItem value="none">Без пикселя</SelectItem>
                         {pixels.length === 0 && !isLoadingPixels && (
                           <SelectItem value="no-pixels" disabled>
                             Пиксели не найдены в рекламном кабинете
