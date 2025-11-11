@@ -26,6 +26,7 @@ export const COUNTRIES = [
   { code: 'KZ', name: 'Казахстан' },
   { code: 'KG', name: 'Кыргызстан' },
   { code: 'UZ', name: 'Узбекистан' },
+  { code: 'KR', name: 'Южная Корея' },
 ];
 
 // Список городов и стран для поповера
@@ -44,10 +45,11 @@ export const CITIES_AND_COUNTRIES = [
   { id: 'AU', name: 'Австралия' },
   { id: 'FR', name: 'Франция' },
   { id: 'DE', name: 'Германия' },
+  { id: 'KR', name: 'Южная Корея' },
 ];
 
 // ID стран для проверок
-export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE'];
+export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA', 'ES', 'AE', 'AU', 'FR', 'DE', 'KR'];
 
 // Дефолтный UTM-тег
 export const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}';
