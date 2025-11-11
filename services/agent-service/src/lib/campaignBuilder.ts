@@ -1660,7 +1660,7 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
     case 'instagram_traffic':
       return 'LINK_CLICKS';
     case 'site_leads':
-      return 'LEAD_GENERATION';
+      return 'OFFSITE_CONVERSIONS';
     default:
       return 'CONVERSATIONS';
   }
