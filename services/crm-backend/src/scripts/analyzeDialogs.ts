@@ -288,7 +288,6 @@ async function saveNewLead(
       
       // Set as new lead
       funnel_stage: 'new_lead',
-      next_message: 'Новый лид, требуется первый контакт',
       score: 0,
       
       // Store full conversation
@@ -426,16 +425,20 @@ export async function analyzeDialogs(params: {
       log.info({ maxDialogs }, 'Limiting analysis to specified number of dialogs');
     }
     
+    // Limit new leads to save (max 10 to avoid flooding DB)
+    const newLeadsToSave = newLeads.slice(0, 10);
+    
     log.info({ 
       totalContacts: contacts.size,
       newLeads: newLeads.length,
+      newLeadsToSave: newLeadsToSave.length,
       toAnalyze: contactsToAnalyze.length,
       minIncoming,
       maxDialogs: maxDialogs || 'unlimited'
     }, 'Contacts categorized');
 
-    // 4. Save new leads without LLM analysis
-    for (const contact of newLeads) {
+    // 4. Save new leads without LLM analysis (limited to 10)
+    for (const contact of newLeadsToSave) {
       try {
         await saveNewLead(instanceName, userAccountId, contact);
       } catch (error: any) {
@@ -447,7 +450,7 @@ export async function analyzeDialogs(params: {
     const stats = {
       total: contactsToAnalyze.length,
       analyzed: 0,
-      new_leads: newLeads.length,
+      new_leads: newLeadsToSave.length,
       hot: 0,
       warm: 0,
       cold: 0,
