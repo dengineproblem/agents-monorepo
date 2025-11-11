@@ -194,7 +194,52 @@ async function fetchAdsetsDaily(adAccountId, accessToken, days = 14) {
 }
 
 /**
- * Fetch агрегированные actions для adsets (для WhatsApp метрик)
+ * Получить objective для adsets через campaign_id → direction
+ * Возвращает Map<adset_id, objective>
+ */
+async function getAdsetsObjectives(supabase, userAccountId, adsetIds) {
+  if (!adsetIds || adsetIds.length === 0) return new Map();
+
+  const objectivesMap = new Map();
+
+  try {
+    // Получаем campaign_id для каждого adset из Facebook Insights
+    // (уже есть в dailyData: campaign_id)
+    // Поэтому вместо adsetIds используем campaign_ids
+
+    // Получаем directions с их fb_campaign_id и objective
+    const { data: directions, error } = await supabase
+      .from('account_directions')
+      .select('fb_campaign_id, objective')
+      .eq('user_account_id', userAccountId)
+      .not('fb_campaign_id', 'is', null);
+
+    if (error) {
+      logger.error({ error: error.message }, '[getAdsetsObjectives] Failed to fetch directions');
+      return objectivesMap;
+    }
+
+    // Создаем Map<fb_campaign_id, objective>
+    const campaignObjectives = new Map();
+    for (const d of directions || []) {
+      campaignObjectives.set(d.fb_campaign_id, d.objective);
+    }
+
+    logger.debug({
+      directions_count: directions?.length || 0,
+      campaigns_mapped: campaignObjectives.size
+    }, '[getAdsetsObjectives] Loaded campaign objectives');
+
+    return campaignObjectives;
+
+  } catch (err) {
+    logger.error({ err: err.message }, '[getAdsetsObjectives] Error fetching objectives');
+    return objectivesMap;
+  }
+}
+
+/**
+ * Fetch агрегированные actions для adsets (для всех типов кампаний)
  */
 async function fetchAdsetsActions(adAccountId, accessToken, datePreset = 'last_7d') {
   const normalizedId = normalizeAdAccountId(adAccountId);
@@ -229,9 +274,10 @@ async function fetchAdsetsActions(adAccountId, accessToken, datePreset = 'last_7
 /**
  * Группирует daily данные и вычисляет тренды для 1d, 3d, 7d
  * @param {Array} dailyData - данные с breakdown по дням
- * @param {Array} actionsData - агрегированные actions для WhatsApp метрик
+ * @param {Array} actionsData - агрегированные actions
+ * @param {Map} campaignObjectives - Map<campaign_id, objective>
  */
-function calculateMultiPeriodTrends(dailyData, actionsData = []) {
+function calculateMultiPeriodTrends(dailyData, actionsData = [], campaignObjectives = new Map()) {
   // Группируем по adset_id
   const byAdset = new Map();
   
@@ -279,50 +325,87 @@ function calculateMultiPeriodTrends(dailyData, actionsData = []) {
       d7: calculateTrend(days.slice(-14, -7), days.slice(-7)) // дни 8-14 vs последние 7
     };
     
-    // Получаем WhatsApp метрики из агрегированных actions
+    // Получаем objective для этого adset
+    const objective = campaignObjectives.get(adset.campaign_id) || 'whatsapp'; // fallback для legacy
+
+    // Получаем actions для этого adset
     const actionsForAdset = actionsData.find(a => a.adset_id === adset.adset_id);
     const actions = actionsForAdset?.actions || [];
-    
-    // WhatsApp метрики:
-    const linkClicksTotal = extractActionValue(actions, 'link_click');
-    const conversationsTotal = extractActionValue(actions, 'onsite_conversion.total_messaging_connection'); // начатые переписки
-    const qualityLeadsTotal = extractActionValue(actions, 'onsite_conversion.messaging_user_depth_2_message_send'); // качественные лиды (≥2 сообщения)
-    
+
     // Для отладки: выводим все action_types
     const allActionTypes = actions.map(a => `${a.action_type}:${a.value}`).join(', ');
-    
+
     let dataValid = true;
     let dataValidityReason = null;
-    
-    // Проверка валидности для WhatsApp кампаний
-    if (linkClicksTotal > 0) {
-      const conversionRate = conversationsTotal > 0 
-        ? (conversationsTotal / linkClicksTotal) * 100 
-        : 0;
-      
-      if (conversionRate < 10) { // менее 10% конверсия = невалидно
+    let objectiveMetrics = null;
+
+    // Собираем метрики в зависимости от objective
+    if (objective === 'whatsapp') {
+      // WhatsApp метрики
+      const linkClicksTotal = extractActionValue(actions, 'link_click');
+      const conversationsTotal = extractActionValue(actions, 'onsite_conversion.total_messaging_connection');
+      const qualityLeadsTotal = extractActionValue(actions, 'onsite_conversion.messaging_user_depth_2_message_send');
+
+      const conversionRate = linkClicksTotal > 0 ? (conversationsTotal / linkClicksTotal) * 100 : 0;
+      const qualityConversionRate = linkClicksTotal > 0 ? (qualityLeadsTotal / linkClicksTotal) * 100 : 0;
+
+      // Проверка валидности ТОЛЬКО для WhatsApp
+      if (linkClicksTotal > 0 && conversionRate < 10) {
         dataValid = false;
         dataValidityReason = `Низкая конверсия WhatsApp: ${conversionRate.toFixed(1)}% (${linkClicksTotal} кликов → ${conversationsTotal} переписок). Возможно, лиды не прогрузились.`;
       }
+
+      objectiveMetrics = {
+        whatsapp_metrics: {
+          link_clicks: linkClicksTotal,
+          conversations_started: conversationsTotal,
+          quality_leads: qualityLeadsTotal,
+          conversion_rate: conversionRate.toFixed(1),
+          quality_conversion_rate: qualityConversionRate.toFixed(1),
+          all_action_types: allActionTypes
+        }
+      };
+    } else if (objective === 'site_leads') {
+      // Site Leads метрики
+      const linkClicksTotal = extractActionValue(actions, 'link_click');
+      const pixelLeadsTotal = extractActionValue(actions, 'offsite_conversion.fb_pixel_lead');
+
+      const conversionRate = linkClicksTotal > 0 ? (pixelLeadsTotal / linkClicksTotal) * 100 : 0;
+
+      objectiveMetrics = {
+        site_leads_metrics: {
+          link_clicks: linkClicksTotal,
+          pixel_leads: pixelLeadsTotal,
+          conversion_rate: conversionRate.toFixed(1),
+          all_action_types: allActionTypes
+        }
+      };
+    } else if (objective === 'instagram_traffic') {
+      // Instagram Traffic метрики
+      const linkClicksTotal = extractActionValue(actions, 'link_click');
+      const totalSpend = last7d?.spend || 0;
+      const costPerClick = linkClicksTotal > 0 ? totalSpend / linkClicksTotal : 0;
+
+      objectiveMetrics = {
+        instagram_metrics: {
+          link_clicks: linkClicksTotal,
+          cost_per_click: costPerClick.toFixed(2),
+          all_action_types: allActionTypes
+        }
+      };
     }
-    
+
     result.push({
       adset_id: adset.adset_id,
       adset_name: adset.adset_name,
       campaign_id: adset.campaign_id,
       campaign_name: adset.campaign_name,
+      objective: objective, // ✅ ДОБАВЛЕНО
       metrics_last_7d: last7d,
       trends,
       data_valid: dataValid,
       data_validity_reason: dataValidityReason,
-      whatsapp_metrics: {
-        link_clicks: linkClicksTotal,
-        conversations_started: conversationsTotal, // начатые переписки
-        quality_leads: qualityLeadsTotal, // качественные лиды (≥2 сообщения)
-        conversion_rate: linkClicksTotal > 0 ? ((conversationsTotal / linkClicksTotal) * 100).toFixed(1) : 0,
-        quality_conversion_rate: linkClicksTotal > 0 ? ((qualityLeadsTotal / linkClicksTotal) * 100).toFixed(1) : 0,
-        all_action_types: allActionTypes // для отладки
-      }
+      ...objectiveMetrics // ✅ Условное добавление метрик
     });
   }
   
@@ -659,15 +742,16 @@ export async function runScoringAgent(userAccount, options = {}) {
     
     logger.info({ where: 'scoring_agent', phase: 'fetching_adsets' });
 
-    // Fetch данные: daily breakdown (для трендов) + агрегированные actions (для WhatsApp) + diagnostics
-    const [dailyData, actionsData, diagnostics] = await Promise.all([
+    // Fetch данные: daily breakdown (для трендов) + агрегированные actions + diagnostics + objectives
+    const [dailyData, actionsData, diagnostics, campaignObjectives] = await Promise.all([
       fetchAdsetsDaily(ad_account_id, access_token, 14),
       fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),
-      fetchAdsetDiagnostics(ad_account_id, access_token)
+      fetchAdsetDiagnostics(ad_account_id, access_token),
+      getAdsetsObjectives(supabase, userAccountId)
     ]);
-    
+
     // Группируем по adset_id и вычисляем метрики для разных периодов
-    const adsetMetrics = calculateMultiPeriodTrends(dailyData, actionsData);
+    const adsetMetrics = calculateMultiPeriodTrends(dailyData, actionsData, campaignObjectives);
     
     logger.info({ 
       where: 'scoring_agent', 
@@ -681,12 +765,14 @@ export async function runScoringAgent(userAccount, options = {}) {
     // Объединяем данные с diagnostics
     const adsetsWithTrends = adsetMetrics.map(adset => {
       const diag = diagnostics.find(d => d.adset_id === adset.adset_id);
-      
-      return {
+
+      // Формируем базовый объект
+      const result = {
         adset_id: adset.adset_id,
         adset_name: adset.adset_name,
         campaign_id: adset.campaign_id,
         campaign_name: adset.campaign_name,
+        objective: adset.objective, // ✅ ДОБАВЛЕНО
         metrics_last_7d: adset.metrics_last_7d,
         trends: {
           // Короткий тренд (1 день): вчера vs позавчера
@@ -712,9 +798,21 @@ export async function runScoringAgent(userAccount, options = {}) {
           ads_count: diag.ads_count
         } : null,
         data_valid: adset.data_valid,
-        data_validity_reason: adset.data_validity_reason,
-        whatsapp_metrics: adset.whatsapp_metrics
+        data_validity_reason: adset.data_validity_reason
       };
+
+      // Условное добавление метрик в зависимости от objective
+      if (adset.whatsapp_metrics) {
+        result.whatsapp_metrics = adset.whatsapp_metrics;
+      }
+      if (adset.site_leads_metrics) {
+        result.site_leads_metrics = adset.site_leads_metrics;
+      }
+      if (adset.instagram_metrics) {
+        result.instagram_metrics = adset.instagram_metrics;
+      }
+
+      return result;
     });
     
     // Опционально: сохраняем snapshot для аудита
