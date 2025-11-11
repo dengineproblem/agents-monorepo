@@ -333,19 +333,25 @@ export async function createWebsiteLeadsCreative(
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const objectStorySpec = {
+  const objectStorySpec: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     video_data: {
       video_id: params.videoId,
-      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
       message: params.message,
       call_to_action: {
         type: "LEARN_MORE",
-        value: { link: params.siteUrl }
+        value: {
+          link: params.siteUrl,
+          link_format: "VIDEO_LPP"  // Явный формат для видео-линк постов
+        }
       }
     }
   };
+
+  // Instagram ID добавляем только если он есть (для диагностики можно убрать)
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
 
   const payload: any = {
     name: "Website Leads Creative",
@@ -526,18 +532,25 @@ export async function createWebsiteLeadsImageCreative(
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const objectStorySpec = {
+  const objectStorySpec: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     link_data: {
       image_hash: params.imageHash,
       message: params.message,
       call_to_action: {
         type: "LEARN_MORE",
-        value: { link: params.siteUrl }
+        value: {
+          link: params.siteUrl,
+          link_format: "VIDEO_LPP"  // Явный формат для линк-постов
+        }
       }
     }
   };
+
+  // Instagram ID добавляем только если он есть
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
 
   const payload: any = {
     name: "Website Leads Image Creative",
