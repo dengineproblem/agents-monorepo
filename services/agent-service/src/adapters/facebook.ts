@@ -341,7 +341,7 @@ export async function createWebsiteLeadsCreative(
       image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
       message: params.message,
       call_to_action: {
-        type: "SIGN_UP",
+        type: "LEARN_MORE",
         value: { link: params.siteUrl }
       }
     }
@@ -533,7 +533,7 @@ export async function createWebsiteLeadsImageCreative(
       image_hash: params.imageHash,
       message: params.message,
       call_to_action: {
-        type: "SIGN_UP",
+        type: "LEARN_MORE",
         value: { link: params.siteUrl }
       }
     }
