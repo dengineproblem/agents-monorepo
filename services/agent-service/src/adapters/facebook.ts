@@ -349,7 +349,7 @@ export async function createWebsiteLeadsCreative(
 
   const payload: any = {
     name: "Website Leads Creative",
-    object_story_spec: JSON.stringify(objectStorySpec)
+    object_story_spec: objectStorySpec
   };
 
   if (params.utm) {
@@ -541,7 +541,7 @@ export async function createWebsiteLeadsImageCreative(
 
   const payload: any = {
     name: "Website Leads Image Creative",
-    object_story_spec: JSON.stringify(objectStorySpec)
+    object_story_spec: objectStorySpec
   };
 
   if (params.utm) {
