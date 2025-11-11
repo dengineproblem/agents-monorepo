@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
+import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import axios from 'axios';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
@@ -197,100 +198,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   }, app);
 }
 
-/**
- * Resolve creative_id, direction_id, and whatsapp_phone_number_id from Facebook Ad ID
- *
- * Strategy:
- * 1. PRIMARY: Lookup in ad_creative_mapping by ad_id
- * 2. FALLBACK: Lookup in user_creatives by creative URL matching
- */
-async function resolveCreativeAndDirection(
-  sourceId: string,
-  sourceUrl: string | null,
-  userAccountId: string,
-  app: FastifyInstance
-): Promise<{ 
-  creativeId: string | null; 
-  directionId: string | null;
-  whatsappPhoneNumberId: string | null;
-}> {
-
-  // PRIMARY LOOKUP: Find in ad_creative_mapping by ad_id
-  const { data: adMapping, error: mappingError } = await supabase
-    .from('ad_creative_mapping')
-    .select(`
-      user_creative_id,
-      direction_id,
-      account_directions(whatsapp_phone_number_id)
-    `)
-    .eq('ad_id', sourceId)
-    .eq('user_id', userAccountId)
-    .maybeSingle();
-
-  if (mappingError) {
-    app.log.error({ error: mappingError.message, sourceId }, 'Error looking up ad_creative_mapping');
-  }
-
-  if (adMapping) {
-    const whatsappPhoneNumberId = (adMapping as any)?.account_directions?.whatsapp_phone_number_id || null;
-
-    app.log.debug({
-      sourceId,
-      creativeId: adMapping.user_creative_id,
-      directionId: adMapping.direction_id,
-      whatsappPhoneNumberId,
-    }, 'Found creative via ad_creative_mapping');
-
-    return {
-      creativeId: adMapping.user_creative_id,
-      directionId: adMapping.direction_id,
-      whatsappPhoneNumberId,
-    };
-  }
-
-  // FALLBACK LOOKUP: Find by creative URL matching
-  if (sourceUrl) {
-    const { data: creativeByUrl, error: urlError } = await supabase
-      .from('user_creatives')
-      .select(`
-        id, 
-        direction_id,
-        account_directions(whatsapp_phone_number_id)
-      `)
-      .eq('user_id', userAccountId)
-      .ilike('title', `%${sourceUrl}%`)
-      .maybeSingle();
-
-    if (urlError) {
-      app.log.error({ error: urlError.message, sourceUrl }, 'Error looking up user_creatives by URL');
-    }
-
-    if (creativeByUrl) {
-      const whatsappPhoneNumberId = (creativeByUrl as any)?.account_directions?.whatsapp_phone_number_id || null;
-
-      app.log.debug({
-        sourceUrl,
-        creativeId: creativeByUrl.id,
-        directionId: creativeByUrl.direction_id,
-        whatsappPhoneNumberId,
-      }, 'Found creative via URL matching');
-
-      return {
-        creativeId: creativeByUrl.id,
-        directionId: creativeByUrl.direction_id,
-        whatsappPhoneNumberId,
-      };
-    }
-  }
-
-  app.log.warn({ sourceId, sourceUrl }, 'Could not resolve creative_id and direction_id');
-
-  return {
-    creativeId: null,
-    directionId: null,
-    whatsappPhoneNumberId: null,
-  };
-}
+// resolveCreativeAndDirection is now imported from ../lib/creativeResolver.js
 
 /**
  * Process lead from Facebook ad

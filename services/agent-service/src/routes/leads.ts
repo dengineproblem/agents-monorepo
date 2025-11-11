@@ -1,7 +1,10 @@
 /**
  * Leads API Routes
  *
- * Handles lead creation from website and syncing to AmoCRM
+ * Handles lead creation from website (Tilda webhook)
+ * 
+ * Flow: Tilda form → webhook → leads (with source_id from ad_id) 
+ *       → AmoCRM webhook (sales only) → sales table
  *
  * @module routes/leads
  */
@@ -9,8 +12,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
-import { syncLeadToAmoCRM } from '../workflows/amocrmSync.js';
-import { isAmoCRMConnected } from '../lib/amocrmTokens.js';
+import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 
 /**
  * Schema for creating a lead from website
@@ -25,7 +27,10 @@ const CreateLeadSchema = z.object({
   utm_medium: z.string().optional(),
   utm_campaign: z.string().optional(),
   utm_term: z.string().optional(),
-  utm_content: z.string().optional(),
+  utm_content: z.string().optional(), // Can contain Facebook ad_id
+
+  // Facebook Ad ID (can be passed directly or via utm_content)
+  ad_id: z.string().optional(),
 
   // Optional fields
   email: z.string().email().optional(),
@@ -69,17 +74,22 @@ export default async function leadsRoutes(app: FastifyInstance) {
    * POST /leads
    * External URL: /api/leads (nginx adds /api/ prefix)
    *
-   * Create a new lead from website and sync to AmoCRM
+   * Create a new lead from website (Tilda webhook)
+   * 
+   * Maps leads to creatives using Facebook ad_id from UTM parameters.
+   * AmoCRM sync is DISABLED - leads are NOT automatically sent to AmoCRM.
+   * AmoCRM is used only for receiving sales data via webhook.
    *
    * Body:
    *   - userAccountId: UUID of user account
    *   - name: Lead's name
    *   - phone: Lead's phone number
    *   - utm_source, utm_medium, utm_campaign, utm_term, utm_content: UTM parameters
+   *   - ad_id (optional): Facebook Ad ID (alternative to utm_content)
    *   - email (optional): Lead's email
    *   - message (optional): Additional message from lead
    *
-   * Returns: { success: true, leadId: number, amocrmSynced: boolean }
+   * Returns: { success: true, leadId: number }
    */
   app.post('/leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -99,7 +109,9 @@ export default async function leadsRoutes(app: FastifyInstance) {
         userAccountId: leadData.userAccountId,
         name: leadData.name,
         phone: leadData.phone,
-        utm_campaign: leadData.utm_campaign
+        utm_campaign: leadData.utm_campaign,
+        ad_id: leadData.ad_id,
+        utm_content: leadData.utm_content
       }, 'Received lead from website');
 
       // 2. Verify user account exists
@@ -116,7 +128,34 @@ export default async function leadsRoutes(app: FastifyInstance) {
         });
       }
 
-      // 3. Insert lead into database
+      // 3. Extract ad_id from utm_content or direct parameter
+      const sourceId = leadData.ad_id || leadData.utm_content || null;
+
+      // 4. Resolve creative_id and direction_id from ad_id
+      let creativeId: string | null = null;
+      let directionId: string | null = null;
+
+      if (sourceId) {
+        const resolved = await resolveCreativeAndDirection(
+          sourceId,
+          null, // sourceUrl not needed for Tilda
+          leadData.userAccountId,
+          app
+        );
+        
+        creativeId = resolved.creativeId;
+        directionId = resolved.directionId;
+        
+        app.log.info({
+          sourceId,
+          creativeId,
+          directionId
+        }, 'Resolved creative from ad_id for Tilda lead');
+      } else {
+        app.log.warn('No ad_id or utm_content provided for lead');
+      }
+
+      // 6. Insert lead into database
       const { data: lead, error: insertError } = await supabase
         .from('leads')
         .insert({
@@ -132,17 +171,17 @@ export default async function leadsRoutes(app: FastifyInstance) {
           // chat_id is NULL for website leads (only used for WhatsApp)
           chat_id: null,
 
+          // Facebook Ad tracking
+          source_id: sourceId,
+          creative_id: creativeId,
+          direction_id: directionId,
+
           // UTM tracking
           utm_source: leadData.utm_source || null,
           utm_medium: leadData.utm_medium || null,
           utm_campaign: leadData.utm_campaign || null,
           utm_term: leadData.utm_term || null,
           utm_content: leadData.utm_content || null,
-
-          // Leave direction_id and creative_id null for now
-          // They can be determined later based on UTM data
-          direction_id: null,
-          creative_id: null,
 
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -160,32 +199,23 @@ export default async function leadsRoutes(app: FastifyInstance) {
 
       const leadId = lead.id;
 
-      app.log.info({ leadId, name: leadData.name, phone: leadData.phone }, 'Lead created in database');
+      app.log.info({ 
+        leadId, 
+        name: leadData.name, 
+        phone: leadData.phone,
+        sourceId,
+        creativeId,
+        directionId 
+      }, 'Lead created in database');
 
-      // 5. Immediately respond to website (don't make them wait for AmoCRM sync)
+      // 7. Respond to webhook
+      // NOTE: AmoCRM sync is DISABLED. Leads are NOT automatically sent to AmoCRM.
+      // AmoCRM is used only for receiving sales data via webhook.
       reply.send({
         success: true,
         leadId,
         message: 'Lead received successfully'
       });
-
-      // 6. Asynchronously sync to AmoCRM (don't await - runs in background)
-      const amocrmConnected = await isAmoCRMConnected(leadData.userAccountId);
-
-      if (amocrmConnected) {
-        app.log.info({ leadId }, 'Starting background AmoCRM sync');
-
-        syncLeadToAmoCRM(leadId, leadData.userAccountId, app)
-          .then(() => {
-            app.log.info({ leadId }, 'Lead synced to AmoCRM successfully');
-          })
-          .catch((error) => {
-            app.log.error({ error, leadId }, 'Failed to sync lead to AmoCRM');
-            // Don't throw - lead is already saved in DB
-          });
-      } else {
-        app.log.info({ leadId }, 'AmoCRM not connected, skipping sync');
-      }
 
     } catch (error: any) {
       app.log.error({ error }, 'Error processing lead creation');
