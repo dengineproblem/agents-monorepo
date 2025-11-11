@@ -240,7 +240,8 @@ export async function workflowStartCreativeTest(
       name: campaign_name,
       objective: 'OUTCOME_ENGAGEMENT',
       special_ad_categories: [],
-      status: 'ACTIVE'
+      status: 'ACTIVE',
+      is_adset_budget_sharing_enabled: false
     };
 
     log.info({ campaign_name }, 'Creating campaign for creative test');

@@ -103,6 +103,7 @@ async function createFacebookCampaign(
           objective: fbObjective,
           status: 'ACTIVE', // создаем в активном состоянии сразу
           special_ad_categories: [],
+          is_adset_budget_sharing_enabled: false,
           access_token: accessToken,
         }),
       }

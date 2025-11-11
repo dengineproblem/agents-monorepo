@@ -175,7 +175,8 @@ export async function workflowCreateCampaignWithCreative(
     name: campaign_name,
     objective: fb_objective,
     special_ad_categories: [], // Требуется Facebook, даже если пустой
-    status: auto_activate ? 'ACTIVE' : 'PAUSED'
+    status: auto_activate ? 'ACTIVE' : 'PAUSED',
+    is_adset_budget_sharing_enabled: false
   };
 
   console.log('[CreateCampaignWithCreative] Creating campaign:', campaignBody);

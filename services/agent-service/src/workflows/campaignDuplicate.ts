@@ -40,7 +40,7 @@ function hasGeo(targeting:any){const g=targeting?.geo_locations||{};return Boole
 
 async function createCampaignFromSource(src:CampaignInfo,t:string):Promise<string>{
   // Рабочая цель для WA — OUTCOME_ENGAGEMENT
-  const body={name:src.name,objective:'OUTCOME_ENGAGEMENT',special_ad_categories:src.special_ad_categories||[],status:'ACTIVE',daily_budget: src.daily_budget || undefined};
+  const body={name:src.name,objective:'OUTCOME_ENGAGEMENT',special_ad_categories:src.special_ad_categories||[],status:'ACTIVE',daily_budget: src.daily_budget || undefined,is_adset_budget_sharing_enabled:false};
   const r=await withStep('create_campaign',{path:`act_${src.account_id}/campaigns`,body},()=>graph('POST',`act_${src.account_id}/campaigns`,t,toParams(body)));
   const id=r?.id; if(!id) throw Object.assign(new Error('create_campaign_failed'),{step:'create_campaign_no_id'}); return String(id);
 }
