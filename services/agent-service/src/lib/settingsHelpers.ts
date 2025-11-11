@@ -58,6 +58,12 @@ export function buildTargeting(settings: any, objective: CampaignObjective) {
     age_max: settings.age_max || 65,
   };
 
+  // Для WhatsApp кампаний фиксируем age_max: 65 для совместимости с Advantage audience
+  if (objective === 'whatsapp') {
+    targeting.age_min = 18;
+    targeting.age_max = 65;
+  }
+
   // Пол
   if (settings.gender && settings.gender !== 'all') {
     targeting.genders = settings.gender === 'male' ? [1] : [2];
@@ -102,6 +108,13 @@ export function buildTargeting(settings: any, objective: CampaignObjective) {
     // Если cities не указаны - ошибка валидации
     log.error({ settings }, 'No cities configured in settings');
     throw new Error('No cities/countries configured in targeting settings. Please add at least one location.');
+  }
+
+  // Для WhatsApp кампаний добавляем targeting_automation (Advantage audience включена)
+  if (objective === 'whatsapp') {
+    targeting.targeting_automation = {
+      advantage_audience: 1  // 0 = отключено, 1 = включено
+    };
   }
 
   log.info({
