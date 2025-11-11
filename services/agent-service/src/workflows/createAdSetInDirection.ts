@@ -174,7 +174,7 @@ export async function workflowCreateAdSetInDirection(
       break;
     case 'site_leads':
       fb_objective = 'OUTCOME_LEADS';
-      optimization_goal = 'LEAD_GENERATION';
+      optimization_goal = 'OFFSITE_CONVERSIONS';
       break;
     default:
       throw new Error(`Unknown objective: ${direction.objective}`);
@@ -376,6 +376,24 @@ export async function workflowCreateAdSetInDirection(
       adsetBody.promoted_object = {
         page_id: String(userAccount.page_id),
         ...(whatsapp_phone_number && { whatsapp_phone_number })
+      };
+    }
+  }
+
+  // Для Site Leads добавляем destination_type и promoted_object с pixel_id
+  if (direction.objective === 'site_leads') {
+    adsetBody.destination_type = 'WEBSITE';
+
+    // Получаем pixel_id из направления (если был выбран при создании)
+    if (direction.pixel_id) {
+      adsetBody.promoted_object = {
+        pixel_id: String(direction.pixel_id),
+        custom_event_type: 'LEAD'
+      };
+    } else {
+      // Если pixel_id не указан, используем только custom_event_type
+      adsetBody.promoted_object = {
+        custom_event_type: 'LEAD'
       };
     }
   }
