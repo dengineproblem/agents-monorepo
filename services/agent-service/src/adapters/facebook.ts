@@ -27,7 +27,13 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   usp.set('access_token', token);
   // НЕ используем appsecret_proof - токены могут быть от других приложений
   // if (FB_APP_SECRET) usp.set('appsecret_proof', appsecret_proof(token));
-  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null) usp.set(k, String(v));
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) {
+      // Для объектов используем JSON.stringify, для примитивов - String
+      const value = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      usp.set(k, value);
+    }
+  }
   if (FB_VALIDATE_ONLY && (method === 'POST' || method === 'DELETE')) {
     usp.set('execution_options', '["validate_only"]');
   }
