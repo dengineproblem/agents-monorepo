@@ -548,15 +548,14 @@ function computeLeadsFromActions(stat) {
       qualityLeads = v;
     } else if (t === 'lead' || t === 'fb_form_lead' || (typeof t === 'string' && (t.includes('fb_form_lead') || t.includes('leadgen')))) {
       formLeads = sumInt(formLeads, v);
-    } else if (t === 'onsite_web_lead') {
-      siteLeads = sumInt(siteLeads, v);
-    } else if (t === 'offsite_conversion.fb_pixel_lead') {
-      siteLeads = sumInt(siteLeads, v);
-    } else if (t === 'offsite_conversion.lead') {
-      siteLeads = sumInt(siteLeads, v);
-    } else if (typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
-      siteLeads = sumInt(siteLeads, v);
-    } else if (typeof t === 'string' && t.startsWith('offsite_conversion.') && !String(t).includes('fb_form_lead') && (String(t).includes('lead') || String(t).includes('custom'))) {
+    }
+    // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
+    // чтобы избежать дублирования с onsite_web_lead
+    else if (t === 'offsite_conversion.fb_pixel_lead') {
+      siteLeads = v;
+    }
+    // Кастомные конверсии пикселя
+    else if (typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
       siteLeads = sumInt(siteLeads, v);
     }
   }
@@ -1110,7 +1109,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '  • Мессенджеры (старт диалога): onsite_conversion.total_messaging_connection',
   '  • Качественные WA-лиды (≥2 сообщений): onsite_conversion.messaging_user_depth_2_message_send',
   '  • Лид-формы: lead, fb_form_lead, leadgen',
-  '  • Сайт/пиксель: onsite_web_lead, offsite_conversion.lead, offsite_conversion.fb_pixel_lead, offsite_conversion.custom*',
+  '  • Сайт/пиксель: offsite_conversion.fb_pixel_lead, offsite_conversion.custom* (БЕЗ onsite_web_lead для избежания дублирования)',
   '- Формулы: CPL = spend / max(total_leads,1); QCPL = spend / max(quality_leads,1). Для WhatsApp сначала QCPL; если quality_leads<3 на окне — опираемся на CPL.',
   '',
   'ТАЙМФРЕЙМЫ И ВЕСА',

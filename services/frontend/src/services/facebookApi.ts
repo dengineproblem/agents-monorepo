@@ -660,29 +660,13 @@ export const facebookApi = {
               else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
                 qualityLeads = parseInt(action.value || "0", 10);
               }
-              // Лиды с сайта (события сайта и пикселя)
-              else if (action.action_type === 'onsite_web_lead') {
-                siteLeads += parseInt(action.value || "0", 10);
-              }
-              // Конверсии пикселя, отмеченные как lead
+              // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
+              // чтобы избежать дублирования с onsite_web_lead
               else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
-                siteLeads += parseInt(action.value || "0", 10);
+                siteLeads = parseInt(action.value || "0", 10);
               }
               // Кастомные конверсии пикселя (берем все custom как лиды сайта)
               else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-                siteLeads += parseInt(action.value || "0", 10);
-              }
-              // Стандартное пиксельное событие lead (offsite)
-              else if (action.action_type === 'offsite_conversion.lead') {
-                siteLeads += parseInt(action.value || "0", 10);
-              }
-              // Любые другие offsite_conversion с lead/custom, кроме fb_form_lead
-              else if (
-                typeof action.action_type === 'string' &&
-                action.action_type.startsWith('offsite_conversion.') &&
-                !action.action_type.includes('fb_form_lead') &&
-                (action.action_type.includes('lead') || action.action_type.includes('custom'))
-              ) {
                 siteLeads += parseInt(action.value || "0", 10);
               }
             }
@@ -901,20 +885,14 @@ export const facebookApi = {
             for (const action of row.actions) {
               if (action.action_type === 'onsite_conversion.total_messaging_connection') {
                 messagingLeads = parseInt(action.value || '0', 10);
-              } else if (action.action_type === 'onsite_web_lead') {
-                siteLeads += parseInt(action.value || '0', 10);
-              } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
-                siteLeads += parseInt(action.value || '0', 10);
-              } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-                siteLeads += parseInt(action.value || '0', 10);
-              } else if (action.action_type === 'offsite_conversion.lead') {
-                siteLeads += parseInt(action.value || '0', 10);
-              } else if (
-                typeof action.action_type === 'string' &&
-                action.action_type.startsWith('offsite_conversion.') &&
-                !action.action_type.includes('fb_form_lead') &&
-                (action.action_type.includes('lead') || action.action_type.includes('custom'))
-              ) {
+              }
+              // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
+              // чтобы избежать дублирования с onsite_web_lead
+              else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+                siteLeads = parseInt(action.value || '0', 10);
+              }
+              // Кастомные конверсии пикселя
+              else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
                 siteLeads += parseInt(action.value || '0', 10);
               }
             }

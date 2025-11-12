@@ -132,17 +132,35 @@ async function fetchProductionMetrics(adAccountId, accessToken, fbCreativeId) {
   
   for (const d of data) {
     if (d.actions) {
-      // Leads
-      const leadAction = d.actions.find(a => 
-        a.action_type === 'lead' || 
-        a.action_type === 'onsite_conversion.lead_grouped' ||
-        a.action_type === 'onsite_conversion.total_messaging_connection' ||
-        a.action_type === 'onsite_conversion.messaging_user_depth_2_message_send'
-      );
-      if (leadAction) {
-        totalLeads += parseFloat(leadAction.value) || 0;
+      // Leads - собираем все типы лидов, избегая дублирования
+      let messagingLeads = 0;
+      let siteLeads = 0;
+      let formLeads = 0;
+
+      for (const action of d.actions) {
+        const t = action.action_type;
+        const v = parseFloat(action.value) || 0;
+
+        // WhatsApp лиды
+        if (t === 'onsite_conversion.total_messaging_connection') {
+          messagingLeads = v;
+        }
+        // Лид-формы
+        else if (t === 'lead' || t === 'fb_form_lead' || (typeof t === 'string' && (t.includes('fb_form_lead') || t.includes('leadgen')))) {
+          formLeads += v;
+        }
+        // Лиды с сайта - ТОЛЬКО offsite_conversion.fb_pixel_lead (избегаем дублирования с onsite_web_lead)
+        else if (t === 'offsite_conversion.fb_pixel_lead') {
+          siteLeads = v;
+        }
+        // Кастомные конверсии пикселя
+        else if (typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
+          siteLeads += v;
+        }
       }
-      
+
+      totalLeads += messagingLeads + siteLeads + formLeads;
+
       // Link clicks
       const linkClickAction = d.actions.find(a => a.action_type === 'link_click');
       if (linkClickAction) {

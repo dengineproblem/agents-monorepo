@@ -12,10 +12,10 @@
 
 import cron from 'node-cron';
 import fetch from 'node-fetch';
-import { createLogger } from './lib/logger.js';
+import { logger } from './lib/logger.js';
 import { supabase } from './lib/supabaseClient.js';
 
-const log = createLogger('amocrmLeadsSyncCron');
+const log = logger.child({ module: 'amocrmLeadsSyncCron' });
 
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://agent-service:8082';
 // Каждые 6 часов (00:00, 06:00, 12:00, 18:00)
