@@ -487,7 +487,7 @@ export async function workflowCreateAdSetInDirection(
       const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
       const isWhatsAppError = errorSubcode === 2446885;
 
-      if (isWhatsAppError && direction.objective === 'whatsapp' && whatsapp_phone_number) {
+      if (isWhatsAppError && direction.objective === 'whatsapp' && whatsapp_phone_number && userAccount?.page_id) {
         log.warn({
           error_subcode: errorSubcode,
           error_message: error?.error?.message || error?.message,

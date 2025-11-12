@@ -200,7 +200,7 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
   };
 }
 
-async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string }) {
+async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean }) {
   switch ((action as any).type) {
     case 'GetCampaignStatus': {
       const p = (action as any).params as { campaign_id: string };

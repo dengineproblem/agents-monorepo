@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^8.5.0",
-    "@fastify/formbody": "^8.0.2",
+    "@fastify/formbody": "^7.4.0",
     "@fastify/multipart": "^8.3.0",
     "@supabase/supabase-js": "^2.45.0",
     "@types/pdf-parse": "^1.1.5",
