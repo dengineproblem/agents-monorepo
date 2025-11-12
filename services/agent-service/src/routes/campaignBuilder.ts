@@ -248,21 +248,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             let promoted_object;
 
             if (direction.objective === 'whatsapp') {
-              // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
-              if (userAccount.skip_whatsapp_number_in_api !== false) {
-                // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер
-                promoted_object = {
-                  page_id: userAccount.page_id
-                  // whatsapp_phone_number намеренно НЕ передается
-                };
-              } else {
-                // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер с fallback
-                const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
-                promoted_object = {
-                  page_id: userAccount.page_id,
-                  ...(whatsapp_phone_number && { whatsapp_phone_number })
-                };
-              }
+              // Всегда включаем номер из направления (если есть)
+              // Если получим ошибку 2446885, createAdSetInCampaign автоматически повторит без номера
+              const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+              promoted_object = {
+                page_id: userAccount.page_id,
+                ...(whatsapp_phone_number && { whatsapp_phone_number })
+              };
             } else if (direction.objective === 'instagram_traffic') {
               // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
               // Ссылка уже в креативе в call_to_action
@@ -563,21 +555,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // Формируем promoted_object
         let promoted_object;
         if (direction.objective === 'whatsapp') {
-          // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
-          if (userAccount.skip_whatsapp_number_in_api !== false) {
-            // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер
-            promoted_object = {
-              page_id: userAccount.page_id
-              // whatsapp_phone_number намеренно НЕ передается
-            };
-          } else {
-            // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер с fallback
-            const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
-            promoted_object = {
-              page_id: userAccount.page_id,
-              ...(whatsapp_phone_number && { whatsapp_phone_number })
-            };
-          }
+          // Всегда включаем номер из направления (если есть)
+          // Если получим ошибку 2446885, createAdSetInCampaign автоматически повторит без номера
+          const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+          promoted_object = {
+            page_id: userAccount.page_id,
+            ...(whatsapp_phone_number && { whatsapp_phone_number })
+          };
         } else if (direction.objective === 'instagram_traffic') {
           // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
           // Ссылка уже в креативе в call_to_action

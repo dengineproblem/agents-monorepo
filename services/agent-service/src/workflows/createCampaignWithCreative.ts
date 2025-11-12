@@ -26,7 +26,6 @@ type CreateCampaignContext = {
   user_account_id: string;
   ad_account_id: string;
   whatsapp_phone_number?: string; // Номер WhatsApp из Supabase (если есть)
-  skip_whatsapp_number_in_api?: boolean; // Флаг workaround для bug 2446885
 };
 
 // Helpers from campaignDuplicate
@@ -265,41 +264,66 @@ export async function workflowCreateCampaignWithCreative(
   };
 
   // Для WhatsApp добавляем promoted_object и destination_type
-  // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
   if (objective === 'WhatsApp' && page_id) {
     adsetBody.destination_type = 'WHATSAPP';
 
-    if (context.skip_whatsapp_number_in_api !== false) {
-      // НОВАЯ ЛОГИКА (по умолчанию): не отправляем номер
-      adsetBody.promoted_object = {
-        page_id: String(page_id)
-        // whatsapp_phone_number намеренно НЕ передается
-      };
-    } else {
-      // СТАРАЯ ЛОГИКА (обратная совместимость): отправляем номер
-      adsetBody.promoted_object = {
-        page_id: String(page_id),
-        ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
-      };
-    }
+    // Всегда включаем номер из контекста (если есть)
+    // Если получим ошибку 2446885, повторим запрос без номера
+    adsetBody.promoted_object = {
+      page_id: String(page_id),
+      ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+    };
   }
 
-  const skipWhatsAppNumber = context.skip_whatsapp_number_in_api !== false;
   console.log('[CreateCampaignWithCreative] Creating adset:', {
     campaign_id,
     name: finalAdsetName,
     optimization_goal,
     destination_type: adsetBody.destination_type,
     promoted_object: adsetBody.promoted_object,
-    skip_whatsapp_number_in_api: skipWhatsAppNumber,
-    whatsapp_number_sent: skipWhatsAppNumber ? null : (context.whatsapp_phone_number || null)
+    whatsapp_number: context.whatsapp_phone_number || null
   });
 
-  const adsetResult = await withStep(
-    'create_adset',
-    { payload: adsetBody },
-    () => graph('POST', `${normalized_ad_account_id}/adsets`, accessToken, toParams(adsetBody))
-  );
+  let adsetResult;
+  try {
+    // Попытка 1: создаем с номером
+    adsetResult = await withStep(
+      'create_adset',
+      { payload: adsetBody },
+      () => graph('POST', `${normalized_ad_account_id}/adsets`, accessToken, toParams(adsetBody))
+    );
+  } catch (error: any) {
+    // Проверяем, является ли это ошибкой 2446885 (WhatsApp Business requirement)
+    const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
+    const isWhatsAppError = errorSubcode === 2446885;
+
+    if (isWhatsAppError && context.whatsapp_phone_number && objective === 'WhatsApp') {
+      console.log('[CreateCampaignWithCreative] ⚠️ Facebook API error 2446885 detected - retrying WITHOUT whatsapp_phone_number', {
+        error_subcode: errorSubcode,
+        whatsapp_number_attempted: context.whatsapp_phone_number
+      });
+
+      // Попытка 2: создаем БЕЗ номера (Facebook подставит дефолтный)
+      const adsetBodyWithoutNumber = {
+        ...adsetBody,
+        promoted_object: {
+          page_id: String(page_id)
+          // whatsapp_phone_number убран
+        }
+      };
+
+      adsetResult = await withStep(
+        'create_adset_retry',
+        { payload: adsetBodyWithoutNumber },
+        () => graph('POST', `${normalized_ad_account_id}/adsets`, accessToken, toParams(adsetBodyWithoutNumber))
+      );
+
+      console.log('[CreateCampaignWithCreative] ✅ Ad set created successfully WITHOUT whatsapp_phone_number (fallback used)');
+    } else {
+      // Если это не ошибка 2446885 или нет номера - пробрасываем ошибку дальше
+      throw error;
+    }
+  }
 
   const adset_id = adsetResult?.id;
   if (!adset_id) {

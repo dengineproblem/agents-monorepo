@@ -28,3 +28,4 @@ COMMENT ON COLUMN dialog_analysis.reactivation_attempts IS 'Количество
 COMMENT ON COLUMN dialog_analysis.last_reactivation_at IS 'Время последней попытки реанимации';
 
 
+

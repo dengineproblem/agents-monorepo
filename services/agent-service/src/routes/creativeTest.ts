@@ -39,7 +39,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       // Получаем данные пользователя
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number, skip_whatsapp_number_in_api')
+        .select('id, access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
         .eq('id', user_id)
         .single();
 
@@ -78,13 +78,9 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью:
-      // Если skip_whatsapp_number_in_api=true (по умолчанию) - не передаем номер
-      // Если false - передаем номер с fallback (старая логика)
-      let whatsapp_phone_number_for_test;
-      if (userAccount.skip_whatsapp_number_in_api === false) {
-        whatsapp_phone_number_for_test = await getWhatsAppPhoneNumber(direction, user_id, supabase) || undefined;
-      }
+      // Получаем WhatsApp номер из направления
+      // Если получим ошибку 2446885, workflow автоматически повторит без номера
+      const whatsapp_phone_number_for_test = await getWhatsAppPhoneNumber(direction, user_id, supabase) || undefined;
 
       // Проверяем, не запускался ли тест ранее
       const { data: existingTests, error: existingError } = await supabase
@@ -121,8 +117,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           ad_account_id: userAccount.ad_account_id,
           page_id: userAccount.page_id,
           instagram_id: userAccount.instagram_id,
-          whatsapp_phone_number: whatsapp_phone_number_for_test, // может быть undefined (новая логика) или номер (старая)
-          skip_whatsapp_number_in_api: userAccount.skip_whatsapp_number_in_api
+          whatsapp_phone_number: whatsapp_phone_number_for_test
         },
         userAccount.access_token
       );

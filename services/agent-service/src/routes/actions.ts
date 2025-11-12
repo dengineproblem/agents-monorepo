@@ -184,7 +184,7 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
   }
   const { data, error } = await supabase
     .from('user_accounts')
-    .select('access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number, skip_whatsapp_number_in_api')
+    .select('access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
     .eq('id', account.userAccountId)
     .maybeSingle();
 
@@ -196,12 +196,11 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
     adAccountId: (data as any).ad_account_id || account.adAccountId,
     pageId: (data as any).page_id || undefined,
     instagramId: (data as any).instagram_id || undefined,
-    whatsappPhoneNumber: account.whatsappPhoneNumber || (data as any).whatsapp_phone_number || undefined,
-    skipWhatsAppNumberInApi: (data as any).skip_whatsapp_number_in_api
+    whatsappPhoneNumber: account.whatsappPhoneNumber || (data as any).whatsapp_phone_number || undefined
   };
 }
 
-async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean }) {
+async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string }) {
   switch ((action as any).type) {
     case 'GetCampaignStatus': {
       const p = (action as any).params as { campaign_id: string };
@@ -280,10 +279,9 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         throw new Error('CreateCampaignWithCreative: userAccountId and adAccountId required in context');
       }
 
-      // WORKAROUND для Facebook API bug 2446885 с обратной совместимостью
+      // Получаем WhatsApp номер из направления (если есть)
       let whatsapp_phone_number;
-      if (ctx.skipWhatsAppNumberInApi === false && p.objective === 'WhatsApp' && creative_ids.length > 0) {
-        // СТАРАЯ ЛОГИКА (обратная совместимость): получаем номер с fallback
+      if (p.objective === 'WhatsApp' && creative_ids.length > 0) {
         const { data: firstCreative } = await supabase
           .from('user_creatives')
           .select('direction_id')
@@ -330,10 +328,8 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         }
       }
 
-      const skipWhatsAppNumber = ctx.skipWhatsAppNumberInApi !== false;
       console.log('[Brain Agent] CreateCampaignWithCreative:', {
-        skip_whatsapp_number_in_api: skipWhatsAppNumber,
-        whatsapp_number_sent: skipWhatsAppNumber ? null : (whatsapp_phone_number || null)
+        whatsapp_number: whatsapp_phone_number || null
       });
 
       return workflowCreateCampaignWithCreative(
@@ -352,8 +348,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         {
           user_account_id: ctx.userAccountId,
           ad_account_id: ctx.adAccountId,
-          whatsapp_phone_number,
-          skip_whatsapp_number_in_api: ctx.skipWhatsAppNumberInApi
+          whatsapp_phone_number
         },
         token
       );

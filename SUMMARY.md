@@ -248,3 +248,4 @@ cd services/crm-frontend && npm run dev # Terminal 2
 **Миграция Phase 1 успешно завершена! 🎉**
 
 
+

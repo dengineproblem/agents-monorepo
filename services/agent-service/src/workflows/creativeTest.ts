@@ -31,7 +31,6 @@ type CreativeTestContext = {
   page_id?: string;
   instagram_id?: string;
   whatsapp_phone_number?: string;
-  skip_whatsapp_number_in_api?: boolean;
 };
 
 /**
@@ -269,26 +268,65 @@ export async function workflowStartCreativeTest(
       optimization_goal: 'CONVERSATIONS',
       daily_budget: 2000,
       bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-      targeting,
+      targeting,  // targeting_automation уже внутри targeting из buildTargeting
       destination_type: 'WHATSAPP',
-      promoted_object: context.skip_whatsapp_number_in_api !== false
-        ? {
-            page_id: String(page_id)
-          }
-        : {
-            page_id: String(page_id),
-            ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
-          }
+      promoted_object: {
+        page_id: String(page_id),
+        ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+      }
     };
 
-    log.info({ campaign_id }, 'Creating ad set for creative test');
+    log.info({
+      campaign_id,
+      whatsapp_phone_number: context.whatsapp_phone_number || null
+    }, 'Creating ad set for creative test with WhatsApp number');
 
-    const adsetResult = await graph(
-      'POST',
-      `${normalized_ad_account_id}/adsets`,
-      accessToken,
-      toParams(adsetBody)
-    );
+    let adsetResult;
+    try {
+      // Попытка 1: создаем с номером из направления
+      adsetResult = await graph(
+        'POST',
+        `${normalized_ad_account_id}/adsets`,
+        accessToken,
+        toParams(adsetBody)
+      );
+    } catch (error: any) {
+      // Проверяем, является ли это ошибкой 2446885 (WhatsApp Business requirement)
+      const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
+      const isWhatsAppError = errorSubcode === 2446885;
+
+      if (isWhatsAppError && context.whatsapp_phone_number) {
+        log.warn({
+          error_subcode: errorSubcode,
+          error_message: error?.error?.message || error?.message,
+          whatsapp_number_attempted: context.whatsapp_phone_number
+        }, '⚠️ Facebook API error 2446885 detected - retrying WITHOUT whatsapp_phone_number');
+
+        // Попытка 2: создаем БЕЗ номера (Facebook подставит дефолтный)
+        const adsetBodyWithoutNumber = {
+          ...adsetBody,
+          promoted_object: {
+            page_id: String(page_id)
+            // whatsapp_phone_number убран
+          }
+        };
+
+        adsetResult = await graph(
+          'POST',
+          `${normalized_ad_account_id}/adsets`,
+          accessToken,
+          toParams(adsetBodyWithoutNumber)
+        );
+
+        log.info({
+          adsetId: adsetResult?.id,
+          fallback_used: true
+        }, '✅ Ad set created successfully WITHOUT whatsapp_phone_number (Facebook will use page default)');
+      } else {
+        // Если это не ошибка 2446885 или нет номера - пробрасываем ошибку дальше
+        throw error;
+      }
+    }
 
     adset_id = adsetResult?.id;
     if (!adset_id) {

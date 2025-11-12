@@ -37,3 +37,4 @@ CREATE POLICY chatbot_configs_user_access ON chatbot_configurations
   USING (user_account_id = auth.uid());
 
 
+

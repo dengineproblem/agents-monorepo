@@ -1772,7 +1772,7 @@ export async function createAdSetInCampaign(params: {
     page_id: body.promoted_object?.page_id
   }, 'Final ad set parameters before Facebook API call');
 
-  const response = await fetch(
+  let response = await fetch(
     `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/adsets`,
     {
       method: 'POST',
@@ -1781,10 +1781,55 @@ export async function createAdSetInCampaign(params: {
     }
   );
 
+  // Если получили ошибку 2446885 и есть WhatsApp номер - повторяем без него
   if (!response.ok) {
     const error = await response.json();
-    log.error({ err: error, campaignId, name }, 'Failed to create ad set');
-    throw new Error(`Failed to create ad set: ${JSON.stringify(error)}`);
+    const errorSubcode = error?.error?.error_subcode;
+    const isWhatsAppError = errorSubcode === 2446885;
+    const hasWhatsAppNumber = body.promoted_object?.whatsapp_phone_number;
+
+    if (isWhatsAppError && hasWhatsAppNumber && optimization_goal === 'CONVERSATIONS') {
+      log.warn({
+        error_subcode: errorSubcode,
+        error_message: error?.error?.message,
+        whatsapp_number_attempted: body.promoted_object.whatsapp_phone_number
+      }, '⚠️ Facebook API error 2446885 detected - retrying WITHOUT whatsapp_phone_number');
+
+      // Повторяем запрос БЕЗ номера
+      const bodyWithoutNumber = {
+        ...body,
+        promoted_object: {
+          page_id: body.promoted_object.page_id
+          // whatsapp_phone_number убран
+        }
+      };
+
+      response = await fetch(
+        `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/adsets`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyWithoutNumber),
+        }
+      );
+
+      if (!response.ok) {
+        const retryError = await response.json();
+        log.error({ err: retryError, campaignId, name }, 'Failed to create ad set even without WhatsApp number');
+        throw new Error(`Failed to create ad set: ${JSON.stringify(retryError)}`);
+      }
+
+      const result = await response.json();
+      log.info({
+        adsetId: result.id,
+        fallback_used: true
+      }, '✅ Ad set created successfully WITHOUT whatsapp_phone_number (Facebook will use page default)');
+      return result;
+    } else {
+      // Если это не ошибка 2446885 или нет номера WhatsApp - пробрасываем ошибку
+      log.error({ err: error, campaignId, name }, 'Failed to create ad set');
+      throw new Error(`Failed to create ad set: ${JSON.stringify(error)}`);
+    }
   }
 
   const result = await response.json();
