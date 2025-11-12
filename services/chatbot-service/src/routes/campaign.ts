@@ -459,5 +459,57 @@ export async function campaignRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * POST /campaign/generate-single-message
+   * Generate AI message for a single lead (for CRM UI)
+   */
+  app.post('/campaign/generate-single-message', async (request, reply) => {
+    try {
+      const { userAccountId, leadId } = request.body as { 
+        userAccountId: string; 
+        leadId: string;
+      };
+
+      if (!userAccountId || !leadId) {
+        return reply.status(400).send({ error: 'userAccountId and leadId are required' });
+      }
+
+      app.log.info({ userAccountId, leadId }, 'Generating single message');
+
+      // Get lead data
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('*')
+        .eq('id', leadId)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      // Generate message using the existing message generator
+      const messagesMap = await generateBatchMessages([lead], userAccountId);
+      const generatedMessage = messagesMap.get(leadId);
+
+      if (!generatedMessage) {
+        return reply.status(500).send({ error: 'Failed to generate message' });
+      }
+
+      app.log.info({ leadId, messageType: generatedMessage.type }, 'Message generated successfully');
+
+      return reply.send({
+        message: generatedMessage.message,
+        messageType: generatedMessage.type,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to generate single message');
+      return reply.status(500).send({ 
+        error: 'Message generation failed', 
+        message: error.message 
+      });
+    }
+  });
 }
 

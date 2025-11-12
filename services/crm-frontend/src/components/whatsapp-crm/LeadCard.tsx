@@ -1,18 +1,11 @@
 import { DialogAnalysis } from '@/types/dialogAnalysis';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useDrag } from 'react-dnd';
 import { 
-  Phone, 
-  Building2, 
   MoreVertical,
-  Calendar,
-  TrendingUp,
-  User,
-  Briefcase,
-  Bot,
-  Pause
+  TrendingUp
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -60,53 +53,37 @@ export function LeadCard({ lead, onClick, onEdit, onDelete }: LeadCardProps) {
 
   const getInterestLabel = () => {
     switch (lead.interest_level) {
-      case 'hot': return 'HOT';
-      case 'warm': return 'WARM';
-      case 'cold': return 'COLD';
+      case 'hot': return '🔥';
+      case 'warm': return '☀️';
+      case 'cold': return '❄️';
       default: return '—';
     }
   };
+
+  // Check if contact name is valid (not empty and not same as phone)
+  const hasValidName = lead.contact_name && lead.contact_name !== lead.contact_phone && lead.contact_name.toLowerCase() !== 'без имени';
 
   return (
     <Card
       ref={drag}
       onClick={onClick}
-      className={`cursor-pointer hover:shadow-md transition-all ${
-        isDragging ? 'opacity-50 scale-95' : ''
+      className={`cursor-pointer transition-all border-l-2 ${
+        isDragging ? 'opacity-50' : 'hover:shadow-md'
       } ${getInterestColor()}`}
     >
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            <Badge variant={getInterestVariant()} className="flex-shrink-0">
-              {getInterestLabel()}
-            </Badge>
-            <Badge variant="outline" className="flex-shrink-0">
-              {lead.score ?? '—'}
-            </Badge>
-            {/* Bot Status Indicator */}
-            {lead.assigned_to_human && (
-              <div className="flex items-center" title="Менеджер в работе">
-                <User className="h-4 w-4 text-orange-500" />
-              </div>
-            )}
-            {lead.bot_paused && (
-              <div className="flex items-center" title="Бот на паузе">
-                <Pause className="h-4 w-4 text-gray-500" />
-              </div>
-            )}
-            {!lead.assigned_to_human && !lead.bot_paused && (
-              <div className="flex items-center" title="Бот активен">
-                <Bot className="h-4 w-4 text-green-500" />
-              </div>
-            )}
-          </div>
-          
+      <div className="p-1.5">
+        {/* Top: Badge + Actions */}
+        <div className="flex items-center justify-between mb-0.5">
+          <Badge variant={getInterestVariant()} className="text-[10px] px-1 py-0 h-4">
+            {getInterestLabel()} {lead.score ?? '—'}
+          </Badge>
+
+          {/* Actions Menu */}
           {(onEdit || onDelete) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                  <MoreVertical className="h-4 w-4" />
+                <Button variant="ghost" size="icon" className="h-5 w-5">
+                  <MoreVertical className="h-3 w-3" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -139,62 +116,52 @@ export function LeadCard({ lead, onClick, onEdit, onDelete }: LeadCardProps) {
           )}
         </div>
 
-        <div className="space-y-1 mt-2">
-          <h4 className="font-semibold text-base leading-tight">
-            {lead.contact_name || 'Без имени'}
-          </h4>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Phone className="h-3 w-3 flex-shrink-0" />
-            <span className="truncate">{lead.contact_phone}</span>
-          </div>
+        {/* Contact Info */}
+        <div className="mb-0.5">
+          {hasValidName ? (
+            <>
+              <div className="font-semibold text-[10px] truncate">{lead.contact_name}</div>
+              <div className="text-[9px] text-muted-foreground truncate">
+                {lead.contact_phone}
+              </div>
+            </>
+          ) : (
+            <div className="font-medium text-[10px] truncate">
+              {lead.contact_phone}
+            </div>
+          )}
         </div>
-      </CardHeader>
 
-      <CardContent className="space-y-2.5 pt-0">
-        {/* Business Type */}
-        {lead.business_type && (
-          <div className="flex items-center gap-2 text-sm">
-            <Building2 className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-            <span className="truncate flex-1" title={lead.business_type}>
-              {lead.business_type}
-            </span>
-            {lead.is_medical && (
-              <Badge variant="secondary" className="text-xs flex-shrink-0">
-                🏥
+        {/* Tags */}
+        {lead.lead_tags && lead.lead_tags.length > 0 && (
+          <div className="flex flex-wrap gap-0.5 mb-0.5">
+            {lead.lead_tags.slice(0, 2).map((tag, index) => (
+              <Badge 
+                key={index} 
+                variant="secondary" 
+                className="text-[8px] px-1 py-0 h-3 font-normal leading-none"
+              >
+                {tag}
+              </Badge>
+            ))}
+            {lead.lead_tags.length > 2 && (
+              <Badge variant="secondary" className="text-[8px] px-1 py-0 h-3 font-normal leading-none">
+                +{lead.lead_tags.length - 2}
               </Badge>
             )}
           </div>
         )}
 
-        {/* Qualification Info */}
-        <div className="flex flex-wrap gap-1.5">
-          {lead.is_owner && (
-            <Badge variant="outline" className="text-xs">
-              <User className="w-3 h-3 mr-1" />
-              Владелец
-            </Badge>
-          )}
-          {lead.uses_ads_now && (
-            <Badge variant="outline" className="text-xs">
-              <Briefcase className="w-3 h-3 mr-1" />
-              Реклама
-            </Badge>
-          )}
-        </div>
-
-        {/* Last Message Time */}
+        {/* Time */}
         {lead.last_message && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-1 border-t">
-            <Calendar className="h-3 w-3" />
-            <span>
-              {formatDistanceToNow(new Date(lead.last_message), {
-                addSuffix: true,
-                locale: ru,
-              })}
-            </span>
+          <div className="text-[8px] text-muted-foreground border-t pt-0.5">
+            {formatDistanceToNow(new Date(lead.last_message), {
+              addSuffix: true,
+              locale: ru,
+            })}
           </div>
         )}
-      </CardContent>
+      </div>
     </Card>
   );
 }

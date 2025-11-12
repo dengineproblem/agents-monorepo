@@ -3,22 +3,29 @@ import { Sidebar } from './components/Sidebar';
 import { WhatsAppCRM } from './pages/WhatsAppCRM';
 import { ChatbotSettings } from './pages/ChatbotSettings';
 import { ReactivationCampaigns } from './pages/ReactivationCampaigns';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from '@/components/ui/toaster';
+
+const queryClient = new QueryClient();
 
 function App() {
   return (
-    <BrowserRouter>
-      <div className="flex h-screen bg-slate-50">
-        <Sidebar />
-        
-        <main className="flex-1 overflow-y-auto">
-          <Routes>
-            <Route path="/" element={<WhatsAppCRM />} />
-            <Route path="/chatbot" element={<ChatbotSettings />} />
-            <Route path="/reactivation" element={<ReactivationCampaigns />} />
-          </Routes>
-        </main>
-      </div>
-    </BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <div className="flex h-screen bg-background">
+          <Sidebar />
+          
+          <main className="flex-1 overflow-y-auto bg-background">
+            <Routes>
+              <Route path="/" element={<WhatsAppCRM />} />
+              <Route path="/chatbot" element={<ChatbotSettings />} />
+              <Route path="/reactivation" element={<ReactivationCampaigns />} />
+            </Routes>
+          </main>
+        </div>
+        <Toaster />
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 }
 

@@ -7,11 +7,11 @@ import { reanalyzeWithAudioContext, reanalyzeWithNotes } from '../lib/reanalyzeW
 
 // Validation schemas
 const AnalyzeDialogsSchema = z.object({
-  instanceName: z.string().min(1),
+  instanceName: z.string().optional().transform(val => val || undefined), // Опциональный - автоматически определяется по userAccountId
   userAccountId: z.string().uuid(),
-  minIncoming: z.number().int().min(1).optional().default(3),
-  maxDialogs: z.number().int().min(1).optional(),
-  maxContacts: z.number().int().min(1).optional(),
+  minIncoming: z.number().int().min(1).optional().default(3), // Минимум входящих сообщений для анализа
+  maxDialogs: z.number().int().min(1).optional(), // ВАЖНО: это лимит УЖЕ ОТФИЛЬТРОВАННЫХ диалогов (>= minIncoming)
+  maxContacts: z.number().int().min(1).optional(), // Лимит топ N самых активных контактов из БД (до фильтрации)
 });
 
 const GetAnalysisSchema = z.object({
@@ -78,9 +78,32 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.post('/dialogs/analyze', async (request, reply) => {
     try {
       const body = AnalyzeDialogsSchema.parse(request.body);
-      const { instanceName, userAccountId, minIncoming, maxDialogs, maxContacts } = body;
+      let { instanceName, userAccountId, minIncoming, maxDialogs, maxContacts } = body;
 
       app.log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
+
+      // If instanceName not provided, get it automatically from user's whatsapp_instances
+      if (!instanceName) {
+        app.log.info({ userAccountId }, 'Instance name not provided, fetching from database');
+        
+        const { data: userInstance, error: fetchError } = await supabase
+          .from('whatsapp_instances')
+          .select('instance_name')
+          .eq('user_account_id', userAccountId)
+          .limit(1)
+          .maybeSingle();
+        
+        if (fetchError || !userInstance) {
+          app.log.error({ fetchError, userAccountId }, 'No WhatsApp instance found for user');
+          return reply.status(404).send({
+            success: false,
+            error: 'WhatsApp instance не найден для этого пользователя. Подключите WhatsApp сначала.'
+          });
+        }
+        
+        instanceName = userInstance.instance_name;
+        app.log.info({ instanceName, userAccountId }, 'Auto-detected instance name');
+      }
 
       // Verify that instance belongs to user
       app.log.info({ instanceName, userAccountId }, 'Checking instance in database');
@@ -114,9 +137,9 @@ export async function dialogsRoutes(app: FastifyInstance) {
         });
       }
 
-      // Run analysis
+      // Run analysis (instanceName guaranteed to be defined at this point)
       const stats = await analyzeDialogs({
-        instanceName,
+        instanceName: instanceName!, // Non-null assertion after auto-detection
         userAccountId,
         minIncoming,
         maxDialogs,
@@ -345,7 +368,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
         total: data?.length || 0,
         hot: data?.filter(d => d.interest_level === 'hot').length || 0,
         warm: data?.filter(d => d.interest_level === 'warm').length || 0,
-        cold: data?.filter(d => d.interest_level === 'cold').length || 0,
+        cold: data?.filter(d => d.interest_level === 'cold' || !d.interest_level || d.interest_level === '').length || 0,
         avgScore: data?.length 
           ? Math.round(data.reduce((sum, d) => sum + (d.score || 0), 0) / data.length)
           : 0,
@@ -777,6 +800,164 @@ export async function dialogsRoutes(app: FastifyInstance) {
       app.log.error({ error: error.message }, 'Failed to update autopilot');
       return reply.status(500).send({
         error: 'Autopilot update failed',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /dialogs/leads/:id/generate-message
+   * Generate AI message for specific lead
+   */
+  app.post('/dialogs/leads/:id/generate-message', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { userAccountId } = request.body as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId field is required' });
+      }
+
+      // Get lead data
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      if (lead.user_account_id !== userAccountId) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      // Call chatbot-service to generate message
+      const chatbotServiceUrl = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
+      const response = await fetch(`${chatbotServiceUrl}/campaign/generate-single-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAccountId,
+          leadId: id,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Chatbot service returned ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      app.log.info({ leadId: id }, 'Message generated');
+
+      return reply.send({
+        message: result.message,
+        messageType: result.messageType,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to generate message');
+      return reply.status(500).send({
+        error: 'Message generation failed',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /dialogs/leads/:id/send-message
+   * Send WhatsApp message to lead
+   */
+  app.post('/dialogs/leads/:id/send-message', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { userAccountId, message } = request.body as { 
+        userAccountId: string; 
+        message: string;
+      };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId field is required' });
+      }
+
+      if (!message || !message.trim()) {
+        return reply.status(400).send({ error: 'message field is required' });
+      }
+
+      // Get lead and instance data
+      const { data: lead, error: leadError } = await supabase
+        .from('dialog_analysis')
+        .select('*, whatsapp_instances!inner(instance_name, evolution_url, evolution_api_key)')
+        .eq('id', id)
+        .single();
+
+      if (leadError || !lead) {
+        return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      if (lead.user_account_id !== userAccountId) {
+        return reply.status(403).send({ error: 'Access denied' });
+      }
+
+      const instance = (lead as any).whatsapp_instances;
+      if (!instance) {
+        return reply.status(400).send({ error: 'WhatsApp instance not found' });
+      }
+
+      // Send message via Evolution API
+      const evolutionUrl = instance.evolution_url || process.env.EVOLUTION_API_URL || 'https://n8n.performanteaiagency.com';
+      const apiKey = instance.evolution_api_key || process.env.EVOLUTION_API_KEY;
+
+      const sendMessageUrl = `${evolutionUrl}/message/sendText/${instance.instance_name}`;
+      
+      const sendResponse = await fetch(sendMessageUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': apiKey,
+        },
+        body: JSON.stringify({
+          number: lead.contact_phone,
+          text: message,
+        }),
+      });
+
+      if (!sendResponse.ok) {
+        const errorText = await sendResponse.text();
+        throw new Error(`Evolution API returned ${sendResponse.status}: ${errorText}`);
+      }
+
+      // Add message to dialog history
+      const newMessage = {
+        text: message,
+        timestamp: new Date().toISOString(),
+        from_me: true,
+        is_system: false,
+      };
+
+      const updatedMessages = [...(lead.messages || []), newMessage];
+
+      await supabase
+        .from('dialog_analysis')
+        .update({
+          messages: updatedMessages,
+          last_message: new Date().toISOString(),
+          outgoing_count: lead.outgoing_count + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id);
+
+      app.log.info({ leadId: id, phone: lead.contact_phone }, 'Message sent');
+
+      return reply.send({ 
+        success: true,
+        message: 'Message sent successfully',
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to send message');
+      return reply.status(500).send({
+        error: 'Message sending failed',
         message: error.message
       });
     }

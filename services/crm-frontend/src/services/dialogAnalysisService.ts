@@ -42,7 +42,8 @@ export const dialogAnalysisService = {
     
     const response = await fetch(`${API_BASE_URL}/dialogs/stats?${params}`);
     if (!response.ok) throw new Error('Failed to fetch stats');
-    return response.json();
+    const data = await response.json();
+    return data.stats || data;
   },
   
   // Export CSV
@@ -150,6 +151,38 @@ export const dialogAnalysisService = {
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.message || 'Failed to toggle autopilot');
+    }
+    
+    return response.json();
+  },
+
+  // Generate AI message
+  async generateMessage(leadId: string, userAccountId: string): Promise<{ message: string; messageType: string }> {
+    const response = await fetch(`${API_BASE_URL}/dialogs/leads/${leadId}/generate-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAccountId }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to generate message');
+    }
+    
+    return response.json();
+  },
+
+  // Send WhatsApp message
+  async sendMessage(leadId: string, userAccountId: string, message: string) {
+    const response = await fetch(`${API_BASE_URL}/dialogs/leads/${leadId}/send-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAccountId, message }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Failed to send message');
     }
     
     return response.json();

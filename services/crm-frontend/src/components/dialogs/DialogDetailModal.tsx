@@ -13,7 +13,7 @@ import { dialogAnalysisService } from '@/services/dialogAnalysisService';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Upload, Loader2 } from 'lucide-react';
+import { Upload, Loader2, Sparkles, Send } from 'lucide-react';
 
 const USER_ACCOUNT_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
@@ -23,12 +23,39 @@ interface DialogDetailModalProps {
   onClose: () => void;
 }
 
+// Parse reasoning into structured format
+function parseReasoning(reasoning: string): { positive: string[]; negative: string[] } {
+  const lines = reasoning.split('\n').filter(line => line.trim());
+  const positive: string[] = [];
+  const negative: string[] = [];
+
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    // Look for lines with +/- followed by numbers
+    if (trimmed.match(/[+\+][\s]*\d+/)) {
+      positive.push(trimmed);
+    } else if (trimmed.match(/[-\-][\s]*\d+/)) {
+      negative.push(trimmed);
+    } else if (trimmed.includes('+')) {
+      positive.push(trimmed);
+    } else if (trimmed.includes('-') && trimmed.match(/\d/)) {
+      negative.push(trimmed);
+    } else if (trimmed) {
+      // Default: any line with content
+      positive.push(trimmed);
+    }
+  });
+
+  return { positive, negative };
+}
+
 export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalProps) {
   if (!dialog) return null;
 
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState(dialog.manual_notes || '');
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const [messageText, setMessageText] = useState('');
 
   // Upload audio mutation
   const uploadAudioMutation = useMutation({
@@ -85,6 +112,46 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
     },
   });
 
+  // Generate message mutation
+  const generateMessageMutation = useMutation({
+    mutationFn: () => dialogAnalysisService.generateMessage(dialog.id, USER_ACCOUNT_ID),
+    onSuccess: (data) => {
+      setMessageText(data.message);
+      toast({ 
+        title: '✨ Сообщение сгенерировано',
+        description: `Тип: ${data.messageType}` 
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Ошибка генерации сообщения',
+        description: error.message,
+        variant: 'destructive'
+      });
+    },
+  });
+
+  // Send message mutation
+  const sendMessageMutation = useMutation({
+    mutationFn: (message: string) => 
+      dialogAnalysisService.sendMessage(dialog.id, USER_ACCOUNT_ID, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['leads'] });
+      setMessageText('');
+      toast({ 
+        title: '✓ Сообщение отправлено',
+        description: 'Сообщение успешно отправлено в WhatsApp'
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Ошибка отправки сообщения',
+        description: error.message,
+        variant: 'destructive'
+      });
+    },
+  });
+
   const handleAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -93,34 +160,46 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
     }
   };
 
+  const handleSendMessage = () => {
+    if (!messageText.trim()) return;
+    sendMessageMutation.mutate(messageText);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh]">
-        <DialogHeader>
+        <DialogHeader className="border-b pb-4">
           <DialogTitle className="flex items-center gap-3">
-            <span>{dialog.contact_name || 'Без имени'}</span>
-            <Badge variant="secondary">{dialog.contact_phone}</Badge>
+            <span className="text-xl font-bold">{dialog.contact_name || 'Без имени'}</span>
+            <Badge variant="secondary" className="text-sm">{dialog.contact_phone}</Badge>
           </DialogTitle>
         </DialogHeader>
 
         <ScrollArea className="h-[70vh] pr-4">
           <div className="space-y-6">
-            {/* Key Metrics */}
-            <div>
-              <h3 className="font-semibold mb-3">Основные метрики</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-sm text-gray-500">Score</div>
-                  <div className="text-2xl font-bold">{dialog.score ?? '—'}</div>
-                </div>
-                <div>
-                  <div className="text-sm text-gray-500">Уровень интереса</div>
-                  <div className="text-xl font-semibold">
-                    {dialog.interest_level === 'hot' && '🔥 HOT'}
-                    {dialog.interest_level === 'warm' && '🌤️ WARM'}
-                    {dialog.interest_level === 'cold' && '❄️ COLD'}
+            {/* Key Metrics - Combined */}
+            <div className="bg-accent/30 rounded-lg p-4 border space-y-3">
+              <div>
+                <div className="text-sm text-muted-foreground mb-1">Уровень интереса</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-3xl font-bold">{dialog.score ?? '—'}</div>
+                  <div className="text-2xl">
+                    {dialog.interest_level === 'hot' && '🔥'}
+                    {dialog.interest_level === 'warm' && '☀️'}
+                    {dialog.interest_level === 'cold' && '❄️'}
+                    {!dialog.interest_level && '—'}
                   </div>
                 </div>
+              </div>
+              
+              {/* Autopilot Toggle */}
+              <div className="flex items-center justify-between pt-2 border-t">
+                <span className="text-sm font-medium">Автопилот</span>
+                <Switch
+                  checked={dialog.autopilot_enabled ?? true}
+                  onCheckedChange={(enabled) => toggleAutopilotMutation.mutate(enabled)}
+                  disabled={toggleAutopilotMutation.isPending}
+                />
               </div>
             </div>
 
@@ -156,14 +235,53 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
             </div>
 
             {/* Reasoning */}
-            {dialog.reasoning && (
-              <div>
-                <h3 className="font-semibold mb-3">Обоснование оценки</h3>
-                <div className="bg-gray-50 rounded-lg p-4 text-sm">
-                  {dialog.reasoning}
+            {dialog.reasoning && (() => {
+              const { positive, negative } = parseReasoning(dialog.reasoning);
+              return (
+                <div>
+                  <h3 className="font-semibold mb-3">Обоснование оценки</h3>
+                  <div className="space-y-3">
+                {positive.length > 0 && (
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                    <div className="font-medium mb-2 flex items-center gap-2">
+                      <span className="text-lg">✓</span>
+                      Позитивные факторы
+                    </div>
+                    <ul className="space-y-1.5">
+                      {positive.map((item, index) => (
+                        <li key={index} className="text-sm flex items-start gap-2">
+                          <span className="mt-0.5">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {negative.length > 0 && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+                    <div className="font-medium mb-2 flex items-center gap-2">
+                      <span className="text-lg">✗</span>
+                      Негативные факторы
+                    </div>
+                    <ul className="space-y-1.5">
+                      {negative.map((item, index) => (
+                        <li key={index} className="text-sm flex items-start gap-2">
+                          <span className="mt-0.5">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {positive.length === 0 && negative.length === 0 && (
+                  <div className="bg-muted rounded-lg p-4 text-sm">
+                    {dialog.reasoning}
+                  </div>
+                )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Audio, Notes & Autopilot */}
             <div>
@@ -232,20 +350,90 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
                     </p>
                   )}
                 </div>
+              </div>
+            </div>
 
-                {/* Autopilot Toggle */}
-                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <div>
-                    <p className="font-medium text-sm">Автопилот для этого лида</p>
-                    <p className="text-xs text-gray-600 mt-1">
-                      Включать лида в автоматические рассылки
-                    </p>
-                  </div>
-                  <Switch
-                    checked={dialog.autopilot_enabled ?? true}
-                    onCheckedChange={(enabled) => toggleAutopilotMutation.mutate(enabled)}
-                    disabled={toggleAutopilotMutation.isPending}
+            {/* Send Message Section */}
+            <div>
+              <h3 className="font-semibold mb-3">Отправить сообщение</h3>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Textarea
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    placeholder="Введите сообщение для отправки..."
+                    rows={3}
+                    className="flex-1"
+                    disabled={sendMessageMutation.isPending}
                   />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => generateMessageMutation.mutate()}
+                    variant="outline"
+                    size="sm"
+                    disabled={generateMessageMutation.isPending}
+                    className="flex items-center gap-2"
+                  >
+                    {generateMessageMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Генерация...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4" />
+                        Сгенерировать ИИ
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={handleSendMessage}
+                    size="sm"
+                    disabled={!messageText.trim() || sendMessageMutation.isPending}
+                    className="flex items-center gap-2"
+                  >
+                    {sendMessageMutation.isPending ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Отправка...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="h-4 w-4" />
+                        Отправить
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Metadata */}
+            <div>
+              <h3 className="font-semibold mb-3">Метаданные</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Первое сообщение:</span>
+                  <span className="font-medium">
+                    {dialog.first_message
+                      ? format(new Date(dialog.first_message), 'dd MMM yyyy, HH:mm', { locale: ru })
+                      : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Последнее сообщение:</span>
+                  <span className="font-medium">
+                    {dialog.last_message
+                      ? format(new Date(dialog.last_message), 'dd MMM yyyy, HH:mm', { locale: ru })
+                      : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Проанализировано:</span>
+                  <span className="font-medium">
+                    {format(new Date(dialog.analyzed_at), 'dd MMM yyyy, HH:mm', { locale: ru })}
+                  </span>
                 </div>
               </div>
             </div>
@@ -260,17 +448,17 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
                   {dialog.messages.map((msg, idx) => (
                     <div
                       key={idx}
-                      className={`text-sm p-3 rounded-lg ${
+                      className={`text-sm p-3 rounded-lg border ${
                         msg.from_me
-                          ? 'bg-green-50 border-green-200 border ml-8'
-                          : 'bg-gray-50 border-gray-200 border mr-8'
+                          ? 'bg-green-500/10 border-green-500/20 ml-8'
+                          : 'bg-muted border-border mr-8'
                       }`}
                     >
                       <div className="flex items-center justify-between mb-1">
-                        <span className="font-medium text-xs text-gray-600">
+                        <span className="font-medium text-xs">
                           {msg.from_me ? 'Вы' : dialog.contact_name || 'Клиент'}
                         </span>
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-muted-foreground">
                           {format(new Date(msg.timestamp), 'dd MMM yyyy, HH:mm', { locale: ru })}
                         </span>
                       </div>
@@ -281,34 +469,6 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
               </div>
             )}
 
-            {/* Metadata */}
-            <div>
-              <h3 className="font-semibold mb-3">Метаданные</h3>
-              <div className="space-y-2 text-sm text-gray-600">
-                <div className="flex justify-between">
-                  <span>Первое сообщение:</span>
-                  <span>
-                    {dialog.first_message
-                      ? format(new Date(dialog.first_message), 'dd MMM yyyy, HH:mm', { locale: ru })
-                      : '—'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Последнее сообщение:</span>
-                  <span>
-                    {dialog.last_message
-                      ? format(new Date(dialog.last_message), 'dd MMM yyyy, HH:mm', { locale: ru })
-                      : '—'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Проанализировано:</span>
-                  <span>
-                    {format(new Date(dialog.analyzed_at), 'dd MMM yyyy, HH:mm', { locale: ru })}
-                  </span>
-                </div>
-              </div>
-            </div>
           </div>
         </ScrollArea>
       </DialogContent>

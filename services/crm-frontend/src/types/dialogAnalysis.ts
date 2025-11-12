@@ -25,7 +25,10 @@ export interface DialogAnalysis {
   first_message: string | null;
   last_message: string | null;
   
-  // Бизнес-профиль
+  // Гибкие теги от LLM
+  lead_tags: string[] | null;
+  
+  // Бизнес-профиль (deprecated, kept for backward compatibility)
   business_type: string | null;
   is_medical: boolean | null;
   is_owner: boolean | null;

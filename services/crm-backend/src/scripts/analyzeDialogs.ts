@@ -1,5 +1,5 @@
 import { OpenAI } from 'openai';
-import { getInstanceMessages } from '../lib/evolutionDb.js';
+import { getFilteredDialogsForAnalysis, getNewLeads } from '../lib/evolutionDb.js';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { getDefaultContext, formatContextForPrompt, type PersonalizedContext } from '../lib/promptGenerator.js';
@@ -22,6 +22,7 @@ S: — системное сообщение
 Верни JSON (только JSON, без дополнительного текста):
 
 {
+  "lead_tags": string[],
   "business_type": string | null,
   "is_medical": boolean,
   "is_owner": boolean | null,
@@ -41,6 +42,18 @@ S: — системное сообщение
   "reasoning": string
 }
 
+LEAD_TAGS - ВАЖНО:
+Сгенерируй 2-3 ключевых тега которые характеризуют этого лида. Теги должны быть универсальными и подходить для любой ниши бизнеса.
+Примеры тегов:
+- География: "Москва", "Санкт-Петербург", "Удаленно"
+- Бюджет: "До 50к", "50-100к", "100к+"
+- Срочность: "Срочно", "В течение недели", "Планирует"
+- Интерес/Потребность: "Хочет консультацию", "Интересуется ценой", "Сравнивает варианты"
+- Категория/Проблема: специфичные для ниши теги
+- Статус: "Готов к покупке", "Изучает", "Сомневается"
+
+Выбирай только самые важные характеристики лида. Теги должны быть краткими (1-3 слова).
+
 ЭТАПЫ ВОРОНКИ И СКОРИНГ:
 Используй этапы воронки, скоринг и критерии из ПЕРСОНАЛИЗИРОВАННОГО КОНТЕКСТА клиента ниже.
 Определи на каком этапе находится лид и присвой соответствующий базовый score из funnel_scoring.
@@ -55,6 +68,17 @@ S: — системное сообщение
 - Долго не отвечает: -15
 
 Interest level (финальный): HOT(75-100), WARM(40-74), COLD(0-39)
+
+ФОРМАТ REASONING - ОБЯЗАТЕЛЬНО:
+Представь reasoning в структурированном виде. Каждая строка должна начинаться с + или - и содержать количество баллов:
++ Причина (баллы: +X)
+- Причина (баллы: -Y)
+
+Пример:
++ Базовый этап — первый контакт (баллы: +20)
++ Владелец бизнеса, соответствует идеальному профилю (баллы: +10)
++ Задает много технических вопросов (баллы: +5)
+- Нет четкого запроса на встречу (баллы: -5)
 
 <<<PERSONALIZED_CONTEXT>>>
 
@@ -90,6 +114,7 @@ interface Contact {
 }
 
 interface AnalysisResult {
+  lead_tags: string[];
   business_type: string | null;
   is_medical: boolean;
   is_owner: boolean | null;
@@ -243,7 +268,7 @@ async function analyzeDialog(
 
   try {
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: 'You are a helpful assistant that analyzes WhatsApp dialogs and returns structured JSON.' },
         { role: 'user', content: prompt }
@@ -328,6 +353,7 @@ async function saveAnalysisResult(
       last_message: contact.last_message.toISOString(),
       
       // Analysis results
+      lead_tags: analysis.lead_tags || [],
       business_type: analysis.business_type,
       is_medical: analysis.is_medical,
       is_owner: analysis.is_owner,
@@ -339,7 +365,7 @@ async function saveAnalysisResult(
       sent_instagram: analysis.sent_instagram,
       instagram_url: analysis.instagram_url,
       funnel_stage: analysis.funnel_stage,
-      interest_level: analysis.interest_level,
+      interest_level: analysis.interest_level.toLowerCase() as 'hot' | 'warm' | 'cold',
       main_intent: analysis.main_intent,
       objection: analysis.objection,
       action: analysis.action,
@@ -406,38 +432,32 @@ export async function analyzeDialogs(params: {
 `;
     }
 
-    // 1. Get messages from Evolution PostgreSQL (limited to top N most active contacts)
-    const messages = await getInstanceMessages(instanceName, maxContacts);
-    log.info({ messageCount: messages.length, maxContacts }, 'Retrieved messages from Evolution DB');
+    // ⚡ OPTIMIZED: Get already filtered dialogs from Evolution PostgreSQL
+    // Filtering is done at SQL level (10-20x faster than JS)
+    const messages = await getFilteredDialogsForAnalysis(instanceName, minIncoming, maxDialogs);
+    log.info({ messageCount: messages.length }, '⚡ Retrieved pre-filtered messages from Evolution DB');
+
+    // 📥 Get ALL new leads (< minIncoming messages) to save without analysis
+    // БЕЗ ЛИМИТА - это быстро (без GPT анализа), все new leads попадают в CRM
+    const newLeadMessages = await getNewLeads(instanceName, minIncoming);
+    log.info({ messageCount: newLeadMessages.length }, '📥 Retrieved ALL new leads from Evolution DB');
 
     // 2. Group by contact
     const contacts = groupMessagesByContact(messages);
-    log.info({ contactCount: contacts.size }, 'Grouped messages by contact');
-
-    // 3. Separate new leads (< minIncoming) and contacts to analyze (>= minIncoming)
-    const allContacts = Array.from(contacts.values());
-    const newLeads = allContacts.filter(contact => contact.incoming_count < minIncoming);
-    let contactsToAnalyze = allContacts.filter(contact => contact.incoming_count >= minIncoming);
+    const contactsToAnalyze = Array.from(contacts.values());
     
-    // Limit number of dialogs if maxDialogs is specified
-    if (maxDialogs && maxDialogs > 0) {
-      contactsToAnalyze = contactsToAnalyze.slice(0, maxDialogs);
-      log.info({ maxDialogs }, 'Limiting analysis to specified number of dialogs');
-    }
-    
-    // Limit new leads to save (max 10 to avoid flooding DB)
-    const newLeadsToSave = newLeads.slice(0, 10);
+    const newLeadContacts = groupMessagesByContact(newLeadMessages);
+    const newLeadsToSave = Array.from(newLeadContacts.values());
     
     log.info({ 
-      totalContacts: contacts.size,
-      newLeads: newLeads.length,
-      newLeadsToSave: newLeadsToSave.length,
+      contactCount: contacts.size,
       toAnalyze: contactsToAnalyze.length,
+      newLeads: newLeadsToSave.length,
       minIncoming,
       maxDialogs: maxDialogs || 'unlimited'
-    }, 'Contacts categorized');
+    }, '✅ Dialogs ready for analysis (pre-filtered in SQL)');
 
-    // 4. Save new leads without LLM analysis (limited to 10)
+    // 3. Save new leads without LLM analysis (fast!)
     for (const contact of newLeadsToSave) {
       try {
         await saveNewLead(instanceName, userAccountId, contact);
@@ -446,7 +466,7 @@ export async function analyzeDialogs(params: {
       }
     }
 
-    // 5. Analyze contacts with enough messages
+    // 4. Analyze contacts (already filtered in SQL)
     const stats = {
       total: contactsToAnalyze.length,
       analyzed: 0,

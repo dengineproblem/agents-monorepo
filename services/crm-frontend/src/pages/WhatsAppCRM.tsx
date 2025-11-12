@@ -8,12 +8,18 @@ import { DialogDetailModal } from '@/components/dialogs/DialogDetailModal';
 import { DialogFilters } from '@/components/dialogs/DialogFilters';
 import { OnboardingModal } from '@/components/onboarding/OnboardingModal';
 import { LoadLeadsModal } from '@/components/dialogs/LoadLeadsModal';
+import { CampaignQueueModal } from '@/components/dialogs/CampaignQueueModal';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { dialogAnalysisService } from '@/services/dialogAnalysisService';
 import { DialogAnalysis, DialogFilters as DialogFiltersType, FunnelStage } from '@/types/dialogAnalysis';
-import { Plus, Download, RefreshCw, Loader2 } from 'lucide-react';
+import { Plus, Download, RefreshCw, Filter, Moon, Sun, Send } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 export function WhatsAppCRM() {
   const queryClient = useQueryClient();
@@ -27,7 +33,24 @@ export function WhatsAppCRM() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isLoadLeadsModalOpen, setIsLoadLeadsModalOpen] = useState(false);
+  const [isCampaignQueueModalOpen, setIsCampaignQueueModalOpen] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    return saved === 'dark';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isDarkMode) {
+      root.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      root.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
 
   // Fetch leads
   const { data: leads = [], isLoading, refetch } = useQuery({
@@ -42,7 +65,7 @@ export function WhatsAppCRM() {
   });
 
   // Check for business profile (onboarding)
-  const { data: profile, isLoading: profileLoading, isError: profileError } = useQuery({
+  const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ['business-profile', userAccountId],
     queryFn: async () => {
       try {
@@ -120,10 +143,10 @@ export function WhatsAppCRM() {
 
   // Analyze dialogs mutation
   const analyzeDialogsMutation = useMutation({
-    mutationFn: async ({ instanceName, maxDialogs }: { instanceName: string; maxDialogs: number }) => {
+    mutationFn: async ({ maxDialogs }: { maxDialogs: number }) => {
       return dialogAnalysisService.analyzeDialogs({
         userAccountId,
-        instanceName,
+        instanceName: '', // Backend will auto-detect from user_account_id
         minIncoming: 3,
         maxDialogs,
       });
@@ -190,70 +213,114 @@ export function WhatsAppCRM() {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className="container mx-auto p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-3xl font-bold">WhatsApp CRM</h1>
-          <div className="flex gap-2">
-            <Button 
-              onClick={() => setIsLoadLeadsModalOpen(true)} 
-              variant="default" 
-              size="sm"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Загрузить лиды из WhatsApp
-            </Button>
-            <Button onClick={() => refetch()} variant="outline" size="sm">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Обновить
-            </Button>
-            <Button onClick={handleExportCsv} variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-2" />
-              Экспорт CSV
-            </Button>
-            <Button onClick={() => setIsAddModalOpen(true)} size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              Добавить лида
-            </Button>
-          </div>
-        </div>
+      <div className="container mx-auto p-6 min-h-screen">
+        {/* Compact Toolbar */}
+        <TooltipProvider>
+          <div className="flex items-center justify-between mb-6 bg-card rounded-lg shadow-sm p-3 border">
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    onClick={() => setIsAddModalOpen(true)} 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-9 w-9"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Добавить лида</TooltipContent>
+              </Tooltip>
 
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold text-red-600">{stats.hot}</div>
-                <div className="text-sm text-gray-600">🔥 Горячие</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold text-orange-600">{stats.warm}</div>
-                <div className="text-sm text-gray-600">☀️ Тёплые</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold text-blue-600">{stats.cold}</div>
-                <div className="text-sm text-gray-600">❄️ Холодные</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-3xl font-bold text-gray-600">{stats.total}</div>
-                <div className="text-sm text-gray-600">📊 Всего</div>
-              </CardContent>
-            </Card>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    onClick={handleExportCsv} 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-9 w-9"
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Экспорт CSV</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    onClick={() => setShowFilters(!showFilters)} 
+                    variant="ghost" 
+                    size="icon"
+                    className={`h-9 w-9 ${showFilters ? 'bg-accent' : ''}`}
+                  >
+                    <Filter className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Фильтры</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    onClick={() => refetch()} 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-9 w-9"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Обновить</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    onClick={() => setIsDarkMode(!isDarkMode)} 
+                    variant="ghost" 
+                    size="icon"
+                    className="h-9 w-9"
+                  >
+                    {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Переключить тему</TooltipContent>
+              </Tooltip>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {stats && (
+                <div className="flex items-center gap-2 text-xs mr-2 bg-muted/30 px-2 py-1 rounded">
+                  <span>🔥 <span className="font-semibold">{stats.hot || 0}</span></span>
+                  <span>☀️ <span className="font-semibold">{stats.warm || 0}</span></span>
+                  <span>❄️ <span className="font-semibold">{stats.cold || 0}</span></span>
+                  <span className="border-l pl-2 ml-1">Всего: <span className="font-semibold">{stats.total || 0}</span></span>
+                </div>
+              )}
+
+              <Button 
+                onClick={() => setIsCampaignQueueModalOpen(true)} 
+                variant="default"
+                size="sm"
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Рассылки
+              </Button>
+            </div>
           </div>
-        )}
+        </TooltipProvider>
 
         {/* Filters */}
-        <DialogFilters
-          filters={filters}
-          onFiltersChange={setFilters}
-          onReset={handleResetFilters}
-        />
+        {showFilters && (
+          <div className="mb-6">
+            <DialogFilters
+              filters={filters}
+              onFiltersChange={setFilters}
+              onReset={handleResetFilters}
+            />
+          </div>
+        )}
 
         {/* Kanban Board */}
         {isLoading ? (
@@ -274,10 +341,15 @@ export function WhatsAppCRM() {
         <LoadLeadsModal
           open={isLoadLeadsModalOpen}
           onClose={() => setIsLoadLeadsModalOpen(false)}
-          onSubmit={(instanceName, maxDialogs) => {
-            analyzeDialogsMutation.mutate({ instanceName, maxDialogs });
+          onSubmit={(maxDialogs) => {
+            analyzeDialogsMutation.mutate({ maxDialogs });
           }}
           isLoading={analyzeDialogsMutation.isPending}
+        />
+
+        <CampaignQueueModal
+          open={isCampaignQueueModalOpen}
+          onClose={() => setIsCampaignQueueModalOpen(false)}
         />
 
         <AddLeadModal
