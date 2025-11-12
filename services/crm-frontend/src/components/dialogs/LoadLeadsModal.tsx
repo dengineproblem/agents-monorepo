@@ -14,21 +14,17 @@ import { Label } from '@/components/ui/label';
 interface LoadLeadsModalProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (instanceName: string, maxDialogs: number) => void;
+  onSubmit: (maxDialogs: number) => void;
   isLoading?: boolean;
 }
 
 export function LoadLeadsModal({ open, onClose, onSubmit, isLoading }: LoadLeadsModalProps) {
-  const [instanceName, setInstanceName] = useState('');
   const [maxDialogs, setMaxDialogs] = useState(100);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (instanceName.trim()) {
-      onSubmit(instanceName.trim(), maxDialogs);
-      setInstanceName('');
-      setMaxDialogs(100);
-    }
+    onSubmit(maxDialogs);
+    setMaxDialogs(100);
   };
 
   return (
@@ -38,28 +34,11 @@ export function LoadLeadsModal({ open, onClose, onSubmit, isLoading }: LoadLeads
           <DialogHeader>
             <DialogTitle>Загрузить лиды из WhatsApp</DialogTitle>
             <DialogDescription>
-              Введите название вашего WhatsApp Instance для загрузки и анализа диалогов
+              WhatsApp instance будет определён автоматически. Выберите количество диалогов для анализа.
             </DialogDescription>
           </DialogHeader>
           
           <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="instance">
-                Название Instance <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="instance"
-                placeholder="my-whatsapp-instance"
-                value={instanceName}
-                onChange={(e) => setInstanceName(e.target.value)}
-                required
-                disabled={isLoading}
-              />
-              <p className="text-sm text-gray-500">
-                Например: business-whatsapp, my-instance
-              </p>
-            </div>
-
             <div className="grid gap-2">
               <Label htmlFor="maxDialogs">
                 Максимум диалогов для анализа
@@ -74,7 +53,7 @@ export function LoadLeadsModal({ open, onClose, onSubmit, isLoading }: LoadLeads
                 disabled={isLoading}
               />
               <p className="text-sm text-gray-500">
-                Рекомендуется: 50-200 для первого запуска
+                Рекомендуется: 50-200 для первого запуска. Будут проанализированы диалоги с минимум 3 входящими сообщениями.
               </p>
             </div>
           </div>
@@ -88,7 +67,7 @@ export function LoadLeadsModal({ open, onClose, onSubmit, isLoading }: LoadLeads
             >
               Отмена
             </Button>
-            <Button type="submit" disabled={isLoading || !instanceName.trim()}>
+            <Button type="submit" disabled={isLoading}>
               {isLoading ? 'Загрузка...' : 'Загрузить'}
             </Button>
           </DialogFooter>

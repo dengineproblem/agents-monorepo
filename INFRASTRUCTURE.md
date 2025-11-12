@@ -143,6 +143,7 @@ Docker nginx (контейнер)
 | `evolution-postgres` | 5432 | 5433 | БД для Evolution API |
 | `evolution-redis` | 6379 | 6380 | Cache для Evolution API |
 | `tiktok-proxy` (на хосте) | 4001 | 4001 | TikTok Marketing API proxy (legacy, не в Docker) |
+| `SSH tunnel` (локальная разработка) | 5434 | 5434 | Туннель к production evolution-postgres для CRM |
 | `crm-backend` | 8084 | 8084 | Backend анализа WhatsApp диалогов |
 | `crm-frontend` | 80 | 3003 | Frontend CRM (nginx в контейнере) |
 | `chatbot-service` | 8083 | 8083 | Чатбот автоматизация |
@@ -831,6 +832,57 @@ docker network connect agents-monorepo_default root-n8n-1 2>/dev/null
 docker exec root-n8n-1 python3 --version
 docker exec root-n8n-1 python3 -c "from PIL import Image; print('OK')"
 ```
+
+---
+
+### **❌ ПРОБЛЕМА: crm-backend не может подключиться к production БД**
+
+**Причина:** SSH туннель не работает или неправильно настроен
+
+**Решение:**
+
+```bash
+# 1. Проверить что SSH туннель работает
+lsof -i:5434
+# Должен быть ssh процесс
+
+# Если нет - запустить туннель
+ssh -L 5434:localhost:5433 root@147.182.186.15 -N -f
+
+# 2. Проверить SSH доступ к серверу
+ssh root@147.182.186.15 echo "OK"
+# Должно вернуть "OK" без запроса пароля
+
+# 3. Проверить .env.crm
+cat .env.crm | grep EVOLUTION_DB
+# Должно быть:
+# EVOLUTION_DB_HOST=host.docker.internal
+# EVOLUTION_DB_PORT=5434
+
+# 4. Проверить docker-compose.yml
+cat docker-compose.yml | grep -A 5 "crm-backend:"
+# Должен быть extra_hosts:
+#   - "host.docker.internal:host-gateway"
+
+# 5. Перезапустить crm-backend
+docker-compose restart crm-backend
+
+# 6. Проверить логи
+docker logs agents-monorepo-crm-backend-1 --tail 20
+# Должно быть: "Connected to Evolution PostgreSQL" с host: host.docker.internal
+
+# 7. Если туннель падает - использовать autossh для автоперезапуска
+brew install autossh  # macOS
+autossh -M 0 -L 5434:localhost:5433 root@147.182.186.15 -N -f
+```
+
+**Альтернатива:** Использовать автоматический скрипт
+```bash
+./scripts/start-crm-dev.sh
+# Скрипт сам настроит всё правильно
+```
+
+**Подробнее:** См. `services/crm-backend/DEV_SETUP.md`
 
 ---
 

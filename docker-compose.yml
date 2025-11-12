@@ -115,10 +115,8 @@ services:
     environment:
       - PORT=8084
       - NODE_ENV=production
-      - EVOLUTION_DB_HOST=evolution-postgres
-      - EVOLUTION_DB_PORT=5432
-      - EVOLUTION_DB_NAME=evolution
-      - EVOLUTION_DB_USER=evolution
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8084:8084"
     restart: unless-stopped
