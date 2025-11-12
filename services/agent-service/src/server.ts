@@ -1,5 +1,6 @@
 import fastify from 'fastify';
 import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
 import dotenv from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { actionsRoutes } from './routes/actions.js';
@@ -53,6 +54,8 @@ app.register(cors, {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 });
+// Поддержка application/x-www-form-urlencoded (для Tilda webhook)
+app.register(formbody);
 // ВАЖНО: НЕ ДОБАВЛЯЙТЕ prefix: '/api' - nginx убирает /api перед проксированием!
 // См. nginx-production.conf: rewrite ^/api/(.*)$ /$1 break;
 app.register(actionsRoutes);
