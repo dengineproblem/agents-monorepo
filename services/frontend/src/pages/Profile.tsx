@@ -843,7 +843,7 @@ const Profile: React.FC = () => {
   const handleAmoCRMConnectSubmit = () => {
     if (!user?.id || !amocrmInputSubdomain.trim()) return;
 
-    const url = `${API_BASE_URL}/amocrm/auth?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
+    const url = `${API_BASE_URL}/amocrm/connect?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
     window.location.href = url;
   };
 
