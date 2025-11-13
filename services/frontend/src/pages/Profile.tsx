@@ -303,23 +303,24 @@ const Profile: React.FC = () => {
   useEffect(() => {
     const loadAmoCRMStatus = async () => {
       if (!user?.id) return;
-      
+
       try {
-        const response = await fetch(`${API_BASE_URL}/amocrm/status?userAccountId=${user.id}`);
+        // AmoCRM endpoints use direct URL without /api prefix
+        const response = await fetch(`/amocrm/status?userAccountId=${user.id}`);
         if (!response.ok) {
           console.error('Failed to load AmoCRM status');
           return;
         }
-        
+
         const data = await response.json();
         console.log('AmoCRM status loaded:', data);
         setAmocrmConnected(data.connected);
         setAmocrmSubdomain(data.subdomain || '');
-        
+
         if (data.connected) {
           // Check webhook status
           try {
-            const webhookRes = await fetch(`${API_BASE_URL}/amocrm/webhook-status?userAccountId=${user.id}`);
+            const webhookRes = await fetch(`/amocrm/webhook-status?userAccountId=${user.id}`);
             if (webhookRes.ok) {
               const webhookData = await webhookRes.json();
               console.log('Webhook status:', webhookData);
@@ -842,16 +843,18 @@ const Profile: React.FC = () => {
 
   const handleAmoCRMConnectSubmit = () => {
     if (!user?.id || !amocrmInputSubdomain.trim()) return;
-    
-    const url = `${API_BASE_URL}/amocrm/auth?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
+
+    // AmoCRM OAuth uses direct URL without /api prefix
+    const url = `/amocrm/auth?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
     window.location.href = url;
   };
 
   const handleAmoCRMDisconnect = async () => {
     if (!user?.id) return;
-    
+
     try {
-      const response = await fetch(`${API_BASE_URL}/amocrm/disconnect?userAccountId=${user.id}`, {
+      // AmoCRM endpoints use direct URL without /api prefix
+      const response = await fetch(`/amocrm/disconnect?userAccountId=${user.id}`, {
         method: 'POST'
       });
       
@@ -872,11 +875,12 @@ const Profile: React.FC = () => {
 
   const handleAmoCRMSync = async () => {
     if (!user?.id) return;
-    
+
     setIsSyncingAmocrm(true);
     try {
       toast.info('Синхронизация запущена...');
-      const response = await fetch(`${API_BASE_URL}/amocrm/sync-leads?userAccountId=${user.id}`, {
+      // AmoCRM endpoints use direct URL without /api prefix
+      const response = await fetch(`/amocrm/sync-leads?userAccountId=${user.id}`, {
         method: 'POST'
       });
       const data = await response.json();
