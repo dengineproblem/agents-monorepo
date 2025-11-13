@@ -1,11 +1,10 @@
 /**
  * AmoCRM API Client
- *
+ * 
  * Provides methods for interacting with AmoCRM integration endpoints
- *
- * NOTE: AmoCRM endpoints use direct URLs without /api prefix
- * because they are proxied directly by nginx to agent-service
  */
+
+import { API_BASE_URL } from '../config/api';
 
 export interface FunnelStage {
   stage_name: string;
@@ -59,9 +58,8 @@ export async function getCreativeFunnelStats(params: {
     queryParams.append('dateTo', params.dateTo);
   }
 
-  // AmoCRM endpoints use direct URL without /api prefix
   const response = await fetch(
-    `/amocrm/creative-funnel-stats?${queryParams.toString()}`
+    `${API_BASE_URL}/amocrm/creative-funnel-stats?${queryParams.toString()}`
   );
 
   if (!response.ok) {
@@ -74,14 +72,13 @@ export async function getCreativeFunnelStats(params: {
 
 /**
  * Trigger manual leads synchronization from AmoCRM
- *
+ * 
  * @param userAccountId - User account UUID
  * @returns Sync result
  */
 export async function triggerLeadsSync(userAccountId: string): Promise<SyncResult> {
-  // AmoCRM endpoints use direct URL without /api prefix
   const response = await fetch(
-    `/amocrm/sync-leads?userAccountId=${userAccountId}`,
+    `${API_BASE_URL}/amocrm/sync-leads?userAccountId=${userAccountId}`,
     {
       method: 'POST',
     }
