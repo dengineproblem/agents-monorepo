@@ -852,7 +852,7 @@ const Profile: React.FC = () => {
     
     try {
       const response = await fetch(`${API_BASE_URL}/amocrm/disconnect?userAccountId=${user.id}`, {
-        method: 'POST'
+        method: 'DELETE'
       });
       
       if (response.ok) {
