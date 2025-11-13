@@ -152,6 +152,7 @@ const Profile: React.FC = () => {
   const [amocrmWebhookActive, setAmocrmWebhookActive] = useState(false);
   const [amocrmModal, setAmocrmModal] = useState(false);
   const [amocrmConnectModal, setAmocrmConnectModal] = useState(false);
+  const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
   const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
 
   // Handle Facebook OAuth callback
@@ -837,6 +838,13 @@ const Profile: React.FC = () => {
     } else {
       setAmocrmConnectModal(true); // Open connection modal
     }
+  };
+
+  const handleAmoCRMConnectSubmit = () => {
+    if (!user?.id || !amocrmInputSubdomain.trim()) return;
+
+    const url = `${API_BASE_URL}/amocrm/auth?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
+    window.location.href = url;
   };
 
   const handleAmoCRMDisconnect = async () => {
@@ -1673,49 +1681,34 @@ const Profile: React.FC = () => {
             <DialogHeader>
               <DialogTitle>Подключить AmoCRM</DialogTitle>
               <DialogDescription>
-                Нажмите кнопку ниже для авторизации в AmoCRM
+                Введите поддомен вашего аккаунта AmoCRM (например: mycompany)
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-              <div id="amocrm-button-container"></div>
-              <script
-                dangerouslySetInnerHTML={{
-                  __html: `
-                    if (!window.amocrmScriptLoaded) {
-                      const script = document.createElement('script');
-                      script.className = 'amocrm_oauth';
-                      script.charset = 'utf-8';
-                      script.setAttribute('data-name', 'AI-таргетолог Performante');
-                      script.setAttribute('data-description', 'Автоматическая передача лидов с сайта и сквозная аналитика продаж');
-                      script.setAttribute('data-redirect_uri', '${API_BASE_URL}/amocrm/callback');
-                      script.setAttribute('data-secrets_uri', '${API_BASE_URL}/amocrm/secrets');
-                      script.setAttribute('data-logo', 'https://app.performanteaiagency.com/logo.png');
-                      script.setAttribute('data-scopes', 'crm,notifications');
-                      script.setAttribute('data-title', 'Подключить amoCRM');
-                      script.setAttribute('data-state', btoa('${user?.id}|' + Date.now()));
-                      script.setAttribute('data-mode', 'popup');
-                      script.setAttribute('data-compact', 'false');
-                      script.setAttribute('data-class-name', 'amocrm-button');
-                      script.setAttribute('data-color', 'blue');
-                      script.setAttribute('data-error-callback', 'onAmoCRMError');
-                      script.src = 'https://www.amocrm.ru/auth/button.min.js';
-                      document.getElementById('amocrm-button-container').appendChild(script);
-                      window.amocrmScriptLoaded = true;
-
-                      window.onAmoCRMError = function(error) {
-                        console.error('AmoCRM error:', error);
-                        alert('Ошибка подключения AmoCRM: ' + (error.error_description || error.error));
-                      };
-
-                      window.addEventListener('message', function(event) {
-                        if (event.data && event.data.type === 'amocrm_connected') {
-                          window.location.reload();
-                        }
-                      });
-                    }
-                  `
-                }}
-              />
+              <div>
+                <Label htmlFor="subdomain">Поддомен AmoCRM</Label>
+                <div className="flex items-center gap-2 mt-2">
+                  <Input
+                    id="subdomain"
+                    placeholder="mycompany"
+                    value={amocrmInputSubdomain}
+                    onChange={(e) => setAmocrmInputSubdomain(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && amocrmInputSubdomain.trim()) {
+                        handleAmoCRMConnectSubmit();
+                      }
+                    }}
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">.amocrm.ru</span>
+                </div>
+              </div>
+              <Button
+                onClick={handleAmoCRMConnectSubmit}
+                disabled={!amocrmInputSubdomain.trim()}
+                className="w-full"
+              >
+                Подключить
+              </Button>
             </div>
           </DialogContent>
         </Dialog>
