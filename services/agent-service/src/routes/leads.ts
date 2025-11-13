@@ -93,10 +93,34 @@ export default async function leadsRoutes(app: FastifyInstance) {
    */
   app.post('/leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
+      // Tilda может отправлять поля с заглавных букв или строчных
+      const body = request.body as any;
+
+      // Нормализуем данные от Tilda (поля могут быть Name, Phone или name, phone)
+      const normalizedBody = {
+        userAccountId: body.userAccountId || body.user_account_id,
+        name: body.name || body.Name,
+        phone: body.phone || body.Phone,
+        email: body.email || body.Email,
+        message: body.message || body.Message,
+        utm_source: body.utm_source,
+        utm_medium: body.utm_medium,
+        utm_campaign: body.utm_campaign,
+        utm_term: body.utm_term,
+        utm_content: body.utm_content,
+        ad_id: body.ad_id
+      };
+
       // 1. Validate request body
-      const parsed = CreateLeadSchema.safeParse(request.body);
+      const parsed = CreateLeadSchema.safeParse(normalizedBody);
 
       if (!parsed.success) {
+        app.log.error({
+          body: request.body,
+          normalized: normalizedBody,
+          errors: parsed.error.flatten()
+        }, 'Lead validation failed');
+
         return reply.code(400).send({
           error: 'validation_error',
           issues: parsed.error.flatten()
