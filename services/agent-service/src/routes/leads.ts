@@ -96,18 +96,41 @@ export default async function leadsRoutes(app: FastifyInstance) {
       // Tilda может отправлять поля с заглавных букв или строчных
       const body = request.body as any;
 
+      // Парсим UTM из TILDAUTM cookie (если передано)
+      let utmParams: any = {};
+      if (body.COOKIES) {
+        const tildaUtm = body.COOKIES.match(/TILDAUTM=([^;]+)/);
+        if (tildaUtm) {
+          try {
+            const decoded = decodeURIComponent(tildaUtm[1]);
+            // Парсим utm_source=x&utm_medium=y...
+            const params = new URLSearchParams(decoded);
+            utmParams = {
+              utm_source: params.get('utm_source'),
+              utm_medium: params.get('utm_medium'),
+              utm_campaign: params.get('utm_campaign'),
+              utm_term: params.get('utm_term'),
+              utm_content: params.get('utm_content')
+            };
+          } catch (e) {
+            app.log.warn({ error: e, cookies: body.COOKIES }, 'Failed to parse TILDAUTM cookie');
+          }
+        }
+      }
+
       // Нормализуем данные от Tilda (поля могут быть Name, Phone или name, phone)
       const normalizedBody = {
         userAccountId: body.userAccountId || body.user_account_id,
         name: body.name || body.Name,
         phone: body.phone || body.Phone,
         email: body.email || body.Email,
-        message: body.message || body.Message,
-        utm_source: body.utm_source,
-        utm_medium: body.utm_medium,
-        utm_campaign: body.utm_campaign,
-        utm_term: body.utm_term,
-        utm_content: body.utm_content,
+        message: body.message || body.Message || body.Comments,
+        // Приоритет: прямые параметры > UTM из cookies
+        utm_source: body.utm_source || utmParams.utm_source,
+        utm_medium: body.utm_medium || utmParams.utm_medium,
+        utm_campaign: body.utm_campaign || utmParams.utm_campaign,
+        utm_term: body.utm_term || utmParams.utm_term,
+        utm_content: body.utm_content || utmParams.utm_content,
         ad_id: body.ad_id
       };
 
