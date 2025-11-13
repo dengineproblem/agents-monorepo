@@ -71,8 +71,8 @@ function normalizePhoneForWhatsApp(phone: string): string {
 
 export default async function leadsRoutes(app: FastifyInstance) {
   /**
-   * POST /leads
-   * External URL: /api/leads (nginx adds /api/ prefix)
+   * POST /leads/:userAccountId? (optional userAccountId in URL)
+   * External URL: /api/leads or /api/leads/:userAccountId (nginx adds /api/ prefix)
    *
    * Create a new lead from website (Tilda webhook)
    * 
@@ -91,8 +91,13 @@ export default async function leadsRoutes(app: FastifyInstance) {
    *
    * Returns: { success: true, leadId: number }
    */
-  app.post('/leads', async (request: FastifyRequest, reply: FastifyReply) => {
+  // Handler для обоих вариантов: /leads и /leads/:userAccountId
+  const handleLeadCreation = async (request: FastifyRequest, reply: FastifyReply) => {
     try {
+      // Извлекаем userAccountId из URL параметра (если есть)
+      const params = request.params as { userAccountId?: string };
+      const urlUserAccountId = params.userAccountId;
+
       // Tilda может отправлять поля с заглавных букв или строчных
       const body = request.body as any;
 
@@ -119,8 +124,9 @@ export default async function leadsRoutes(app: FastifyInstance) {
       }
 
       // Нормализуем данные от Tilda (поля могут быть Name, Phone или name, phone)
+      // Приоритет userAccountId: URL > body.userAccountId > body.user_account_id
       const normalizedBody = {
-        userAccountId: body.userAccountId || body.user_account_id,
+        userAccountId: urlUserAccountId || body.userAccountId || body.user_account_id,
         name: body.name || body.Name,
         phone: body.phone || body.Phone,
         email: body.email || body.Email,
@@ -271,7 +277,11 @@ export default async function leadsRoutes(app: FastifyInstance) {
         message: error.message
       });
     }
-  });
+  };
+
+  // Регистрируем оба роута
+  app.post('/leads', handleLeadCreation);
+  app.post('/leads/:userAccountId', handleLeadCreation);
 
   /**
    * GET /leads/:id
