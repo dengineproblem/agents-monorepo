@@ -108,6 +108,15 @@ export default async function leadsRoutes(app: FastifyInstance) {
         bodyKeys: Object.keys(body)
       }, 'Received webhook data from Tilda');
 
+      // Если это тестовый запрос от Tilda - возвращаем успех
+      if (body.test === 'test') {
+        app.log.info('Tilda test webhook received - returning success');
+        return reply.send({
+          success: true,
+          message: 'Test webhook received successfully'
+        });
+      }
+
       // Парсим UTM из TILDAUTM cookie (если передано)
       let utmParams: any = {};
       if (body.COOKIES) {
