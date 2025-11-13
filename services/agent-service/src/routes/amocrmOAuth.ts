@@ -81,18 +81,39 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
 
       const { userAccountId, subdomain } = parsed.data;
 
-      if (!AMOCRM_CLIENT_ID || !AMOCRM_REDIRECT_URI) {
-        return reply.code(500).send({
-          error: 'AmoCRM OAuth not configured on server'
-        });
-      }
-
       // Encode state with userAccountId and subdomain (separated by |)
       const state = Buffer.from(`${userAccountId}|${subdomain}`).toString('base64');
 
+      // Check if there are temporary credentials for auto-created integration
+      const tempCreds = await getTempCredentials(state);
+
+      let clientId: string;
+
+      if (tempCreds) {
+        // Use auto-created integration credentials
+        clientId = tempCreds.client_id;
+        app.log.info({
+          userAccountId,
+          subdomain,
+          integrationName: tempCreds.integration_name
+        }, 'Using auto-created AmoCRM integration');
+      } else {
+        // Use global CLIENT_ID from environment
+        if (!AMOCRM_CLIENT_ID || !AMOCRM_REDIRECT_URI) {
+          return reply.code(500).send({
+            error: 'AmoCRM OAuth not configured on server'
+          });
+        }
+        clientId = AMOCRM_CLIENT_ID;
+        app.log.info({
+          userAccountId,
+          subdomain
+        }, 'Using pre-configured AmoCRM integration');
+      }
+
       // Build OAuth URL
       const authUrl = new URL(`https://${subdomain}.amocrm.ru/oauth`);
-      authUrl.searchParams.set('client_id', AMOCRM_CLIENT_ID);
+      authUrl.searchParams.set('client_id', clientId);
       authUrl.searchParams.set('state', state);
       authUrl.searchParams.set('mode', 'post_message');
 
