@@ -101,6 +101,13 @@ export default async function leadsRoutes(app: FastifyInstance) {
       // Tilda может отправлять поля с заглавных букв или строчных
       const body = request.body as any;
 
+      // Логируем ВСЕ поля для отладки
+      app.log.info({
+        urlUserAccountId,
+        allBodyFields: body,
+        bodyKeys: Object.keys(body)
+      }, 'Received webhook data from Tilda');
+
       // Парсим UTM из TILDAUTM cookie (если передано)
       let utmParams: any = {};
       if (body.COOKIES) {
