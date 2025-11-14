@@ -1,6 +1,7 @@
 import { OpenAI } from 'openai';
 import { supabase } from './supabase.js';
 import { createLogger } from './logger.js';
+import { getDefaultContext, formatContextForPrompt } from './promptGenerator.js';
 
 const log = createLogger({ module: 'reanalyzeWithContext' });
 
@@ -8,8 +9,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!
 });
 
-// Базовый промпт для переанализа (упрощенная версия из analyzeDialogs.ts)
-const REANALYSIS_PROMPT = `Ты — Динар, менеджер Performante (маркетинг для клиник).
+// Базовый промпт для переанализа с учетом дополнительного контекста (универсальный)
+const REANALYSIS_PROMPT = `Ты — менеджер по продажам, анализирующий WhatsApp переписку.
 
 Проанализируй диалог WhatsApp с учетом ДОПОЛНИТЕЛЬНОГО КОНТЕКСТА. Формат:
 
@@ -20,31 +21,38 @@ S: — системное сообщение
 Верни JSON (только JSON, без дополнительного текста):
 
 {
+  "lead_tags": string[],
   "business_type": string | null,
-  "is_medical": boolean,
   "is_owner": boolean | null,
-  "uses_ads_now": boolean | null,
-  "has_sales_dept": boolean | null,
-  "ad_budget": string | null,
   "qualification_complete": boolean,
-  "has_booking": boolean,
-  "sent_instagram": boolean,
-  "instagram_url": string | null,
   "funnel_stage": "not_qualified" | "qualified" | "consultation_booked" | "consultation_completed" | "deal_closed" | "deal_lost",
   "interest_level": "hot" | "warm" | "cold",
-  "main_intent": "clinic_lead" | "ai_targetolog" | "marketing_analysis" | "other",
+  "main_intent": "purchase" | "inquiry" | "support" | "consultation" | "other",
   "objection": string | null,
   "next_message": string,
   "action": "want_call" | "want_work" | "reserve" | "none",
   "score": 0-100,
-  "reasoning": string
+  "reasoning": string,
+  "custom_fields": Record<string, any> | null
 }
 
-СИСТЕМА СКОРИНГА:
-- Базовый score по этапу воронки: new_lead(5), not_qualified(15), qualified(30), consultation_booked(40), consultation_completed(55), deal_closed(75), deal_lost(0)
-- Модификаторы ниши: Медицина(+15), Инфобизнес(+10), Салоны(+10), Таргетологи(-30)
-- Модификаторы поведения: Владелец(+10), Бюджет указан(+10), Записался(+20), "Подумаю"(-20)
-- Interest level: HOT(75-100), WARM(40-74), COLD(0-39)
+LEAD_TAGS - ВАЖНО:
+Сгенерируй 2-3 ключевых тега которые характеризуют этого лида. Теги должны быть универсальными и подходить для любой ниши бизнеса.
+
+ЭТАПЫ ВОРОНКИ И СКОРИНГ:
+Используй этапы воронки, скоринг и критерии из ПЕРСОНАЛИЗИРОВАННОГО КОНТЕКСТА клиента ниже.
+Определи на каком этапе находится лид и присвой соответствующий базовый score из funnel_scoring.
+
+ДОПОЛНИТЕЛЬНЫЕ МОДИФИКАТОРЫ СКОРИНГА:
+- Совпадение с идеальным профилем клиента: +10-20
+- Совпадение с non-target профилем: -20-30
+- Упоминание болей клиента: +5-10 за каждую
+- Позитивные сигналы (фразы интереса): +5 за каждую
+- Негативные сигналы (возражения): -10 за каждое
+- Быстро отвечает: +5
+- Долго не отвечает: -15
+
+<<<PERSONALIZED_CONTEXT>>>
 
 <<<ADDITIONAL_CONTEXT>>>
 
@@ -55,23 +63,17 @@ S: — системное сообщение
 
 interface AnalysisResult {
   business_type: string | null;
-  is_medical: boolean;
   is_owner: boolean | null;
-  uses_ads_now: boolean | null;
-  has_sales_dept: boolean | null;
-  ad_budget: string | null;
   qualification_complete: boolean;
-  has_booking: boolean;
-  sent_instagram: boolean;
-  instagram_url: string | null;
   funnel_stage: 'not_qualified' | 'qualified' | 'consultation_booked' | 'consultation_completed' | 'deal_closed' | 'deal_lost';
   interest_level: 'hot' | 'warm' | 'cold';
-  main_intent: 'clinic_lead' | 'ai_targetolog' | 'marketing_analysis' | 'other';
+  main_intent: 'purchase' | 'inquiry' | 'support' | 'consultation' | 'other';
   objection: string | null;
   next_message: string;
   action: 'want_call' | 'want_work' | 'reserve' | 'none';
   score: number;
   reasoning: string;
+  custom_fields: Record<string, any> | null;
 }
 
 /**
@@ -116,6 +118,20 @@ export async function reanalyzeWithAudioContext(
       throw new Error(`Lead not found: ${leadId}`);
     }
 
+    // Get business profile for personalized context
+    const { data: profile } = await supabase
+      .from('business_profile')
+      .select('*')
+      .eq('user_account_id', lead.user_account_id)
+      .maybeSingle();
+
+    let personalizedContext = '';
+    if (profile?.personalized_context) {
+      personalizedContext = formatContextForPrompt(profile.personalized_context);
+    } else {
+      personalizedContext = formatContextForPrompt(getDefaultContext());
+    }
+
     // Build additional context
     const additionalContext = `ДОПОЛНИТЕЛЬНЫЙ КОНТЕКСТ ИЗ АУДИОЗАПИСИ ЗВОНКА:
 ${transcript}
@@ -128,6 +144,7 @@ ${lead.manual_notes}` : ''}`;
 
     // Build prompt
     const prompt = REANALYSIS_PROMPT
+      .replace('<<<PERSONALIZED_CONTEXT>>>', personalizedContext)
       .replace('<<<ADDITIONAL_CONTEXT>>>', additionalContext)
       .replace('<<<DIALOG>>>', dialogText);
 
@@ -184,6 +201,20 @@ export async function reanalyzeWithNotes(
       throw new Error(`Lead not found: ${leadId}`);
     }
 
+    // Get business profile for personalized context
+    const { data: profile } = await supabase
+      .from('business_profile')
+      .select('*')
+      .eq('user_account_id', lead.user_account_id)
+      .maybeSingle();
+
+    let personalizedContext = '';
+    if (profile?.personalized_context) {
+      personalizedContext = formatContextForPrompt(profile.personalized_context);
+    } else {
+      personalizedContext = formatContextForPrompt(getDefaultContext());
+    }
+
     // Build additional context
     let additionalContext = `ЗАМЕТКИ МЕНЕДЖЕРА:
 ${notes}`;
@@ -201,6 +232,7 @@ ${notes}`;
 
     // Build prompt
     const prompt = REANALYSIS_PROMPT
+      .replace('<<<PERSONALIZED_CONTEXT>>>', personalizedContext)
       .replace('<<<ADDITIONAL_CONTEXT>>>', additionalContext)
       .replace('<<<DIALOG>>>', dialogText);
 

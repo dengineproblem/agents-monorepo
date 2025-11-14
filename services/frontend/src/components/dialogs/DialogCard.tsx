@@ -165,9 +165,10 @@ export function DialogCard({ dialog, onViewDetails, onSendMessage }: DialogCardP
             <div className="flex items-center gap-2">
               <Target className="w-4 h-4 text-blue-500" />
               <span>
-                {dialog.main_intent === 'ai_targetolog' && 'AI-таргетолог'}
-                {dialog.main_intent === 'clinic_lead' && 'Лид для клиники'}
-                {dialog.main_intent === 'marketing_analysis' && 'Маркетинг-анализ'}
+                {dialog.main_intent === 'purchase' && 'Покупка'}
+                {dialog.main_intent === 'inquiry' && 'Вопрос'}
+                {dialog.main_intent === 'support' && 'Поддержка'}
+                {dialog.main_intent === 'consultation' && 'Консультация'}
                 {dialog.main_intent === 'other' && 'Другое'}
               </span>
             </div>

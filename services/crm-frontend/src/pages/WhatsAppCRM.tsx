@@ -12,7 +12,7 @@ import { CampaignQueueModal } from '@/components/dialogs/CampaignQueueModal';
 import { Button } from '@/components/ui/button';
 import { dialogAnalysisService } from '@/services/dialogAnalysisService';
 import { DialogAnalysis, DialogFilters as DialogFiltersType, FunnelStage } from '@/types/dialogAnalysis';
-import { Plus, Download, RefreshCw, Filter, Moon, Sun, Send } from 'lucide-react';
+import { Plus, Download, RefreshCw, Filter, Moon, Sun, Send, Play } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import {
   Tooltip,
@@ -211,6 +211,7 @@ export function WhatsAppCRM() {
     setFilters({});
   };
 
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="container mx-auto p-6 min-h-screen">
@@ -299,14 +300,33 @@ export function WhatsAppCRM() {
                 </div>
               )}
 
-              <Button 
-                onClick={() => setIsCampaignQueueModalOpen(true)} 
-                variant="default"
-                size="sm"
-              >
-                <Send className="h-4 w-4 mr-2" />
-                Рассылки
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setIsLoadLeadsModalOpen(true)}
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9"
+                  >
+                    <Play className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Запустить анализ всех диалогов</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setIsCampaignQueueModalOpen(true)}
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Рассылки</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </TooltipProvider>

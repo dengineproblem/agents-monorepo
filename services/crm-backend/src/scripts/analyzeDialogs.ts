@@ -27,6 +27,7 @@ S: — системное сообщение
   "is_owner": boolean | null,
   "qualification_complete": boolean,
   "funnel_stage": "not_qualified" | "qualified" | "consultation_booked" | "consultation_completed" | "deal_closed" | "deal_lost",
+  "is_on_key_stage": boolean,
   "interest_level": "hot" | "warm" | "cold",
   "main_intent": "purchase" | "inquiry" | "support" | "consultation" | "other",
   "objection": string | null,
@@ -51,6 +52,10 @@ LEAD_TAGS - ВАЖНО:
 ЭТАПЫ ВОРОНКИ И СКОРИНГ:
 Используй этапы воронки, скоринг и критерии из ПЕРСОНАЛИЗИРОВАННОГО КОНТЕКСТА клиента ниже.
 Определи на каком этапе находится лид и присвой соответствующий базовый score из funnel_scoring.
+
+КЛЮЧЕВЫЕ ЭТАПЫ (важно для отслеживания):
+Если в контексте указаны КЛЮЧЕВЫЕ ЭТАПЫ ВОРОНКИ, и лид находится на одном из них, установи "is_on_key_stage": true.
+Ключевые этапы - это важные моменты (например: "Запись на консультацию", "Ожидание визита"), где лида НЕ нужно беспокоить рассылками.
 
 ДОПОЛНИТЕЛЬНЫЕ МОДИФИКАТОРЫ СКОРИНГА:
 - Совпадение с идеальным профилем клиента: +10-20
@@ -353,7 +358,8 @@ async function analyzeAndSaveContact(
   instanceName: string,
   userAccountId: string,
   personalizedContext: string,
-  businessProfileContext: string
+  businessProfileContext: string,
+  keyFunnelStages: string[] = []
 ): Promise<{
   success: boolean;
   phone: string;
@@ -373,7 +379,7 @@ async function analyzeAndSaveContact(
       log.info({ phone: contact.phone }, 'Auto-upgraded to qualified stage');
     }
     
-    await saveAnalysisResult(instanceName, userAccountId, contact, analysis);
+    await saveAnalysisResult(instanceName, userAccountId, contact, analysis, keyFunnelStages);
     
     return {
       success: true,
@@ -397,8 +403,55 @@ async function saveAnalysisResult(
   instanceName: string,
   userAccountId: string,
   contact: Contact,
-  analysis: AnalysisResult
+  analysis: AnalysisResult,
+  keyFunnelStages: string[] = []
 ) {
+  // Get existing record to track stage changes
+  const { data: existingLead } = await supabase
+    .from('dialog_analysis')
+    .select('funnel_stage, is_on_key_stage, key_stage_entered_at, key_stage_left_at, funnel_stage_history')
+    .eq('instance_name', instanceName)
+    .eq('contact_phone', contact.phone)
+    .maybeSingle();
+
+  const oldStage = existingLead?.funnel_stage;
+  const newStage = analysis.funnel_stage;
+  const now = new Date().toISOString();
+
+  // Determine if on key stage
+  const isOnKeyStage = analysis.is_on_key_stage || keyFunnelStages.includes(newStage);
+  
+  // Track stage transitions
+  let keyStageEnteredAt = existingLead?.key_stage_entered_at;
+  let keyStageLeftAt = existingLead?.key_stage_left_at;
+  let funnelStageHistory = existingLead?.funnel_stage_history || [];
+
+  // If stage changed, update history and key stage tracking
+  if (oldStage && oldStage !== newStage) {
+    // Add to history
+    funnelStageHistory = [
+      ...funnelStageHistory,
+      { stage: newStage, timestamp: now, previous_stage: oldStage }
+    ];
+
+    const wasOnKeyStage = keyFunnelStages.includes(oldStage);
+    
+    // Entering a key stage
+    if (isOnKeyStage && !wasOnKeyStage) {
+      keyStageEnteredAt = now;
+      keyStageLeftAt = null;
+    }
+    // Leaving a key stage
+    else if (!isOnKeyStage && wasOnKeyStage) {
+      keyStageLeftAt = now;
+      keyStageEnteredAt = null;
+    }
+  }
+  // First time on key stage
+  else if (!oldStage && isOnKeyStage) {
+    keyStageEnteredAt = now;
+  }
+
   const { error } = await supabase
     .from('dialog_analysis')
     .upsert({
@@ -416,7 +469,11 @@ async function saveAnalysisResult(
       business_type: analysis.business_type,
       is_owner: analysis.is_owner,
       qualification_complete: analysis.qualification_complete,
-      funnel_stage: analysis.funnel_stage,
+      funnel_stage: newStage,
+      is_on_key_stage: isOnKeyStage,
+      key_stage_entered_at: keyStageEnteredAt,
+      key_stage_left_at: keyStageLeftAt,
+      funnel_stage_history: funnelStageHistory,
       interest_level: analysis.interest_level.toLowerCase() as 'hot' | 'warm' | 'cold',
       main_intent: analysis.main_intent,
       objection: analysis.objection,
@@ -428,10 +485,10 @@ async function saveAnalysisResult(
       // Store full conversation
       messages: contact.messages,
       
-      analyzed_at: new Date().toISOString(),
+      analyzed_at: now,
     }, {
       onConflict: 'instance_name,contact_phone',
-      ignoreDuplicates: true  // Skip if already exists - prevents duplicates on re-analysis
+      ignoreDuplicates: false  // Allow updates
     });
 
   if (error) {
@@ -439,7 +496,12 @@ async function saveAnalysisResult(
     throw error;
   }
 
-  log.info({ phone: contact.phone, funnel_stage: analysis.funnel_stage }, 'Analysis saved');
+  log.info({ 
+    phone: contact.phone, 
+    funnel_stage: newStage,
+    is_on_key_stage: isOnKeyStage,
+    stage_changed: oldStage !== newStage
+  }, 'Analysis saved');
 }
 
 /**
@@ -465,9 +527,12 @@ export async function analyzeDialogs(params: {
       .maybeSingle();
 
     let personalizedContext = '';
+    let keyFunnelStages: string[] = [];
+    
     if (profile?.personalized_context) {
       personalizedContext = formatContextForPrompt(profile.personalized_context as PersonalizedContext);
-      log.info({ userAccountId }, 'Using personalized context from profile');
+      keyFunnelStages = profile.key_funnel_stages || [];
+      log.info({ userAccountId, keyStagesCount: keyFunnelStages.length }, 'Using personalized context from profile');
     } else {
       // Use default context
       const defaultContext = getDefaultContext();
@@ -614,7 +679,8 @@ export async function analyzeDialogs(params: {
           instanceName,
           userAccountId,
           personalizedContext,
-          businessProfileContext
+          businessProfileContext,
+          keyFunnelStages
         )
       );
 

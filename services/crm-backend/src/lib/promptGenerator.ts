@@ -17,6 +17,7 @@ const META_PROMPT = `Ты - эксперт по созданию промпто�
 - Описание бизнеса: <<<DESCRIPTION>>>
 - Целевая аудитория: <<<TARGET_AUDIENCE>>>
 - Этапы воронки: <<<FUNNEL_STAGES>>>
+- Ключевые этапы: <<<KEY_STAGES>>>
 - Критерии переходов: <<<STAGE_CRITERIA>>>
 - Идеальный клиент: <<<IDEAL_CLIENT>>>
 - Кто НЕ подходит: <<<NON_TARGET>>>
@@ -30,12 +31,18 @@ const META_PROMPT = `Ты - эксперт по созданию промпто�
   "target_profile": "Описание идеального лида для этого бизнеса",
   "funnel_specifics": "Особенности воронки продаж в этой нише",
   "funnel_stages": ["этап1", "этап2", "этап3", ...],
+  "funnel_stages_details": [
+    {"name": "этап1", "is_key": false, "score": 25},
+    {"name": "этап2", "is_key": true, "score": 50},
+    ...
+  ],
   "funnel_scoring": {
     "этап1": 25,
     "этап2": 50,
     "этап3": 75,
     "этап4": 100
   },
+  "key_funnel_stages": ["этап2", "этап3"],
   "stage_transition_criteria": {
     "этап1_к_этап2": "конкретный критерий",
     "этап2_к_этап3": "конкретный критерий"
@@ -56,31 +63,42 @@ const META_PROMPT = `Ты - эксперт по созданию промпто�
 1. Контекст должен быть конкретным и релевантным нише
 2. Используй ВСЕ предоставленные данные из брифа
 3. Парси этапы воронки из <<<FUNNEL_STAGES>>> (разделитель: "→" или новая строка)
-4. Парси критерии переходов из <<<STAGE_CRITERIA>>>
-5. Парси идеального клиента, non-target, боли из соответствующих полей
-6. Парси фразы интереса и возражения из <<<INTEREST_OBJECTIONS>>> (разделяй по ключевым словам "Интерес:", "Возражения:")
+4. Ключевые этапы берутся из <<<KEY_STAGES>>> - это этапы где лидов НЕ нужно беспокоить рассылками
+5. Парси критерии переходов из <<<STAGE_CRITERIA>>>
+6. Парси идеального клиента, non-target, боли из соответствующих полей
+7. Парси фразы интереса и возражения из <<<INTEREST_OBJECTIONS>>> (разделяй по ключевым словам "Интерес:", "Возражения:")
 
 АВТОМАТИЧЕСКИЙ РАСЧЕТ СКОРИНГА:
 Для funnel_scoring используй формулу: score = Math.round((100 / N) * номер_этапа)
 Где N = количество этапов воронки
+
+В funnel_stages_details указывай is_key: true для этапов из <<<KEY_STAGES>>>
 
 Примеры:
 - 3 этапа: {"этап1": 33, "этап2": 67, "этап3": 100}
 - 4 этапа: {"этап1": 25, "этап2": 50, "этап3": 75, "этап4": 100}
 - 5 этапов: {"этап1": 20, "этап2": 40, "этап3": 60, "этап4": 80, "этап5": 100}
 
-7. Фразы-сигналы должны быть типичными для этого бизнеса
-8. Учитывай специфику продаж в указанной сфере
-9. Modifiers должны отражать ценность клиента для этого бизнеса
-10. Все на русском языке
+8. Фразы-сигналы должны быть типичными для этого бизнеса
+9. Учитывай специфику продаж в указанной сфере
+10. Modifiers должны отражать ценность клиента для этого бизнеса
+11. Все на русском языке
 
 Верни ТОЛЬКО JSON, без дополнительного текста.`;
+
+export interface FunnelStage {
+  id: string;
+  name: string;
+  order: number;
+}
 
 export interface BusinessProfile {
   business_industry: string;
   business_description: string;
   target_audience: string;
   funnel_stages_description?: string;
+  funnel_stages_structured?: FunnelStage[];
+  key_funnel_stages?: string[];
   stage_transition_criteria?: string;
   ideal_client_profile?: string;
   non_target_profile?: string;
@@ -88,12 +106,20 @@ export interface BusinessProfile {
   interest_and_objections?: string;
 }
 
+export interface FunnelStageDetail {
+  name: string;
+  is_key: boolean;
+  score: number;
+}
+
 export interface PersonalizedContext {
   business_context: string;
   target_profile: string;
   funnel_specifics: string;
   funnel_stages?: string[];
+  funnel_stages_details?: FunnelStageDetail[];
   funnel_scoring?: Record<string, number>;
+  key_funnel_stages?: string[];
   stage_transition_criteria?: Record<string, string>;
   ideal_client_profile?: string;
   non_target_profile?: string;
@@ -116,12 +142,27 @@ export async function generatePersonalizedPromptContext(
   try {
     log.info({ industry: profile.business_industry }, 'Generating personalized prompt context');
 
+    // Prepare funnel stages string
+    let funnelStagesStr = profile.funnel_stages_description || 'не указано';
+    if (profile.funnel_stages_structured && profile.funnel_stages_structured.length > 0) {
+      funnelStagesStr = profile.funnel_stages_structured
+        .sort((a, b) => a.order - b.order)
+        .map(s => s.name)
+        .join(' → ');
+    }
+
+    // Prepare key stages string
+    const keyStagesStr = profile.key_funnel_stages && profile.key_funnel_stages.length > 0
+      ? profile.key_funnel_stages.join(', ')
+      : 'не указано';
+
     // Fill meta-prompt with brief data
     const prompt = META_PROMPT
       .replace('<<<INDUSTRY>>>', profile.business_industry)
       .replace('<<<DESCRIPTION>>>', profile.business_description)
       .replace('<<<TARGET_AUDIENCE>>>', profile.target_audience)
-      .replace('<<<FUNNEL_STAGES>>>', profile.funnel_stages_description || 'не указано')
+      .replace('<<<FUNNEL_STAGES>>>', funnelStagesStr)
+      .replace('<<<KEY_STAGES>>>', keyStagesStr)
       .replace('<<<STAGE_CRITERIA>>>', profile.stage_transition_criteria || 'не указано')
       .replace('<<<IDEAL_CLIENT>>>', profile.ideal_client_profile || 'не указано')
       .replace('<<<NON_TARGET>>>', profile.non_target_profile || 'не указано')
@@ -130,7 +171,7 @@ export async function generatePersonalizedPromptContext(
 
     // Call GPT to generate context
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: 'You are an expert prompt engineer specializing in sales analysis.' },
         { role: 'user', content: prompt }
@@ -211,8 +252,21 @@ ${context.funnel_specifics}
 `;
     context.funnel_stages.forEach((stage, i) => {
       const score = context.funnel_scoring?.[stage] || ((i + 1) * Math.round(100 / context.funnel_stages!.length));
-      formatted += `${i + 1}. ${stage} → ${score} баллов\n`;
+      const isKey = context.key_funnel_stages?.includes(stage);
+      const keyMarker = isKey ? ' [КЛЮЧЕВОЙ]' : '';
+      formatted += `${i + 1}. ${stage} → ${score} баллов${keyMarker}\n`;
     });
+  }
+
+  // Add key stages info
+  if (context.key_funnel_stages && context.key_funnel_stages.length > 0) {
+    formatted += `
+КЛЮЧЕВЫЕ ЭТАПЫ ВОРОНКИ (не трогать для рассылок):
+${context.key_funnel_stages.map(s => `- ${s}`).join('\n')}
+
+ВАЖНО: Лидов на ключевых этапах НЕ нужно беспокоить автоматическими рассылками.
+Они уже записаны/ждут встречи/выполняют важное действие.
+`;
   }
 
   // Add stage transition criteria if available

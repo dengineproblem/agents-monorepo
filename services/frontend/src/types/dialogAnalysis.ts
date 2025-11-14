@@ -1,6 +1,6 @@
 export type InterestLevel = 'hot' | 'warm' | 'cold';
 export type FunnelStage = 'new_lead' | 'not_qualified' | 'qualified' | 'consultation_booked' | 'consultation_completed' | 'deal_closed' | 'deal_lost';
-export type MainIntent = 'clinic_lead' | 'ai_targetolog' | 'marketing_analysis' | 'other';
+export type MainIntent = 'purchase' | 'inquiry' | 'support' | 'consultation' | 'other';
 export type Action = 'want_call' | 'want_work' | 'reserve' | 'none';
 
 export interface DialogMessage {
@@ -25,18 +25,17 @@ export interface DialogAnalysis {
   first_message: string | null;
   last_message: string | null;
   
+  // Гибкие теги от LLM
+  lead_tags: string[] | null;
+  
   // Бизнес-профиль
   business_type: string | null;
-  is_medical: boolean | null;
   is_owner: boolean | null;
-  uses_ads_now: boolean | null;
-  has_sales_dept: boolean | null;
-  ad_budget: string | null;
   qualification_complete: boolean | null;
-  has_booking: boolean | null;
-  sent_instagram: boolean | null;
-  instagram_url: string | null;
   notes: string | null;
+  
+  // Гибкие поля для специфичных данных
+  custom_fields: Record<string, any> | null;
   
   // Анализ
   funnel_stage: FunnelStage | null;

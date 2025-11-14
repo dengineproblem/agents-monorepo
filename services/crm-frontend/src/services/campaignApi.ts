@@ -151,7 +151,10 @@ export interface CampaignMessage {
   };
 }
 
-export async function generateCampaignQueue(userId: string): Promise<{
+export async function generateCampaignQueue(
+  userId: string, 
+  signal?: AbortSignal
+): Promise<{
   queueSize: number;
   messagesGenerated: number;
   topLeads: any[];
@@ -159,6 +162,7 @@ export async function generateCampaignQueue(userId: string): Promise<{
   const data = await fetchJson(`${CHATBOT_API_BASE}/campaign/generate-queue`, {
     method: 'POST',
     body: JSON.stringify({ userAccountId: userId }),
+    signal, // Pass AbortSignal for cancellation support
   });
   return data;
 }

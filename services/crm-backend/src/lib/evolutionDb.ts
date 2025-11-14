@@ -142,34 +142,43 @@ export async function getInstanceMessages(instanceName: string, maxContacts?: nu
 export async function getFilteredDialogsForAnalysis(
   instanceName: string,
   minIncoming: number = 3,
-  maxDialogs?: number
+  maxDialogs?: number,
+  excludePhones?: string[]
 ) {
   const startTime = Date.now();
-  
+
+  // Build exclusion condition using PostgreSQL array (much more efficient!)
+  const excludeParam = maxDialogs ? '$4' : '$3';
+  const excludeCondition = excludePhones && excludePhones.length > 0
+    ? `AND "key"->>'remoteJid' NOT IN (SELECT unnest(${excludeParam}::text[]))`
+    : '';
+
   // Оптимизированный SQL запрос:
   // 1. Группирует по контактам
   // 2. Считает входящие сообщения
   // 3. Фильтрует HAVING incoming_count >= minIncoming (в БД!)
-  // 4. Лимитирует LIMIT maxDialogs (в БД!)
-  // 5. Возвращает сообщения только для этих контактов
+  // 4. Исключает уже проанализированные контакты используя массив (эффективно!)
+  // 5. Лимитирует LIMIT maxDialogs (в БД!)
+  // 6. Возвращает сообщения только для этих контактов
   const query = `
     WITH instance_data AS (
       SELECT id FROM "Instance" WHERE name = $1
     ),
     eligible_contacts AS (
-      SELECT 
+      SELECT
         "key"->>'remoteJid' as remote_jid,
         MAX("pushName") as contact_name,
         COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') as incoming_count,
         COUNT(*) as total_messages
       FROM "Message"
       WHERE "instanceId" IN (SELECT id FROM instance_data)
+        ${excludeCondition}
       GROUP BY "key"->>'remoteJid'
       HAVING COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') >= $2
       ORDER BY total_messages DESC
       ${maxDialogs ? 'LIMIT $3' : ''}
     )
-    SELECT 
+    SELECT
       m."key"->>'remoteJid' as remote_jid,
       m."pushName" as contact_name,
       m."key"->>'fromMe' as from_me,
@@ -182,14 +191,18 @@ export async function getFilteredDialogsForAnalysis(
     ORDER BY m."messageTimestamp" ASC
   `;
 
-  const params = maxDialogs 
-    ? [instanceName, minIncoming, maxDialogs]
-    : [instanceName, minIncoming];
+  const params = [
+    instanceName,
+    minIncoming,
+    ...(maxDialogs ? [maxDialogs] : []),
+    ...(excludePhones && excludePhones.length > 0 ? [excludePhones] : [])
+  ];
 
-  log.info({ 
-    instanceName, 
-    minIncoming, 
-    maxDialogs: maxDialogs || 'unlimited' 
+  log.info({
+    instanceName,
+    minIncoming,
+    maxDialogs: maxDialogs || 'unlimited',
+    excludeCount: excludePhones?.length || 0
   }, '⚡ Fetching filtered dialogs (SQL-level filtering)');
 
   const result = await evolutionQuery(query, params);
@@ -213,30 +226,37 @@ export async function getFilteredDialogsForAnalysis(
  */
 export async function getNewLeads(
   instanceName: string,
-  minIncoming: number = 3
+  minIncoming: number = 3,
+  excludePhones?: string[]
 ) {
   const startTime = Date.now();
-  
-  // Получаем ВСЕ контакты с МЕНЬШЕ чем minIncoming входящих (без GPT анализа)
+
+  // Build exclusion condition using PostgreSQL array (much more efficient!)
+  const excludeCondition = excludePhones && excludePhones.length > 0
+    ? `AND "key"->>'remoteJid' NOT IN (SELECT unnest($3::text[]))`
+    : '';
+
+  // Получаем ТОЛЬКО НОВЫЕ контакты с МЕНЬШЕ чем minIncoming входящих (без GPT анализа)
+  // Исключаем уже существующие в CRM используя массив (эффективно!)
   // БЕЗ ЛИМИТА - это быстро, т.к. не используем GPT
   const query = `
     WITH instance_data AS (
       SELECT id FROM "Instance" WHERE name = $1
     ),
     new_lead_contacts AS (
-      SELECT 
+      SELECT
         "key"->>'remoteJid' as remote_jid,
         MAX("pushName") as contact_name,
         COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') as incoming_count,
         COUNT(*) as total_messages
       FROM "Message"
       WHERE "instanceId" IN (SELECT id FROM instance_data)
+        ${excludeCondition}
       GROUP BY "key"->>'remoteJid'
       HAVING COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') < $2
-        AND COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') > 0
       ORDER BY MAX("messageTimestamp") DESC
     )
-    SELECT 
+    SELECT
       m."key"->>'remoteJid' as remote_jid,
       m."pushName" as contact_name,
       m."key"->>'fromMe' as from_me,
@@ -249,12 +269,17 @@ export async function getNewLeads(
     ORDER BY m."messageTimestamp" ASC
   `;
 
-  const params = [instanceName, minIncoming];
+  const params = [
+    instanceName,
+    minIncoming,
+    ...(excludePhones && excludePhones.length > 0 ? [excludePhones] : [])
+  ];
 
-  log.info({ 
-    instanceName, 
-    minIncoming
-  }, '📥 Fetching ALL new leads (< minIncoming messages, no limit)');
+  log.info({
+    instanceName,
+    minIncoming,
+    excludeCount: excludePhones?.length || 0
+  }, '📥 Fetching NEW leads only (< minIncoming messages, excluding existing)');
 
   const result = await evolutionQuery(query, params);
   

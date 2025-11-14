@@ -24,7 +24,6 @@ export function LoadLeadsModal({ open, onClose, onSubmit, isLoading }: LoadLeads
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmit(maxDialogs);
-    setMaxDialogs(100);
   };
 
   return (
@@ -49,7 +48,7 @@ export function LoadLeadsModal({ open, onClose, onSubmit, isLoading }: LoadLeads
                 min={1}
                 max={1000}
                 value={maxDialogs}
-                onChange={(e) => setMaxDialogs(parseInt(e.target.value) || 100)}
+                onChange={(e) => setMaxDialogs(parseInt(e.target.value) || 0)}
                 disabled={isLoading}
               />
               <p className="text-sm text-gray-500">

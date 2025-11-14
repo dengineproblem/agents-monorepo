@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { generatePersonalizedPromptContext } from '../lib/promptGenerator.js';
 
+const FunnelStageSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  order: z.number(),
+});
+
 const BusinessProfileSchema = z.object({
   userAccountId: z.string().uuid(),
   business_industry: z.string().min(1, 'Укажите сферу деятельности'),
@@ -11,7 +17,9 @@ const BusinessProfileSchema = z.object({
   funnel_stages: z.array(z.string()).optional(),
   
   // Funnel personalization
-  funnel_stages_description: z.string().min(3, 'Минимум 3 символа').optional(),
+  funnel_stages_description: z.string().optional(),
+  funnel_stages_structured: z.array(FunnelStageSchema).optional(),
+  key_funnel_stages: z.array(z.string()).optional(),
   stage_transition_criteria: z.string().min(3, 'Минимум 3 символа').optional(),
   
   // Client profiles and signals
@@ -65,6 +73,8 @@ export async function businessProfileRoutes(app: FastifyInstance) {
           target_audience: body.target_audience,
           funnel_stages: body.funnel_stages,
           funnel_stages_description: body.funnel_stages_description,
+          funnel_stages_structured: body.funnel_stages_structured,
+          key_funnel_stages: body.key_funnel_stages,
           stage_transition_criteria: body.stage_transition_criteria,
           ideal_client_profile: body.ideal_client_profile,
           non_target_profile: body.non_target_profile,
@@ -91,6 +101,8 @@ export async function businessProfileRoutes(app: FastifyInstance) {
           business_description: body.business_description,
           target_audience: body.target_audience,
           funnel_stages_description: body.funnel_stages_description,
+          funnel_stages_structured: body.funnel_stages_structured,
+          key_funnel_stages: body.key_funnel_stages,
           stage_transition_criteria: body.stage_transition_criteria,
           ideal_client_profile: body.ideal_client_profile,
           non_target_profile: body.non_target_profile,

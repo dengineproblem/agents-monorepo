@@ -22,7 +22,23 @@ export function DailyCampaignQueue() {
 
   // Generate queue mutation
   const generateMutation = useMutation({
-    mutationFn: () => campaignApi.generateCampaignQueue(USER_ACCOUNT_ID),
+    mutationFn: async () => {
+      // Add timeout to prevent infinite waiting
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes timeout
+      
+      try {
+        const result = await campaignApi.generateCampaignQueue(USER_ACCOUNT_ID, controller.signal);
+        clearTimeout(timeoutId);
+        return result;
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          throw new Error('Запрос прерван: превышено время ожидания (2 минуты)');
+        }
+        throw error;
+      }
+    },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['campaign-queue'] });
       toast({ 
@@ -30,7 +46,11 @@ export function DailyCampaignQueue() {
         description: `Создано ${result.messagesGenerated} сообщений для ${result.queueSize} лидов` 
       });
     },
-    onError: () => toast({ title: 'Ошибка при формировании очереди', variant: 'destructive' }),
+    onError: (error: Error) => toast({ 
+      title: 'Ошибка при формировании очереди', 
+      description: error.message,
+      variant: 'destructive' 
+    }),
   });
 
   // Mark as copied mutation
@@ -105,7 +125,7 @@ export function DailyCampaignQueue() {
             <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
           </div>
         ) : !data?.messages || data.messages.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
             Нет сообщений в очереди. Нажмите "Сформировать очередь" для создания.
           </div>
         ) : (
@@ -115,7 +135,7 @@ export function DailyCampaignQueue() {
                 <div className="flex justify-between items-start mb-3">
                   <div>
                     <p className="font-semibold">{msg.lead?.contact_name || 'Без имени'}</p>
-                    <p className="text-sm text-gray-600">{msg.lead?.contact_phone}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-300">{msg.lead?.contact_phone}</p>
                     <div className="flex gap-2 mt-2">
                       <Badge variant={getInterestBadgeVariant(msg.lead?.interest_level || '')}>
                         {msg.lead?.interest_level?.toUpperCase()}
@@ -127,13 +147,13 @@ export function DailyCampaignQueue() {
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-medium">
-                      Score: {msg.lead?.reactivation_score?.toFixed(1) || msg.lead?.score || 0}
+                      Score: {msg.lead?.score || 0}
                     </p>
-                    <p className="text-xs text-gray-500">{msg.lead?.business_type || ''}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{msg.lead?.business_type || ''}</p>
                   </div>
                 </div>
 
-                <div className="bg-gray-50 p-3 rounded mb-3">
+                <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded mb-3">
                   <p className="text-sm whitespace-pre-wrap">{msg.message_text}</p>
                 </div>
 

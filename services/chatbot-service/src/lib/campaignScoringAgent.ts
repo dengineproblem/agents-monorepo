@@ -12,6 +12,10 @@ interface Lead {
   score: number | null;
   interest_level: 'hot' | 'warm' | 'cold' | null;
   funnel_stage: string | null;
+  is_on_key_stage?: boolean;
+  key_stage_entered_at?: string | null;
+  key_stage_left_at?: string | null;
+  funnel_stage_history?: any;
   last_campaign_message_at: string | null;
   campaign_messages_count: number;
   incoming_count: number;
@@ -35,6 +39,9 @@ interface CampaignSettings {
   work_hours_start: number;
   work_hours_end: number;
   work_days: number[];
+  key_stage_cooldown_days: number;
+  stage_interval_multipliers?: Record<string, number>;
+  fatigue_thresholds?: Record<string, number>;
 }
 
 interface ScoredLead extends Lead {
@@ -67,6 +74,9 @@ async function getCampaignSettings(userAccountId: string): Promise<CampaignSetti
       work_hours_start: 10,
       work_hours_end: 20,
       work_days: [1, 2, 3, 4, 5], // Monday-Friday
+      key_stage_cooldown_days: 7,
+      stage_interval_multipliers: {},
+      fatigue_thresholds: {},
     };
   }
 
@@ -90,7 +100,82 @@ function calculateDaysSince(date: string | null): number {
 }
 
 /**
- * Get interval based on interest level
+ * Get key funnel stages from business profile
+ */
+async function getKeyFunnelStages(userAccountId: string): Promise<string[]> {
+  const { data } = await supabase
+    .from('business_profile')
+    .select('key_funnel_stages')
+    .eq('user_account_id', userAccountId)
+    .maybeSingle();
+  
+  return data?.key_funnel_stages || [];
+}
+
+/**
+ * Check if lead should be blocked from campaign queue
+ */
+function isLeadBlocked(
+  lead: Lead,
+  keyStages: string[],
+  cooldownDays: number = 7
+): boolean {
+  // 1. Hard-blocked stages
+  const ALWAYS_SKIP = ['deal_closed', 'deal_lost'];
+  if (lead.funnel_stage && ALWAYS_SKIP.includes(lead.funnel_stage)) {
+    return true;
+  }
+  
+  // 2. Currently on key stage
+  if (lead.is_on_key_stage === true) {
+    return true;
+  }
+  
+  // 3. Recently left key stage (< cooldown days)
+  if (lead.key_stage_left_at) {
+    const daysSinceLeft = calculateDaysSince(lead.key_stage_left_at);
+    if (daysSinceLeft < cooldownDays) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Get touch interval days based on lead characteristics
+ */
+function getTouchIntervalDays(
+  lead: Lead,
+  settings: CampaignSettings
+): number {
+  const interest = lead.interest_level ?? 'cold';
+  
+  // Base interval by interest
+  const baseByInterest = {
+    hot: settings.hot_interval_days || 2,
+    warm: settings.warm_interval_days || 5,
+    cold: settings.cold_interval_days || 10,
+  };
+  let interval = baseByInterest[interest] ?? 10;
+  
+  // Stage multiplier
+  const stageMultipliers = settings.stage_interval_multipliers || {
+    'new_lead': 0.7,
+    'first_contact': 1.0,
+    'thinking': 1.2,
+    'no_show': 0.8,
+    'price_objection': 1.2,
+  };
+  
+  const multiplier = lead.funnel_stage ? (stageMultipliers[lead.funnel_stage] || 1.0) : 1.0;
+  interval = interval * multiplier;
+  
+  return Math.round(interval);
+}
+
+/**
+ * Get interval based on interest level (deprecated, kept for compatibility)
  */
 function getIntervalForLead(interestLevel: string | null, settings: CampaignSettings): number {
   if (interestLevel === 'hot') return settings.hot_interval_days;
@@ -99,7 +184,39 @@ function getIntervalForLead(interestLevel: string | null, settings: CampaignSett
 }
 
 /**
- * Calculate time coefficient based on how long since last campaign message
+ * Calculate time readiness coefficient
+ * Considers both campaign messages and regular messages
+ */
+function calculateTimeReadinessCoefficient(
+  lead: Lead,
+  settings: CampaignSettings
+): number {
+  const interval = getTouchIntervalDays(lead, settings);
+  
+  // Take minimum of last campaign and last message (any touch counts)
+  const daysSinceLastCampaign = calculateDaysSince(lead.last_campaign_message_at);
+  const daysSinceLastMessage = calculateDaysSince(lead.last_message);
+  const daysSinceLastTouch = Math.min(daysSinceLastCampaign, daysSinceLastMessage);
+  
+  if (daysSinceLastTouch === Infinity) return 1.0; // Never contacted
+  
+  const threshold = interval * 0.7;
+  if (daysSinceLastTouch < threshold) return 0; // Too early
+  
+  const ratio = daysSinceLastTouch / interval;
+  
+  if (ratio < 1.0) {
+    // Between 70% and 100% of interval
+    const progress = (ratio - 0.7) / 0.3;
+    return 0.5 + progress * 0.5;
+  }
+  
+  // After interval - grows but capped
+  return Math.min(1.0 + (ratio - 1) * 0.4, 1.5);
+}
+
+/**
+ * Calculate time coefficient based on how long since last campaign message (deprecated)
  * The longer the wait since required interval, the higher the coefficient
  * SOFTENED: Includes leads that have reached 70%+ of required interval
  */
@@ -128,9 +245,9 @@ function calculateTimeCoefficient(
     return 0.5 + progress * 0.5;
   }
   
-  // Exponential growth: 1.0 at exactly interval, 1.5 at 2x, 2.0 at 3x, etc
-  // But cap at 3.0 to avoid too high scores
-  const coeff = Math.min(1.0 + (intervalsPassed - 1) * 0.5, 3.0);
+  // Exponential growth: 1.0 at exactly interval, 1.25 at 2x, etc
+  // But cap at 1.5 to keep scores reasonable
+  const coeff = Math.min(1.0 + (intervalsPassed - 1) * 0.5, 1.5);
   
   return coeff;
 }
@@ -174,7 +291,40 @@ function calculateActivityCoefficient(lead: Lead): number {
     coeff -= 0.2;
   }
 
-  return Math.max(coeff, 0.1); // Never less than 0.1
+  // Cap at 1.2 to keep reactivation scores reasonable
+  return Math.min(Math.max(coeff, 0.1), 1.2);
+}
+
+/**
+ * Calculate stage coefficient based on funnel stage
+ */
+function calculateStageCoefficient(stage: string | null): number {
+  if (!stage) return 1.0;
+  
+  const stageMapping: Record<string, number> = {
+    'new_lead': 1.2,
+    'first_contact': 1.1,
+    'no_show': 1.3,
+    'thinking': 0.9,
+    'price_objection': 1.0,
+    'not_qualified': 0.8,
+  };
+  
+  return stageMapping[stage] ?? 1.0;
+}
+
+/**
+ * Calculate fatigue coefficient based on campaign message count
+ */
+function calculateFatigueCoefficient(lead: Lead): number {
+  const sentCount = lead.campaign_messages_count ?? 0;
+  
+  if (sentCount === 0) return 1.0;
+  if (sentCount <= 3) return 0.95;
+  if (sentCount <= 6) return 0.85;
+  if (sentCount <= 10) return 0.7;
+  
+  return 0.5; // Heavily spammed
 }
 
 /**
@@ -189,19 +339,14 @@ export async function generateDailyCampaignQueue(
 
     // 1. Get campaign settings
     const settings = await getCampaignSettings(userAccountId);
-
-    // Note: Queue generation is independent of autopilot_enabled
-    // Autopilot only controls automatic sending via worker
-    // User can still manually generate queue and send messages
+    const keyStages = await getKeyFunnelStages(userAccountId);
 
     // 2. Get all leads with autopilot enabled
     const { data: leads, error } = await supabase
       .from('dialog_analysis')
       .select('*')
       .eq('user_account_id', userAccountId)
-      .eq('autopilot_enabled', true)
-      .neq('funnel_stage', 'deal_closed') // Skip closed deals
-      .neq('funnel_stage', 'deal_lost'); // Skip lost deals
+      .eq('autopilot_enabled', true);
 
     if (error) {
       throw error;
@@ -212,19 +357,26 @@ export async function generateDailyCampaignQueue(
       return [];
     }
 
-    log.info({ userAccountId, totalLeads: leads.length }, 'Processing leads for scoring');
+    log.info({ 
+      userAccountId, 
+      totalLeads: leads.length,
+      keyStagesCount: keyStages.length 
+    }, 'Processing leads for scoring');
 
     // 3. Calculate reactivation score for each lead
     const scoredLeads: ScoredLead[] = leads.map((lead: Lead) => {
+      // Hard filter: blocked leads
+      if (isLeadBlocked(lead, keyStages, settings.key_stage_cooldown_days)) {
+        return {
+          ...lead,
+          reactivationScore: 0
+        };
+      }
+      
       const baseScore = lead.score || 0;
       
-      // Time coefficient
-      const daysSinceLastCampaign = calculateDaysSince(lead.last_campaign_message_at);
-      const timeCoeff = calculateTimeCoefficient(
-        lead.interest_level,
-        daysSinceLastCampaign,
-        settings
-      );
+      // Time readiness coefficient
+      const timeCoeff = calculateTimeReadinessCoefficient(lead, settings);
       
       // If not ready (timeCoeff = 0), skip this lead
       if (timeCoeff === 0) {
@@ -237,11 +389,14 @@ export async function generateDailyCampaignQueue(
       // Activity coefficient
       const activityCoeff = calculateActivityCoefficient(lead);
       
-      // AI prediction coefficient (for now, just 1.0 - can be enhanced later)
-      const conversionProbability = 1.0;
+      // Stage coefficient
+      const stageCoeff = calculateStageCoefficient(lead.funnel_stage);
+      
+      // Fatigue coefficient
+      const fatigueCoeff = calculateFatigueCoefficient(lead);
       
       // Final reactivation score
-      const reactivationScore = baseScore * timeCoeff * activityCoeff * conversionProbability;
+      const reactivationScore = baseScore * timeCoeff * activityCoeff * stageCoeff * fatigueCoeff;
       
       return {
         ...lead,

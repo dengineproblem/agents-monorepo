@@ -1,62 +1,72 @@
 #!/bin/bash
-set -e
 
-USER_ID="0f559eb0-53fa-4b6a-a51b-5d3e15e5864b"
-SUBDOMAIN="performanteaiagency"
+# 🚀 Скрипт деплоя исправления AmoCRM интеграции на production
+# Дата: 2025-11-13
 
-echo "🚀 Деплой исправления AmoCRM connect"
-echo "======================================"
+set -e  # Остановиться при ошибке
+
+echo "=========================================="
+echo "🚀 ДЕПЛОЙ ИСПРАВЛЕНИЯ AMOCRM"
+echo "=========================================="
 echo ""
 
-echo "📦 1. Копирование обновленного файла на сервер..."
-scp amocrm-connect.html root@app.performanteaiagency.com:/var/www/html/amocrm-connect.html
-echo "✅ Файл скопирован"
+# Получить IP production сервера из окружения или использовать дефолтный
+PROD_SERVER="${PROD_SERVER:-root@147.182.186.15}"
+
+echo "📡 Production сервер: $PROD_SERVER"
 echo ""
 
-echo "🔍 2. Проверка миграции 030..."
-ssh root@app.performanteaiagency.com << 'EOF'
+echo "1️⃣ Подключение к production серверу..."
+echo "------------------------------------------"
+
+ssh $PROD_SERVER << 'ENDSSH'
+
+echo "✅ Подключен к production серверу"
+echo ""
+
+echo "2️⃣ Переход в директорию проекта..."
 cd ~/agents-monorepo
 
-# Проверяем, применена ли миграция
-RESULT=$(docker-compose exec -T postgres psql -U postgres -d postgres -tAc "
-SELECT COUNT(*) 
-FROM information_schema.columns 
-WHERE table_name = 'user_accounts' 
-  AND column_name IN ('amocrm_client_id', 'amocrm_client_secret');
-")
+echo "3️⃣ Получение последних изменений из GitHub..."
+git pull origin main
 
-if [ "$RESULT" = "2" ]; then
-  echo "✅ Миграция 030 уже применена"
-else
-  echo "⚙️ Применяем миграцию 030..."
-  docker-compose exec -T postgres psql -U postgres -d postgres < migrations/030_add_amocrm_client_credentials.sql
-  echo "✅ Миграция 030 применена"
-fi
-EOF
 echo ""
+echo "4️⃣ Пересборка agent-service контейнера..."
+docker-compose build agent-service
 
-echo "🧹 3. Отключение старого подключения AmoCRM..."
-curl -X DELETE "https://app.performanteaiagency.com/api/amocrm/disconnect?userAccountId=${USER_ID}"
 echo ""
-echo "✅ Старое подключение отключено"
-echo ""
+echo "5️⃣ Перезапуск agent-service..."
+docker-compose up -d agent-service
 
-echo "======================================"
-echo "✅ Деплой завершен!"
 echo ""
-echo "📋 Следующие шаги:"
-echo ""
-echo "1. Откройте в браузере:"
-echo "   https://app.performanteaiagency.com/amocrm-connect.html?userAccountId=${USER_ID}&subdomain=${SUBDOMAIN}"
-echo ""
-echo "2. Нажмите кнопку 'Подключить amoCRM'"
-echo ""
-echo "3. После подключения проверьте:"
-echo "   curl 'https://app.performanteaiagency.com/api/amocrm/status?userAccountId=${USER_ID}'"
-echo ""
-echo "4. Синхронизируйте воронки:"
-echo "   curl -X POST 'https://app.performanteaiagency.com/api/amocrm/sync-pipelines?userAccountId=${USER_ID}'"
-echo ""
+echo "6️⃣ Ожидание запуска сервиса (10 секунд)..."
+sleep 10
 
+echo ""
+echo "7️⃣ Проверка статуса контейнера..."
+docker ps | grep agent-service
 
+echo ""
+echo "8️⃣ Проверка последних логов..."
+docker logs agents-monorepo-agent-service-1 --tail 20
 
+echo ""
+echo "9️⃣ Тестирование AmoCRM endpoint..."
+curl -s http://localhost:8082/amocrm/status?userAccountId=feb9ae84-7365-4d88-bfcf-486a2a2870ed || echo "Endpoint не отвечает (может быть нормально)"
+
+echo ""
+echo "=========================================="
+echo "✅ ДЕПЛОЙ ЗАВЕРШЕН!"
+echo "=========================================="
+
+ENDSSH
+
+echo ""
+echo "✅ Деплой на production успешно завершен!"
+echo ""
+echo "📋 СЛЕДУЮЩИЕ ШАГИ:"
+echo "1. Откройте https://app.performanteaiagency.com/profile"
+echo "2. Попробуйте подключить AmoCRM через форму"
+echo "3. Введите subdomain: performanteaiagency"
+echo "4. Проверьте что ошибка исчезла"
+echo ""

@@ -208,27 +208,27 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
               <h3 className="font-semibold mb-3">Информация о бизнесе</h3>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Тип бизнеса:</span>
+                  <span className="text-gray-600 dark:text-gray-300">Тип бизнеса:</span>
                   <span className="font-medium">{dialog.business_type || '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Владелец:</span>
+                  <span className="text-gray-600 dark:text-gray-300">Владелец:</span>
                   <span>{dialog.is_owner ? '✓ Да' : '✗ Нет'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Запускает рекламу:</span>
+                  <span className="text-gray-600 dark:text-gray-300">Запускает рекламу:</span>
                   <span>{dialog.uses_ads_now ? '✓ Да' : '✗ Нет'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Отдел продаж:</span>
+                  <span className="text-gray-600 dark:text-gray-300">Отдел продаж:</span>
                   <span>{dialog.has_sales_dept ? '✓ Есть' : '✗ Нет'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Бюджет на рекламу:</span>
+                  <span className="text-gray-600 dark:text-gray-300">Бюджет на рекламу:</span>
                   <span className="font-medium">{dialog.ad_budget || '—'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Квалифицирован:</span>
+                  <span className="text-gray-600 dark:text-gray-300">Квалифицирован:</span>
                   <span>{dialog.qualification_complete ? '✓ Да' : '✗ Нет'}</span>
                 </div>
               </div>
@@ -289,7 +289,7 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
               <div className="space-y-4">
                 {/* Upload Audio */}
                 <div>
-                  <Label htmlFor="audio-upload" className="text-sm text-gray-600 mb-2 block">
+                  <Label htmlFor="audio-upload" className="text-sm text-gray-600 dark:text-gray-300 mb-2 block">
                     Загрузить аудиозапись звонка
                   </Label>
                   <div className="flex items-center gap-2">
@@ -302,7 +302,7 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
                       className="flex-1"
                     />
                     {isUploadingAudio && (
-                      <Loader2 className="h-4 w-4 animate-spin text-gray-500" />
+                      <Loader2 className="h-4 w-4 animate-spin text-gray-500 dark:text-gray-400" />
                     )}
                   </div>
                   {dialog.audio_transcripts && dialog.audio_transcripts.length > 0 && (
@@ -311,14 +311,14 @@ export function DialogDetailModal({ dialog, open, onClose }: DialogDetailModalPr
                       Загружено {dialog.audio_transcripts.length} аудиозаписей
                     </p>
                   )}
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     Аудио будет транскрибировано и использовано для уточнения анализа
                   </p>
                 </div>
 
                 {/* Manual Notes */}
                 <div>
-                  <Label htmlFor="notes" className="text-sm text-gray-600 mb-2 block">
+                  <Label htmlFor="notes" className="text-sm text-gray-600 dark:text-gray-300 mb-2 block">
                     Заметки менеджера
                   </Label>
                   <Textarea

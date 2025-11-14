@@ -334,16 +334,39 @@ ${ctx.negative_signals ? ctx.negative_signals.map((s: string) => `- "${s}"`).joi
 
     const userTemplates = templates || [];
 
-    // Generate messages for each lead
+    // Generate messages for each lead in parallel (with concurrency limit)
     const results = new Map<string, GeneratedMessage>();
-
-    for (const lead of leads) {
-      try {
-        const generatedMessage = await generatePersonalizedMessage(lead, userTemplates, businessContext);
-        results.set(lead.id, generatedMessage);
-      } catch (error: any) {
-        log.error({ error: error.message, leadId: lead.id }, 'Failed to generate message for lead');
-        // Continue with other leads
+    
+    // Process in batches to avoid overwhelming OpenAI API (20 concurrent requests)
+    const BATCH_SIZE = 20;
+    
+    for (let i = 0; i < leads.length; i += BATCH_SIZE) {
+      const batch = leads.slice(i, i + BATCH_SIZE);
+      
+      log.info({ 
+        userAccountId, 
+        batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+        batchSize: batch.length,
+        totalLeads: leads.length 
+      }, 'Processing batch of leads');
+      
+      const promises = batch.map(async (lead) => {
+        try {
+          const generatedMessage = await generatePersonalizedMessage(lead, userTemplates, businessContext);
+          return { leadId: lead.id, message: generatedMessage };
+        } catch (error: any) {
+          log.error({ error: error.message, leadId: lead.id }, 'Failed to generate message for lead');
+          return null;
+        }
+      });
+      
+      const batchResults = await Promise.all(promises);
+      
+      // Add successful results to map
+      for (const result of batchResults) {
+        if (result) {
+          results.set(result.leadId, result.message);
+        }
       }
     }
 

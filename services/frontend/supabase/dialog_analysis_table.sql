@@ -29,16 +29,21 @@ CREATE TABLE IF NOT EXISTS dialog_analysis (
   
   -- Interest and Intent
   interest_level TEXT CHECK (interest_level IN ('hot', 'warm', 'cold')),
-  main_intent TEXT CHECK (main_intent IN ('clinic_lead', 'ai_targetolog', 'marketing_analysis', 'other')),
-  
+  main_intent TEXT CHECK (main_intent IN ('purchase', 'inquiry', 'support', 'consultation', 'other')),
+
+  -- CRM Funnel
+  funnel_stage TEXT CHECK (funnel_stage IN ('new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost')) DEFAULT 'new_lead',
+  qualification_complete BOOLEAN DEFAULT FALSE,
+
   -- Key insights
   objection TEXT,
-  next_message TEXT NOT NULL,
+  next_message TEXT,
   action TEXT CHECK (action IN ('want_call', 'want_work', 'reserve', 'none')),
-  
+
   -- Scoring
   score INT CHECK (score >= 0 AND score <= 100),
   reasoning TEXT,
+  custom_fields JSONB,
   
   -- Dialog history
   messages JSONB,
@@ -59,6 +64,9 @@ CREATE INDEX IF NOT EXISTS idx_dialog_analysis_interest ON dialog_analysis(inter
 CREATE INDEX IF NOT EXISTS idx_dialog_analysis_score ON dialog_analysis(score DESC);
 CREATE INDEX IF NOT EXISTS idx_dialog_analysis_last_message ON dialog_analysis(last_message DESC);
 CREATE INDEX IF NOT EXISTS idx_dialog_analysis_analyzed_at ON dialog_analysis(analyzed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dialog_analysis_funnel_stage ON dialog_analysis(funnel_stage);
+CREATE INDEX IF NOT EXISTS idx_dialog_analysis_qualification ON dialog_analysis(qualification_complete);
+CREATE INDEX IF NOT EXISTS idx_dialog_analysis_custom_fields ON dialog_analysis USING GIN (custom_fields);
 
 -- Comments
 COMMENT ON TABLE dialog_analysis IS 'WhatsApp dialog analysis results with AI-generated insights';
