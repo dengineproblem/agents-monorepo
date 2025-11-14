@@ -86,7 +86,9 @@ export function formatContextsForPrompt(contexts: CampaignContext[]): string {
 ${i + 1}. Тип: ${ctx.type.toUpperCase()}
    Название: ${ctx.title}
    Детали: ${ctx.content}${ctx.goal ? `
-   Цель: ${ctx.goal}` : ''}`
+   Цель: ${ctx.goal}` : ''}
+   
+   КРИТИЧЕСКИ ВАЖНО: Если в деталях есть ссылки, номера телефонов, конкретные даты или цифры - включи их в сообщение ДОСЛОВНО, НЕ пересказывай общими фразами.`
   ).join('\n');
 }
 
