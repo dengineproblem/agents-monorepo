@@ -169,7 +169,7 @@ export async function syncLeadsFromAmoCRM(
         }
 
         // Get lead from contact
-        const amocrmLeadFromContact = contact._embedded?.leads?.[0];
+        const amocrmLeadFromContact = (contact as any)._embedded?.leads?.[0];
 
         if (!amocrmLeadFromContact) {
           log.info({
