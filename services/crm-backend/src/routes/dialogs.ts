@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
-import { analyzeDialogs } from '../scripts/analyzeDialogs.js';
+import { analyzeDialogs, reanalyzeSingleLead } from '../scripts/analyzeDialogs.js';
 import { transcribeAudio, validateAudioFile } from '../lib/whisperTranscription.js';
 import { reanalyzeWithAudioContext, reanalyzeWithNotes } from '../lib/reanalyzeWithContext.js';
 
@@ -185,43 +185,63 @@ export async function dialogsRoutes(app: FastifyInstance) {
       const query = GetAnalysisSchema.parse(request.query);
       const { userAccountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
 
-      let dbQuery = supabase
-        .from('dialog_analysis')
-        .select('*')
-        .eq('user_account_id', userAccountId)
-        .order('score', { ascending: false })
-        .order('last_message', { ascending: false });
+      // Fetch ALL results using pagination (Supabase has 1000 limit per request)
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let page = 0;
+      let hasMore = true;
 
-      if (instanceName) {
-        dbQuery = dbQuery.eq('instance_name', instanceName);
-      }
+      while (hasMore) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        
+        let dbQuery = supabase
+          .from('dialog_analysis')
+          .select('*')
+          .eq('user_account_id', userAccountId)
+          .order('score', { ascending: false })
+          .order('last_message', { ascending: false })
+          .range(from, to);
 
-      if (interestLevel) {
-        dbQuery = dbQuery.eq('interest_level', interestLevel);
-      }
+        if (instanceName) {
+          dbQuery = dbQuery.eq('instance_name', instanceName);
+        }
 
-      if (minScore !== undefined) {
-        dbQuery = dbQuery.gte('score', minScore);
-      }
+        if (interestLevel) {
+          dbQuery = dbQuery.eq('interest_level', interestLevel);
+        }
 
-      if (funnelStage) {
-        dbQuery = dbQuery.eq('funnel_stage', funnelStage);
-      }
+        if (minScore !== undefined) {
+          dbQuery = dbQuery.gte('score', minScore);
+        }
 
-      if (qualificationComplete !== undefined) {
-        dbQuery = dbQuery.eq('qualification_complete', qualificationComplete);
-      }
+        if (funnelStage) {
+          dbQuery = dbQuery.eq('funnel_stage', funnelStage);
+        }
 
-      const { data, error } = await dbQuery;
+        if (qualificationComplete !== undefined) {
+          dbQuery = dbQuery.eq('qualification_complete', qualificationComplete);
+        }
 
-      if (error) {
-        throw error;
+        const { data, error } = await dbQuery;
+
+        if (error) {
+          throw error;
+        }
+
+        if (data && data.length > 0) {
+          allData.push(...data);
+          hasMore = data.length === PAGE_SIZE;
+          page++;
+        } else {
+          hasMore = false;
+        }
       }
 
       return reply.send({
         success: true,
-        results: data || [],
-        count: data?.length || 0,
+        results: allData,
+        count: allData.length,
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -348,20 +368,42 @@ export async function dialogsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'userAccountId is required' });
       }
 
-      let dbQuery = supabase
-        .from('dialog_analysis')
-        .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
-        .eq('user_account_id', userAccountId);
+      // Fetch ALL results using pagination (Supabase has 1000 limit per request)
+      const PAGE_SIZE = 1000;
+      let allData: any[] = [];
+      let page = 0;
+      let hasMore = true;
 
-      if (instanceName) {
-        dbQuery = dbQuery.eq('instance_name', instanceName);
+      while (hasMore) {
+        const from = page * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+        
+        let dbQuery = supabase
+          .from('dialog_analysis')
+          .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
+          .eq('user_account_id', userAccountId)
+          .range(from, to);
+
+        if (instanceName) {
+          dbQuery = dbQuery.eq('instance_name', instanceName);
+        }
+
+        const { data, error } = await dbQuery;
+
+        if (error) {
+          throw error;
+        }
+
+        if (data && data.length > 0) {
+          allData.push(...data);
+          hasMore = data.length === PAGE_SIZE;
+          page++;
+        } else {
+          hasMore = false;
+        }
       }
 
-      const { data, error } = await dbQuery;
-
-      if (error) {
-        throw error;
-      }
+      const data = allData;
 
       // Calculate statistics
       const stats = {
@@ -958,6 +1000,48 @@ export async function dialogsRoutes(app: FastifyInstance) {
       app.log.error({ error: error.message }, 'Failed to send message');
       return reply.status(500).send({
         error: 'Message sending failed',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /dialogs/reanalyze/:leadId
+   * Reanalyze specific lead with fresh data from Evolution DB
+   * This forcefully updates the lead analysis
+   */
+  app.post('/dialogs/reanalyze/:leadId', async (request, reply) => {
+    try {
+      const { leadId } = request.params as { leadId: string };
+      const { userAccountId } = request.body as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ 
+          success: false,
+          error: 'userAccountId field is required' 
+        });
+      }
+
+      app.log.info({ leadId, userAccountId }, 'Reanalyzing lead');
+
+      // Call reanalysis function
+      const result = await reanalyzeSingleLead({
+        leadId,
+        userAccountId,
+      });
+
+      if (!result.success) {
+        return reply.status(400).send(result);
+      }
+
+      app.log.info({ leadId, lead: result.lead }, 'Lead reanalyzed successfully');
+
+      return reply.send(result);
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to reanalyze lead');
+      return reply.status(500).send({
+        success: false,
+        error: 'Lead reanalysis failed',
         message: error.message
       });
     }

@@ -24,22 +24,16 @@ S: — системное сообщение
 {
   "lead_tags": string[],
   "business_type": string | null,
-  "is_medical": boolean,
   "is_owner": boolean | null,
-  "uses_ads_now": boolean | null,
-  "has_sales_dept": boolean | null,
-  "ad_budget": string | null,
   "qualification_complete": boolean,
-  "has_booking": boolean,
-  "sent_instagram": boolean,
-  "instagram_url": string | null,
   "funnel_stage": "not_qualified" | "qualified" | "consultation_booked" | "consultation_completed" | "deal_closed" | "deal_lost",
   "interest_level": "hot" | "warm" | "cold",
-  "main_intent": "clinic_lead" | "ai_targetolog" | "marketing_analysis" | "other",
+  "main_intent": "purchase" | "inquiry" | "support" | "consultation" | "other",
   "objection": string | null,
   "action": "want_call" | "want_work" | "reserve" | "none",
   "score": 0-100,
-  "reasoning": string
+  "reasoning": string,
+  "custom_fields": Record<string, any> | null
 }
 
 LEAD_TAGS - ВАЖНО:
@@ -116,22 +110,16 @@ interface Contact {
 interface AnalysisResult {
   lead_tags: string[];
   business_type: string | null;
-  is_medical: boolean;
   is_owner: boolean | null;
-  uses_ads_now: boolean | null;
-  has_sales_dept: boolean | null;
-  ad_budget: string | null;
   qualification_complete: boolean;
-  has_booking: boolean;
-  sent_instagram: boolean;
-  instagram_url: string | null;
   funnel_stage: 'not_qualified' | 'qualified' | 'consultation_booked' | 'consultation_completed' | 'deal_closed' | 'deal_lost';
   interest_level: 'hot' | 'warm' | 'cold';
-  main_intent: 'clinic_lead' | 'ai_targetolog' | 'marketing_analysis' | 'other';
+  main_intent: 'purchase' | 'inquiry' | 'support' | 'consultation' | 'other';
   objection: string | null;
   action: 'want_call' | 'want_work' | 'reserve' | 'none';
   score: number;
   reasoning: string;
+  custom_fields: Record<string, any> | null;
 }
 
 /**
@@ -182,7 +170,10 @@ function groupMessagesByContact(messages: Message[]): Map<string, Contact> {
   const contacts = new Map<string, Contact>();
 
   for (const msg of messages) {
-    const phone = msg.remote_jid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+    const phone = msg.remote_jid
+      .replace('@s.whatsapp.net', '')
+      .replace('@c.us', '')
+      .replace('@g.us', '');  // ← Groups too!
     
     if (!contacts.has(phone)) {
       contacts.set(phone, {
@@ -292,43 +283,111 @@ async function analyzeDialog(
 }
 
 /**
- * Save new lead (< minIncoming messages) to Supabase without LLM analysis
+ * Get list of contact phones that already exist in CRM for this instance
+ * Uses pagination to fetch ALL contacts (Supabase has 1000 default limit per request)
  */
-async function saveNewLead(
-  instanceName: string,
-  userAccountId: string,
-  contact: Contact
-) {
-  const { error } = await supabase
-    .from('dialog_analysis')
-    .upsert({
-      instance_name: instanceName,
-      user_account_id: userAccountId,
-      contact_phone: contact.phone,
-      contact_name: contact.name,
-      incoming_count: contact.incoming_count,
-      outgoing_count: contact.outgoing_count,
-      first_message: contact.first_message.toISOString(),
-      last_message: contact.last_message.toISOString(),
-      
-      // Set as new lead
-      funnel_stage: 'new_lead',
-      score: 0,
-      
-      // Store full conversation
-      messages: contact.messages,
-      
-      analyzed_at: new Date().toISOString(),
-    }, {
-      onConflict: 'instance_name,contact_phone'
-    });
+async function getExistingContactPhones(instanceName: string): Promise<string[]> {
+  const startTime = Date.now();
+  const PAGE_SIZE = 1000;
+  let allPhones: string[] = [];
+  let page = 0;
+  let hasMore = true;
 
-  if (error) {
-    log.error({ error: error.message, phone: contact.phone }, 'Failed to save new lead');
-    throw error;
+  while (hasMore) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    
+    const { data, error, count } = await supabase
+      .from('dialog_analysis')
+      .select('contact_phone', { count: page === 0 ? 'exact' : undefined })
+      .eq('instance_name', instanceName)
+      .range(from, to);
+
+    if (error) {
+      log.error({ error: error.message, page }, 'Failed to get existing contacts');
+      break;
+    }
+
+    if (data && data.length > 0) {
+      allPhones.push(...data.map(row => row.contact_phone));
+      hasMore = data.length === PAGE_SIZE;
+      page++;
+      
+      if (page === 1 && count) {
+        log.info({ 
+          totalInDb: count,
+          estimatedPages: Math.ceil(count / PAGE_SIZE) 
+        }, 'Starting pagination of existing contacts');
+      }
+    } else {
+      hasMore = false;
+    }
   }
 
-  log.info({ phone: contact.phone }, 'New lead saved');
+  const duration = Date.now() - startTime;
+  log.info({ 
+    count: allPhones.length,
+    pages: page,
+    duration: `${duration}ms`
+  }, 'Retrieved ALL existing contact phones from CRM');
+  
+  return allPhones;
+}
+
+/**
+ * Helper to chunk array into smaller arrays
+ */
+function chunkArray<T>(array: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < array.length; i += chunkSize) {
+    chunks.push(array.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+/**
+ * Analyze and save a single contact (for parallel processing)
+ */
+async function analyzeAndSaveContact(
+  contact: Contact,
+  instanceName: string,
+  userAccountId: string,
+  personalizedContext: string,
+  businessProfileContext: string
+): Promise<{
+  success: boolean;
+  phone: string;
+  analysis?: AnalysisResult;
+  error?: string;
+}> {
+  try {
+    let analysis = await analyzeDialog(contact, personalizedContext, businessProfileContext);
+    
+    // Post-processing: Check if should be qualified
+    if (
+      analysis.qualification_complete &&
+      analysis.is_owner !== null &&
+      analysis.funnel_stage === 'not_qualified'
+    ) {
+      analysis.funnel_stage = 'qualified';
+      log.info({ phone: contact.phone }, 'Auto-upgraded to qualified stage');
+    }
+    
+    await saveAnalysisResult(instanceName, userAccountId, contact, analysis);
+    
+    return {
+      success: true,
+      phone: contact.phone,
+      analysis
+    };
+  } catch (error: any) {
+    log.error({ error: error.message, phone: contact.phone }, 'Failed to analyze contact');
+    return {
+      success: false,
+      phone: contact.phone,
+      error: error.message
+    };
+  }
 }
 
 /**
@@ -355,15 +414,8 @@ async function saveAnalysisResult(
       // Analysis results
       lead_tags: analysis.lead_tags || [],
       business_type: analysis.business_type,
-      is_medical: analysis.is_medical,
       is_owner: analysis.is_owner,
-      uses_ads_now: analysis.uses_ads_now,
-      has_sales_dept: analysis.has_sales_dept,
-      ad_budget: analysis.ad_budget,
       qualification_complete: analysis.qualification_complete,
-      has_booking: analysis.has_booking,
-      sent_instagram: analysis.sent_instagram,
-      instagram_url: analysis.instagram_url,
       funnel_stage: analysis.funnel_stage,
       interest_level: analysis.interest_level.toLowerCase() as 'hot' | 'warm' | 'cold',
       main_intent: analysis.main_intent,
@@ -371,13 +423,15 @@ async function saveAnalysisResult(
       action: analysis.action,
       score: analysis.score,
       reasoning: analysis.reasoning,
+      custom_fields: analysis.custom_fields || null,
       
       // Store full conversation
       messages: contact.messages,
       
       analyzed_at: new Date().toISOString(),
     }, {
-      onConflict: 'instance_name,contact_phone'
+      onConflict: 'instance_name,contact_phone',
+      ignoreDuplicates: true  // Skip if already exists - prevents duplicates on re-analysis
     });
 
   if (error) {
@@ -432,15 +486,34 @@ export async function analyzeDialogs(params: {
 `;
     }
 
+    // 🔍 Get list of already existing contacts in CRM to exclude them
+    const existingPhones = await getExistingContactPhones(instanceName);
+    
+    // ⚠️ IMPORTANT: Evolution DB stores phones with suffixes:
+    // - Individual: "77xxx@s.whatsapp.net" or "77xxx@c.us"
+    // - Group chats: "120363313310752475@g.us"
+    // We store them WITHOUT suffix in Supabase, so need to convert for SQL matching!
+    const existingPhonesWithSuffix = existingPhones.flatMap(phone => [
+      `${phone}@s.whatsapp.net`,
+      `${phone}@c.us`,
+      `${phone}@g.us`  // ← Groups!
+    ]);
+    
+    log.info({ 
+      existingCount: existingPhones.length,
+      withSuffixes: existingPhonesWithSuffix.length  // x3 for each suffix type
+    }, '🔍 Excluding existing contacts (individuals + groups) from analysis');
+
     // ⚡ OPTIMIZED: Get already filtered dialogs from Evolution PostgreSQL
     // Filtering is done at SQL level (10-20x faster than JS)
-    const messages = await getFilteredDialogsForAnalysis(instanceName, minIncoming, maxDialogs);
+    // EXCLUDES already analyzed contacts
+    const messages = await getFilteredDialogsForAnalysis(instanceName, minIncoming, maxDialogs, existingPhonesWithSuffix);
     log.info({ messageCount: messages.length }, '⚡ Retrieved pre-filtered messages from Evolution DB');
 
-    // 📥 Get ALL new leads (< minIncoming messages) to save without analysis
-    // БЕЗ ЛИМИТА - это быстро (без GPT анализа), все new leads попадают в CRM
-    const newLeadMessages = await getNewLeads(instanceName, minIncoming);
-    log.info({ messageCount: newLeadMessages.length }, '📥 Retrieved ALL new leads from Evolution DB');
+    // 📥 Get ONLY NEW leads (< minIncoming messages) to save without analysis
+    // EXCLUDES leads that already exist in CRM - saves time and DB operations!
+    const newLeadMessages = await getNewLeads(instanceName, minIncoming, existingPhonesWithSuffix);
+    log.info({ messageCount: newLeadMessages.length }, '📥 Retrieved NEW leads only from Evolution DB');
 
     // 2. Group by contact
     const contacts = groupMessagesByContact(messages);
@@ -457,63 +530,298 @@ export async function analyzeDialogs(params: {
       maxDialogs: maxDialogs || 'unlimited'
     }, '✅ Dialogs ready for analysis (pre-filtered in SQL)');
 
-    // 3. Save new leads without LLM analysis (fast!)
-    for (const contact of newLeadsToSave) {
+    // 3. Save new leads without LLM analysis in batches (FAST!)
+    const BATCH_SIZE = 100;
+    let savedCount = 0;
+    
+    for (let i = 0; i < newLeadsToSave.length; i += BATCH_SIZE) {
+      const batch = newLeadsToSave.slice(i, i + BATCH_SIZE);
+      
       try {
-        await saveNewLead(instanceName, userAccountId, contact);
+        const records = batch.map(contact => ({
+          instance_name: instanceName,
+          user_account_id: userAccountId,
+          contact_phone: contact.phone,
+          contact_name: contact.name,
+          incoming_count: contact.incoming_count,
+          outgoing_count: contact.outgoing_count,
+          first_message: contact.first_message.toISOString(),
+          last_message: contact.last_message.toISOString(),
+          funnel_stage: 'new_lead',
+          score: 0,
+          messages: contact.messages,
+          analyzed_at: new Date().toISOString(),
+        }));
+
+        const { error } = await supabase
+          .from('dialog_analysis')
+          .upsert(records, {
+            onConflict: 'instance_name,contact_phone',
+            ignoreDuplicates: true
+          });
+
+        if (error) {
+          log.error({ error: error.message, batchSize: batch.length }, 'Failed to save batch of new leads');
+        } else {
+          savedCount += batch.length;
+          log.info({ 
+            batchNumber: Math.floor(i / BATCH_SIZE) + 1,
+            batchSize: batch.length,
+            totalSaved: savedCount,
+            remaining: newLeadsToSave.length - savedCount
+          }, 'Batch of new leads saved');
+        }
       } catch (error: any) {
-        log.error({ error: error.message, phone: contact.phone }, 'Failed to save new lead');
+        log.error({ error: error.message, batchSize: batch.length }, 'Exception saving new leads batch');
       }
     }
+    
+    log.info({ totalSaved: savedCount, total: newLeadsToSave.length }, '✅ All new leads saved in batches');
 
-    // 4. Analyze contacts (already filtered in SQL)
+    // 4. Analyze contacts in parallel (MUCH FASTER!)
     const stats = {
       total: contactsToAnalyze.length,
       analyzed: 0,
-      new_leads: newLeadsToSave.length,
+      new_leads: savedCount,
       hot: 0,
       warm: 0,
       cold: 0,
       errors: 0,
     };
 
-    for (const contact of contactsToAnalyze) {
-      try {
-        let analysis = await analyzeDialog(contact, personalizedContext, businessProfileContext);
-        
-        // Post-processing: Check if should be qualified
-        if (
-          analysis.qualification_complete &&
-          analysis.is_owner !== null &&
-          analysis.has_sales_dept !== null &&
-          analysis.uses_ads_now !== null &&
-          analysis.ad_budget !== null &&
-          analysis.funnel_stage === 'not_qualified'
-        ) {
-          analysis.funnel_stage = 'qualified';
-          log.info({ phone: contact.phone }, 'Auto-upgraded to qualified stage');
+    const PARALLEL_LIMIT = 5; // Process 5 contacts simultaneously
+    const chunks = chunkArray(contactsToAnalyze, PARALLEL_LIMIT);
+    
+    log.info({ 
+      totalContacts: contactsToAnalyze.length, 
+      parallelLimit: PARALLEL_LIMIT,
+      chunks: chunks.length 
+    }, '🚀 Starting parallel analysis');
+
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+      const chunk = chunks[chunkIndex];
+      
+      log.info({ 
+        chunkNumber: chunkIndex + 1, 
+        totalChunks: chunks.length,
+        chunkSize: chunk.length 
+      }, 'Processing chunk in parallel');
+
+      // Process chunk in parallel
+      const promises = chunk.map(contact => 
+        analyzeAndSaveContact(
+          contact,
+          instanceName,
+          userAccountId,
+          personalizedContext,
+          businessProfileContext
+        )
+      );
+
+      const results = await Promise.allSettled(promises);
+
+      // Process results
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          const { success, analysis, error } = result.value;
+          
+          if (success && analysis) {
+            stats.analyzed++;
+            if (analysis.interest_level === 'hot') stats.hot++;
+            if (analysis.interest_level === 'warm') stats.warm++;
+            if (analysis.interest_level === 'cold') stats.cold++;
+          } else {
+            stats.errors++;
+          }
+        } else {
+          stats.errors++;
+          log.error({ error: result.reason }, 'Promise rejected in parallel analysis');
         }
-        
-        await saveAnalysisResult(instanceName, userAccountId, contact, analysis);
-        
-        stats.analyzed++;
-        if (analysis.interest_level === 'hot') stats.hot++;
-        if (analysis.interest_level === 'warm') stats.warm++;
-        if (analysis.interest_level === 'cold') stats.cold++;
-        
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
-      } catch (error: any) {
-        log.error({ error: error.message, phone: contact.phone }, 'Failed to analyze contact');
-        stats.errors++;
       }
+
+      log.info({ 
+        chunkNumber: chunkIndex + 1,
+        analyzed: stats.analyzed,
+        errors: stats.errors,
+        remaining: contactsToAnalyze.length - stats.analyzed - stats.errors
+      }, 'Chunk completed');
     }
 
-    log.info(stats, 'Dialog analysis completed');
+    log.info(stats, '✅ Dialog analysis completed (parallel)');
     return stats;
   } catch (error: any) {
     log.error({ error: error.message }, 'Dialog analysis failed');
     throw error;
+  }
+}
+
+/**
+ * Reanalyze a single lead with fresh data from Evolution DB
+ * This forcefully updates the lead, even if it already exists
+ */
+export async function reanalyzeSingleLead(params: {
+  leadId: string;
+  userAccountId: string;
+}): Promise<{
+  success: boolean;
+  lead?: any;
+  error?: string;
+}> {
+  const { leadId, userAccountId } = params;
+  
+  log.info({ leadId, userAccountId }, 'Starting single lead reanalysis');
+
+  try {
+    // 1. Get lead from CRM
+    const { data: lead, error: leadError } = await supabase
+      .from('dialog_analysis')
+      .select('*')
+      .eq('id', leadId)
+      .eq('user_account_id', userAccountId)
+      .single();
+
+    if (leadError || !lead) {
+      log.error({ leadId, error: leadError?.message }, 'Lead not found');
+      return {
+        success: false,
+        error: 'Lead not found or access denied'
+      };
+    }
+
+    // 2. Get business profile for personalized context
+    const { data: profile } = await supabase
+      .from('business_profile')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    let personalizedContext = '';
+    if (profile?.personalized_context) {
+      personalizedContext = formatContextForPrompt(profile.personalized_context as PersonalizedContext);
+    } else {
+      const defaultContext = getDefaultContext();
+      personalizedContext = formatContextForPrompt(defaultContext);
+    }
+
+    let businessProfileContext = '';
+    if (profile) {
+      businessProfileContext = `
+КОНТЕКСТ БИЗНЕСА ПОЛЬЗОВАТЕЛЯ:
+- Сфера: ${profile.business_industry}
+- Описание: ${profile.business_description}
+- Целевая аудитория: ${profile.target_audience}
+- Задачи: ${profile.main_challenges}
+`;
+    }
+
+    // 3. Get fresh messages from Evolution DB
+    const { getInstanceMessages } = await import('../lib/evolutionDb.js');
+    const allMessages = await getInstanceMessages(lead.instance_name);
+    
+    // Filter messages for this specific contact
+    const contactMessages = allMessages.filter((msg: any) => {
+      const phone = msg.remote_jid
+        .replace('@s.whatsapp.net', '')
+        .replace('@c.us', '')
+        .replace('@g.us', '');
+      return phone === lead.contact_phone;
+    });
+
+    if (contactMessages.length === 0) {
+      log.warn({ leadId, phone: lead.contact_phone }, 'No messages found in Evolution DB');
+      return {
+        success: false,
+        error: 'No messages found for this contact in Evolution DB'
+      };
+    }
+
+    // 4. Group and format messages
+    const contacts = groupMessagesByContact(contactMessages);
+    const contact = contacts.get(lead.contact_phone);
+
+    if (!contact) {
+      return {
+        success: false,
+        error: 'Failed to process contact messages'
+      };
+    }
+
+    // 5. Analyze dialog
+    const analysis = await analyzeDialog(contact, personalizedContext, businessProfileContext);
+
+    // Post-processing: Check if should be qualified
+    if (
+      analysis.qualification_complete &&
+      analysis.is_owner !== null &&
+      analysis.funnel_stage === 'not_qualified'
+    ) {
+      analysis.funnel_stage = 'qualified';
+      log.info({ phone: contact.phone }, 'Auto-upgraded to qualified stage');
+    }
+
+    // 6. Update lead in CRM (force update with ignoreDuplicates: false)
+    const { error: updateError } = await supabase
+      .from('dialog_analysis')
+      .update({
+        contact_name: contact.name,
+        incoming_count: contact.incoming_count,
+        outgoing_count: contact.outgoing_count,
+        first_message: contact.first_message.toISOString(),
+        last_message: contact.last_message.toISOString(),
+        
+        // Analysis results
+        lead_tags: analysis.lead_tags || [],
+        business_type: analysis.business_type,
+        is_owner: analysis.is_owner,
+        qualification_complete: analysis.qualification_complete,
+        funnel_stage: analysis.funnel_stage,
+        interest_level: analysis.interest_level.toLowerCase() as 'hot' | 'warm' | 'cold',
+        main_intent: analysis.main_intent,
+        objection: analysis.objection,
+        action: analysis.action,
+        score: analysis.score,
+        reasoning: analysis.reasoning,
+        custom_fields: analysis.custom_fields || null,
+        
+        // Store full conversation
+        messages: contact.messages,
+        
+        analyzed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', leadId);
+
+    if (updateError) {
+      log.error({ error: updateError.message, leadId }, 'Failed to update lead');
+      throw updateError;
+    }
+
+    log.info({ 
+      leadId, 
+      phone: lead.contact_phone,
+      oldScore: lead.score,
+      newScore: analysis.score,
+      oldStage: lead.funnel_stage,
+      newStage: analysis.funnel_stage
+    }, 'Lead reanalyzed successfully');
+
+    return {
+      success: true,
+      lead: {
+        id: leadId,
+        contact_phone: lead.contact_phone,
+        contact_name: contact.name,
+        funnel_stage: analysis.funnel_stage,
+        interest_level: analysis.interest_level,
+        score: analysis.score,
+      }
+    };
+  } catch (error: any) {
+    log.error({ error: error.message, leadId }, 'Lead reanalysis failed');
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
 
