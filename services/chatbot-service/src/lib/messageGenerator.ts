@@ -1,6 +1,10 @@
 import { OpenAI } from 'openai';
 import { supabase } from './supabase.js';
 import { createLogger } from './logger.js';
+import { StrategyType, InterestLevel, MessageType } from './strategyTypes.js';
+import { determineStrategyType } from './strategySelector.js';
+import { getActiveContexts, incrementContextUsage } from './contextManager.js';
+import { buildMessagePrompt } from './promptBuilder.js';
 
 const log = createLogger({ module: 'messageGenerator' });
 
@@ -8,10 +12,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!
 });
 
-type MessageType = 'selling' | 'useful' | 'reminder';
-
 interface Lead {
   id: string;
+  user_account_id?: string;
   contact_name: string | null;
   contact_phone: string;
   business_type: string | null;
@@ -32,17 +35,22 @@ interface Template {
   title: string;
   content: string;
   template_type: MessageType;
+  strategy_type?: StrategyType | null;
   is_active?: boolean;
 }
 
 interface GeneratedMessage {
   message: string;
   type: MessageType;
+  strategyType: StrategyType;
   reasoning: string;
+  contextId?: string;
+  goalDescription?: string;
 }
 
 interface CampaignMessage {
   message_type: MessageType;
+  strategy_type?: StrategyType | null;
   created_at: string;
 }
 
@@ -62,6 +70,7 @@ function calculateDaysSince(date: string | null): number {
 
 /**
  * Format last N messages for prompt
+ * (moved to promptBuilder.ts, kept here for compatibility)
  */
 function formatLastMessages(messages: any[] | null, count: number = 10): string {
   if (!messages || !Array.isArray(messages)) {
@@ -88,7 +97,7 @@ async function getLastCampaignMessages(
 ): Promise<CampaignMessage[]> {
   const { data, error } = await supabase
     .from('campaign_messages')
-    .select('message_type, created_at')
+    .select('message_type, strategy_type, created_at')
     .eq('lead_id', leadId)
     .order('created_at', { ascending: false })
     .limit(count);
@@ -102,9 +111,10 @@ async function getLastCampaignMessages(
 }
 
 /**
- * Determine message type based on history and lead characteristics
+ * DEPRECATED: Old message type determination - replaced by strategy-based system
+ * Kept for backward compatibility
  */
-async function determineMessageType(lead: Lead): Promise<MessageType> {
+async function determineMessageType_OLD(lead: Lead): Promise<MessageType> {
   try {
     // Get last campaign messages
     const lastMessages = await getLastCampaignMessages(lead.id, 3);
@@ -118,8 +128,6 @@ async function determineMessageType(lead: Lead): Promise<MessageType> {
     // Count message types in last 3
     const lastTypes = lastMessages.map(m => m.message_type);
     const sellingCount = lastTypes.filter(t => t === 'selling').length;
-    const usefulCount = lastTypes.filter(t => t === 'useful').length;
-    const reminderCount = lastTypes.filter(t => t === 'reminder').length;
 
     // If last 2 were selling → useful
     if (sellingCount >= 2) {
@@ -150,85 +158,64 @@ async function determineMessageType(lead: Lead): Promise<MessageType> {
 }
 
 /**
- * Generate personalized message for a lead using AI
+ * Generate personalized message for a lead using AI with strategy-based system
  */
 export async function generatePersonalizedMessage(
   lead: Lead,
   templates: Template[],
-  businessContext?: string
+  businessContext?: string,
+  userAccountId?: string
 ): Promise<GeneratedMessage> {
   try {
-    log.info({ leadId: lead.id, leadName: lead.contact_name }, 'Generating personalized message');
+    log.info({ leadId: lead.id, leadName: lead.contact_name }, 'Generating personalized message with strategy system');
 
-    // 1. Determine message type
-    const messageType = await determineMessageType(lead);
-
-    // 2. Get relevant templates
-    const relevantTemplates = templates.filter(
-      t => t.template_type === messageType && t.is_active !== false
+    // 1. Get active contexts for this lead
+    const activeContexts = await getActiveContexts(
+      userAccountId || lead.user_account_id || '',
+      lead.funnel_stage,
+      lead.interest_level as InterestLevel
     );
 
-    // 3. Build prompt
+    // 2. Get last strategy types (prefer strategy_type over message_type)
+    const lastMessages = await getLastCampaignMessages(lead.id, 3);
+    const lastStrategyTypes = lastMessages
+      .map(m => m.strategy_type)
+      .filter(Boolean) as StrategyType[];
+
+    // 3. Determine strategy type using new system
+    const { strategyType, messageType, selectedContext } = await determineStrategyType({
+      lead: {
+        id: lead.id,
+        funnel_stage: lead.funnel_stage,
+        interest_level: lead.interest_level as InterestLevel,
+        campaign_messages_count: lead.campaign_messages_count
+      },
+      lastMessageTypes: lastStrategyTypes,
+      activeContexts
+    }, userAccountId || lead.user_account_id || '');
+
+    // 4. Get relevant templates (filter by strategy_type if available, else by message_type)
+    const relevantTemplates = templates.filter(t => {
+      if (t.strategy_type) {
+        return t.strategy_type === strategyType && t.is_active !== false;
+      }
+      return t.template_type === messageType && t.is_active !== false;
+    });
+
+    // 5. Build enhanced prompt
     const daysSinceLastCampaign = calculateDaysSince(lead.last_campaign_message_at);
     
-    const prompt = `Ты - персональный менеджер по продажам.
+    const prompt = buildMessagePrompt({
+      lead,
+      strategyType,
+      messageType,
+      businessContext: businessContext || '',
+      activeContexts,
+      templates: relevantTemplates,
+      daysSinceLastCampaign
+    });
 
-ЗАДАЧА: Сгенерируй персонализированное WhatsApp сообщение для реактивации клиента.
-
-${businessContext || ''}
-
-ТИП СООБЩЕНИЯ: ${messageType}
-- "selling": Продающее (предложение консультации, услуг, кейсы, результаты)
-- "useful": Полезное (статья, совет, чек-лист, инсайт, тренды)
-- "reminder": Напоминающее (как дела, что нового, мягкое касание)
-
-КОНТЕКСТ КЛИЕНТА:
-- Имя: ${lead.contact_name || 'Клиент'}
-- Бизнес: ${lead.business_type || 'не указан'}
-- Медицина: ${lead.is_medical ? 'да' : 'нет'}
-- Этап воронки: ${lead.funnel_stage}
-- Теплота: ${lead.interest_level?.toUpperCase()}
-- Score: ${lead.score}
-- Прошло дней с последней рассылки: ${daysSinceLastCampaign}
-- Всего сообщений кампаний: ${lead.campaign_messages_count}
-
-ИСТОРИЯ ПЕРЕПИСКИ (последние 10 сообщений):
-${formatLastMessages(lead.messages, 10)}
-
-${lead.audio_transcripts && lead.audio_transcripts.length > 0 ? `
-ТРАНСКРИПТЫ ЗВОНКОВ:
-${lead.audio_transcripts.map((t: any) => t.transcript).join('\n\n')}
-` : ''}
-
-${lead.manual_notes ? `
-ЗАМЕТКИ МЕНЕДЖЕРА:
-${lead.manual_notes}
-` : ''}
-
-${relevantTemplates.length > 0 ? `
-ДОСТУПНЫЕ ШАБЛОНЫ И МАТЕРИАЛЫ (используй как базу):
-${relevantTemplates.map(t => `${t.title}: ${t.content}`).join('\n\n')}
-` : ''}
-
-ПРАВИЛА:
-1. Сообщение на русском, естественное, персональное
-2. Длина: 50-150 слов (не более!)
-3. Обязательно учитывай всю историю общения и контекст
-4. Для "selling": мягкая продажа, value proposition, конкретные результаты
-5. Для "useful": конкретная польза, ссылка/материал из шаблонов если есть
-6. Для "reminder": легкое касание, не давить, естественный разговор
-7. НЕ повторяй то, что уже было сказано ранее
-8. Адаптируй под теплоту лида (HOT=более прямолинейно, COLD=мягче)
-9. Упоминай имя клиента если оно есть
-10. НЕ используй эмодзи, только текст
-
-Верни JSON:
-{
-  "message": "текст сообщения",
-  "reasoning": "почему выбран этот тип и содержание"
-}`;
-
-    // 4. Call OpenAI
+    // 6. Call OpenAI
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -246,16 +233,26 @@ ${relevantTemplates.map(t => `${t.title}: ${t.content}`).join('\n\n')}
 
     const result = JSON.parse(content);
     
+    // 7. Increment context usage if context was used
+    if (selectedContext) {
+      await incrementContextUsage(selectedContext.id);
+    }
+    
     log.info({ 
       leadId: lead.id, 
+      strategyType,
       messageType,
-      messageLength: result.message.length 
-    }, 'Message generated successfully');
+      messageLength: result.message.length,
+      contextUsed: !!selectedContext
+    }, 'Message generated successfully with strategy system');
 
     return {
       message: result.message,
       type: messageType,
-      reasoning: result.reasoning
+      strategyType,
+      reasoning: result.reasoning,
+      contextId: selectedContext?.id,
+      goalDescription: `Strategy: ${strategyType}`
     };
   } catch (error: any) {
     log.error({ error: error.message, leadId: lead.id }, 'Failed to generate message');
@@ -264,6 +261,7 @@ ${relevantTemplates.map(t => `${t.title}: ${t.content}`).join('\n\n')}
     return {
       message: `Добрый день${lead.contact_name ? ', ' + lead.contact_name : ''}! Как дела? Есть новости по вашей клинике?`,
       type: 'reminder',
+      strategyType: 'check_in',
       reasoning: 'Fallback message due to error'
     };
   }
@@ -352,7 +350,7 @@ ${ctx.negative_signals ? ctx.negative_signals.map((s: string) => `- "${s}"`).joi
       
       const promises = batch.map(async (lead) => {
         try {
-          const generatedMessage = await generatePersonalizedMessage(lead, userTemplates, businessContext);
+          const generatedMessage = await generatePersonalizedMessage(lead, userTemplates, businessContext, userAccountId);
           return { leadId: lead.id, message: generatedMessage };
         } catch (error: any) {
           log.error({ error: error.message, leadId: lead.id }, 'Failed to generate message for lead');

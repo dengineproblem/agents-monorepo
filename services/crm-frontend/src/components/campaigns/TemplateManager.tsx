@@ -22,6 +22,7 @@ export function TemplateManager() {
     title: '',
     content: '',
     template_type: 'selling' as 'selling' | 'useful' | 'reminder',
+    strategy_type: '' as '' | 'check_in' | 'value' | 'case' | 'offer' | 'direct_selling',
   });
 
   const { data: templates } = useQuery({
@@ -68,10 +69,11 @@ export function TemplateManager() {
         title: template.title,
         content: template.content,
         template_type: template.template_type,
+        strategy_type: (template as any).strategy_type || '',
       });
     } else {
       setEditingTemplate(null);
-      setFormData({ title: '', content: '', template_type: 'selling' });
+      setFormData({ title: '', content: '', template_type: 'selling', strategy_type: '' });
     }
     setIsModalOpen(true);
   };
@@ -79,7 +81,7 @@ export function TemplateManager() {
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setEditingTemplate(null);
-    setFormData({ title: '', content: '', template_type: 'selling' });
+    setFormData({ title: '', content: '', template_type: 'selling', strategy_type: '' });
   };
 
   const handleSubmit = () => {
@@ -180,7 +182,7 @@ export function TemplateManager() {
               />
             </div>
             <div>
-              <Label>Тип сообщения</Label>
+              <Label>Тип сообщения (технический)</Label>
               <Select
                 value={formData.template_type}
                 onValueChange={(v) => setFormData({ ...formData, template_type: v as any })}
@@ -194,6 +196,28 @@ export function TemplateManager() {
                   <SelectItem value="reminder">Напоминание</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Стратегический тип (опционально)</Label>
+              <Select
+                value={formData.strategy_type}
+                onValueChange={(v) => setFormData({ ...formData, strategy_type: v as any })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Любая стратегия</SelectItem>
+                  <SelectItem value="check_in">Check-in (Проверка актуальности)</SelectItem>
+                  <SelectItem value="value">Value (Полезный контент)</SelectItem>
+                  <SelectItem value="case">Case (Кейс/Результат)</SelectItem>
+                  <SelectItem value="offer">Offer (Акция/Предложение)</SelectItem>
+                  <SelectItem value="direct_selling">Direct Selling (Прямая продажа)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-500 mt-1">
+                Оставьте пустым для автоматического выбора по техническому типу
+              </p>
             </div>
             <div>
               <Label>Текст шаблона</Label>

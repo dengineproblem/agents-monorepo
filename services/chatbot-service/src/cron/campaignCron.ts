@@ -53,12 +53,15 @@ export function startCampaignCron() {
           // Generate messages
           const messages = await generateBatchMessages(queue, userAccountId);
 
-          // Save to database
+          // Save to database with strategy information
           const campaignMessages = Array.from(messages.entries()).map(([leadId, msg]) => ({
             user_account_id: userAccountId,
             lead_id: leadId,
             message_text: msg.message,
             message_type: msg.type,
+            strategy_type: msg.strategyType,
+            context_id: msg.contextId || null,
+            goal_description: msg.goalDescription || null,
             status: 'pending',
             scheduled_at: new Date().toISOString(),
           }));

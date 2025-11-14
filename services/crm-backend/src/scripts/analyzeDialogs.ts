@@ -419,7 +419,7 @@ async function saveAnalysisResult(
   const now = new Date().toISOString();
 
   // Determine if on key stage
-  const isOnKeyStage = analysis.is_on_key_stage || keyFunnelStages.includes(newStage);
+  const isOnKeyStage = keyFunnelStages.includes(newStage);
   
   // Track stage transitions
   let keyStageEnteredAt = existingLead?.key_stage_entered_at;

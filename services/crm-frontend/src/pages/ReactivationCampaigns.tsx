@@ -3,6 +3,7 @@ import { DailyCampaignQueue } from '@/components/campaigns/DailyCampaignQueue';
 import { TemplateManager } from '@/components/campaigns/TemplateManager';
 import { CampaignSettings } from '@/components/campaigns/CampaignSettings';
 import { CampaignStatsDashboard } from '@/components/campaigns/CampaignStatsDashboard';
+import { CampaignContextsManager } from '@/components/campaigns/CampaignContextsManager';
 
 export function ReactivationCampaigns() {
   return (
@@ -12,6 +13,7 @@ export function ReactivationCampaigns() {
       <Tabs defaultValue="queue" className="space-y-6">
         <TabsList>
           <TabsTrigger value="queue">Очередь на сегодня</TabsTrigger>
+          <TabsTrigger value="contexts">Актуальный контекст</TabsTrigger>
           <TabsTrigger value="templates">Шаблоны</TabsTrigger>
           <TabsTrigger value="settings">Настройки</TabsTrigger>
           <TabsTrigger value="stats">Статистика</TabsTrigger>
@@ -19,6 +21,10 @@ export function ReactivationCampaigns() {
 
         <TabsContent value="queue">
           <DailyCampaignQueue />
+        </TabsContent>
+        
+        <TabsContent value="contexts">
+          <CampaignContextsManager />
         </TabsContent>
         
         <TabsContent value="templates">

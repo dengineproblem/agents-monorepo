@@ -9,6 +9,18 @@ import { Copy, Send, Loader2, ChevronLeft, ChevronRight, RefreshCw } from 'lucid
 
 const USER_ACCOUNT_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
+const strategyLabels: Record<string, string> = {
+  check_in: '✓ Check-in',
+  value: '💡 Value',
+  case: '📊 Case',
+  offer: '🎁 Offer',
+  direct_selling: '🎯 Direct'
+};
+
+const getStrategyLabel = (strategy: string): string => {
+  return strategyLabels[strategy] || strategy;
+};
+
 export function DailyCampaignQueue() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
@@ -136,13 +148,18 @@ export function DailyCampaignQueue() {
                   <div>
                     <p className="font-semibold">{msg.lead?.contact_name || 'Без имени'}</p>
                     <p className="text-sm text-gray-600 dark:text-gray-300">{msg.lead?.contact_phone}</p>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex gap-2 mt-2 flex-wrap">
                       <Badge variant={getInterestBadgeVariant(msg.lead?.interest_level || '')}>
                         {msg.lead?.interest_level?.toUpperCase()}
                       </Badge>
                       <Badge variant={getTypeBadgeVariant(msg.message_type)}>
                         {msg.message_type}
                       </Badge>
+                      {(msg as any).strategy_type && (
+                        <Badge variant="secondary">
+                          {getStrategyLabel((msg as any).strategy_type)}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
