@@ -80,6 +80,12 @@ class SalesApiService {
   // Функция для получения затрат по конкретному объявлению
   private async getAdSpend(accessToken: string, adId: string, datePreset: 'last_7d' | 'last_30d' | 'last_90d'): Promise<number> {
     try {
+      // Validate Ad ID format - must be all digits
+      if (!/^\d+$/.test(adId)) {
+        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Facebook Ad ID должен содержать только цифры. Пропускаем запрос к Facebook API.`);
+        return 0;
+      }
+
       const baseUrl = 'https://graph.facebook.com/v18.0';
       const url = new URL(`${baseUrl}/${adId}/insights`);
       url.searchParams.append('access_token', accessToken);
@@ -124,6 +130,12 @@ class SalesApiService {
   // Функция для получения ID кампании по ID объявления
   private async getCampaignIdByAdId(accessToken: string, adId: string): Promise<string | null> {
     try {
+      // Validate Ad ID format - must be all digits
+      if (!/^\d+$/.test(adId)) {
+        console.warn(`⚠️ Невалидный формат Ad ID: "${adId}". Пропускаем запрос к Facebook API.`);
+        return null;
+      }
+
       const baseUrl = 'https://graph.facebook.com/v18.0';
       const url = new URL(`${baseUrl}/${adId}`);
       url.searchParams.append('access_token', accessToken);

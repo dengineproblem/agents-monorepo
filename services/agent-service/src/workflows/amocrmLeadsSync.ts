@@ -102,6 +102,78 @@ async function fetchAllContactsFromAmoCRM(
 }
 
 /**
+ * Fetch unsorted leads from AmoCRM
+ */
+async function fetchUnsortedFromAmoCRM(
+  subdomain: string,
+  accessToken: string,
+  log: any
+): Promise<Array<{ id: number; phone: string | null; contact_id: number | null }>> {
+  const unsortedLeads: Array<{ id: number; phone: string | null; contact_id: number | null }> = [];
+
+  try {
+    let page = 1;
+    const limit = 250;
+    let hasMore = true;
+
+    while (hasMore && page <= 10) { // Limit to 10 pages of unsorted
+      try {
+        const url = `https://${subdomain}.amocrm.ru/api/v4/leads/unsorted?limit=${limit}&page=${page}`;
+
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 204) {
+            // No unsorted leads
+            log.info('No unsorted leads found in AmoCRM');
+            break;
+          }
+          throw new Error(`AmoCRM API error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const unsorted = data._embedded?.unsorted || [];
+
+        log.info({ page, count: unsorted.length }, 'Fetched page of unsorted from AmoCRM');
+
+        for (const item of unsorted) {
+          // Extract phone from unsorted item
+          const phoneField = item.custom_fields_values?.find(
+            (field: any) => field.field_code === 'PHONE'
+          );
+
+          const phone = phoneField?.values?.[0]?.value ? String(phoneField.values[0].value) : null;
+
+          unsortedLeads.push({
+            id: item.id,
+            phone: normalizePhone(phone),
+            contact_id: null
+          });
+        }
+
+        hasMore = unsorted.length === limit;
+        page++;
+
+      } catch (error: any) {
+        log.error({ error: error.message, page }, 'Failed to fetch unsorted from AmoCRM');
+        hasMore = false;
+      }
+    }
+
+    log.info({ totalUnsorted: unsortedLeads.length }, 'Fetched all unsorted from AmoCRM');
+  } catch (error: any) {
+    log.warn({ error: error.message }, 'Error fetching unsorted, will skip');
+  }
+
+  return unsortedLeads;
+}
+
+/**
  * Fetch all leads from AmoCRM with their contacts and phones
  */
 async function fetchAllLeadsFromAmoCRM(
@@ -256,9 +328,13 @@ export async function syncLeadsFromAmoCRM(
 
     // 3. Fetch ALL leads from AmoCRM (we'll match by phone)
     log.info({ userAccountId }, 'Fetching ALL leads from AmoCRM');
-    
+
     // AmoCRM API: get leads with contacts
     const amocrmLeads = await fetchAllLeadsFromAmoCRM(subdomain, accessToken, log);
+
+    // Also fetch unsorted leads
+    log.info({ userAccountId }, 'Fetching unsorted leads from AmoCRM');
+    const unsortedLeads = await fetchUnsortedFromAmoCRM(subdomain, accessToken, log);
 
     // Create map by phone for quick lookup
     const amocrmLeadsByPhone = new Map<string, typeof amocrmLeads[0]>();
@@ -268,11 +344,22 @@ export async function syncLeadsFromAmoCRM(
       }
     }
 
-  log.info({ 
-    userAccountId, 
+    // Add unsorted to map (with null status/pipeline since they're not processed yet)
+    const unsortedByPhone = new Map<string, typeof unsortedLeads[0]>();
+    for (const unsorted of unsortedLeads) {
+      if (unsorted.phone) {
+        unsortedByPhone.set(unsorted.phone, unsorted);
+      }
+    }
+
+  log.info({
+    userAccountId,
     totalAmoCRMLeads: amocrmLeads.length,
+    totalUnsorted: unsortedLeads.length,
     withPhone: amocrmLeadsByPhone.size,
-    samplePhones: Array.from(amocrmLeadsByPhone.keys()).slice(0, 5)
+    unsortedWithPhone: unsortedByPhone.size,
+    samplePhones: Array.from(amocrmLeadsByPhone.keys()).slice(0, 5),
+    sampleUnsortedPhones: Array.from(unsortedByPhone.keys()).slice(0, 5)
   }, 'Received leads from AmoCRM');
 
   // Log first 5 local lead phones for comparison
@@ -304,25 +391,59 @@ export async function syncLeadsFromAmoCRM(
 
     // 6. Update each lead in database by matching phone numbers
     let notFoundCount = 0;
+    const notFoundPhones: Array<{ leadId: number; rawPhone: string; normalizedPhone: string }> = [];
+
     for (const localLead of leads) {
       try {
         // Normalize phone from our database
-        const ourPhone = normalizePhone(localLead.phone || localLead.chat_id);
-        
+        const rawPhone = localLead.phone || localLead.chat_id;
+        const ourPhone = normalizePhone(rawPhone);
+
         if (!ourPhone) {
           continue;
         }
 
         // Find matching lead in AmoCRM by phone
-        const amocrmLead = amocrmLeadsByPhone.get(ourPhone);
+        let amocrmLead = amocrmLeadsByPhone.get(ourPhone);
+        let foundInUnsorted = false;
+
+        // If not found in leads, check unsorted
+        if (!amocrmLead) {
+          const unsortedItem = unsortedByPhone.get(ourPhone);
+          if (unsortedItem) {
+            foundInUnsorted = true;
+            log.info({
+              leadId: localLead.id,
+              phone: ourPhone,
+              unsortedId: unsortedItem.id
+            }, 'Lead found in AmoCRM unsorted');
+
+            // Create a pseudo-lead object for unsorted (no status/pipeline yet)
+            amocrmLead = {
+              id: unsortedItem.id,
+              status_id: null as any,
+              pipeline_id: null as any,
+              phone: unsortedItem.phone,
+              contact_id: unsortedItem.contact_id
+            };
+          }
+        }
 
         if (!amocrmLead) {
           notFoundCount++;
-          if (notFoundCount <= 10) {
-            log.info({ 
-              leadId: localLead.id, 
-              phone: ourPhone 
-            }, 'Lead not found in AmoCRM by phone');
+          notFoundPhones.push({
+            leadId: localLead.id,
+            rawPhone: rawPhone || '',
+            normalizedPhone: ourPhone
+          });
+
+          // Log first 50 not found for debugging
+          if (notFoundCount <= 50) {
+            log.info({
+              leadId: localLead.id,
+              rawPhone: rawPhone,
+              normalizedPhone: ourPhone
+            }, 'Lead not found in AmoCRM by phone (neither in leads nor unsorted)');
           }
           continue;
         }
@@ -391,12 +512,22 @@ export async function syncLeadsFromAmoCRM(
       }
     }
 
-    log.info({ 
-      userAccountId, 
+    log.info({
+      userAccountId,
       total: result.total,
       updated: result.updated,
-      errors: result.errors
+      errors: result.errors,
+      notFound: notFoundCount
     }, 'AmoCRM leads sync completed');
+
+    // Log summary of not found phones for debugging
+    if (notFoundPhones.length > 0) {
+      log.warn({
+        notFoundCount,
+        sampleNotFound: notFoundPhones.slice(0, 10),
+        totalNotFound: notFoundPhones.length
+      }, 'Summary of leads not found in AmoCRM');
+    }
 
     return result;
 

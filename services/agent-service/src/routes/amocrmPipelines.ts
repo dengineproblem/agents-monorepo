@@ -527,6 +527,154 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * GET /amocrm/debug-phone-matching
+   * Debug endpoint to check phone number matching with AmoCRM
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *   - phone: Phone number to test (optional)
+   *   - leadId: Lead ID to test (optional)
+   *
+   * Returns: Detailed phone matching information for debugging
+   */
+  app.get('/amocrm/debug-phone-matching', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, phone, leadId } = request.query as {
+        userAccountId?: string;
+        phone?: string;
+        leadId?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'missing_user_account_id'
+        });
+      }
+
+      app.log.info({ userAccountId, phone, leadId }, 'Debug phone matching');
+
+      // Import normalize function
+      const { syncLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
+
+      // Normalize phone function (copy from amocrmLeadsSync.ts)
+      function normalizePhone(phone: string | null): string | null {
+        if (!phone) return null;
+        let cleaned = phone.replace(/@s\.whatsapp\.net|@c\.us/g, '');
+        cleaned = cleaned.replace(/\D/g, '');
+        if (cleaned.startsWith('8') && cleaned.length === 11) {
+          cleaned = '7' + cleaned.substring(1);
+        }
+        return cleaned || null;
+      }
+
+      const debugInfo: any = {
+        userAccountId,
+        input: { phone, leadId },
+        normalized: {},
+        amocrmSearch: {},
+        localLeads: []
+      };
+
+      // 1. If phone provided, normalize and search
+      if (phone) {
+        const normalized = normalizePhone(phone);
+        debugInfo.normalized = {
+          raw: phone,
+          normalized,
+          length: normalized?.length
+        };
+
+        // Search in AmoCRM
+        try {
+          const { getValidAmoCRMToken } = await import('../lib/amocrmTokens.js');
+          const { findContactByPhone } = await import('../adapters/amocrm.js');
+
+          const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+
+          // Try to find contact
+          const contact = await findContactByPhone(phone, subdomain, accessToken);
+
+          debugInfo.amocrmSearch.foundContact = !!contact;
+          if (contact) {
+            debugInfo.amocrmSearch.contactId = contact.id;
+            debugInfo.amocrmSearch.contactName = contact.name;
+            debugInfo.amocrmSearch.leads = (contact as any)._embedded?.leads || [];
+          }
+        } catch (error: any) {
+          debugInfo.amocrmSearch.error = error.message;
+        }
+      }
+
+      // 2. If leadId provided, get lead info
+      if (leadId) {
+        const { data: lead } = await supabase
+          .from('leads')
+          .select('*')
+          .eq('id', leadId)
+          .eq('user_account_id', userAccountId)
+          .maybeSingle();
+
+        if (lead) {
+          const rawPhone = lead.phone || lead.chat_id;
+          const normalized = normalizePhone(rawPhone);
+
+          debugInfo.localLeads.push({
+            leadId: lead.id,
+            rawPhone,
+            normalized,
+            amocrmLeadId: lead.amocrm_lead_id,
+            currentStatusId: lead.current_status_id,
+            creativeId: lead.creative_id
+          });
+        }
+      }
+
+      // 3. Get sample local leads without AmoCRM connection
+      const { data: unmatchedLeads } = await supabase
+        .from('leads')
+        .select('id, phone, chat_id, amocrm_lead_id')
+        .eq('user_account_id', userAccountId)
+        .is('amocrm_lead_id', null)
+        .not('phone', 'is', null)
+        .limit(10);
+
+      debugInfo.sampleUnmatchedLeads = (unmatchedLeads || []).map(l => ({
+        leadId: l.id,
+        rawPhone: l.phone || l.chat_id,
+        normalized: normalizePhone(l.phone || l.chat_id)
+      }));
+
+      // 4. Get sample AmoCRM phones
+      debugInfo.instructions = {
+        description: 'Use this endpoint to debug phone number matching issues',
+        usage: {
+          byPhone: '/amocrm/debug-phone-matching?userAccountId=UUID&phone=+7(123)456-78-90',
+          byLeadId: '/amocrm/debug-phone-matching?userAccountId=UUID&leadId=123'
+        },
+        normalizationRules: {
+          step1: 'Remove WhatsApp suffixes (@s.whatsapp.net, @c.us)',
+          step2: 'Remove all non-digits',
+          step3: 'Replace leading 8 with 7 for Russian numbers (if 11 digits)',
+          examples: {
+            '+7 (771) 817-19-94': '77718171994',
+            '87772339309': '77772339309',
+            '+7 (775) 831-95-04': '77758319504'
+          }
+        }
+      };
+
+      return reply.send(debugInfo);
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error in debug phone matching');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
 }
 
 
