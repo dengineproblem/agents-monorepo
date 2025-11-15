@@ -259,7 +259,9 @@ export async function generatePersonalizedMessage(
     
     // Fallback message
     return {
-      message: `Добрый день${lead.contact_name ? ', ' + lead.contact_name : ''}! Как дела? Есть новости по вашей клинике?`,
+      message: lead.contact_name 
+        ? `Добрый день, ${lead.contact_name}! Как дела? Есть новости по вашей клинике?`
+        : 'Здравствуйте! Напоминаю о себе. Актуальна ли ещё тема по настройке рекламы?',
       type: 'reminder',
       strategyType: 'check_in',
       reasoning: 'Fallback message due to error'

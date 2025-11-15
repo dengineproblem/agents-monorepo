@@ -21,6 +21,7 @@ S: — системное сообщение
 Верни JSON (только JSON, без дополнительного текста):
 
 {
+  "client_name": string | null,
   "lead_tags": string[],
   "business_type": string | null,
   "is_owner": boolean | null,
@@ -35,6 +36,10 @@ S: — системное сообщение
   "reasoning": string,
   "custom_fields": Record<string, any> | null
 }
+
+CLIENT_NAME - ВАЛИДАЦИЯ ИМЕНИ:
+Если имя из WhatsApp (указано ниже) не является настоящим именем (инициалы типа "Rs", "AB", короткие символы, цифры, общие слова "Test", "User") - ищи реальное имя в переписке.
+Если имя найдено в переписке - верни его. Если нет - верни null.
 
 LEAD_TAGS - ВАЖНО:
 Сгенерируй 2-3 ключевых тега которые характеризуют этого лида. Теги должны быть универсальными и подходить для любой ниши бизнеса.
@@ -56,12 +61,15 @@ LEAD_TAGS - ВАЖНО:
 
 <<<ADDITIONAL_CONTEXT>>>
 
+ИМЯ КЛИЕНТА ИЗ WHATSAPP: <<<CONTACT_NAME_FROM_WHATSAPP>>>
+
 ИСТОРИЯ ПЕРЕПИСКИ:
 <<<DIALOG>>>
 
 Пересчитай score, interest_level, funnel_stage, reasoning с учетом ПОЛНОГО контекста (переписка + аудио + заметки).`;
 
 interface AnalysisResult {
+  client_name: string | null;
   business_type: string | null;
   is_owner: boolean | null;
   qualification_complete: boolean;
@@ -146,6 +154,7 @@ ${lead.manual_notes}` : ''}`;
     const prompt = REANALYSIS_PROMPT
       .replace('<<<PERSONALIZED_CONTEXT>>>', personalizedContext)
       .replace('<<<ADDITIONAL_CONTEXT>>>', additionalContext)
+      .replace('<<<CONTACT_NAME_FROM_WHATSAPP>>>', lead.contact_name || 'не указано')
       .replace('<<<DIALOG>>>', dialogText);
 
     // Call OpenAI
@@ -234,6 +243,7 @@ ${notes}`;
     const prompt = REANALYSIS_PROMPT
       .replace('<<<PERSONALIZED_CONTEXT>>>', personalizedContext)
       .replace('<<<ADDITIONAL_CONTEXT>>>', additionalContext)
+      .replace('<<<CONTACT_NAME_FROM_WHATSAPP>>>', lead.contact_name || 'не указано')
       .replace('<<<DIALOG>>>', dialogText);
 
     // Call OpenAI

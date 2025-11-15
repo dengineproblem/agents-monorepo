@@ -22,6 +22,7 @@ S: — системное сообщение
 Верни JSON (только JSON, без дополнительного текста):
 
 {
+  "client_name": string | null,
   "lead_tags": string[],
   "business_type": string | null,
   "is_owner": boolean | null,
@@ -36,6 +37,42 @@ S: — системное сообщение
   "reasoning": string,
   "custom_fields": Record<string, any> | null
 }
+
+CLIENT_NAME - ВАЛИДАЦИЯ ИМЕНИ ИЗ WHATSAPP:
+Имя клиента в WhatsApp (если указано ниже) нужно ВАЛИДИРОВАТЬ:
+
+ПРАВИЛА ВАЛИДАЦИИ:
+1. Если имя из WhatsApp действительно является настоящим человеческим именем - сохрани его в "client_name"
+2. Если имя НЕ является настоящим именем (см. критерии ниже) - ищи реальное имя в истории переписки
+3. Если имя найдено в переписке - верни его в "client_name"
+4. Если имя не найдено нигде - верни null в "client_name"
+
+КРИТЕРИИ "НЕ ЯВЛЯЕТСЯ ИМЕНЕМ":
+- Длина меньше 2 символов (например: "R", "A")
+- Только инициалы - 2-3 заглавные буквы подряд (например: "RS", "AB", "IVA")
+- Содержит цифры (например: "User123", "Alex99")
+- Содержит спецсимволы кроме дефиса и апострофа (например: "Test@", "User#1")
+- Общие слова не являющиеся именами (например: "Test", "User", "Client", "Me", "Unknown")
+- Набор случайных букв, не похожий на имя (например: "Abc", "Xyz", "Qwerty")
+
+ПРИМЕРЫ ВАЛИДНЫХ ИМЕН (сохранить как есть):
+- "Иван", "Мария", "Александр"
+- "John", "Sarah", "Mohammed"
+- "Анна-Мария", "O'Brien"
+
+ПРИМЕРЫ НЕВАЛИДНЫХ ИМЕН (искать в переписке):
+- "Rs", "AB", "IVA" (инициалы)
+- "Test", "User", "Client" (общие слова)
+- "User123", "Alex99" (содержат цифры)
+- "R", "A", "Z" (слишком короткие)
+
+ПОИСК ИМЕНИ В ПЕРЕПИСКЕ:
+Если имя из WhatsApp невалидное, проанализируй переписку:
+- Клиент мог представиться: "Меня зовут Иван", "Я Александр", "Это Мария"
+- Агент мог обратиться по имени, и клиент подтвердил
+- Имя могло быть упомянуто в контексте записи или документов
+
+ВАЖНО: Если ты не уверен или в переписке нет четкого упоминания имени - лучше вернуть null.
 
 LEAD_TAGS - ВАЖНО:
 Сгенерируй 2-3 ключевых тега которые характеризуют этого лида. Теги должны быть универсальными и подходить для любой ниши бизнеса.
@@ -83,10 +120,13 @@ Interest level (финальный): HOT(75-100), WARM(40-74), COLD(0-39)
 
 <<<BUSINESS_PROFILE_CONTEXT>>>
 
+ИМЯ КЛИЕНТА ИЗ WHATSAPP: <<<CONTACT_NAME_FROM_WHATSAPP>>>
+
 ИСТОРИЯ ПЕРЕПИСКИ:
 <<<DIALOG>>>
 
 Пересчитай score, interest_level, funnel_stage с учетом ВСЕГО контекста.`;
+
 
 interface Message {
   remote_jid: string;
@@ -113,6 +153,7 @@ interface Contact {
 }
 
 interface AnalysisResult {
+  client_name: string | null;
   lead_tags: string[];
   business_type: string | null;
   is_owner: boolean | null;
@@ -258,9 +299,10 @@ async function analyzeDialog(
   const prompt = BASE_ANALYSIS_PROMPT
     .replace('<<<PERSONALIZED_CONTEXT>>>', personalizedContext)
     .replace('<<<BUSINESS_PROFILE_CONTEXT>>>', businessProfileContext)
+    .replace('<<<CONTACT_NAME_FROM_WHATSAPP>>>', contact.name || 'не указано')
     .replace('<<<DIALOG>>>', dialogText);
 
-  log.info({ phone: contact.phone, messageCount: contact.messages.length }, 'Analyzing dialog');
+  log.info({ phone: contact.phone, messageCount: contact.messages.length, whatsappName: contact.name }, 'Analyzing dialog');
 
   try {
     const response = await openai.chat.completions.create({
@@ -458,7 +500,7 @@ async function saveAnalysisResult(
       instance_name: instanceName,
       user_account_id: userAccountId,
       contact_phone: contact.phone,
-      contact_name: contact.name,
+      contact_name: analysis.client_name, // Use validated name from LLM
       incoming_count: contact.incoming_count,
       outgoing_count: contact.outgoing_count,
       first_message: contact.first_message.toISOString(),
@@ -497,7 +539,9 @@ async function saveAnalysisResult(
   }
 
   log.info({ 
-    phone: contact.phone, 
+    phone: contact.phone,
+    whatsappName: contact.name,
+    validatedName: analysis.client_name,
     funnel_stage: newStage,
     is_on_key_stage: isOnKeyStage,
     stage_changed: oldStage !== newStage
@@ -829,7 +873,7 @@ export async function reanalyzeSingleLead(params: {
     const { error: updateError } = await supabase
       .from('dialog_analysis')
       .update({
-        contact_name: contact.name,
+        contact_name: analysis.client_name, // Use validated name from LLM
         incoming_count: contact.incoming_count,
         outgoing_count: contact.outgoing_count,
         first_message: contact.first_message.toISOString(),
@@ -865,6 +909,8 @@ export async function reanalyzeSingleLead(params: {
     log.info({ 
       leadId, 
       phone: lead.contact_phone,
+      whatsappName: contact.name,
+      validatedName: analysis.client_name,
       oldScore: lead.score,
       newScore: analysis.score,
       oldStage: lead.funnel_stage,
@@ -876,7 +922,7 @@ export async function reanalyzeSingleLead(params: {
       lead: {
         id: leadId,
         contact_phone: lead.contact_phone,
-        contact_name: contact.name,
+        contact_name: analysis.client_name,
         funnel_stage: analysis.funnel_stage,
         interest_level: analysis.interest_level,
         score: analysis.score,
