@@ -598,6 +598,47 @@ export async function processLeadStatusChange(
       isQualified
     }, 'Updated lead status and qualification');
 
+    // 3b. Check if lead reached key stage (once qualified, always qualified)
+    if (!lead.reached_key_stage) {
+      // Only check if not already qualified (performance optimization)
+      const { data: direction } = await supabase
+        .from('account_directions')
+        .select('key_stage_pipeline_id, key_stage_status_id')
+        .eq('id', lead.direction_id)
+        .maybeSingle();
+
+      if (direction?.key_stage_pipeline_id && direction?.key_stage_status_id) {
+        // Direction has key stage configured
+        if (
+          direction.key_stage_pipeline_id === newPipelineId &&
+          direction.key_stage_status_id === newStatusId
+        ) {
+          // Lead reached key stage! Set flag permanently
+          const { error: keyStageError } = await supabase
+            .from('leads')
+            .update({
+              reached_key_stage: true,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', lead.id);
+
+          if (keyStageError) {
+            app.log.error({
+              error: keyStageError.message,
+              leadId: lead.id
+            }, 'Failed to set reached_key_stage flag - continuing anyway');
+          } else {
+            app.log.info({
+              leadId: lead.id,
+              amocrmLeadId,
+              pipelineId: newPipelineId,
+              statusId: newStatusId
+            }, 'Lead reached key stage - set reached_key_stage flag');
+          }
+        }
+      }
+    }
+
     // 4. Record status change in history
     const { error: historyError } = await supabase
       .from('amocrm_lead_status_history')

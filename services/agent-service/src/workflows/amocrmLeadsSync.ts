@@ -222,11 +222,11 @@ export async function syncLeadsFromAmoCRM(
           .eq('id', localLead.id);
 
         if (updateError) {
-          log.error({ 
-            error: updateError.message, 
-            leadId: localLead.id 
+          log.error({
+            error: updateError.message,
+            leadId: localLead.id
           }, 'Failed to update lead');
-          
+
           result.errors++;
           result.errorDetails?.push({
             leadId: localLead.id,
@@ -234,8 +234,8 @@ export async function syncLeadsFromAmoCRM(
           });
         } else {
           result.updated++;
-          
-          log.debug({ 
+
+          log.debug({
             leadId: localLead.id,
             oldStatus: localLead.current_status_id,
             newStatus: newStatusId,
@@ -243,6 +243,73 @@ export async function syncLeadsFromAmoCRM(
             newPipeline: newPipelineId,
             isQualified
           }, 'Lead updated successfully');
+
+          // Check if lead reached key stage (once qualified, always qualified)
+          // Get full lead data to check reached_key_stage and direction_id
+          const { data: fullLead } = await supabase
+            .from('leads')
+            .select('reached_key_stage, direction_id')
+            .eq('id', localLead.id)
+            .maybeSingle();
+
+          if (fullLead && !fullLead.reached_key_stage) {
+            // Only check if not already qualified (performance optimization)
+            const { data: direction } = await supabase
+              .from('account_directions')
+              .select('key_stage_pipeline_id, key_stage_status_id')
+              .eq('id', fullLead.direction_id)
+              .maybeSingle();
+
+            if (direction?.key_stage_pipeline_id && direction?.key_stage_status_id) {
+              // Check current status
+              if (
+                direction.key_stage_pipeline_id === newPipelineId &&
+                direction.key_stage_status_id === newStatusId
+              ) {
+                // Lead is currently on key stage! Set flag permanently
+                await supabase
+                  .from('leads')
+                  .update({
+                    reached_key_stage: true,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('id', localLead.id);
+
+                log.info({
+                  leadId: localLead.id,
+                  pipelineId: newPipelineId,
+                  statusId: newStatusId
+                }, 'Lead currently on key stage - set reached_key_stage flag');
+              } else {
+                // Check if lead was ever on key stage (check history)
+                const { data: history } = await supabase
+                  .from('amocrm_lead_status_history')
+                  .select('to_pipeline_id, to_status_id')
+                  .eq('lead_id', localLead.id)
+                  .eq('to_pipeline_id', direction.key_stage_pipeline_id)
+                  .eq('to_status_id', direction.key_stage_status_id)
+                  .limit(1)
+                  .maybeSingle();
+
+                if (history) {
+                  // Lead reached key stage in the past! Set flag permanently
+                  await supabase
+                    .from('leads')
+                    .update({
+                      reached_key_stage: true,
+                      updated_at: new Date().toISOString()
+                    })
+                    .eq('id', localLead.id);
+
+                  log.info({
+                    leadId: localLead.id,
+                    pipelineId: newPipelineId,
+                    statusId: newStatusId
+                  }, 'Lead reached key stage in history - set reached_key_stage flag');
+                }
+              }
+            }
+          }
         }
 
       } catch (error: any) {

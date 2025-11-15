@@ -43,10 +43,17 @@ const ROIAnalytics: React.FC = () => {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [selectedDirectionId, setSelectedDirectionId] = useState<string | null>(null);
   const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false);
-  
+
   // Funnel modal state
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
   const [selectedCreative, setSelectedCreative] = useState<{ id: string; name: string } | null>(null);
+
+  // Qualification stats state
+  const [qualificationStats, setQualificationStats] = useState<{
+    total_leads: number;
+    qualified_leads: number;
+    qualification_rate: number;
+  } | null>(null);
   
 
 
@@ -78,6 +85,22 @@ const ROIAnalytics: React.FC = () => {
       setDirections(data);
     } catch (err) {
       console.error('Ошибка загрузки направлений:', err);
+    }
+  };
+
+  // Загрузка статистики квалификации для выбранного направления
+  const loadQualificationStats = async (directionId: string) => {
+    try {
+      const { getDirectionKeyStageStats } = await import('@/services/amocrmApi');
+      const stats = await getDirectionKeyStageStats(directionId);
+      setQualificationStats({
+        total_leads: stats.total_leads,
+        qualified_leads: stats.qualified_leads,
+        qualification_rate: stats.qualification_rate
+      });
+    } catch (err) {
+      console.error('Ошибка загрузки статистики квалификации:', err);
+      setQualificationStats(null);
     }
   };
 
@@ -142,6 +165,18 @@ const ROIAnalytics: React.FC = () => {
   useEffect(() => {
     if (userAccountId) {
       loadROIData();
+
+      // Load qualification stats only if direction is selected and has key stage configured
+      if (selectedDirectionId) {
+        const direction = directions.find(d => d.id === selectedDirectionId);
+        if (direction?.key_stage_pipeline_id && direction?.key_stage_status_id) {
+          loadQualificationStats(selectedDirectionId);
+        } else {
+          setQualificationStats(null);
+        }
+      } else {
+        setQualificationStats(null);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDirectionId]);
@@ -320,7 +355,7 @@ const ROIAnalytics: React.FC = () => {
         )}
 
         {/* Общая статистика */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
           <Card className="transition-all duration-200 hover:shadow-md shadow-sm">
             <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-2">
@@ -364,6 +399,31 @@ const ROIAnalytics: React.FC = () => {
               <p className={`text-lg font-semibold ${roiData?.totalROI && roiData.totalROI > 0 ? 'text-green-600 dark:text-green-500/70' : 'text-red-600 dark:text-red-500/70'}`}>
                 {formatPercent(roiData?.totalROI || 0)}
               </p>
+            </CardContent>
+          </Card>
+
+          <Card className="transition-all duration-200 hover:shadow-md shadow-sm">
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-1.5 rounded-lg bg-muted flex-shrink-0">
+                  <Target className="h-4 w-4 text-blue-600 dark:text-blue-500/70" />
+                </div>
+                <p className="text-xs text-muted-foreground leading-tight flex-1">Процент квалов</p>
+              </div>
+              {qualificationStats ? (
+                <div>
+                  <p className="text-lg font-semibold text-blue-600 dark:text-blue-500/70">
+                    {formatPercent(qualificationStats.qualification_rate)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {qualificationStats.qualified_leads} / {qualificationStats.total_leads} лидов
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {selectedDirectionId ? 'Не настроено' : 'Выберите направление'}
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>

@@ -19,6 +19,11 @@ export interface CampaignROI {
   roi: number;
   leads: number;
   conversions: number;
+  qualification?: {
+    qualified: number;
+    total: number;
+    rate: number;
+  };
 }
 
 export interface Direction {
@@ -28,6 +33,8 @@ export interface Direction {
   whatsapp_phone_number: string | null;
   is_active: boolean;
   created_at: string;
+  key_stage_pipeline_id?: number | null;
+  key_stage_status_id?: number | null;
 }
 
 class SalesApiService {
