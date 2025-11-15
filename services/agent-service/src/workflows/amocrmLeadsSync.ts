@@ -99,11 +99,11 @@ export async function syncLeadsFromAmoCRM(
     result.total = leads.length;
     log.info({ userAccountId, totalLeads: leads.length }, 'Found leads to sync');
 
-    // NEW EFFICIENT APPROACH: Direct search for each lead by phone
+    // NEW EFFICIENT APPROACH: Direct search for leads by phone across ALL pipelines
     // Instead of downloading ALL leads from AmoCRM, we search for each lead individually
-    log.info({ userAccountId }, 'Starting efficient phone-by-phone sync');
+    log.info({ userAccountId }, 'Starting efficient phone-by-phone sync (all pipelines)');
 
-    const { findContactByPhone } = await import('../adapters/amocrm.js');
+    const { findLeadsByPhone } = await import('../adapters/amocrm.js');
 
     // Get pipeline stages for qualification check
     const { data: pipelineStages, error: stagesError } = await supabase
@@ -127,6 +127,10 @@ export async function syncLeadsFromAmoCRM(
     let notFoundCount = 0;
     const notFoundPhones: Array<{ leadId: number; rawPhone: string; normalizedPhone: string }> = [];
 
+    // Track statistics by pipeline
+    const pipelineStats = new Map<number, { count: number; pipelineName?: string }>();
+    let multipleLeadsCount = 0;
+
     for (const localLead of leads) {
       try {
         // Normalize phone from our database
@@ -137,19 +141,19 @@ export async function syncLeadsFromAmoCRM(
           continue;
         }
 
-        // Direct search in AmoCRM by phone (much faster than bulk download)
-        let contact = null;
+        // Direct search for leads in AmoCRM by phone (searches ALL pipelines)
+        let amocrmLeads: any[] = [];
         try {
-          contact = await findContactByPhone(rawPhone, subdomain, accessToken);
+          amocrmLeads = await findLeadsByPhone(rawPhone, subdomain, accessToken);
         } catch (error: any) {
           log.warn({
             leadId: localLead.id,
             phone: ourPhone,
             error: error.message
-          }, 'Error searching contact in AmoCRM');
+          }, 'Error searching leads in AmoCRM');
         }
 
-        if (!contact) {
+        if (!amocrmLeads || amocrmLeads.length === 0) {
           notFoundCount++;
           notFoundPhones.push({
             leadId: localLead.id,
@@ -163,26 +167,37 @@ export async function syncLeadsFromAmoCRM(
               leadId: localLead.id,
               rawPhone: rawPhone,
               normalizedPhone: ourPhone
-            }, 'Contact not found in AmoCRM by phone');
+            }, 'Leads not found in AmoCRM by phone');
           }
           continue;
         }
 
-        // Get lead from contact
-        const amocrmLeadFromContact = (contact as any)._embedded?.leads?.[0];
+        // Take the first lead (or most recent if multiple)
+        // Sort by created_at descending to get most recent lead
+        const sortedLeads = amocrmLeads.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+        const amocrmLeadFromContact = sortedLeads[0];
 
-        if (!amocrmLeadFromContact) {
+        // Log if multiple leads found
+        if (amocrmLeads.length > 1) {
+          multipleLeadsCount++;
           log.info({
             leadId: localLead.id,
-            contactId: contact.id,
-            phone: ourPhone
-          }, 'Contact found but has no leads');
-          continue;
+            phone: ourPhone,
+            foundLeadsCount: amocrmLeads.length,
+            pipelines: amocrmLeads.map(l => l.pipeline_id)
+          }, 'Multiple leads found for phone, using most recent');
         }
 
         const newAmoCRMLeadId = amocrmLeadFromContact.id;
         const newStatusId = amocrmLeadFromContact.status_id;
         const newPipelineId = amocrmLeadFromContact.pipeline_id;
+
+        // Update pipeline statistics
+        if (newPipelineId) {
+          const current = pipelineStats.get(newPipelineId) || { count: 0 };
+          current.count++;
+          pipelineStats.set(newPipelineId, current);
+        }
         const isQualified = qualificationMap.get(newStatusId!) || false;
 
         // Only update if something changed
@@ -244,12 +259,20 @@ export async function syncLeadsFromAmoCRM(
       }
     }
 
+    // Prepare pipeline statistics for logging
+    const pipelineStatsArray = Array.from(pipelineStats.entries()).map(([pipelineId, stats]) => ({
+      pipelineId,
+      count: stats.count
+    }));
+
     log.info({
       userAccountId,
       total: result.total,
       updated: result.updated,
       errors: result.errors,
-      notFound: notFoundCount
+      notFound: notFoundCount,
+      multipleLeadsFound: multipleLeadsCount,
+      pipelineStats: pipelineStatsArray
     }, 'AmoCRM leads sync completed');
 
     // Log summary of not found phones for debugging
@@ -259,6 +282,15 @@ export async function syncLeadsFromAmoCRM(
         sampleNotFound: notFoundPhones.slice(0, 10),
         totalNotFound: notFoundPhones.length
       }, 'Summary of leads not found in AmoCRM');
+    }
+
+    // Log pipeline distribution
+    if (pipelineStatsArray.length > 0) {
+      log.info({
+        userAccountId,
+        pipelines: pipelineStatsArray,
+        totalPipelines: pipelineStatsArray.length
+      }, 'Leads distribution by pipeline');
     }
 
     return result;

@@ -35,6 +35,7 @@ export interface AmoCRMContact {
   custom_fields_values?: AmoCRMCustomFieldValue[];
   _embedded?: {
     tags?: Array<{ id: number; name: string }>;
+    leads?: AmoCRMLead[];
   };
 }
 
@@ -327,6 +328,38 @@ export async function findContactByPhone(
   } catch (error) {
     console.error('Error finding contact by phone:', error);
     return null;
+  }
+}
+
+/**
+ * Find leads by phone number (searches across ALL pipelines)
+ *
+ * @param phone - Phone number to search
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @returns Array of leads found (from all pipelines)
+ */
+export async function findLeadsByPhone(
+  phone: string,
+  subdomain: string,
+  accessToken: string
+): Promise<AmoCRMLead[]> {
+  try {
+    const response = await amocrmRequest<{ _embedded: { leads: AmoCRMLead[] } }>({
+      subdomain,
+      accessToken,
+      endpoint: 'leads',
+      query: {
+        query: phone,
+        with: 'contacts'
+      }
+    });
+
+    const leads = response._embedded?.leads || [];
+    return leads;
+  } catch (error) {
+    console.error('Error finding leads by phone:', error);
+    return [];
   }
 }
 
