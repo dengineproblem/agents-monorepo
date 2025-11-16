@@ -1768,6 +1768,9 @@ const Profile: React.FC = () => {
         {/* AmoCRM Key Stages Settings Modal */}
         <Dialog open={amocrmKeyStagesModal} onOpenChange={setAmocrmKeyStagesModal}>
           <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader className="sr-only">
+              <DialogTitle>Настройка ключевых этапов воронки AmoCRM</DialogTitle>
+            </DialogHeader>
             {user?.id && (
               <AmoCRMKeyStageSettings
                 userAccountId={user.id}
