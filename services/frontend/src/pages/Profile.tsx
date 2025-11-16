@@ -17,6 +17,7 @@ import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
 import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionCard';
+import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
@@ -154,6 +155,7 @@ const Profile: React.FC = () => {
   const [amocrmConnectModal, setAmocrmConnectModal] = useState(false);
   const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
   const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
+  const [amocrmKeyStagesModal, setAmocrmKeyStagesModal] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -1731,24 +1733,47 @@ const Profile: React.FC = () => {
                   </span>
                 </div>
               </div>
-              
-              <Button 
-                onClick={handleAmoCRMSync} 
-                variant="outline" 
+
+              <Button
+                onClick={() => {
+                  setAmocrmModal(false);
+                  setAmocrmKeyStagesModal(true);
+                }}
+                variant="default"
+                className="w-full"
+              >
+                Настроить ключевые этапы
+              </Button>
+
+              <Button
+                onClick={handleAmoCRMSync}
+                variant="outline"
                 className="w-full"
                 disabled={isSyncingAmocrm}
               >
                 {isSyncingAmocrm ? 'Синхронизация...' : 'Синхронизировать данные вручную'}
               </Button>
-              
-              <Button 
-                onClick={handleAmoCRMDisconnect} 
-                variant="destructive" 
+
+              <Button
+                onClick={handleAmoCRMDisconnect}
+                variant="destructive"
                 className="w-full"
               >
                 Отключить AmoCRM
               </Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* AmoCRM Key Stages Settings Modal */}
+        <Dialog open={amocrmKeyStagesModal} onOpenChange={setAmocrmKeyStagesModal}>
+          <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+            {user?.id && (
+              <AmoCRMKeyStageSettings
+                userAccountId={user.id}
+                onClose={() => setAmocrmKeyStagesModal(false)}
+              />
+            )}
           </DialogContent>
         </Dialog>
       </div>

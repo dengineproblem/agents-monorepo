@@ -60,7 +60,8 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
         {items.map((it) => (
           <Card
             key={it.id}
-            className={`transition-all ${it.disabled ? 'opacity-60' : ''} hover:shadow-md border-muted`}
+            className={`transition-all ${it.disabled ? 'opacity-60' : 'cursor-pointer'} hover:shadow-md border-muted`}
+            onClick={it.disabled ? undefined : it.onClick}
           >
             <CardContent className="p-5 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -92,7 +93,10 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
               <Button
                 variant={it.connected ? "outline" : "default"}
                 size="sm"
-                onClick={it.onClick}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  it.onClick();
+                }}
                 disabled={it.disabled}
                 className="transition-all hover:shadow-sm px-2 sm:px-4"
               >

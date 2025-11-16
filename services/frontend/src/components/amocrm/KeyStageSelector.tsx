@@ -28,7 +28,7 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
   currentStatusId,
   onSave,
 }) => {
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);  // Always initialize as empty array
   const [selectedPipelineId, setSelectedPipelineId] = useState<number | undefined>(
     currentPipelineId ?? undefined
   );
@@ -49,11 +49,22 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
     try {
       setLoading(true);
       setError(null);
+      console.log('[KeyStageSelector] Loading pipelines for userAccountId:', userAccountId);
       const data = await getPipelines(userAccountId);
+      console.log('[KeyStageSelector] Loaded pipelines:', data);
       setPipelines(data);
     } catch (err: any) {
-      console.error('Failed to load pipelines:', err);
-      setError(err.message || 'Не удалось загрузить воронки');
+      console.error('[KeyStageSelector] Failed to load pipelines:', {
+        userAccountId,
+        error: err,
+        message: err.message,
+        stack: err.stack
+      });
+      setError(
+        err.message || 'Не удалось загрузить воронки. Проверьте подключение к AmoCRM или попробуйте на продакшн-сервере.'
+      );
+      // Set empty pipelines array to prevent crashes
+      setPipelines([]);
     } finally {
       setLoading(false);
     }
@@ -99,11 +110,13 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
     setSuccessMessage(null);
   };
 
-  // Get selected pipeline
-  const selectedPipeline = pipelines.find(p => p.pipeline_id === selectedPipelineId);
+  // Get selected pipeline (safe with empty array)
+  const selectedPipeline = Array.isArray(pipelines)
+    ? pipelines.find(p => p.pipeline_id === selectedPipelineId)
+    : undefined;
 
-  // Get selected stage name
-  const selectedStage = selectedPipeline?.stages.find(s => s.status_id === selectedStatusId);
+  // Get selected stage name (safe with undefined pipeline)
+  const selectedStage = selectedPipeline?.stages?.find(s => s.status_id === selectedStatusId);
 
   // Check if values changed
   const hasChanges =
@@ -142,12 +155,13 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
             setSelectedStatusId(undefined); // Reset stage when pipeline changes
             setError(null);
           }}
+          disabled={!Array.isArray(pipelines) || pipelines.length === 0}
         >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Выберите воронку" />
+            <SelectValue placeholder={!Array.isArray(pipelines) || pipelines.length === 0 ? "Нет доступных воронок" : "Выберите воронку"} />
           </SelectTrigger>
           <SelectContent>
-            {pipelines.map((pipeline) => (
+            {Array.isArray(pipelines) && pipelines.map((pipeline) => (
               <SelectItem key={pipeline.pipeline_id} value={pipeline.pipeline_id.toString()}>
                 {pipeline.pipeline_name}
               </SelectItem>
@@ -171,19 +185,20 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
               <SelectValue placeholder="Выберите этап" />
             </SelectTrigger>
             <SelectContent>
-              {selectedPipeline.stages
-                .sort((a, b) => a.sort_order - b.sort_order)
-                .map((stage) => (
-                  <SelectItem key={stage.status_id} value={stage.status_id.toString()}>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-3 h-3 rounded-full"
-                        style={{ backgroundColor: stage.status_color || '#ccc' }}
-                      />
-                      <span>{stage.status_name}</span>
-                    </div>
-                  </SelectItem>
-                ))}
+              {Array.isArray(selectedPipeline?.stages) &&
+                selectedPipeline.stages
+                  .sort((a, b) => a.sort_order - b.sort_order)
+                  .map((stage) => (
+                    <SelectItem key={stage.status_id} value={stage.status_id.toString()}>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: stage.status_color || '#ccc' }}
+                        />
+                        <span>{stage.status_name}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
             </SelectContent>
           </Select>
         </div>
