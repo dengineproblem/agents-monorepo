@@ -174,9 +174,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      return reply.send({
-        pipelines: Array.from(pipelinesMap.values())
-      });
+      return reply.send(Array.from(pipelinesMap.values()));
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching pipelines');
