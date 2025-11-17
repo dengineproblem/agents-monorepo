@@ -14,6 +14,7 @@ import { dialogAnalysisService } from '@/services/dialogAnalysisService';
 import { DialogAnalysis, DialogFilters as DialogFiltersType, FunnelStage } from '@/types/dialogAnalysis';
 import { Plus, Download, RefreshCw, Filter, Moon, Sun, Send, Play } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { useDebounce } from '@/hooks/useDebounce';
 import {
   Tooltip,
   TooltipContent,
@@ -29,6 +30,7 @@ export function WhatsAppCRM() {
   
   // State
   const [filters, setFilters] = useState<DialogFiltersType>({});
+  const [searchInput, setSearchInput] = useState('');
   const [selectedDialog, setSelectedDialog] = useState<DialogAnalysis | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -40,6 +42,17 @@ export function WhatsAppCRM() {
     const saved = localStorage.getItem('theme');
     return saved === 'dark';
   });
+
+  // Debounce search input to avoid too many API calls
+  const debouncedSearch = useDebounce(searchInput, 500);
+
+  // Update filters when debounced search changes
+  useEffect(() => {
+    setFilters(prev => ({
+      ...prev,
+      search: debouncedSearch || undefined
+    }));
+  }, [debouncedSearch]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -209,6 +222,7 @@ export function WhatsAppCRM() {
 
   const handleResetFilters = () => {
     setFilters({});
+    setSearchInput('');
   };
 
 
@@ -337,6 +351,8 @@ export function WhatsAppCRM() {
             <DialogFilters
               filters={filters}
               onFiltersChange={setFilters}
+              searchInput={searchInput}
+              onSearchChange={setSearchInput}
               onReset={handleResetFilters}
             />
           </div>

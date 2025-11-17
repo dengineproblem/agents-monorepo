@@ -7,11 +7,13 @@ import { Search, X } from 'lucide-react';
 interface DialogFiltersProps {
   filters: DialogFiltersType;
   onFiltersChange: (filters: DialogFiltersType) => void;
+  searchInput: string;
+  onSearchChange: (value: string) => void;
   onReset: () => void;
 }
 
-export function DialogFilters({ filters, onFiltersChange, onReset }: DialogFiltersProps) {
-  const hasActiveFilters = filters.interestLevel || filters.funnelStage || filters.search || filters.minScore;
+export function DialogFilters({ filters, onFiltersChange, searchInput, onSearchChange, onReset }: DialogFiltersProps) {
+  const hasActiveFilters = filters.interestLevel || filters.funnelStage || searchInput || filters.minScore;
 
   return (
     <div className="bg-white rounded-lg border p-4 mb-6 space-y-4">
@@ -31,8 +33,8 @@ export function DialogFilters({ filters, onFiltersChange, onReset }: DialogFilte
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           <Input
             placeholder="Поиск по телефону или имени..."
-            value={filters.search || ''}
-            onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
+            value={searchInput}
+            onChange={(e) => onSearchChange(e.target.value)}
             className="pl-9"
           />
         </div>
@@ -101,6 +103,8 @@ export function DialogFilters({ filters, onFiltersChange, onReset }: DialogFilte
     </div>
   );
 }
+
+
 
 
 
