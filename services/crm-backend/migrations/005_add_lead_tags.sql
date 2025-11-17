@@ -17,3 +17,5 @@ COMMENT ON COLUMN dialog_analysis.lead_tags IS
 -- Note: We are keeping business_type, is_medical, is_owner, uses_ads_now for backward compatibility
 -- but they will not be used in the new UI
 
+
+

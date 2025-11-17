@@ -17,3 +17,5 @@ COMMENT ON COLUMN business_profile.key_funnel_stages IS
 CREATE INDEX IF NOT EXISTS idx_business_profile_key_stages 
   ON business_profile USING GIN (key_funnel_stages);
 
+
+
