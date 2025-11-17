@@ -962,7 +962,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
       // Get instance data separately
       const { data: instance, error: instanceError } = await supabase
         .from('whatsapp_instances')
-        .select('instance_name, evolution_url, evolution_api_key')
+        .select('instance_name')
         .eq('instance_name', lead.instance_name)
         .single();
 
@@ -971,9 +971,9 @@ export async function dialogsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'WhatsApp instance not found' });
       }
 
-      // Send message via Evolution API
-      const evolutionUrl = instance.evolution_url || process.env.EVOLUTION_API_URL || 'https://n8n.performanteaiagency.com';
-      const apiKey = instance.evolution_api_key || process.env.EVOLUTION_API_KEY;
+      // Send message via Evolution API - use environment variables
+      const evolutionUrl = process.env.EVOLUTION_API_URL || 'https://n8n.performanteaiagency.com';
+      const apiKey = process.env.EVOLUTION_API_KEY;
 
       const sendMessageUrl = `${evolutionUrl}/message/sendText/${instance.instance_name}`;
       
