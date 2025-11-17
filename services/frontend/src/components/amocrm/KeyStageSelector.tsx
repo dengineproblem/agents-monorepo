@@ -38,6 +38,11 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
   const getInitialKeyStages = (): KeyStageData[] => {
     const stages: KeyStageData[] = [];
 
+    // Safety check: if no direction provided, return empty stage
+    if (!direction) {
+      return [{ pipelineId: undefined, statusId: undefined }];
+    }
+
     // Add stage 1 if configured
     if (direction.key_stage_1_pipeline_id && direction.key_stage_1_status_id) {
       stages.push({
