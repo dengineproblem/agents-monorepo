@@ -675,28 +675,32 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
   });
 
   /**
-   * PATCH /amocrm/directions/:directionId/key-stage
-   * Set key qualification stage for a direction
+   * PATCH /amocrm/directions/:directionId/key-stages
+   * Set up to 3 key qualification stages for a direction
    *
    * Params:
    *   - directionId: UUID of direction
    *
    * Body:
-   *   - pipelineId: number - AmoCRM pipeline ID
-   *   - statusId: number - AmoCRM status ID within that pipeline
+   *   - keyStages: Array of { pipelineId: number, statusId: number } (0-3 items)
+   *     Each item represents a key stage. Can provide 0, 1, 2, or 3 stages.
    *
-   * Returns: { success: boolean, direction: {...} }
+   * Returns: { success: boolean, direction: {...}, stages: [...] }
    */
-  app.patch('/amocrm/directions/:directionId/key-stage', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/amocrm/directions/:directionId/key-stages', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { directionId } = request.params as { directionId: string };
 
-      const KeyStageSchema = z.object({
-        pipelineId: z.number().int().positive(),
-        statusId: z.number().int().positive()
+      const KeyStagesSchema = z.object({
+        keyStages: z.array(
+          z.object({
+            pipelineId: z.number().int().positive(),
+            statusId: z.number().int().positive()
+          })
+        ).max(3, 'Maximum 3 key stages allowed')
       });
 
-      const parsed = KeyStageSchema.safeParse(request.body);
+      const parsed = KeyStagesSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send({
           error: 'validation_error',
@@ -704,9 +708,9 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      const { pipelineId, statusId } = parsed.data;
+      const { keyStages } = parsed.data;
 
-      app.log.info({ directionId, pipelineId, statusId }, 'Setting key stage for direction');
+      app.log.info({ directionId, keyStagesCount: keyStages.length }, 'Setting key stages for direction');
 
       // Verify direction exists
       const { data: direction, error: directionError } = await supabase
@@ -722,47 +726,60 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Verify that this pipeline/status exists in amocrm_pipeline_stages
-      const { data: stage, error: stageError } = await supabase
-        .from('amocrm_pipeline_stages')
-        .select('*')
-        .eq('user_account_id', direction.user_account_id)
-        .eq('pipeline_id', pipelineId)
-        .eq('status_id', statusId)
-        .maybeSingle();
+      // Verify all pipeline/status combinations exist
+      const verifiedStages = [];
+      for (let i = 0; i < keyStages.length; i++) {
+        const { pipelineId, statusId } = keyStages[i];
 
-      if (stageError || !stage) {
-        return reply.code(400).send({
-          error: 'invalid_stage',
-          message: 'Pipeline stage not found. Please sync pipelines first.',
-          hint: 'Call POST /amocrm/sync-pipelines to sync stages from amoCRM'
-        });
+        const { data: stage, error: stageError } = await supabase
+          .from('amocrm_pipeline_stages')
+          .select('*')
+          .eq('user_account_id', direction.user_account_id)
+          .eq('pipeline_id', pipelineId)
+          .eq('status_id', statusId)
+          .maybeSingle();
+
+        if (stageError || !stage) {
+          return reply.code(400).send({
+            error: 'invalid_stage',
+            message: `Key stage ${i + 1}: Pipeline stage not found. Please sync pipelines first.`,
+            hint: 'Call POST /amocrm/sync-pipelines to sync stages from amoCRM'
+          });
+        }
+
+        verifiedStages.push(stage);
       }
 
-      // Update direction with key stage
+      // Build update object with all 3 key stages (null for unused)
+      const updateData: any = {
+        key_stage_1_pipeline_id: keyStages[0]?.pipelineId || null,
+        key_stage_1_status_id: keyStages[0]?.statusId || null,
+        key_stage_2_pipeline_id: keyStages[1]?.pipelineId || null,
+        key_stage_2_status_id: keyStages[1]?.statusId || null,
+        key_stage_3_pipeline_id: keyStages[2]?.pipelineId || null,
+        key_stage_3_status_id: keyStages[2]?.statusId || null,
+        updated_at: new Date().toISOString()
+      };
+
+      // Update direction with key stages
       const { data: updatedDirection, error: updateError } = await supabase
         .from('account_directions')
-        .update({
-          key_stage_pipeline_id: pipelineId,
-          key_stage_status_id: statusId,
-          updated_at: new Date().toISOString()
-        })
+        .update(updateData)
         .eq('id', directionId)
         .select()
         .single();
 
       if (updateError) {
-        app.log.error({ error: updateError }, 'Failed to update direction key stage');
+        app.log.error({ error: updateError }, 'Failed to update direction key stages');
         return reply.code(500).send({
           error: 'update_failed',
           message: updateError.message
         });
       }
 
-      app.log.info({ directionId, pipelineId, statusId }, 'Key stage set successfully');
+      app.log.info({ directionId, keyStagesCount: keyStages.length }, 'Key stages set successfully');
 
-      // Trigger recalculation of reached_key_stage flags for all leads in this direction
-      // This is important when key stage changes - we need to recalculate which leads are qualified
+      // Trigger recalculation of reached_key_stage_N flags for all leads in this direction
       app.log.info({ directionId, userAccountId: direction.user_account_id }, 'Triggering reached_key_stage recalculation');
 
       // Run recalculation asynchronously (don't wait for it)
@@ -782,16 +799,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       return reply.send({
         success: true,
         direction: updatedDirection,
-        stage: {
+        stages: verifiedStages.map((stage, idx) => ({
+          index: idx + 1,
           pipeline_name: stage.pipeline_name,
           status_name: stage.status_name,
           status_color: stage.status_color
-        },
-        message: 'Key stage set successfully. Recalculating qualification flags in background.'
+        })),
+        message: 'Key stages set successfully. Recalculating qualification flags in background.'
       });
 
     } catch (error: any) {
-      app.log.error({ error }, 'Error setting key stage for direction');
+      app.log.error({ error }, 'Error setting key stages for direction');
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -801,7 +819,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
   /**
    * GET /amocrm/directions/:directionId/key-stage-stats
-   * Get qualification statistics for a direction based on its key stage
+   * Get qualification statistics for a direction based on its key stages (up to 3)
    *
    * Params:
    *   - directionId: UUID of direction
@@ -812,10 +830,15 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    *
    * Returns: {
    *   total_leads: number,
-   *   qualified_leads: number,
-   *   qualification_rate: number,
-   *   key_stage: { pipeline_id, status_id, pipeline_name, status_name },
-   *   creative_stats: [{ creative_id, creative_name, total, qualified, rate }]
+   *   key_stages: [
+   *     {
+   *       index: 1|2|3,
+   *       pipeline_id, status_id, pipeline_name, status_name,
+   *       qualified_leads, qualification_rate,
+   *       creative_stats: [{ creative_id, creative_name, total, qualified, rate }]
+   *     },
+   *     ...
+   *   ]
    * }
    */
   app.get('/amocrm/directions/:directionId/key-stage-stats', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -825,10 +848,15 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
       app.log.info({ directionId, dateFrom, dateTo }, 'Getting key stage stats for direction');
 
-      // Get direction with key stage
+      // Get direction with all 3 key stages
       const { data: direction, error: directionError } = await supabase
         .from('account_directions')
-        .select('id, user_account_id, name, key_stage_pipeline_id, key_stage_status_id')
+        .select(`
+          id, user_account_id, name,
+          key_stage_1_pipeline_id, key_stage_1_status_id,
+          key_stage_2_pipeline_id, key_stage_2_status_id,
+          key_stage_3_pipeline_id, key_stage_3_status_id
+        `)
         .eq('id', directionId)
         .maybeSingle();
 
@@ -839,29 +867,10 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Check if key stage is configured
-      if (!direction.key_stage_pipeline_id || !direction.key_stage_status_id) {
-        return reply.code(400).send({
-          error: 'key_stage_not_configured',
-          message: 'Key stage not configured for this direction',
-          hint: 'Use PATCH /amocrm/directions/:directionId/key-stage to configure'
-        });
-      }
-
-      // Get stage info
-      const { data: stage } = await supabase
-        .from('amocrm_pipeline_stages')
-        .select('pipeline_name, status_name, status_color')
-        .eq('user_account_id', direction.user_account_id)
-        .eq('pipeline_id', direction.key_stage_pipeline_id)
-        .eq('status_id', direction.key_stage_status_id)
-        .maybeSingle();
-
       // Build leads query with optional date filter
-      // NOTE: Date filter applies to lead creation date, not qualification date
       let leadsQuery = supabase
         .from('leads')
-        .select('id, creative_id, reached_key_stage, created_at')
+        .select('id, creative_id, reached_key_stage_1, reached_key_stage_2, reached_key_stage_3, created_at')
         .eq('user_account_id', direction.user_account_id)
         .eq('direction_id', directionId);
 
@@ -883,67 +892,93 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       }
 
       const totalLeads = leads?.length || 0;
-      // Use reached_key_stage flag instead of current status
-      // This implements "once qualified, always qualified" logic
-      const qualifiedLeads = leads?.filter(lead => lead.reached_key_stage === true).length || 0;
 
-      const qualificationRate = totalLeads > 0
-        ? Math.round((qualifiedLeads / totalLeads) * 1000) / 10 // Round to 1 decimal
-        : 0;
+      // Process each configured key stage
+      const keyStagesStats = [];
 
-      // Group by creative
-      const creativeStats: Record<string, { total: number; qualified: number }> = {};
+      for (let stageNum = 1; stageNum <= 3; stageNum++) {
+        const pipelineIdKey = `key_stage_${stageNum}_pipeline_id` as keyof typeof direction;
+        const statusIdKey = `key_stage_${stageNum}_status_id` as keyof typeof direction;
+        const pipelineId = direction[pipelineIdKey];
+        const statusId = direction[statusIdKey];
 
-      leads?.forEach(lead => {
-        if (!lead.creative_id) return;
-
-        if (!creativeStats[lead.creative_id]) {
-          creativeStats[lead.creative_id] = { total: 0, qualified: 0 };
+        // Skip if this stage is not configured
+        if (!pipelineId || !statusId) {
+          continue;
         }
 
-        creativeStats[lead.creative_id].total++;
+        // Get stage info from amocrm_pipeline_stages
+        const { data: stageInfo } = await supabase
+          .from('amocrm_pipeline_stages')
+          .select('pipeline_name, status_name, status_color')
+          .eq('user_account_id', direction.user_account_id)
+          .eq('pipeline_id', pipelineId)
+          .eq('status_id', statusId)
+          .maybeSingle();
 
-        // Use reached_key_stage flag instead of current status
-        if (lead.reached_key_stage === true) {
-          creativeStats[lead.creative_id].qualified++;
-        }
-      });
-
-      // Get creative names
-      const creativeIds = Object.keys(creativeStats);
-      const { data: creatives } = await supabase
-        .from('user_creatives')
-        .select('id, name')
-        .in('id', creativeIds);
-
-      const creativeMap = new Map(creatives?.map(c => [c.id, c.name]) || []);
-
-      const creativeStatsList = creativeIds.map(creativeId => {
-        const stats = creativeStats[creativeId];
-        const rate = stats.total > 0
-          ? Math.round((stats.qualified / stats.total) * 1000) / 10
+        // Calculate overall stats for this key stage
+        const reachedFlagKey = `reached_key_stage_${stageNum}` as 'reached_key_stage_1' | 'reached_key_stage_2' | 'reached_key_stage_3';
+        const qualifiedLeads = leads?.filter(lead => lead[reachedFlagKey] === true).length || 0;
+        const qualificationRate = totalLeads > 0
+          ? Math.round((qualifiedLeads / totalLeads) * 1000) / 10
           : 0;
 
-        return {
-          creative_id: creativeId,
-          creative_name: creativeMap.get(creativeId) || 'Unknown',
-          total: stats.total,
-          qualified: stats.qualified,
-          rate
-        };
-      }).sort((a, b) => b.qualified - a.qualified); // Sort by qualified count descending
+        // Group by creative for this key stage
+        const creativeStats: Record<string, { total: number; qualified: number }> = {};
+
+        leads?.forEach(lead => {
+          if (!lead.creative_id) return;
+
+          if (!creativeStats[lead.creative_id]) {
+            creativeStats[lead.creative_id] = { total: 0, qualified: 0 };
+          }
+
+          creativeStats[lead.creative_id].total++;
+
+          if (lead[reachedFlagKey] === true) {
+            creativeStats[lead.creative_id].qualified++;
+          }
+        });
+
+        // Get creative names
+        const creativeIds = Object.keys(creativeStats);
+        const { data: creatives } = await supabase
+          .from('user_creatives')
+          .select('id, name')
+          .in('id', creativeIds);
+
+        const creativeMap = new Map(creatives?.map(c => [c.id, c.name]) || []);
+
+        const creativeStatsList = creativeIds.map(creativeId => {
+          const stats = creativeStats[creativeId];
+          const rate = stats.total > 0
+            ? Math.round((stats.qualified / stats.total) * 1000) / 10
+            : 0;
+
+          return {
+            creative_id: creativeId,
+            creative_name: creativeMap.get(creativeId) || 'Unknown',
+            total: stats.total,
+            qualified: stats.qualified,
+            rate
+          };
+        }).sort((a, b) => b.qualified - a.qualified);
+
+        keyStagesStats.push({
+          index: stageNum,
+          pipeline_id: pipelineId,
+          status_id: statusId,
+          pipeline_name: stageInfo?.pipeline_name || 'Unknown',
+          status_name: stageInfo?.status_name || 'Unknown',
+          qualified_leads: qualifiedLeads,
+          qualification_rate: qualificationRate,
+          creative_stats: creativeStatsList
+        });
+      }
 
       return reply.send({
         total_leads: totalLeads,
-        qualified_leads: qualifiedLeads,
-        qualification_rate: qualificationRate,
-        key_stage: {
-          pipeline_id: direction.key_stage_pipeline_id,
-          status_id: direction.key_stage_status_id,
-          pipeline_name: stage?.pipeline_name || 'Unknown',
-          status_name: stage?.status_name || 'Unknown'
-        },
-        creative_stats: creativeStatsList
+        key_stages: keyStagesStats
       });
 
     } catch (error: any) {
