@@ -598,43 +598,66 @@ export async function processLeadStatusChange(
       isQualified
     }, 'Updated lead status and qualification');
 
-    // 3b. Check if lead reached key stage (once qualified, always qualified)
-    if (!lead.reached_key_stage) {
-      // Only check if not already qualified (performance optimization)
-      const { data: direction } = await supabase
-        .from('account_directions')
-        .select('key_stage_pipeline_id, key_stage_status_id')
-        .eq('id', lead.direction_id)
-        .maybeSingle();
+    // 3b. Check if lead reached any of the 3 key stages (once qualified, always qualified)
+    // Get direction with all 3 key stages
+    const { data: direction } = await supabase
+      .from('account_directions')
+      .select(`
+        key_stage_1_pipeline_id, key_stage_1_status_id,
+        key_stage_2_pipeline_id, key_stage_2_status_id,
+        key_stage_3_pipeline_id, key_stage_3_status_id
+      `)
+      .eq('id', lead.direction_id)
+      .maybeSingle();
 
-      if (direction?.key_stage_pipeline_id && direction?.key_stage_status_id) {
-        // Direction has key stage configured
-        if (
-          direction.key_stage_pipeline_id === newPipelineId &&
-          direction.key_stage_status_id === newStatusId
-        ) {
-          // Lead reached key stage! Set flag permanently
-          const { error: keyStageError } = await supabase
-            .from('leads')
-            .update({
-              reached_key_stage: true,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', lead.id);
+    if (direction) {
+      const updateFlags: Record<string, any> = {};
 
-          if (keyStageError) {
-            app.log.error({
-              error: keyStageError.message,
-              leadId: lead.id
-            }, 'Failed to set reached_key_stage flag - continuing anyway');
-          } else {
-            app.log.info({
-              leadId: lead.id,
-              amocrmLeadId,
-              pipelineId: newPipelineId,
-              statusId: newStatusId
-            }, 'Lead reached key stage - set reached_key_stage flag');
-          }
+      // Check each of the 3 key stages
+      for (let stageNum = 1; stageNum <= 3; stageNum++) {
+        const reachedFlagKey = `reached_key_stage_${stageNum}`;
+        const pipelineIdKey = `key_stage_${stageNum}_pipeline_id`;
+        const statusIdKey = `key_stage_${stageNum}_status_id`;
+
+        // Skip if already reached this stage (performance optimization)
+        if ((lead as any)[reachedFlagKey] === true) {
+          continue;
+        }
+
+        const keyPipelineId = (direction as any)[pipelineIdKey];
+        const keyStatusId = (direction as any)[statusIdKey];
+
+        // Skip if this key stage is not configured
+        if (!keyPipelineId || !keyStatusId) {
+          continue;
+        }
+
+        // Check if lead reached this key stage
+        if (keyPipelineId === newPipelineId && keyStatusId === newStatusId) {
+          updateFlags[reachedFlagKey] = true;
+          app.log.info({
+            leadId: lead.id,
+            amocrmLeadId,
+            stageNum,
+            pipelineId: newPipelineId,
+            statusId: newStatusId
+          }, `Lead reached key stage ${stageNum} - setting flag`);
+        }
+      }
+
+      // Update flags if any changed
+      if (Object.keys(updateFlags).length > 0) {
+        updateFlags.updated_at = new Date().toISOString();
+        const { error: keyStageError } = await supabase
+          .from('leads')
+          .update(updateFlags)
+          .eq('id', lead.id);
+
+        if (keyStageError) {
+          app.log.error({
+            error: keyStageError.message,
+            leadId: lead.id
+          }, 'Failed to set reached_key_stage flags - continuing anyway');
         }
       }
     }

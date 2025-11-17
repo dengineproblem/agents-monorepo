@@ -13,6 +13,13 @@ export interface Direction {
   target_cpl_cents: number;
   is_active: boolean;
   whatsapp_phone_number?: string | null;
+  // AmoCRM key stages (up to 3)
+  key_stage_1_pipeline_id?: number | null;
+  key_stage_1_status_id?: number | null;
+  key_stage_2_pipeline_id?: number | null;
+  key_stage_2_status_id?: number | null;
+  key_stage_3_pipeline_id?: number | null;
+  key_stage_3_status_id?: number | null;
   created_at: string;
   updated_at: string;
 }

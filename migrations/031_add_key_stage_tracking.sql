@@ -31,3 +31,5 @@ CREATE INDEX IF NOT EXISTS idx_dialog_analysis_key_stage_left
 CREATE INDEX IF NOT EXISTS idx_dialog_analysis_funnel_stage_history 
   ON dialog_analysis USING GIN (funnel_stage_history);
 
+
+

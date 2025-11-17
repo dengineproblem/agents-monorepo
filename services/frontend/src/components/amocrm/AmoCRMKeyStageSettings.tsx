@@ -190,8 +190,7 @@ export const AmoCRMKeyStageSettings: React.FC<AmoCRMKeyStageSettingsProps> = ({
                       directionId={direction.id}
                       directionName={direction.name}
                       userAccountId={userAccountId}
-                      currentPipelineId={direction.key_stage_pipeline_id}
-                      currentStatusId={direction.key_stage_status_id}
+                      direction={direction}
                       onSave={() => {
                         // Reload directions to get updated data
                         loadDirections();

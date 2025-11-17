@@ -835,9 +835,12 @@ const Profile: React.FC = () => {
 
   // AmoCRM handlers
   const handleAmoCRMConnect = () => {
+    console.log('[Profile] handleAmoCRMConnect called, amocrmConnected:', amocrmConnected);
     if (amocrmConnected) {
+      console.log('[Profile] Opening management modal');
       setAmocrmModal(true); // Open management modal
     } else {
+      console.log('[Profile] Opening connection modal');
       setAmocrmConnectModal(true); // Open connection modal
     }
   };

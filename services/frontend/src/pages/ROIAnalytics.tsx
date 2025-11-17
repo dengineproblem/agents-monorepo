@@ -48,13 +48,22 @@ const ROIAnalytics: React.FC = () => {
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
   const [selectedCreative, setSelectedCreative] = useState<{ id: string; name: string } | null>(null);
 
-  // Qualification stats state
+  // Qualification stats state - now supports up to 3 key stages
   const [qualificationStats, setQualificationStats] = useState<{
     total_leads: number;
-    qualified_leads: number;
-    qualification_rate: number;
+    key_stages: Array<{
+      index: number;
+      pipeline_name: string;
+      status_name: string;
+      qualified_leads: number;
+      qualification_rate: number;
+      creative_stats: Array<{
+        creative_id: string;
+        rate: number;
+      }>;
+    }>;
   } | null>(null);
-  
+
 
 
   const formatCurrency = (amount: number) => {
@@ -74,6 +83,21 @@ const ROIAnalytics: React.FC = () => {
     return `${percent.toFixed(1)}%`;
   };
 
+  // Получить проценты квалификации по ключевым этапам для креатива
+  const getCreativeKeyStageRates = (creativeId: string): string | null => {
+    if (!qualificationStats || !qualificationStats.key_stages || qualificationStats.key_stages.length === 0) {
+      return null;
+    }
+
+    const rates = qualificationStats.key_stages.map((stage, index) => {
+      const creativeStats = stage.creative_stats.find(cs => cs.creative_id === creativeId);
+      const rate = creativeStats?.rate || 0;
+      return `КЭ${stage.index}: ${rate.toFixed(1)}%`;
+    });
+
+    return rates.join(' | ');
+  };
+
   // Загрузка направлений
   const loadDirections = async (userAccountId: string) => {
     try {
@@ -88,16 +112,12 @@ const ROIAnalytics: React.FC = () => {
     }
   };
 
-  // Загрузка статистики квалификации для выбранного направления
+  // Загрузка статистики квалификации для выбранного направления (до 3 ключевых этапов)
   const loadQualificationStats = async (directionId: string) => {
     try {
       const { getDirectionKeyStageStats } = await import('@/services/amocrmApi');
       const stats = await getDirectionKeyStageStats(directionId);
-      setQualificationStats({
-        total_leads: stats.total_leads,
-        qualified_leads: stats.qualified_leads,
-        qualification_rate: stats.qualification_rate
-      });
+      setQualificationStats(stats);
     } catch (err) {
       console.error('Ошибка загрузки статистики квалификации:', err);
       setQualificationStats(null);
@@ -408,15 +428,22 @@ const ROIAnalytics: React.FC = () => {
                 <div className="p-1.5 rounded-lg bg-muted flex-shrink-0">
                   <Target className="h-4 w-4 text-blue-600 dark:text-blue-500/70" />
                 </div>
-                <p className="text-xs text-muted-foreground leading-tight flex-1">Процент квалов</p>
+                <p className="text-xs text-muted-foreground leading-tight flex-1">Ключевые этапы</p>
               </div>
-              {qualificationStats ? (
-                <div>
-                  <p className="text-lg font-semibold text-blue-600 dark:text-blue-500/70">
-                    {formatPercent(qualificationStats.qualification_rate)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {qualificationStats.qualified_leads} / {qualificationStats.total_leads} лидов
+              {qualificationStats && qualificationStats.key_stages.length > 0 ? (
+                <div className="space-y-1.5">
+                  {qualificationStats.key_stages.map((stage) => (
+                    <div key={stage.index} className="flex justify-between items-center">
+                      <p className="text-xs text-muted-foreground">
+                        КЭ{stage.index}: {stage.status_name}
+                      </p>
+                      <p className="text-sm font-semibold text-blue-600 dark:text-blue-500/70">
+                        {formatPercent(stage.qualification_rate)}
+                      </p>
+                    </div>
+                  ))}
+                  <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-slate-200">
+                    Всего лидов: {qualificationStats.total_leads}
                   </p>
                 </div>
               ) : (
@@ -587,6 +614,14 @@ const ROIAnalytics: React.FC = () => {
                             <span className="font-medium">
                               {((campaign.conversions / campaign.leads) * 100).toFixed(1)}%
                             </span>
+                          </div>
+                        )}
+                        {/* Key stages qualification rates */}
+                        {getCreativeKeyStageRates(campaign.id) && (
+                          <div className="pt-1.5 mt-1.5 border-t border-slate-200">
+                            <div className="text-xs text-blue-700 font-medium">
+                              {getCreativeKeyStageRates(campaign.id)}
+                            </div>
                           </div>
                         )}
                       </div>
