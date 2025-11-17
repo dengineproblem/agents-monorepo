@@ -21,6 +21,7 @@ const GetAnalysisSchema = z.object({
   minScore: z.number().int().min(0).max(100).optional(),
   funnelStage: z.enum(['new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost']).optional(),
   qualificationComplete: z.boolean().optional(),
+  search: z.string().optional(),
 });
 
 const ExportCsvSchema = z.object({
@@ -183,7 +184,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.get('/dialogs/analysis', async (request, reply) => {
     try {
       const query = GetAnalysisSchema.parse(request.query);
-      const { userAccountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
+      const { userAccountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete, search } = query;
 
       // Fetch ALL results using pagination (Supabase has 1000 limit per request)
       const PAGE_SIZE = 1000;
@@ -236,6 +237,16 @@ export async function dialogsRoutes(app: FastifyInstance) {
         } else {
           hasMore = false;
         }
+      }
+
+      // Apply search filter (client-side) if provided
+      if (search) {
+        const searchLower = search.toLowerCase();
+        allData = allData.filter(lead => {
+          const phoneMatch = lead.contact_phone?.toLowerCase().includes(searchLower);
+          const nameMatch = lead.contact_name?.toLowerCase().includes(searchLower);
+          return phoneMatch || nameMatch;
+        });
       }
 
       return reply.send({
@@ -927,10 +938,10 @@ export async function dialogsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'message field is required' });
       }
 
-      // Get lead and instance data
+      // Get lead data (without join)
       const { data: lead, error: leadError } = await supabase
         .from('dialog_analysis')
-        .select('*, whatsapp_instances(instance_name, evolution_url, evolution_api_key)')
+        .select('*')
         .eq('id', id)
         .single();
 
@@ -948,8 +959,15 @@ export async function dialogsRoutes(app: FastifyInstance) {
         return reply.status(403).send({ error: 'Access denied' });
       }
 
-      const instance = (lead as any).whatsapp_instances;
-      if (!instance) {
+      // Get instance data separately
+      const { data: instance, error: instanceError } = await supabase
+        .from('whatsapp_instances')
+        .select('instance_name, evolution_url, evolution_api_key')
+        .eq('instance_name', lead.instance_name)
+        .single();
+
+      if (instanceError || !instance) {
+        app.log.error({ instanceError, instance_name: lead.instance_name }, 'Error fetching WhatsApp instance');
         return reply.status(400).send({ error: 'WhatsApp instance not found' });
       }
 
