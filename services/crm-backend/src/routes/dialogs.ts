@@ -973,7 +973,12 @@ export async function dialogsRoutes(app: FastifyInstance) {
 
       // Send message via Evolution API - use environment variables
       const evolutionUrl = process.env.EVOLUTION_API_URL || 'https://n8n.performanteaiagency.com';
-      const apiKey = process.env.EVOLUTION_API_KEY;
+      const apiKey = process.env.EVOLUTION_API_KEY || '';
+
+      if (!apiKey) {
+        app.log.error('EVOLUTION_API_KEY not configured');
+        return reply.status(500).send({ error: 'Evolution API not configured' });
+      }
 
       const sendMessageUrl = `${evolutionUrl}/message/sendText/${instance.instance_name}`;
       
