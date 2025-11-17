@@ -86,6 +86,11 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
     loadPipelines();
   }, [userAccountId]);
 
+  // Update keyStages when direction changes (e.g., after save)
+  useEffect(() => {
+    setKeyStages(getInitialKeyStages());
+  }, [direction]);
+
   const loadPipelines = async () => {
     try {
       setLoading(true);
