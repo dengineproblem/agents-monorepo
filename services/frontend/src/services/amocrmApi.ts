@@ -29,17 +29,13 @@ export interface SyncResult {
 }
 
 export interface KeyStage {
+  index: number; // 1, 2, or 3
   pipeline_id: number;
   status_id: number;
   pipeline_name: string;
   status_name: string;
-}
-
-export interface KeyStageStats {
-  total_leads: number;
   qualified_leads: number;
   qualification_rate: number;
-  key_stage: KeyStage;
   creative_stats: Array<{
     creative_id: string;
     creative_name: string;
@@ -47,6 +43,11 @@ export interface KeyStageStats {
     qualified: number;
     rate: number;
   }>;
+}
+
+export interface KeyStageStats {
+  total_leads: number;
+  key_stages: KeyStage[]; // Up to 3 key stages
 }
 
 export interface Pipeline {
@@ -161,35 +162,32 @@ export async function getPipelines(userAccountId: string): Promise<Pipeline[]> {
 }
 
 /**
- * Set key qualification stage for a direction
+ * Set up to 3 key qualification stages for a direction
  *
  * @param directionId - Direction UUID
- * @param pipelineId - AmoCRM pipeline ID
- * @param statusId - AmoCRM status ID
+ * @param keyStages - Array of { pipelineId, statusId } (0-3 items)
  * @returns Updated direction
  */
-export async function setDirectionKeyStage(
+export async function setDirectionKeyStages(
   directionId: string,
-  pipelineId: number,
-  statusId: number
-): Promise<{ success: boolean; direction: any; stage: any }> {
+  keyStages: Array<{ pipelineId: number; statusId: number }>
+): Promise<{ success: boolean; direction: any; stages: any[] }> {
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/directions/${directionId}/key-stage`,
+    `${API_BASE_URL}/amocrm/directions/${directionId}/key-stages`,
     {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        pipelineId,
-        statusId,
+        keyStages,
       }),
     }
   );
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.message || 'Failed to set key stage');
+    throw new Error(error.message || 'Failed to set key stages');
   }
 
   return response.json();
