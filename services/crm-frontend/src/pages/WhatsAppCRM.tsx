@@ -350,7 +350,28 @@ export function WhatsAppCRM() {
           </div>
         ) : (
           <KanbanBoard
-            leads={leads}
+            leads={leads.filter(lead => {
+              // Search filter
+              if (filters.search) {
+                const searchLower = filters.search.toLowerCase();
+                const matchesPhone = lead.contact_phone?.toLowerCase().includes(searchLower);
+                const matchesName = lead.contact_name?.toLowerCase().includes(searchLower);
+                if (!matchesPhone && !matchesName) return false;
+              }
+              // Interest level filter
+              if (filters.interestLevel && lead.interest_level !== filters.interestLevel) {
+                return false;
+              }
+              // Funnel stage filter
+              if (filters.funnelStage && lead.funnel_stage !== filters.funnelStage) {
+                return false;
+              }
+              // Min score filter
+              if (filters.minScore !== undefined && (lead.score || 0) < filters.minScore) {
+                return false;
+              }
+              return true;
+            })}
             onMoveCard={handleMoveCard}
             onCardClick={handleCardClick}
             onDelete={handleDeleteLead}

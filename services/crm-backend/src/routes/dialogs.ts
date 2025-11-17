@@ -930,11 +930,17 @@ export async function dialogsRoutes(app: FastifyInstance) {
       // Get lead and instance data
       const { data: lead, error: leadError } = await supabase
         .from('dialog_analysis')
-        .select('*, whatsapp_instances!inner(instance_name, evolution_url, evolution_api_key)')
+        .select('*, whatsapp_instances(instance_name, evolution_url, evolution_api_key)')
         .eq('id', id)
         .single();
 
-      if (leadError || !lead) {
+      if (leadError) {
+        app.log.error({ leadError, id }, 'Error fetching lead');
+        return reply.status(404).send({ error: 'Lead not found', details: leadError.message });
+      }
+
+      if (!lead) {
+        app.log.error({ id }, 'Lead not found in database');
         return reply.status(404).send({ error: 'Lead not found' });
       }
 
