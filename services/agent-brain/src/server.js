@@ -559,7 +559,11 @@ function computeLeadsFromActions(stat) {
       siteLeads = sumInt(siteLeads, v);
     }
   }
-  const leads = messagingLeads + siteLeads + formLeads;
+  // ВАЖНО: Считаем только messagingLeads + siteLeads (БЕЗ formLeads)
+  // потому что offsite_conversion.fb_pixel_lead и lead - это ОДНИ И ТЕ ЖЕ лиды!
+  // Facebook возвращает пиксельные лиды как offsite_conversion.fb_pixel_lead,
+  // а также дублирует их в action_type "lead"
+  const leads = messagingLeads + siteLeads;
   return { messagingLeads, qualityLeads, siteLeads, formLeads, leads };
 }
 
@@ -603,18 +607,51 @@ function median(values) {
 
 function indexByCampaign(rows) {
   const map = new Map();
+  const duplicates = [];
+
+  // Логируем сколько строк получили от Facebook
+  if (rows && rows.length > 0) {
+    const uniqueCampaigns = new Set(rows.map(r => r.campaign_id).filter(Boolean));
+    if (rows.length > uniqueCampaigns.size) {
+      console.warn(`[indexByCampaign] Facebook вернул ${rows.length} строк для ${uniqueCampaigns.size} уникальных кампаний - есть дубликаты!`);
+    }
+  }
+
   for (const r of rows || []) {
     const id = r.campaign_id;
     if (!id) continue;
-    const prev = map.get(id) || { spend:0, impressions:0, ctr:0, cpm:0, frequency:0, actions:[] };
-    prev.spend = sumInt(prev.spend, Number(r.spend)||0);
-    prev.impressions = sumInt(prev.impressions, Number(r.impressions)||0);
-    prev.ctr = r.ctr !== undefined ? Number(r.ctr)||0 : prev.ctr;
-    prev.cpm = r.cpm !== undefined ? Number(r.cpm)||0 : prev.cpm;
-    prev.frequency = r.frequency !== undefined ? Number(r.frequency)||0 : prev.frequency;
+
+    // Если кампания уже есть в map, значит Facebook вернул несколько строк для одной кампании
+    // Это происходит при некоторых комбинациях параметров запроса
+    // КРИТИЧНО: НЕ суммируем данные, берем ТОЛЬКО первую строку!
+    if (map.has(id)) {
+      duplicates.push({
+        campaign_id: id,
+        campaign_name: r.campaign_name,
+        spend: Number(r.spend)||0,
+        leads: computeLeadsFromActions(r).leads || 0
+      });
+      continue;
+    }
+
+    const prev = { spend:0, impressions:0, ctr:0, cpm:0, frequency:0, actions:[] };
+    prev.spend = Number(r.spend)||0;
+    prev.impressions = Number(r.impressions)||0;
+    prev.ctr = r.ctr !== undefined ? Number(r.ctr)||0 : 0;
+    prev.cpm = r.cpm !== undefined ? Number(r.cpm)||0 : 0;
+    prev.frequency = r.frequency !== undefined ? Number(r.frequency)||0 : 0;
     if (Array.isArray(r.actions)) prev.actions = r.actions;
     map.set(id, prev);
   }
+
+  if (duplicates.length > 0) {
+    console.warn(`[indexByCampaign] КРИТИЧНО! Пропущено ${duplicates.length} дубликатов кампаний:`);
+    duplicates.forEach(d => {
+      console.warn(`  - ${d.campaign_name} (${d.campaign_id}): spend=${d.spend}, leads=${d.leads}`);
+    });
+    console.warn(`[indexByCampaign] Это могло завышать количество лидов в отчете!`);
+  }
+
   return map;
 }
 
@@ -2239,10 +2276,61 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const classes = { very_good:25, good:5, neutral_low:-5, bad:-25 };
     const bounds = { minCents: 300, maxCents: 10000 };
     // Загружаем настройки из Supabase или используем дефолты
-    const targets = { 
+    const targets = {
       cpl_cents: ua.default_cpl_target_cents || 200,
       daily_budget_cents: ua.plan_daily_budget_cents || 2000
     };
+
+    // ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ: что приходит от Facebook API для yesterday
+    console.log('\n=== [BRAIN DEBUG] Facebook API Response для YESTERDAY ===');
+    console.log(`Количество строк от Facebook (campY.length): ${campY.length}`);
+    if (campY.length > 0) {
+      const campaignGroups = new Map();
+      campY.forEach(row => {
+        const id = row.campaign_id;
+        if (!campaignGroups.has(id)) {
+          campaignGroups.set(id, []);
+        }
+        campaignGroups.get(id).push(row);
+      });
+
+      console.log(`Уникальных кампаний: ${campaignGroups.size}`);
+      console.log('\n--- Детали по каждой кампании ---');
+
+      campaignGroups.forEach((rows, campaign_id) => {
+        console.log(`\nКампания: ${rows[0].campaign_name} (${campaign_id})`);
+        console.log(`  Facebook вернул ${rows.length} строк для этой кампании`);
+
+        if (rows.length > 1) {
+          console.warn('  ⚠️  ДУБЛИКАТЫ! Facebook вернул несколько строк:');
+        }
+
+        rows.forEach((row, idx) => {
+          const leads = computeLeadsFromActions(row);
+          console.log(`  Строка ${idx + 1}:`);
+          console.log(`    - spend: ${row.spend}`);
+          console.log(`    - impressions: ${row.impressions}`);
+          console.log(`    - leads: ${leads.leads} (messaging: ${leads.messagingLeads}, site: ${leads.siteLeads}, form: ${leads.formLeads})`);
+          console.log(`    - actions: ${JSON.stringify(row.actions || [])}`);
+        });
+
+        // Показываем что будет использовано
+        const firstRow = rows[0];
+        const firstLeads = computeLeadsFromActions(firstRow);
+        console.log(`  ✅ Будет использовано (первая строка):`);
+        console.log(`    - spend: ${firstRow.spend}, leads: ${firstLeads.leads}`);
+
+        if (rows.length > 1) {
+          console.warn(`  ❌ Будет ПРОПУЩЕНО (${rows.length - 1} дубликатов):`);
+          rows.slice(1).forEach((row, idx) => {
+            const skippedLeads = computeLeadsFromActions(row);
+            console.warn(`    - Строка ${idx + 2}: spend=${row.spend}, leads=${skippedLeads.leads}`);
+          });
+        }
+      });
+
+      console.log('\n=== [BRAIN DEBUG] Конец детального лога ===\n');
+    }
 
     const byCY = indexByCampaign(campY);
     const byC3 = indexByCampaign(camp3);
@@ -2636,6 +2724,22 @@ fastify.post('/api/brain/run', async (request, reply) => {
           const spend = campaignsWithResults.reduce((s,{y})=> s + (Number(y.spend)||0), 0);
           const leads = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).leads||0), 0);
           const ql = campaignsWithResults.reduce((s,{y})=> s + (computeLeadsFromActions(y).qualityLeads||0), 0);
+
+          // ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ: что попадает в отчет
+          console.log('\n=== [BRAIN DEBUG] Данные для отчета (yesterday_totals) ===');
+          console.log(`Кампаний с результатами: ${campaignsWithResults.length}`);
+          campaignsWithResults.forEach(({c, y}) => {
+            const campaignLeads = computeLeadsFromActions(y);
+            console.log(`  - ${c.name} (${c.id}):`);
+            console.log(`      spend: ${Number(y.spend)||0}`);
+            console.log(`      leads: ${campaignLeads.leads} (messaging: ${campaignLeads.messagingLeads}, site: ${campaignLeads.siteLeads}, form: ${campaignLeads.formLeads})`);
+          });
+          console.log(`\n  ИТОГО в отчете:`);
+          console.log(`    - total spend: ${spend.toFixed(2)}`);
+          console.log(`    - total leads: ${leads}`);
+          console.log(`    - quality leads: ${ql}`);
+          console.log('=== [BRAIN DEBUG] Конец лога отчета ===\n');
+
           return {
             spend_usd: spend.toFixed(2),
             leads_total: leads,
