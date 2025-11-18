@@ -89,7 +89,7 @@ const ROIAnalytics: React.FC = () => {
       return null;
     }
 
-    const rates = qualificationStats.key_stages.map((stage, index) => {
+    const rates = qualificationStats.key_stages.map((stage) => {
       const creativeStats = stage.creative_stats.find(cs => cs.creative_id === creativeId);
       const rate = creativeStats?.rate || 0;
       return `КЭ${stage.index}: ${rate.toFixed(1)}%`;
@@ -117,10 +117,56 @@ const ROIAnalytics: React.FC = () => {
     try {
       const { getDirectionKeyStageStats } = await import('@/services/amocrmApi');
       const stats = await getDirectionKeyStageStats(directionId);
+      console.log('📊 Loaded qualification stats:', stats);
       setQualificationStats(stats);
     } catch (err) {
       console.error('Ошибка загрузки статистики квалификации:', err);
-      setQualificationStats(null);
+      
+      // На локалхосте без AmoCRM показываем нули для проверки интерфейса
+      const direction = directions.find(d => d.id === directionId);
+      if (direction) {
+        const mockStats: typeof qualificationStats = {
+          total_leads: 0,
+          key_stages: []
+        };
+
+        // Добавляем mock этапы для каждого настроенного ключевого этапа
+        if (direction.key_stage_1_pipeline_id && direction.key_stage_1_status_id) {
+          mockStats.key_stages.push({
+            index: 1,
+            pipeline_name: 'Воронка 1',
+            status_name: 'Этап 1',
+            qualified_leads: 0,
+            qualification_rate: 0,
+            creative_stats: []
+          });
+        }
+        if (direction.key_stage_2_pipeline_id && direction.key_stage_2_status_id) {
+          mockStats.key_stages.push({
+            index: 2,
+            pipeline_name: 'Воронка 2',
+            status_name: 'Этап 2',
+            qualified_leads: 0,
+            qualification_rate: 0,
+            creative_stats: []
+          });
+        }
+        if (direction.key_stage_3_pipeline_id && direction.key_stage_3_status_id) {
+          mockStats.key_stages.push({
+            index: 3,
+            pipeline_name: 'Воронка 3',
+            status_name: 'Этап 3',
+            qualified_leads: 0,
+            qualification_rate: 0,
+            creative_stats: []
+          });
+        }
+
+        console.log('🧪 Using mock stats for local development:', mockStats);
+        setQualificationStats(mockStats);
+      } else {
+        setQualificationStats(null);
+      }
     }
   };
 
@@ -186,12 +232,27 @@ const ROIAnalytics: React.FC = () => {
     if (userAccountId) {
       loadROIData();
 
-      // Load qualification stats only if direction is selected and has key stage configured
+      // Load qualification stats only if direction is selected and has at least one key stage configured
       if (selectedDirectionId) {
         const direction = directions.find(d => d.id === selectedDirectionId);
-        if (direction?.key_stage_pipeline_id && direction?.key_stage_status_id) {
+        console.log('🔍 Direction found:', direction);
+        console.log('🔍 Key stages:', {
+          stage1: { pipeline: direction?.key_stage_1_pipeline_id, status: direction?.key_stage_1_status_id },
+          stage2: { pipeline: direction?.key_stage_2_pipeline_id, status: direction?.key_stage_2_status_id },
+          stage3: { pipeline: direction?.key_stage_3_pipeline_id, status: direction?.key_stage_3_status_id }
+        });
+
+        const hasKeyStage = (
+          (direction?.key_stage_1_pipeline_id && direction?.key_stage_1_status_id) ||
+          (direction?.key_stage_2_pipeline_id && direction?.key_stage_2_status_id) ||
+          (direction?.key_stage_3_pipeline_id && direction?.key_stage_3_status_id)
+        );
+
+        if (hasKeyStage) {
+          console.log('✅ Has key stages, loading stats for direction:', selectedDirectionId);
           loadQualificationStats(selectedDirectionId);
         } else {
+          console.log('⚠️ No key stages configured for direction:', selectedDirectionId);
           setQualificationStats(null);
         }
       } else {
@@ -433,13 +494,23 @@ const ROIAnalytics: React.FC = () => {
               {qualificationStats && qualificationStats.key_stages.length > 0 ? (
                 <div className="space-y-1.5">
                   {qualificationStats.key_stages.map((stage) => (
-                    <div key={stage.index} className="flex justify-between items-center">
-                      <p className="text-xs text-muted-foreground">
-                        КЭ{stage.index}: {stage.status_name}
-                      </p>
-                      <p className="text-sm font-semibold text-blue-600 dark:text-blue-500/70">
-                        {formatPercent(stage.qualification_rate)}
-                      </p>
+                    <div key={stage.index} className="space-y-0.5">
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-muted-foreground">
+                          КЭ{stage.index}: {stage.status_name}
+                        </p>
+                        <p className="text-sm font-semibold text-blue-600 dark:text-blue-500/70">
+                          {formatPercent(stage.qualification_rate)}
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-muted-foreground/80">
+                          Лидов на этапе:
+                        </p>
+                        <p className="text-xs font-medium text-blue-600 dark:text-blue-500/70">
+                          {stage.qualified_leads} из {qualificationStats.total_leads}
+                        </p>
+                      </div>
                     </div>
                   ))}
                   <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-slate-200">
@@ -479,6 +550,9 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Лиды</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсии</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсия %</th>
+                            {qualificationStats && qualificationStats.key_stages.length > 0 && (
+                              <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ключевые этапы</th>
+                            )}
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Воронка</th>
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ссылка</th>
                           </tr>
@@ -510,11 +584,18 @@ const ROIAnalytics: React.FC = () => {
                                 {formatNumber(campaign.conversions)}
                               </td>
                               <td className="py-2 px-3 text-right text-sm">
-                                {campaign.leads > 0 ? 
-                                  `${((campaign.conversions / campaign.leads) * 100).toFixed(1)}%` 
+                                {campaign.leads > 0 ?
+                                  `${((campaign.conversions / campaign.leads) * 100).toFixed(1)}%`
                                   : '0%'
                                 }
                               </td>
+                              {qualificationStats && qualificationStats.key_stages.length > 0 && (
+                                <td className="py-2 px-3 text-center">
+                                  <div className="text-xs text-blue-700 dark:text-blue-400 font-medium whitespace-nowrap">
+                                    {getCreativeKeyStageRates(campaign.id)}
+                                  </div>
+                                </td>
+                              )}
                               <td className="py-2 px-3 text-center">
                                 <button
                                   onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
@@ -617,9 +698,9 @@ const ROIAnalytics: React.FC = () => {
                           </div>
                         )}
                         {/* Key stages qualification rates */}
-                        {getCreativeKeyStageRates(campaign.id) && (
+                        {qualificationStats && qualificationStats.key_stages.length > 0 && (
                           <div className="pt-1.5 mt-1.5 border-t border-slate-200">
-                            <div className="text-xs text-blue-700 font-medium">
+                            <div className="text-xs text-blue-700 dark:text-blue-400 font-medium">
                               {getCreativeKeyStageRates(campaign.id)}
                             </div>
                           </div>

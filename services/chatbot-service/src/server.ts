@@ -9,6 +9,7 @@ import { campaignRoutes } from './routes/campaign.js';
 import { startReactivationCron } from './cron/reactivationCron.js';
 import { startCampaignCron } from './cron/campaignCron.js';
 import { startKeyStageTransitionCron } from './cron/keyStageTransitionCron.js';
+import { startLeadSnapshotCron } from './cron/leadSnapshotCron.js';
 import { startReactivationWorker } from './workers/reactivationWorker.js';
 import { startCampaignWorker } from './workers/campaignWorker.js';
 import pino from 'pino';
@@ -81,6 +82,7 @@ app.post('/process-message', async (request, reply) => {
     // Динамический импорт для избежания циркулярных зависимостей
     const { collectMessages, shouldBotRespond } = await import('./lib/chatbotEngine.js');
     const { supabase } = await import('./lib/supabase.js');
+    const { markCampaignReply } = await import('./lib/campaignAnalytics.js');
 
     // Получить информацию о лиде
     const { data: lead } = await supabase
@@ -94,6 +96,9 @@ app.post('/process-message', async (request, reply) => {
       app.log.debug({ contactPhone, instanceName }, 'Lead not found for bot response');
       return reply.send({ success: false, reason: 'lead_not_found' });
     }
+
+    // Mark reply on campaign message if applicable
+    await markCampaignReply(lead.id);
 
     // Проверить, должен ли бот ответить
     if (!shouldBotRespond(lead)) {
@@ -123,6 +128,10 @@ startCampaignCron();
 // Запускаем cron для автоматического перехода с ключевых этапов (ежедневно в 3:00)
 // @ts-ignore
 startKeyStageTransitionCron();
+
+// Запускаем cron для ежедневных снимков лидов (ежедневно в 23:55)
+// @ts-ignore
+startLeadSnapshotCron();
 
 // Запускаем worker для отправки реанимационных сообщений (каждую минуту)
 // @ts-ignore - Type mismatch between fastify and pino logger

@@ -70,6 +70,13 @@ async function sendMessageBatch(messages: any[]): Promise<void> {
         continue;
       }
 
+      // Get lead analytics data before sending
+      const { data: leadAnalytics } = await supabase
+        .from('dialog_analysis')
+        .select('interest_level, funnel_stage, score')
+        .eq('id', msg.lead_id)
+        .single();
+
       // Send message
       const result = await sendWhatsAppMessageWithRetry({
         instanceName: lead.instance_name,
@@ -84,6 +91,10 @@ async function sendMessageBatch(messages: any[]): Promise<void> {
           .update({
             status: 'sent',
             sent_at: new Date().toISOString(),
+            // Save analytics data at send time
+            interest_level_at_send: leadAnalytics?.interest_level || null,
+            funnel_stage_at_send: leadAnalytics?.funnel_stage || null,
+            score_at_send: leadAnalytics?.score || null,
           })
           .eq('id', msg.id);
 
@@ -127,6 +138,7 @@ async function sendMessageBatch(messages: any[]): Promise<void> {
 /**
  * Campaign worker - runs every 5 minutes
  * Sends messages in slots with randomization
+ * Handles both autopilot and manual send requests
  */
 export function startCampaignWorker() {
   // Run every 5 minutes
@@ -134,16 +146,38 @@ export function startCampaignWorker() {
     try {
       log.info('Campaign worker tick - checking for messages to send');
 
-      // Get all users with autopilot enabled
-      const { data: users, error } = await supabase
+      // Get all users with autopilot enabled OR with manual send requests
+      const { data: autopilotUsers, error: autopilotError } = await supabase
         .from('campaign_settings')
         .select('user_account_id')
         .eq('autopilot_enabled', true);
 
-      if (error || !users || users.length === 0) {
-        log.info('No users with autopilot enabled');
+      // Get users with manual send requests
+      const { data: manualSendMessages } = await supabase
+        .from('campaign_messages')
+        .select('user_account_id')
+        .in('status', ['pending', 'scheduled'])
+        .not('manual_send_requested_at', 'is', null)
+        .limit(100);
+
+      // Combine and deduplicate users
+      const userAccountIds = new Set<string>();
+      
+      if (autopilotUsers) {
+        autopilotUsers.forEach(u => userAccountIds.add(u.user_account_id));
+      }
+      
+      if (manualSendMessages) {
+        manualSendMessages.forEach(m => userAccountIds.add(m.user_account_id));
+      }
+
+      if (userAccountIds.size === 0) {
+        log.info('No users with autopilot enabled or manual send requests');
         return;
       }
+
+      const users = Array.from(userAccountIds).map(id => ({ user_account_id: id }));
+      log.info({ usersCount: users.length }, 'Processing users');
 
       for (const user of users) {
         try {

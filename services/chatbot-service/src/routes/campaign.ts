@@ -4,6 +4,12 @@ import { supabase } from '../lib/supabase.js';
 import { generateDailyCampaignQueue, previewCampaignQueue } from '../lib/campaignScoringAgent.js';
 import { generateBatchMessages } from '../lib/messageGenerator.js';
 import { sendWhatsAppMessageWithRetry, checkInstanceStatus } from '../lib/evolutionApi.js';
+import { 
+  checkExistingQueue, 
+  determineSchedule, 
+  decideQueueAction,
+  markForManualSend 
+} from '../lib/manualSendScheduler.js';
 
 // Validation schemas
 const GenerateQueueSchema = z.object({
@@ -30,16 +36,65 @@ export async function campaignRoutes(app: FastifyInstance) {
   /**
    * POST /campaign/generate-queue
    * Generate daily campaign queue with AI-personalized messages
+   * Supports 'action' parameter: 'replace' | 'merge' | undefined (auto-decide)
    */
   app.post('/campaign/generate-queue', async (request, reply) => {
     try {
-      const body = GenerateQueueSchema.parse(request.body);
-      const { userAccountId } = body;
+      const body = request.body as { 
+        userAccountId: string; 
+        action?: 'replace' | 'merge' 
+      };
+      const { userAccountId, action } = body;
 
-      app.log.info({ userAccountId }, 'Starting campaign queue generation');
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      app.log.info({ userAccountId, action }, 'Starting campaign queue generation');
+
+      // Check for existing queue
+      const existingQueue = await checkExistingQueue(userAccountId);
+      
+      if (existingQueue && !action) {
+        // Queue exists and no action specified - return info for user decision
+        const recommendedAction = decideQueueAction(existingQueue);
+        
+        if (recommendedAction === 'ask') {
+          return reply.send({
+            needsDecision: true,
+            existingQueue: {
+              count: existingQueue.count,
+              createdAt: existingQueue.createdAt,
+              hasSentMessages: existingQueue.hasSentMessages,
+            },
+            recommendedAction: 'replace',
+          });
+        }
+        
+        // Auto-decide: replace or merge
+        app.log.info({ recommendedAction }, 'Auto-deciding queue action');
+        
+        if (recommendedAction === 'replace') {
+          // Delete existing queue
+          await supabase
+            .from('campaign_messages')
+            .delete()
+            .eq('user_account_id', userAccountId)
+            .in('status', ['pending', 'scheduled']);
+        }
+        // If 'merge', we'll filter duplicates below
+      } else if (existingQueue && action === 'replace') {
+        // User explicitly chose to replace
+        app.log.info('Replacing existing queue');
+        await supabase
+          .from('campaign_messages')
+          .delete()
+          .eq('user_account_id', userAccountId)
+          .in('status', ['pending', 'scheduled']);
+      }
 
       // 1. Generate queue using scoring agent
-      const queue = await generateDailyCampaignQueue(userAccountId);
+      let queue = await generateDailyCampaignQueue(userAccountId);
 
       if (queue.length === 0) {
         return reply.send({
@@ -49,17 +104,40 @@ export async function campaignRoutes(app: FastifyInstance) {
         });
       }
 
+      // 2. If merging, filter out leads already in queue
+      if (existingQueue && (action === 'merge' || decideQueueAction(existingQueue) === 'merge')) {
+        const existingLeadIds = new Set(existingQueue.leadIds);
+        const originalCount = queue.length;
+        queue = queue.filter(lead => !existingLeadIds.has(lead.id));
+        
+        app.log.info({ 
+          originalCount, 
+          filteredCount: queue.length, 
+          duplicatesRemoved: originalCount - queue.length 
+        }, 'Filtered duplicate leads for merge');
+
+        if (queue.length === 0) {
+          return reply.send({
+            success: true,
+            message: 'All leads already in queue',
+            queueSize: existingQueue.count,
+            merged: true,
+          });
+        }
+      }
+
       app.log.info({ userAccountId, queueSize: queue.length }, 'Queue generated, generating messages');
 
-      // 2. Generate AI messages for each lead
+      // 3. Generate AI messages for each lead
       const messages = await generateBatchMessages(queue, userAccountId);
 
-      // 3. Save messages to campaign_messages table
+      // 4. Save new messages to campaign_messages table
       const campaignMessages = Array.from(messages.entries()).map(([leadId, msg]) => ({
         user_account_id: userAccountId,
         lead_id: leadId,
         message_text: msg.message,
         message_type: msg.type,
+        strategy_type: msg.strategyType,
         status: 'pending',
         scheduled_at: new Date().toISOString(),
       }));
@@ -102,6 +180,43 @@ export async function campaignRoutes(app: FastifyInstance) {
       return reply.status(500).send({ 
         error: 'Failed to generate queue', 
         message: error.message 
+      });
+    }
+  });
+
+  /**
+   * POST /campaign/clear-queue
+   * Clear pending messages from queue
+   */
+  app.post('/campaign/clear-queue', async (request, reply) => {
+    try {
+      const { userAccountId } = request.body as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      const { error, count } = await supabase
+        .from('campaign_messages')
+        .delete({ count: 'exact' })
+        .eq('user_account_id', userAccountId)
+        .eq('status', 'pending');
+
+      if (error) {
+        throw error;
+      }
+
+      app.log.info({ userAccountId, deletedCount: count }, 'Cleared pending queue');
+
+      return reply.send({
+        success: true,
+        deletedCount: count || 0,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to clear queue');
+      return reply.status(500).send({
+        error: 'Failed to clear queue',
+        message: error.message,
       });
     }
   });
@@ -461,6 +576,251 @@ export async function campaignRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /campaign/analytics/overview
+   * Get overview analytics
+   */
+  app.get('/campaign/analytics/overview', async (request, reply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      // Get total sent messages
+      const { data: sentMessages } = await supabase
+        .from('campaign_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_account_id', userAccountId)
+        .eq('status', 'sent');
+
+      const totalSent = sentMessages || 0;
+
+      // Call SQL functions for metrics
+      const { data: replyRateData } = await supabase.rpc('calculate_reply_rate', {
+        p_user_account_id: userAccountId,
+      });
+
+      const { data: conversionRateData } = await supabase.rpc('calculate_conversion_rate', {
+        p_user_account_id: userAccountId,
+      });
+
+      const { data: avgTimeToReplyData } = await supabase.rpc('get_avg_time_to_reply', {
+        p_user_account_id: userAccountId,
+      });
+
+      const { data: avgTimeToActionData } = await supabase.rpc('get_avg_time_to_action', {
+        p_user_account_id: userAccountId,
+      });
+
+      return reply.send({
+        totalSent,
+        replyRate: replyRateData || 0,
+        conversionRate: conversionRateData || 0,
+        avgTimeToReply: avgTimeToReplyData || 0,
+        avgTimeToAction: avgTimeToActionData || 0,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to get analytics overview');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /campaign/analytics/by-strategy
+   * Get effectiveness by strategy type
+   */
+  app.get('/campaign/analytics/by-strategy', async (request, reply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      // Aggregate by strategy_type
+      const { data: strategies, error } = await supabase
+        .from('campaign_messages')
+        .select('strategy_type, lead_id, has_reply, led_to_target_action')
+        .eq('user_account_id', userAccountId)
+        .eq('status', 'sent')
+        .not('strategy_type', 'is', null);
+
+      if (error) throw error;
+
+      // Group by strategy
+      const grouped = (strategies || []).reduce((acc: any, msg: any) => {
+        const strategy = msg.strategy_type || 'unknown';
+        if (!acc[strategy]) {
+          acc[strategy] = {
+            strategy_type: strategy,
+            sent: 0,
+            uniqueLeads: new Set(),
+            replies: 0,
+            conversions: 0,
+          };
+        }
+        acc[strategy].sent++;
+        acc[strategy].uniqueLeads.add(msg.lead_id);
+        if (msg.has_reply) acc[strategy].replies++;
+        if (msg.led_to_target_action) acc[strategy].conversions++;
+        return acc;
+      }, {});
+
+      // Calculate rates
+      const result = Object.values(grouped).map((g: any) => ({
+        strategy_type: g.strategy_type,
+        sent: g.sent,
+        replies: g.replies,
+        replyRate: g.sent > 0 ? ((g.replies / g.sent) * 100).toFixed(2) : 0,
+        conversions: g.conversions,
+        conversionRate: g.sent > 0 ? ((g.conversions / g.sent) * 100).toFixed(2) : 0,
+      }));
+
+      return reply.send(result);
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to get strategy analytics');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /campaign/analytics/by-temperature
+   * Get effectiveness by lead temperature
+   */
+  app.get('/campaign/analytics/by-temperature', async (request, reply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      // Aggregate by interest_level_at_send
+      const { data: temperatures, error } = await supabase
+        .from('campaign_messages')
+        .select('interest_level_at_send, lead_id, has_reply, led_to_target_action')
+        .eq('user_account_id', userAccountId)
+        .eq('status', 'sent')
+        .not('interest_level_at_send', 'is', null);
+
+      if (error) throw error;
+
+      // Group by temperature
+      const grouped = (temperatures || []).reduce((acc: any, msg: any) => {
+        const temp = msg.interest_level_at_send || 'unknown';
+        if (!acc[temp]) {
+          acc[temp] = {
+            interest_level: temp,
+            sent: 0,
+            uniqueLeads: new Set(),
+            replies: 0,
+            conversions: 0,
+          };
+        }
+        acc[temp].sent++;
+        acc[temp].uniqueLeads.add(msg.lead_id);
+        if (msg.has_reply) acc[temp].replies++;
+        if (msg.led_to_target_action) acc[temp].conversions++;
+        return acc;
+      }, {});
+
+      // Calculate rates
+      const result = Object.values(grouped).map((g: any) => ({
+        interest_level: g.interest_level,
+        sent: g.sent,
+        replies: g.replies,
+        replyRate: g.sent > 0 ? ((g.replies / g.sent) * 100).toFixed(2) : 0,
+        conversions: g.conversions,
+        conversionRate: g.sent > 0 ? ((g.conversions / g.sent) * 100).toFixed(2) : 0,
+      }));
+
+      return reply.send(result);
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to get temperature analytics');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /campaign/analytics/temperature-dynamics
+   * Get temperature dynamics over time
+   */
+  app.get('/campaign/analytics/temperature-dynamics', async (request, reply) => {
+    try {
+      const { userAccountId, days = '30' } = request.query as { 
+        userAccountId: string; 
+        days?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      // Call SQL function
+      const { data, error } = await supabase.rpc('get_temperature_dynamics', {
+        p_user_account_id: userAccountId,
+        p_days: parseInt(days),
+      });
+
+      if (error) throw error;
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to get temperature dynamics');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /campaign/analytics/by-stage
+   * Get effectiveness by funnel stage
+   */
+  app.get('/campaign/analytics/by-stage', async (request, reply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      // Aggregate by funnel_stage_at_send
+      const { data: stages, error } = await supabase
+        .from('campaign_messages')
+        .select('funnel_stage_at_send, lead_id, has_reply, led_to_target_action')
+        .eq('user_account_id', userAccountId)
+        .eq('status', 'sent')
+        .not('funnel_stage_at_send', 'is', null);
+
+      if (error) throw error;
+
+      // Group by stage
+      const grouped = (stages || []).reduce((acc: any, msg: any) => {
+        const stage = msg.funnel_stage_at_send || 'unknown';
+        if (!acc[stage]) {
+          acc[stage] = {
+            funnel_stage: stage,
+            sent: 0,
+            replies: 0,
+            conversions: 0,
+          };
+        }
+        acc[stage].sent++;
+        if (msg.has_reply) acc[stage].replies++;
+        if (msg.led_to_target_action) acc[stage].conversions++;
+        return acc;
+      }, {});
+
+      const result = Object.values(grouped);
+
+      return reply.send(result);
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to get stage analytics');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
    * POST /campaign/generate-single-message
    * Generate AI message for a single lead (for CRM UI)
    */
@@ -507,6 +867,103 @@ export async function campaignRoutes(app: FastifyInstance) {
       app.log.error({ error: error.message }, 'Failed to generate single message');
       return reply.status(500).send({ 
         error: 'Message generation failed', 
+        message: error.message 
+      });
+    }
+  });
+
+  /**
+   * GET /campaign/queue-status
+   * Check if there's an existing queue and its status
+   */
+  app.get('/campaign/queue-status', async (request, reply) => {
+    try {
+      const { userAccountId } = request.query as { userAccountId: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      const existingQueue = await checkExistingQueue(userAccountId);
+
+      if (!existingQueue) {
+        return reply.send({
+          hasQueue: false,
+        });
+      }
+
+      const action = decideQueueAction(existingQueue);
+
+      return reply.send({
+        hasQueue: true,
+        count: existingQueue.count,
+        createdAt: existingQueue.createdAt,
+        hasSentMessages: existingQueue.hasSentMessages,
+        recommendedAction: action,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to check queue status');
+      return reply.status(500).send({ 
+        error: 'Failed to check queue status', 
+        message: error.message 
+      });
+    }
+  });
+
+  /**
+   * POST /campaign/start-manual-send
+   * Start manual sending of the queue with smart scheduling
+   */
+  app.post('/campaign/start-manual-send', async (request, reply) => {
+    try {
+      const body = GenerateQueueSchema.parse(request.body);
+      const { userAccountId } = body;
+
+      app.log.info({ userAccountId }, 'Starting manual send');
+
+      // Check if there are pending messages
+      const { data: messages, error } = await supabase
+        .from('campaign_messages')
+        .select('id')
+        .eq('user_account_id', userAccountId)
+        .in('status', ['pending', 'scheduled']);
+
+      if (error) {
+        throw error;
+      }
+
+      if (!messages || messages.length === 0) {
+        return reply.status(400).send({ 
+          error: 'No messages in queue',
+          message: 'Please generate a queue first' 
+        });
+      }
+
+      // Determine schedule
+      const schedule = await determineSchedule(userAccountId, messages.length);
+
+      // Mark messages for manual send
+      const markedCount = await markForManualSend(userAccountId);
+
+      app.log.info({ 
+        userAccountId, 
+        markedCount, 
+        mode: schedule.mode 
+      }, 'Manual send initiated');
+
+      return reply.send({
+        success: true,
+        mode: schedule.mode,
+        scheduledFor: schedule.scheduledFor,
+        nextWorkingTime: schedule.nextWorkingTime,
+        estimatedDuration: schedule.estimatedDuration,
+        messagesPerHour: schedule.messagesPerHour,
+        queueSize: markedCount,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to start manual send');
+      return reply.status(500).send({ 
+        error: 'Failed to start manual send', 
         message: error.message 
       });
     }

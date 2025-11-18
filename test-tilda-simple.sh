@@ -114,3 +114,5 @@ echo -e "${YELLOW}To cleanup test leads:${NC}"
 echo "DELETE FROM leads WHERE phone IN ('$TEST_PHONE', '$TEST_PHONE_2');"
 echo ""
 
+
+

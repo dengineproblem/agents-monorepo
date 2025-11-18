@@ -89,20 +89,54 @@ function selectStrategyFromMatrix(
 }
 
 /**
- * Boost strategy based on active contexts
- * If there's a high-priority context, prefer the matching strategy
+ * Determine if context should be used based on strategy and lead state
  */
-function boostStrategyForContext(
+function shouldUseContext(
   strategy: StrategyType,
-  contexts: any[]
+  lead: { interest_level?: string | null; campaign_messages_count: number }
+): boolean {
+  // check_in strategy: no context (just checking in)
+  if (strategy === 'check_in') {
+    return false;
+  }
+  
+  // First message to lead: be careful with aggressive context
+  if (lead.campaign_messages_count === 0) {
+    // For first message, only use context if lead is warm/hot
+    if (lead.interest_level === 'cold') {
+      return false;
+    }
+  }
+  
+  // For other strategies, context is welcome
+  return true;
+}
+
+/**
+ * Select best context for the lead and strategy
+ * Returns null if no context should be used
+ */
+function selectContextForLead(
+  strategy: StrategyType,
+  contexts: any[],
+  lead: { interest_level?: string | null; campaign_messages_count: number }
 ): { strategy: StrategyType; context?: any } {
   if (contexts.length === 0) {
     return { strategy };
   }
   
+  // Check if context should be used at all
+  if (!shouldUseContext(strategy, lead)) {
+    log.info({ 
+      strategy, 
+      interestLevel: lead.interest_level,
+      campaignCount: lead.campaign_messages_count
+    }, 'Context skipped - not appropriate for this strategy/lead');
+    return { strategy };
+  }
+  
   // Sort by priority (highest first)
   const sortedContexts = [...contexts].sort((a, b) => b.priority - a.priority);
-  const topContext = sortedContexts[0];
   
   // Map context type to strategy type
   const contextStrategyMap: Record<string, StrategyType> = {
@@ -112,18 +146,38 @@ function boostStrategyForContext(
     news: 'value'
   };
   
-  const boostedStrategy = contextStrategyMap[topContext.type] || strategy;
+  // Try to find context that matches current strategy
+  let selectedContext = sortedContexts.find(ctx => 
+    contextStrategyMap[ctx.type] === strategy
+  );
+  
+  // If no match, take highest priority context and adjust strategy
+  if (!selectedContext) {
+    selectedContext = sortedContexts[0];
+    const newStrategy = contextStrategyMap[selectedContext.type] || strategy;
+    
+    log.info({ 
+      originalStrategy: strategy, 
+      newStrategy, 
+      contextType: selectedContext.type,
+      contextTitle: selectedContext.title
+    }, 'Strategy adjusted to match available context');
+    
+    return { 
+      strategy: newStrategy, 
+      context: selectedContext 
+    };
+  }
   
   log.info({ 
-    originalStrategy: strategy, 
-    boostedStrategy, 
-    contextType: topContext.type,
-    contextTitle: topContext.title
-  }, 'Strategy boosted by active context');
+    strategy, 
+    contextType: selectedContext.type,
+    contextTitle: selectedContext.title
+  }, 'Context selected matching strategy');
   
   return { 
-    strategy: boostedStrategy, 
-    context: topContext 
+    strategy, 
+    context: selectedContext 
   };
 }
 
@@ -153,10 +207,10 @@ export async function determineStrategyType(
       input.lastMessageTypes
     );
     
-    // Boost strategy if there's an active context
+    // Select context if appropriate for this lead and strategy
     let selectedContext;
     if (input.activeContexts.length > 0) {
-      const result = boostStrategyForContext(strategyType, input.activeContexts);
+      const result = selectContextForLead(strategyType, input.activeContexts, input.lead);
       strategyType = result.strategy;
       selectedContext = result.context;
     }

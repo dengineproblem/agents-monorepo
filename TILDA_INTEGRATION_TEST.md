@@ -313,3 +313,5 @@ LIMIT 10;
 - `migrations/026_ad_creative_mapping.sql` - Структура таблицы маппинга
 - `AMOCRM_INTEGRATION.md` - Общая документация по интеграции
 
+
+

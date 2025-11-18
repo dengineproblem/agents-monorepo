@@ -33,8 +33,13 @@ export interface Direction {
   whatsapp_phone_number: string | null;
   is_active: boolean;
   created_at: string;
-  key_stage_pipeline_id?: number | null;
-  key_stage_status_id?: number | null;
+  // AmoCRM key stages (up to 3)
+  key_stage_1_pipeline_id?: number | null;
+  key_stage_1_status_id?: number | null;
+  key_stage_2_pipeline_id?: number | null;
+  key_stage_2_status_id?: number | null;
+  key_stage_3_pipeline_id?: number | null;
+  key_stage_3_status_id?: number | null;
 }
 
 class SalesApiService {

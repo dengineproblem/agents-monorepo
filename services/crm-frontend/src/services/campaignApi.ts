@@ -167,6 +167,84 @@ export async function generateCampaignQueue(
   return data;
 }
 
+export async function clearCampaignQueue(userId: string): Promise<{ deletedCount: number }> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/clear-queue`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ userAccountId: userId }),
+    }
+  );
+  return data;
+}
+
+// ===== Manual Send =====
+
+export interface QueueStatus {
+  hasQueue: boolean;
+  count?: number;
+  createdAt?: string;
+  hasSentMessages?: boolean;
+  recommendedAction?: 'replace' | 'merge' | 'ask';
+}
+
+export interface ManualSendResponse {
+  success: boolean;
+  mode: 'immediate' | 'scheduled';
+  scheduledFor?: string;
+  nextWorkingTime?: string;
+  estimatedDuration?: string;
+  messagesPerHour?: number;
+  queueSize: number;
+}
+
+export interface GenerateQueueResponse {
+  success: boolean;
+  queueSize?: number;
+  messagesGenerated?: number;
+  needsDecision?: boolean;
+  existingQueue?: {
+    count: number;
+    createdAt: string;
+    hasSentMessages: boolean;
+  };
+  recommendedAction?: 'replace' | 'merge';
+  message?: string;
+  merged?: boolean;
+}
+
+export async function getQueueStatus(userId: string): Promise<QueueStatus> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/queue-status?userAccountId=${userId}`
+  );
+  return data;
+}
+
+export async function startManualSend(userId: string): Promise<ManualSendResponse> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/start-manual-send`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ userAccountId: userId }),
+    }
+  );
+  return data;
+}
+
+export async function generateQueueWithAction(
+  userId: string,
+  action?: 'replace' | 'merge'
+): Promise<GenerateQueueResponse> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/generate-queue`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ userAccountId: userId, action }),
+    }
+  );
+  return data;
+}
+
 export async function getTodayQueue(
   userId: string,
   limit: number = 20,
@@ -264,6 +342,89 @@ export async function getCampaignStats(userId: string): Promise<CampaignStats> {
   return data;
 }
 
+// ===== Analytics Interfaces =====
+
+export interface AnalyticsOverview {
+  totalSent: number;
+  replyRate: number;
+  conversionRate: number;
+  avgTimeToReply: number;
+  avgTimeToAction: number;
+}
+
+export interface StrategyAnalytics {
+  strategy_type: string;
+  sent: number;
+  replies: number;
+  replyRate: string;
+  conversions: number;
+  conversionRate: string;
+}
+
+export interface TemperatureAnalytics {
+  interest_level: string;
+  sent: number;
+  replies: number;
+  replyRate: string;
+  conversions: number;
+  conversionRate: string;
+}
+
+export interface TemperatureDynamics {
+  snapshot_date: string;
+  hot_count: number;
+  warm_count: number;
+  cold_count: number;
+  total_leads: number;
+}
+
+export interface StageAnalytics {
+  funnel_stage: string;
+  sent: number;
+  replies: number;
+  conversions: number;
+}
+
+// ===== Analytics API Functions =====
+
+export async function getAnalyticsOverview(userId: string): Promise<AnalyticsOverview> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/analytics/overview?userAccountId=${userId}`
+  );
+  return data;
+}
+
+export async function getAnalyticsByStrategy(userId: string): Promise<StrategyAnalytics[]> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/analytics/by-strategy?userAccountId=${userId}`
+  );
+  return data;
+}
+
+export async function getAnalyticsByTemperature(userId: string): Promise<TemperatureAnalytics[]> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/analytics/by-temperature?userAccountId=${userId}`
+  );
+  return data;
+}
+
+export async function getTemperatureDynamics(
+  userId: string, 
+  days: number = 30
+): Promise<TemperatureDynamics[]> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/analytics/temperature-dynamics?userAccountId=${userId}&days=${days}`
+  );
+  return data;
+}
+
+export async function getAnalyticsByStage(userId: string): Promise<StageAnalytics[]> {
+  const data = await fetchJson(
+    `${CHATBOT_API_BASE}/campaign/analytics/by-stage?userAccountId=${userId}`
+  );
+  return data;
+}
+
 export const campaignApi = {
   // Settings
   getCampaignSettings,
@@ -278,10 +439,16 @@ export const campaignApi = {
   
   // Queue & Messages
   generateCampaignQueue,
+  generateQueueWithAction,
+  clearCampaignQueue,
   getTodayQueue,
   sendMessageAuto,
   markMessageAsCopied,
   previewCampaignQueue,
+  
+  // Manual Send
+  getQueueStatus,
+  startManualSend,
   
   // Lead extras
   uploadLeadAudio,
@@ -290,5 +457,12 @@ export const campaignApi = {
   
   // Stats
   getCampaignStats,
+  
+  // Analytics
+  getAnalyticsOverview,
+  getAnalyticsByStrategy,
+  getAnalyticsByTemperature,
+  getTemperatureDynamics,
+  getAnalyticsByStage,
 };
 

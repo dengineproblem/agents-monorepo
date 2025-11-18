@@ -379,6 +379,13 @@ async function moveFunnelStage(
   newStage: string,
   app: FastifyInstance
 ): Promise<void> {
+  // Get lead info first
+  const { data: lead } = await supabase
+    .from('dialog_analysis')
+    .select('user_account_id')
+    .eq('id', leadId)
+    .single();
+
   const { error } = await supabase
     .from('dialog_analysis')
     .update({ funnel_stage: newStage })
@@ -388,6 +395,12 @@ async function moveFunnelStage(
     app.log.error({ error, leadId, newStage }, 'Failed to move funnel stage');
   } else {
     app.log.info({ leadId, newStage }, 'Moved lead to new funnel stage');
+    
+    // Mark target action for campaign analytics
+    if (lead?.user_account_id) {
+      const { markTargetAction } = await import('./campaignAnalytics.js');
+      await markTargetAction(leadId, lead.user_account_id, newStage);
+    }
   }
 }
 

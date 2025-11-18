@@ -82,7 +82,12 @@ export const AmoCRMKeyStageSettings: React.FC<AmoCRMKeyStageSettingsProps> = ({
         message: err.message,
         stack: err.stack
       });
-      setError(err.message || 'Не удалось пересчитать статистику');
+      // На локалхосте без AmoCRM показываем информативное сообщение
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('амокрм')) {
+        setError('AmoCRM недоступен (локальная разработка). На production это будет работать.');
+      } else {
+        setError(err.message || 'Не удалось пересчитать статистику');
+      }
     } finally {
       setRecalculating(false);
     }

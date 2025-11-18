@@ -37,3 +37,5 @@ SELECT
   (SELECT COUNT(*) FROM ad_creative_mapping WHERE ad_id = :'test_ad_id') as mappings_remaining,
   (SELECT COUNT(*) FROM leads WHERE source_id = :'test_ad_id') as leads_remaining;
 
+
+

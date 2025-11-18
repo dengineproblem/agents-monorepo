@@ -29,3 +29,5 @@ echo "📁 Файл сохранен: greenapi_history_${MINUTES}min.json"
 
 
 
+
+

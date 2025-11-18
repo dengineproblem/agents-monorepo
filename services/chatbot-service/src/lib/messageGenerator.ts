@@ -205,25 +205,41 @@ export async function generatePersonalizedMessage(
     // 5. Build enhanced prompt
     const daysSinceLastCampaign = calculateDaysSince(lead.last_campaign_message_at);
     
+    // Pass only the selected context to the prompt, not all contexts
+    const contextsForPrompt = selectedContext ? [selectedContext] : [];
+    
     const prompt = buildMessagePrompt({
       lead,
       strategyType,
       messageType,
       businessContext: businessContext || '',
-      activeContexts,
+      activeContexts: contextsForPrompt,
       templates: relevantTemplates,
       daysSinceLastCampaign
     });
+    
+    // DEBUG: Log contexts being sent to GPT
+    if (activeContexts && activeContexts.length > 0) {
+      log.info({
+        leadId: lead.id,
+        contextsCount: activeContexts.length,
+        contexts: activeContexts.map(c => ({
+          title: c.title,
+          type: c.type,
+          contentPreview: c.content.substring(0, 200)
+        }))
+      }, 'DEBUG: Contexts in prompt');
+    }
 
     // 6. Call OpenAI
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: 'You are a helpful assistant that generates personalized WhatsApp messages for lead reactivation.' },
         { role: 'user', content: prompt }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.8, // Higher creativity for personalized messages
+      // temperature: 1 is the default and only supported value for gpt-5-mini
     });
 
     const content = response.choices[0]?.message?.content;

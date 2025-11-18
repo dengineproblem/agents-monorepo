@@ -107,7 +107,12 @@ export const KeyStageSelector: React.FC<KeyStageSelectorProps> = ({
       }
     } catch (err: any) {
       console.error('[KeyStageSelector] Failed to load pipelines:', err);
-      setError(err.message || 'Не удалось загрузить воронки');
+      // На локалхосте без AmoCRM показываем информативное сообщение
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('амокрм')) {
+        setError('AmoCRM недоступен (локальная разработка). На production это будет работать.');
+      } else {
+        setError(err.message || 'Не удалось загрузить воронки');
+      }
       setPipelines([]);
     } finally {
       setLoading(false);

@@ -432,3 +432,5 @@ docker-compose logs promtail --tail 50
 
 
 
+
+

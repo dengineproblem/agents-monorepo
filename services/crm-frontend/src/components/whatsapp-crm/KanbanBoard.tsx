@@ -20,8 +20,13 @@ interface KanbanBoardProps {
 }
 
 export function KanbanBoard({ leads, onMoveCard, onCardClick, onEdit, onDelete }: KanbanBoardProps) {
+  // Deduplicate leads by id to avoid duplicate key warnings
+  const uniqueLeads = Array.from(
+    new Map(leads.map(lead => [lead.id, lead])).values()
+  );
+  
   const groupedLeads = FUNNEL_STAGES.reduce((acc, stage) => {
-    acc[stage.key] = leads.filter(lead => lead.funnel_stage === stage.key);
+    acc[stage.key] = uniqueLeads.filter(lead => lead.funnel_stage === stage.key);
     return acc;
   }, {} as Record<FunnelStage, DialogAnalysis[]>);
 
@@ -42,6 +47,8 @@ export function KanbanBoard({ leads, onMoveCard, onCardClick, onEdit, onDelete }
     </div>
   );
 }
+
+
 
 
 

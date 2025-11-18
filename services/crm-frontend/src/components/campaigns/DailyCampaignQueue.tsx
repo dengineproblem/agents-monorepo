@@ -1,11 +1,24 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { campaignApi, CampaignMessage } from '@/services/campaignApi';
+import { campaignApi, CampaignMessage, GenerateQueueResponse } from '@/services/campaignApi';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
-import { Copy, Send, Loader2, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { Copy, Send, Loader2, ChevronLeft, ChevronRight, RefreshCw, Trash2, Play, AlertCircle } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert';
 
 const USER_ACCOUNT_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
@@ -25,6 +38,10 @@ export function DailyCampaignQueue() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const pageSize = 20;
+  const [showQueueDialog, setShowQueueDialog] = useState(false);
+  const [queueDecision, setQueueDecision] = useState<GenerateQueueResponse | null>(null);
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [scheduleInfo, setScheduleInfo] = useState<any>(null);
 
   // Fetch today's queue
   const { data, isLoading, refetch } = useQuery({
@@ -34,13 +51,12 @@ export function DailyCampaignQueue() {
 
   // Generate queue mutation
   const generateMutation = useMutation({
-    mutationFn: async () => {
-      // Add timeout to prevent infinite waiting
+    mutationFn: async (action?: 'replace' | 'merge') => {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes timeout
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
       
       try {
-        const result = await campaignApi.generateCampaignQueue(USER_ACCOUNT_ID, controller.signal);
+        const result = await campaignApi.generateQueueWithAction(USER_ACCOUNT_ID, action);
         clearTimeout(timeoutId);
         return result;
       } catch (error: any) {
@@ -52,14 +68,38 @@ export function DailyCampaignQueue() {
       }
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['campaign-queue'] });
-      toast({ 
-        title: 'Очередь сформирована', 
-        description: `Создано ${result.messagesGenerated} сообщений для ${result.queueSize} лидов` 
-      });
+      if (result.needsDecision) {
+        // Show dialog for user decision
+        setQueueDecision(result);
+        setShowQueueDialog(true);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['campaign-queue'] });
+        const message = result.merged 
+          ? `Очередь обновлена (${result.queueSize} сообщений)`
+          : `Создано ${result.messagesGenerated} сообщений для ${result.queueSize} лидов`;
+        toast({ 
+          title: 'Очередь сформирована', 
+          description: message 
+        });
+      }
     },
     onError: (error: Error) => toast({ 
       title: 'Ошибка при формировании очереди', 
+      description: error.message,
+      variant: 'destructive' 
+    }),
+  });
+
+  // Manual send mutation
+  const manualSendMutation = useMutation({
+    mutationFn: () => campaignApi.startManualSend(USER_ACCOUNT_ID),
+    onSuccess: (result) => {
+      setScheduleInfo(result);
+      setShowScheduleDialog(true);
+      queryClient.invalidateQueries({ queryKey: ['campaign-queue'] });
+    },
+    onError: (error: Error) => toast({ 
+      title: 'Ошибка при запуске отправки', 
       description: error.message,
       variant: 'destructive' 
     }),
@@ -83,6 +123,23 @@ export function DailyCampaignQueue() {
     },
     onError: (error: any) => toast({ 
       title: 'Ошибка отправки', 
+      description: error.message, 
+      variant: 'destructive' 
+    }),
+  });
+
+  // Clear queue mutation
+  const clearMutation = useMutation({
+    mutationFn: () => campaignApi.clearCampaignQueue(USER_ACCOUNT_ID),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['campaign-queue'] });
+      toast({ 
+        title: 'Очередь очищена', 
+        description: `Удалено ${result.deletedCount} сообщений` 
+      });
+    },
+    onError: (error: any) => toast({ 
+      title: 'Ошибка очистки', 
       description: error.message, 
       variant: 'destructive' 
     }),
@@ -121,12 +178,38 @@ export function DailyCampaignQueue() {
               Обновить
             </Button>
             <Button 
+              onClick={() => clearMutation.mutate()} 
+              disabled={clearMutation.isPending || !data?.total}
+              variant="outline"
+              size="sm"
+            >
+              {clearMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Очистить очередь
+            </Button>
+            <Button 
               onClick={() => generateMutation.mutate()} 
               disabled={generateMutation.isPending}
+              variant="outline"
               size="sm"
             >
               {generateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Сформировать очередь
+            </Button>
+            <Button 
+              onClick={() => manualSendMutation.mutate()} 
+              disabled={manualSendMutation.isPending || !data?.total}
+              size="sm"
+            >
+              {manualSendMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Play className="h-4 w-4 mr-2" />
+              )}
+              Запустить отправку
             </Button>
           </div>
         </div>
@@ -229,6 +312,104 @@ export function DailyCampaignQueue() {
           </div>
         )}
       </CardContent>
+
+      {/* Dialog for existing queue decision */}
+      <Dialog open={showQueueDialog} onOpenChange={setShowQueueDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <AlertCircle className="h-5 w-5 inline mr-2 text-yellow-500" />
+              Обнаружена существующая очередь
+            </DialogTitle>
+            <DialogDescription>
+              В очереди уже есть {queueDecision?.existingQueue?.count} сообщений, 
+              созданных {new Date(queueDecision?.existingQueue?.createdAt || '').toLocaleString('ru-RU')}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <Alert>
+              <AlertTitle>Что сделать?</AlertTitle>
+              <AlertDescription className="space-y-2 mt-2">
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold">Заменить:</span>
+                  <span className="text-sm">Старые сообщения будут удалены, создастся новая очередь</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="font-semibold">Добавить:</span>
+                  <span className="text-sm">Новые лиды добавятся к существующим (дубли пропустятся)</span>
+                </div>
+              </AlertDescription>
+            </Alert>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowQueueDialog(false)}
+            >
+              Отмена
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowQueueDialog(false);
+                generateMutation.mutate('merge');
+              }}
+            >
+              Добавить к существующей
+            </Button>
+            <Button
+              onClick={() => {
+                setShowQueueDialog(false);
+                generateMutation.mutate('replace');
+              }}
+            >
+              Заменить старую очередь
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog for send schedule info */}
+      <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {scheduleInfo?.mode === 'immediate' ? '⚡ Отправка началась' : '⏰ Отправка запланирована'}
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {scheduleInfo?.mode === 'immediate' ? (
+              <Alert>
+                <AlertTitle>Сообщения отправляются прямо сейчас</AlertTitle>
+                <AlertDescription className="space-y-2 mt-2">
+                  <div>Сообщений в очереди: <strong>{scheduleInfo.queueSize}</strong></div>
+                  <div>Скорость: <strong>~{scheduleInfo.messagesPerHour} сообщений/час</strong></div>
+                  <div>Ожидаемая длительность: <strong>{scheduleInfo.estimatedDuration}</strong></div>
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <Alert>
+                <AlertTitle>Отправка начнётся в рабочее время</AlertTitle>
+                <AlertDescription className="space-y-2 mt-2">
+                  <div>Начало: <strong>{scheduleInfo?.nextWorkingTime}</strong></div>
+                  <div>Сообщений: <strong>{scheduleInfo?.queueSize}</strong></div>
+                  <div>Скорость: <strong>~{scheduleInfo?.messagesPerHour} сообщений/час</strong></div>
+                  <div>Длительность: <strong>{scheduleInfo?.estimatedDuration}</strong></div>
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setShowScheduleDialog(false)}>
+              Понятно
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

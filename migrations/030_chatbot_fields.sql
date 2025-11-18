@@ -29,3 +29,5 @@ COMMENT ON COLUMN dialog_analysis.last_reactivation_at IS 'Время после
 
 
 
+
+

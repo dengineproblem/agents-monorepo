@@ -71,3 +71,5 @@ SELECT id, title, direction_id, status FROM user_creatives WHERE id = 'test-tild
 SELECT 'Created Ad Mapping:' as info;
 SELECT ad_id, user_creative_id, direction_id, source FROM ad_creative_mapping WHERE ad_id = :'test_ad_id';
 
+
+
