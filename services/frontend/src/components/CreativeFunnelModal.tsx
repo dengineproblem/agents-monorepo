@@ -88,7 +88,7 @@ export function CreativeFunnelModal({
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Filter className="h-5 w-5 text-blue-600" />
+            <Filter className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             Распределение по воронке
           </DialogTitle>
           <DialogDescription className="text-sm">
@@ -99,20 +99,20 @@ export function CreativeFunnelModal({
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400" />
             </div>
           ) : error ? (
-            <Card className="bg-red-50 border-red-200">
+            <Card className="bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800">
               <CardContent className="p-4">
-                <p className="text-sm text-red-800">{error}</p>
+                <p className="text-sm text-red-800 dark:text-red-200">{error}</p>
               </CardContent>
             </Card>
           ) : stats && stats.total_leads > 0 ? (
             <div className="space-y-4">
               {/* Статистика */}
-              <Card className="bg-blue-50 border-blue-200">
+              <Card className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800">
                 <CardContent className="p-4">
-                  <p className="text-sm font-semibold text-blue-900">
+                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
                     Всего лидов: {stats.total_leads}
                   </p>
                 </CardContent>
