@@ -120,53 +120,9 @@ const ROIAnalytics: React.FC = () => {
       console.log('📊 Loaded qualification stats:', stats);
       setQualificationStats(stats);
     } catch (err) {
-      console.error('Ошибка загрузки статистики квалификации:', err);
-      
-      // На локалхосте без AmoCRM показываем нули для проверки интерфейса
-      const direction = directions.find(d => d.id === directionId);
-      if (direction) {
-        const mockStats: typeof qualificationStats = {
-          total_leads: 0,
-          key_stages: []
-        };
-
-        // Добавляем mock этапы для каждого настроенного ключевого этапа
-        if (direction.key_stage_1_pipeline_id && direction.key_stage_1_status_id) {
-          mockStats.key_stages.push({
-            index: 1,
-            pipeline_name: 'Воронка 1',
-            status_name: 'Этап 1',
-            qualified_leads: 0,
-            qualification_rate: 0,
-            creative_stats: []
-          });
-        }
-        if (direction.key_stage_2_pipeline_id && direction.key_stage_2_status_id) {
-          mockStats.key_stages.push({
-            index: 2,
-            pipeline_name: 'Воронка 2',
-            status_name: 'Этап 2',
-            qualified_leads: 0,
-            qualification_rate: 0,
-            creative_stats: []
-          });
-        }
-        if (direction.key_stage_3_pipeline_id && direction.key_stage_3_status_id) {
-          mockStats.key_stages.push({
-            index: 3,
-            pipeline_name: 'Воронка 3',
-            status_name: 'Этап 3',
-            qualified_leads: 0,
-            qualification_rate: 0,
-            creative_stats: []
-          });
-        }
-
-        console.log('🧪 Using mock stats for local development:', mockStats);
-        setQualificationStats(mockStats);
-      } else {
-        setQualificationStats(null);
-      }
+      console.error('❌ Ошибка загрузки статистики квалификации:', err);
+      // Просто скрываем карточку при ошибке, не показываем моки
+      setQualificationStats(null);
     }
   };
 
