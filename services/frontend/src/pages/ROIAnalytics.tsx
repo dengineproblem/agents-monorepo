@@ -233,7 +233,7 @@ const ROIAnalytics: React.FC = () => {
       loadROIData();
 
       // Load qualification stats only if direction is selected and has at least one key stage configured
-      if (selectedDirectionId) {
+      if (selectedDirectionId && directions.length > 0) {
         const direction = directions.find(d => d.id === selectedDirectionId);
         console.log('🔍 Direction found:', direction);
         console.log('🔍 Key stages:', {
@@ -260,7 +260,7 @@ const ROIAnalytics: React.FC = () => {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDirectionId]);
+  }, [selectedDirectionId, directions]);
 
   const getROIBadgeVariant = (roi: number) => {
     if (roi > 0) return 'outline';
