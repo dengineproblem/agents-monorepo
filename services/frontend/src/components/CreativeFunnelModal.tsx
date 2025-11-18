@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { RefreshCw, Loader2, Filter } from 'lucide-react';
-import { getCreativeFunnelStats, triggerLeadsSync, FunnelStats } from '../services/amocrmApi';
+import { getCreativeFunnelStats, triggerCreativeLeadsSync, FunnelStats } from '../services/amocrmApi';
 import {
   Dialog,
   DialogContent,
@@ -67,7 +67,8 @@ export function CreativeFunnelModal({
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await triggerLeadsSync(userAccountId);
+      // Используем быструю синхронизацию только для лидов этого креатива
+      await triggerCreativeLeadsSync(userAccountId, creativeId);
       // Перезагружаем статистику после синхронизации
       await loadStats();
     } catch (err: any) {

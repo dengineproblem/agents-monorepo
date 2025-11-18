@@ -386,6 +386,53 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
   });
 
   /**
+   * POST /amocrm/sync-creative-leads
+   * Быстрая синхронизация лидов конкретного креатива из AmoCRM (с параллелизацией)
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *   - creativeId: UUID of creative
+   *
+   * Returns: { success: boolean, total: number, updated: number, errors: number }
+   */
+  app.post('/amocrm/sync-creative-leads', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, creativeId } = request.query as { userAccountId?: string; creativeId?: string };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'missing_user_account_id',
+          message: 'userAccountId is required'
+        });
+      }
+
+      if (!creativeId) {
+        return reply.code(400).send({
+          error: 'missing_creative_id',
+          message: 'creativeId is required'
+        });
+      }
+
+      app.log.info({ userAccountId, creativeId }, 'AmoCRM creative leads sync triggered');
+
+      // Import sync function dynamically to avoid circular dependencies
+      const { syncCreativeLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
+
+      // Execute sync
+      const result = await syncCreativeLeadsFromAmoCRM(userAccountId, creativeId, app);
+
+      return reply.send(result);
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error syncing creative leads from AmoCRM');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
    * GET /amocrm/creative-funnel-stats
    * Get funnel stage distribution for a specific creative
    *

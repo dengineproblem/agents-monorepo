@@ -126,6 +126,32 @@ export async function triggerLeadsSync(userAccountId: string): Promise<SyncResul
 }
 
 /**
+ * Быстрая синхронизация лидов конкретного креатива из AmoCRM (с параллелизацией)
+ * 
+ * @param userAccountId - User account UUID
+ * @param creativeId - Creative UUID
+ * @returns Sync result
+ */
+export async function triggerCreativeLeadsSync(
+  userAccountId: string, 
+  creativeId: string
+): Promise<SyncResult> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/sync-creative-leads?userAccountId=${userAccountId}&creativeId=${creativeId}`,
+    {
+      method: 'POST',
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to sync creative leads');
+  }
+
+  return response.json();
+}
+
+/**
  * Get all pipelines with their stages
  *
  * @param userAccountId - User account UUID

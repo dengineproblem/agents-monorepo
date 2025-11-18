@@ -393,3 +393,250 @@ export async function syncLeadsFromAmoCRM(
   }
 }
 
+/**
+ * Синхронизирует статусы лидов конкретного креатива из AmoCRM (с параллелизацией)
+ * 
+ * Оптимизированная версия для быстрой синхронизации лидов одного креатива:
+ * - Фильтрует только лиды указанного креатива
+ * - Использует параллельные запросы к AmoCRM (до 10 одновременно)
+ * - Значительно быстрее, чем синхронизация всех лидов пользователя
+ * 
+ * @param userAccountId - UUID пользователя
+ * @param creativeId - UUID креатива
+ * @param app - Fastify instance для логирования
+ * @returns Результат синхронизации
+ */
+export async function syncCreativeLeadsFromAmoCRM(
+  userAccountId: string,
+  creativeId: string,
+  app: FastifyInstance
+): Promise<SyncLeadsResult> {
+  const log = app.log;
+  const result: SyncLeadsResult = {
+    success: true,
+    total: 0,
+    updated: 0,
+    errors: 0,
+    errorDetails: []
+  };
+
+  try {
+    log.info({ userAccountId, creativeId }, 'Starting AmoCRM creative leads sync');
+
+    // 1. Get valid AmoCRM token
+    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+
+    // 2. Get leads for this specific creative only
+    const { data: leads, error: leadsError } = await supabase
+      .from('leads')
+      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id')
+      .eq('user_account_id', userAccountId)
+      .eq('creative_id', creativeId);
+
+    if (leadsError) {
+      throw new Error(`Failed to fetch leads: ${leadsError.message}`);
+    }
+
+    if (!leads || leads.length === 0) {
+      log.info({ userAccountId, creativeId }, 'No leads found for this creative');
+      return result;
+    }
+
+    result.total = leads.length;
+    log.info({ userAccountId, creativeId, totalLeads: leads.length }, 'Found leads to sync for creative');
+
+    // 3. Get qualification map
+    const { data: pipelineStages, error: stagesError } = await supabase
+      .from('amocrm_pipeline_stages')
+      .select('status_id, is_qualified_stage')
+      .eq('user_account_id', userAccountId);
+
+    if (stagesError) {
+      log.warn({ error: stagesError.message }, 'Failed to fetch pipeline stages, will not update is_qualified');
+    }
+
+    const qualificationMap = new Map<number, boolean>();
+    if (pipelineStages) {
+      for (const stage of pipelineStages) {
+        qualificationMap.set(stage.status_id, stage.is_qualified_stage);
+      }
+    }
+
+    const { findLeadsByPhone } = await import('../adapters/amocrm.js');
+
+    // 4. Параллельная обработка с ограничением concurrency
+    const concurrency = 10; // 10 параллельных запросов
+    const queue: Promise<void>[] = [];
+    let active = 0;
+
+    const runTask = async (task: () => Promise<void>) => {
+      active++;
+      try {
+        await task();
+      } finally {
+        active--;
+      }
+    };
+
+    const schedule = async (task: () => Promise<void>): Promise<void> => {
+      while (active >= concurrency) {
+        await Promise.race(queue);
+      }
+      const p = runTask(task);
+      queue.push(p);
+      p.finally(() => {
+        const idx = queue.indexOf(p);
+        if (idx >= 0) queue.splice(idx, 1);
+      });
+      return p;
+    };
+
+    // 5. Обрабатываем все лиды параллельно
+    await Promise.all(
+      leads.map(localLead =>
+        schedule(async () => {
+          try {
+            const rawPhone = localLead.phone || localLead.chat_id;
+            const ourPhone = normalizePhone(rawPhone);
+
+            if (!ourPhone) {
+              return;
+            }
+
+            // Direct search for leads in AmoCRM by phone
+            let amocrmLeads: any[] = [];
+            try {
+              amocrmLeads = await findLeadsByPhone(rawPhone, subdomain, accessToken);
+            } catch (error: any) {
+              log.warn({
+                leadId: localLead.id,
+                phone: ourPhone,
+                error: error.message
+              }, 'Error searching leads in AmoCRM');
+              result.errors++;
+              return;
+            }
+
+            if (!amocrmLeads || amocrmLeads.length === 0) {
+              log.debug({
+                leadId: localLead.id,
+                phone: ourPhone
+              }, 'Lead not found in AmoCRM by phone');
+              return;
+            }
+
+            // Take the most recent lead
+            const sortedLeads = amocrmLeads.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+            const amocrmLeadFromContact = sortedLeads[0];
+
+            const newAmoCRMLeadId = amocrmLeadFromContact.id;
+            const newStatusId = amocrmLeadFromContact.status_id;
+            const newPipelineId = amocrmLeadFromContact.pipeline_id;
+            const isQualified = qualificationMap.get(newStatusId!) || false;
+
+            // Check if update needed
+            const needsUpdate = 
+              localLead.current_status_id !== newStatusId ||
+              localLead.current_pipeline_id !== newPipelineId ||
+              localLead.amocrm_lead_id !== newAmoCRMLeadId;
+
+            if (!needsUpdate) {
+              return;
+            }
+
+            // Update in database
+            const updateData: any = {
+              amocrm_lead_id: newAmoCRMLeadId,
+              current_status_id: newStatusId,
+              current_pipeline_id: newPipelineId,
+              is_qualified: isQualified,
+              updated_at: new Date().toISOString()
+            };
+
+            // Check and update key stages
+            if (localLead.direction_id) {
+              const { data: direction } = await supabase
+                .from('account_directions')
+                .select(`
+                  key_stage_1_pipeline_id, key_stage_1_status_id,
+                  key_stage_2_pipeline_id, key_stage_2_status_id,
+                  key_stage_3_pipeline_id, key_stage_3_status_id
+                `)
+                .eq('id', localLead.direction_id)
+                .maybeSingle();
+
+              if (direction) {
+                for (let stageNum = 1; stageNum <= 3; stageNum++) {
+                  const pipelineIdKey = `key_stage_${stageNum}_pipeline_id`;
+                  const statusIdKey = `key_stage_${stageNum}_status_id`;
+                  const reachedFlagKey = `reached_key_stage_${stageNum}`;
+
+                  const keyPipelineId = (direction as any)[pipelineIdKey];
+                  const keyStatusId = (direction as any)[statusIdKey];
+
+                  if (keyPipelineId && keyStatusId &&
+                      newPipelineId === keyPipelineId &&
+                      newStatusId === keyStatusId) {
+                    updateData[reachedFlagKey] = true;
+                  }
+                }
+              }
+            }
+
+            const { error: updateError } = await supabase
+              .from('leads')
+              .update(updateData)
+              .eq('id', localLead.id);
+
+            if (updateError) {
+              log.error({
+                error: updateError.message,
+                leadId: localLead.id
+              }, 'Failed to update lead');
+              result.errors++;
+              result.errorDetails?.push({
+                leadId: localLead.id,
+                error: updateError.message
+              });
+            } else {
+              result.updated++;
+            }
+
+          } catch (error: any) {
+            log.error({
+              error: error.message,
+              leadId: localLead.id
+            }, 'Error processing lead');
+            result.errors++;
+            result.errorDetails?.push({
+              leadId: localLead.id,
+              error: error.message
+            });
+          }
+        })
+      )
+    );
+
+    log.info({
+      userAccountId,
+      creativeId,
+      total: result.total,
+      updated: result.updated,
+      errors: result.errors
+    }, 'Completed AmoCRM creative leads sync');
+
+    return result;
+
+  } catch (error: any) {
+    log.error({ error, userAccountId, creativeId }, 'Failed to sync creative leads from AmoCRM');
+    
+    result.success = false;
+    result.errorDetails?.push({
+      leadId: 0,
+      error: error.message
+    });
+    
+    return result;
+  }
+}
+
