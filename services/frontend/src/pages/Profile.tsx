@@ -17,7 +17,7 @@ import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
 import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionCard';
-import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
+// TEMPORARILY HIDDEN: import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
@@ -1737,6 +1737,7 @@ const Profile: React.FC = () => {
                 </div>
               </div>
 
+              {/* TEMPORARILY HIDDEN: Key Stages Configuration
               <Button
                 onClick={() => {
                   setAmocrmModal(false);
@@ -1747,6 +1748,7 @@ const Profile: React.FC = () => {
               >
                 Настроить ключевые этапы
               </Button>
+              */}
 
               <Button
                 onClick={handleAmoCRMSync}
@@ -1768,7 +1770,7 @@ const Profile: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* AmoCRM Key Stages Settings Modal */}
+        {/* TEMPORARILY HIDDEN: AmoCRM Key Stages Settings Modal
         <Dialog open={amocrmKeyStagesModal} onOpenChange={setAmocrmKeyStagesModal}>
           <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
             <DialogHeader className="sr-only">
@@ -1782,6 +1784,7 @@ const Profile: React.FC = () => {
             )}
           </DialogContent>
         </Dialog>
+        */}
       </div>
     </div>
   );

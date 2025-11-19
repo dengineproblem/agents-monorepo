@@ -48,6 +48,7 @@ const ROIAnalytics: React.FC = () => {
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
   const [selectedCreative, setSelectedCreative] = useState<{ id: string; name: string } | null>(null);
 
+  /* TEMPORARILY HIDDEN: Key Stages Qualification Stats
   // Qualification stats state - now supports up to 3 key stages
   const [qualificationStats, setQualificationStats] = useState<{
     total_leads: number;
@@ -63,6 +64,7 @@ const ROIAnalytics: React.FC = () => {
       }>;
     }>;
   } | null>(null);
+  */
 
 
 
@@ -83,6 +85,7 @@ const ROIAnalytics: React.FC = () => {
     return `${percent.toFixed(1)}%`;
   };
 
+  /* TEMPORARILY HIDDEN: Key Stages Functions
   // Получить проценты квалификации по ключевым этапам для креатива
   const getCreativeKeyStageRates = (creativeId: string): string | null => {
     if (!qualificationStats || !qualificationStats.key_stages || qualificationStats.key_stages.length === 0) {
@@ -97,6 +100,7 @@ const ROIAnalytics: React.FC = () => {
 
     return rates.join(' | ');
   };
+  */
 
   // Загрузка направлений
   const loadDirections = async (userAccountId: string) => {
@@ -112,6 +116,7 @@ const ROIAnalytics: React.FC = () => {
     }
   };
 
+  /* TEMPORARILY HIDDEN: Key Stages Stats Loading
   // Загрузка статистики квалификации для выбранного направления (до 3 ключевых этапов)
   const loadQualificationStats = async (directionId: string) => {
     try {
@@ -125,6 +130,7 @@ const ROIAnalytics: React.FC = () => {
       setQualificationStats(null);
     }
   };
+  */
 
   const loadROIData = async (tf?: 7 | 30 | 90 | 'all') => {
     try {
@@ -188,6 +194,7 @@ const ROIAnalytics: React.FC = () => {
     if (userAccountId) {
       loadROIData();
 
+      /* TEMPORARILY HIDDEN: Key Stages Stats Loading in useEffect
       // Load qualification stats only if direction is selected and has at least one key stage configured
       if (selectedDirectionId && directions.length > 0) {
         const direction = directions.find(d => d.id === selectedDirectionId);
@@ -214,6 +221,7 @@ const ROIAnalytics: React.FC = () => {
       } else {
         setQualificationStats(null);
       }
+      */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDirectionId, directions]);
@@ -439,6 +447,7 @@ const ROIAnalytics: React.FC = () => {
             </CardContent>
           </Card>
 
+          {/* TEMPORARILY HIDDEN: Key Stages Card
           <Card className="transition-all duration-200 hover:shadow-md shadow-sm">
             <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-2">
@@ -480,6 +489,7 @@ const ROIAnalytics: React.FC = () => {
               )}
             </CardContent>
           </Card>
+          */}
         </div>
 
                 {/* Креативы */}
@@ -506,9 +516,11 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Лиды</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсии</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсия %</th>
+                            {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
                               <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ключевые этапы</th>
                             )}
+                            */}
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Воронка</th>
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ссылка</th>
                           </tr>
@@ -545,6 +557,7 @@ const ROIAnalytics: React.FC = () => {
                                   : '0%'
                                 }
                               </td>
+                              {/* TEMPORARILY HIDDEN: Key Stages Cell
                               {qualificationStats && qualificationStats.key_stages.length > 0 && (
                                 <td className="py-2 px-3 text-center">
                                   <div className="text-xs text-blue-700 dark:text-blue-400 font-medium whitespace-nowrap">
@@ -552,6 +565,7 @@ const ROIAnalytics: React.FC = () => {
                                   </div>
                                 </td>
                               )}
+                              */}
                               <td className="py-2 px-3 text-center">
                                 <button
                                   onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
@@ -653,7 +667,7 @@ const ROIAnalytics: React.FC = () => {
                             </span>
                           </div>
                         )}
-                        {/* Key stages qualification rates */}
+                        {/* TEMPORARILY HIDDEN: Key stages qualification rates
                         {qualificationStats && qualificationStats.key_stages.length > 0 && (
                           <div className="pt-1.5 mt-1.5 border-t border-slate-200">
                             <div className="text-xs text-blue-700 dark:text-blue-400 font-medium">
@@ -661,6 +675,7 @@ const ROIAnalytics: React.FC = () => {
                             </div>
                           </div>
                         )}
+                        */}
                       </div>
                     </CardContent>
                   </Card>
