@@ -720,6 +720,76 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
 }
 
 /**
+ * Рассчитывает risk score креатива с учетом ROI
+ * 
+ * @param {Object} performance - метрики из Facebook API (cpl, ctr, cpm)
+ * @param {Object} roiData - данные о реальной окупаемости
+ * @param {number} targetCPL - целевой CPL пользователя (в центах)
+ * @returns {number} risk_score (0-100)
+ */
+function calculateRiskScoreWithROI(performance, roiData, targetCPL = 200) {
+  let baseScore = 50; // Начальный нейтральный score
+  
+  // Фактор 1: Facebook метрики (вес 60%)
+  if (performance) {
+    const cpl = performance.cpl || 0; // в центах
+    const ctr = performance.ctr || 0; // в процентах
+    const cpm = performance.cpm || 0; // в центах
+    
+    // CPL выше target -> повышаем risk
+    if (cpl > targetCPL * 1.3) {
+      baseScore += 20;
+    } else if (cpl > targetCPL) {
+      baseScore += 10;
+    } else if (cpl < targetCPL * 0.7) {
+      baseScore -= 15;
+    }
+    
+    // Низкий CTR -> риск
+    if (ctr < 0.8) {
+      baseScore += 15;
+    } else if (ctr > 2.0) {
+      baseScore -= 10;
+    }
+    
+    // Высокий CPM -> риск (конвертируем из центов в доллары)
+    const cpmDollars = cpm / 100;
+    if (cpmDollars > 8) {
+      baseScore += 10;
+    } else if (cpmDollars < 5) {
+      baseScore -= 5;
+    }
+  }
+  
+  // Фактор 2: ROI (вес 40% - важнее метрик!)
+  // Учитываем ROI только если есть минимум 2 конверсии для статистической значимости
+  if (roiData && roiData.conversions >= 2) {
+    const roi = roiData.roi;
+    
+    if (roi > 100) {
+      // Отличная окупаемость -> сильно снижаем риск
+      baseScore -= 25;
+    } else if (roi > 50) {
+      // Хорошая окупаемость
+      baseScore -= 15;
+    } else if (roi > 0) {
+      // Положительный ROI
+      baseScore -= 5;
+    } else if (roi < -50) {
+      // Сильный убыток -> высокий риск
+      baseScore += 30;
+    } else if (roi < 0) {
+      // Убыток
+      baseScore += 15;
+    }
+  }
+  // Если нет ROI данных или мало конверсий (новый креатив) -> используем только Facebook метрики
+  
+  // Ограничиваем диапазон 0-100
+  return Math.max(0, Math.min(100, Math.round(baseScore)));
+}
+
+/**
  * ОСНОВНАЯ ФУНКЦИЯ: Запуск Scoring Agent
  */
 export async function runScoringAgent(userAccount, options = {}) {
@@ -838,6 +908,30 @@ export async function runScoringAgent(userAccount, options = {}) {
       active_in_ads: activeCreativeIds.creativeIdsSet.size
     });
     
+    // ========================================
+    // ЧАСТЬ 2.5: ЗАГРУЗКА ROI ДАННЫХ
+    // ========================================
+    
+    logger.info({ where: 'scoring_agent', phase: 'fetching_roi' });
+    
+    let creativeROIMap = new Map();
+    try {
+      const { calculateCreativeROI } = await import('../../agent-service/src/lib/roiCalculator.js');
+      creativeROIMap = await calculateCreativeROI(userAccountId, null, 30, supabase);
+      
+      logger.info({ 
+        where: 'scoring_agent', 
+        phase: 'roi_loaded',
+        creatives_with_roi: creativeROIMap.size
+      });
+    } catch (error) {
+      logger.warn({
+        where: 'scoring_agent',
+        phase: 'roi_load_failed',
+        error: String(error)
+      }, 'Failed to load ROI data, continuing without it');
+    }
+    
     const readyCreatives = [];
     
     for (const uc of userCreatives) {
@@ -898,9 +992,22 @@ export async function runScoringAgent(userAccount, options = {}) {
       }
       
       if (creatives.length > 0) {
+        // Добавляем ROI данные если есть
+        const roiData = creativeROIMap.get(uc.id) || null;
+        
+        // Рассчитываем risk score с учетом ROI
+        // Берем первый креатив для расчета (обычно это основной objective)
+        const primaryCreative = creatives[0];
+        const performance = primaryCreative?.performance || null;
+        const targetCPL = 200; // Целевой CPL в центах (можно получить из настроек пользователя)
+        const riskScore = calculateRiskScoreWithROI(performance, roiData, targetCPL);
+        
         readyCreatives.push({
           name: uc.title,
-          creatives: creatives
+          user_creative_id: uc.id,
+          creatives: creatives,
+          roi_data: roiData, // { revenue, spend, roi, conversions, leads }
+          risk_score: riskScore // 0-100, с учетом ROI
         });
       }
     }
@@ -909,7 +1016,8 @@ export async function runScoringAgent(userAccount, options = {}) {
       where: 'scoring_agent', 
       phase: 'creatives_processed',
       total: readyCreatives.length,
-      with_stats: readyCreatives.filter(c => c.creatives.length > 0).length
+      with_stats: readyCreatives.filter(c => c.creatives.length > 0).length,
+      with_roi: readyCreatives.filter(c => c.roi_data !== null).length
     });
     
     // ========================================
