@@ -101,6 +101,16 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
                       message.message?.contextInfo ||  // Для совместимости
                       message.message?.extendedTextMessage?.contextInfo;
   
+  // 🔍 DEBUG: Логируем структуру contextInfo
+  app.log.info({
+    hasDataContextInfo: !!data.contextInfo,
+    hasMessageContextInfo: !!message.message?.contextInfo,
+    contextInfoKeys: contextInfo ? Object.keys(contextInfo) : null,
+    hasExternalAdReply: !!contextInfo?.externalAdReply,
+    externalAdReplyKeys: contextInfo?.externalAdReply ? Object.keys(contextInfo.externalAdReply) : null,
+    rawSourceId: contextInfo?.externalAdReply?.sourceId
+  }, '🔍 DEBUG: contextInfo structure');
+  
   // Извлекаем метаданные Facebook из externalAdReply
   const externalAdReply = contextInfo?.externalAdReply;
   const sourceId = externalAdReply?.sourceId; // Ad ID из Facebook (например: "120236271994930134")
