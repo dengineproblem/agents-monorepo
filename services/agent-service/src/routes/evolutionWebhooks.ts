@@ -96,13 +96,14 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
                       message.message?.extendedTextMessage?.text || '';
 
   // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из contextInfo.externalAdReply
-  // В Evolution API информация о рекламе Facebook находится в contextInfo
-  const contextInfo = message.message?.contextInfo || 
+  // В Evolution API webhook contextInfo приходит как отдельное поле в data
+  const contextInfo = data.contextInfo ||  // ✅ Сначала проверяем data.contextInfo (Evolution API webhook)
+                      message.message?.contextInfo ||  // Для совместимости
                       message.message?.extendedTextMessage?.contextInfo;
   
   // Извлекаем метаданные Facebook из externalAdReply
   const externalAdReply = contextInfo?.externalAdReply;
-  const sourceId = externalAdReply?.sourceId; // Ad ID из Facebook (например: "120237700368900666")
+  const sourceId = externalAdReply?.sourceId; // Ad ID из Facebook (например: "120236271994930134")
   const sourceType = externalAdReply?.sourceType; // "ad" для рекламных сообщений
   const sourceUrl = externalAdReply?.sourceUrl; // Ссылка на рекламу (Instagram/Facebook)
   const mediaUrl = externalAdReply?.mediaUrl; // Медиа из рекламы
