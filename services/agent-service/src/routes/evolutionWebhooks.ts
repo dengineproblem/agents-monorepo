@@ -95,18 +95,22 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const messageText = message.message?.conversation ||
                       message.message?.extendedTextMessage?.text || '';
 
-  // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из message.key (а не из contextInfo)
-  // В Evolution API информация о рекламе Facebook находится в key объекте
-  const sourceId = message.key?.sourceId; // Ad ID из Facebook
-  const sourceType = message.key?.sourceType; // "ad" для рекламных сообщений
-  const sourceUrl = message.key?.sourceUrl; // Ссылка на рекламу
-  const mediaUrl = message.key?.mediaUrl; // Медиа из рекламы
+  // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из contextInfo.externalAdReply
+  // В Evolution API информация о рекламе Facebook находится в contextInfo
+  const contextInfo = message.message?.contextInfo || 
+                      message.message?.extendedTextMessage?.contextInfo;
+  
+  // Извлекаем метаданные Facebook из externalAdReply
+  const externalAdReply = contextInfo?.externalAdReply;
+  const sourceId = externalAdReply?.sourceId; // Ad ID из Facebook (например: "120237700368900666")
+  const sourceType = externalAdReply?.sourceType; // "ad" для рекламных сообщений
+  const sourceUrl = externalAdReply?.sourceUrl; // Ссылка на рекламу (Instagram/Facebook)
+  const mediaUrl = externalAdReply?.mediaUrl; // Медиа из рекламы
 
   // Старый способ (для совместимости, если вдруг придёт в другом формате)
-  const contextInfo = message.message?.extendedTextMessage?.contextInfo;
   const legacySourceId = contextInfo?.stanzaId || contextInfo?.referredProductId;
 
-  // Используем sourceId из key, если есть, иначе пробуем старый способ
+  // Используем sourceId из externalAdReply, если есть, иначе пробуем старый способ
   const finalSourceId = sourceId || legacySourceId;
 
   // Log message structure for debugging
