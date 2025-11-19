@@ -69,11 +69,6 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
 async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const { instance, data } = event;
 
-  // 🔍 DEBUG: Логируем весь data объект
-  app.log.info({
-    fullData: JSON.stringify(data, null, 2)
-  }, '🔍 DEBUG: Full webhook data payload');
-
   // Handle different payload formats: data.messages array or data itself
   let messages = data.messages || (data.key ? [data] : null);
 
@@ -101,11 +96,10 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
                       message.message?.extendedTextMessage?.text || '';
 
   // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из contextInfo.externalAdReply
-  // contextInfo может быть в разных местах в зависимости от типа сообщения
-  const contextInfo = data.contextInfo ||  // Top-level contextInfo (Evolution webhook)
-                      message.message?.interactiveMessage?.contextInfo ||  // Interactive messages (ads)
-                      message.message?.contextInfo ||  // Standard messages
-                      message.message?.extendedTextMessage?.contextInfo;  // Extended text messages
+  // В реальных вебхуках Evolution API contextInfo приходит на верхнем уровне data
+  const contextInfo = data.contextInfo ||  // ✅ Top-level contextInfo (REAL ad messages)
+                      message.message?.contextInfo ||  // Fallback: Standard messages
+                      message.message?.extendedTextMessage?.contextInfo;  // Fallback: Extended text
   
   // Извлекаем метаданные Facebook из externalAdReply
   const externalAdReply = contextInfo?.externalAdReply;
