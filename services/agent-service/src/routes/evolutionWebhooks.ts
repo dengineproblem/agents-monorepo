@@ -69,6 +69,11 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
 async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const { instance, data } = event;
 
+  // 🔍 DEBUG: Логируем весь data объект
+  app.log.info({
+    fullData: JSON.stringify(data, null, 2)
+  }, '🔍 DEBUG: Full webhook data payload');
+
   // Handle different payload formats: data.messages array or data itself
   let messages = data.messages || (data.key ? [data] : null);
 
