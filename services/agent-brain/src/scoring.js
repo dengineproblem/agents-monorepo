@@ -553,11 +553,14 @@ function calculateTrend(prevDays, currentDays) {
 }
 
 /**
- * Fetch insights для креатива за указанный период
+ * DEPRECATED: Fetch insights для креатива за указанный период
  * 
  * НОВЫЙ МЕТОД: Сначала находим все ads использующие этот creative,
  * затем получаем insights для каждого ad и агрегируем результаты
+ * 
+ * ЗАМЕЧАНИЕ: Теперь используем getCreativeMetricsFromDB() вместо этой функции
  */
+/* DEPRECATED - используется getCreativeMetricsFromDB
 async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, options = {}) {
   const normalizedId = normalizeAdAccountId(adAccountId);
   
@@ -695,6 +698,80 @@ async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, opt
 }
 
 /**
+ * Получить метрики креатива из creative_metrics_history
+ * Агрегирует за последние N дней
+ * @returns {Object|null} Метрики или null если данных нет (первый запуск)
+ */
+async function getCreativeMetricsFromDB(supabase, userAccountId, fbCreativeId, days = 30) {
+  const dateFrom = new Date();
+  dateFrom.setDate(dateFrom.getDate() - days);
+  
+  const { data, error } = await supabase
+    .from('creative_metrics_history')
+    .select('*')
+    .eq('user_account_id', userAccountId)
+    .eq('creative_id', fbCreativeId)
+    .eq('source', 'production')
+    .gte('date', dateFrom.toISOString().split('T')[0])
+    .order('date', { ascending: false });
+  
+  if (error) {
+    logger.warn({ 
+      error: error.message, 
+      creative_id: fbCreativeId,
+      user_account_id: userAccountId
+    }, 'Failed to fetch metrics from creative_metrics_history');
+    return null;
+  }
+  
+  if (!data || data.length === 0) {
+    logger.info({ 
+      creative_id: fbCreativeId,
+      user_account_id: userAccountId,
+      days
+    }, 'No metrics found in creative_metrics_history - first run');
+    return null; // Нет данных - первый запуск
+  }
+  
+  // Агрегируем метрики за период
+  const totalImpressions = data.reduce((sum, row) => sum + (row.impressions || 0), 0);
+  const totalSpend = data.reduce((sum, row) => sum + (parseFloat(row.spend) || 0), 0);
+  const totalReach = data.reduce((sum, row) => sum + (row.reach || 0), 0);
+  const totalLeads = data.reduce((sum, row) => sum + (row.leads || 0), 0);
+  const totalClicks = data.reduce((sum, row) => sum + (row.clicks || 0), 0);
+  const totalLinkClicks = data.reduce((sum, row) => sum + (row.link_clicks || 0), 0);
+  
+  // Средние значения
+  const avgCTR = data.reduce((sum, row) => sum + (parseFloat(row.ctr) || 0), 0) / data.length;
+  const avgCPM = data.reduce((sum, row) => sum + (parseFloat(row.cpm) || 0), 0) / data.length;
+  const avgFrequency = data.reduce((sum, row) => sum + (parseFloat(row.frequency) || 0), 0) / data.length;
+  
+  logger.info({ 
+    creative_id: fbCreativeId,
+    user_account_id: userAccountId,
+    data_points: data.length,
+    impressions: totalImpressions,
+    leads: totalLeads
+  }, 'Metrics loaded from creative_metrics_history');
+  
+  return {
+    impressions: totalImpressions,
+    spend: totalSpend,
+    reach: totalReach,
+    clicks: totalClicks,
+    link_clicks: totalLinkClicks,
+    total_leads: totalLeads,
+    avg_cpl: totalLeads > 0 ? totalSpend / totalLeads : null,
+    avg_ctr: avgCTR,
+    avg_cpm: avgCPM,
+    avg_frequency: avgFrequency,
+    data_points: data.length,
+    date_from: dateFrom.toISOString().split('T')[0],
+    date_to: new Date().toISOString().split('T')[0]
+  };
+}
+
+/**
  * Получить активные креативы пользователя из user_creatives
  */
 async function getActiveCreatives(supabase, userAccountId) {
@@ -814,12 +891,15 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
 }
 
 /**
- * Сохранить метрики креативов в creative_metrics_history
+ * DEPRECATED: Сохранить метрики креативов в creative_metrics_history
  * НОВАЯ ФУНКЦИЯ для унифицированной системы метрик
  * 
  * Получает метрики на уровне Ad (не AdSet) для каждого креатива
  * Использует ad_creative_mapping для точного мэтчинга
+ * 
+ * ЗАМЕЧАНИЕ: Теперь метрики собираются отдельным процессом и уже есть в БД
  */
+/* DEPRECATED - метрики собираются отдельно
 async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken) {
   if (!readyCreatives || !readyCreatives.length) return;
   
@@ -970,6 +1050,7 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
     }, 'No metrics to save');
   }
 }
+*/
 
 /**
  * Рассчитывает risk score креатива с учетом ROI
@@ -1191,75 +1272,80 @@ export async function runScoringAgent(userAccount, options = {}) {
       
       // WhatsApp (MESSAGES)
       if (uc.fb_creative_id_whatsapp) {
-        const stats = await fetchCreativeInsights(
-          ad_account_id,
-          access_token,
+        const stats = await getCreativeMetricsFromDB(
+          supabase,
+          userAccountId,
           uc.fb_creative_id_whatsapp,
-          { date_preset: 'last_30d' }
+          30
         );
         
-        if (stats) {
-          creatives.push({
-            objective: 'MESSAGES',
-            fb_creative_id: uc.fb_creative_id_whatsapp,
-            performance: stats
-          });
-        }
+        creatives.push({
+          objective: 'MESSAGES',
+          fb_creative_id: uc.fb_creative_id_whatsapp,
+          performance: stats,
+          has_data: stats !== null  // НОВОЕ: флаг наличия данных
+        });
       }
       
       // Site Leads (OUTCOME_LEADS)
       if (uc.fb_creative_id_site_leads) {
-        const stats = await fetchCreativeInsights(
-          ad_account_id,
-          access_token,
+        const stats = await getCreativeMetricsFromDB(
+          supabase,
+          userAccountId,
           uc.fb_creative_id_site_leads,
-          { date_preset: 'last_30d' }
+          30
         );
         
-        if (stats) {
-          creatives.push({
-            objective: 'OUTCOME_LEADS',
-            fb_creative_id: uc.fb_creative_id_site_leads,
-            performance: stats
-          });
-        }
+        creatives.push({
+          objective: 'OUTCOME_LEADS',
+          fb_creative_id: uc.fb_creative_id_site_leads,
+          performance: stats,
+          has_data: stats !== null  // НОВОЕ: флаг наличия данных
+        });
       }
       
       // Instagram Traffic (OUTCOME_TRAFFIC)
       if (uc.fb_creative_id_instagram_traffic) {
-        const stats = await fetchCreativeInsights(
-          ad_account_id,
-          access_token,
+        const stats = await getCreativeMetricsFromDB(
+          supabase,
+          userAccountId,
           uc.fb_creative_id_instagram_traffic,
-          { date_preset: 'last_30d' }
+          30
         );
         
-        if (stats) {
-          creatives.push({
-            objective: 'OUTCOME_TRAFFIC',
-            fb_creative_id: uc.fb_creative_id_instagram_traffic,
-            performance: stats
-          });
-        }
+        creatives.push({
+          objective: 'OUTCOME_TRAFFIC',
+          fb_creative_id: uc.fb_creative_id_instagram_traffic,
+          performance: stats,
+          has_data: stats !== null  // НОВОЕ: флаг наличия данных
+        });
       }
       
       if (creatives.length > 0) {
         // Добавляем ROI данные если есть
         const roiData = creativeROIMap.get(uc.id) || null;
         
-        // Рассчитываем risk score с учетом ROI
+        // Рассчитываем risk score с учетом ROI только если есть данные
         // Берем первый креатив для расчета (обычно это основной objective)
         const primaryCreative = creatives[0];
         const performance = primaryCreative?.performance || null;
         const targetCPL = 200; // Целевой CPL в центах (можно получить из настроек пользователя)
-        const riskScore = calculateRiskScoreWithROI(performance, roiData, targetCPL);
+        const riskScore = performance ? calculateRiskScoreWithROI(performance, roiData, targetCPL) : null;
         
         readyCreatives.push({
           name: uc.title,
           user_creative_id: uc.id,
+          id: uc.id, // Добавляем для совместимости
+          title: uc.title,
+          direction_id: uc.direction_id,
+          created_at: uc.created_at,
+          fb_creative_id_whatsapp: uc.fb_creative_id_whatsapp,
+          fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
+          fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
           creatives: creatives,
           roi_data: roiData, // { revenue, spend, roi, conversions, leads }
-          risk_score: riskScore // 0-100, с учетом ROI
+          risk_score: riskScore, // 0-100, с учетом ROI или null если нет данных
+          has_data: creatives.some(c => c.has_data) // Есть ли хоть один креатив с данными
         });
       }
     }
@@ -1268,39 +1354,23 @@ export async function runScoringAgent(userAccount, options = {}) {
       where: 'scoring_agent', 
       phase: 'creatives_processed',
       total: readyCreatives.length,
-      with_stats: readyCreatives.filter(c => c.creatives.length > 0).length,
+      with_data: readyCreatives.filter(c => c.has_data).length,
+      without_data: readyCreatives.filter(c => !c.has_data).length,
       with_roi: readyCreatives.filter(c => c.roi_data !== null).length
     });
     
     // ========================================
-    // СОХРАНЯЕМ МЕТРИКИ КРЕАТИВОВ В ИСТОРИЮ
+    // МЕТРИКИ УЖЕ В ИСТОРИИ (читаем из creative_metrics_history)
     // ========================================
-    
-    // НОВОЕ: Сохраняем метрики на уровне Ad для использования в auto-launch
-    logger.info({ 
-      where: 'scoring_agent', 
-      phase: 'saving_metrics_to_history' 
-    });
-    
-    try {
-      await saveCreativeMetricsToHistory(
-        supabase, 
-        userAccountId, 
-        readyCreatives, 
-        ad_account_id, 
-        access_token
-      );
-    } catch (error) {
-      logger.error({ 
-        where: 'scoring_agent',
-        phase: 'save_metrics_failed',
-        error: String(error) 
-      }, 'Failed to save creative metrics to history, continuing...');
-    }
+    // ПРИМЕЧАНИЕ: Метрики собираются отдельным процессом и сохраняются в creative_metrics_history
+    // Здесь мы только читаем их через getCreativeMetricsFromDB()
     
     // ========================================
     // ОПРЕДЕЛЯЕМ НЕИСПОЛЬЗОВАННЫЕ КРЕАТИВЫ
     // ========================================
+    // Креативы попадают в unused_creatives если:
+    // 1. Не используются в активных ads (isUnused = true)
+    // 2. Или у них нет метрик в БД (первый запуск, has_data = false)
     
     const unusedCreatives = [];
     
@@ -1312,11 +1382,16 @@ export async function runScoringAgent(userAccount, options = {}) {
         uc.fb_creative_id_site_leads
       ].filter(id => id);
       
+      // Проверяем есть ли этот креатив в ready_creatives и есть ли у него данные
+      const readyCreative = readyCreatives.find(rc => rc.id === uc.id);
+      const hasData = readyCreative?.has_data || false;
+      
       // Если НИ ОДИН из creative_id не используется в активных ads
       const isUnused = creativeIds.length > 0 && 
                        !creativeIds.some(id => activeCreativeIds.creativeIdsSet.has(id));
       
-      if (isUnused) {
+      // Креатив unused если он не используется ИЛИ у него нет данных (первый запуск)
+      if (isUnused || !hasData) {
         // Определяем рекомендуемый objective на основе наличия креативов
         let recommendedObjective = 'WhatsApp'; // По умолчанию
         if (uc.fb_creative_id_whatsapp) recommendedObjective = 'WhatsApp';
@@ -1331,7 +1406,9 @@ export async function runScoringAgent(userAccount, options = {}) {
           fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
           recommended_objective: recommendedObjective,
           created_at: uc.created_at,
-          direction_id: uc.direction_id  // ВАЖНО: привязка к направлению
+          direction_id: uc.direction_id,  // ВАЖНО: привязка к направлению
+          first_run: !hasData,  // НОВОЕ: флаг первого запуска (нет метрик в БД)
+          not_in_active_ads: isUnused  // Не используется в активных ads
         });
       }
     }
@@ -1339,25 +1416,33 @@ export async function runScoringAgent(userAccount, options = {}) {
     logger.info({ 
       where: 'scoring_agent', 
       phase: 'unused_creatives_identified',
-      count: unusedCreatives.length
+      count: unusedCreatives.length,
+      first_run_count: unusedCreatives.filter(c => c.first_run).length,
+      not_in_active_ads_count: unusedCreatives.filter(c => c.not_in_active_ads).length
     });
     
     // ========================================
     // ЧАСТЬ 3: ФОРМИРОВАНИЕ RAW OUTPUT (БЕЗ LLM!)
     // ========================================
     
+    // Разделяем ready_creatives на те, что с данными и без данных
+    const creativesWithData = readyCreatives.filter(c => c.has_data);
+    const creativesWithoutData = readyCreatives.filter(c => !c.has_data);
+    
     // Возвращаем только RAW данные, без LLM анализа
     const scoringRawData = {
       adsets: adsetsWithTrends,
-      ready_creatives: readyCreatives,
-      unused_creatives: unusedCreatives  // НОВОЕ!
+      ready_creatives: creativesWithData,  // Только креативы с метриками
+      unused_creatives: unusedCreatives  // Включает креативы без метрик (first_run: true)
     };
     
     logger.info({ 
       where: 'scoring_agent', 
       phase: 'data_collected',
       adsets_count: adsetsWithTrends.length,
-      creatives_count: readyCreatives.length
+      ready_creatives_count: creativesWithData.length,
+      unused_creatives_count: unusedCreatives.length,
+      creatives_without_data_count: creativesWithoutData.length
     });
     
     // ========================================

@@ -227,7 +227,93 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
           log.info({ directionId: direction.id, creativeCount: creatives.length }, 'Found creatives for direction');
 
+          // ===================================================
+          // ПОПЫТКА 1: LLM ПОДХОД (primary)
+          // ===================================================
+          let llmSuccess = false;
           try {
+            log.info({ 
+              directionId: direction.id, 
+              mode: 'llm_primary' 
+            }, 'Attempting LLM-based launch');
+
+            // Вызываем AI для анализа и выбора креативов
+            const action = await buildCampaignAction({
+              user_account_id,
+              direction_id: direction.id,
+              objective: direction.objective,
+              campaign_name: direction.name,
+              requested_budget_cents: direction.daily_budget_cents,
+            });
+
+            action.params.auto_activate = (request.body as any)?.auto_activate || false;
+
+            log.info({ 
+              directionId: direction.id,
+              action: action.type,
+              creativesSelected: action.params.user_creative_ids?.length,
+              reasoning: action.reasoning
+            }, 'LLM selected creatives for direction');
+
+            // Выполняем action через систему actions
+            const envelope = {
+              idempotencyKey: `ai-autolaunch-v2-${direction.id}-${Date.now()}`,
+              account: {
+                userAccountId: user_account_id,
+                whatsappPhoneNumber: userAccount.whatsapp_phone_number,
+              },
+              actions: [action],
+              source: 'ai-campaign-builder-v2',
+            };
+
+            const actionsResponse = await request.server.inject({
+              method: 'POST',
+              url: '/agent/actions',
+              payload: envelope,
+            });
+
+            if (actionsResponse.statusCode === 202) {
+              const executionResult = JSON.parse(actionsResponse.body);
+              
+              results.push({
+                direction_id: direction.id,
+                direction_name: direction.name,
+                campaign_id: direction.fb_campaign_id,
+                success: true,
+                mode: 'llm',
+                action: action.type,
+                creatives_count: action.params.user_creative_ids?.length,
+                reasoning: action.reasoning,
+                execution_id: executionResult.executionId,
+                status: 'success',
+              });
+
+              llmSuccess = true;
+              log.info({ 
+                directionId: direction.id, 
+                executionId: executionResult.executionId 
+              }, 'LLM launch successful');
+            } else {
+              throw new Error(`Actions API returned ${actionsResponse.statusCode}`);
+            }
+          } catch (llmError: any) {
+            log.warn({ 
+              err: llmError, 
+              directionId: direction.id,
+              message: llmError.message 
+            }, 'LLM launch failed, falling back to deterministic approach');
+          }
+
+          // ===================================================
+          // ПОПЫТКА 2: ДЕТЕРМИНИСТИЧЕСКИЙ ПОДХОД (fallback)
+          // ===================================================
+          if (!llmSuccess) {
+            log.info({ 
+              directionId: direction.id, 
+              mode: 'deterministic_fallback' 
+            }, 'Using deterministic approach');
+
+            try {
             // Получаем дефолтные настройки направления
             const defaultSettings = await getDirectionSettings(direction.id);
             log.info({
@@ -382,6 +468,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               daily_budget_cents: direction.daily_budget_cents,
               ads_created: ads.length,
               creatives_used: creativesToUse.map(c => c.user_creative_id),
+              mode: 'deterministic',
               status: 'success',
             });
           } catch (error: any) {
@@ -409,9 +496,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               campaign_id: direction.fb_campaign_id,
               error: errorMessage,
               error_details: errorDetails,
+              mode: 'deterministic',
               status: 'failed',
             });
           }
+          } // закрываем проверку !llmSuccess
         }
 
         // ===================================================
@@ -894,7 +983,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
               const actionsResponse = await request.server.inject({
                 method: 'POST',
-                url: '/api/agent/actions',
+                url: '/agent/actions',
                 payload: envelope,
               });
 
@@ -966,12 +1055,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         const envelope = convertActionToEnvelope(action, user_account_id, objective, userAccount.whatsapp_phone_number);
         
-        // Вызываем POST /api/agent/actions через внутренний механизм
+        // Вызываем POST /agent/actions через внутренний механизм
         let executionResult;
         try {
           const actionsResponse = await request.server.inject({
             method: 'POST',
-            url: '/api/agent/actions',
+            url: '/agent/actions',
             payload: envelope,
           });
 

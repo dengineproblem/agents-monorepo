@@ -903,64 +903,15 @@ export async function getAvailableCreatives(
     .in('creative_id', creativeIds)
     .order('date', { ascending: false });
 
-  // 2. OPTIMIZATION: Сначала пытаемся получить из БД (кэш от agent-brain)
+  // 2. Получаем метрики ТОЛЬКО из БД (creative_metrics_history)
+  // Больше НЕ обращаемся к Facebook API - все данные должны быть в БД
   const metricsMap = await getCreativeMetrics(userAccountId, creativeIds);
 
   log.info({ 
     fromDB: metricsMap.size,
+    withoutMetrics: creativeIds.length - metricsMap.size,
     total: creativeIds.length 
-  }, 'Loaded metrics from DB');
-
-  // 3. FALLBACK: Для креативов без метрик в БД - запрашиваем из Facebook API
-  const freshMetricsMap = new Map();
-  
-  const { data: userAccount } = await supabase
-    .from('user_accounts')
-    .select('ad_account_id, access_token')
-    .eq('id', userAccountId)
-    .single();
-
-  if (userAccount && userAccount.access_token) {
-    const missingCreativeIds = creativeIds.filter(id => !metricsMap.has(id));
-    
-    if (missingCreativeIds.length > 0) {
-      log.info({ count: missingCreativeIds.length }, 'Fetching missing metrics from FB API');
-      
-      // OPTIMIZATION: Запускаем запросы параллельно
-      const metricsPromises = missingCreativeIds.map(async (creativeId) => {
-        try {
-          const insights = await fetchCreativeInsightsLight(
-            userAccount.ad_account_id,
-            userAccount.access_token,
-            creativeId
-          );
-          
-          if (insights) {
-            return { creativeId, insights };
-          }
-        } catch (e) {
-          log.warn({ creativeId, err: e }, 'Failed to fetch insights for creative');
-        }
-        return null;
-      });
-
-      // Ждем выполнения всех запросов
-      const results = await Promise.all(metricsPromises);
-      
-      // Сохраняем результаты
-      results.forEach(result => {
-        if (result) {
-          freshMetricsMap.set(result.creativeId, result.insights);
-        }
-      });
-    }
-  }
-
-  log.info({ 
-    fromDB: metricsMap.size, 
-    fromAPI: freshMetricsMap.size,
-    total: creativeIds.length
-  }, 'Metrics loaded (DB + API)');
+  }, 'Metrics loaded from DB only');
 
 
   // Объединяем креативы со скорами и метриками
@@ -979,7 +930,7 @@ export async function getAvailableCreatives(
     }
 
     const score = scores?.find((s) => s.creative_id === fbCreativeId);
-    const metrics = metricsMap.get(fbCreativeId!) || freshMetricsMap.get(fbCreativeId!);
+    const metrics = metricsMap.get(fbCreativeId!);
 
     return {
       user_creative_id: creative.id,
@@ -1709,7 +1660,7 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
 // ========================================
 
 /**
- * Конвертировать campaign action в envelope для POST /api/agent/actions
+ * Конвертировать campaign action в envelope для POST /agent/actions
  */
 export function convertActionToEnvelope(
   action: CampaignAction, 
