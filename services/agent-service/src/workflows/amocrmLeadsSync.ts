@@ -429,7 +429,7 @@ export async function syncCreativeLeadsFromAmoCRM(
     // 2. Get leads for this specific creative only
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id')
+      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type')
       .eq('user_account_id', userAccountId)
       .eq('creative_id', creativeId);
 
@@ -539,6 +539,67 @@ export async function syncCreativeLeadsFromAmoCRM(
               localLead.current_status_id !== newStatusId ||
               localLead.current_pipeline_id !== newPipelineId ||
               localLead.amocrm_lead_id !== newAmoCRMLeadId;
+
+            // Always sync sales data if we have the lead from AmoCRM
+            if (newAmoCRMLeadId) {
+              try {
+                const amount = amocrmLeadFromContact.price || 0;
+                
+                // Extract client info
+                let clientPhone = '';
+                let clientName = 'Unknown';
+                
+                if (localLead.source_type === 'website' || localLead.source_type === 'manual') {
+                  clientPhone = localLead.phone || '';
+                  clientName = localLead.name || 'Клиент с сайта';
+                } else {
+                  clientPhone = localLead.chat_id?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
+                  clientName = localLead.chat_id || 'Unknown';
+                }
+
+                const saleData = {
+                  client_phone: clientPhone,
+                  client_name: clientName,
+                  amount: amount / 100, // Matching logic from processDealWebhook
+                  currency: 'RUB',
+                  status: newStatusId === 142 ? 'paid' : 'pending',
+                  sale_date: new Date().toISOString().split('T')[0],
+                  amocrm_deal_id: newAmoCRMLeadId,
+                  amocrm_pipeline_id: newPipelineId,
+                  amocrm_status_id: newStatusId,
+                  created_by: userAccountId,
+                  updated_at: new Date().toISOString()
+                };
+
+                // Upsert sale record
+                const { data: existingSale } = await supabase
+                  .from('sales')
+                  .select('id')
+                  .eq('amocrm_deal_id', newAmoCRMLeadId)
+                  .maybeSingle();
+
+                if (existingSale) {
+                   await supabase
+                     .from('sales')
+                     .update(saleData)
+                     .eq('id', existingSale.id);
+                } else {
+                   await supabase
+                     .from('sales')
+                     .insert({
+                       ...saleData,
+                       created_at: new Date().toISOString()
+                     });
+                }
+              } catch (saleError: any) {
+                log.warn({
+                  error: saleError.message,
+                  leadId: localLead.id,
+                  amocrmLeadId: newAmoCRMLeadId
+                }, 'Failed to sync sale data');
+                // Don't fail the whole sync for sales error
+              }
+            }
 
             if (!needsUpdate) {
               return;
