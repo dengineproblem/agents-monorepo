@@ -355,17 +355,19 @@ class SalesApiService {
       // Обрабатываем каждый лид асинхронно
       for (const lead of leadsStats || []) {
         const creativeId = lead.creative_id || 'unknown_creative';
-        const revenue = Number(lead.sale_amount) || 0;
-        const hasConversion = revenue > 0;
         
         // Находим все продажи для этого лида
         const leadPurchases = purchasesStats?.filter(p => p.client_phone === lead.chat_id) || [];
         const purchaseCount = leadPurchases.length;
         
+        // Считаем выручку из реальных продаж, а не из поля leads.sale_amount
+        const revenue = leadPurchases.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+        const hasConversion = revenue > 0;
+        
         // console.log(`📊 Лид ${lead.id}: creative_id=${creativeId}, revenue=${revenue}, hasConversion=${hasConversion}, purchases=${purchaseCount}`);
         
         if (hasConversion) {
-          totalConversions += purchaseCount; // Считаем количество продаж, а не лидов
+          totalConversions += purchaseCount; // Считаем количество продаж
         }
         totalRevenue += revenue;
 
