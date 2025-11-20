@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -89,6 +89,9 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
             </div>
             <Badge variant="secondary">{numbers.length}</Badge>
           </CardTitle>
+          <CardDescription>
+            Используется для получения данных о лидах и сопоставления их с креативами
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {numbers.length === 0 ? (

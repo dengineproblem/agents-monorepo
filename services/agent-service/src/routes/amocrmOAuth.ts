@@ -299,6 +299,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
         <html>
         <head>
           <title>AmoCRM Connected</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -308,6 +310,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               height: 100vh;
               margin: 0;
               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: #333;
             }
             .container {
               background: white;
@@ -316,20 +319,23 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               box-shadow: 0 10px 40px rgba(0,0,0,0.1);
               text-align: center;
               max-width: 400px;
+              width: 90%;
             }
             h1 {
               color: #333;
               margin-bottom: 16px;
+              font-size: 24px;
             }
             p {
               color: #666;
               margin-bottom: 24px;
+              line-height: 1.5;
             }
             .success-icon {
               font-size: 64px;
               margin-bottom: 16px;
             }
-            button {
+            .btn {
               background: #667eea;
               color: white;
               border: none;
@@ -338,9 +344,17 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               font-size: 16px;
               cursor: pointer;
               transition: background 0.2s;
+              text-decoration: none;
+              display: inline-block;
+              font-weight: 500;
             }
-            button:hover {
+            .btn:hover {
               background: #5568d3;
+            }
+            .redirect-text {
+              margin-top: 16px;
+              font-size: 12px;
+              color: #888;
             }
           </style>
         </head>
@@ -349,16 +363,31 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
             <div class="success-icon">✅</div>
             <h1>AmoCRM подключен!</h1>
             <p>Ваш аккаунт AmoCRM (${subdomain}.amocrm.ru) успешно подключен к системе.</p>
-            <button onclick="window.close()">Закрыть окно</button>
+            
+            <a href="https://app.performanteaiagency.com/profile" class="btn">Вернуться в профиль</a>
+            
+            <div class="redirect-text">Автоматический переход через 3 секунды...</div>
           </div>
           <script>
             // Try to send message to parent window (if opened in popup)
-            if (window.opener) {
-              window.opener.postMessage({
-                type: 'amocrm_connected',
-                subdomain: '${subdomain}'
-              }, '*');
+            try {
+              if (window.opener) {
+                window.opener.postMessage({
+                  type: 'amocrm_connected',
+                  subdomain: '${subdomain}'
+                }, '*');
+                
+                // Close popup after short delay if successfully messaged
+                setTimeout(() => window.close(), 2000);
+              }
+            } catch (e) {
+              console.error('Error posting message:', e);
             }
+
+            // Always redirect to profile as fallback or main flow
+            setTimeout(() => {
+              window.location.href = 'https://app.performanteaiagency.com/profile';
+            }, 3000);
           </script>
         </body>
         </html>
@@ -372,6 +401,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
         <html>
         <head>
           <title>AmoCRM Connection Error</title>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
             body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -381,6 +412,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               height: 100vh;
               margin: 0;
               background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+              color: #333;
             }
             .container {
               background: white;
@@ -389,14 +421,17 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               box-shadow: 0 10px 40px rgba(0,0,0,0.1);
               text-align: center;
               max-width: 400px;
+              width: 90%;
             }
             h1 {
               color: #d9534f;
               margin-bottom: 16px;
+              font-size: 24px;
             }
             p {
               color: #666;
               margin-bottom: 24px;
+              line-height: 1.5;
             }
             .error-icon {
               font-size: 64px;
@@ -409,6 +444,23 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               text-align: left;
               overflow-x: auto;
               font-size: 12px;
+              margin-bottom: 24px;
+            }
+            .btn {
+              background: #d9534f;
+              color: white;
+              border: none;
+              padding: 12px 24px;
+              border-radius: 6px;
+              font-size: 16px;
+              cursor: pointer;
+              transition: background 0.2s;
+              text-decoration: none;
+              display: inline-block;
+              font-weight: 500;
+            }
+            .btn:hover {
+              background: #c9302c;
             }
           </style>
         </head>
@@ -418,6 +470,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
             <h1>Ошибка подключения</h1>
             <p>Не удалось подключить AmoCRM. Попробуйте ещё раз.</p>
             <pre>${error.message}</pre>
+            
+            <a href="https://app.performanteaiagency.com/profile" class="btn">Вернуться в профиль</a>
           </div>
         </body>
         </html>

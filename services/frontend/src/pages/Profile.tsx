@@ -143,10 +143,6 @@ const Profile: React.FC = () => {
   const [newAudienceId, setNewAudienceId] = useState('');
   const [isSavingAudienceId, setIsSavingAudienceId] = useState(false);
 
-  // Ad Set Creation Mode
-  const [defaultAdsetMode, setDefaultAdsetMode] = useState<'api_create' | 'use_existing'>(user?.default_adset_mode || 'api_create');
-  const [isSavingAdsetMode, setIsSavingAdsetMode] = useState(false);
-
   // AmoCRM Integration
   const [amocrmConnected, setAmocrmConnected] = useState(false);
   const [amocrmSubdomain, setAmocrmSubdomain] = useState('');
@@ -803,36 +799,6 @@ const Profile: React.FC = () => {
     }
   };
 
-  const handleSaveAdsetMode = async (newMode: 'api_create' | 'use_existing') => {
-    if (!user?.id) return;
-    
-    setIsSavingAdsetMode(true);
-    try {
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ default_adset_mode: newMode } as any)
-        .eq('id', user.id);
-      
-      if (error) {
-        console.error('Error saving ad set mode:', error);
-        toast.error(`Failed to save: ${error.message}`);
-        return;
-      }
-      
-      // Update localStorage
-      const updatedUser = { ...user, default_adset_mode: newMode };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      
-      setDefaultAdsetMode(newMode);
-      toast.success('Ad set creation mode saved successfully');
-    } catch (error) {
-      console.error('Error saving ad set mode:', error);
-      toast.error('An error occurred while saving');
-    } finally {
-      setIsSavingAdsetMode(false);
-    }
-  };
-
   // AmoCRM handlers
   const handleAmoCRMConnect = () => {
     console.log('[Profile] handleAmoCRMConnect called, amocrmConnected:', amocrmConnected);
@@ -989,70 +955,6 @@ const Profile: React.FC = () => {
                         </Button>
                       </div>
                     )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Ad Set Creation Mode Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <DollarSign className="h-5 w-5" />
-                    Режим создания Ad Sets
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="text-sm text-muted-foreground mb-3">
-                      Выберите, как создавать ad sets для ваших кампаний
-                    </div>
-                    
-                    {/* Radio Group */}
-                    <div className="space-y-3">
-                      <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                        defaultAdsetMode === 'api_create' 
-                          ? 'border-primary bg-primary/5' 
-                          : 'border-border hover:border-primary/50'
-                      }`}>
-                        <input
-                          type="radio"
-                          name="adset-mode"
-                          value="api_create"
-                          checked={defaultAdsetMode === 'api_create'}
-                          onChange={(e) => handleSaveAdsetMode('api_create')}
-                          disabled={isSavingAdsetMode}
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <div className="font-medium">Режим одного номера WhatsApp (по умолчанию)</div>
-                          <div className="text-sm text-muted-foreground mt-1">
-                            Автоматическое создание ad sets через Facebook API. Подходит для пользователей с одним бизнес-направлением.
-                          </div>
-                        </div>
-                      </label>
-                      
-                      <label className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-colors ${
-                        defaultAdsetMode === 'use_existing' 
-                          ? 'border-primary bg-primary/5' 
-                          : 'border-border hover:border-primary/50'
-                      }`}>
-                        <input
-                          type="radio"
-                          name="adset-mode"
-                          value="use_existing"
-                          checked={defaultAdsetMode === 'use_existing'}
-                          onChange={(e) => handleSaveAdsetMode('use_existing')}
-                          disabled={isSavingAdsetMode}
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <div className="font-medium">Режим нескольких номеров WhatsApp</div>
-                          <div className="text-sm text-muted-foreground mt-1">
-                            Использование заранее созданных ad sets с конкретными номерами WhatsApp. Необходимо для нескольких направлений с разными номерами телефонов.
-                          </div>
-                        </div>
-                      </label>
-                    </div>
                   </div>
                 </CardContent>
               </Card>
