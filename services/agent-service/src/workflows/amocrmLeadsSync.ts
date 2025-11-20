@@ -553,35 +553,36 @@ export async function syncCreativeLeadsFromAmoCRM(
 
                 const saleData = {
                   client_phone: clientPhone,
-                  client_name: clientName,
-                  amount: amount / 100, // Matching logic from processDealWebhook
-                  currency: 'RUB',
-                  status: newStatusId === 142 ? 'paid' : 'pending',
-                  sale_date: new Date().toISOString().split('T')[0],
+                  // client_name field doesn't exist in purchases table based on schema provided
+                  // business_id is optional
+                  amount: amount, // No division by 100 for AmoCRM values (usually integers)
+                  currency: 'KZT', // Default to KZT
+                  // status field doesn't exist in purchases, using notes to store status info if needed
+                  purchase_date: new Date().toISOString(),
                   amocrm_deal_id: newAmoCRMLeadId,
                   amocrm_pipeline_id: newPipelineId,
                   amocrm_status_id: newStatusId,
-                  created_by: userAccountId,
+                  user_account_id: userAccountId,
                   updated_at: new Date().toISOString()
                 };
 
-                // Upsert sale record
-                const { data: existingSale } = await supabase
-                  .from('sales')
+                // Upsert purchase record
+                const { data: existingPurchase } = await supabase
+                  .from('purchases')
                   .select('id')
                   .eq('amocrm_deal_id', newAmoCRMLeadId)
                   .maybeSingle();
 
-                if (existingSale) {
+                if (existingPurchase) {
                    await supabase
-                     .from('sales')
+                     .from('purchases')
                      .update(saleData)
-                     .eq('id', existingSale.id);
+                     .eq('id', existingPurchase.id);
                 } else {
-                   // Only create sale if amount > 0 or status is won
+                   // Only create purchase if amount > 0 or status is won (142)
                    if (amount > 0 || newStatusId === 142) {
                      await supabase
-                       .from('sales')
+                       .from('purchases')
                        .insert({
                          ...saleData,
                          created_at: new Date().toISOString()

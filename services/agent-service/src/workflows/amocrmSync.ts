@@ -375,59 +375,56 @@ export async function processDealWebhook(
       return;
     }
 
-    // 3. Create or update sale record
-    const { data: existingSale } = await supabase
-      .from('sales')
-      .select('*')
+    // 3. Create or update purchase record (using purchases table instead of sales)
+    const { data: existingPurchase } = await supabase
+      .from('purchases')
+      .select('id')
       .eq('amocrm_deal_id', dealId)
       .maybeSingle();
 
     // Extract client info based on lead source type
     let clientPhone = '';
-    let clientName = 'Unknown';
     
     if (ourLead.source_type === 'website' || ourLead.source_type === 'manual') {
       clientPhone = ourLead.phone || '';
-      clientName = ourLead.name || 'Клиент с сайта';
     } else {
       clientPhone = ourLead.chat_id?.replace('@s.whatsapp.net', '').replace('@c.us', '') || '';
-      clientName = ourLead.chat_id || 'Unknown';
     }
 
-    const saleData = {
+    const purchaseData = {
       client_phone: clientPhone,
-      client_name: clientName,
-      amount: amount / 100, // Convert cents to rubles (if needed)
-      currency: 'RUB',
-      status: dealStatus === 142 ? 'paid' : 'pending', // 142 is typical "Won" status
-      sale_date: new Date().toISOString().split('T')[0],
+      amount: amount, // No division by 100
+      currency: 'KZT', // Default to KZT
+      purchase_date: new Date().toISOString(),
       amocrm_deal_id: dealId,
       amocrm_pipeline_id: pipelineId,
       amocrm_status_id: dealStatus,
-      created_by: userAccountId,
+      user_account_id: userAccountId,
       updated_at: new Date().toISOString()
     };
 
-    if (existingSale) {
-      // Update existing sale
+    if (existingPurchase) {
+      // Update existing purchase
       await supabase
-        .from('sales')
-        .update(saleData)
-        .eq('id', existingSale.id);
+        .from('purchases')
+        .update(purchaseData)
+        .eq('id', existingPurchase.id);
 
-      app.log.info({ saleId: existingSale.id, dealId }, 'Updated sale from AmoCRM deal');
+      app.log.info({ purchaseId: existingPurchase.id, dealId }, 'Updated purchase from AmoCRM deal');
     } else {
-      // Create new sale
-      const { data: newSale } = await supabase
-        .from('sales')
-        .insert({
-          ...saleData,
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
+      // Create new purchase only if meaningful (amount > 0 or Won status)
+      if (amount > 0 || dealStatus === 142) {
+        const { data: newPurchase } = await supabase
+          .from('purchases')
+          .insert({
+            ...purchaseData,
+            created_at: new Date().toISOString()
+          })
+          .select()
+          .single();
 
-      app.log.info({ saleId: newSale?.id, dealId }, 'Created sale from AmoCRM deal');
+        app.log.info({ purchaseId: newPurchase?.id, dealId }, 'Created purchase from AmoCRM deal');
+      }
     }
 
     // 4. Log success
