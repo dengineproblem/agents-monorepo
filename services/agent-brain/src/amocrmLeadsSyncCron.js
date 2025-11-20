@@ -63,10 +63,7 @@ async function syncAllUsersLeads() {
         const response = await fetch(
           `${AGENT_SERVICE_URL}/amocrm/sync-leads?userAccountId=${user.id}`,
           {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            }
+            method: 'POST'
           }
         );
 

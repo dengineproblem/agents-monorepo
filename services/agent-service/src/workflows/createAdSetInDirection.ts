@@ -373,17 +373,27 @@ export async function workflowCreateAdSetInDirection(
   if (direction.objective === 'site_leads') {
     adsetBody.destination_type = 'WEBSITE';
 
-    // Получаем pixel_id из направления (если был выбран при создании)
-    if (direction.pixel_id) {
+    // Проверяем ОБА источника: direction.pixel_id (fallback) и defaultSettings.pixel_id (основной)
+    if (direction.pixel_id || defaultSettings?.pixel_id) {
       adsetBody.promoted_object = {
-        pixel_id: String(direction.pixel_id),
+        pixel_id: String(direction.pixel_id || defaultSettings.pixel_id),
         custom_event_type: 'LEAD'
       };
+      
+      log.info({ 
+        pixel_id: direction.pixel_id || defaultSettings.pixel_id,
+        source: direction.pixel_id ? 'direction' : 'defaultSettings'
+      }, 'Using pixel_id for site_leads');
     } else {
-      // Если pixel_id не указан, используем только custom_event_type
+      // Если pixel не настроен - создаём без пикселя (допустимо для Facebook)
       adsetBody.promoted_object = {
         custom_event_type: 'LEAD'
       };
+      
+      log.warn({ 
+        directionId: direction.id,
+        directionName: direction.name 
+      }, 'Creating site_leads adset without pixel_id - tracking will be limited');
     }
   }
 
