@@ -246,13 +246,15 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               requested_budget_cents: direction.daily_budget_cents,
             });
 
-            action.params.auto_activate = (request.body as any)?.auto_activate || false;
+            // ВСЕГДА включаем adsets - игнорируем что вернула LLM
+            action.params.auto_activate = true;
 
             log.info({ 
               directionId: direction.id,
               action: action.type,
               creativesSelected: action.params.user_creative_ids?.length,
-              reasoning: action.reasoning
+              reasoning: action.reasoning,
+              auto_activate: true // ВСЕГДА true
             }, 'LLM selected creatives for direction');
 
             // Выполняем action через систему actions
