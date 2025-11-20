@@ -103,6 +103,17 @@ CREATE TABLE creative_metrics_history (
   cpm DECIMAL(10,2),       -- Cost per 1000 impressions
   frequency DECIMAL(5,2),  -- Частота показа
   
+  -- НОВОЕ: Видео-метрики (миграция 031)
+  video_views INTEGER DEFAULT 0,                    -- Просмотры видео
+  video_views_25_percent INTEGER DEFAULT 0,         -- Досмотр до 25%
+  video_views_50_percent INTEGER DEFAULT 0,         -- Досмотр до 50%
+  video_views_75_percent INTEGER DEFAULT 0,         -- Досмотр до 75%
+  video_views_95_percent INTEGER DEFAULT 0,         -- Досмотр до 95%
+  video_avg_watch_time_sec NUMERIC(10,2),          -- Среднее время просмотра
+  
+  -- Источник данных
+  source TEXT DEFAULT 'production',  -- 'production' | 'test'
+  
   -- Facebook Diagnostics
   quality_ranking TEXT,
   engagement_rate_ranking TEXT,
@@ -122,6 +133,54 @@ CREATE UNIQUE INDEX creative_metrics_ad_date_unique
 1. **Уникальность:** Одна запись = 1 Ad + 1 день
 2. **Агрегация:** Если у креатива несколько ads → суммируем при чтении
 3. **Обратная совместимость:** Старые записи (adset_id без ad_id) сохраняются
+4. **Видео-метрики:** Глубина просмотра (25%, 50%, 75%, 95%) + среднее время просмотра
+5. **Разделение source:** `production` (agent-brain) vs `test` (creative-analyzer)
+
+---
+
+## 🎥 Видео-метрики (Video Engagement)
+
+### Зачем нужны
+
+Видео-метрики позволяют оценить **качество вовлечения** пользователей:
+- **video_views:** Сколько раз видео начали смотреть
+- **video_views_50_percent:** Досмотрели до половины (ключевая метрика engagement)
+- **video_views_75_percent:** Досмотрели до 3/4 (высокое вовлечение)
+- **video_avg_watch_time_sec:** Среднее время просмотра
+
+### Расчет Engagement Rate
+
+```sql
+SELECT 
+  creative_id,
+  video_views,
+  ROUND((video_views_50_percent::NUMERIC / NULLIF(video_views, 0)) * 100, 2) as engagement_50,
+  ROUND((video_views_75_percent::NUMERIC / NULLIF(video_views, 0)) * 100, 2) as engagement_75,
+  video_avg_watch_time_sec
+FROM creative_metrics_history
+WHERE video_views > 0
+  AND date >= CURRENT_DATE - INTERVAL '7 days'
+ORDER BY engagement_50 DESC;
+```
+
+### Использование в LLM
+
+Agent-brain и creative-analyzer могут использовать video-метрики для:
+- **Сравнение креативов:** Какой креатив лучше удерживает внимание
+- **Оптимизация:** Креативы с низким engagement_50 → требуют доработки
+- **A/B тестирование:** Сравнить video engagement test vs production
+
+### Источники данных
+
+**Facebook API fields:**
+- `video_play_actions` → video_views
+- `video_p25_watched_actions` → video_views_25_percent
+- `video_p50_watched_actions` → video_views_50_percent
+- `video_p75_watched_actions` → video_views_75_percent
+- `video_p95_watched_actions` → video_views_95_percent
+- `video_avg_time_watched_actions` → video_avg_watch_time_sec
+
+**Важно:** Эти метрики доступны **только для видео-креативов**. Для картинок будет 0 или NULL.
 
 ---
 
@@ -146,9 +205,10 @@ for (каждый креатив в readyCreatives) {
     // 2. Получить метрики из FB API
     const insights = await fetchAdInsights(ad_id, 'last_7d');
     
-    // 3. Извлечь лиды и клики
+    // 3. Извлечь лиды, клики и видео-метрики
     const leads = extractLeads(insights.actions);
     const linkClicks = extractLinkClicks(insights.actions);
+    const videoMetrics = extractVideoMetrics(insights);
     
     // 4. Вычислить CPL
     const cpl = leads > 0 ? (spend * 100 / leads) : null;
@@ -159,7 +219,12 @@ for (каждый креатив в readyCreatives) {
       date: today,
       ad_id: ad.ad_id,
       creative_id: ad.fb_creative_id,
-      impressions, clicks, leads, cpl, ...
+      impressions, clicks, leads, cpl,
+      video_views: videoMetrics.video_views,
+      video_views_50_percent: videoMetrics.video_views_50_percent,
+      video_avg_watch_time_sec: videoMetrics.video_avg_watch_time_sec,
+      source: 'production',
+      ...
     });
   }
 }

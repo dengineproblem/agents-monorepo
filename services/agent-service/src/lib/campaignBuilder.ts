@@ -1349,7 +1349,7 @@ export async function fetchCreativeInsightsLight(
     const allInsights: any[] = [];
     
     // OPTIMIZATION: Запускаем запросы к Ads параллельно
-    const insightPromises = adsWithCreative.map(async (ad) => {
+    const insightPromises = adsWithCreative.map(async (ad: any) => {
       const insightsUrl = `https://graph.facebook.com/v20.0/${ad.id}/insights`;
       const insightsParams = new URLSearchParams({
         fields,

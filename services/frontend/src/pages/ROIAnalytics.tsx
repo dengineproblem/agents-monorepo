@@ -16,11 +16,13 @@ import {
   RefreshCw,
   AlertCircle,
   ChevronDown,
+  ChevronUp,
   Edit,
   Trash2,
   Save,
   X,
-  ShoppingCart
+  ShoppingCart,
+  Play
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,6 +36,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import SalesList from '@/components/SalesList';
 import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
 import { Filter } from 'lucide-react';
+import { API_BASE_URL } from '@/config/api';
+import { creativesApi } from '@/services/creativesApi';
 
 const ROIAnalytics: React.FC = () => {
   const [roiData, setRoiData] = useState<ROIData | null>(null);
@@ -47,6 +51,16 @@ const ROIAnalytics: React.FC = () => {
   // Funnel modal state
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
   const [selectedCreative, setSelectedCreative] = useState<{ id: string; name: string } | null>(null);
+
+  // Creative metrics state
+  const [expandedCreativeId, setExpandedCreativeId] = useState<string | null>(null);
+  const [creativeMetrics, setCreativeMetrics] = useState<any[]>([]);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [analyzingCreative, setAnalyzingCreative] = useState<string | null>(null);
+  
+  // Creative analysis and transcript state
+  const [creativeAnalysis, setCreativeAnalysis] = useState<any>(null);
+  const [creativeTranscript, setCreativeTranscript] = useState<string | null>(null);
 
   /* TEMPORARILY HIDDEN: Key Stages Qualification Stats
   // Qualification stats state - now supports up to 3 key stages
@@ -83,6 +97,14 @@ const ROIAnalytics: React.FC = () => {
 
   const formatPercent = (percent: number) => {
     return `${percent.toFixed(1)}%`;
+  };
+
+  // Verdict metadata для отображения оценки
+  const verdictMeta: Record<string, { label: string; emoji: string; className: string }> = {
+    excellent: { label: "Отлично", emoji: "🌟", className: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200" },
+    good: { label: "Хорошо", emoji: "👍", className: "bg-blue-100 text-blue-700 dark:bg-gray-800/40 dark:text-gray-300" },
+    average: { label: "Средне", emoji: "😐", className: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200" },
+    poor: { label: "Слабо", emoji: "👎", className: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200" },
   };
 
   /* TEMPORARILY HIDDEN: Key Stages Functions
@@ -239,6 +261,105 @@ const ROIAnalytics: React.FC = () => {
   const handleOpenFunnelModal = (creativeId: string, creativeName: string) => {
     setSelectedCreative({ id: creativeId, name: creativeName });
     setFunnelModalOpen(true);
+  };
+
+  // Загрузка метрик креатива, транскрипции и анализа
+  const loadCreativeMetrics = async (creativeId: string) => {
+    if (expandedCreativeId === creativeId) {
+      // Закрыть, если уже открыт
+      setExpandedCreativeId(null);
+      setCreativeMetrics([]);
+      setCreativeAnalysis(null);
+      setCreativeTranscript(null);
+      return;
+    }
+
+    setExpandedCreativeId(creativeId);
+    setLoadingMetrics(true);
+    
+    try {
+      // Параллельная загрузка метрик, анализа и транскрипции
+      const [metricsResult, analysisResult, transcriptText] = await Promise.all([
+        salesApi.getCreativeMetrics(creativeId, userAccountId, 30),
+        salesApi.getCreativeAnalysis(creativeId, userAccountId),
+        creativesApi.getTranscript(creativeId).catch(() => null)
+      ]);
+      
+      if (metricsResult.error) {
+        console.error('Ошибка загрузки метрик:', metricsResult.error);
+        setCreativeMetrics([]);
+      } else {
+        setCreativeMetrics(metricsResult.data || []);
+      }
+      
+      if (analysisResult.error) {
+        console.log('Анализ не найден (ожидаемо при первой загрузке)');
+        setCreativeAnalysis(null);
+      } else {
+        setCreativeAnalysis(analysisResult.data);
+      }
+      
+      setCreativeTranscript(transcriptText);
+      
+    } catch (err) {
+      console.error('Ошибка загрузки данных креатива:', err);
+      setCreativeMetrics([]);
+      setCreativeAnalysis(null);
+      setCreativeTranscript(null);
+    } finally {
+      setLoadingMetrics(false);
+    }
+  };
+
+  // Запуск анализа креатива
+  const analyzeCreative = async (creativeId: string) => {
+    setAnalyzingCreative(creativeId);
+    
+    try {
+      // Вызываем API для анализа креатива
+      const response = await fetch(`${API_BASE_URL}/analyzer/analyze-creative`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          creative_id: creativeId,
+          user_id: userAccountId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Ошибка при запуске анализа');
+      }
+
+      const result = await response.json();
+      console.log('✅ Анализ креатива завершен:', result);
+      
+      // Обновляем состояние анализа напрямую из результата
+      if (result.analysis) {
+        setCreativeAnalysis(result.analysis);
+      }
+      
+      // Перезагружаем метрики и анализ
+      const [metricsResult, analysisResult] = await Promise.all([
+        salesApi.getCreativeMetrics(creativeId, userAccountId, 30),
+        salesApi.getCreativeAnalysis(creativeId, userAccountId)
+      ]);
+      
+      if (!metricsResult.error) {
+        setCreativeMetrics(metricsResult.data || []);
+      }
+      
+      if (!analysisResult.error && analysisResult.data) {
+        setCreativeAnalysis(analysisResult.data);
+      }
+      
+    } catch (err) {
+      console.error('Ошибка анализа креатива:', err);
+      alert('Ошибка при запуске анализа креатива');
+    } finally {
+      setAnalyzingCreative(null);
+    }
   };
 
   if (loading) {
@@ -523,73 +644,233 @@ const ROIAnalytics: React.FC = () => {
                             */}
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Воронка</th>
                             <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ссылка</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Детали</th>
                           </tr>
                         </thead>
                         <tbody>
                           {roiData.campaigns.map((campaign, index) => (
-                            <tr key={campaign.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                              <td className="py-2 px-3">
-                                <div className="font-medium text-sm">{campaign.name}</div>
-                              </td>
-                              <td className="py-2 px-3 text-right text-sm font-medium text-green-600 dark:text-green-500/70">
-                                {formatCurrency(campaign.revenue)}
-                              </td>
-                              <td className="py-2 px-3 text-right text-sm font-medium text-slate-600">
-                                {formatCurrency(campaign.spend)}
-                              </td>
-                              <td className="py-2 px-3 text-right">
-                                <Badge 
-                                  variant={getROIBadgeVariant(campaign.roi)}
-                                  className={`text-xs ${getROIBadgeClass(campaign.roi)}`}
-                                >
-                                  {formatPercent(campaign.roi)}
-                                </Badge>
-                              </td>
-                              <td className="py-2 px-3 text-right text-sm">
-                                {formatNumber(campaign.leads)}
-                              </td>
-                              <td className="py-2 px-3 text-right text-sm">
-                                {formatNumber(campaign.conversions)}
-                              </td>
-                              <td className="py-2 px-3 text-right text-sm">
-                                {campaign.leads > 0 ?
-                                  `${((campaign.conversions / campaign.leads) * 100).toFixed(1)}%`
-                                  : '0%'
-                                }
-                              </td>
-                              {/* TEMPORARILY HIDDEN: Key Stages Cell
-                              {qualificationStats && qualificationStats.key_stages.length > 0 && (
-                                <td className="py-2 px-3 text-center">
-                                  <div className="text-xs text-blue-700 dark:text-blue-400 font-medium whitespace-nowrap">
-                                    {getCreativeKeyStageRates(campaign.id)}
-                                  </div>
+                            <React.Fragment key={campaign.id}>
+                              <tr className="border-b hover:bg-muted/30 transition-colors">
+                                <td className="py-2 px-3">
+                                  <div className="font-medium text-sm">{campaign.name}</div>
                                 </td>
-                              )}
-                              */}
-                              <td className="py-2 px-3 text-center">
-                                <button
-                                  onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
-                                  className="inline-flex items-center justify-center text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
-                                  title="View funnel distribution"
-                                >
-                                  <Filter className="h-4 w-4" />
-                                </button>
-                              </td>
-                              <td className="py-2 px-3 text-center">
-                                {campaign.creative_url ? (
-                                  <a 
-                                    href={campaign.creative_url} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center text-foreground hover:text-foreground/70 transition-colors"
+                                <td className="py-2 px-3 text-right text-sm font-medium text-green-600 dark:text-green-500/70">
+                                  {formatCurrency(campaign.revenue)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm font-medium text-slate-600">
+                                  {formatCurrency(campaign.spend)}
+                                </td>
+                                <td className="py-2 px-3 text-right">
+                                  <Badge 
+                                    variant={getROIBadgeVariant(campaign.roi)}
+                                    className={`text-xs ${getROIBadgeClass(campaign.roi)}`}
                                   >
-                                    <ExternalLink className="h-4 w-4" />
-                                  </a>
-                                ) : (
-                                  <span className="text-muted-foreground text-xs">—</span>
+                                    {formatPercent(campaign.roi)}
+                                  </Badge>
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm">
+                                  {formatNumber(campaign.leads)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm">
+                                  {formatNumber(campaign.conversions)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm">
+                                  {campaign.leads > 0 ?
+                                    `${((campaign.conversions / campaign.leads) * 100).toFixed(1)}%`
+                                    : '0%'
+                                  }
+                                </td>
+                                {/* TEMPORARILY HIDDEN: Key Stages Cell
+                                {qualificationStats && qualificationStats.key_stages.length > 0 && (
+                                  <td className="py-2 px-3 text-center">
+                                    <div className="text-xs text-blue-700 dark:text-blue-400 font-medium whitespace-nowrap">
+                                      {getCreativeKeyStageRates(campaign.id)}
+                                    </div>
+                                  </td>
                                 )}
-                              </td>
-                            </tr>
+                                */}
+                                <td className="py-2 px-3 text-center">
+                                  <button
+                                    onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
+                                    className="inline-flex items-center justify-center text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                                    title="View funnel distribution"
+                                  >
+                                    <Filter className="h-4 w-4" />
+                                  </button>
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  {campaign.creative_url ? (
+                                    <a 
+                                      href={campaign.creative_url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center justify-center text-foreground hover:text-foreground/70 transition-colors"
+                                    >
+                                      <ExternalLink className="h-4 w-4" />
+                                    </a>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">—</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <button
+                                    onClick={() => loadCreativeMetrics(campaign.id)}
+                                    className="inline-flex items-center justify-center text-foreground hover:text-foreground/70 transition-colors"
+                                    title="Показать детали"
+                                  >
+                                    {expandedCreativeId === campaign.id ? (
+                                      <ChevronUp className="h-4 w-4" />
+                                    ) : (
+                                      <ChevronDown className="h-4 w-4" />
+                                    )}
+                                  </button>
+                                </td>
+                              </tr>
+                              {expandedCreativeId === campaign.id && (
+                                <tr className="border-b">
+                                  <td colSpan={10} className="p-4 bg-muted/20">
+                                    {loadingMetrics ? (
+                                      <div className="text-center py-4">
+                                        <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                                        <p className="text-sm text-muted-foreground mt-2">Загрузка метрик...</p>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-4">
+                                        {/* Транскрипция */}
+                                        <Card className="bg-muted/30">
+                                          <CardHeader className="pb-3">
+                                            <CardTitle className="text-sm flex items-center gap-2">
+                                              📝 Транскрибация видео
+                                            </CardTitle>
+                                          </CardHeader>
+                                          <CardContent>
+                                            <div className="text-sm whitespace-pre-wrap text-muted-foreground">
+                                              {creativeTranscript || 'Транскрибация еще не готова. Она появится после обработки видео.'}
+                                            </div>
+                                          </CardContent>
+                                        </Card>
+
+                                        {/* Кнопка запуска анализа */}
+                                        <div className="flex items-center justify-between">
+                                          <h4 className="font-semibold text-sm">LLM Анализ креатива</h4>
+                                          <Button
+                                            size="sm"
+                                            onClick={() => analyzeCreative(campaign.id)}
+                                            disabled={analyzingCreative === campaign.id}
+                                            className="flex items-center gap-2"
+                                          >
+                                            {analyzingCreative === campaign.id ? (
+                                              <>
+                                                <RefreshCw className="h-3 w-3 animate-spin" />
+                                                Анализ...
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Play className="h-3 w-3" />
+                                                Запустить анализ
+                                              </>
+                                            )}
+                                          </Button>
+                                        </div>
+
+                                        {/* LLM Анализ */}
+                                        {creativeAnalysis && creativeAnalysis.score !== null && (
+                                          <Card className="border-primary/30 bg-primary/5">
+                                            <CardHeader className="pb-2">
+                                              <CardTitle className="text-sm flex items-center gap-2">
+                                                <span className={`rounded-full px-2 py-0.5 text-xs ${verdictMeta[creativeAnalysis.verdict]?.className || ''}`}>
+                                                  {verdictMeta[creativeAnalysis.verdict]?.emoji} {verdictMeta[creativeAnalysis.verdict]?.label}
+                                                </span>
+                                                <span className="text-muted-foreground">Оценка: {creativeAnalysis.score}/100</span>
+                                              </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="space-y-2 text-sm text-muted-foreground">
+                                              {creativeAnalysis.reasoning && <div>{creativeAnalysis.reasoning}</div>}
+                                              {creativeAnalysis.video_analysis && (
+                                                <div>
+                                                  <span className="font-medium text-foreground">Видео:</span> {creativeAnalysis.video_analysis}
+                                                </div>
+                                              )}
+                                              {creativeAnalysis.text_recommendations && (
+                                                <div>
+                                                  <span className="font-medium text-foreground">Текст:</span> {creativeAnalysis.text_recommendations}
+                                                </div>
+                                              )}
+                                              {creativeAnalysis.transcript_match_quality && (
+                                                <div>
+                                                  <span className="font-medium text-foreground">Соответствие транскрипта:</span> {creativeAnalysis.transcript_match_quality}
+                                                </div>
+                                              )}
+                                              {creativeAnalysis.transcript_suggestions && Array.isArray(creativeAnalysis.transcript_suggestions) && creativeAnalysis.transcript_suggestions.length > 0 && (
+                                                <div className="space-y-2">
+                                                  <div className="font-medium text-foreground">Предложения по тексту</div>
+                                                  <div className="space-y-2">
+                                                    {creativeAnalysis.transcript_suggestions.map((suggestion: any, index: number) => (
+                                                      <div key={`${suggestion.from}-${index}`} className="rounded-md border p-2">
+                                                        <div className="text-xs text-muted-foreground">Исходный текст</div>
+                                                        <div className="text-sm font-medium">"{suggestion.from}"</div>
+                                                        <div className="text-xs text-muted-foreground mt-2">Новый текст</div>
+                                                        <div className="text-sm font-medium text-foreground">"{suggestion.to}"</div>
+                                                        <div className="text-xs text-muted-foreground mt-2">Почему: {suggestion.reason}</div>
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </CardContent>
+                                          </Card>
+                                        )}
+
+                                        {/* История метрик */}
+                                        {creativeMetrics.length > 0 && (
+                                          <div>
+                                            <h4 className="font-semibold text-sm mb-3">История метрик</h4>
+                                            <div className="overflow-x-auto">
+                                              <table className="min-w-full text-xs">
+                                                <thead className="bg-muted/50">
+                                                  <tr>
+                                                    <th className="py-1 px-2 text-left font-medium">Дата</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Показы</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Охват</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Клики</th>
+                                                    <th className="py-1 px-2 text-right font-medium">CTR %</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Лиды</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Расход</th>
+                                                    <th className="py-1 px-2 text-right font-medium">CPM</th>
+                                                    <th className="py-1 px-2 text-right font-medium">CPL</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Видео 25%</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Видео 50%</th>
+                                                    <th className="py-1 px-2 text-right font-medium">Видео 75%</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody>
+                                                  {creativeMetrics.map((metric, idx) => (
+                                                    <tr key={idx} className="border-b last:border-0 hover:bg-muted/10">
+                                                      <td className="py-1 px-2">{new Date(metric.date).toLocaleDateString('ru-RU')}</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.impressions || 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.reach || 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.clicks || 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{metric.ctr ? (metric.ctr * 100).toFixed(2) : '0.00'}%</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.leads || 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatCurrency(metric.spend_cents ? metric.spend_cents / 100 : 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatCurrency(metric.cpm_cents ? metric.cpm_cents / 100 : 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{metric.cpl_cents ? formatCurrency(metric.cpl_cents / 100) : '—'}</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_25_percent || 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_50_percent || 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_75_percent || 0)}</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
                           ))}
                         </tbody>
                       </table>
@@ -614,7 +895,7 @@ const ROIAnalytics: React.FC = () => {
                           {formatPercent(campaign.roi)}
                         </Badge>
                       </div>
-                      <div className="flex gap-2 mb-3">
+                      <div className="flex gap-2 mb-3 flex-wrap">
                         {campaign.creative_url && (
                           <a 
                             href={campaign.creative_url} 
@@ -632,6 +913,22 @@ const ROIAnalytics: React.FC = () => {
                         >
                           <Filter className="h-3 w-3" />
                           Воронка
+                        </button>
+                        <button
+                          onClick={() => loadCreativeMetrics(campaign.id)}
+                          className="text-xs text-foreground hover:text-foreground/70 flex items-center gap-1 transition-colors font-medium"
+                        >
+                          {expandedCreativeId === campaign.id ? (
+                            <>
+                              <ChevronUp className="h-3 w-3" />
+                              Скрыть детали
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-3 w-3" />
+                              Показать детали
+                            </>
+                          )}
                         </button>
                       </div>
                       <div className="space-y-1.5">
@@ -677,6 +974,110 @@ const ROIAnalytics: React.FC = () => {
                         )}
                         */}
                       </div>
+                      
+                      {/* Раскрывающаяся секция с метриками для мобильной версии */}
+                      {expandedCreativeId === campaign.id && (
+                        <div className="mt-3 pt-3 border-t space-y-3">
+                          {loadingMetrics ? (
+                            <div className="text-center py-4">
+                              <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                              <p className="text-xs text-muted-foreground mt-2">Загрузка данных...</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {/* Транскрипция */}
+                              <div className="bg-muted/30 rounded p-3">
+                                <div className="text-xs font-semibold mb-2">📝 Транскрибация видео</div>
+                                <div className="text-xs whitespace-pre-wrap text-muted-foreground">
+                                  {creativeTranscript || 'Транскрибация еще не готова.'}
+                                </div>
+                              </div>
+
+                              {/* Кнопка анализа */}
+                              <div className="flex items-center justify-between">
+                                <h5 className="font-semibold text-xs">LLM Анализ</h5>
+                                <Button
+                                  size="sm"
+                                  onClick={() => analyzeCreative(campaign.id)}
+                                  disabled={analyzingCreative === campaign.id}
+                                  className="flex items-center gap-1 text-xs h-7"
+                                >
+                                  {analyzingCreative === campaign.id ? (
+                                    <>
+                                      <RefreshCw className="h-3 w-3 animate-spin" />
+                                      Анализ...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Play className="h-3 w-3" />
+                                      Анализ
+                                    </>
+                                  )}
+                                </Button>
+                              </div>
+
+                              {/* LLM Анализ */}
+                              {creativeAnalysis && creativeAnalysis.score !== null && (
+                                <div className="border-primary/30 bg-primary/5 rounded p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`rounded-full px-2 py-0.5 text-xs ${verdictMeta[creativeAnalysis.verdict]?.className || ''}`}>
+                                      {verdictMeta[creativeAnalysis.verdict]?.emoji} {verdictMeta[creativeAnalysis.verdict]?.label}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">Оценка: {creativeAnalysis.score}/100</span>
+                                  </div>
+                                  {creativeAnalysis.reasoning && (
+                                    <div className="text-xs text-muted-foreground">{creativeAnalysis.reasoning}</div>
+                                  )}
+                                  {creativeAnalysis.video_analysis && (
+                                    <div className="text-xs">
+                                      <span className="font-medium text-foreground">Видео:</span> {creativeAnalysis.video_analysis}
+                                    </div>
+                                  )}
+                                  {creativeAnalysis.text_recommendations && (
+                                    <div className="text-xs">
+                                      <span className="font-medium text-foreground">Текст:</span> {creativeAnalysis.text_recommendations}
+                                    </div>
+                                  )}
+                                  {creativeAnalysis.transcript_suggestions && Array.isArray(creativeAnalysis.transcript_suggestions) && creativeAnalysis.transcript_suggestions.length > 0 && (
+                                    <div className="space-y-2">
+                                      <div className="text-xs font-medium text-foreground">Предложения по тексту</div>
+                                      {creativeAnalysis.transcript_suggestions.map((suggestion: any, index: number) => (
+                                        <div key={`${suggestion.from}-${index}`} className="rounded border p-2 space-y-1">
+                                          <div className="text-xs text-muted-foreground">"{suggestion.from}"</div>
+                                          <div className="text-xs font-medium text-foreground">→ "{suggestion.to}"</div>
+                                          <div className="text-xs text-muted-foreground">{suggestion.reason}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* История метрик */}
+                              {creativeMetrics.length > 0 && (
+                                <>
+                                  <h5 className="font-semibold text-xs">История метрик</h5>
+                                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                                    {creativeMetrics.slice(0, 10).map((metric, idx) => (
+                                      <div key={idx} className="bg-muted/20 rounded p-2 space-y-1">
+                                        <div className="font-medium text-xs">{new Date(metric.date).toLocaleDateString('ru-RU')}</div>
+                                        <div className="grid grid-cols-2 gap-1 text-xs">
+                                          <div><span className="text-muted-foreground">Показы:</span> {formatNumber(metric.impressions || 0)}</div>
+                                          <div><span className="text-muted-foreground">Клики:</span> {formatNumber(metric.clicks || 0)}</div>
+                                          <div><span className="text-muted-foreground">CTR:</span> {metric.ctr ? (metric.ctr * 100).toFixed(2) : '0.00'}%</div>
+                                          <div><span className="text-muted-foreground">Лиды:</span> {formatNumber(metric.leads || 0)}</div>
+                                          <div><span className="text-muted-foreground">Расход:</span> {formatCurrency(metric.spend_cents ? metric.spend_cents / 100 : 0)}</div>
+                                          <div><span className="text-muted-foreground">CPL:</span> {metric.cpl_cents ? formatCurrency(metric.cpl_cents / 100) : '—'}</div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))}

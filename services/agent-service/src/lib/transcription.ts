@@ -53,6 +53,32 @@ export async function transcribeAudio(audioPath: string, language: string = 'ru'
 }
 
 /**
+ * Извлекает первый кадр видео как изображение для обложки
+ */
+export async function extractVideoThumbnail(videoPath: string): Promise<Buffer> {
+  const thumbnailPath = path.join('/var/tmp', `thumbnail_${randomUUID()}.jpg`);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg(videoPath)
+      .seekInput(0.001) // Первый кадр на 0.001 секунде
+      .frames(1) // Извлекаем только 1 кадр
+      .size('1200x628') // Масштабируем до оптимального размера для Facebook
+      .output(thumbnailPath)
+      .on('end', async () => {
+        try {
+          const buffer = await fs.readFile(thumbnailPath);
+          await fs.unlink(thumbnailPath); // Удаляем временный файл
+          resolve(buffer);
+        } catch (err) {
+          reject(err);
+        }
+      })
+      .on('error', (err: Error) => reject(new Error(`FFmpeg thumbnail error: ${err.message}`)))
+      .run();
+  });
+}
+
+/**
  * Обрабатывает видео: извлекает аудио и транскрибирует его
  */
 export async function processVideoTranscription(

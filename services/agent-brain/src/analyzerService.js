@@ -369,6 +369,51 @@ fastify.post('/analyze-test', async (request, reply) => {
     }
 
     // ===================================================
+    // STEP 5.5: Сохраняем анализ в creative_analysis для унифицированного доступа
+    // ===================================================
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      
+      const { error: analysisInsertError } = await supabase
+        .from('creative_analysis')
+        .insert({
+          creative_id: test.user_creative_id,
+          user_account_id: test.user_id,
+          source: 'test',
+          test_id: test_id,
+          date_from: today,
+          date_to: today,
+          metrics: testData,
+          score: analysis?.score || null,
+          verdict: analysis?.verdict || null,
+          reasoning: analysis?.reasoning || null,
+          video_analysis: analysis?.video_analysis || null,
+          text_recommendations: analysis?.text_recommendations || null,
+          transcript_match_quality: analysis?.transcript_match_quality || null,
+          transcript_suggestions: analysis?.transcript_suggestions || null
+        });
+
+      if (analysisInsertError) {
+        fastify.log.warn({ 
+          test_id,
+          creative_id: test.user_creative_id,
+          error: analysisInsertError.message 
+        }, 'Failed to save analysis to creative_analysis table');
+      } else {
+        fastify.log.info({ 
+          test_id,
+          creative_id: test.user_creative_id,
+          source: 'test'
+        }, 'Saved analysis to creative_analysis table');
+      }
+    } catch (err) {
+      fastify.log.warn({ 
+        test_id,
+        error: err.message 
+      }, 'Error saving analysis to creative_analysis, continuing...');
+    }
+
+    // ===================================================
     // STEP 6: Сохраняем метрики в creative_metrics_history
     // ===================================================
     // ПРАВИЛЬНО: Test ad имеет ДРУГОЙ ad_id, чем production ad
@@ -416,7 +461,15 @@ fastify.post('/analyze-test', async (request, reply) => {
                 ctr: test.ctr || 0,
                 cpm: (test.cpm_cents || 0) / 100,      // центы → доллары
                 cpl: test.cpl_cents ? (test.cpl_cents / 100) : null,
-                frequency: test.frequency || 0
+                frequency: test.frequency || 0,
+                // Video metrics
+                video_views: test.video_views || 0,
+                video_views_25_percent: test.video_views_25_percent || 0,
+                video_views_50_percent: test.video_views_50_percent || 0,
+                video_views_75_percent: test.video_views_75_percent || 0,
+                video_views_95_percent: test.video_views_95_percent || 0,
+                video_avg_watch_time_sec: test.video_avg_watch_time_sec || null,
+                source: 'test'
               }, { 
                 onConflict: 'user_account_id,ad_id,date',
                 ignoreDuplicates: false  // Обновляем если есть
@@ -718,9 +771,41 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     let analysis = null;
     
     if (test.status === 'completed') {
-      // Проверяем существующий анализ в БД
-      if (test.llm_score !== null && test.llm_verdict !== null && test.transcript_suggestions !== null) {
-        fastify.log.info({ user_creative_id, source: 'database', llm_score: test.llm_score }, 'Using existing LLM analysis from DB');
+      // Сначала проверяем creative_analysis (новая система)
+      const { data: creativeAnalysisData, error: analysisError } = await supabase
+        .from('creative_analysis')
+        .select('*')
+        .eq('creative_id', user_creative_id)
+        .eq('user_account_id', user_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (creativeAnalysisData && !analysisError) {
+        fastify.log.info({ 
+          user_creative_id, 
+          source: 'creative_analysis', 
+          score: creativeAnalysisData.score,
+          analysis_source: creativeAnalysisData.source
+        }, 'Using analysis from creative_analysis table');
+        
+        analysis = {
+          score: creativeAnalysisData.score,
+          verdict: creativeAnalysisData.verdict,
+          reasoning: creativeAnalysisData.reasoning,
+          video_analysis: creativeAnalysisData.video_analysis,
+          text_recommendations: creativeAnalysisData.text_recommendations,
+          transcript_match_quality: creativeAnalysisData.transcript_match_quality,
+          transcript_suggestions: creativeAnalysisData.transcript_suggestions
+        };
+      } else if (test.llm_score !== null && test.llm_verdict !== null && test.transcript_suggestions !== null) {
+        // Fallback на старую систему (creative_tests.llm_*)
+        fastify.log.info({ 
+          user_creative_id, 
+          source: 'creative_tests_legacy', 
+          llm_score: test.llm_score 
+        }, 'Using legacy LLM analysis from creative_tests');
+        
         analysis = {
           score: test.llm_score,
           verdict: test.llm_verdict,
@@ -833,6 +918,227 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     
   } catch (error) {
     fastify.log.error({ error: error.message, stack: error.stack }, 'Creative analytics error');
+    return reply.code(500).send({ error: error.message });
+  }
+});
+
+/**
+ * POST /analyze-creative
+ * 
+ * Запускает анализ креатива на основе последних метрик из creative_metrics_history
+ * 
+ * ВХОДНЫЕ ДАННЫЕ:
+ * - creative_id: ID креатива из user_creatives
+ * - user_id: ID пользователя
+ * 
+ * ЧТО ДЕЛАЕТ:
+ * 1. Получает последние метрики из creative_metrics_history
+ * 2. Получает транскрибацию креатива
+ * 3. Отправляет все в LLM (OpenAI)
+ * 4. Получает анализ (score, verdict, recommendations)
+ * 5. Возвращает результаты анализа
+ */
+fastify.post('/analyze-creative', async (request, reply) => {
+  try {
+    const { creative_id, user_id } = request.body;
+    
+    if (!creative_id || !user_id) {
+      return reply.code(400).send({ error: 'creative_id and user_id are required' });
+    }
+
+    fastify.log.info({ where: 'analyzeCreative', creative_id, user_id, status: 'started' });
+
+    // ===================================================
+    // STEP 1: Получаем последние агрегированные метрики креатива
+    // ===================================================
+    const { data: metricsHistory, error: metricsError } = await supabase
+      .from('creative_metrics_history')
+      .select('*')
+      .eq('creative_id', creative_id)
+      .eq('user_account_id', user_id)
+      .order('date', { ascending: false })
+      .limit(30); // Берем последние 30 дней
+
+    if (metricsError || !metricsHistory || metricsHistory.length === 0) {
+      fastify.log.error({ where: 'analyzeCreative', creative_id, error: metricsError });
+      return reply.code(404).send({ error: 'No metrics found for this creative' });
+    }
+
+    // Агрегируем метрики за последние 30 дней
+    const aggregatedMetrics = metricsHistory.reduce((acc, metric) => ({
+      impressions: acc.impressions + (metric.impressions || 0),
+      reach: acc.reach + (metric.reach || 0),
+      clicks: acc.clicks + (metric.clicks || 0),
+      link_clicks: acc.link_clicks + (metric.link_clicks || 0),
+      leads: acc.leads + (metric.leads || 0),
+      spend_cents: acc.spend_cents + (metric.spend_cents || 0),
+      video_views: acc.video_views + (metric.video_views || 0),
+      video_views_25_percent: acc.video_views_25_percent + (metric.video_views_25_percent || 0),
+      video_views_50_percent: acc.video_views_50_percent + (metric.video_views_50_percent || 0),
+      video_views_75_percent: acc.video_views_75_percent + (metric.video_views_75_percent || 0),
+      video_views_95_percent: acc.video_views_95_percent + (metric.video_views_95_percent || 0),
+    }), {
+      impressions: 0,
+      reach: 0,
+      clicks: 0,
+      link_clicks: 0,
+      leads: 0,
+      spend_cents: 0,
+      video_views: 0,
+      video_views_25_percent: 0,
+      video_views_50_percent: 0,
+      video_views_75_percent: 0,
+      video_views_95_percent: 0,
+    });
+
+    // Вычисляем производные метрики
+    const ctr = aggregatedMetrics.impressions > 0 
+      ? aggregatedMetrics.clicks / aggregatedMetrics.impressions 
+      : 0;
+    const link_ctr = aggregatedMetrics.impressions > 0 
+      ? aggregatedMetrics.link_clicks / aggregatedMetrics.impressions 
+      : 0;
+    const cpm_cents = aggregatedMetrics.impressions > 0 
+      ? (aggregatedMetrics.spend_cents / aggregatedMetrics.impressions) * 1000 
+      : 0;
+    const cpl_cents = aggregatedMetrics.leads > 0 
+      ? aggregatedMetrics.spend_cents / aggregatedMetrics.leads 
+      : null;
+    const frequency = aggregatedMetrics.reach > 0 
+      ? aggregatedMetrics.impressions / aggregatedMetrics.reach 
+      : 0;
+
+    // Средние метрики видео (берем последнее значение)
+    const latestMetric = metricsHistory[0];
+    const video_avg_watch_time_sec = latestMetric.video_avg_watch_time_sec || 0;
+
+    // ===================================================
+    // STEP 2: Получаем информацию о креативе
+    // ===================================================
+    const { data: creative, error: creativeError } = await supabase
+      .from('user_creatives')
+      .select('id, title')
+      .eq('id', creative_id)
+      .single();
+
+    if (creativeError || !creative) {
+      fastify.log.error({ where: 'analyzeCreative', creative_id, error: creativeError });
+      return reply.code(404).send({ error: 'Creative not found' });
+    }
+
+    // ===================================================
+    // STEP 3: Получаем транскрибацию
+    // ===================================================
+    const { data: transcript, error: transcriptError } = await supabase
+      .from('creative_transcripts')
+      .select('text')
+      .eq('creative_id', creative_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const transcriptText = transcript?.text || null;
+
+    fastify.log.info({ 
+      where: 'analyzeCreative', 
+      creative_id, 
+      has_transcript: !!transcriptText,
+      impressions: aggregatedMetrics.impressions,
+      leads: aggregatedMetrics.leads
+    });
+
+    // ===================================================
+    // STEP 4: Подготавливаем данные для LLM
+    // ===================================================
+    const testData = {
+      creative_title: creative.title || 'Untitled',
+      impressions: aggregatedMetrics.impressions,
+      reach: aggregatedMetrics.reach,
+      frequency: frequency,
+      clicks: aggregatedMetrics.clicks,
+      link_clicks: aggregatedMetrics.link_clicks,
+      ctr: ctr,
+      link_ctr: link_ctr,
+      leads: aggregatedMetrics.leads,
+      spend_cents: aggregatedMetrics.spend_cents,
+      cpm_cents: Math.round(cpm_cents),
+      cpc_cents: aggregatedMetrics.clicks > 0 
+        ? Math.round(aggregatedMetrics.spend_cents / aggregatedMetrics.clicks) 
+        : 0,
+      cpl_cents: cpl_cents ? Math.round(cpl_cents) : null,
+      video_views: aggregatedMetrics.video_views,
+      video_views_25_percent: aggregatedMetrics.video_views_25_percent,
+      video_views_50_percent: aggregatedMetrics.video_views_50_percent,
+      video_views_75_percent: aggregatedMetrics.video_views_75_percent,
+      video_views_95_percent: aggregatedMetrics.video_views_95_percent,
+      video_avg_watch_time_sec: video_avg_watch_time_sec
+    };
+
+    // ===================================================
+    // STEP 5: Анализируем через LLM
+    // ===================================================
+    const analysis = await analyzeCreativeTest(testData, transcriptText);
+
+    fastify.log.info({ 
+      where: 'analyzeCreative', 
+      creative_id,
+      score: analysis?.score,
+      verdict: analysis?.verdict
+    });
+
+    // ===================================================
+    // STEP 6: Сохраняем результаты анализа в creative_analysis
+    // ===================================================
+    try {
+      const { error: analysisError } = await supabase
+        .from('creative_analysis')
+        .insert({
+          creative_id: creative_id,
+          user_account_id: user_id,
+          source: 'manual',
+          date_from: metricsHistory[metricsHistory.length - 1].date,
+          date_to: metricsHistory[0].date,
+          metrics: testData,
+          score: analysis?.score || null,
+          verdict: analysis?.verdict || null,
+          reasoning: analysis?.reasoning || null,
+          video_analysis: analysis?.video_analysis || null,
+          text_recommendations: analysis?.text_recommendations || null,
+          transcript_match_quality: analysis?.transcript_match_quality || null,
+          transcript_suggestions: analysis?.transcript_suggestions || null
+        });
+
+      if (analysisError) {
+        fastify.log.warn({ 
+          creative_id, 
+          error: analysisError.message 
+        }, 'Failed to save analysis to creative_analysis table');
+      } else {
+        fastify.log.info({ 
+          creative_id,
+          source: 'manual'
+        }, 'Saved analysis to creative_analysis table');
+      }
+    } catch (err) {
+      fastify.log.warn({ 
+        creative_id,
+        error: err.message 
+      }, 'Error saving analysis to creative_analysis, continuing...');
+    }
+
+    // ===================================================
+    // STEP 7: Возвращаем результаты
+    // ===================================================
+    return reply.send({
+      success: true,
+      creative_id,
+      metrics: testData,
+      analysis: analysis,
+      transcript_available: !!transcriptText
+    });
+    
+  } catch (error) {
+    fastify.log.error({ error: error.message, stack: error.stack }, 'Analyze creative error');
     return reply.code(500).send({ error: error.message });
   }
 });

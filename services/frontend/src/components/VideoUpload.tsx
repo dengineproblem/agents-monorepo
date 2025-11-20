@@ -193,7 +193,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [launchResult, setLaunchResult] = useState<ManualLaunchResponse | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
   const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(10); // Дневной бюджет в USD
-  const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('midnight_almaty');
+  const [launchedBudget, setLaunchedBudget] = useState<number>(10); // Сохраненный бюджет для показа в результате
+  const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('now'); // По умолчанию "Сейчас"
 
   useEffect(() => {
     async function fetchUserData() {
@@ -374,6 +375,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     setManualLaunchLoading(true);
 
     try {
+      // Сохраняем бюджет для показа в результате
+      setLaunchedBudget(manualLaunchBudget);
+      
       const result = await manualLaunchAds({
         user_account_id: userData.id,
         direction_id: selectedManualDirection,
@@ -393,7 +397,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setSelectedCreativeIds([]);
         setAvailableCreatives([]);
         setManualLaunchBudget(10);
-        setManualStartMode('midnight_almaty');
+        setManualStartMode('now'); // Сбрасываем на "Сейчас"
       } else {
         toast.error(result.error || 'Ошибка запуска рекламы');
       }
@@ -2993,7 +2997,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     </div>
                     <div className="text-sm pt-2 border-t border-border/50">
                       <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                      <span className="font-medium">${manualLaunchBudget}</span>
+                      <span className="font-medium">${launchedBudget}</span>
                     </div>
                   </div>
 

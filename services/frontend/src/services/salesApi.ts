@@ -649,6 +649,43 @@ class SalesApiService {
     }
   }
 
+  // Получение метрик креатива из creative_metrics_history
+  async getCreativeMetrics(creativeId: string, userAccountId: string, limit: number = 30): Promise<{ data: any[]; error: any }> {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('creative_metrics_history')
+        .select('*')
+        .eq('creative_id', creativeId)
+        .eq('user_account_id', userAccountId)
+        .order('date', { ascending: false })
+        .limit(limit);
+      
+      return { data: data || [], error };
+    } catch (error) {
+      console.error('Ошибка загрузки метрик креатива:', error);
+      return { data: [], error };
+    }
+  }
+
+  // Получение последнего анализа креатива из creative_analysis
+  async getCreativeAnalysis(creativeId: string, userAccountId: string): Promise<{ data: any | null; error: any }> {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('creative_analysis')
+        .select('*')
+        .eq('creative_id', creativeId)
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      return { data: data || null, error };
+    } catch (error) {
+      console.error('Ошибка загрузки анализа креатива:', error);
+      return { data: null, error };
+    }
+  }
+
   // Добавление продажи
   public async addSale(saleData: {
     client_phone: string;

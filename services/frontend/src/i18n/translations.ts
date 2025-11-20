@@ -286,7 +286,7 @@ export const translations = {
       loginButtonLoading: 'Вход...'
     },
     menu: {
-      dashboard: 'Дашборд',
+      dashboard: 'Главная',
       campaigns: 'Кампании',
       creatives: 'Креативы',
       directions: 'Направления',

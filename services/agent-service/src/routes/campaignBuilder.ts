@@ -465,13 +465,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
             daily_budget_cents: { type: 'number', minimum: 500 },
             targeting: { type: 'object' },
+            start_mode: { type: 'string', enum: ['now', 'midnight_almaty'] },
           },
         },
       },
     },
     async (request: any, reply: any) => {
       const log = getWorkflowLogger(request as FastifyRequest, 'manualLaunch');
-      const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting } = request.body;
+      const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting, start_mode } = request.body;
 
       log.info({
         userAccountId: user_account_id,
@@ -631,13 +632,15 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             optimization_goal,
             billing_event,
             promoted_object,
+            start_mode: start_mode || 'now', // Используем переданный режим или "Сейчас" по умолчанию
           });
 
           adsetId = adset.id;
 
           log.info({ 
             adsetId, 
-            mode: 'api_create' 
+            mode: 'api_create',
+            start_mode: start_mode || 'now'
           }, 'Manual launch ad set created');
         }
 

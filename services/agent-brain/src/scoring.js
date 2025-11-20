@@ -32,7 +32,7 @@ function normalizeAdAccountId(adAccountId) {
 async function fetchAdInsights(adAccountId, accessToken, adId, datePreset = 'last_7d') {
   const url = `https://graph.facebook.com/${FB_API_VERSION}/${adId}/insights`;
   const params = new URLSearchParams({
-    fields: 'impressions,reach,spend,clicks,actions,ctr,cpm,frequency',
+    fields: 'impressions,reach,spend,clicks,actions,ctr,cpm,frequency,video_play_actions,video_avg_time_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions',
     date_preset: datePreset,
     access_token: accessToken
   });
@@ -92,6 +92,31 @@ function extractLinkClicks(actions) {
   
   const linkClickAction = actions.find(a => a.action_type === 'link_click');
   return linkClickAction ? parseInt(linkClickAction.value) || 0 : 0;
+}
+
+/**
+ * Извлечь метрики по просмотру видео из insights
+ */
+function extractVideoMetrics(insights) {
+  if (!insights) {
+    return {
+      video_views: 0,
+      video_views_25_percent: 0,
+      video_views_50_percent: 0,
+      video_views_75_percent: 0,
+      video_views_95_percent: 0,
+      video_avg_watch_time_sec: null
+    };
+  }
+
+  return {
+    video_views: parseInt(insights.video_play_actions?.[0]?.value) || 0,
+    video_views_25_percent: parseInt(insights.video_p25_watched_actions?.[0]?.value) || 0,
+    video_views_50_percent: parseInt(insights.video_p50_watched_actions?.[0]?.value) || 0,
+    video_views_75_percent: parseInt(insights.video_p75_watched_actions?.[0]?.value) || 0,
+    video_views_95_percent: parseInt(insights.video_p95_watched_actions?.[0]?.value) || 0,
+    video_avg_watch_time_sec: parseFloat(insights.video_avg_time_watched_actions?.[0]?.value) || null
+  };
 }
 
 /**
@@ -854,6 +879,7 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
           const leads = extractLeads(insights.actions);
           const linkClicks = extractLinkClicks(insights.actions);
           const spend = parseFloat(insights.spend || 0);
+          const videoMetrics = extractVideoMetrics(insights);
           
           // Вычисляем CPL в центах (если есть лиды)
           const cpl = leads > 0 ? (spend * 100 / leads) : null;
@@ -874,7 +900,15 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
             ctr: parseFloat(insights.ctr || 0),
             cpm: parseFloat(insights.cpm || 0),
             cpl: cpl,
-            frequency: parseFloat(insights.frequency || 0)
+            frequency: parseFloat(insights.frequency || 0),
+            // Video metrics
+            video_views: videoMetrics.video_views,
+            video_views_25_percent: videoMetrics.video_views_25_percent,
+            video_views_50_percent: videoMetrics.video_views_50_percent,
+            video_views_75_percent: videoMetrics.video_views_75_percent,
+            video_views_95_percent: videoMetrics.video_views_95_percent,
+            video_avg_watch_time_sec: videoMetrics.video_avg_watch_time_sec,
+            source: 'production'
           });
 
           logger.debug({ 

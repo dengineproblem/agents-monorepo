@@ -143,6 +143,15 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fs.unlinkSync(tmpPath);
     }
     
+    // Подробное логирование ошибки
+    console.error('[uploadVideo] Full error object:', JSON.stringify({
+      message: error?.message,
+      code: error?.code,
+      response_status: error?.response?.status,
+      response_data: error?.response?.data,
+      response_headers: error?.response?.headers
+    }, null, 2));
+    
     const g = error?.response?.data?.error || {};
     const err: any = new Error(g?.message || error.message);
     err.fb = {
@@ -262,6 +271,7 @@ export async function createWhatsAppCreative(
     message: string;
     clientQuestion: string;
     whatsappPhoneNumber?: string;
+    thumbnailHash?: string;
   }
 ): Promise<{ id: string }> {
   const pageWelcomeMessage = JSON.stringify({
@@ -286,16 +296,22 @@ export async function createWhatsAppCreative(
   }
 
   log.debug({ adAccountId, callToAction }, 'WhatsApp creative callToAction');
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: callToAction,
+    page_welcome_message: pageWelcomeMessage
+  };
+  
+  // Добавляем image_hash если есть thumbnail
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  }
+  
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
-    video_data: {
-      video_id: params.videoId,
-      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
-      message: params.message,
-      call_to_action: callToAction,
-      page_welcome_message: pageWelcomeMessage
-    }
+    video_data: videoData
   };
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -313,22 +329,29 @@ export async function createInstagramCreative(
     instagramId: string;
     instagramUsername: string;
     message: string;
+    thumbnailHash?: string;
   }
 ): Promise<{ id: string }> {
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: {
+      type: "LEARN_MORE",
+      value: {
+        link: `https://www.instagram.com/${params.instagramUsername}`
+      }
+    }
+  };
+  
+  // Добавляем image_hash если есть thumbnail
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  }
+  
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
-    video_data: {
-      video_id: params.videoId,
-      image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
-      message: params.message,
-      call_to_action: {
-        type: "LEARN_MORE",
-        value: {
-          link: `https://www.instagram.com/${params.instagramUsername}`
-        }
-      }
-    }
+    video_data: videoData
   };
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, {
@@ -347,6 +370,7 @@ export async function createWebsiteLeadsCreative(
     message: string;
     siteUrl: string;
     utm?: string;
+    thumbnailHash?: string;
   }
 ): Promise<{ id: string }> {
   console.log('[createWebsiteLeadsCreative] Входные параметры:', {
@@ -356,8 +380,25 @@ export async function createWebsiteLeadsCreative(
     instagramId: params.instagramId,
     message: params.message,
     siteUrl: params.siteUrl,
-    utm: params.utm
+    utm: params.utm,
+    thumbnailHash: params.thumbnailHash
   });
+
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: {
+      type: "SIGN_UP",
+      value: {
+        link: params.siteUrl
+      }
+    }
+  };
+  
+  // Добавляем image_hash если есть thumbnail
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  }
 
   const payload: any = {
     name: "Website Leads Creative",
@@ -365,17 +406,7 @@ export async function createWebsiteLeadsCreative(
     object_story_spec: {
       page_id: params.pageId,
       instagram_user_id: params.instagramId,
-      video_data: {
-        video_id: params.videoId,
-        image_url: "https://dummyimage.com/1200x628/ffffff/ffffff.png",
-        message: params.message,
-        call_to_action: {
-          type: "SIGN_UP",
-          value: {
-            link: params.siteUrl
-          }
-        }
-      }
+      video_data: videoData
     }
   };
 
