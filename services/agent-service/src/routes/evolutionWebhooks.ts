@@ -108,11 +108,9 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const sourceUrl = externalAdReply?.sourceUrl; // Ссылка на рекламу (Instagram/Facebook)
   const mediaUrl = externalAdReply?.mediaUrl; // Медиа из рекламы
 
-  // Старый способ (для совместимости, если вдруг придёт в другом формате)
-  const legacySourceId = contextInfo?.stanzaId || contextInfo?.referredProductId;
-
-  // Используем sourceId из externalAdReply, если есть, иначе пробуем старый способ
-  const finalSourceId = sourceId || legacySourceId;
+  // ✅ ИСПОЛЬЗУЕМ ТОЛЬКО sourceId из externalAdReply (реальный Facebook Ad ID)
+  // ❌ НЕ используем stanzaId - это просто message ID, а не Ad ID!
+  const finalSourceId = sourceId;
 
   // Log message structure for debugging
   app.log.info({
@@ -121,17 +119,32 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     sourceId: finalSourceId || null,
     sourceType: sourceType || null,
     sourceUrl: sourceUrl || null,
+    hasExternalAdReply: !!externalAdReply,
     keyKeys: message.key ? Object.keys(message.key) : [],
     messageText: messageText.substring(0, 50)
   }, 'Incoming message structure');
 
-  // Only process messages with Facebook metadata (from ads)
-  if (!finalSourceId) {
+  // ✅ Строгая проверка: обрабатываем ТОЛЬКО сообщения с реальными данными рекламы
+  // Игнорируем: обычные сообщения, групповые чаты, сообщения без externalAdReply
+  if (!finalSourceId || !externalAdReply) {
     app.log.debug({
       instance,
       remoteJid,
+      hasExternalAdReply: !!externalAdReply,
+      hasSourceId: !!finalSourceId,
       messageText: messageText.substring(0, 30)
-    }, 'Ignoring message without Facebook metadata (no source_id) - not from ad');
+    }, 'Ignoring message: not from Facebook ad (no externalAdReply or sourceId)');
+    return;
+  }
+
+  // ✅ Дополнительная проверка sourceType (опционально, но надежнее)
+  if (sourceType && sourceType !== 'ad') {
+    app.log.debug({
+      instance,
+      remoteJid,
+      sourceType,
+      messageText: messageText.substring(0, 30)
+    }, 'Ignoring message: sourceType is not "ad"');
     return;
   }
 
@@ -163,7 +176,12 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     .eq('user_account_id', instanceData.user_account_id)
     .single();
 
-  const clientPhone = remoteJid.replace('@s.whatsapp.net', '').replace('@c.us', '');
+  // ✅ Очищаем chat_id от ВСЕХ суффиксов WhatsApp
+  const clientPhone = remoteJid
+    .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
+    .replace('@c.us', '')            // Обычный контакт (старый формат)
+    .replace('@g.us', '')            // Групповой чат
+    .replace('@lid', '');            // Lead identifier (из рекламы)
 
   // Resolve creative, direction AND whatsapp_phone_number_id BEFORE processing lead
   const { creativeId, directionId, whatsappPhoneNumberId: directionWhatsappId } = 
