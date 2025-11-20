@@ -903,33 +903,65 @@ export async function getAvailableCreatives(
     .in('creative_id', creativeIds)
     .order('date', { ascending: false });
 
-  // 2. Получаем метрики из creative_metrics_history
+  // 2. OPTIMIZATION: Сначала пытаемся получить из БД (кэш от agent-brain)
   const metricsMap = await getCreativeMetrics(userAccountId, creativeIds);
 
-  // 3. Для креативов без метрик в history - запрашиваем из Facebook API
+  log.info({ 
+    fromDB: metricsMap.size,
+    total: creativeIds.length 
+  }, 'Loaded metrics from DB');
+
+  // 3. FALLBACK: Для креативов без метрик в БД - запрашиваем из Facebook API
+  const freshMetricsMap = new Map();
+  
   const { data: userAccount } = await supabase
     .from('user_accounts')
     .select('ad_account_id, access_token')
     .eq('id', userAccountId)
     .single();
 
-  const freshMetricsMap = new Map();
-
   if (userAccount && userAccount.access_token) {
-    for (const creativeId of creativeIds) {
-      if (!metricsMap.has(creativeId)) {
-        const insights = await fetchCreativeInsightsLight(
-          userAccount.ad_account_id,
-          userAccount.access_token,
-          creativeId
-        );
-        
-        if (insights) {
-          freshMetricsMap.set(creativeId, insights);
+    const missingCreativeIds = creativeIds.filter(id => !metricsMap.has(id));
+    
+    if (missingCreativeIds.length > 0) {
+      log.info({ count: missingCreativeIds.length }, 'Fetching missing metrics from FB API');
+      
+      // OPTIMIZATION: Запускаем запросы параллельно
+      const metricsPromises = missingCreativeIds.map(async (creativeId) => {
+        try {
+          const insights = await fetchCreativeInsightsLight(
+            userAccount.ad_account_id,
+            userAccount.access_token,
+            creativeId
+          );
+          
+          if (insights) {
+            return { creativeId, insights };
+          }
+        } catch (e) {
+          log.warn({ creativeId, err: e }, 'Failed to fetch insights for creative');
         }
-      }
+        return null;
+      });
+
+      // Ждем выполнения всех запросов
+      const results = await Promise.all(metricsPromises);
+      
+      // Сохраняем результаты
+      results.forEach(result => {
+        if (result) {
+          freshMetricsMap.set(result.creativeId, result.insights);
+        }
+      });
     }
   }
+
+  log.info({ 
+    fromDB: metricsMap.size, 
+    fromAPI: freshMetricsMap.size,
+    total: creativeIds.length
+  }, 'Metrics loaded (DB + API)');
+
 
   // Объединяем креативы со скорами и метриками
   const result: AvailableCreative[] = filteredCreatives.map((creative) => {
@@ -1152,6 +1184,10 @@ function preprocessCreativesForLLM(
 
 /**
  * Получить метрики креативов из creative_metrics_history
+ * ОБНОВЛЕНО для унифицированной системы метрик
+ * 
+ * Читает метрики за сегодня или вчера (если сегодня еще нет)
+ * Агрегирует метрики если у креатива несколько ads
  */
 export async function getCreativeMetrics(
   userAccountId: string,
@@ -1159,35 +1195,93 @@ export async function getCreativeMetrics(
 ): Promise<Map<string, any>> {
   if (fbCreativeIds.length === 0) return new Map();
   
-  // Получаем последние метрики для каждого креатива
-  const { data: metrics } = await supabase
+  const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  
+  log.debug({ today, yesterday }, 'Fetching creative metrics from DB');
+  
+  // Пытаемся получить за сегодня
+  let { data: metrics } = await supabase
     .from('creative_metrics_history')
     .select('*')
     .eq('user_account_id', userAccountId)
     .in('creative_id', fbCreativeIds)
-    .order('date', { ascending: false });
+    .eq('date', today);
   
-  // Группируем по creative_id, берем последнюю запись
-  const metricsMap = new Map();
-  
-  if (metrics && metrics.length > 0) {
-    for (const metric of metrics) {
-      if (!metricsMap.has(metric.creative_id)) {
-        metricsMap.set(metric.creative_id, {
-          impressions: metric.impressions || 0,
-          reach: metric.reach || 0,
-          spend: metric.spend || 0,
-          ctr: metric.ctr || 0,
-          cpm: metric.cpm || 0,
-          frequency: metric.frequency || 0,
-          clicks: metric.clicks || 0,
-          quality_ranking: metric.quality_ranking,
-          engagement_rate_ranking: metric.engagement_rate_ranking,
-          date: metric.date
-        });
-      }
-    }
+  // Если за сегодня нет - берем за вчера
+  if (!metrics || metrics.length === 0) {
+    log.debug('No metrics for today, trying yesterday');
+    const result = await supabase
+      .from('creative_metrics_history')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .in('creative_id', fbCreativeIds)
+      .eq('date', yesterday);
+    metrics = result.data;
   }
+  
+  if (!metrics || metrics.length === 0) {
+    log.debug('No metrics found in DB');
+    return new Map();
+  }
+  
+  log.debug({ count: metrics.length }, 'Found metrics in DB');
+  
+  // Агрегируем по creative_id (может быть несколько ads у одного креатива)
+  const aggregated = new Map();
+  
+  for (const metric of metrics) {
+    if (!aggregated.has(metric.creative_id)) {
+      aggregated.set(metric.creative_id, {
+        impressions: 0,
+        reach: 0,
+        spend: 0,
+        clicks: 0,
+        link_clicks: 0,
+        leads: 0,
+        frequency: 0,
+        count: 0
+      });
+    }
+    
+    const agg = aggregated.get(metric.creative_id);
+    agg.impressions += metric.impressions || 0;
+    agg.reach += metric.reach || 0;
+    agg.spend += metric.spend || 0;
+    agg.clicks += metric.clicks || 0;
+    agg.link_clicks += metric.link_clicks || 0;
+    agg.leads += metric.leads || 0;
+    agg.frequency += metric.frequency || 0;
+    agg.count += 1;
+  }
+  
+  // Вычисляем средние метрики
+  const metricsMap = new Map();
+  for (const [creativeId, agg] of aggregated) {
+    const avgFrequency = agg.count > 0 ? agg.frequency / agg.count : 0;
+    const ctr = agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : 0;
+    const cpm = agg.impressions > 0 ? (agg.spend / agg.impressions) * 1000 : 0;
+    const cpl = agg.leads > 0 ? agg.spend / agg.leads : null;
+    
+    metricsMap.set(creativeId, {
+      impressions: agg.impressions,
+      reach: agg.reach,
+      spend: agg.spend,
+      clicks: agg.clicks,
+      link_clicks: agg.link_clicks,
+      leads: agg.leads,
+      ctr: parseFloat(ctr.toFixed(2)),
+      cpm: parseFloat(cpm.toFixed(2)),
+      cpl: cpl ? parseFloat(cpl.toFixed(2)) : null,
+      frequency: parseFloat(avgFrequency.toFixed(2)),
+      date: metrics[0].date
+    });
+  }
+  
+  log.info({ 
+    fromDB: metricsMap.size,
+    requested: fbCreativeIds.length 
+  }, 'Loaded metrics from DB');
   
   return metricsMap;
 }
@@ -1252,9 +1346,10 @@ export async function fetchCreativeInsightsLight(
       'actions'
     ].join(',');
     
-    const allInsights = [];
+    const allInsights: any[] = [];
     
-    for (const ad of adsWithCreative) {
+    // OPTIMIZATION: Запускаем запросы к Ads параллельно
+    const insightPromises = adsWithCreative.map(async (ad) => {
       const insightsUrl = `https://graph.facebook.com/v20.0/${ad.id}/insights`;
       const insightsParams = new URLSearchParams({
         fields,
@@ -1267,13 +1362,24 @@ export async function fetchCreativeInsightsLight(
         if (insightsRes.ok) {
           const insightsJson = await insightsRes.json();
           if (insightsJson.data && insightsJson.data.length > 0) {
-            allInsights.push(...insightsJson.data);
+            return insightsJson.data; // Возвращаем массив данных
           }
         }
       } catch (error: any) {
         log.warn({ adId: ad.id, error: error.message }, 'Failed to fetch ad insights');
       }
-    }
+      return []; // Возвращаем пустой массив при ошибке
+    });
+
+    // Ждем всех
+    const results = await Promise.all(insightPromises);
+    
+    // Собираем все результаты в один массив
+    results.forEach(data => {
+      if (data && data.length > 0) {
+        allInsights.push(...data);
+      }
+    });
     
     if (allInsights.length === 0) {
       log.info({ fbCreativeId, adsChecked: adsWithCreative.length }, 'No insights found for ads');

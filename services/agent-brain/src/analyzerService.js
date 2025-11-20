@@ -368,6 +368,86 @@ fastify.post('/analyze-test', async (request, reply) => {
       throw updateError;
     }
 
+    // ===================================================
+    // STEP 6: Сохраняем метрики в creative_metrics_history
+    // ===================================================
+    // ПРАВИЛЬНО: Test ad имеет ДРУГОЙ ad_id, чем production ad
+    // → нет конфликта! Можем хранить обе истории в одной таблице
+    if (test.ad_id && test.user_creatives?.user_id) {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        
+        // Получаем fb_creative_id (используем whatsapp как primary)
+        const fbCreativeId = test.user_creatives.fb_creative_id_whatsapp || 
+                            test.user_creatives.fb_creative_id_instagram_traffic || 
+                            test.user_creatives.fb_creative_id_site_leads ||
+                            test.user_creatives.fb_video_id;
+        
+        if (!fbCreativeId) {
+          fastify.log.warn({ 
+            where: 'analyzeTest',
+            test_id,
+            creative_id: test.user_creative_id
+          }, 'No fb_creative_id found, skipping creative_metrics_history save');
+        } else {
+          // Получаем user_account_id
+          const { data: userAccount } = await supabase
+            .from('user_accounts')
+            .select('id')
+            .eq('id', test.user_creatives.user_id)
+            .single();
+          
+          if (userAccount) {
+            const { error: historyError } = await supabase
+              .from('creative_metrics_history')
+              .upsert({
+                user_account_id: userAccount.id,
+                date: today,
+                ad_id: test.ad_id,                    // Test ad (уникальный!)
+                creative_id: fbCreativeId,
+                adset_id: test.adset_id,
+                campaign_id: test.campaign_id,
+                impressions: test.impressions || 0,
+                reach: test.reach || 0,
+                spend: (test.spend_cents || 0) / 100,  // центы → доллары
+                clicks: test.clicks || 0,
+                link_clicks: test.link_clicks || 0,
+                leads: test.leads || 0,
+                ctr: test.ctr || 0,
+                cpm: (test.cpm_cents || 0) / 100,      // центы → доллары
+                cpl: test.cpl_cents ? (test.cpl_cents / 100) : null,
+                frequency: test.frequency || 0
+              }, { 
+                onConflict: 'user_account_id,ad_id,date',
+                ignoreDuplicates: false  // Обновляем если есть
+              });
+
+            if (historyError) {
+              fastify.log.warn({ 
+                where: 'analyzeTest',
+                test_id,
+                ad_id: test.ad_id,
+                error: historyError.message 
+              }, 'Failed to save test metrics to creative_metrics_history');
+            } else {
+              fastify.log.info({ 
+                where: 'analyzeTest',
+                test_id, 
+                ad_id: test.ad_id,
+                creative_id: fbCreativeId
+              }, 'Saved test metrics to creative_metrics_history');
+            }
+          }
+        }
+      } catch (err) {
+        fastify.log.warn({ 
+          where: 'analyzeTest',
+          test_id,
+          error: err.message 
+        }, 'Error saving test metrics to history, continuing...');
+      }
+    }
+
     return reply.send({
       success: true,
       test_id,
@@ -446,7 +526,7 @@ fastify.post('/analyze-batch', async (request, reply) => {
 /**
  * GET /creative-analytics/:user_creative_id (nginx проксирует /api/analyzer/creative-analytics -> /creative-analytics)
  * 
- * Получить полную аналитику креатива (тест + production)
+ * Получить аналитику ТЕСТА креатива (ТОЛЬКО тесты, НЕ production)
  * 
  * ВХОДНЫЕ ДАННЫЕ:
  * - user_creative_id: UUID креатива
@@ -456,10 +536,11 @@ fastify.post('/analyze-batch', async (request, reply) => {
  * ЧТО ДЕЛАЕТ:
  * 1. Проверяет кеш (10 минут)
  * 2. Получает креатив из user_creatives
- * 3. Проверяет: используется ли в production?
- * 4. Получает метрики (test или production)
- * 5. Анализирует через LLM
- * 6. Возвращает результат с кешированием
+ * 3. Получает данные теста из creative_tests
+ * 4. Анализирует через LLM (если тест завершен)
+ * 5. Возвращает результат с кешированием
+ * 
+ * ПРИМЕЧАНИЕ: Для production метрик используй отдельный endpoint в agent-service
  */
 fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
   try {
@@ -533,8 +614,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     }
 
     // ===================================================
-    // STEP 3: Проверяем тест (если был)
-    // Приоритет: running > completed > cancelled
+    // STEP 3: Получаем данные теста (если был)
     // ===================================================
     const { data: allTests, error: testsError } = await supabase
       .from('creative_tests')
@@ -542,7 +622,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       .eq('user_creative_id', user_creative_id)
       .order('started_at', { ascending: false });
     
-    // Выбираем тест по приоритету: running > completed > любой последний
+    // Выбираем тест по приоритету: running > completed > cancelled > любой последний
     let test = null;
     if (allTests && allTests.length > 0) {
       const runningTest = allTests.find(t => t.status === 'running');
@@ -550,76 +630,52 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       test = runningTest || completedTest || allTests[0];
     }
 
-    // ===================================================
-    // STEP 4: Пробуем получить production метрики
-    // ===================================================
-    let productionMetrics = null;
-    let dataSource = 'none';
-    
-    // Определяем какой fb_creative_id использовать (приоритет: whatsapp > instagram > site_leads)
-    const fbCreativeId = creative.fb_creative_id_whatsapp || 
-                         creative.fb_creative_id_instagram_traffic || 
-                         creative.fb_creative_id_site_leads;
-    
-    if (fbCreativeId && userAccount.access_token && userAccount.ad_account_id) {
-      try {
-        productionMetrics = await fetchProductionMetrics(
-          userAccount.ad_account_id,
-          userAccount.access_token,
-          fbCreativeId
-        );
-        
-        if (productionMetrics) {
-          dataSource = 'production';
-          fastify.log.info({ user_creative_id, impressions: productionMetrics.impressions }, 'Production metrics found');
-        }
-      } catch (err) {
-        fastify.log.warn({ user_creative_id, error: err.message }, 'Failed to fetch production metrics');
-      }
-    }
-    
-    // Если нет production, используем тест (completed, cancelled или running с данными)
-    if (!productionMetrics && test) {
-      if (test.status === 'completed' || 
-          (test.status === 'running' && test.impressions > 0) ||
-          (test.status === 'cancelled' && test.impressions > 0)) {
-        dataSource = 'test';
-      }
-    }
-
-    // Если нет ни production, ни данных теста
-    if (dataSource === 'none') {
+    // Если нет теста - возвращаем пустой результат
+    if (!test) {
       return reply.send({
         creative: {
           id: creative.id,
           title: creative.title,
           status: creative.status,
+          direction_id: creative.direction_id,
           direction_name: creative.account_directions?.name || null
         },
-        data_source: 'none',
-        message: test?.status === 'running' 
-          ? 'Тест запущен, накапливается статистика' 
-          : 'Креатив не тестировался и не используется в рекламе',
-        test: test ? {
+        test: {
+          exists: false,
+          message: 'Креатив не тестировался'
+        },
+        analysis: null
+      });
+    }
+
+    // Если тест только запущен (нет данных) - возвращаем статус
+    if (test.status === 'running' && (!test.impressions || test.impressions < 100)) {
+      return reply.send({
+        creative: {
+          id: creative.id,
+          title: creative.title,
+          status: creative.status,
+          direction_id: creative.direction_id,
+          direction_name: creative.account_directions?.name || null
+        },
+        test: {
           exists: true,
-          status: test.status,
+          status: 'running',
           started_at: test.started_at,
-          completed_at: test.completed_at,
           test_id: test.id,
+          message: 'Тест запущен, накапливается статистика',
           metrics: {
             impressions: test.impressions || 0,
             reach: test.reach || 0,
-            leads: test.leads || 0,
-            spend_cents: test.spend_cents || 0
+            leads: test.leads || 0
           }
-        } : null,
-        production: null,
+        },
         analysis: null
       });
     }
 
     // ===================================================
-    // STEP 5: Получаем транскрибацию
+    // STEP 4: Получаем транскрибацию
     // ===================================================
     const { data: transcript } = await supabase
       .from('creative_transcripts')
@@ -632,52 +688,38 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     const transcriptText = transcript?.text || null;
 
     // ===================================================
-    // STEP 6: Подготавливаем данные для LLM
+    // STEP 5: Подготавливаем данные теста для LLM
     // ===================================================
-    let metricsForAnalysis;
-    
-    if (dataSource === 'production') {
-      metricsForAnalysis = {
-        creative_title: creative.title,
-        ...productionMetrics
-      };
-    } else {
-      // Используем тест
-      metricsForAnalysis = {
-        creative_title: creative.title,
-        impressions: test.impressions || 0,
-        reach: test.reach || 0,
-        frequency: test.frequency || 0,
-        clicks: test.clicks || 0,
-        link_clicks: test.link_clicks || 0,
-        ctr: test.ctr || 0,
-        link_ctr: test.link_ctr || 0,
-        leads: test.leads || 0,
-        spend_cents: test.spend_cents || 0,
-        cpm_cents: test.cpm_cents || 0,
-        cpc_cents: test.cpc_cents || 0,
-        cpl_cents: test.cpl_cents || null,
-        video_views: test.video_views || 0,
-        video_views_25_percent: test.video_views_25_percent || 0,
-        video_views_50_percent: test.video_views_50_percent || 0,
-        video_views_75_percent: test.video_views_75_percent || 0,
-        video_views_95_percent: test.video_views_95_percent || 0,
-        video_avg_watch_time_sec: test.video_avg_watch_time_sec || 0
-      };
-    }
+    const testMetrics = {
+      creative_title: creative.title,
+      impressions: test.impressions || 0,
+      reach: test.reach || 0,
+      frequency: test.frequency || 0,
+      clicks: test.clicks || 0,
+      link_clicks: test.link_clicks || 0,
+      ctr: test.ctr || 0,
+      link_ctr: test.link_ctr || 0,
+      leads: test.leads || 0,
+      spend_cents: test.spend_cents || 0,
+      cpm_cents: test.cpm_cents || 0,
+      cpc_cents: test.cpc_cents || 0,
+      cpl_cents: test.cpl_cents || null,
+      video_views: test.video_views || 0,
+      video_views_25_percent: test.video_views_25_percent || 0,
+      video_views_50_percent: test.video_views_50_percent || 0,
+      video_views_75_percent: test.video_views_75_percent || 0,
+      video_views_95_percent: test.video_views_95_percent || 0,
+      video_avg_watch_time_sec: test.video_avg_watch_time_sec || 0
+    };
 
     // ===================================================
-    // STEP 7: Анализируем через LLM (только для completed тестов или production)
+    // STEP 6: Анализируем через LLM (только для completed тестов)
     // ===================================================
     let analysis = null;
     
-    // LLM анализ только если тест завершён или это production данные
-    const shouldAnalyze = dataSource === 'production' || (dataSource === 'test' && test.status === 'completed');
-    
-    if (shouldAnalyze) {
-      // ШАГ 1: Проверяем существующий анализ в БД
-      // Проверяем что есть ВСЕ поля (включая transcript_suggestions), иначе делаем новый анализ
-      if (test && test.llm_score !== null && test.llm_verdict !== null && test.transcript_suggestions !== null) {
+    if (test.status === 'completed') {
+      // Проверяем существующий анализ в БД
+      if (test.llm_score !== null && test.llm_verdict !== null && test.transcript_suggestions !== null) {
         fastify.log.info({ user_creative_id, source: 'database', llm_score: test.llm_score }, 'Using existing LLM analysis from DB');
         analysis = {
           score: test.llm_score,
@@ -689,11 +731,11 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
           transcript_suggestions: test.transcript_suggestions
         };
       } else {
-        // ШАГ 2: Делаем новый анализ через OpenAI
-        fastify.log.info({ user_creative_id, data_source: dataSource }, 'Analyzing with LLM');
+        // Делаем новый анализ через OpenAI
+        fastify.log.info({ user_creative_id, test_status: test.status }, 'Analyzing with LLM');
         
         try {
-          analysis = await analyzeCreativeTest(metricsForAnalysis, transcriptText);
+          analysis = await analyzeCreativeTest(testMetrics, transcriptText);
 
           fastify.log.info({ 
             user_creative_id, 
@@ -701,43 +743,40 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
             llm_verdict: analysis.verdict
           }, 'LLM analysis complete');
 
-          // ШАГ 3: Сохраняем результат в БД (все поля включая transcript_suggestions)
-          if (test && test.id) {
-            const { error: updateError } = await supabase
-              .from('creative_tests')
-              .update({
-                llm_score: analysis.score,
-                llm_verdict: analysis.verdict,
-                llm_reasoning: analysis.reasoning,
-                llm_video_analysis: analysis.video_analysis,
-                llm_text_recommendations: analysis.text_recommendations,
-                transcript_match_quality: analysis.transcript_match_quality,
-                transcript_suggestions: analysis.transcript_suggestions,
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', test.id);
-            
-            if (updateError) {
-              fastify.log.error({ test_id: test.id, error: updateError }, 'Failed to save LLM analysis to DB');
-            } else {
-              fastify.log.info({ test_id: test.id }, 'LLM analysis saved to DB');
-            }
+          // Сохраняем результат в БД
+          const { error: updateError } = await supabase
+            .from('creative_tests')
+            .update({
+              llm_score: analysis.score,
+              llm_verdict: analysis.verdict,
+              llm_reasoning: analysis.reasoning,
+              llm_video_analysis: analysis.video_analysis,
+              llm_text_recommendations: analysis.text_recommendations,
+              transcript_match_quality: analysis.transcript_match_quality,
+              transcript_suggestions: analysis.transcript_suggestions,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', test.id);
+          
+          if (updateError) {
+            fastify.log.error({ test_id: test.id, error: updateError }, 'Failed to save LLM analysis to DB');
+          } else {
+            fastify.log.info({ test_id: test.id }, 'LLM analysis saved to DB');
           }
         } catch (error) {
           fastify.log.warn({ 
             user_creative_id, 
             error: error.message 
           }, 'LLM analysis failed, continuing without analysis');
-          // Продолжаем без анализа, возвращаем данные теста
           analysis = null;
         }
       }
     } else {
-      fastify.log.info({ user_creative_id, test_status: test.status }, 'Skipping LLM analysis for running test');
+      fastify.log.info({ user_creative_id, test_status: test.status }, 'Skipping LLM analysis for non-completed test');
     }
 
     // ===================================================
-    // STEP 8: Формируем ответ
+    // STEP 7: Формируем ответ (ТОЛЬКО тестовые данные)
     // ===================================================
     const result = {
       creative: {
@@ -748,51 +787,45 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         direction_name: creative.account_directions?.name || null
       },
       
-      data_source: dataSource, // 'test' или 'production'
-      message: test?.status === 'running' ? 'Тест в процессе, анализ будет доступен после завершения' : undefined,
-      
-      test: test ? {
+      test: {
         exists: true,
+        test_id: test.id,
         status: test.status,
+        started_at: test.started_at,
         completed_at: test.completed_at,
         metrics: {
           impressions: test.impressions,
           reach: test.reach,
+          clicks: test.clicks,
+          link_clicks: test.link_clicks,
           leads: test.leads,
+          spend_cents: test.spend_cents,
           cpl_cents: test.cpl_cents,
           ctr: test.ctr,
+          cpm_cents: test.cpm_cents,
+          frequency: test.frequency,
           video_views: test.video_views,
           video_views_25_percent: test.video_views_25_percent,
           video_views_50_percent: test.video_views_50_percent,
           video_views_75_percent: test.video_views_75_percent,
-          video_views_95_percent: test.video_views_95_percent
-        },
-        llm_analysis: {
-          score: test.llm_score,
-          verdict: test.llm_verdict,
-          reasoning: test.llm_reasoning
+          video_views_95_percent: test.video_views_95_percent,
+          video_avg_watch_time_sec: test.video_avg_watch_time_sec
         }
-      } : null,
+      },
       
-      production: productionMetrics ? {
-        in_use: true,
-        metrics: productionMetrics
-      } : null,
+      analysis: analysis,
       
-      analysis: analysis ? {
-        ...analysis,
-        based_on: dataSource,
-        note: dataSource === 'production' 
-          ? 'Анализ основан на реальных данных из рекламы'
-          : 'Анализ основан на результатах теста'
+      transcript: transcriptText ? {
+        exists: true,
+        preview: transcriptText.substring(0, 200) + (transcriptText.length > 200 ? '...' : '')
       } : null
     };
-
-    // ===================================================
-    // STEP 9: Сохраняем в кеш
-    // ===================================================
+    
+    // Кешируем результат
     setCachedAnalytics(cacheKey, result);
-
+    
+    fastify.log.info({ user_creative_id, test_status: test.status, has_analysis: !!analysis }, 'Returning test analytics');
+    
     return reply.send({
       ...result,
       from_cache: false

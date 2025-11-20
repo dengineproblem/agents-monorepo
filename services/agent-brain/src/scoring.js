@@ -26,6 +26,75 @@ function normalizeAdAccountId(adAccountId) {
 }
 
 /**
+ * Fetch insights для конкретного Facebook Ad
+ * Используется для получения метрик на уровне Ad (не AdSet)
+ */
+async function fetchAdInsights(adAccountId, accessToken, adId, datePreset = 'last_7d') {
+  const url = `https://graph.facebook.com/${FB_API_VERSION}/${adId}/insights`;
+  const params = new URLSearchParams({
+    fields: 'impressions,reach,spend,clicks,actions,ctr,cpm,frequency',
+    date_preset: datePreset,
+    access_token: accessToken
+  });
+
+  try {
+    const res = await fetch(`${url}?${params.toString()}`);
+    if (!res.ok) {
+      if (res.status === 400) {
+        // Ad не имеет показов или удален
+        return null;
+      }
+      const err = await res.text();
+      logger.warn({ 
+        where: 'fetchAdInsights',
+        ad_id: adId,
+        status: res.status,
+        error: err
+      }, 'Failed to fetch ad insights');
+      return null;
+    }
+
+    const json = await res.json();
+    return json.data?.[0] || null;
+  } catch (error) {
+    logger.warn({ 
+      where: 'fetchAdInsights',
+      ad_id: adId,
+      error: error.message
+    }, 'Error fetching ad insights');
+    return null;
+  }
+}
+
+/**
+ * Извлечь количество лидов из actions
+ * Поддерживает разные типы конверсий (lead, messaging, site leads)
+ */
+function extractLeads(actions) {
+  if (!actions || !Array.isArray(actions)) return 0;
+  
+  // Ищем действия типа lead
+  const leadAction = actions.find(a => 
+    a.action_type === 'lead' || 
+    a.action_type === 'onsite_conversion.lead_grouped' ||
+    a.action_type === 'onsite_conversion.messaging_conversation_started_7d' ||
+    a.action_type === 'onsite_conversion.total_messaging_connection'
+  );
+  
+  return leadAction ? parseInt(leadAction.value) || 0 : 0;
+}
+
+/**
+ * Извлечь количество кликов по ссылке из actions
+ */
+function extractLinkClicks(actions) {
+  if (!actions || !Array.isArray(actions)) return 0;
+  
+  const linkClickAction = actions.find(a => a.action_type === 'link_click');
+  return linkClickAction ? parseInt(linkClickAction.value) || 0 : 0;
+}
+
+/**
  * Fetch активных ad sets с insights за указанный период
  */
 async function fetchAdsets(adAccountId, accessToken, options = 'last_7d') {
@@ -720,6 +789,155 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
 }
 
 /**
+ * Сохранить метрики креативов в creative_metrics_history
+ * НОВАЯ ФУНКЦИЯ для унифицированной системы метрик
+ * 
+ * Получает метрики на уровне Ad (не AdSet) для каждого креатива
+ * Использует ad_creative_mapping для точного мэтчинга
+ */
+async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken) {
+  if (!readyCreatives || !readyCreatives.length) return;
+  
+  const today = new Date().toISOString().split('T')[0];
+  const records = [];
+  
+  logger.info({ 
+    where: 'saveCreativeMetricsToHistory',
+    creatives_count: readyCreatives.length 
+  }, 'Starting to save creative metrics to history');
+
+  for (const creative of readyCreatives) {
+    try {
+      // Получить список ads через ad_creative_mapping
+      const { data: mappings, error } = await supabase
+        .from('ad_creative_mapping')
+        .select('ad_id, adset_id, campaign_id, fb_creative_id')
+        .eq('user_creative_id', creative.user_creative_id);
+
+      if (error) {
+        logger.warn({ 
+          where: 'saveCreativeMetricsToHistory',
+          creative_id: creative.user_creative_id,
+          error: error.message 
+        }, 'Failed to fetch ad mappings');
+        continue;
+      }
+
+      if (!mappings || mappings.length === 0) {
+        logger.debug({ 
+          where: 'saveCreativeMetricsToHistory',
+          creative_id: creative.user_creative_id 
+        }, 'No ad mappings found for creative');
+        continue;
+      }
+
+      logger.debug({ 
+        where: 'saveCreativeMetricsToHistory',
+        creative_id: creative.user_creative_id,
+        ads_count: mappings.length 
+      }, 'Found ad mappings');
+
+      // Получить метрики для каждого ad
+      for (const mapping of mappings) {
+        try {
+          const insights = await fetchAdInsights(adAccountId, accessToken, mapping.ad_id, 'last_7d');
+          
+          if (!insights) {
+            logger.debug({ 
+              where: 'saveCreativeMetricsToHistory',
+              ad_id: mapping.ad_id 
+            }, 'No insights for ad');
+            continue;
+          }
+
+          // Извлекаем метрики
+          const leads = extractLeads(insights.actions);
+          const linkClicks = extractLinkClicks(insights.actions);
+          const spend = parseFloat(insights.spend || 0);
+          
+          // Вычисляем CPL в центах (если есть лиды)
+          const cpl = leads > 0 ? (spend * 100 / leads) : null;
+
+          records.push({
+            user_account_id: userAccountId,
+            date: today,
+            ad_id: mapping.ad_id,
+            creative_id: mapping.fb_creative_id,
+            adset_id: mapping.adset_id,
+            campaign_id: mapping.campaign_id,
+            impressions: parseInt(insights.impressions || 0),
+            reach: parseInt(insights.reach || 0),
+            spend: spend,
+            clicks: parseInt(insights.clicks || 0),
+            link_clicks: linkClicks,
+            leads: leads,
+            ctr: parseFloat(insights.ctr || 0),
+            cpm: parseFloat(insights.cpm || 0),
+            cpl: cpl,
+            frequency: parseFloat(insights.frequency || 0)
+          });
+
+          logger.debug({ 
+            where: 'saveCreativeMetricsToHistory',
+            ad_id: mapping.ad_id,
+            impressions: insights.impressions,
+            leads: leads 
+          }, 'Collected metrics for ad');
+
+        } catch (err) {
+          logger.warn({ 
+            where: 'saveCreativeMetricsToHistory',
+            ad_id: mapping.ad_id,
+            error: err.message 
+          }, 'Failed to fetch ad insights');
+        }
+      }
+    } catch (err) {
+      logger.warn({ 
+        where: 'saveCreativeMetricsToHistory',
+        creative_id: creative.user_creative_id,
+        error: err.message 
+      }, 'Failed to process creative');
+    }
+  }
+
+  // Сохраняем все записи одним batch запросом
+  if (records.length > 0) {
+    try {
+      const { error } = await supabase
+        .from('creative_metrics_history')
+        .upsert(records, { 
+          onConflict: 'user_account_id,ad_id,date',
+          ignoreDuplicates: false 
+        });
+
+      if (error) {
+        logger.error({ 
+          where: 'saveCreativeMetricsToHistory',
+          error: error.message,
+          records_count: records.length 
+        }, 'Failed to save metrics to history');
+      } else {
+        logger.info({ 
+          where: 'saveCreativeMetricsToHistory',
+          saved_count: records.length 
+        }, 'Successfully saved creative metrics to history');
+      }
+    } catch (err) {
+      logger.error({ 
+        where: 'saveCreativeMetricsToHistory',
+        error: err.message,
+        records_count: records.length 
+      }, 'Error saving metrics to history');
+    }
+  } else {
+    logger.info({ 
+      where: 'saveCreativeMetricsToHistory' 
+    }, 'No metrics to save');
+  }
+}
+
+/**
  * Рассчитывает risk score креатива с учетом ROI
  * 
  * @param {Object} performance - метрики из Facebook API (cpl, ctr, cpm)
@@ -1019,6 +1237,32 @@ export async function runScoringAgent(userAccount, options = {}) {
       with_stats: readyCreatives.filter(c => c.creatives.length > 0).length,
       with_roi: readyCreatives.filter(c => c.roi_data !== null).length
     });
+    
+    // ========================================
+    // СОХРАНЯЕМ МЕТРИКИ КРЕАТИВОВ В ИСТОРИЮ
+    // ========================================
+    
+    // НОВОЕ: Сохраняем метрики на уровне Ad для использования в auto-launch
+    logger.info({ 
+      where: 'scoring_agent', 
+      phase: 'saving_metrics_to_history' 
+    });
+    
+    try {
+      await saveCreativeMetricsToHistory(
+        supabase, 
+        userAccountId, 
+        readyCreatives, 
+        ad_account_id, 
+        access_token
+      );
+    } catch (error) {
+      logger.error({ 
+        where: 'scoring_agent',
+        phase: 'save_metrics_failed',
+        error: String(error) 
+      }, 'Failed to save creative metrics to history, continuing...');
+    }
     
     // ========================================
     // ОПРЕДЕЛЯЕМ НЕИСПОЛЬЗОВАННЫЕ КРЕАТИВЫ
