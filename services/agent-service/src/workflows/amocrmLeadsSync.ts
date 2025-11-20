@@ -534,12 +534,6 @@ export async function syncCreativeLeadsFromAmoCRM(
             const newPipelineId = amocrmLeadFromContact.pipeline_id;
             const isQualified = qualificationMap.get(newStatusId!) || false;
 
-            // Check if update needed
-            const needsUpdate = 
-              localLead.current_status_id !== newStatusId ||
-              localLead.current_pipeline_id !== newPipelineId ||
-              localLead.amocrm_lead_id !== newAmoCRMLeadId;
-
             // Always sync sales data if we have the lead from AmoCRM
             if (newAmoCRMLeadId) {
               try {
@@ -584,12 +578,15 @@ export async function syncCreativeLeadsFromAmoCRM(
                      .update(saleData)
                      .eq('id', existingSale.id);
                 } else {
-                   await supabase
-                     .from('sales')
-                     .insert({
-                       ...saleData,
-                       created_at: new Date().toISOString()
-                     });
+                   // Only create sale if amount > 0 or status is won
+                   if (amount > 0 || newStatusId === 142) {
+                     await supabase
+                       .from('sales')
+                       .insert({
+                         ...saleData,
+                         created_at: new Date().toISOString()
+                       });
+                   }
                 }
               } catch (saleError: any) {
                 log.warn({
@@ -600,6 +597,12 @@ export async function syncCreativeLeadsFromAmoCRM(
                 // Don't fail the whole sync for sales error
               }
             }
+
+            // Check if update needed
+            const needsUpdate = 
+              localLead.current_status_id !== newStatusId ||
+              localLead.current_pipeline_id !== newPipelineId ||
+              localLead.amocrm_lead_id !== newAmoCRMLeadId;
 
             if (!needsUpdate) {
               return;
