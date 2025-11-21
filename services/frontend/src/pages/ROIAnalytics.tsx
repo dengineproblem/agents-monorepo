@@ -91,6 +91,16 @@ const ROIAnalytics: React.FC = () => {
     }).format(amount);
   };
 
+  // Форматирование в долларах (для метрик из Facebook)
+  const formatUSD = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
   const formatNumber = (num: number) => {
     return new Intl.NumberFormat('ru-RU').format(num);
   };
@@ -856,9 +866,9 @@ const ROIAnalytics: React.FC = () => {
                                                       <td className="py-1 px-2 text-right">{formatNumber(metric.clicks || 0)}</td>
                                                       <td className="py-1 px-2 text-right">{metric.ctr ? (metric.ctr * 100).toFixed(2) : '0.00'}%</td>
                                                       <td className="py-1 px-2 text-right">{formatNumber(metric.leads || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatCurrency(metric.spend_cents ? metric.spend_cents / 100 : 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatCurrency(metric.cpm_cents ? metric.cpm_cents / 100 : 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{metric.cpl_cents ? formatCurrency(metric.cpl_cents / 100) : '—'}</td>
+                                                      <td className="py-1 px-2 text-right">{formatUSD(metric.spend_cents ? metric.spend_cents / 100 : 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{formatUSD(metric.cpm_cents ? metric.cpm_cents / 100 : 0)}</td>
+                                                      <td className="py-1 px-2 text-right">{metric.cpl_cents ? formatUSD(metric.cpl_cents / 100) : '—'}</td>
                                                       <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_25_percent || 0)}</td>
                                                       <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_50_percent || 0)}</td>
                                                       <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_75_percent || 0)}</td>
@@ -1070,8 +1080,8 @@ const ROIAnalytics: React.FC = () => {
                                           <div><span className="text-muted-foreground">Клики:</span> {formatNumber(metric.clicks || 0)}</div>
                                           <div><span className="text-muted-foreground">CTR:</span> {metric.ctr ? (metric.ctr * 100).toFixed(2) : '0.00'}%</div>
                                           <div><span className="text-muted-foreground">Лиды:</span> {formatNumber(metric.leads || 0)}</div>
-                                          <div><span className="text-muted-foreground">Расход:</span> {formatCurrency(metric.spend_cents ? metric.spend_cents / 100 : 0)}</div>
-                                          <div><span className="text-muted-foreground">CPL:</span> {metric.cpl_cents ? formatCurrency(metric.cpl_cents / 100) : '—'}</div>
+                                          <div><span className="text-muted-foreground">Расход:</span> {formatUSD(metric.spend_cents ? metric.spend_cents / 100 : 0)}</div>
+                                          <div><span className="text-muted-foreground">CPL:</span> {metric.cpl_cents ? formatUSD(metric.cpl_cents / 100) : '—'}</div>
                                         </div>
                                       </div>
                                     ))}
