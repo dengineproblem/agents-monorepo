@@ -447,6 +447,7 @@ fastify.post('/analyze-test', async (request, reply) => {
               .from('creative_metrics_history')
               .upsert({
                 user_account_id: userAccount.id,
+                // user_creative_id заполнится автоматически через триггер на основе ad_id
                 date: today,
                 ad_id: test.ad_id,                    // Test ad (уникальный!)
                 creative_id: fbCreativeId,
@@ -951,17 +952,30 @@ fastify.post('/analyze-creative', async (request, reply) => {
     // ===================================================
     // STEP 1: Получаем последние агрегированные метрики креатива
     // ===================================================
+    // ✅ Теперь просто ищем по user_creative_id - никаких джойнов!
     const { data: metricsHistory, error: metricsError } = await supabase
       .from('creative_metrics_history')
       .select('*')
-      .eq('creative_id', creative_id)
+      .eq('user_creative_id', creative_id)  // ✅ Используем user_creative_id напрямую!
       .eq('user_account_id', user_id)
       .order('date', { ascending: false })
       .limit(30); // Берем последние 30 дней
 
+    fastify.log.info({ 
+      where: 'analyzeCreative', 
+      creative_id, 
+      user_id,
+      metricsFound: metricsHistory?.length || 0,
+      metricsError: metricsError?.message 
+    });
+
     if (metricsError || !metricsHistory || metricsHistory.length === 0) {
-      fastify.log.error({ where: 'analyzeCreative', creative_id, error: metricsError });
-      return reply.code(404).send({ error: 'No metrics found for this creative' });
+      fastify.log.error({ where: 'analyzeCreative', creative_id, user_id, error: metricsError });
+      return reply.code(404).send({ 
+        error: 'No metrics found for this creative',
+        creative_id,
+        user_id 
+      });
     }
 
     // Агрегируем метрики за последние 30 дней
@@ -1090,9 +1104,11 @@ fastify.post('/analyze-creative', async (request, reply) => {
     // STEP 6: Сохраняем результаты анализа в creative_analysis
     // ===================================================
     try {
+      // Используем upsert вместо delete + insert для атомарной операции
+      // Это гарантирует что анализ всегда сохраняется, даже если страница обновляется
       const { error: analysisError } = await supabase
         .from('creative_analysis')
-        .insert({
+        .upsert({
           creative_id: creative_id,
           user_account_id: user_id,
           source: 'manual',
@@ -1106,6 +1122,8 @@ fastify.post('/analyze-creative', async (request, reply) => {
           text_recommendations: analysis?.text_recommendations || null,
           transcript_match_quality: analysis?.transcript_match_quality || null,
           transcript_suggestions: analysis?.transcript_suggestions || null
+        }, {
+          onConflict: 'creative_id,user_account_id,source'
         });
 
       if (analysisError) {
