@@ -276,8 +276,8 @@ export const translations = {
       loading: 'Загрузка...'
     },
     auth: {
-      loginTitle: 'Meta Ads Monitor',
-      loginSubtitle: 'Войдите для доступа к панели управления',
+      loginTitle: 'Performante AI',
+      loginSubtitle: 'Войдите для доступа к личному кабинету',
       usernameLabel: 'Логин',
       usernamePlaceholder: 'Введите логин',
       passwordLabel: 'Пароль',

@@ -1520,12 +1520,12 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
                   >
                     <Rocket className="mr-2 h-4 w-4" />
-                    Автозапуск
+                    Запуск с AI
                   </Button>
                 </DialogTrigger>
                 <DialogContent>
                   <DialogHeader>
-                    <DialogTitle>Автозапуск рекламы</DialogTitle>
+                    <DialogTitle>Запуск с AI</DialogTitle>
                     <DialogDescription>
                       Реклама будет запущена для всех активных направлений
                     </DialogDescription>

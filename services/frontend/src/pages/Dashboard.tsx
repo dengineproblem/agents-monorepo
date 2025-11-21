@@ -32,8 +32,6 @@ const Dashboard: React.FC = () => {
     aiAutopilot,
     toggleAiAutopilot,
     aiAutopilotLoading,
-    optimization,
-    updateOptimization,
     platform,
     setPlatform,
     tiktokConnected,
@@ -470,26 +468,6 @@ const Dashboard: React.FC = () => {
                   <p className="text-sm text-muted-foreground mb-4">
                     Оптимизация бюджета и управление ставками с помощью искусственного интеллекта для достижения максимальной эффективности
             </p>
-            
-            {/* Выпадающий список оптимизации - показывается только когда автопилот включен */}
-            {aiAutopilot && (
-                    <div className="pt-3 border-t">
-                <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium text-muted-foreground">Режим оптимизации:</span>
-                  <Select value={optimization} onValueChange={updateOptimization}>
-                          <SelectTrigger className="w-auto min-w-[200px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lead_cost">По стоимости лида</SelectItem>
-                      <SelectItem value="qual_lead">По стоимости качественного лида</SelectItem>
-                      <SelectItem value="roi">По ROI</SelectItem>
-                            <SelectItem value="agent2">Agent 2</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
                 </CardContent>
               </Card>
             )}
