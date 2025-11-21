@@ -396,17 +396,17 @@ const Dashboard: React.FC = () => {
           );
         })()}
         {platform === 'instagram' && isPaymentFailed && !hideDebtBanner && (
-          <Card className="mb-6 shadow-sm border-red-200">
-            <CardContent className="relative p-4 bg-gradient-to-r from-red-50 to-rose-50">
+          <Card className="mb-6 shadow-sm border-red-200 dark:border-red-700">
+            <CardContent className="relative p-4 bg-gradient-to-r from-red-50 to-rose-50 dark:from-red-900/50 dark:to-rose-900/50">
               <div className="flex items-center gap-3">
-                <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0" />
-                <p className="text-sm font-medium text-red-900">
+                <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                <p className="text-sm font-medium text-red-900 dark:text-red-200">
                   {t('dashboard.paymentFailedMessage')}
                 </p>
               </div>
               <button
                 aria-label={t('action.close')}
-                className="absolute right-3 top-3 text-red-600/70 hover:text-red-900 transition-colors text-xl leading-none"
+                className="absolute right-3 top-3 text-red-600/70 hover:text-red-900 dark:text-red-400/70 dark:hover:text-red-200 transition-colors text-xl leading-none"
                 onClick={() => { setHideDebtBanner(true); localStorage.setItem('hideDebtBanner', '1'); }}
               >
                 ×
