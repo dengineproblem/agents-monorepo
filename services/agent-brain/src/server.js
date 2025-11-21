@@ -25,21 +25,10 @@ const fastify = Fastify({
 
 // CORS для Frontend
 await fastify.register(cors, {
-  origin: (origin, cb) => {
-    // Разрешаем localhost для разработки и продакшн домен
-    const allowedOrigins = [
-      'http://localhost:8081',
-      'http://localhost:3000',
-      'https://agents.performanteaiagency.com'
-    ];
-    
-    if (!origin || allowedOrigins.includes(origin)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Not allowed by CORS'), false);
-    }
-  },
-  credentials: true
+  origin: true, // В продакшене можно ограничить конкретными доменами
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 });
 
 fastify.addHook('onRequest', (request, _reply, done) => {
