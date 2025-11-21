@@ -836,49 +836,53 @@ const ROIAnalytics: React.FC = () => {
                                         )}
 
                                         {/* История метрик */}
-                                        {creativeMetrics.length > 0 && (
-                                          <div>
-                                            <h4 className="font-semibold text-sm mb-3">История метрик</h4>
-                                            <div className="overflow-x-auto">
-                                              <table className="min-w-full text-xs">
-                                                <thead className="bg-muted/50">
-                                                  <tr>
-                                                    <th className="py-1 px-2 text-left font-medium">Дата</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Показы</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Охват</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Клики</th>
-                                                    <th className="py-1 px-2 text-right font-medium">CTR %</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Лиды</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Расход</th>
-                                                    <th className="py-1 px-2 text-right font-medium">CPM</th>
-                                                    <th className="py-1 px-2 text-right font-medium">CPL</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Видео 25%</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Видео 50%</th>
-                                                    <th className="py-1 px-2 text-right font-medium">Видео 75%</th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody>
-                                                  {creativeMetrics.map((metric, idx) => (
-                                                    <tr key={idx} className="border-b last:border-0 hover:bg-muted/10">
-                                                      <td className="py-1 px-2">{new Date(metric.date).toLocaleDateString('ru-RU')}</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.impressions || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.reach || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.clicks || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{metric.ctr ? (metric.ctr * 100).toFixed(2) : '0.00'}%</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.leads || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatUSD(metric.spend_cents ? metric.spend_cents / 100 : 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatUSD(metric.cpm_cents ? metric.cpm_cents / 100 : 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{metric.cpl_cents ? formatUSD(metric.cpl_cents / 100) : '—'}</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_25_percent || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_50_percent || 0)}</td>
-                                                      <td className="py-1 px-2 text-right">{formatNumber(metric.video_views_75_percent || 0)}</td>
-                                                    </tr>
-                                                  ))}
-                                                </tbody>
-                                              </table>
+                                        {creativeMetrics.length > 0 && (() => {
+                                          // Вычисляем СУММУ за весь период
+                                          const totalMetrics = creativeMetrics.reduce((acc, metric) => ({
+                                            impressions: acc.impressions + (metric.impressions || 0),
+                                            reach: acc.reach + (metric.reach || 0),
+                                            clicks: acc.clicks + (metric.clicks || 0),
+                                            leads: acc.leads + (metric.leads || 0),
+                                            spend: acc.spend + (metric.spend || 0),
+                                            video_views: acc.video_views + (metric.video_views || 0),
+                                            video_views_25: acc.video_views_25 + (metric.video_views_25_percent || 0),
+                                            video_views_50: acc.video_views_50 + (metric.video_views_50_percent || 0),
+                                            video_views_75: acc.video_views_75 + (metric.video_views_75_percent || 0)
+                                          }), { impressions: 0, reach: 0, clicks: 0, leads: 0, spend: 0, video_views: 0, video_views_25: 0, video_views_50: 0, video_views_75: 0 });
+                                          
+                                          const totalCTR = totalMetrics.impressions > 0 
+                                            ? (totalMetrics.clicks / totalMetrics.impressions) * 100 
+                                            : 0;
+                                          const totalCPM = totalMetrics.impressions > 0 
+                                            ? (totalMetrics.spend / totalMetrics.impressions) * 1000 
+                                            : 0;
+                                          const totalCPL = totalMetrics.leads > 0 
+                                            ? totalMetrics.spend / totalMetrics.leads 
+                                            : 0;
+                                          
+                                          return (
+                                            <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
+                                              <h4 className="font-semibold text-sm mb-2 text-primary">📊 Статистика креатива</h4>
+                                              <div className="grid grid-cols-4 gap-2 text-xs">
+                                                <div className="font-medium"><span className="text-muted-foreground">Показы:</span> {formatNumber(totalMetrics.impressions)}</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">Охват:</span> {formatNumber(totalMetrics.reach)}</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">Клики:</span> {formatNumber(totalMetrics.clicks)}</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">CTR:</span> {totalCTR.toFixed(2)}%</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">Лиды:</span> {formatNumber(totalMetrics.leads)}</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">Расход:</span> {formatUSD(totalMetrics.spend)}</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">CPM:</span> {formatUSD(totalCPM)}</div>
+                                                <div className="font-medium"><span className="text-muted-foreground">CPL:</span> {totalMetrics.leads > 0 ? formatUSD(totalCPL) : '—'}</div>
+                                                {totalMetrics.video_views > 0 && (
+                                                  <>
+                                                    <div className="font-medium"><span className="text-muted-foreground">Видео 25%:</span> {formatNumber(totalMetrics.video_views_25)}</div>
+                                                    <div className="font-medium"><span className="text-muted-foreground">Видео 50%:</span> {formatNumber(totalMetrics.video_views_50)}</div>
+                                                    <div className="font-medium"><span className="text-muted-foreground">Видео 75%:</span> {formatNumber(totalMetrics.video_views_75)}</div>
+                                                  </>
+                                                )}
                                             </div>
                                           </div>
-                                        )}
+                                          );
+                                        })()}
                                       </div>
                                     )}
                                   </td>
@@ -1067,27 +1071,54 @@ const ROIAnalytics: React.FC = () => {
                                 </div>
                               )}
 
-                              {/* История метрик */}
-                              {creativeMetrics.length > 0 && (
-                                <>
-                                  <h5 className="font-semibold text-xs">История метрик</h5>
-                                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                                    {creativeMetrics.slice(0, 10).map((metric, idx) => (
-                                      <div key={idx} className="bg-muted/20 rounded p-2 space-y-1">
-                                        <div className="font-medium text-xs">{new Date(metric.date).toLocaleDateString('ru-RU')}</div>
-                                        <div className="grid grid-cols-2 gap-1 text-xs">
-                                          <div><span className="text-muted-foreground">Показы:</span> {formatNumber(metric.impressions || 0)}</div>
-                                          <div><span className="text-muted-foreground">Клики:</span> {formatNumber(metric.clicks || 0)}</div>
-                                          <div><span className="text-muted-foreground">CTR:</span> {metric.ctr ? (metric.ctr * 100).toFixed(2) : '0.00'}%</div>
-                                          <div><span className="text-muted-foreground">Лиды:</span> {formatNumber(metric.leads || 0)}</div>
-                                          <div><span className="text-muted-foreground">Расход:</span> {formatUSD(metric.spend_cents ? metric.spend_cents / 100 : 0)}</div>
-                                          <div><span className="text-muted-foreground">CPL:</span> {metric.cpl_cents ? formatUSD(metric.cpl_cents / 100) : '—'}</div>
+                              {/* Статистика креатива за выбранный период */}
+                              {creativeMetrics.length > 0 && (() => {
+                                // Вычисляем СУММУ за весь период
+                                const totalMetrics = creativeMetrics.reduce((acc, metric) => ({
+                                  impressions: acc.impressions + (metric.impressions || 0),
+                                  reach: acc.reach + (metric.reach || 0),
+                                  clicks: acc.clicks + (metric.clicks || 0),
+                                  leads: acc.leads + (metric.leads || 0),
+                                  spend: acc.spend + (metric.spend || 0),
+                                  video_views: acc.video_views + (metric.video_views || 0),
+                                  video_views_25: acc.video_views_25 + (metric.video_views_25_percent || 0),
+                                  video_views_50: acc.video_views_50 + (metric.video_views_50_percent || 0),
+                                  video_views_75: acc.video_views_75 + (metric.video_views_75_percent || 0)
+                                }), { impressions: 0, reach: 0, clicks: 0, leads: 0, spend: 0, video_views: 0, video_views_25: 0, video_views_50: 0, video_views_75: 0 });
+                                
+                                const totalCTR = totalMetrics.impressions > 0 
+                                  ? (totalMetrics.clicks / totalMetrics.impressions) * 100 
+                                  : 0;
+                                const totalCPM = totalMetrics.impressions > 0 
+                                  ? (totalMetrics.spend / totalMetrics.impressions) * 1000 
+                                  : 0;
+                                const totalCPL = totalMetrics.leads > 0 
+                                  ? totalMetrics.spend / totalMetrics.leads 
+                                  : 0;
+                                
+                                return (
+                                  <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
+                                    <h5 className="font-semibold text-xs mb-2 text-primary">📊 Статистика креатива</h5>
+                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                      <div className="font-medium"><span className="text-muted-foreground">Показы:</span> {formatNumber(totalMetrics.impressions)}</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">Охват:</span> {formatNumber(totalMetrics.reach)}</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">Клики:</span> {formatNumber(totalMetrics.clicks)}</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">CTR:</span> {totalCTR.toFixed(2)}%</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">Лиды:</span> {formatNumber(totalMetrics.leads)}</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">Расход:</span> {formatUSD(totalMetrics.spend)}</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">CPM:</span> {formatUSD(totalCPM)}</div>
+                                      <div className="font-medium"><span className="text-muted-foreground">CPL:</span> {totalMetrics.leads > 0 ? formatUSD(totalCPL) : '—'}</div>
+                                      {totalMetrics.video_views > 0 && (
+                                        <>
+                                          <div className="font-medium"><span className="text-muted-foreground">Видео 25%:</span> {formatNumber(totalMetrics.video_views_25)}</div>
+                                          <div className="font-medium"><span className="text-muted-foreground">Видео 50%:</span> {formatNumber(totalMetrics.video_views_50)}</div>
+                                          <div className="font-medium"><span className="text-muted-foreground">Видео 75%:</span> {formatNumber(totalMetrics.video_views_75)}</div>
+                                        </>
+                                      )}
                                         </div>
                                       </div>
-                                    ))}
-                                  </div>
-                                </>
-                              )}
+                                );
+                              })()}
                             </div>
                           )}
                         </div>
