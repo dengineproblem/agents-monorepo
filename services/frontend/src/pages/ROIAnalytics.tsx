@@ -872,15 +872,16 @@ const ROIAnalytics: React.FC = () => {
                                                 <div className="font-medium"><span className="text-muted-foreground">Расход:</span> {formatUSD(totalMetrics.spend)}</div>
                                                 <div className="font-medium"><span className="text-muted-foreground">CPM:</span> {formatUSD(totalCPM)}</div>
                                                 <div className="font-medium"><span className="text-muted-foreground">CPL:</span> {totalMetrics.leads > 0 ? formatUSD(totalCPL) : '—'}</div>
-                                                {totalMetrics.video_views > 0 && (
+                                                {/* Показываем видео-метрики только после анализа */}
+                                                {creativeAnalysis && totalMetrics.video_views > 0 && (
                                                   <>
                                                     <div className="font-medium"><span className="text-muted-foreground">Видео 25%:</span> {formatNumber(totalMetrics.video_views_25)}</div>
                                                     <div className="font-medium"><span className="text-muted-foreground">Видео 50%:</span> {formatNumber(totalMetrics.video_views_50)}</div>
                                                     <div className="font-medium"><span className="text-muted-foreground">Видео 75%:</span> {formatNumber(totalMetrics.video_views_75)}</div>
                                                   </>
                                                 )}
+                                              </div>
                                             </div>
-                                          </div>
                                           );
                                         })()}
                                       </div>
@@ -1004,12 +1005,18 @@ const ROIAnalytics: React.FC = () => {
                           ) : (
                             <div className="space-y-3">
                               {/* Транскрипция */}
-                              <div className="bg-muted/30 rounded p-3">
-                                <div className="text-xs font-semibold mb-2">📝 Транскрибация видео</div>
-                                <div className="text-xs whitespace-pre-wrap text-muted-foreground">
-                                  {creativeTranscript || 'Транскрибация еще не готова.'}
-                                </div>
-                              </div>
+                              <Card className="bg-muted/30">
+                                <CardHeader className="pb-3">
+                                  <CardTitle className="text-xs flex items-center gap-2">
+                                    📝 Транскрибация видео
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  <div className="text-xs whitespace-pre-wrap text-muted-foreground">
+                                    {creativeTranscript || 'Транскрибация еще не готова. Она появится после обработки видео.'}
+                                  </div>
+                                </CardContent>
+                              </Card>
 
                               {/* Кнопка анализа */}
                               <div className="flex items-center justify-between">
@@ -1108,15 +1115,16 @@ const ROIAnalytics: React.FC = () => {
                                       <div className="font-medium"><span className="text-muted-foreground">Расход:</span> {formatUSD(totalMetrics.spend)}</div>
                                       <div className="font-medium"><span className="text-muted-foreground">CPM:</span> {formatUSD(totalCPM)}</div>
                                       <div className="font-medium"><span className="text-muted-foreground">CPL:</span> {totalMetrics.leads > 0 ? formatUSD(totalCPL) : '—'}</div>
-                                      {totalMetrics.video_views > 0 && (
+                                      {/* Показываем видео-метрики только после анализа */}
+                                      {creativeAnalysis && totalMetrics.video_views > 0 && (
                                         <>
                                           <div className="font-medium"><span className="text-muted-foreground">Видео 25%:</span> {formatNumber(totalMetrics.video_views_25)}</div>
                                           <div className="font-medium"><span className="text-muted-foreground">Видео 50%:</span> {formatNumber(totalMetrics.video_views_50)}</div>
                                           <div className="font-medium"><span className="text-muted-foreground">Видео 75%:</span> {formatNumber(totalMetrics.video_views_75)}</div>
                                         </>
                                       )}
-                                        </div>
-                                      </div>
+                                    </div>
+                                  </div>
                                 );
                               })()}
                             </div>
