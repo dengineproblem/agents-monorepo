@@ -745,28 +745,35 @@ class SalesApiService {
       grouped.set(m.date, existing);
     });
 
-    // Вычисляем средние значения и форматируем для отображения
-    return Array.from(grouped.values()).map(item => ({
-      date: item.date,
-      impressions: item.impressions,
-      reach: item.reach,
-      clicks: item.clicks,
-      link_clicks: item.link_clicks,
-      leads: item.leads,
-      spend: item.spend,
-      spend_cents: Math.round(item.spend * 100),
-      ctr: item.count > 0 ? item.ctr_sum / item.count : 0,
-      cpm: item.count > 0 ? item.cpm_sum / item.count : 0,
-      cpm_cents: item.count > 0 ? Math.round((item.cpm_sum / item.count) * 100) : 0,
-      cpl: item.count > 0 && item.cpl_sum > 0 ? item.cpl_sum / item.count : null,
-      cpl_cents: item.count > 0 && item.cpl_sum > 0 ? Math.round((item.cpl_sum / item.count) * 100) : null,
-      frequency: item.count > 0 ? item.frequency_sum / item.count : 0,
-      video_views: item.video_views,
-      video_views_25_percent: item.video_views_25_percent,
-      video_views_50_percent: item.video_views_50_percent,
-      video_views_75_percent: item.video_views_75_percent,
-      video_views_95_percent: item.video_views_95_percent
-    }));
+    // Вычисляем метрики заново из суммированных значений
+    return Array.from(grouped.values()).map(item => {
+      // Пересчитываем CTR, CPM, CPL из суммированных значений
+      const ctr = item.impressions > 0 ? (item.clicks / item.impressions) : 0;
+      const cpm = item.impressions > 0 ? (item.spend / item.impressions) * 1000 : 0;
+      const cpl = item.leads > 0 ? item.spend / item.leads : null;
+      
+      return {
+        date: item.date,
+        impressions: item.impressions,
+        reach: item.reach,
+        clicks: item.clicks,
+        link_clicks: item.link_clicks,
+        leads: item.leads,
+        spend: item.spend,
+        spend_cents: Math.round(item.spend * 100),
+        ctr: ctr,  // Уже в десятичной форме (0.0117 = 1.17%)
+        cpm: cpm,
+        cpm_cents: Math.round(cpm * 100),
+        cpl: cpl,
+        cpl_cents: cpl !== null ? Math.round(cpl * 100) : null,
+        frequency: item.count > 0 ? item.frequency_sum / item.count : 0,
+        video_views: item.video_views,
+        video_views_25_percent: item.video_views_25_percent,
+        video_views_50_percent: item.video_views_50_percent,
+        video_views_75_percent: item.video_views_75_percent,
+        video_views_95_percent: item.video_views_95_percent
+      };
+    });
   }
 
   // Получение последнего анализа креатива из creative_analysis

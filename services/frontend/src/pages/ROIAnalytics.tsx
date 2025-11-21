@@ -36,7 +36,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import SalesList from '@/components/SalesList';
 import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
 import { Filter } from 'lucide-react';
-import { API_BASE_URL } from '@/config/api';
+import { API_BASE_URL, ANALYTICS_API_BASE_URL } from '@/config/api';
 import { creativesApi } from '@/services/creativesApi';
 
 const ROIAnalytics: React.FC = () => {
@@ -316,8 +316,12 @@ const ROIAnalytics: React.FC = () => {
     setAnalyzingCreative(creativeId);
     
     try {
-      // Вызываем API для анализа креатива
-      const response = await fetch(`${API_BASE_URL}/analyzer/analyze-creative`, {
+      // Вызываем API для анализа креатива (agent-brain)
+      const analyzerUrl = ANALYTICS_API_BASE_URL 
+        ? `${ANALYTICS_API_BASE_URL}/api/analyzer/analyze-creative`
+        : 'http://localhost:7080/api/analyzer/analyze-creative';
+      
+      const response = await fetch(analyzerUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
