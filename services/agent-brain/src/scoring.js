@@ -29,13 +29,22 @@ function normalizeAdAccountId(adAccountId) {
  * Fetch insights для конкретного Facebook Ad
  * Используется для получения метрик на уровне Ad (не AdSet)
  */
-async function fetchAdInsights(adAccountId, accessToken, adId, datePreset = 'last_7d') {
+async function fetchAdInsights(adAccountId, accessToken, adId, datePresetOrRange = 'last_7d') {
   const url = `https://graph.facebook.com/${FB_API_VERSION}/${adId}/insights`;
   const params = new URLSearchParams({
-    fields: 'impressions,reach,spend,clicks,actions,ctr,cpm,frequency,video_play_actions,video_avg_time_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions',
-    date_preset: datePreset,
+    fields: 'impressions,reach,spend,clicks,actions,ctr,cpm,frequency,quality_ranking,engagement_rate_ranking,conversion_rate_ranking,video_play_actions,video_avg_time_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p95_watched_actions',
     access_token: accessToken
   });
+
+  // Поддержка как строки date_preset, так и объекта с time_range
+  if (typeof datePresetOrRange === 'string') {
+    params.set('date_preset', datePresetOrRange);
+  } else if (datePresetOrRange && datePresetOrRange.time_range) {
+    params.set('time_range', JSON.stringify(datePresetOrRange.time_range));
+  } else {
+    // fallback на default
+    params.set('date_preset', 'last_7d');
+  }
 
   try {
     const res = await fetch(`${url}?${params.toString()}`);
@@ -891,24 +900,26 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
 }
 
 /**
- * DEPRECATED: Сохранить метрики креативов в creative_metrics_history
- * НОВАЯ ФУНКЦИЯ для унифицированной системы метрик
+ * Сохранить метрики креативов за вчерашний день в creative_metrics_history
  * 
  * Получает метрики на уровне Ad (не AdSet) для каждого креатива
  * Использует ad_creative_mapping для точного мэтчинга
- * 
- * ЗАМЕЧАНИЕ: Теперь метрики собираются отдельным процессом и уже есть в БД
+ * Собирает инкрементальные данные за вчерашний день
  */
-/* DEPRECATED - метрики собираются отдельно
 async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken) {
   if (!readyCreatives || !readyCreatives.length) return;
   
-  const today = new Date().toISOString().split('T')[0];
+  // Вчерашний день (метрики собираются на следующий день после показов)
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split('T')[0];
+  
   const records = [];
   
   logger.info({ 
     where: 'saveCreativeMetricsToHistory',
-    creatives_count: readyCreatives.length 
+    creatives_count: readyCreatives.length,
+    date: yesterdayStr
   }, 'Starting to save creative metrics to history');
 
   for (const creative of readyCreatives) {
@@ -942,16 +953,33 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
         ads_count: mappings.length 
       }, 'Found ad mappings');
 
-      // Получить метрики для каждого ad
+      // Получить метрики для каждого ad за вчерашний день
       for (const mapping of mappings) {
         try {
-          const insights = await fetchAdInsights(adAccountId, accessToken, mapping.ad_id, 'last_7d');
+          const insights = await fetchAdInsights(adAccountId, accessToken, mapping.ad_id, {
+            time_range: {
+              since: yesterdayStr,
+              until: yesterdayStr
+            }
+          });
           
           if (!insights) {
             logger.debug({ 
               where: 'saveCreativeMetricsToHistory',
-              ad_id: mapping.ad_id 
+              ad_id: mapping.ad_id,
+              date: yesterdayStr
             }, 'No insights for ad');
+            continue;
+          }
+
+          // Пропускаем если нет показов (ad не показывался вчера)
+          const impressions = parseInt(insights.impressions || 0);
+          if (impressions === 0) {
+            logger.debug({ 
+              where: 'saveCreativeMetricsToHistory',
+              ad_id: mapping.ad_id,
+              date: yesterdayStr
+            }, 'No impressions, skipping');
             continue;
           }
 
@@ -961,40 +989,52 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
           const spend = parseFloat(insights.spend || 0);
           const videoMetrics = extractVideoMetrics(insights);
           
-          // Вычисляем CPL в центах (если есть лиды)
-          const cpl = leads > 0 ? (spend * 100 / leads) : null;
+          // Вычисляем CPL (если есть лиды)
+          const cpl = leads > 0 ? (spend / leads) : null;
 
           records.push({
             user_account_id: userAccountId,
-            date: today,
+            date: yesterdayStr,  // Вчерашний день
             ad_id: mapping.ad_id,
             creative_id: mapping.fb_creative_id,
             adset_id: mapping.adset_id,
             campaign_id: mapping.campaign_id,
-            impressions: parseInt(insights.impressions || 0),
+            
+            // Абсолютные метрики
+            impressions: impressions,
             reach: parseInt(insights.reach || 0),
             spend: spend,
             clicks: parseInt(insights.clicks || 0),
             link_clicks: linkClicks,
             leads: leads,
+            
+            // Вычисляемые метрики (сохраняем сразу)
             ctr: parseFloat(insights.ctr || 0),
             cpm: parseFloat(insights.cpm || 0),
             cpl: cpl,
             frequency: parseFloat(insights.frequency || 0),
-            // Video metrics
+            
+            // Видео метрики
             video_views: videoMetrics.video_views,
             video_views_25_percent: videoMetrics.video_views_25_percent,
             video_views_50_percent: videoMetrics.video_views_50_percent,
             video_views_75_percent: videoMetrics.video_views_75_percent,
             video_views_95_percent: videoMetrics.video_views_95_percent,
             video_avg_watch_time_sec: videoMetrics.video_avg_watch_time_sec,
+            
+            // Diagnostics (на уровне ad)
+            quality_ranking: insights.quality_ranking || null,
+            engagement_rate_ranking: insights.engagement_rate_ranking || null,
+            conversion_rate_ranking: insights.conversion_rate_ranking || null,
+            
             source: 'production'
           });
 
           logger.debug({ 
             where: 'saveCreativeMetricsToHistory',
             ad_id: mapping.ad_id,
-            impressions: insights.impressions,
+            date: yesterdayStr,
+            impressions: impressions,
             leads: leads 
           }, 'Collected metrics for ad');
 
@@ -1022,7 +1062,7 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
         .from('creative_metrics_history')
         .upsert(records, { 
           onConflict: 'user_account_id,ad_id,date',
-          ignoreDuplicates: false 
+          ignoreDuplicates: false  // Обновляем если уже есть (на случай повторного запуска)
         });
 
       if (error) {
@@ -1034,7 +1074,8 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
       } else {
         logger.info({ 
           where: 'saveCreativeMetricsToHistory',
-          saved_count: records.length 
+          saved_count: records.length,
+          date: yesterdayStr
         }, 'Successfully saved creative metrics to history');
       }
     } catch (err) {
@@ -1046,11 +1087,11 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
     }
   } else {
     logger.info({ 
-      where: 'saveCreativeMetricsToHistory' 
-    }, 'No metrics to save');
+      where: 'saveCreativeMetricsToHistory',
+      date: yesterdayStr
+    }, 'No metrics to save (no ads with impressions yesterday)');
   }
 }
-*/
 
 /**
  * Рассчитывает risk score креатива с учетом ROI
@@ -1360,10 +1401,37 @@ export async function runScoringAgent(userAccount, options = {}) {
     });
     
     // ========================================
-    // МЕТРИКИ УЖЕ В ИСТОРИИ (читаем из creative_metrics_history)
+    // ЧАСТЬ 2.6: СОХРАНЕНИЕ МЕТРИК В ИСТОРИЮ
     // ========================================
-    // ПРИМЕЧАНИЕ: Метрики собираются отдельным процессом и сохраняются в creative_metrics_history
-    // Здесь мы только читаем их через getCreativeMetricsFromDB()
+    
+    logger.info({ 
+      where: 'scoring_agent', 
+      phase: 'saving_metrics_to_history',
+      creatives_count: readyCreatives.length 
+    });
+    
+    // Сохраняем метрики за вчерашний день для всех активных ads
+    try {
+      await saveCreativeMetricsToHistory(
+        supabase, 
+        userAccountId, 
+        readyCreatives, 
+        ad_account_id, 
+        access_token
+      );
+      
+      logger.info({ 
+        where: 'scoring_agent', 
+        phase: 'metrics_saved' 
+      });
+    } catch (error) {
+      // Не критическая ошибка - продолжаем работу даже если не удалось сохранить метрики
+      logger.error({ 
+        where: 'scoring_agent', 
+        phase: 'metrics_save_failed',
+        error: String(error)
+      }, 'Failed to save metrics to history, continuing...');
+    }
     
     // ========================================
     // ОПРЕДЕЛЯЕМ НЕИСПОЛЬЗОВАННЫЕ КРЕАТИВЫ

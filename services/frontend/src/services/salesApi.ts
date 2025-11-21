@@ -650,21 +650,123 @@ class SalesApiService {
   }
 
   // Получение метрик креатива из creative_metrics_history
+  // Агрегирует метрики всех ads креатива через ad_creative_mapping
   async getCreativeMetrics(creativeId: string, userAccountId: string, limit: number = 30): Promise<{ data: any[]; error: any }> {
     try {
+      // Шаг 1: Получить все ad_id для этого креатива через ad_creative_mapping
+      const { data: mappings, error: mappingError } = await (supabase as any)
+        .from('ad_creative_mapping')
+        .select('ad_id')
+        .eq('user_creative_id', creativeId);
+
+      if (mappingError) {
+        console.error('Ошибка загрузки ad_creative_mapping:', mappingError);
+        return { data: [], error: mappingError };
+      }
+
+      if (!mappings || mappings.length === 0) {
+        console.log('Нет ad mappings для креатива:', creativeId);
+        return { data: [], error: null };
+      }
+
+      const adIds = mappings.map((m: any) => m.ad_id);
+
+      // Шаг 2: Получить метрики для всех ads за последние N дней
+      const dateCutoff = new Date();
+      dateCutoff.setDate(dateCutoff.getDate() - limit);
+
       const { data, error } = await (supabase as any)
         .from('creative_metrics_history')
         .select('*')
-        .eq('creative_id', creativeId)
+        .in('ad_id', adIds)
         .eq('user_account_id', userAccountId)
-        .order('date', { ascending: false })
-        .limit(limit);
+        .eq('source', 'production')
+        .gte('date', dateCutoff.toISOString().split('T')[0])
+        .order('date', { ascending: false });
+
+      if (error) {
+        console.error('Ошибка загрузки метрик из creative_metrics_history:', error);
+        return { data: [], error };
+      }
+
+      // Шаг 3: Агрегировать метрики по дням
+      const aggregated = this.aggregateMetricsByDate(data || []);
       
-      return { data: data || [], error };
+      return { data: aggregated, error: null };
     } catch (error) {
       console.error('Ошибка загрузки метрик креатива:', error);
       return { data: [], error };
     }
+  }
+
+  // Вспомогательная функция для агрегации метрик по дням
+  private aggregateMetricsByDate(metrics: any[]): any[] {
+    const grouped = new Map<string, any>();
+
+    metrics.forEach(m => {
+      const existing = grouped.get(m.date) || {
+        date: m.date,
+        impressions: 0,
+        reach: 0,
+        clicks: 0,
+        link_clicks: 0,
+        leads: 0,
+        spend: 0,
+        video_views: 0,
+        video_views_25_percent: 0,
+        video_views_50_percent: 0,
+        video_views_75_percent: 0,
+        video_views_95_percent: 0,
+        ctr_sum: 0,
+        cpm_sum: 0,
+        cpl_sum: 0,
+        frequency_sum: 0,
+        count: 0
+      };
+
+      existing.impressions += m.impressions || 0;
+      existing.reach += m.reach || 0;
+      existing.clicks += m.clicks || 0;
+      existing.link_clicks += m.link_clicks || 0;
+      existing.leads += m.leads || 0;
+      existing.spend += parseFloat(m.spend) || 0;
+      existing.video_views += m.video_views || 0;
+      existing.video_views_25_percent += m.video_views_25_percent || 0;
+      existing.video_views_50_percent += m.video_views_50_percent || 0;
+      existing.video_views_75_percent += m.video_views_75_percent || 0;
+      existing.video_views_95_percent += m.video_views_95_percent || 0;
+      
+      if (m.ctr) existing.ctr_sum += m.ctr;
+      if (m.cpm) existing.cpm_sum += m.cpm;
+      if (m.cpl) existing.cpl_sum += m.cpl;
+      if (m.frequency) existing.frequency_sum += m.frequency;
+      existing.count++;
+
+      grouped.set(m.date, existing);
+    });
+
+    // Вычисляем средние значения и форматируем для отображения
+    return Array.from(grouped.values()).map(item => ({
+      date: item.date,
+      impressions: item.impressions,
+      reach: item.reach,
+      clicks: item.clicks,
+      link_clicks: item.link_clicks,
+      leads: item.leads,
+      spend: item.spend,
+      spend_cents: Math.round(item.spend * 100),
+      ctr: item.count > 0 ? item.ctr_sum / item.count : 0,
+      cpm: item.count > 0 ? item.cpm_sum / item.count : 0,
+      cpm_cents: item.count > 0 ? Math.round((item.cpm_sum / item.count) * 100) : 0,
+      cpl: item.count > 0 && item.cpl_sum > 0 ? item.cpl_sum / item.count : null,
+      cpl_cents: item.count > 0 && item.cpl_sum > 0 ? Math.round((item.cpl_sum / item.count) * 100) : null,
+      frequency: item.count > 0 ? item.frequency_sum / item.count : 0,
+      video_views: item.video_views,
+      video_views_25_percent: item.video_views_25_percent,
+      video_views_50_percent: item.video_views_50_percent,
+      video_views_75_percent: item.video_views_75_percent,
+      video_views_95_percent: item.video_views_95_percent
+    }));
   }
 
   // Получение последнего анализа креатива из creative_analysis
