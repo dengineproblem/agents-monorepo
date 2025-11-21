@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import 'dotenv/config';
 import OpenAI from 'openai';
 import cron from 'node-cron';
@@ -8,6 +9,7 @@ import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
 import { supabase, supabaseQuery } from './lib/supabaseClient.js';
 import { startAmoCRMLeadsSyncCron } from './amocrmLeadsSyncCron.js';
+import { analyzeCreativeTest } from './creativeAnalyzer.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
@@ -19,6 +21,25 @@ const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '313145981,280192
 const fastify = Fastify({
   logger: baseLogger,
   genReqId: () => randomUUID()
+});
+
+// CORS для Frontend
+await fastify.register(cors, {
+  origin: (origin, cb) => {
+    // Разрешаем localhost для разработки и продакшн домен
+    const allowedOrigins = [
+      'http://localhost:8081',
+      'http://localhost:3000',
+      'https://agents.performanteaiagency.com'
+    ];
+    
+    if (!origin || allowedOrigins.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Not allowed by CORS'), false);
+    }
+  },
+  credentials: true
 });
 
 fastify.addHook('onRequest', (request, _reply, done) => {
@@ -3452,6 +3473,181 @@ fastify.post('/api/brain/cron/run-batch', async (request, reply) => {
   } catch (err) {
     fastify.log.error(err);
     return reply.code(500).send({ error: 'batch_failed', details: String(err?.message || err) });
+  }
+});
+
+/**
+ * POST /api/analyzer/analyze-creative
+ * 
+ * Анализирует креатив на основе метрик из creative_metrics_history
+ */
+fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
+  try {
+    const { creative_id, user_id } = request.body;
+    
+    if (!creative_id || !user_id) {
+      return reply.code(400).send({ error: 'creative_id and user_id are required' });
+    }
+
+    fastify.log.info({ where: 'analyzeCreative', creative_id, user_id, status: 'started' });
+
+    // Получаем метрики креатива из creative_metrics_history
+    const { data: metricsData, error: metricsError } = await supabase
+      .rpc('get_creative_aggregated_metrics', {
+        p_user_creative_id: creative_id,
+        p_user_account_id: user_id,
+        p_days_limit: 30
+      });
+
+    if (metricsError || !metricsData || metricsData.length === 0) {
+      fastify.log.error({ where: 'analyzeCreative', creative_id, error: metricsError });
+      return reply.code(404).send({ error: 'No metrics found for this creative' });
+    }
+
+    // Агрегируем метрики за весь период
+    const aggregatedMetrics = metricsData.reduce((acc, metric) => ({
+      impressions: acc.impressions + (metric.total_impressions || 0),
+      reach: acc.reach + (metric.total_reach || 0),
+      clicks: acc.clicks + (metric.total_clicks || 0),
+      link_clicks: acc.link_clicks + (metric.total_link_clicks || 0),
+      leads: acc.leads + (metric.total_leads || 0),
+      spend: acc.spend + (metric.total_spend || 0),
+      video_views: acc.video_views + (metric.total_video_views || 0),
+      video_views_25_percent: acc.video_views_25_percent + (metric.total_video_views_25 || 0),
+      video_views_50_percent: acc.video_views_50_percent + (metric.total_video_views_50 || 0),
+      video_views_75_percent: acc.video_views_75_percent + (metric.total_video_views_75 || 0),
+    }), {
+      impressions: 0,
+      reach: 0,
+      clicks: 0,
+      link_clicks: 0,
+      leads: 0,
+      spend: 0,
+      video_views: 0,
+      video_views_25_percent: 0,
+      video_views_50_percent: 0,
+      video_views_75_percent: 0,
+    });
+
+    // Вычисляем производные метрики
+    const ctr = aggregatedMetrics.impressions > 0 
+      ? aggregatedMetrics.clicks / aggregatedMetrics.impressions 
+      : 0;
+    const link_ctr = aggregatedMetrics.impressions > 0 
+      ? aggregatedMetrics.link_clicks / aggregatedMetrics.impressions 
+      : 0;
+    const cpm_cents = aggregatedMetrics.impressions > 0 
+      ? (aggregatedMetrics.spend * 100 / aggregatedMetrics.impressions) * 1000 
+      : 0;
+    const cpl_cents = aggregatedMetrics.leads > 0 
+      ? (aggregatedMetrics.spend * 100) / aggregatedMetrics.leads 
+      : null;
+    const frequency = aggregatedMetrics.reach > 0 
+      ? aggregatedMetrics.impressions / aggregatedMetrics.reach 
+      : 0;
+
+    // Получаем креатив
+    const { data: creative, error: creativeError } = await supabase
+      .from('user_creatives')
+      .select('id, title')
+      .eq('id', creative_id)
+      .single();
+
+    if (creativeError || !creative) {
+      fastify.log.error({ where: 'analyzeCreative', creative_id, error: creativeError });
+      return reply.code(404).send({ error: 'Creative not found' });
+    }
+
+    // Получаем транскрибацию
+    const { data: transcript } = await supabase
+      .from('creative_transcripts')
+      .select('text')
+      .eq('creative_id', creative_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const transcriptText = transcript?.text || null;
+
+    // Подготавливаем данные для LLM
+    const testData = {
+      creative_title: creative.title || 'Untitled',
+      impressions: aggregatedMetrics.impressions,
+      reach: aggregatedMetrics.reach,
+      frequency: frequency,
+      clicks: aggregatedMetrics.clicks,
+      link_clicks: aggregatedMetrics.link_clicks,
+      ctr: ctr,
+      link_ctr: link_ctr,
+      leads: aggregatedMetrics.leads,
+      spend_cents: Math.round(aggregatedMetrics.spend * 100),
+      cpm_cents: Math.round(cpm_cents),
+      cpc_cents: aggregatedMetrics.clicks > 0 
+        ? Math.round((aggregatedMetrics.spend * 100) / aggregatedMetrics.clicks) 
+        : 0,
+      cpl_cents: cpl_cents ? Math.round(cpl_cents) : null,
+      video_views: aggregatedMetrics.video_views,
+      video_views_25_percent: aggregatedMetrics.video_views_25_percent,
+      video_views_50_percent: aggregatedMetrics.video_views_50_percent,
+      video_views_75_percent: aggregatedMetrics.video_views_75_percent,
+      video_avg_watch_time_sec: metricsData[0]?.avg_video_watch_time || 0
+    };
+
+    // Анализируем через LLM
+    const analysis = await analyzeCreativeTest(testData, transcriptText);
+
+    fastify.log.info({ 
+      where: 'analyzeCreative', 
+      creative_id,
+      score: analysis?.score,
+      verdict: analysis?.verdict
+    });
+
+    // Сохраняем результаты анализа
+    try {
+      const { error: analysisError } = await supabase
+        .from('creative_analysis')
+        .insert({
+          creative_id: creative_id,
+          user_account_id: user_id,
+          source: 'manual',
+          date_from: metricsData[metricsData.length - 1]?.date || new Date().toISOString().split('T')[0],
+          date_to: metricsData[0]?.date || new Date().toISOString().split('T')[0],
+          metrics: testData,
+          score: analysis?.score || null,
+          verdict: analysis?.verdict || null,
+          reasoning: analysis?.reasoning || null,
+          video_analysis: analysis?.video_analysis || null,
+          text_recommendations: analysis?.text_recommendations || null,
+          transcript_match_quality: analysis?.transcript_match_quality || null,
+          transcript_suggestions: analysis?.transcript_suggestions || null
+        });
+
+      if (analysisError) {
+        fastify.log.warn({ 
+          creative_id, 
+          error: analysisError.message 
+        }, 'Failed to save analysis to creative_analysis table');
+      }
+    } catch (err) {
+      fastify.log.warn({ 
+        creative_id,
+        error: err.message 
+      }, 'Error saving analysis, continuing...');
+    }
+
+    // Возвращаем результаты
+    return reply.send({
+      success: true,
+      creative_id,
+      metrics: testData,
+      analysis: analysis,
+      transcript_available: !!transcriptText
+    });
+    
+  } catch (error) {
+    fastify.log.error({ error: error.message, stack: error.stack }, 'Analyze creative error');
+    return reply.code(500).send({ error: error.message });
   }
 });
 
