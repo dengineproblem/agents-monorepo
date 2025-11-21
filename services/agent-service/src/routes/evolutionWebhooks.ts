@@ -92,6 +92,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   }
 
   const remoteJid = message.key.remoteJid;
+  const remoteJidAlt = message.key.remoteJidAlt;  // Альтернативный JID (для лидов с рекламы)
   const messageText = message.message?.conversation ||
                       message.message?.extendedTextMessage?.text || '';
 
@@ -116,6 +117,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   app.log.info({
     instance,
     remoteJid,
+    remoteJidAlt,
     sourceId: finalSourceId || null,
     sourceType: sourceType || null,
     sourceUrl: sourceUrl || null,
@@ -176,12 +178,30 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     .eq('user_account_id', instanceData.user_account_id)
     .single();
 
-  // ✅ Очищаем chat_id от ВСЕХ суффиксов WhatsApp
-  const clientPhone = remoteJid
-    .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
-    .replace('@c.us', '')            // Обычный контакт (старый формат)
-    .replace('@g.us', '')            // Групповой чат
-    .replace('@lid', '');            // Lead identifier (из рекламы)
+  // ✅ ИСПРАВЛЕНО: Для лидов с рекламы используем remoteJidAlt (настоящий номер)
+  // Если remoteJid заканчивается на @lid - это Lead ID, настоящий номер в remoteJidAlt
+  let clientPhone: string;
+  
+  if (remoteJid.endsWith('@lid')) {
+    // Лид из рекламы: используем remoteJidAlt (настоящий номер клиента)
+    clientPhone = (remoteJidAlt || remoteJid)
+      .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
+      .replace('@c.us', '')            // Обычный контакт (старый формат)
+      .replace('@lid', '');            // На случай если remoteJidAlt тоже @lid
+    
+    app.log.info({
+      remoteJid,
+      remoteJidAlt,
+      clientPhone,
+      isAdLead: true
+    }, 'Using remoteJidAlt for ad lead phone number');
+  } else {
+    // Обычное сообщение: используем remoteJid
+    clientPhone = remoteJid
+      .replace('@s.whatsapp.net', '')  // Обычный контакт (новый формат)
+      .replace('@c.us', '')            // Обычный контакт (старый формат)
+      .replace('@g.us', '');           // Групповой чат
+  }
 
   // Resolve creative, direction AND whatsapp_phone_number_id BEFORE processing lead
   const { creativeId, directionId, whatsappPhoneNumberId: directionWhatsappId } = 
