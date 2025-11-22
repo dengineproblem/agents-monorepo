@@ -760,73 +760,35 @@ const CreativeGeneration = () => {
 
             {/* Выбор стиля креатива */}
             <Card className="shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-lg">Стиль креатива</CardTitle>
-                <CardDescription>
-                  Выберите визуальный стиль для генерации изображения
-                </CardDescription>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Стиль креатива</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStyle('modern_performance')}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      selectedStyle === 'modern_performance'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="font-semibold mb-1">Современная графика</div>
-                    <div className="text-sm text-muted-foreground">
-                      Чистый дизайн с UI-элементами, графикой роста и структурированными блоками
-                    </div>
-                  </button>
-                  
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStyle('live_ugc')}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      selectedStyle === 'live_ugc'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="font-semibold mb-1">Живой UGC-контент</div>
-                    <div className="text-sm text-muted-foreground">
-                      Реалистичные сцены с людьми в естественных ситуациях, как в настоящих сторис
-                    </div>
-                  </button>
-                  
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStyle('visual_hook')}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      selectedStyle === 'visual_hook'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="font-semibold mb-1">Визуальный зацеп</div>
-                    <div className="text-sm text-muted-foreground">
-                      Яркий контраст, мощные метафоры и эффектные визуальные образы
-                    </div>
-                  </button>
-                  
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStyle('premium_minimal')}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      selectedStyle === 'premium_minimal'
-                        ? 'border-primary bg-primary/5'
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <div className="font-semibold mb-1">Премиум минимализм</div>
-                    <div className="text-sm text-muted-foreground">
-                      Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха
-                    </div>
-                  </button>
+              <CardContent className="space-y-3">
+                <Select
+                  value={selectedStyle}
+                  onValueChange={(value: any) => setSelectedStyle(value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите стиль" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="modern_performance">Современная графика</SelectItem>
+                    <SelectItem value="live_ugc">Живой UGC-контент</SelectItem>
+                    <SelectItem value="visual_hook">Визуальный зацеп</SelectItem>
+                    <SelectItem value="premium_minimal">Премиум минимализм</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Описание выбранного стиля */}
+                <div className="text-sm text-muted-foreground p-3 bg-muted/30 rounded-md">
+                  {selectedStyle === 'modern_performance' &&
+                    'Чистый дизайн с UI-элементами, графикой роста и структурированными блоками'}
+                  {selectedStyle === 'live_ugc' &&
+                    'Реалистичные сцены с людьми в естественных ситуациях, как в настоящих сторис'}
+                  {selectedStyle === 'visual_hook' &&
+                    'Яркий контраст, мощные метафоры и эффектные визуальные образы'}
+                  {selectedStyle === 'premium_minimal' &&
+                    'Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха'}
                 </div>
               </CardContent>
             </Card>
