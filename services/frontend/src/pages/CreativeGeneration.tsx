@@ -57,7 +57,7 @@ const CreativeGeneration = () => {
   const [editPrompt, setEditPrompt] = useState<string>('');
   
   // State для выбора стиля креатива
-  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal'>('modern_performance');
+  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'>('modern_performance');
   
   // Загрузка направлений
   const { directions, loading: directionsLoading } = useDirections(userId);
@@ -776,6 +776,7 @@ const CreativeGeneration = () => {
                     <SelectItem value="live_ugc">Живой UGC-контент</SelectItem>
                     <SelectItem value="visual_hook">Визуальный зацеп</SelectItem>
                     <SelectItem value="premium_minimal">Премиум минимализм</SelectItem>
+                    <SelectItem value="product_hero">Товар в главной роли</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -789,6 +790,8 @@ const CreativeGeneration = () => {
                     'Яркий контраст, мощные метафоры и эффектные визуальные образы'}
                   {selectedStyle === 'premium_minimal' &&
                     'Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха'}
+                  {selectedStyle === 'product_hero' &&
+                    'Товар в центре внимания: профессиональная товарная реклама с продуктом в главной роли'}
                 </div>
               </CardContent>
             </Card>
