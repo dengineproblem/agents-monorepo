@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle, Upload, X, Edit } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle, Upload, X, Edit, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
@@ -460,10 +460,43 @@ const CreativeGeneration = () => {
       toast.error('Введите инструкции для редактирования');
       return;
     }
-    
+
     // Генерируем с текущим изображением как референсом
     // editPrompt будет использован как reference_image_prompt
     await generateCreative(true);
+  };
+
+  // Функция скачивания изображения
+  const downloadImage = async () => {
+    if (!generatedImage) return;
+
+    try {
+      // Получаем изображение
+      const response = await fetch(generatedImage);
+      const blob = await response.blob();
+
+      // Создаём ссылку для скачивания
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Генерируем имя файла с датой и временем
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      link.download = `creative_${timestamp}.png`;
+
+      // Триггерим скачивание
+      document.body.appendChild(link);
+      link.click();
+
+      // Очищаем
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('Изображение скачано');
+    } catch (error) {
+      console.error('Error downloading image:', error);
+      toast.error('Ошибка при скачивании изображения');
+    }
   };
 
   const getTypeLabel = (type: keyof CreativeTexts): string => {
@@ -841,15 +874,26 @@ const CreativeGeneration = () => {
                         <CardTitle className="text-lg flex items-center justify-between">
                           Сгенерированный креатив
                           {!isEditMode && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={startEditMode}
-                              disabled={loading.image}
-                            >
-                              <Edit className="h-4 w-4 mr-2" />
-                              Редактировать
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={downloadImage}
+                                disabled={loading.image}
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Скачать
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={startEditMode}
+                                disabled={loading.image}
+                              >
+                                <Edit className="h-4 w-4 mr-2" />
+                                Редактировать
+                              </Button>
+                            </div>
                           )}
                         </CardTitle>
                       </CardHeader>
