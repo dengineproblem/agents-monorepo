@@ -59,6 +59,9 @@ const CreativeGeneration = () => {
   // State для сохранения creative_id для upscale
   const [generatedCreativeId, setGeneratedCreativeId] = useState<string>('');
 
+  // State для полноэкранного просмотра изображения
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+
   // State для выбора стиля креатива
   const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'>('modern_performance');
   
@@ -84,6 +87,18 @@ const CreativeGeneration = () => {
       }
     };
   }, [generatedImage, referenceImage]);
+
+  // Закрытие полноэкранного просмотра по Escape
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreenOpen) {
+        setIsFullscreenOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [isFullscreenOpen]);
 
   const handleOpenDatePicker = () => {
     // Функция для открытия выбора даты (пока пустая)
@@ -942,7 +957,11 @@ const CreativeGeneration = () => {
                         </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <div className="rounded-lg overflow-hidden bg-muted/30 p-4 flex justify-center items-center">
+                        <div
+                          className="rounded-lg overflow-hidden bg-muted/30 p-4 flex justify-center items-center cursor-pointer hover:bg-muted/50 transition-colors"
+                          onClick={() => setIsFullscreenOpen(true)}
+                          title="Нажмите для просмотра в полноэкранном режиме"
+                        >
                           <img
                             src={generatedImage}
                             alt="Сгенерированный креатив"
@@ -1055,6 +1074,27 @@ const CreativeGeneration = () => {
           </div>
         </div>
       </div>
+
+      {/* Полноэкранный просмотр изображения */}
+      {isFullscreenOpen && generatedImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4"
+          onClick={() => setIsFullscreenOpen(false)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white hover:text-gray-300 transition-colors"
+            onClick={() => setIsFullscreenOpen(false)}
+          >
+            <X className="h-8 w-8" />
+          </button>
+          <img
+            src={generatedImage}
+            alt="Сгенерированный креатив в полноэкранном режиме"
+            className="max-w-full max-h-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 };
