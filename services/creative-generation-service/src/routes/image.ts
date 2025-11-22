@@ -251,13 +251,24 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
       app.log.info('[Upscale to 4K] Original image loaded, starting upscale...');
 
-      // Формируем промпт из данных креатива
-      const originalPrompt = `Рекламный креатив для Instagram Reels/Stories (9:16):
-Offer: ${creative.offer}
-Bullets: ${creative.bullets}
-Profits: ${creative.profits}
-CTA: ${creative.cta}
-Style: ${creative.style_id}`;
+      // Формируем промпт из данных креатива (только заполненные поля)
+      const promptParts: string[] = [`Рекламный креатив для Instagram Reels/Stories (9:16):`];
+
+      if (creative.offer && creative.offer.trim()) {
+        promptParts.push(`Offer: ${creative.offer}`);
+      }
+      if (creative.bullets && creative.bullets.trim()) {
+        promptParts.push(`Bullets: ${creative.bullets}`);
+      }
+      if (creative.profits && creative.profits.trim()) {
+        promptParts.push(`Profits: ${creative.profits}`);
+      }
+      if (creative.cta && creative.cta.trim()) {
+        promptParts.push(`CTA: ${creative.cta}`);
+      }
+      promptParts.push(`Style: ${creative.style_id}`);
+
+      const originalPrompt = promptParts.join('\n');
 
       // Upscale изображения
       const upscaled4KImage = await upscaleImageTo4K(base64Image, originalPrompt);

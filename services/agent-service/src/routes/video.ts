@@ -166,14 +166,28 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       app.log.info(`Thumbnail uploaded with hash: ${thumbnailResult.hash}, loading direction settings...`);
 
       // ===================================================
-      // ПОЛУЧАЕМ НАСТРОЙКИ ИЗ НАПРАВЛЕНИЯ (default_ad_settings)
+      // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
       // ===================================================
       let description = 'Напишите нам, чтобы узнать подробности';
       let clientQuestion = 'Здравствуйте! Хочу узнать об этом подробнее.';
       let siteUrl = null;
       let utm = null;
+      let objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' = 'whatsapp'; // default
 
       if (body.direction_id) {
+        // Загружаем direction для получения objective
+        const { data: direction } = await supabase
+          .from('account_directions')
+          .select('objective')
+          .eq('id', body.direction_id)
+          .maybeSingle();
+
+        if (direction?.objective) {
+          objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads';
+          app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
+        }
+
+        // Загружаем настройки из default_ad_settings
         const { data: defaultSettings } = await supabase
           .from('default_ad_settings')
           .select('*')
@@ -188,28 +202,31 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
           app.log.info({
             direction_id: body.direction_id,
+            objective,
             description,
             clientQuestion,
-            siteUrl
-          }, 'Using settings from direction');
+            siteUrl,
+            utm
+          }, 'Using settings from direction for video creative');
         } else {
           app.log.warn({
             direction_id: body.direction_id
           }, 'No default settings found for direction, using fallback');
         }
       } else {
-        app.log.warn('No direction_id provided, using fallback settings');
+        app.log.warn('No direction_id provided for video, using fallback settings');
       }
 
-      app.log.info('Creating creatives with direction settings...');
-      
-      let whatsappCreative: { id: string } = { id: '' };
-      let instagramCreative: { id: string } = { id: '' };
-      let websiteCreative: { id: string } = { id: '' };
-      
+      // ===================================================
+      // СОЗДАЁМ ОДИН КРЕАТИВ В СООТВЕТСТВИИ С OBJECTIVE
+      // ===================================================
+      app.log.info(`Creating video creative with objective: ${objective}...`);
+
+      let fbCreativeId = '';
+
       try {
-        [whatsappCreative, instagramCreative, websiteCreative] = await Promise.all([
-          createWhatsAppCreative(normalizedAdAccountId, userAccount.access_token, {
+        if (objective === 'whatsapp') {
+          const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, userAccount.access_token, {
             videoId: fbVideo.id,
             pageId: userAccount.page_id,
             instagramId: userAccount.instagram_id,
@@ -217,18 +234,24 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             clientQuestion: clientQuestion,
             whatsappPhoneNumber: userAccount.whatsapp_phone_number || undefined,
             thumbnailHash: thumbnailResult.hash
-          }),
-
-          createInstagramCreative(normalizedAdAccountId, userAccount.access_token, {
+          });
+          fbCreativeId = whatsappCreative.id;
+        } else if (objective === 'instagram_traffic') {
+          const instagramCreative = await createInstagramCreative(normalizedAdAccountId, userAccount.access_token, {
             videoId: fbVideo.id,
             pageId: userAccount.page_id,
             instagramId: userAccount.instagram_id,
             instagramUsername: userAccount.instagram_username || '',
             message: description,
             thumbnailHash: thumbnailResult.hash
-          }),
-
-          siteUrl ? createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
+          });
+          fbCreativeId = instagramCreative.id;
+        } else if (objective === 'site_leads') {
+          if (!siteUrl) {
+            app.log.error('site_leads objective requires site_url in direction settings');
+            throw new Error('site_url is required for site_leads objective');
+          }
+          const websiteCreative = await createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
             videoId: fbVideo.id,
             pageId: userAccount.page_id,
             instagramId: userAccount.instagram_id,
@@ -236,10 +259,11 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             siteUrl: siteUrl,
             utm: utm,
             thumbnailHash: thumbnailResult.hash
-          }) : Promise.resolve({ id: '' })
-        ]);
+          });
+          fbCreativeId = websiteCreative.id;
+        }
 
-        app.log.info('All creatives created successfully, saving transcription...');
+        app.log.info(`Creative created with ID: ${fbCreativeId}, saving transcription...`);
 
         const { error: transcriptError } = await supabase
           .from('creative_transcripts')
@@ -256,15 +280,23 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           app.log.error(`Failed to save transcription: ${transcriptError.message}`);
         }
 
+        // Обновляем запись креатива - заполняем только нужное поле в зависимости от objective
+        const updateData: any = {
+          fb_video_id: fbVideo.id,
+          status: 'ready'
+        };
+
+        if (objective === 'whatsapp') {
+          updateData.fb_creative_id_whatsapp = fbCreativeId;
+        } else if (objective === 'instagram_traffic') {
+          updateData.fb_creative_id_instagram_traffic = fbCreativeId;
+        } else if (objective === 'site_leads') {
+          updateData.fb_creative_id_site_leads = fbCreativeId;
+        }
+
         const { error: updateError } = await supabase
           .from('user_creatives')
-          .update({
-            fb_video_id: fbVideo.id,
-            fb_creative_id_whatsapp: whatsappCreative.id,
-            fb_creative_id_instagram_traffic: instagramCreative.id,
-            fb_creative_id_site_leads: websiteCreative.id || null,
-            status: 'ready'
-          })
+          .update(updateData)
           .eq('id', creative.id);
 
         if (updateError) {
@@ -290,13 +322,12 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       return reply.send({
         success: true,
-        message: 'Video processed and creatives created successfully',
+        message: 'Video processed and creative created successfully',
         data: {
           creative_id: creative.id,
           fb_video_id: fbVideo.id,
-          fb_creative_id_whatsapp: whatsappCreative.id,
-          fb_creative_id_instagram_traffic: instagramCreative.id,
-          fb_creative_id_site_leads: websiteCreative.id || null,
+          fb_creative_id: fbCreativeId,
+          objective: objective,
           transcription: {
             text: transcription.text,
             language: transcription.language,

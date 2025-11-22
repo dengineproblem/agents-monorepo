@@ -133,49 +133,120 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
         const fbImage = await uploadImage(normalizedAdAccountId, ACCESS_TOKEN, imageBuffer);
 
-        app.log.info(`Image uploaded to Facebook: ${fbImage.hash}, creating creatives...`);
+        app.log.info(`Image uploaded to Facebook: ${fbImage.hash}, loading direction settings...`);
 
-        const description = body.description || 'Изображение креатив';
-        
-        const [whatsappCreative, instagramCreative, websiteCreative] = await Promise.all([
-          createWhatsAppImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+        // ===================================================
+        // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
+        // ===================================================
+        let description = body.description || 'Напишите нам, чтобы узнать подробности';
+        let clientQuestion = body.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.';
+        let siteUrl = body.site_url || null;
+        let utm = body.utm || null;
+        let objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' = 'whatsapp'; // default
+
+        if (body.direction_id) {
+          // Загружаем direction для получения objective
+          const { data: direction } = await supabase
+            .from('account_directions')
+            .select('objective')
+            .eq('id', body.direction_id)
+            .maybeSingle();
+
+          if (direction?.objective) {
+            objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads';
+            app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
+          }
+
+          // Загружаем настройки из default_ad_settings
+          const { data: defaultSettings } = await supabase
+            .from('default_ad_settings')
+            .select('*')
+            .eq('direction_id', body.direction_id)
+            .maybeSingle();
+
+          if (defaultSettings) {
+            description = defaultSettings.description || description;
+            clientQuestion = defaultSettings.client_question || clientQuestion;
+            siteUrl = defaultSettings.site_url || siteUrl;
+            utm = defaultSettings.utm_tag || utm;
+
+            app.log.info({
+              direction_id: body.direction_id,
+              objective,
+              description,
+              clientQuestion,
+              siteUrl,
+              utm
+            }, 'Using settings from direction for image creative');
+          } else {
+            app.log.warn({
+              direction_id: body.direction_id
+            }, 'No default settings found for direction, using fallback');
+          }
+        } else {
+          app.log.warn('No direction_id provided for image, using fallback settings');
+        }
+
+        // ===================================================
+        // СОЗДАЁМ ОДИН КРЕАТИВ В СООТВЕТСТВИИ С OBJECTIVE
+        // ===================================================
+        app.log.info(`Creating image creative with objective: ${objective}...`);
+
+        let fbCreativeId = '';
+
+        if (objective === 'whatsapp') {
+          const whatsappCreative = await createWhatsAppImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
             pageId: userAccount.page_id,
             instagramId: userAccount.instagram_id,
             message: description,
-            clientQuestion: body.client_question || 'Здравствуйте! Интересует ваше предложение.'
-          }),
-
-          createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+            clientQuestion: clientQuestion
+          });
+          fbCreativeId = whatsappCreative.id;
+        } else if (objective === 'instagram_traffic') {
+          const instagramCreative = await createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
             pageId: userAccount.page_id,
             instagramId: userAccount.instagram_id,
             instagramUsername: userAccount.instagram_username || '',
             message: description
-          }),
-
-          body.site_url ? createWebsiteLeadsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          });
+          fbCreativeId = instagramCreative.id;
+        } else if (objective === 'site_leads') {
+          if (!siteUrl) {
+            app.log.error('site_leads objective requires site_url in direction settings');
+            throw new Error('site_url is required for site_leads objective');
+          }
+          const websiteCreative = await createWebsiteLeadsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
             pageId: userAccount.page_id,
             instagramId: userAccount.instagram_id,
             message: description,
-            siteUrl: body.site_url,
-            utm: body.utm
-          }) : Promise.resolve({ id: '' })
-        ]);
+            siteUrl: siteUrl,
+            utm: utm || undefined
+          });
+          fbCreativeId = websiteCreative.id;
+        }
 
-        app.log.info('All creatives created, updating record...');
+        app.log.info(`Creative created with ID: ${fbCreativeId}, updating record...`);
 
-        // Обновляем запись креатива со всеми ID
+        // Обновляем запись креатива - заполняем только нужное поле в зависимости от objective
+        const updateData: any = {
+          fb_image_hash: fbImage.hash,
+          status: 'ready'
+        };
+
+        if (objective === 'whatsapp') {
+          updateData.fb_creative_id_whatsapp = fbCreativeId;
+        } else if (objective === 'instagram_traffic') {
+          updateData.fb_creative_id_instagram_traffic = fbCreativeId;
+        } else if (objective === 'site_leads') {
+          updateData.fb_creative_id_site_leads = fbCreativeId;
+        }
+
         const { error: updateError } = await supabase
           .from('user_creatives')
-          .update({
-            fb_image_hash: fbImage.hash,
-            fb_creative_id_whatsapp: whatsappCreative.id,
-            fb_creative_id_instagram_traffic: instagramCreative.id,
-            fb_creative_id_site_leads: websiteCreative.id || null,
-            status: 'ready'
-          })
+          .update(updateData)
           .eq('id', creative.id);
 
         if (updateError) {
@@ -187,13 +258,12 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
         return reply.send({
           success: true,
-          message: 'Image processed and creatives created successfully',
+          message: 'Image processed and creative created successfully',
           data: {
             creative_id: creative.id,
             fb_image_hash: fbImage.hash,
-            fb_creative_id_whatsapp: whatsappCreative.id,
-            fb_creative_id_instagram_traffic: instagramCreative.id,
-            fb_creative_id_site_leads: websiteCreative.id || null,
+            fb_creative_id: fbCreativeId,
+            objective: objective,
             media_type: 'image',
             direction_id: body.direction_id || null
           }
