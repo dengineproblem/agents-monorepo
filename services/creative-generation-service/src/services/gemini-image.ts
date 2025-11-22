@@ -114,7 +114,7 @@ export async function generateCreativeImage(
     console.log('[Gemini] Image config: 9:16 aspect ratio, 2K resolution');
 
     const result = await model.generateContent({
-      contents: contentParts,
+      contents: [{ role: 'user', parts: contentParts }],
       generationConfig
     });
     const response = result.response;
@@ -195,7 +195,7 @@ export async function upscaleImageTo4K(
     console.log('[Gemini Upscale] Generating 4K version...');
 
     const result = await model.generateContent({
-      contents: contentParts,
+      contents: [{ role: 'user', parts: contentParts }],
       generationConfig
     });
 
