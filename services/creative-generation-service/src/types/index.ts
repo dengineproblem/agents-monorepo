@@ -25,7 +25,7 @@ export interface GenerateCreativeRequest {
   profits: string;
   cta: string;
   direction_id?: string;
-  style_id?: 'modern_performance' | 'live_ugc' | 'visual_hook'; // Стиль креатива
+  style_id?: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal'; // Стиль креатива
   // Новое поле для референсного изображения
   reference_image?: string;
   reference_image_type?: 'base64' | 'url';

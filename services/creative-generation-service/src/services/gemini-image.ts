@@ -28,7 +28,7 @@ export async function generateCreativeImage(
   profits: string,
   cta: string,
   userPrompt4: string,
-  styleId: 'modern_performance' | 'live_ugc' | 'visual_hook',
+  styleId: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal',
   referenceImage?: string,
   referenceImageType?: 'base64' | 'url',
   referenceImagePrompt?: string

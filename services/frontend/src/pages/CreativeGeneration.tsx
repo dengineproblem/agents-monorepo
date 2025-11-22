@@ -57,7 +57,7 @@ const CreativeGeneration = () => {
   const [editPrompt, setEditPrompt] = useState<string>('');
   
   // State для выбора стиля креатива
-  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook'>('modern_performance');
+  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal'>('modern_performance');
   
   // Загрузка направлений
   const { directions, loading: directionsLoading } = useDirections(userId);
@@ -767,7 +767,7 @@ const CreativeGeneration = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <button
                     type="button"
                     onClick={() => setSelectedStyle('modern_performance')}
@@ -810,6 +810,21 @@ const CreativeGeneration = () => {
                     <div className="font-semibold mb-1">Визуальный зацеп</div>
                     <div className="text-sm text-muted-foreground">
                       Яркий контраст, мощные метафоры и эффектные визуальные образы
+                    </div>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStyle('premium_minimal')}
+                    className={`p-4 rounded-lg border-2 transition-all text-left ${
+                      selectedStyle === 'premium_minimal'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
+                    <div className="font-semibold mb-1">Премиум минимализм</div>
+                    <div className="text-sm text-muted-foreground">
+                      Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха
                     </div>
                   </button>
                 </div>
