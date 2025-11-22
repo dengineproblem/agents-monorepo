@@ -95,6 +95,62 @@ export type Database = {
           },
         ]
       }
+      user_briefing_responses: {
+        Row: {
+          id: string
+          user_id: string
+          business_name: string
+          business_niche: string
+          instagram_url: string | null
+          website_url: string | null
+          target_audience: string | null
+          geography: string | null
+          main_services: string | null
+          competitive_advantages: string | null
+          price_segment: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          business_name: string
+          business_niche: string
+          instagram_url?: string | null
+          website_url?: string | null
+          target_audience?: string | null
+          geography?: string | null
+          main_services?: string | null
+          competitive_advantages?: string | null
+          price_segment?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          business_name?: string
+          business_niche?: string
+          instagram_url?: string | null
+          website_url?: string | null
+          target_audience?: string | null
+          geography?: string | null
+          main_services?: string | null
+          competitive_advantages?: string | null
+          price_segment?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_briefing_responses_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "user_accounts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       user_accounts: {
         Row: {
           access_token: string

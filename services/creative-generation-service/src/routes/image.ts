@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { generateCreativeImage } from '../services/gemini-image'; // Gemini для изображений!
+import { generateCreativeImage, upscaleImageTo4K } from '../services/gemini-image'; // Gemini для изображений!
 import { supabase, logSupabaseError } from '../db/supabase';
 import { GenerateCreativeRequest, GenerateCreativeResponse } from '../types';
 
@@ -191,10 +191,141 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       });
     }
   });
-  
+
+  /**
+   * POST /upscale-to-4k
+   *
+   * Upscale изображения с 2K до 4K перед финальным использованием
+   * Используется при скачивании или создании креатива
+   */
+  app.post<{
+    Body: {
+      creative_id: string;
+      user_id: string;
+    };
+  }>('/upscale-to-4k', async (request, reply) => {
+    const { creative_id, user_id } = request.body;
+
+    try {
+      app.log.info(`[Upscale to 4K] Request for creative: ${creative_id}, user: ${user_id}`);
+
+      // Получаем креатив из БД
+      const { data: creative, error: creativeError } = await supabase
+        .from('generated_creatives')
+        .select('*')
+        .eq('id', creative_id)
+        .eq('user_id', user_id)
+        .single();
+
+      if (creativeError || !creative) {
+        logSupabaseError('Get creative for upscale', creativeError);
+        return reply.status(404).send({
+          success: false,
+          error: 'Creative not found'
+        });
+      }
+
+      // Проверяем, не был ли уже upscale
+      if (creative.image_url_4k) {
+        app.log.info(`[Upscale to 4K] 4K version already exists: ${creative.image_url_4k}`);
+        return {
+          success: true,
+          image_url_4k: creative.image_url_4k
+        };
+      }
+
+      // Загружаем оригинальное изображение из storage
+      const imagePath = creative.image_url.split('/creo/')[1];
+      const { data: imageData, error: downloadError } = await supabase.storage
+        .from('creo')
+        .download(imagePath);
+
+      if (downloadError || !imageData) {
+        logSupabaseError('Download image for upscale', downloadError);
+        throw new Error('Failed to download original image');
+      }
+
+      // Конвертируем в base64
+      const arrayBuffer = await imageData.arrayBuffer();
+      const base64Image = Buffer.from(arrayBuffer).toString('base64');
+
+      app.log.info('[Upscale to 4K] Original image loaded, starting upscale...');
+
+      // Формируем промпт из данных креатива
+      const originalPrompt = `Рекламный креатив для Instagram Reels/Stories (9:16):
+Offer: ${creative.offer}
+Bullets: ${creative.bullets}
+Profits: ${creative.profits}
+CTA: ${creative.cta}
+Style: ${creative.style_id}`;
+
+      // Upscale изображения
+      const upscaled4KImage = await upscaleImageTo4K(base64Image, originalPrompt);
+
+      // Сохраняем 4K версию в storage
+      const imageBuffer = Buffer.from(upscaled4KImage, 'base64');
+      const fileName4K = imagePath.replace('.png', '_4k.png');
+
+      app.log.info(`[Upscale to 4K] Uploading 4K version: ${fileName4K}`);
+
+      const { error: uploadError } = await supabase.storage
+        .from('creo')
+        .upload(fileName4K, imageBuffer, {
+          contentType: 'image/png',
+          upsert: false,
+          cacheControl: '3600'
+        });
+
+      if (uploadError) {
+        logSupabaseError('Upload 4K image', uploadError);
+        throw new Error(`Failed to upload 4K image: ${uploadError.message}`);
+      }
+
+      // Получаем публичный URL для 4K версии
+      const { data: publicUrlData } = supabase.storage
+        .from('creo')
+        .getPublicUrl(fileName4K);
+
+      if (!publicUrlData?.publicUrl) {
+        throw new Error('Failed to get public URL for 4K image');
+      }
+
+      app.log.info(`[Upscale to 4K] 4K version uploaded: ${publicUrlData.publicUrl}`);
+
+      // Обновляем запись в БД
+      const { error: updateError } = await supabase
+        .from('generated_creatives')
+        .update({
+          image_url_4k: publicUrlData.publicUrl
+        })
+        .eq('id', creative_id);
+
+      if (updateError) {
+        logSupabaseError('Update creative with 4K URL', updateError);
+        // Не критично, продолжаем
+      }
+
+      app.log.info('[Upscale to 4K] Successfully completed');
+
+      return {
+        success: true,
+        image_url_4k: publicUrlData.publicUrl
+      };
+
+    } catch (error: any) {
+      app.log.error('[Upscale to 4K] Error:', error);
+
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to upscale image to 4K',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
   // Healthcheck эндпоинт
   app.get('/health', async (request, reply) => {
-    return { 
+    return {
       status: 'ok',
       service: 'creative-generation-service',
       timestamp: new Date().toISOString()

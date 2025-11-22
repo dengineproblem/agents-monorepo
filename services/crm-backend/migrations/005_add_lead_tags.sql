@@ -19,3 +19,4 @@ COMMENT ON COLUMN dialog_analysis.lead_tags IS
 
 
 
+

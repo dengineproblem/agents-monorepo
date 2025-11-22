@@ -26,6 +26,7 @@ import amocrmConnectRoutes from './routes/amocrmConnect.js';
 import amocrmPipelinesRoutes from './routes/amocrmPipelines.js';
 import amocrmManagementRoutes from './routes/amocrmManagement.js';
 import leadsRoutes from './routes/leads.js';
+import { briefingRoutes } from './routes/briefingRoutes.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { logger as baseLogger } from './lib/logger.js';
 
@@ -81,6 +82,7 @@ app.register(amocrmConnectRoutes);
 app.register(amocrmPipelinesRoutes);
 app.register(amocrmManagementRoutes);
 app.register(leadsRoutes);
+app.register(briefingRoutes, { prefix: '/briefing' });
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);

@@ -46,16 +46,19 @@ const CreativeGeneration = () => {
   // State для создания креатива
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
   const [isCreatingCreative, setIsCreatingCreative] = useState(false);
-  
+
   // State для референсного изображения
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [referenceImagePrompt, setReferenceImagePrompt] = useState<string>('');
-  
+
   // State для редактирования
   const [isEditMode, setIsEditMode] = useState(false);
   const [editPrompt, setEditPrompt] = useState<string>('');
-  
+
+  // State для сохранения creative_id для upscale
+  const [generatedCreativeId, setGeneratedCreativeId] = useState<string>('');
+
   // State для выбора стиля креатива
   const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'>('modern_performance');
   
@@ -424,14 +427,21 @@ const CreativeGeneration = () => {
       // Новый API возвращает: { success: true, creative_id, image_url, generations_remaining }
       if (data.image_url) {
         setGeneratedImage(data.image_url);
+
+        // Сохраняем creative_id для upscale
+        if (data.creative_id) {
+          setGeneratedCreativeId(data.creative_id);
+          console.log('Creative ID сохранен:', data.creative_id);
+        }
+
         toast.success(isEdit ? 'Креатив успешно отредактирован!' : 'Креатив успешно сгенерирован!');
-        
+
         // Обновляем счетчик генераций
         if (typeof data.generations_remaining === 'number') {
           setCreativeGenerationsAvailable(data.generations_remaining);
           console.log('Счетчик генераций обновлен:', data.generations_remaining);
         }
-        
+
         // Сбрасываем режим редактирования
         if (isEdit) {
           setIsEditMode(false);
@@ -468,11 +478,36 @@ const CreativeGeneration = () => {
 
   // Функция скачивания изображения
   const downloadImage = async () => {
-    if (!generatedImage) return;
+    if (!generatedImage || !generatedCreativeId) {
+      toast.error('Сначала сгенерируйте креатив');
+      return;
+    }
 
     try {
-      // Получаем изображение
-      const response = await fetch(generatedImage);
+      toast.loading('Подготовка 4K версии для скачивания...', { id: 'upscale' });
+
+      // Вызываем upscale до 4K
+      const upscaleResponse = await fetch('http://localhost:8085/upscale-to-4k', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          creative_id: generatedCreativeId,
+          user_id: userId
+        }),
+      });
+
+      const upscaleData = await upscaleResponse.json();
+
+      if (!upscaleData.success || !upscaleData.image_url_4k) {
+        throw new Error('Не удалось улучшить качество изображения');
+      }
+
+      toast.success('4K версия готова, скачивание...', { id: 'upscale' });
+
+      // Получаем 4K изображение
+      const response = await fetch(upscaleData.image_url_4k);
       const blob = await response.blob();
 
       // Создаём ссылку для скачивания
@@ -482,7 +517,7 @@ const CreativeGeneration = () => {
 
       // Генерируем имя файла с датой и временем
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-      link.download = `creative_${timestamp}.png`;
+      link.download = `creative_4K_${timestamp}.png`;
 
       // Триггерим скачивание
       document.body.appendChild(link);
@@ -492,10 +527,10 @@ const CreativeGeneration = () => {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
 
-      toast.success('Изображение скачано');
+      toast.success('4K изображение скачано', { id: 'upscale' });
     } catch (error) {
       console.error('Error downloading image:', error);
-      toast.error('Ошибка при скачивании изображения');
+      toast.error('Ошибка при скачивании изображения', { id: 'upscale' });
     }
   };
 

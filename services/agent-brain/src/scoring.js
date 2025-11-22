@@ -994,6 +994,7 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
 
           records.push({
             user_account_id: userAccountId,
+            // user_creative_id заполнится автоматически через триггер на основе ad_id
             date: yesterdayStr,  // Вчерашний день
             ad_id: mapping.ad_id,
             creative_id: mapping.fb_creative_id,

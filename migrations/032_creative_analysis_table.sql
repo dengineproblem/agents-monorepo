@@ -102,3 +102,4 @@ COMMENT ON COLUMN creative_analysis.transcript_suggestions IS
 -- WHERE creative_id = 'xxx'
 -- GROUP BY source;
 
+

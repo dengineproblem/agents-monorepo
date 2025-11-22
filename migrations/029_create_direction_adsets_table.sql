@@ -178,3 +178,4 @@ COMMENT ON FUNCTION increment_ads_count IS
 
 
 
+

@@ -27,6 +27,7 @@ const fastify = Fastify({
 await fastify.register(cors, {
   origin: true, // В продакшене можно ограничить конкретными доменами
   credentials: true,
+  preflight: true, // Автоматически отвечать на OPTIONS запросы
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 });
@@ -3463,6 +3464,14 @@ fastify.post('/api/brain/cron/run-batch', async (request, reply) => {
     fastify.log.error(err);
     return reply.code(500).send({ error: 'batch_failed', details: String(err?.message || err) });
   }
+});
+
+/**
+ * OPTIONS /api/analyzer/analyze-creative
+ * CORS preflight handler
+ */
+fastify.options('/api/analyzer/analyze-creative', async (request, reply) => {
+  return reply.code(204).send();
 });
 
 /**

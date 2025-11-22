@@ -73,3 +73,4 @@ COMMENT ON TABLE purchases IS 'Customer purchases. Use user_account_id for filte
 
 
 
+

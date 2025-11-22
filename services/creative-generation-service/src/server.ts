@@ -14,6 +14,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 // Создаем Fastify instance
 const app = Fastify({
+  bodyLimit: 50 * 1024 * 1024, // 50MB лимит для base64-изображений
   logger: {
     level: process.env.LOG_LEVEL || 'info',
     transport: process.env.NODE_ENV === 'development' ? {

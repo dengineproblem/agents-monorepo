@@ -49,11 +49,27 @@ services:
       - CAMPAIGN_BUILDER_MODEL=gpt-4o
       - ANALYZER_URL=http://creative-analyzer:7081
       - CHATBOT_SERVICE_URL=http://chatbot-service:8083
+      - CREATIVE_GENERATION_SERVICE_URL=http://creative-generation-service:8085
     ports:
       - "8082:8082"
     restart: unless-stopped
     depends_on:
       - chatbot-service
+      - creative-generation-service
+
+  # Creative Generation Service (AI-powered creative generation with Gemini 3 Pro)
+  creative-generation-service:
+    build: ./services/creative-generation-service
+    labels:
+      logging: "promtail"
+    env_file:
+      - ./services/creative-generation-service/.env
+    environment:
+      - PORT=8085
+      - NODE_ENV=production
+    ports:
+      - "8085:8085"
+    restart: unless-stopped
 
   # AI Chatbot Service
   chatbot-service:

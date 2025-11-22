@@ -60,7 +60,7 @@ export async function generateCreativeImage(
     console.log('[Gemini] Has reference image:', hasReferenceImage);
 
     // Используем Gemini 3 Pro Image Preview для генерации изображений
-    const model = genAI.getGenerativeModel({ 
+    const model = genAI.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
 
@@ -78,7 +78,7 @@ export async function generateCreativeImage(
         const response = await fetch(referenceImage);
         const buffer = await response.arrayBuffer();
         const base64 = Buffer.from(buffer).toString('base64');
-        
+
         contentParts.push({
           inlineData: {
             mimeType: response.headers.get('content-type') || 'image/jpeg',
@@ -98,7 +98,25 @@ export async function generateCreativeImage(
       }
     }
 
-    const result = await model.generateContent(contentParts);
+    // Конфигурация для генерации в формате 9:16 для Instagram Reels/Stories
+    // Используем 2K для preview, позже можно будет upscale до 4K
+    const generationConfig = {
+      responseModalities: ['IMAGE'],
+      imageConfig: {
+        aspectRatio: '9:16',
+        imageSize: '2K'
+      },
+      temperature: 1.0,
+      topK: 40,
+      topP: 0.95
+    };
+
+    console.log('[Gemini] Image config: 9:16 aspect ratio, 2K resolution');
+
+    const result = await model.generateContent({
+      contents: contentParts,
+      generationConfig
+    });
     const response = result.response;
 
     // Gemini возвращает изображение в base64
@@ -128,6 +146,86 @@ export async function generateCreativeImage(
   } catch (error: any) {
     console.error('[Gemini] Error generating creative image:', error);
     throw new Error(`Gemini image generation failed: ${error.message}`);
+  }
+}
+
+/**
+ * Upscale изображения с 2K до 4K
+ * Используется перед финальным сохранением/скачиванием
+ * @param base64Image - Исходное изображение в base64
+ * @param originalPrompt - Оригинальный промпт для сохранения стиля
+ * @returns Base64 изображение в 4K качестве
+ */
+export async function upscaleImageTo4K(
+  base64Image: string,
+  originalPrompt: string
+): Promise<string> {
+  try {
+    console.log('[Gemini Upscale] Starting image upscale to 4K...');
+
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3-pro-image-preview'
+    });
+
+    // Формируем контент с исходным изображением
+    const contentParts: any[] = [
+      {
+        text: `${originalPrompt}\n\nУлучши качество этого изображения, сохранив все детали, композицию и стиль без изменений.`
+      },
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: base64Image
+        }
+      }
+    ];
+
+    // Конфигурация для 4K
+    const generationConfig = {
+      responseModalities: ['IMAGE'],
+      imageConfig: {
+        aspectRatio: '9:16',
+        imageSize: '4K'
+      },
+      temperature: 0.1, // Низкая температура для точного воспроизведения
+      topK: 10,
+      topP: 0.8
+    };
+
+    console.log('[Gemini Upscale] Generating 4K version...');
+
+    const result = await model.generateContent({
+      contents: contentParts,
+      generationConfig
+    });
+
+    const response = result.response;
+
+    if (!response.candidates || response.candidates.length === 0) {
+      throw new Error('No image generated during upscale');
+    }
+
+    const candidate = response.candidates[0];
+
+    if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+      throw new Error('No image parts in upscale response');
+    }
+
+    const imagePart = candidate.content.parts.find((part: any) => part.inlineData);
+
+    if (!imagePart || !imagePart.inlineData || !imagePart.inlineData.data) {
+      throw new Error('No image data in upscale response');
+    }
+
+    const upscaledImage = imagePart.inlineData.data;
+
+    console.log('[Gemini Upscale] 4K image generated successfully');
+    console.log('[Gemini Upscale] Image size:', upscaledImage.length, 'bytes (base64)');
+
+    return upscaledImage;
+  } catch (error: any) {
+    console.error('[Gemini Upscale] Error upscaling image:', error);
+    throw new Error(`Image upscale failed: ${error.message}`);
   }
 }
 

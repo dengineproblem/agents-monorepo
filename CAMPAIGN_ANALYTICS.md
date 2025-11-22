@@ -681,3 +681,4 @@ docker logs agents-monorepo-chatbot-service-1 | grep "Daily lead snapshot comple
 
 🎉 **Аналитика без LLM = Быстро, точно, масштабируемо!**
 
+

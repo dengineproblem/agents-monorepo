@@ -22,7 +22,8 @@ import {
   Save,
   X,
   ShoppingCart,
-  Play
+  Play,
+  Filter
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -35,7 +36,6 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import SalesList from '@/components/SalesList';
 import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
-import { Filter } from 'lucide-react';
 import { API_BASE_URL, ANALYTICS_API_BASE_URL } from '@/config/api';
 import { creativesApi } from '@/services/creativesApi';
 
@@ -303,9 +303,10 @@ const ROIAnalytics: React.FC = () => {
       }
       
       if (analysisResult.error) {
-        console.log('Анализ не найден (ожидаемо при первой загрузке)');
+        console.log('Анализ не найден (ожидаемо при первой загрузке)', analysisResult.error);
         setCreativeAnalysis(null);
       } else {
+        console.log('✅ Загружен анализ креатива:', analysisResult.data);
         setCreativeAnalysis(analysisResult.data);
       }
       
@@ -327,9 +328,10 @@ const ROIAnalytics: React.FC = () => {
     
     try {
       // Вызываем API для анализа креатива (agent-brain)
+      // Используем относительный путь, чтобы запрос шел через Vite proxy
       const analyzerUrl = ANALYTICS_API_BASE_URL 
         ? `${ANALYTICS_API_BASE_URL}/api/analyzer/analyze-creative`
-        : 'http://localhost:7080/api/analyzer/analyze-creative';
+        : '/api/analyzer/analyze-creative';
       
       const response = await fetch(analyzerUrl, {
         method: 'POST',
@@ -763,6 +765,70 @@ const ROIAnalytics: React.FC = () => {
                                             </div>
                                           </CardContent>
                                         </Card>
+
+                                        {/* Видео досмотры */}
+                                        {(() => {
+                                          const totalMetrics = creativeMetrics.reduce((acc, metric) => ({
+                                            video_views: acc.video_views + (metric.video_views || 0),
+                                            video_views_25: acc.video_views_25 + (metric.video_views_25_percent || 0),
+                                            video_views_50: acc.video_views_50 + (metric.video_views_50_percent || 0),
+                                            video_views_75: acc.video_views_75 + (metric.video_views_75_percent || 0),
+                                            video_views_95: acc.video_views_95 + (metric.video_views_95_percent || 0),
+                                            video_avg_watch_time_sec: metric.video_avg_watch_time_sec || 0
+                                          }), { video_views: 0, video_views_25: 0, video_views_50: 0, video_views_75: 0, video_views_95: 0, video_avg_watch_time_sec: 0 });
+                                          
+                                          if (totalMetrics.video_views === 0) return null;
+
+                                          const formatSeconds = (sec: number) => {
+                                            if (!sec || sec === 0) return '0с';
+                                            if (sec < 60) return `${Math.round(sec)}с`;
+                                            const m = Math.floor(sec / 60);
+                                            const s = Math.round(sec % 60);
+                                            return `${m}м ${s}с`;
+                                          };
+
+                                          return (
+                                            <div className="space-y-3">
+                                              <div className="flex items-center gap-2">
+                                                <TrendingUp className="h-4 w-4 text-primary" />
+                                                <div className="text-sm font-medium">Досмотры видео</div>
+                                              </div>
+                                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                <div className="rounded-lg border p-3 space-y-1">
+                                                  <div className="text-xs text-muted-foreground">25%</div>
+                                                  <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_25)}</div>
+                                                  <div className="text-xs text-muted-foreground">
+                                                    {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_25 / totalMetrics.video_views) * 100) : 0}% от просмотров
+                                                  </div>
+                                                </div>
+                                                <div className="rounded-lg border p-3 space-y-1">
+                                                  <div className="text-xs text-muted-foreground">50%</div>
+                                                  <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_50)}</div>
+                                                  <div className="text-xs text-muted-foreground">
+                                                    {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_50 / totalMetrics.video_views) * 100) : 0}% от просмотров
+                                                  </div>
+                                                </div>
+                                                <div className="rounded-lg border p-3 space-y-1">
+                                                  <div className="text-xs text-muted-foreground">75%</div>
+                                                  <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_75)}</div>
+                                                  <div className="text-xs text-muted-foreground">
+                                                    {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_75 / totalMetrics.video_views) * 100) : 0}% от просмотров
+                                                  </div>
+                                                </div>
+                                                <div className="rounded-lg border p-3 space-y-1">
+                                                  <div className="text-xs text-muted-foreground">95%</div>
+                                                  <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_95)}</div>
+                                                  <div className="text-xs text-muted-foreground">
+                                                    {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_95 / totalMetrics.video_views) * 100) : 0}% от просмотров
+                                                  </div>
+                                                </div>
+                                              </div>
+                                              <div className="text-xs text-muted-foreground">
+                                                Среднее время просмотра: {formatSeconds(totalMetrics.video_avg_watch_time_sec)} · Всего просмотров: {formatNumber(totalMetrics.video_views)}
+                                              </div>
+                                            </div>
+                                          );
+                                        })()}
 
                                         {/* Кнопка запуска анализа */}
                                         <div className="flex items-center justify-between">

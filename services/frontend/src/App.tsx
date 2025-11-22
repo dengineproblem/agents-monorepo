@@ -27,6 +27,7 @@ import Terms from './pages/Terms';
 import OAuthCallback from './pages/OAuthCallback';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
+import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const AppRoutes = () => {
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     // Проверяем наличие пользовательских данных в localStorage
@@ -51,6 +53,12 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
+          // Проверяем наличие prompt1
+          if (!parsedUser.prompt1) {
+            setShowOnboarding(true);
+          } else {
+            setShowOnboarding(false);
+          }
         } else {
           localStorage.removeItem('user');
           setUser(null);
@@ -72,6 +80,12 @@ const AppRoutes = () => {
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
+          // Проверяем prompt1 при изменении данных
+          if (!parsedUser.prompt1) {
+            setShowOnboarding(true);
+          } else {
+            setShowOnboarding(false);
+          }
         } catch (error) {
           setUser(null);
         }
@@ -82,6 +96,20 @@ const AppRoutes = () => {
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
+
+  const handleOnboardingComplete = () => {
+    // Обновляем user из localStorage после завершения онбординга
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+        setShowOnboarding(false);
+      } catch (error) {
+        console.error('Ошибка при обновлении user после онбординга:', error);
+      }
+    }
+  };
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">{t('common.loading')}</div>;
@@ -94,6 +122,9 @@ const AppRoutes = () => {
     <>
       {user && !isPublicRoute ? (
         <>
+          {/* Онбординг показывается поверх всего если prompt1 не заполнен */}
+          {showOnboarding && <OnboardingWizard onComplete={handleOnboardingComplete} />}
+        
           {isNoSidebarRoute ? (
             // Routes without sidebar (e.g., WhatsApp CRM)
             <div className="min-h-screen w-full">
