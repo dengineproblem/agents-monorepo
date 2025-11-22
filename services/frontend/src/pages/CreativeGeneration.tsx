@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle, Upload, X, Edit } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
@@ -46,6 +47,15 @@ const CreativeGeneration = () => {
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
   const [isCreatingCreative, setIsCreatingCreative] = useState(false);
   
+  // State для референсного изображения
+  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
+  const [referenceImagePrompt, setReferenceImagePrompt] = useState<string>('');
+  
+  // State для редактирования
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editPrompt, setEditPrompt] = useState<string>('');
+  
   // Загрузка направлений
   const { directions, loading: directionsLoading } = useDirections(userId);
 
@@ -63,8 +73,11 @@ const CreativeGeneration = () => {
       if (generatedImage && generatedImage.startsWith('blob:')) {
         URL.revokeObjectURL(generatedImage);
       }
+      if (referenceImage && referenceImage.startsWith('blob:')) {
+        URL.revokeObjectURL(referenceImage);
+      }
     };
-  }, [generatedImage]);
+  }, [generatedImage, referenceImage]);
 
   const handleOpenDatePicker = () => {
     // Функция для открытия выбора даты (пока пустая)
@@ -74,7 +87,9 @@ const CreativeGeneration = () => {
   useEffect(() => {
     const loadUserData = async () => {
       try {
+        console.log('=== Начало загрузки данных пользователя ===');
         const storedUser = localStorage.getItem('user');
+        console.log('Данные из localStorage:', storedUser);
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
         
         if (localUserData.id) {
@@ -86,48 +101,75 @@ const CreativeGeneration = () => {
             .single();
             
           if (error) {
-            console.error('Ошибка загрузки данных пользователя из Supabase:', error);
+            console.error('❌ Ошибка загрузки данных пользователя из Supabase:', error);
+            console.error('Детали ошибки:', JSON.stringify(error, null, 2));
             setUserData(localUserData); // fallback
+            
+            // Устанавливаем данные из localStorage как fallback
+            if (localUserData.id) {
+              setUserId(localUserData.id);
+              console.log('⚠️ Используем user ID из localStorage:', localUserData.id);
+            }
+            if (localUserData.prompt4) {
+              setUserPrompt(localUserData.prompt4);
+              console.log('⚠️ Используем prompt из localStorage');
+            }
           } else if (data) {
-            console.log('Получены данные пользователя из Supabase:', data);
+            console.log('✅ Получены данные пользователя из Supabase');
+            console.log('User ID:', data.id);
+            console.log('Prompt4:', data.prompt4 ? `Загружен (${data.prompt4.length} символов)` : 'НЕ НАСТРОЕН');
+            console.log('Доступных генераций:', data.creative_generations_available);
+            
             const combinedData = { ...localUserData, ...data };
             localStorage.setItem('user', JSON.stringify(combinedData));
             setUserData(combinedData);
             
             if (data.prompt4) {
               setUserPrompt(data.prompt4);
-              console.log('Загружен prompt:', data.prompt4);
+              console.log('✅ Загружен prompt');
+            } else {
+              console.warn('⚠️ prompt4 не найден в данных пользователя');
             }
             setUserId(data.id);
-            console.log('Загружен user ID:', data.id);
+            console.log('✅ Установлен user ID:', data.id);
             
             // Загружаем количество доступных генераций
             setCreativeGenerationsAvailable(data.creative_generations_available || 0);
-            console.log('Загружено доступных генераций:', data.creative_generations_available || 0);
           }
         } else {
+          console.warn('⚠️ User ID не найден в localStorage');
           setUserData(localUserData);
         }
+        console.log('=== Завершение загрузки данных пользователя ===');
       } catch (err) {
-        console.error('Ошибка при инициализации данных пользователя:', err);
+        console.error('❌ Критическая ошибка при инициализации данных пользователя:', err);
       }
     };
     
     loadUserData();
   }, []);
 
-  const webhooks = {
-    offer: 'https://n8n.performanteaiagency.com/webhook/offer',
-    bullets: 'https://n8n.performanteaiagency.com/webhook/bullets',
-    profits: 'https://n8n.performanteaiagency.com/webhook/profits',
-    cta: 'https://n8n.performanteaiagency.com/webhook/cta',
-    image: 'https://n8n.performanteaiagency.com/webhook/genimage'
-  };
+  // API базовый URL для creative-generation-service
+  // В dev используем локальный сервер, в production - прокси через nginx
+  const CREATIVE_API_BASE = import.meta.env.VITE_CREATIVE_API_URL || 'http://localhost:8085';
 
   const generateText = async (type: keyof CreativeTexts) => {
     setLoading(prev => ({ ...prev, [type]: true }));
     
     try {
+      // Проверяем, что user_id загружен
+      if (!userId) {
+        console.error('User ID не загружен');
+        throw new Error('Не удалось определить пользователя. Пожалуйста, перезагрузите страницу.');
+      }
+
+      // Проверяем, что prompt загружен
+      if (!userPrompt) {
+        console.error('User prompt не загружен');
+        console.error('User data:', userData);
+        throw new Error('Промпт не настроен. Пожалуйста, настройте prompt4 в профиле.');
+      }
+
       // Собираем уже заполненные поля для отправки в запросе
       const otherTexts = Object.entries(texts)
         .filter(([key]) => key !== type && texts[key as keyof CreativeTexts].trim())
@@ -154,86 +196,157 @@ const CreativeGeneration = () => {
         }, {});
 
       const requestData = {
-        type,
-        ...otherTexts, // Распаковываем поля напрямую в body
-        prompt: userPrompt, // Добавляем prompt в запрос
-        id: userId, // Добавляем id пользователя в запрос
+        user_id: userId,
+        prompt: userPrompt || '',
+        ...otherTexts
       };
 
       console.log(`Отправляем запрос на генерацию ${type}:`, requestData);
+      console.log(`User ID: ${userId}, Prompt length: ${userPrompt?.length || 0}`);
 
-      // Используем XMLHttpRequest без таймаута, как при загрузке видео
-      const data = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', webhooks[type], true);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-
-        xhr.onload = function () {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              const responseData = JSON.parse(xhr.responseText);
-              resolve(responseData);
-            } catch (parseError) {
-              reject(new Error('Ошибка парсинга ответа от сервера'));
-            }
-          } else {
-            reject(new Error(`HTTP error! status: ${xhr.status}`));
-          }
-        };
-
-        xhr.onerror = function () {
-          reject(new Error('Ошибка сети при генерации'));
-        };
-
-        xhr.send(JSON.stringify(requestData));
+      // Вызываем новый API creative-generation-service
+      const response = await fetch(`${CREATIVE_API_BASE}/generate-${type}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
       });
-      console.log(`Получен ответ от ${type} webhook:`, data);
-      
-      // Типизируем data для работы с полями ответа
-      const responseData = data as any;
-      
-      // Проверяем разные возможные поля в ответе
-      let generatedText = null;
-      
-      // N8N возвращает массив с объектами
-      if (Array.isArray(responseData) && responseData.length > 0 && responseData[0].output) {
-        generatedText = responseData[0].output;
-      } else if (responseData.text) {
-        generatedText = responseData.text;
-      } else if (responseData.result) {
-        generatedText = responseData.result;
-      } else if (responseData.content) {
-        generatedText = responseData.content;
-      } else if (responseData.generated_text) {
-        generatedText = responseData.generated_text;
-      } else if (responseData.response) {
-        generatedText = responseData.response;
-      } else if (responseData.output) {
-        generatedText = responseData.output;
-      } else if (typeof responseData === 'string') {
-        generatedText = responseData;
-      } else if (responseData.data && typeof responseData.data === 'string') {
-        generatedText = responseData.data;
+
+      if (!response.ok) {
+        // Пытаемся получить детали ошибки от сервера
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          console.error('Ошибка от сервера:', errorData);
+          
+          if (response.status === 404) {
+            errorMessage = 'Пользователь не найден в системе. Попробуйте перезайти в систему.';
+          } else if (errorData.error) {
+            errorMessage = errorData.error;
+            if (errorData.details) {
+              errorMessage += ` (${errorData.details})`;
+            }
+          }
+        } catch (e) {
+          console.error('Не удалось распарсить ошибку от сервера');
+        }
+        throw new Error(errorMessage);
       }
 
-      if (generatedText) {
+      const data = await response.json();
+      console.log(`=== Получен ответ от API для ${type} ===`);
+      console.log(`Полный ответ:`, JSON.stringify(data, null, 2));
+      console.log(`Тип data:`, typeof data);
+      console.log(`Ключи в data:`, Object.keys(data));
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Ошибка генерации');
+      }
+
+      // Получаем значение из основного поля
+      console.log(`\n--- Поиск значения для поля "${type}" ---`);
+      console.log(`data.hasOwnProperty("${type}"):`, data.hasOwnProperty(type));
+      console.log(`data["${type}"]:`, data[type]);
+      console.log(`Тип data["${type}"]:`, typeof data[type]);
+      
+      // Проверяем все возможные варианты названий полей
+      const fieldMappings: Record<string, string[]> = {
+        offer: ['offer', 'headline', 'title', 'generated_offer'],
+        bullets: ['bullets', 'bullet_points', 'generated_bullets'],
+        profits: ['profits', 'benefits', 'generated_benefits', 'generated_profits'],
+        cta: ['cta', 'call_to_action', 'generated_cta']
+      };
+      
+      const possibleFields = [type, ...(fieldMappings[type] || []), 'text', 'result', 'generated_text'];
+      console.log(`Возможные поля для проверки:`, possibleFields);
+      
+      let generatedText: string | undefined;
+      let foundField: string | undefined;
+      
+      for (const field of possibleFields) {
+        const value = data[field];
+        console.log(`\nПроверяем поле "${field}":`, {
+          exists: data.hasOwnProperty(field),
+          value: value,
+          type: typeof value,
+          isString: typeof value === 'string',
+          length: typeof value === 'string' ? value.length : 'N/A',
+          trimmedLength: typeof value === 'string' ? value.trim().length : 'N/A'
+        });
+        
+        if (typeof value === 'string' && value.trim().length > 0) {
+          generatedText = value;
+          foundField = field;
+          console.log(`✅ Найдено значение в поле "${field}": "${value.substring(0, 100)}..."`);
+          break;
+        }
+      }
+
+      console.log(`\n--- Результат поиска ---`);
+      console.log(`Найдено поле:`, foundField);
+      console.log(`Значение:`, generatedText);
+      
+      if (generatedText && generatedText.trim().length > 0) {
         const cleanedText = cleanText(generatedText);
-        console.log(`Очищенный текст для ${type}:`, cleanedText);
+        console.log(`✅ Очищенный текст для ${type} (${cleanedText.length} символов):`, cleanedText);
         setTexts(prev => ({ ...prev, [type]: cleanedText }));
         toast.success(`${getTypeLabel(type)} сгенерирован!`);
       } else {
-        console.error('Неизвестный формат ответа:', data);
-        throw new Error('Некорректный ответ от сервера - не найдено поле с текстом');
+        console.error('\n❌ === ОШИБКА: Текст не найден ===');
+        console.error('Доступные поля:', Object.keys(data));
+        console.error('Значения всех полей:', data);
+        console.error('Проверенные варианты:', possibleFields);
+        throw new Error(`Некорректный ответ от сервера. Ожидалось непустое текстовое поле "${type}", но все проверенные варианты пусты или отсутствуют. Доступные поля: ${Object.keys(data).join(', ')}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Error generating ${type}:`, error);
-      toast.error(`Ошибка генерации ${getTypeLabel(type).toLowerCase()}`);
+      toast.error(error.message || `Ошибка генерации ${getTypeLabel(type).toLowerCase()}`);
     } finally {
       setLoading(prev => ({ ...prev, [type]: false }));
     }
   };
 
-    const generateCreative = async () => {
+  // Обработка загрузки референсного изображения
+  const handleReferenceImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Проверка типа файла
+    if (!file.type.startsWith('image/')) {
+      toast.error('Пожалуйста, выберите изображение');
+      return;
+    }
+
+    // Проверка размера файла (макс 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Размер изображения не должен превышать 10MB');
+      return;
+    }
+
+    setReferenceImageFile(file);
+    
+    // Создаем preview URL
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setReferenceImage(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+    
+    toast.success('Референсное изображение загружено');
+  };
+
+  // Удаление референсного изображения
+  const removeReferenceImage = () => {
+    if (referenceImage && referenceImage.startsWith('blob:')) {
+      URL.revokeObjectURL(referenceImage);
+    }
+    setReferenceImage(null);
+    setReferenceImageFile(null);
+    setReferenceImagePrompt('');
+  };
+
+  const generateCreative = async (isEdit: boolean = false) => {
     // Проверяем лимит генераций
     if (creativeGenerationsAvailable <= 0) {
       toast.error('У вас закончились генерации креативов. Приобретите дополнительный пакет.');
@@ -243,157 +356,110 @@ const CreativeGeneration = () => {
     setLoading(prev => ({ ...prev, image: true }));
     
     try {
-      // Используем FormData, как в загрузке видео
-      const form = new FormData();
-      form.append('action', 'generate_image'); // Указываем что это генерация изображения
-      form.append('prompt', `Create a marketing creative with: ${texts.offer} ${texts.bullets} ${texts.profits} ${texts.cta}`);
-      form.append('size', '1024x1024');
-      form.append('quality', 'standard');
-      form.append('user_id', userId);
-      form.append('offer', texts.offer);
-      form.append('bullets', texts.bullets);
-      form.append('benefits', texts.profits); // Передаем как benefits для N8N
-      form.append('cta', texts.cta);
+      let referenceImageBase64: string | undefined;
+      
+      // Если редактируем - используем сгенерированное изображение как референс
+      if (isEdit && generatedImage) {
+        const response = await fetch(generatedImage);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        referenceImageBase64 = await new Promise((resolve) => {
+          reader.onload = () => {
+            const base64 = (reader.result as string).split(',')[1];
+            resolve(base64);
+          };
+          reader.readAsDataURL(blob);
+        });
+      } 
+      // Если есть референсное изображение - используем его
+      else if (referenceImage) {
+        const base64 = referenceImage.split(',')[1];
+        referenceImageBase64 = base64;
+      }
 
-      console.log('Отправляем запрос на генерацию креатива через N8N (FormData)');
+      const requestData = {
+        user_id: userId,
+        offer: texts.offer,
+        bullets: texts.bullets,
+        profits: texts.profits,
+        cta: texts.cta,
+        direction_id: selectedDirectionId || undefined,
+        reference_image: referenceImageBase64,
+        reference_image_type: referenceImageBase64 ? 'base64' : undefined,
+        // При редактировании используем editPrompt, иначе referenceImagePrompt
+        reference_image_prompt: isEdit ? editPrompt : (referenceImagePrompt || undefined)
+      };
 
-      // Используем XMLHttpRequest без таймаута, как при загрузке видео
-      const data = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', 'https://n8n.performanteaiagency.com/webhook/genimage', true);
-        // НЕ устанавливаем Content-Type - FormData сам установит multipart/form-data
-        
-        // Ожидаем бинарный ответ (изображение)
-        xhr.responseType = 'blob';
-
-        xhr.onload = function () {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            // Проверяем тип ответа
-            const contentType = xhr.getResponseHeader('Content-Type') || '';
-            console.log('Content-Type ответа:', contentType);
-            
-            if (contentType.includes('image/')) {
-              // Получили изображение как blob
-              const imageBlob = xhr.response;
-              console.log('Получен image blob, размер:', imageBlob.size);
-              resolve({ imageBlob });
-            } else {
-              reject(new Error('Ожидался image/png, получен: ' + contentType));
-            }
-          } else {
-            reject(new Error(`HTTP error! status: ${xhr.status}`));
-          }
-        };
-
-        xhr.onerror = function () {
-          reject(new Error('Ошибка сети при генерации креатива'));
-        };
-
-        xhr.send(form); // Отправляем FormData вместо JSON
+      console.log(`Отправляем запрос на генерацию креатива через Gemini API (isEdit: ${isEdit}):`, {
+        ...requestData,
+        reference_image: referenceImageBase64 ? '[base64 data]' : undefined,
+        reference_image_prompt_length: requestData.reference_image_prompt?.length || 0
       });
 
-      console.log('✅ Получен ответ от N8N webhook:', data);
-      
-      // Типизируем data для работы с полями ответа
-      const responseData = data as any;
-      
-      let imageUrl = null;
-      
-      if (responseData.imageBlob) {
-        // Получили blob изображения. Для совместимости с Telegram WebView конвертируем в data URL
-        const blob: Blob = responseData.imageBlob;
-        const toDataURL = (b: Blob) => new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(String(reader.result));
-          reader.onerror = () => reject(new Error('Не удалось прочитать изображение'));
-          reader.readAsDataURL(b);
-        });
-        try {
-          // 1) Генерируем data URL
-          imageUrl = await toDataURL(blob);
-          console.log('Создан data URL для изображения из blob (для Telegram):', imageUrl?.slice(0, 64) + '...');
+      // Вызываем новый API creative-generation-service
+      const response = await fetch(`${CREATIVE_API_BASE}/generate-creative`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+      });
 
-          // 2) Пробуем загрузить в Supabase Storage и использовать публичный URL (лучше для Telegram WebView)
-          try {
-            const fileName = `generated_creatives/${Date.now()}_${Math.random().toString(36).slice(2)}.png`;
-            const uploadRes = await supabase.storage
-              .from('public')
-              .upload(fileName, blob, { contentType: 'image/png', upsert: true });
-            if (!uploadRes.error) {
-              const pub = supabase.storage.from('public').getPublicUrl(fileName);
-              if (pub.data?.publicUrl) {
-                imageUrl = pub.data.publicUrl;
-                console.log('Изображение загружено в Supabase Storage, public URL:', imageUrl);
-              }
-            } else {
-              console.warn('Не удалось загрузить изображение в Supabase Storage:', uploadRes.error?.message);
-            }
-          } catch (e) {
-            console.warn('Ошибка при загрузке изображения в Supabase Storage:', e);
-          }
-        } catch (e) {
-          // Fallback: если не удалось, пробуем blob URL
-          imageUrl = URL.createObjectURL(blob);
-          console.log('Fallback: создан blob URL для изображения:', imageUrl);
-        }
-      } else if (responseData.imageUrl || responseData.image_url || responseData.url) {
-        // Прямой URL изображения
-        imageUrl = responseData.imageUrl || responseData.image_url || responseData.url;
-        console.log('Получен URL изображения:', imageUrl);
-      } else if (responseData.base64 || responseData.image || responseData.data) {
-        // Base64 изображение
-        const base64Data = responseData.base64 || responseData.image || responseData.data;
-        if (typeof base64Data === 'string') {
-          // Создаем data URL из base64
-          const base64Image = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
-          imageUrl = base64Image;
-          console.log('Получено base64 изображение, размер:', base64Data.length);
-        }
-      } else if (Array.isArray(responseData) && responseData.length > 0) {
-        // N8N может вернуть массив
-        const firstItem = responseData[0];
-        if (firstItem.imageUrl || firstItem.image_url || firstItem.url) {
-          imageUrl = firstItem.imageUrl || firstItem.image_url || firstItem.url;
-        } else if (firstItem.base64 || firstItem.image || firstItem.data) {
-          const base64Data = firstItem.base64 || firstItem.image || firstItem.data;
-          if (typeof base64Data === 'string') {
-            imageUrl = base64Data.startsWith('data:') ? base64Data : `data:image/png;base64,${base64Data}`;
-          }
-        }
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
 
-      if (imageUrl) {
-        setGeneratedImage(imageUrl);
-        toast.success('Креатив сгенерирован!');
+      const data = await response.json();
+      console.log('✅ Получен ответ от API:', data);
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Ошибка генерации');
+      }
+
+      // Новый API возвращает: { success: true, creative_id, image_url, generations_remaining }
+      if (data.image_url) {
+        setGeneratedImage(data.image_url);
+        toast.success(isEdit ? 'Креатив успешно отредактирован!' : 'Креатив успешно сгенерирован!');
         
-        // Уменьшаем счетчик генераций в базе данных
-        try {
-          const newCount = creativeGenerationsAvailable - 1;
-          const { error: updateError } = await supabase
-            .from('user_accounts')
-            .update({ creative_generations_available: newCount })
-            .eq('id', userId);
-            
-          if (updateError) {
-            console.error('Ошибка обновления счетчика генераций:', updateError);
-          } else {
-            setCreativeGenerationsAvailable(newCount);
-            console.log('Счетчик генераций обновлен:', newCount);
-          }
-        } catch (error) {
-          console.error('Ошибка при обновлении счетчика:', error);
+        // Обновляем счетчик генераций
+        if (typeof data.generations_remaining === 'number') {
+          setCreativeGenerationsAvailable(data.generations_remaining);
+          console.log('Счетчик генераций обновлен:', data.generations_remaining);
+        }
+        
+        // Сбрасываем режим редактирования
+        if (isEdit) {
+          setIsEditMode(false);
+          setEditPrompt('');
         }
       } else {
-        console.error('Не найдено изображение в ответе:', data);
-        toast.error('Изображение не найдено в ответе N8N');
+        throw new Error('Не удалось получить URL изображения');
       }
-
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generating creative:', error);
-      toast.error('Ошибка генерации креатива');
+      toast.error(error.message || 'Ошибка генерации креатива');
     } finally {
       setLoading(prev => ({ ...prev, image: false }));
     }
+  };
+
+  // Функция начала редактирования
+  const startEditMode = () => {
+    setIsEditMode(true);
+    setEditPrompt('');
+  };
+
+  // Функция применения редактирования
+  const applyEdit = async () => {
+    if (!editPrompt.trim()) {
+      toast.error('Введите инструкции для редактирования');
+      return;
+    }
+    
+    // Генерируем с текущим изображением как референсом
+    // editPrompt будет использован как reference_image_prompt
+    await generateCreative(true);
   };
 
   const getTypeLabel = (type: keyof CreativeTexts): string => {
@@ -503,6 +569,27 @@ const CreativeGeneration = () => {
             subtitle="Создавайте креативы с помощью AI"
           />
           
+          {/* Предупреждение, если промпт не настроен */}
+          {!userPrompt && userId && (
+            <Card className="mb-6 shadow-sm border-destructive/50 bg-destructive/5">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-destructive/10">
+                    <AlertTriangle className="h-5 w-5 text-destructive" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium text-destructive mb-1">
+                      Промпт не настроен
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Пожалуйста, настройте prompt4 в вашем профиле, чтобы использовать генерацию текстов.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          
           {/* Уведомление о количестве оставшихся генераций */}
           <Card className="mb-6 shadow-sm">
             <CardContent className="p-4">
@@ -567,11 +654,11 @@ const CreativeGeneration = () => {
                     </div>
                     <Button
                       onClick={() => generateText(type)}
-                      disabled={loading[type]}
+                      disabled={loading[type] || !userPrompt || !userId}
                       size="icon"
                       variant="outline"
                       className="shrink-0 h-10 w-10"
-                      title="Сгенерировать с помощью AI"
+                      title={!userPrompt ? 'Настройте prompt4 в профиле' : !userId ? 'Загрузка данных пользователя...' : 'Сгенерировать с помощью AI'}
                     >
                       {loading[type] ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -584,9 +671,92 @@ const CreativeGeneration = () => {
               </Card>
             ))}
 
+            {/* Референсное изображение */}
+            <Card className="shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-lg">Референсное изображение (опционально)</CardTitle>
+                <CardDescription>
+                  Загрузите изображение для сохранения стиля, цветовой палитры или композиции
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!referenceImage ? (
+                  <div className="space-y-4">
+                    <div className="border-2 border-dashed border-muted rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer">
+                      <Label htmlFor="reference-upload" className="cursor-pointer block">
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="p-3 rounded-full bg-muted">
+                            <Upload className="h-6 w-6 text-muted-foreground" />
+                          </div>
+                          <div className="text-sm font-medium">Нажмите для загрузки</div>
+                          <div className="text-xs text-muted-foreground">
+                            PNG, JPG, WebP до 10MB
+                          </div>
+                        </div>
+                      </Label>
+                      <Input
+                        id="reference-upload"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleReferenceImageUpload}
+                      />
+                    </div>
+                    <div className="flex items-start gap-2 p-3 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <div className="text-xs text-blue-800 dark:text-blue-200">
+                        <strong>Совет:</strong> Используйте референс для брендинга, стилизации или композиции
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="relative rounded-lg overflow-hidden bg-muted/30 p-4">
+                      <Button
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-2 right-2 z-10"
+                        onClick={removeReferenceImage}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                      <img
+                        src={referenceImage}
+                        alt="Референсное изображение"
+                        className="max-w-full max-h-[300px] h-auto mx-auto rounded-lg"
+                      />
+                    </div>
+                    
+                    {/* Мини-промпт для референсного изображения */}
+                    <div className="space-y-2">
+                      <Label htmlFor="reference-prompt">
+                        Описание референса (опционально)
+                      </Label>
+                      <Textarea
+                        id="reference-prompt"
+                        value={referenceImagePrompt}
+                        onChange={(e) => setReferenceImagePrompt(e.target.value)}
+                        placeholder="Например: Используй эту цветовую палитру и стиль типографики..."
+                        className="min-h-[80px] resize-none"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        💡 Опишите, какие элементы референса важны: стиль, цвета, композицию, типографику и т.д.
+                      </p>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 p-3 bg-green-50/50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+                      <Badge variant="secondary">✓ Референс загружен</Badge>
+                      <span className="text-xs text-green-800 dark:text-green-200">
+                        Gemini использует этот стиль при генерации
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Кнопка генерации креатива */}
             <Button
-              onClick={generateCreative}
+              onClick={() => generateCreative(false)}
               disabled={loading.image || creativeGenerationsAvailable <= 0}
               className="w-full bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
               size="lg"
@@ -605,15 +775,15 @@ const CreativeGeneration = () => {
             </Button>
 
             {loading.image && (
-              <Card className="bg-amber-50/50 border-amber-200 shadow-sm">
+              <Card className="bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 shadow-sm">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg bg-amber-100">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/50">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                     </div>
                     <div className="text-sm">
-                      <div className="font-medium text-amber-900 mb-1">Важно!</div>
-                      <p className="text-amber-800">
+                      <div className="font-medium text-amber-900 dark:text-amber-100 mb-1">Важно!</div>
+                      <p className="text-amber-800 dark:text-amber-200">
                         НЕ закрывайте браузер и НЕ блокируйте телефон до завершения генерации креатива.
                       </p>
                     </div>
@@ -626,16 +796,76 @@ const CreativeGeneration = () => {
                   {generatedImage && (
                     <Card className="shadow-sm">
                       <CardHeader>
-                        <CardTitle className="text-lg">Сгенерированный креатив</CardTitle>
+                        <CardTitle className="text-lg flex items-center justify-between">
+                          Сгенерированный креатив
+                          {!isEditMode && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={startEditMode}
+                              disabled={loading.image}
+                            >
+                              <Edit className="h-4 w-4 mr-2" />
+                              Редактировать
+                            </Button>
+                          )}
+                        </CardTitle>
                       </CardHeader>
-                      <CardContent>
-                  <div className="rounded-lg overflow-hidden bg-muted/30 p-4 flex justify-center items-center">
+                      <CardContent className="space-y-4">
+                        <div className="rounded-lg overflow-hidden bg-muted/30 p-4 flex justify-center items-center">
                           <img
                             src={generatedImage}
                             alt="Сгенерированный креатив"
-                      className="max-w-full max-h-[70vh] h-auto rounded-lg shadow-md"
+                            className="max-w-full max-h-[70vh] h-auto rounded-lg shadow-md"
                           />
                         </div>
+                        
+                        {/* Режим редактирования */}
+                        {isEditMode && (
+                          <div className="space-y-4 p-4 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                            <div className="space-y-2">
+                              <Label>Инструкции для редактирования</Label>
+                              <Textarea
+                                value={editPrompt}
+                                onChange={(e) => setEditPrompt(e.target.value)}
+                                placeholder="Например: Сделай фон более ярким, измени цвет текста на синий..."
+                                className="min-h-[100px] resize-none"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                Опишите, что нужно изменить. Текущее изображение будет использовано как референс.
+                              </p>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                onClick={applyEdit}
+                                disabled={loading.image || !editPrompt.trim()}
+                                className="flex-1"
+                              >
+                                {loading.image ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    Применяю изменения...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="h-4 w-4 mr-2" />
+                                    Применить изменения
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setIsEditMode(false);
+                                  setEditPrompt('');
+                                }}
+                                disabled={loading.image}
+                              >
+                                Отмена
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   )}

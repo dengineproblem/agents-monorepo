@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+logs/
+.git
+.gitignore
+README.md
+DEPLOYMENT.md
+SETUP_GOOGLE_AI.md
+.DS_Store
+npm-debug.log*
+
