@@ -56,6 +56,9 @@ const CreativeGeneration = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editPrompt, setEditPrompt] = useState<string>('');
   
+  // State для выбора стиля креатива
+  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook'>('modern_performance');
+  
   // Загрузка направлений
   const { directions, loading: directionsLoading } = useDirections(userId);
 
@@ -384,6 +387,7 @@ const CreativeGeneration = () => {
         profits: texts.profits,
         cta: texts.cta,
         direction_id: selectedDirectionId || undefined,
+        style_id: selectedStyle,
         reference_image: referenceImageBase64,
         reference_image_type: referenceImageBase64 ? 'base64' : undefined,
         // При редактировании используем editPrompt, иначе referenceImagePrompt
@@ -751,6 +755,64 @@ const CreativeGeneration = () => {
                     </div>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            {/* Выбор стиля креатива */}
+            <Card className="shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-lg">Стиль креатива</CardTitle>
+                <CardDescription>
+                  Выберите визуальный стиль для генерации изображения
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStyle('modern_performance')}
+                    className={`p-4 rounded-lg border-2 transition-all text-left ${
+                      selectedStyle === 'modern_performance'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
+                    <div className="font-semibold mb-1">Современная графика</div>
+                    <div className="text-sm text-muted-foreground">
+                      Чистый дизайн с UI-элементами, графикой роста и структурированными блоками
+                    </div>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStyle('live_ugc')}
+                    className={`p-4 rounded-lg border-2 transition-all text-left ${
+                      selectedStyle === 'live_ugc'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
+                    <div className="font-semibold mb-1">Живой UGC-контент</div>
+                    <div className="text-sm text-muted-foreground">
+                      Реалистичные сцены с людьми в естественных ситуациях, как в настоящих сторис
+                    </div>
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStyle('visual_hook')}
+                    className={`p-4 rounded-lg border-2 transition-all text-left ${
+                      selectedStyle === 'visual_hook'
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:border-primary/50'
+                    }`}
+                  >
+                    <div className="font-semibold mb-1">Визуальный зацеп</div>
+                    <div className="text-sm text-muted-foreground">
+                      Яркий контраст, мощные метафоры и эффектные визуальные образы
+                    </div>
+                  </button>
+                </div>
               </CardContent>
             </Card>
 

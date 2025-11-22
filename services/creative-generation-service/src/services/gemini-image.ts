@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { buildImagePrompt } from './prompts';
+import { generateImagePrompt } from './imagePromptGenerator';
 
 const apiKey = process.env.GEMINI_API_KEY;
 
@@ -15,7 +15,8 @@ const genAI = new GoogleGenerativeAI(apiKey);
  * @param bullets - Буллеты
  * @param profits - Выгода
  * @param cta - Call-to-action
- * @param userPrompt4 - Пользовательский промпт для стилизации изображения
+ * @param userPrompt4 - Пользовательский промпт для стилизации изображения (PROMPT4)
+ * @param styleId - Выбранный стиль креатива
  * @param referenceImage - Референсное изображение (base64 или URL)
  * @param referenceImageType - Тип изображения ('base64' или 'url')
  * @param referenceImagePrompt - Описание того, как использовать референсное изображение
@@ -27,16 +28,35 @@ export async function generateCreativeImage(
   profits: string,
   cta: string,
   userPrompt4: string,
+  styleId: 'modern_performance' | 'live_ugc' | 'visual_hook',
   referenceImage?: string,
   referenceImageType?: 'base64' | 'url',
   referenceImagePrompt?: string
 ): Promise<string> {
   try {
     const hasReferenceImage = !!referenceImage;
-    const prompt = buildImagePrompt(offer, bullets, profits, cta, userPrompt4, hasReferenceImage, referenceImagePrompt);
+
+    console.log('[Gemini] Generating image prompt via LLM agent...');
+    console.log('[Gemini] Style:', styleId);
+    console.log('[Gemini] PROMPT4 length:', userPrompt4.length);
+
+    // Генерируем промпт через LLM-агент
+    const prompt = await generateImagePrompt(
+      userPrompt4,
+      styleId,
+      offer,
+      bullets,
+      profits,
+      cta
+    );
+
+    // Если есть reference_image_prompt, добавляем его к промпту
+    const finalPrompt = referenceImagePrompt 
+      ? `${prompt}\n\nДОПОЛНИТЕЛЬНО: ${referenceImagePrompt}`
+      : prompt;
 
     console.log('[Gemini] Generating creative image with Gemini 3 Pro Image Preview...');
-    console.log('[Gemini] Image prompt length:', prompt.length);
+    console.log('[Gemini] Final image prompt length:', finalPrompt.length);
     console.log('[Gemini] Has reference image:', hasReferenceImage);
 
     // Используем Gemini 3 Pro Image Preview для генерации изображений
@@ -48,7 +68,7 @@ export async function generateCreativeImage(
     const contentParts: any[] = [];
 
     // Добавляем текстовый промпт
-    contentParts.push({ text: prompt });
+    contentParts.push({ text: finalPrompt });
 
     // Добавляем референсное изображение, если оно есть
     if (referenceImage) {

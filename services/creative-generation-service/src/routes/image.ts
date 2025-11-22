@@ -20,6 +20,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       profits, 
       cta,
       direction_id,
+      style_id,
       reference_image,
       reference_image_type,
       reference_image_prompt
@@ -56,7 +57,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       app.log.info(`[Generate Creative] Generations available: ${user.creative_generations_available}`);
 
       // ====== ШАГ 2: Генерируем изображение через Gemini 3 Pro Image Preview ======
+      const selectedStyle = style_id || 'modern_performance';
       app.log.info('[Generate Creative] Generating creative image with Gemini 3 Pro Image Preview...');
+      app.log.info(`[Generate Creative] Style: ${selectedStyle}`);
       app.log.info(`[Generate Creative] Texts: offer="${offer}", bullets="${bullets}", profits="${profits}", cta="${cta}"`);
       if (reference_image) {
         app.log.info(`[Generate Creative] Using reference image (type: ${reference_image_type})`);
@@ -71,6 +74,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         profits,
         cta,
         user.prompt4 || 'Современный профессиональный дизайн',
+        selectedStyle,
         reference_image,
         reference_image_type,
         reference_image_prompt
@@ -124,6 +128,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           bullets,
           profits,
           cta,
+          style_id: selectedStyle,
           image_url: publicUrlData.publicUrl,
           status: 'generated'
         })
