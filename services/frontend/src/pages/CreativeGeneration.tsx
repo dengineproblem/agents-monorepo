@@ -562,7 +562,7 @@ const CreativeGeneration = () => {
 
   // Функция создания креатива
   const createCreative = async () => {
-    if (!generatedImage || !selectedDirectionId) {
+    if (!generatedImage || !selectedDirectionId || !generatedCreativeId) {
       toast.error('Выберите направление');
       return;
     }
@@ -570,24 +570,32 @@ const CreativeGeneration = () => {
     setIsCreatingCreative(true);
 
     try {
-      // Конвертируем изображение (blob URL или data URL) в File
-      let imageFile: File;
-      
-      if (generatedImage.startsWith('blob:')) {
-        const response = await fetch(generatedImage);
-        const blob = await response.blob();
-        imageFile = new File([blob], 'generated_creative.png', { type: 'image/png' });
-      } else if (generatedImage.startsWith('data:')) {
-        // data URL
-        const response = await fetch(generatedImage);
-        const blob = await response.blob();
-        imageFile = new File([blob], 'generated_creative.png', { type: 'image/png' });
-      } else {
-        // Публичный URL - скачиваем
-        const response = await fetch(generatedImage);
-        const blob = await response.blob();
-        imageFile = new File([blob], 'generated_creative.png', { type: 'image/png' });
+      toast.loading('Подготовка 4K версии для креатива...', { id: 'upscale-create' });
+
+      // Вызываем upscale до 4K (аналогично скачиванию)
+      const upscaleResponse = await fetch('http://localhost:8085/upscale-to-4k', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          creative_id: generatedCreativeId,
+          user_id: userId
+        }),
+      });
+
+      const upscaleData = await upscaleResponse.json();
+
+      if (!upscaleData.success || !upscaleData.image_url_4k) {
+        throw new Error('Не удалось улучшить качество изображения');
       }
+
+      toast.success('4K версия готова, создание креатива...', { id: 'upscale-create' });
+
+      // Скачиваем 4K версию
+      const response = await fetch(upscaleData.image_url_4k);
+      const blob = await response.blob();
+      const imageFile = new File([blob], 'generated_creative_4k.png', { type: 'image/png' });
 
       // Используем существующий API для загрузки
       const success = await creativesApi.uploadToWebhook(
@@ -601,17 +609,18 @@ const CreativeGeneration = () => {
       );
 
       if (success) {
-        toast.success('Креатив успешно создан!');
+        toast.success('Креатив в 4K успешно создан!', { id: 'upscale-create' });
         // Очищаем форму
         setGeneratedImage(null);
+        setGeneratedCreativeId('');
         setTexts({ offer: '', bullets: '', profits: '', cta: '' });
         setSelectedDirectionId('');
-        } else {
-        toast.error('Ошибка создания креатива');
+      } else {
+        toast.error('Ошибка создания креатива', { id: 'upscale-create' });
       }
     } catch (error) {
       console.error('Ошибка при создании креатива:', error);
-      toast.error('Ошибка создания креатива');
+      toast.error('Ошибка создания креатива', { id: 'upscale-create' });
     } finally {
       setIsCreatingCreative(false);
     }
