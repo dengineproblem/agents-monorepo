@@ -25,6 +25,7 @@ import WhatsAppAnalysis from './pages/WhatsAppAnalysis';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import OAuthCallback from './pages/OAuthCallback';
+import CarouselTest from './pages/CarouselTest';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
@@ -148,6 +149,7 @@ const AppRoutes = () => {
                       {FEATURES.SHOW_ROI_ANALYTICS && <Route path="/roi" element={<ROIAnalytics />} />}
                       {FEATURES.SHOW_CREATIVES && <Route path="/creatives" element={<CreativeGeneration />} />}
                       {FEATURES.SHOW_CREATIVES && <Route path="/videos" element={<Creatives />} />}
+                      {FEATURES.SHOW_CREATIVES && <Route path="/carousel-test" element={<CarouselTest />} />}
                       <Route path="/profile" element={<Profile />} />
                       {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
                       <Route path="*" element={<NotFound />} />

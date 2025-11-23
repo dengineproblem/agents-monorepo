@@ -1,0 +1,579 @@
+import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import {
+  GenerateCarouselTextsRequest,
+  GenerateCarouselTextsResponse,
+  RegenerateCarouselCardTextRequest,
+  RegenerateCarouselCardTextResponse,
+  GenerateCarouselRequest,
+  GenerateCarouselResponse,
+  RegenerateCarouselCardRequest,
+  RegenerateCarouselCardResponse,
+  UpscaleCarouselRequest,
+  UpscaleCarouselResponse,
+  CarouselCard
+} from '../types';
+import { generateCarouselTexts, regenerateCarouselCardText } from '../services/carouselTextGenerator';
+import { generateCarouselImages, regenerateCarouselCard, upscaleCarouselTo4K } from '../services/gemini-carousel';
+import { generateCarouselCardPrompt } from '../services/carouselPromptGenerator';
+import { getSupabaseClient } from '../db/supabase';
+
+export default async function carouselRoutes(fastify: FastifyInstance) {
+
+  // ============================================
+  // POST /generate-carousel-texts
+  // Генерация текстов для карусели
+  // ============================================
+  fastify.post<{ Body: GenerateCarouselTextsRequest }>(
+    '/generate-carousel-texts',
+    async (request: FastifyRequest<{ Body: GenerateCarouselTextsRequest }>, reply: FastifyReply) => {
+      try {
+        const { user_id, carousel_idea, cards_count } = request.body;
+
+        console.log('[Carousel Texts] Request:', { user_id, cards_count, idea_length: carousel_idea.length });
+
+        // Валидация
+        if (!user_id || !carousel_idea || !cards_count) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required fields: user_id, carousel_idea, cards_count'
+          });
+        }
+
+        if (cards_count < 2 || cards_count > 10) {
+          return reply.status(400).send({
+            success: false,
+            error: 'cards_count must be between 2 and 10'
+          });
+        }
+
+        // Получаем prompt1 пользователя
+        const supabase = getSupabaseClient();
+        const { data: user, error: userError } = await supabase
+          .from('user_accounts')
+          .select('prompt1')
+          .eq('id', user_id)
+          .single();
+
+        if (userError || !user) {
+          console.error('[Carousel Texts] User not found:', userError);
+          return reply.status(404).send({
+            success: false,
+            error: 'User not found'
+          });
+        }
+
+        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+
+        // Генерируем тексты
+        const texts = await generateCarouselTexts(carousel_idea, cards_count, userPrompt1);
+
+        const response: GenerateCarouselTextsResponse = {
+          success: true,
+          texts
+        };
+
+        return reply.send(response);
+
+      } catch (error: any) {
+        console.error('[Carousel Texts] Error:', error);
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Failed to generate carousel texts'
+        });
+      }
+    }
+  );
+
+  // ============================================
+  // POST /regenerate-carousel-card-text
+  // Перегенерация текста одной карточки
+  // ============================================
+  fastify.post<{ Body: RegenerateCarouselCardTextRequest }>(
+    '/regenerate-carousel-card-text',
+    async (request: FastifyRequest<{ Body: RegenerateCarouselCardTextRequest }>, reply: FastifyReply) => {
+      try {
+        const { user_id, carousel_id, card_index, existing_texts } = request.body;
+
+        console.log('[Carousel Card Text] Request:', { user_id, carousel_id, card_index });
+
+        // Валидация
+        if (!user_id || !carousel_id || card_index === undefined || !existing_texts) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required fields'
+          });
+        }
+
+        // Получаем prompt1 пользователя
+        const supabase = getSupabaseClient();
+        const { data: user, error: userError } = await supabase
+          .from('user_accounts')
+          .select('prompt1')
+          .eq('id', user_id)
+          .single();
+
+        if (userError || !user) {
+          return reply.status(404).send({
+            success: false,
+            error: 'User not found'
+          });
+        }
+
+        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+
+        // Перегенерируем текст карточки
+        const text = await regenerateCarouselCardText(card_index, existing_texts, userPrompt1);
+
+        const response: RegenerateCarouselCardTextResponse = {
+          success: true,
+          text
+        };
+
+        return reply.send(response);
+
+      } catch (error: any) {
+        console.error('[Carousel Card Text] Error:', error);
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Failed to regenerate card text'
+        });
+      }
+    }
+  );
+
+  // ============================================
+  // POST /generate-carousel
+  // Генерация полной карусели (изображения)
+  // ============================================
+  fastify.post<{ Body: GenerateCarouselRequest }>(
+    '/generate-carousel',
+    async (request: FastifyRequest<{ Body: GenerateCarouselRequest }>, reply: FastifyReply) => {
+      try {
+        const { user_id, carousel_texts, custom_prompts, reference_images, direction_id } = request.body;
+
+        console.log('[Generate Carousel] Request:', {
+          user_id,
+          cards_count: carousel_texts.length,
+          direction_id
+        });
+
+        // Валидация
+        if (!user_id || !carousel_texts || carousel_texts.length < 2 || carousel_texts.length > 10) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Invalid carousel_texts: must have 2-10 cards'
+          });
+        }
+
+        // Получаем данные пользователя
+        const supabase = getSupabaseClient();
+        const { data: user, error: userError } = await supabase
+          .from('user_accounts')
+          .select('id, prompt1, creative_generations_available')
+          .eq('id', user_id)
+          .single();
+
+        if (userError || !user) {
+          return reply.status(404).send({
+            success: false,
+            error: 'User not found'
+          });
+        }
+
+        const cardsCount = carousel_texts.length;
+
+        // Проверяем лимит генераций (карусель из N картинок = N генераций)
+        if (user.creative_generations_available < cardsCount) {
+          return reply.status(403).send({
+            success: false,
+            error: `Not enough generations. Need ${cardsCount}, have ${user.creative_generations_available}`
+          });
+        }
+
+        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+
+        // Генерируем изображения для всех карточек
+        const images = await generateCarouselImages(
+          carousel_texts,
+          userPrompt1,
+          custom_prompts,
+          reference_images
+        );
+
+        // Загружаем изображения в Supabase Storage
+        const uploadedCards: CarouselCard[] = [];
+
+        for (let i = 0; i < images.length; i++) {
+          const base64Image = images[i];
+          const imageBuffer = Buffer.from(base64Image, 'base64');
+
+          // Уникальное имя файла
+          const timestamp = Date.now();
+          const randomStr = Math.random().toString(36).substring(7);
+          const fileName = `creatives/${user_id}/carousel_${timestamp}_card${i + 1}_${randomStr}.png`;
+
+          console.log(`[Generate Carousel] Uploading card ${i + 1}/${images.length} to Storage...`);
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('creo')
+            .upload(fileName, imageBuffer, {
+              contentType: 'image/png',
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error(`[Generate Carousel] Upload error for card ${i + 1}:`, uploadError);
+            throw new Error(`Failed to upload card ${i + 1}: ${uploadError.message}`);
+          }
+
+          // Получаем публичный URL
+          const { data: urlData } = supabase.storage
+            .from('creo')
+            .getPublicUrl(fileName);
+
+          const imageUrl = urlData.publicUrl;
+
+          uploadedCards.push({
+            order: i,
+            text: carousel_texts[i],
+            image_url: imageUrl,
+            custom_prompt: custom_prompts?.[i] || undefined,
+            reference_image_url: reference_images?.[i] ? 'user_provided' : undefined
+          });
+        }
+
+        // Создаем запись в БД
+        const { data: carouselRecord, error: insertError } = await supabase
+          .from('generated_creatives')
+          .insert({
+            user_id,
+            direction_id: direction_id || null,
+            creative_type: 'carousel',
+            carousel_data: uploadedCards,
+            status: 'generated'
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error('[Generate Carousel] DB insert error:', insertError);
+          throw new Error(`Failed to save carousel: ${insertError.message}`);
+        }
+
+        // Декрементируем счетчик генераций
+        const { error: updateError } = await supabase
+          .from('user_accounts')
+          .update({
+            creative_generations_available: user.creative_generations_available - cardsCount
+          })
+          .eq('id', user_id);
+
+        if (updateError) {
+          console.error('[Generate Carousel] Failed to decrement generations:', updateError);
+        }
+
+        const response: GenerateCarouselResponse = {
+          success: true,
+          carousel_id: carouselRecord.id,
+          carousel_data: uploadedCards,
+          generations_remaining: user.creative_generations_available - cardsCount
+        };
+
+        console.log('[Generate Carousel] Success:', { carousel_id: carouselRecord.id });
+        return reply.send(response);
+
+      } catch (error: any) {
+        console.error('[Generate Carousel] Error:', error);
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Failed to generate carousel'
+        });
+      }
+    }
+  );
+
+  // ============================================
+  // POST /regenerate-carousel-card
+  // Перегенерация одной карточки карусели
+  // ============================================
+  fastify.post<{ Body: RegenerateCarouselCardRequest }>(
+    '/regenerate-carousel-card',
+    async (request: FastifyRequest<{ Body: RegenerateCarouselCardRequest }>, reply: FastifyReply) => {
+      try {
+        const { user_id, carousel_id, card_index, custom_prompt, reference_image, text } = request.body;
+
+        console.log('[Regenerate Card] Request:', { user_id, carousel_id, card_index });
+
+        // Валидация
+        if (!user_id || !carousel_id || card_index === undefined || !text) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required fields'
+          });
+        }
+
+        // Получаем данные пользователя
+        const supabase = getSupabaseClient();
+        const { data: user, error: userError } = await supabase
+          .from('user_accounts')
+          .select('id, prompt1, creative_generations_available')
+          .eq('id', user_id)
+          .single();
+
+        if (userError || !user) {
+          return reply.status(404).send({
+            success: false,
+            error: 'User not found'
+          });
+        }
+
+        // Проверяем лимит (1 генерация)
+        if (user.creative_generations_available < 1) {
+          return reply.status(403).send({
+            success: false,
+            error: 'Not enough generations available'
+          });
+        }
+
+        // Получаем карусель из БД
+        const { data: carousel, error: carouselError } = await getSupabaseClient()
+          .from('generated_creatives')
+          .select('*')
+          .eq('id', carousel_id)
+          .eq('user_id', user_id)
+          .eq('creative_type', 'carousel')
+          .single();
+
+        if (carouselError || !carousel) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Carousel not found'
+          });
+        }
+
+        const carouselData = carousel.carousel_data as CarouselCard[];
+
+        if (card_index < 0 || card_index >= carouselData.length) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Invalid card_index'
+          });
+        }
+
+        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+
+        // Извлекаем существующие изображения для консистентности
+        const existingImagesUrls = carouselData.map(card => card.image_url).filter(url => url) as string[];
+
+        // Загружаем существующие изображения (нужны для референса)
+        const existingImages: string[] = [];
+        for (const url of existingImagesUrls) {
+          try {
+            const response = await fetch(url);
+            const buffer = await response.arrayBuffer();
+            const base64 = Buffer.from(buffer).toString('base64');
+            existingImages.push(base64);
+          } catch (e) {
+            console.warn('[Regenerate Card] Failed to fetch existing image:', url);
+          }
+        }
+
+        // Перегенерируем карточку
+        const newImage = await regenerateCarouselCard(
+          text,
+          card_index,
+          existingImages,
+          userPrompt1,
+          custom_prompt,
+          reference_image
+        );
+
+        // Загружаем новое изображение в Storage
+        const imageBuffer = Buffer.from(newImage, 'base64');
+        const timestamp = Date.now();
+        const randomStr = Math.random().toString(36).substring(7);
+        const fileName = `creatives/${user_id}/carousel_${timestamp}_card${card_index + 1}_regen_${randomStr}.png`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('creo')
+          .upload(fileName, imageBuffer, {
+            contentType: 'image/png',
+            upsert: false
+          });
+
+        if (uploadError) {
+          throw new Error(`Failed to upload regenerated card: ${uploadError.message}`);
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('creo')
+          .getPublicUrl(fileName);
+
+        const newImageUrl = urlData.publicUrl;
+
+        // Обновляем carousel_data
+        carouselData[card_index].image_url = newImageUrl;
+        carouselData[card_index].text = text;
+        if (custom_prompt) {
+          carouselData[card_index].custom_prompt = custom_prompt;
+        }
+        if (reference_image) {
+          carouselData[card_index].reference_image_url = 'user_provided';
+        }
+        // Сбрасываем 4K версию
+        delete carouselData[card_index].image_url_4k;
+
+        // Обновляем БД
+        const { error: updateCarouselError } = await supabase
+          .from('generated_creatives')
+          .update({ carousel_data: carouselData })
+          .eq('id', carousel_id);
+
+        if (updateCarouselError) {
+          console.error('[Regenerate Card] Failed to update carousel:', updateCarouselError);
+        }
+
+        // Декрементируем счетчик
+        const { error: updateCounterError } = await supabase
+          .from('user_accounts')
+          .update({
+            creative_generations_available: user.creative_generations_available - 1
+          })
+          .eq('id', user_id);
+
+        if (updateCounterError) {
+          console.error('[Regenerate Card] Failed to decrement counter:', updateCounterError);
+        }
+
+        const response: RegenerateCarouselCardResponse = {
+          success: true,
+          image_url: newImageUrl,
+          generations_remaining: user.creative_generations_available - 1
+        };
+
+        return reply.send(response);
+
+      } catch (error: any) {
+        console.error('[Regenerate Card] Error:', error);
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Failed to regenerate card'
+        });
+      }
+    }
+  );
+
+  // ============================================
+  // POST /upscale-carousel-to-4k
+  // Upscale всех карточек карусели до 4K
+  // ============================================
+  fastify.post<{ Body: UpscaleCarouselRequest }>(
+    '/upscale-carousel-to-4k',
+    async (request: FastifyRequest<{ Body: UpscaleCarouselRequest }>, reply: FastifyReply) => {
+      try {
+        const { user_id, carousel_id } = request.body;
+
+        console.log('[Upscale Carousel] Request:', { user_id, carousel_id });
+
+        // Валидация
+        if (!user_id || !carousel_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required fields'
+          });
+        }
+
+        // Получаем карусель из БД
+        const supabase = getSupabaseClient();
+        const { data: carousel, error: carouselError } = await supabase
+          .from('generated_creatives')
+          .select('*')
+          .eq('id', carousel_id)
+          .eq('user_id', user_id)
+          .eq('creative_type', 'carousel')
+          .single();
+
+        if (carouselError || !carousel) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Carousel not found'
+          });
+        }
+
+        const carouselData = carousel.carousel_data as CarouselCard[];
+
+        // Загружаем существующие 2K изображения
+        const images2K: string[] = [];
+        const prompts: string[] = [];
+
+        for (const card of carouselData) {
+          if (!card.image_url) continue;
+
+          const response = await fetch(card.image_url);
+          const buffer = await response.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString('base64');
+          images2K.push(base64);
+
+          // Создаем простой промпт для upscale (сохраняем стиль)
+          prompts.push(`Premium минималистичный рекламный креатив с текстом: "${card.text}"`);
+        }
+
+        // Upscale всех изображений
+        const images4K = await upscaleCarouselTo4K(images2K, prompts);
+
+        // Загружаем 4K версии в Storage
+        for (let i = 0; i < images4K.length; i++) {
+          const base64Image = images4K[i];
+          const imageBuffer = Buffer.from(base64Image, 'base64');
+
+          const timestamp = Date.now();
+          const randomStr = Math.random().toString(36).substring(7);
+          const fileName = `creatives/${user_id}/carousel_${timestamp}_card${i + 1}_4k_${randomStr}.png`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('creo')
+            .upload(fileName, imageBuffer, {
+              contentType: 'image/png',
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error(`[Upscale Carousel] Upload error for card ${i + 1}:`, uploadError);
+            continue;
+          }
+
+          const { data: urlData } = supabase.storage
+            .from('creo')
+            .getPublicUrl(fileName);
+
+          carouselData[i].image_url_4k = urlData.publicUrl;
+        }
+
+        // Обновляем БД
+        const { error: updateError } = await supabase
+          .from('generated_creatives')
+          .update({ carousel_data: carouselData })
+          .eq('id', carousel_id);
+
+        if (updateError) {
+          console.error('[Upscale Carousel] Failed to update carousel:', updateError);
+        }
+
+        const response: UpscaleCarouselResponse = {
+          success: true,
+          carousel_data: carouselData
+        };
+
+        console.log('[Upscale Carousel] Success');
+        return reply.send(response);
+
+      } catch (error: any) {
+        console.error('[Upscale Carousel] Error:', error);
+        return reply.status(500).send({
+          success: false,
+          error: error.message || 'Failed to upscale carousel'
+        });
+      }
+    }
+  );
+}

@@ -7,12 +7,15 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle, Upload, X, Edit, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useDirections } from '@/hooks/useDirections';
 import { creativesApi } from '@/services/creativesApi';
+import { CarouselTab } from '@/components/creatives/CarouselTab';
+import { VideoScriptsTab } from '@/components/creatives/VideoScriptsTab';
 
 interface CreativeTexts {
   offer: string;
@@ -657,13 +660,22 @@ const CreativeGeneration = () => {
 
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
-              <Header onOpenDatePicker={handleOpenDatePicker} />
+      <Header onOpenDatePicker={handleOpenDatePicker} />
       <div className="w-full px-4 py-8 pt-[76px] max-w-full overflow-x-hidden">
         <div className="max-w-3xl lg:max-w-6xl mx-auto w-full">
-          <PageHero 
-            title="Генерация Креативов"
-            subtitle="Создавайте креативы с помощью AI"
+          <PageHero
+            title="Генерация креативов"
+            subtitle="Создавайте профессиональные креативы для Instagram с помощью AI"
           />
+
+          <Tabs defaultValue="images" className="w-full mt-6">
+            <TabsList className="grid w-full grid-cols-3 mb-6">
+              <TabsTrigger value="images">Картинки</TabsTrigger>
+              <TabsTrigger value="carousels">Карусели</TabsTrigger>
+              <TabsTrigger value="video-scripts">Видео-сценарии</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="images" className="mt-0">
           
           {/* Предупреждение, если промпт не настроен */}
           {!userPrompt && userId && (
@@ -1072,6 +1084,21 @@ const CreativeGeneration = () => {
                     </Card>
                   )}
           </div>
+            </TabsContent>
+
+            <TabsContent value="carousels" className="mt-0">
+              <CarouselTab
+                userId={userId}
+                creativeGenerationsAvailable={creativeGenerationsAvailable}
+                setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
+                directions={directions}
+              />
+            </TabsContent>
+
+            <TabsContent value="video-scripts" className="mt-0">
+              <VideoScriptsTab />
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
 

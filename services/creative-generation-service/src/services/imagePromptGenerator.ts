@@ -3,9 +3,13 @@ import pino from 'pino';
 
 const logger = pino({ name: 'imagePromptGenerator' });
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+function getOpenAIClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY must be set in environment variables');
+  }
+  return new OpenAI({ apiKey });
+}
 
 const systemPromptImageGenerator = `
 Ты — эксперт по созданию промптов для генерации рекламных изображений с помощью моделей типа Gemini / DALL·E / Midjourney.
@@ -336,7 +340,8 @@ ${textsSection}
 `;
 
   try {
-    const response = await openai.chat.completions.create({
+    const client = getOpenAIClient();
+    const response = await client.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         { role: 'system', content: systemPromptImageGenerator },

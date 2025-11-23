@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import dotenv from 'dotenv';
 import { textsRoutes } from './routes/texts';
 import { imageRoutes } from './routes/image';
+import carouselRoutes from './routes/carousel';
 import { initializeOpenAI } from './services/openai'; // OpenAI для текстов
 import { initializeGeminiImageAPI } from './services/gemini-image'; // Gemini для изображений
 
@@ -36,6 +37,7 @@ app.register(cors, {
 // Регистрируем routes
 app.register(textsRoutes);
 app.register(imageRoutes);
+app.register(carouselRoutes);
 
 // Root endpoint
 app.get('/', async (request, reply) => {
@@ -51,7 +53,15 @@ app.get('/', async (request, reply) => {
         'POST /generate-cta'
       ],
       image: [
-        'POST /generate-creative'
+        'POST /generate-creative',
+        'POST /upscale-to-4k'
+      ],
+      carousel: [
+        'POST /generate-carousel-texts',
+        'POST /regenerate-carousel-card-text',
+        'POST /generate-carousel',
+        'POST /regenerate-carousel-card',
+        'POST /upscale-carousel-to-4k'
       ],
       health: [
         'GET /health'

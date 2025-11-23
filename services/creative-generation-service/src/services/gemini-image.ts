@@ -1,13 +1,18 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { generateImagePrompt } from './imagePromptGenerator';
 
-const apiKey = process.env.GEMINI_API_KEY;
+let genAI: GoogleGenerativeAI | null = null;
 
-if (!apiKey) {
-  throw new Error('GEMINI_API_KEY must be set in environment variables');
+function getGeminiClient(): GoogleGenerativeAI {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY must be set in environment variables');
+    }
+    genAI = new GoogleGenerativeAI(apiKey);
+  }
+  return genAI;
 }
-
-const genAI = new GoogleGenerativeAI(apiKey);
 
 /**
  * Генерация изображения через Gemini 3 Pro Image Preview
@@ -60,7 +65,8 @@ export async function generateCreativeImage(
     console.log('[Gemini] Has reference image:', hasReferenceImage);
 
     // Используем Gemini 3 Pro Image Preview для генерации изображений
-    const model = genAI.getGenerativeModel({
+    const client = getGeminiClient();
+    const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
 
@@ -163,7 +169,8 @@ export async function upscaleImageTo4K(
   try {
     console.log('[Gemini Upscale] Starting image upscale to 4K...');
 
-    const model = genAI.getGenerativeModel({
+    const client = getGeminiClient();
+    const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
 

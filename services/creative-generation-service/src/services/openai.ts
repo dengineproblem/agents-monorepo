@@ -1,16 +1,20 @@
 import OpenAI from 'openai';
 import { buildImagePrompt } from './prompts';
 
-const apiKey = process.env.OPENAI_API_KEY;
 const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
-if (!apiKey) {
-  throw new Error('OPENAI_API_KEY must be set in environment variables');
-}
+let openai: OpenAI;
 
-const openai = new OpenAI({
-  apiKey: apiKey,
-});
+function getOpenAIClient(): OpenAI {
+  if (!openai) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY must be set in environment variables');
+    }
+    openai = new OpenAI({ apiKey });
+  }
+  return openai;
+}
 
 /**
  * Генерация текста через OpenAI
@@ -53,8 +57,9 @@ export async function generateText(
     if (options?.seed !== undefined) {
       requestParams.seed = options.seed;
     }
-    
-    const completion = await openai.chat.completions.create(requestParams);
+
+    const client = getOpenAIClient();
+    const completion = await client.chat.completions.create(requestParams);
     
     console.log('[OpenAI] ===== ПОЛНЫЙ ОТВЕТ ОТ OPENAI =====');
     console.log('[OpenAI] completion.id:', completion.id);
@@ -133,8 +138,9 @@ Generate a beautiful background that complements these texts but DO NOT include 
     
     console.log('[OpenAI] Generating background image with DALL-E 3...');
     console.log('[OpenAI] Note: Text overlay will need to be added separately');
-    
-    const response = await openai.images.generate({
+
+    const client = getOpenAIClient();
+    const response = await client.images.generate({
       model: 'dall-e-3',
       prompt: backgroundPrompt,
       n: 1,
@@ -172,9 +178,10 @@ export async function initializeOpenAI(): Promise<void> {
     console.log('[OpenAI] Initializing API...');
     console.log('[OpenAI] Model configured:', model);
     console.log('[OpenAI] API initialized successfully');
-    
+
     // Проверяем доступность API простым запросом
-    await openai.models.list();
+    const client = getOpenAIClient();
+    await client.models.list();
     console.log('[OpenAI] API connection verified');
   } catch (error: any) {
     console.error('[OpenAI] Failed to initialize API:', error);
