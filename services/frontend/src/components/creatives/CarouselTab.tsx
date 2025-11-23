@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
 import type { CarouselCard } from '@/types/carousel';
@@ -41,6 +41,11 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   // State для шага 4: Создание креатива
   const [selectedDirectionId, setSelectedDirectionId] = useState('');
   const [isCreatingCreative, setIsCreatingCreative] = useState(false);
+
+  // State для перегенерации отдельной карточки
+  const [regeneratingCardIndex, setRegeneratingCardIndex] = useState<number | null>(null);
+  const [cardRegenerationPrompts, setCardRegenerationPrompts] = useState<{[key: number]: string}>({});
+  const [cardRegenerationImages, setCardRegenerationImages] = useState<{[key: number]: string}>({});
 
   // Генерация текстов для карточек
   const handleGenerateTexts = async () => {
@@ -177,6 +182,74 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     }
   };
 
+  // Перегенерация отдельной карточки
+  const handleRegenerateCard = async (cardIndex: number) => {
+    if (!userId || !generatedCarouselId) return;
+
+    setRegeneratingCardIndex(cardIndex);
+    try {
+      const customPrompt = cardRegenerationPrompts[cardIndex] || undefined;
+      const referenceImage = cardRegenerationImages[cardIndex] || undefined;
+
+      const response = await carouselApi.regenerateCard({
+        user_id: userId,
+        carousel_id: generatedCarouselId,
+        card_index: cardIndex,
+        custom_prompt: customPrompt,
+        reference_image: referenceImage
+      });
+
+      if (response.success && response.card_data) {
+        // Обновляем конкретную карточку
+        const updatedCards = [...carouselCards];
+        updatedCards[cardIndex] = response.card_data;
+        setCarouselCards(updatedCards);
+
+        // Обновляем доступные генерации
+        if (response.generations_remaining !== undefined) {
+          setCreativeGenerationsAvailable(response.generations_remaining);
+        }
+
+        // Очищаем промпт и изображение после успешной регенерации
+        const newPrompts = {...cardRegenerationPrompts};
+        delete newPrompts[cardIndex];
+        setCardRegenerationPrompts(newPrompts);
+
+        const newImages = {...cardRegenerationImages};
+        delete newImages[cardIndex];
+        setCardRegenerationImages(newImages);
+
+        toast.success(`Карточка ${cardIndex + 1} перегенерирована!`);
+      } else {
+        toast.error(response.error || 'Ошибка перегенерации карточки');
+      }
+    } catch (error) {
+      console.error('Error regenerating card:', error);
+      toast.error('Ошибка при перегенерации карточки');
+    } finally {
+      setRegeneratingCardIndex(null);
+    }
+  };
+
+  // Upload референсного изображения для перегенерации
+  const handleCardRegenerationImageUpload = (cardIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      const base64Data = base64.split(',')[1];
+
+      setCardRegenerationImages({
+        ...cardRegenerationImages,
+        [cardIndex]: base64Data
+      });
+      toast.success('Референсное изображение загружено');
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Скачивание всех картинок
   const handleDownloadAll = async () => {
     if (!userId || !generatedCarouselId) return;
@@ -237,10 +310,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
   return (
     <div className="space-y-6 py-6">
-      {/* Шаг 1: Ввод идеи и выбор количества */}
+      {/* Ввод идеи карусели */}
       <Card>
         <CardHeader>
-          <CardTitle>Шаг 1: Опишите идею карусели</CardTitle>
+          <CardTitle>Идея карусели</CardTitle>
           <CardDescription>
             Введите общую идею, и AI создаст связанный storytelling из нескольких карточек
           </CardDescription>
@@ -298,223 +371,269 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         </CardContent>
       </Card>
 
-      {/* Шаг 2: Редактирование текстов карточек */}
+      {/* Редактирование карточек */}
       {carouselCards.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>
-              Шаг 2: Редактирование карточек ({currentCardIndex + 1}/{carouselCards.length})
+              {hasGeneratedImages ? 'Карусель' : 'Редактирование карточек'} ({currentCardIndex + 1}/{carouselCards.length})
             </CardTitle>
             <CardDescription>
-              Отредактируйте тексты, добавьте кастомные промпты или референсные изображения
+              {hasGeneratedImages
+                ? 'Просмотрите и отредактируйте готовые карточки карусели'
+                : 'Отредактируйте тексты, добавьте кастомные промпты или референсные изображения'
+              }
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Навигация по карточкам */}
-            <div className="flex items-center gap-4">
+          <CardContent className="space-y-6">
+            {/* Карточка с навигацией */}
+            <div className="flex items-center justify-center gap-6">
+              {/* Кнопка назад */}
               <Button
-                size="sm"
+                size="icon"
                 variant="outline"
                 onClick={() => setCurrentCardIndex(Math.max(0, currentCardIndex - 1))}
                 disabled={currentCardIndex === 0}
+                className="flex-shrink-0"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
 
-              <div className="flex-1 flex gap-2 justify-center">
-                {carouselCards.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setCurrentCardIndex(i)}
-                    className={`w-3 h-3 rounded-full transition-colors ${
-                      i === currentCardIndex ? 'bg-primary' : 'bg-gray-300 hover:bg-gray-400'
-                    }`}
-                    title={`Карточка ${i + 1}`}
-                  />
-                ))}
+              {/* Карточка 4:5 */}
+              <div className="w-full max-w-md">
+                <div className="space-y-3">
+                  {/* Карточка, имитирующая пост 4:5 */}
+                  <div className="relative aspect-[4/5] bg-gradient-to-br from-muted/80 to-muted border border-border rounded-lg overflow-hidden">
+                    {/* Если есть изображение - показываем его */}
+                    {hasGeneratedImages && carouselCards[currentCardIndex].image_url ? (
+                      <img
+                        src={carouselCards[currentCardIndex].image_url}
+                        alt={`Карточка ${currentCardIndex + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      /* Иначе показываем текстовое поле */
+                      <div className="w-full h-full flex items-center justify-center p-8">
+                        <Textarea
+                          value={carouselCards[currentCardIndex].text}
+                          onChange={(e) => updateCardText(currentCardIndex, e.target.value)}
+                          disabled={hasGeneratedImages}
+                          className="w-full h-full resize-none bg-transparent border-none text-center text-lg font-medium leading-relaxed focus-visible:ring-0 focus-visible:ring-offset-0"
+                          placeholder="Текст карточки..."
+                        />
+                      </div>
+                    )}
+
+                    {/* Бейдж с номером карточки */}
+                    <div className="absolute top-3 left-3">
+                      <Badge variant="secondary">
+                        {currentCardIndex + 1}
+                      </Badge>
+                    </div>
+
+                    {/* Бейдж хук/CTA */}
+                    <div className="absolute top-3 right-3">
+                      {currentCardIndex === 0 && <Badge variant="default">Хук</Badge>}
+                      {currentCardIndex === carouselCards.length - 1 && <Badge variant="default">CTA</Badge>}
+                    </div>
+                  </div>
+
+                  {/* Точки-индикаторы под карточкой */}
+                  <div className="flex gap-2 justify-center">
+                    {carouselCards.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setCurrentCardIndex(i)}
+                        className={`w-2 h-2 rounded-full transition-colors ${
+                          i === currentCardIndex ? 'bg-primary' : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
+                        }`}
+                        title={`Карточка ${i + 1}`}
+                      />
+                    ))}
+                  </div>
+                </div>
               </div>
 
+              {/* Кнопка вперед */}
               <Button
-                size="sm"
+                size="icon"
                 variant="outline"
                 onClick={() => setCurrentCardIndex(Math.min(carouselCards.length - 1, currentCardIndex + 1))}
                 disabled={currentCardIndex === carouselCards.length - 1}
+                className="flex-shrink-0"
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
 
-            {/* Текущая карточка */}
-            <div className="space-y-4 border rounded-lg p-6 bg-gray-50">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <Label htmlFor={`card-text-${currentCardIndex}`}>
-                    Текст карточки {currentCardIndex + 1}
-                    {currentCardIndex === 0 && <Badge className="ml-2" variant="secondary">Хук</Badge>}
-                    {currentCardIndex === carouselCards.length - 1 && <Badge className="ml-2" variant="secondary">CTA</Badge>}
-                  </Label>
+            {/* Инструменты редактирования под карточкой */}
+            <div className="max-w-md mx-auto space-y-3">
+              {hasGeneratedImages ? (
+                /* Инструменты для перегенерации изображения */
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleRegenerateCard(currentCardIndex)}
+                    disabled={regeneratingCardIndex === currentCardIndex}
+                    className="w-full"
+                  >
+                    {regeneratingCardIndex === currentCardIndex ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Перегенерировать карточку
+                  </Button>
+
+                  <div>
+                    <Label htmlFor={`regen-prompt-${currentCardIndex}`} className="text-xs">
+                      Дополнительный промпт (опционально)
+                    </Label>
+                    <Input
+                      id={`regen-prompt-${currentCardIndex}`}
+                      value={cardRegenerationPrompts[currentCardIndex] || ''}
+                      onChange={(e) => setCardRegenerationPrompts({
+                        ...cardRegenerationPrompts,
+                        [currentCardIndex]: e.target.value
+                      })}
+                      placeholder="Например: добавь больше контраста..."
+                      disabled={regeneratingCardIndex === currentCardIndex}
+                      className="mt-1"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor={`regen-image-${currentCardIndex}`} className="text-xs">
+                      Референсное изображение (опционально)
+                    </Label>
+                    <Input
+                      id={`regen-image-${currentCardIndex}`}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleCardRegenerationImageUpload(currentCardIndex, e)}
+                      disabled={regeneratingCardIndex === currentCardIndex}
+                      className="mt-1"
+                    />
+                    {cardRegenerationImages[currentCardIndex] && (
+                      <p className="text-sm text-green-600 dark:text-green-400 mt-1">✓ Изображение загружено</p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                /* Инструменты для редактирования текста */
+                <>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleRegenerateCardText(currentCardIndex)}
-                    disabled={isRegeneratingText || hasGeneratedImages}
+                    disabled={isRegeneratingText}
+                    className="w-full"
                   >
                     {isRegeneratingText ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     ) : (
                       <Sparkles className="h-4 w-4 mr-2" />
                     )}
-                    Перегенерировать
+                    Перегенерировать текст
                   </Button>
-                </div>
-                <Textarea
-                  id={`card-text-${currentCardIndex}`}
-                  value={carouselCards[currentCardIndex].text}
-                  onChange={(e) => updateCardText(currentCardIndex, e.target.value)}
-                  rows={3}
-                  disabled={hasGeneratedImages}
-                />
-              </div>
 
-              <div>
-                <Label htmlFor={`custom-prompt-${currentCardIndex}`}>
-                  Дополнительный промпт (опционально)
-                </Label>
-                <Input
-                  id={`custom-prompt-${currentCardIndex}`}
-                  value={carouselCards[currentCardIndex].custom_prompt || ''}
-                  onChange={(e) => updateCardCustomPrompt(currentCardIndex, e.target.value)}
-                  placeholder="Например: добавь больше контраста..."
-                  disabled={hasGeneratedImages}
-                />
-              </div>
+                  <div>
+                    <Label htmlFor={`custom-prompt-${currentCardIndex}`} className="text-xs">
+                      Дополнительный промпт (опционально)
+                    </Label>
+                    <Input
+                      id={`custom-prompt-${currentCardIndex}`}
+                      value={carouselCards[currentCardIndex].custom_prompt || ''}
+                      onChange={(e) => updateCardCustomPrompt(currentCardIndex, e.target.value)}
+                      placeholder="Например: добавь больше контраста..."
+                      className="mt-1"
+                    />
+                  </div>
 
-              <div>
-                <Label htmlFor={`reference-image-${currentCardIndex}`}>
-                  Референсное изображение (опционально)
-                </Label>
-                <Input
-                  id={`reference-image-${currentCardIndex}`}
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handleReferenceImageUpload(currentCardIndex, e)}
-                  disabled={hasGeneratedImages}
-                />
-                {carouselCards[currentCardIndex].reference_image && (
-                  <p className="text-sm text-green-600 mt-1">✓ Изображение загружено</p>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Шаг 3: Генерация карусели */}
-      {carouselCards.length > 0 && !hasGeneratedImages && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Шаг 3: Генерация карусели</CardTitle>
-            <CardDescription>
-              Сгенерировать изображения для всех карточек
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-4">
-              <Badge variant="secondary">
-                Стоимость: {carouselCards.length} {carouselCards.length === 1 ? 'генерация' : carouselCards.length < 5 ? 'генерации' : 'генераций'}
-              </Badge>
-              <Badge variant={creativeGenerationsAvailable >= carouselCards.length ? "default" : "destructive"}>
-                Доступно: {creativeGenerationsAvailable}
-              </Badge>
-            </div>
-
-            <Button
-              onClick={handleGenerateCarousel}
-              disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
-              className="w-full"
-              size="lg"
-            >
-              {isGeneratingCarousel ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Генерация карусели... Это может занять несколько минут
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="mr-2 h-5 w-5" />
-                  Сгенерировать карусель
+                  <div>
+                    <Label htmlFor={`reference-image-${currentCardIndex}`} className="text-xs">
+                      Референсное изображение (опционально)
+                    </Label>
+                    <Input
+                      id={`reference-image-${currentCardIndex}`}
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleReferenceImageUpload(currentCardIndex, e)}
+                      className="mt-1"
+                    />
+                    {carouselCards[currentCardIndex].reference_image && (
+                      <p className="text-sm text-green-600 dark:text-green-400 mt-1">✓ Изображение загружено</p>
+                    )}
+                  </div>
                 </>
               )}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Шаг 4: Preview и действия */}
-      {hasGeneratedImages && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Preview карусели</CardTitle>
-            <CardDescription>
-              {carouselCards.length} {carouselCards.length === 1 ? 'карточка' : carouselCards.length < 5 ? 'карточки' : 'карточек'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Горизонтальная карусель */}
-            <div className="overflow-x-auto">
-              <div className="flex gap-4 pb-4">
-                {carouselCards.map((card, i) => (
-                  <div key={i} className="flex-shrink-0 w-[280px]">
-                    <div className="space-y-2">
-                      <div className="relative aspect-[9/16] bg-gray-100 rounded-lg overflow-hidden">
-                        <img
-                          src={card.image_url}
-                          alt={`Карточка ${i + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute top-2 left-2">
-                          <Badge variant="secondary">{i + 1}</Badge>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600 line-clamp-2">
-                        {card.text}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
 
-            {/* Действия */}
-            <div className="flex flex-col gap-4">
-              <Button onClick={handleDownloadAll} variant="outline" className="w-full">
-                <Download className="mr-2 h-4 w-4" />
-                Скачать все (4K)
-              </Button>
-
-              <div className="flex gap-2">
-                <Select value={selectedDirectionId} onValueChange={setSelectedDirectionId} disabled={!directions.length}>
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="Выберите направление" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {directions.map(d => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {/* Кнопка генерации и действия */}
+            {!hasGeneratedImages ? (
+              /* Показываем кнопку генерации, если картинок ещё нет */
+              <div className="max-w-md mx-auto space-y-4 pt-4 border-t border-border">
+                <div className="flex items-center gap-4 justify-center">
+                  <Badge variant="secondary">
+                    Стоимость: {carouselCards.length} {carouselCards.length === 1 ? 'генерация' : carouselCards.length < 5 ? 'генерации' : 'генераций'}
+                  </Badge>
+                  <Badge variant={creativeGenerationsAvailable >= carouselCards.length ? "default" : "destructive"}>
+                    Доступно: {creativeGenerationsAvailable}
+                  </Badge>
+                </div>
 
                 <Button
-                  onClick={handleCreateCreative}
-                  disabled={!selectedDirectionId || isCreatingCreative}
+                  onClick={handleGenerateCarousel}
+                  disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
+                  className="w-full"
+                  size="lg"
                 >
-                  {isCreatingCreative && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Создать креатив
+                  {isGeneratingCarousel ? (
+                    <>
+                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                      Генерация карусели... Это может занять несколько минут
+                    </>
+                  ) : (
+                    <>
+                      <ImageIcon className="mr-2 h-5 w-5" />
+                      Сгенерировать карусель
+                    </>
+                  )}
                 </Button>
               </div>
-            </div>
+            ) : (
+              /* Показываем действия после генерации */
+              <div className="max-w-md mx-auto space-y-3 pt-4 border-t border-border">
+                <Button onClick={handleDownloadAll} variant="outline" className="w-full">
+                  <Download className="mr-2 h-4 w-4" />
+                  Скачать все (4K)
+                </Button>
+
+                <div className="flex gap-2">
+                  <Select value={selectedDirectionId} onValueChange={setSelectedDirectionId} disabled={!directions.length}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Выберите направление" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {directions.map(d => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Button
+                    onClick={handleCreateCreative}
+                    disabled={!selectedDirectionId || isCreatingCreative}
+                  >
+                    {isCreatingCreative && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Создать креатив
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

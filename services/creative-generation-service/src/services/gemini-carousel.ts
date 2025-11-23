@@ -73,11 +73,11 @@ async function generateCarouselCard(
       }
     }
 
-    // Конфигурация для генерации в формате 9:16 для Instagram Reels/Stories
+    // Конфигурация для генерации в формате 4:5 для Instagram карусели
     const generationConfig = {
       responseModalities: ['IMAGE'],
       imageConfig: {
-        aspectRatio: '9:16',
+        aspectRatio: '4:5',
         imageSize: '2K'
       },
       temperature: 1.0,
