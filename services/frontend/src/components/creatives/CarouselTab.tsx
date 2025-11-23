@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
-import type { CarouselCard } from '@/types/carousel';
+import type { CarouselCard, CarouselVisualStyle } from '@/types/carousel';
 
 interface CarouselTabProps {
   userId: string | null;
@@ -35,6 +35,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [isRegeneratingText, setIsRegeneratingText] = useState(false);
 
   // State для шага 3: Генерация изображений
+  const [visualStyle, setVisualStyle] = useState<CarouselVisualStyle>('clean_minimal');
   const [isGeneratingCarousel, setIsGeneratingCarousel] = useState(false);
   const [generatedCarouselId, setGeneratedCarouselId] = useState('');
 
@@ -161,6 +162,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       const response = await carouselApi.generateCarousel({
         user_id: userId,
         carousel_texts: texts,
+        visual_style: visualStyle,
         custom_prompts: customPrompts,
         reference_images: referenceImages,
         direction_id: selectedDirectionId || undefined
@@ -196,7 +198,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         carousel_id: generatedCarouselId,
         card_index: cardIndex,
         custom_prompt: customPrompt,
-        reference_image: referenceImage
+        reference_image: referenceImage,
+        text: carouselCards[cardIndex].text
       });
 
       if (response.success && response.card_data) {
@@ -581,6 +584,27 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   <Badge variant={creativeGenerationsAvailable >= carouselCards.length ? "default" : "destructive"}>
                     Доступно: {creativeGenerationsAvailable}
                   </Badge>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="visual-style">Визуальный стиль карусели</Label>
+                  <Select value={visualStyle} onValueChange={(value) => setVisualStyle(value as CarouselVisualStyle)}>
+                    <SelectTrigger id="visual-style">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="clean_minimal">Чистый минимализм</SelectItem>
+                      <SelectItem value="story_illustration">Визуальный сторителлинг</SelectItem>
+                      <SelectItem value="photo_ugc">Живые фото (UGC)</SelectItem>
+                      <SelectItem value="asset_focus">Фокус на товаре/скриншоте</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {visualStyle === 'clean_minimal' && 'Универсальный стиль с акцентом на тексте и современным фоном'}
+                    {visualStyle === 'story_illustration' && 'Иллюстративный стиль для визуального рассказа истории'}
+                    {visualStyle === 'photo_ugc' && 'Реалистичные фото людей и сцен из жизни бизнеса'}
+                    {visualStyle === 'asset_focus' && 'Фокус на загруженном изображении товара или скриншоте'}
+                  </p>
                 </div>
 
                 <Button

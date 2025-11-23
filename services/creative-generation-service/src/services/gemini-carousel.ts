@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { generateCarouselCardPrompt } from './carouselPromptGenerator';
 import { upscaleImageTo4K } from './gemini-image';
+import { CarouselVisualStyle } from '../types';
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -21,6 +22,7 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param cardIndex - Индекс карточки (0-based)
  * @param totalCards - Общее количество карточек
  * @param userPrompt1 - PROMPT1 пользователя
+ * @param visualStyle - Визуальный стиль карусели
  * @param customPrompt - Дополнительный промпт от пользователя (опционально)
  * @param referenceImages - Массив референсных изображений для передачи в Gemini (base64)
  * @returns Base64 изображение
@@ -30,6 +32,7 @@ async function generateCarouselCard(
   cardIndex: number,
   totalCards: number,
   userPrompt1: string,
+  visualStyle: CarouselVisualStyle,
   customPrompt?: string,
   referenceImages?: string[]
 ): Promise<string> {
@@ -42,6 +45,7 @@ async function generateCarouselCard(
       cardText,
       cardIndex,
       totalCards,
+      visualStyle,
       customPrompt
     );
 
@@ -132,6 +136,7 @@ async function generateCarouselCard(
  *
  * @param carouselTexts - Массив текстов для карточек
  * @param userPrompt1 - PROMPT1 пользователя
+ * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompts - Опциональные кастомные промпты для каждой карточки
  * @param referenceImages - Опциональные референсные изображения для каждой карточки (base64)
  * @returns Массив base64 изображений
@@ -139,6 +144,7 @@ async function generateCarouselCard(
 export async function generateCarouselImages(
   carouselTexts: string[],
   userPrompt1: string,
+  visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompts?: (string | null)[],
   referenceImages?: (string | null)[]
 ): Promise<string[]> {
@@ -179,6 +185,7 @@ export async function generateCarouselImages(
         i,
         totalCards,
         userPrompt1,
+        visualStyle,
         customPrompt,
         cardReferenceImages.length > 0 ? cardReferenceImages : undefined
       );
@@ -206,6 +213,7 @@ export async function generateCarouselImages(
  * @param cardIndex - Индекс карточки (0-based)
  * @param existingImages - Существующие изображения карусели (base64)
  * @param userPrompt1 - PROMPT1 пользователя
+ * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompt - Дополнительный промпт от пользователя
  * @param userReferenceImage - Дополнительное референсное изображение от пользователя (base64)
  * @returns Base64 изображение
@@ -215,6 +223,7 @@ export async function regenerateCarouselCard(
   cardIndex: number,
   existingImages: string[],
   userPrompt1: string,
+  visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompt?: string,
   userReferenceImage?: string
 ): Promise<string> {
@@ -243,6 +252,7 @@ export async function regenerateCarouselCard(
       cardIndex,
       totalCards,
       userPrompt1,
+      visualStyle,
       customPrompt,
       cardReferenceImages.length > 0 ? cardReferenceImages : undefined
     );

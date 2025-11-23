@@ -149,11 +149,12 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/generate-carousel',
     async (request: FastifyRequest<{ Body: GenerateCarouselRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, carousel_texts, custom_prompts, reference_images, direction_id } = request.body;
+        const { user_id, carousel_texts, visual_style, custom_prompts, reference_images, direction_id } = request.body;
 
         console.log('[Generate Carousel] Request:', {
           user_id,
           cards_count: carousel_texts.length,
+          visual_style: visual_style || 'clean_minimal',
           direction_id
         });
 
@@ -196,6 +197,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const images = await generateCarouselImages(
           carousel_texts,
           userPrompt1,
+          visual_style || 'clean_minimal',
           custom_prompts,
           reference_images
         );
@@ -250,6 +252,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
             direction_id: direction_id || null,
             creative_type: 'carousel',
             carousel_data: uploadedCards,
+            visual_style: visual_style || 'clean_minimal',
             status: 'generated'
           })
           .select()
@@ -378,12 +381,14 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // Перегенерируем карточку
+        // Перегенерируем карточку с использованием сохраненного visual_style
+        const visualStyle = carousel.visual_style || 'clean_minimal';
         const newImage = await regenerateCarouselCard(
           text,
           card_index,
           existingImages,
           userPrompt1,
+          visualStyle,
           custom_prompt,
           reference_image
         );
@@ -447,7 +452,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
         const response: RegenerateCarouselCardResponse = {
           success: true,
-          image_url: newImageUrl,
+          card_data: carouselData[card_index],
           generations_remaining: user.creative_generations_available - 1
         };
 

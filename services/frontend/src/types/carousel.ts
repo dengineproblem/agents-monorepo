@@ -1,5 +1,11 @@
 // Типы для работы с каруселями
 
+export type CarouselVisualStyle =
+  | 'clean_minimal'
+  | 'story_illustration'
+  | 'photo_ugc'
+  | 'asset_focus';
+
 export interface CarouselCard {
   order: number;
   text: string;
@@ -38,6 +44,7 @@ export interface RegenerateCarouselCardTextResponse {
 export interface GenerateCarouselRequest {
   user_id: string;
   carousel_texts: string[];
+  visual_style?: CarouselVisualStyle;
   custom_prompts?: (string | null)[];
   reference_images?: (string | null)[];
   direction_id?: string;
@@ -62,7 +69,7 @@ export interface RegenerateCarouselCardRequest {
 
 export interface RegenerateCarouselCardResponse {
   success: boolean;
-  image_url?: string;
+  card_data?: CarouselCard;
   generations_remaining?: number;
   error?: string;
 }
