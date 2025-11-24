@@ -5,8 +5,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw, X, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
 import type { CarouselCard, CarouselVisualStyle } from '@/types/carousel';
@@ -49,12 +50,131 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [cardRegenerationPrompts, setCardRegenerationPrompts] = useState<{[key: number]: string}>({});
   const [cardRegenerationImages, setCardRegenerationImages] = useState<{[key: number]: string}>({});
 
+  // State для множественных промптов и референсов
+  interface GlobalPrompt {
+    id: string;
+    text: string;
+    appliedToCards: number[]; // индексы карточек, к которым применён
+  }
+
+  interface GlobalReference {
+    id: string;
+    base64: string;
+    appliedToCards: number[]; // индексы карточек, к которым применён
+  }
+
+  const [globalPrompts, setGlobalPrompts] = useState<GlobalPrompt[]>([]);
+  const [globalReferences, setGlobalReferences] = useState<GlobalReference[]>([]);
+
   // State для отслеживания загрузки изображений
   const [loadedImages, setLoadedImages] = useState<{[key: number]: boolean}>({});
 
   // State для отслеживания прогресса скачивания
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
+
+  // Управление глобальными промптами
+  const addGlobalPrompt = () => {
+    const newPrompt: GlobalPrompt = {
+      id: `prompt_${Date.now()}`,
+      text: '',
+      appliedToCards: []
+    };
+    setGlobalPrompts([...globalPrompts, newPrompt]);
+  };
+
+  const updateGlobalPromptText = (promptId: string, text: string) => {
+    setGlobalPrompts(globalPrompts.map(p =>
+      p.id === promptId ? { ...p, text } : p
+    ));
+  };
+
+  const togglePromptForCard = (promptId: string, cardIndex: number) => {
+    setGlobalPrompts(globalPrompts.map(p => {
+      if (p.id === promptId) {
+        // Если карточка уже применена к этому промпту - убираем
+        if (p.appliedToCards.includes(cardIndex)) {
+          return { ...p, appliedToCards: p.appliedToCards.filter(i => i !== cardIndex) };
+        } else {
+          // Иначе добавляем, но сначала убираем эту карточку из всех других промптов (1 промпт на карточку)
+          const updatedPrompts = globalPrompts.map(otherP => ({
+            ...otherP,
+            appliedToCards: otherP.appliedToCards.filter(i => i !== cardIndex)
+          }));
+          // Обновляем текущий промпт
+          const currentPromptIndex = updatedPrompts.findIndex(pr => pr.id === promptId);
+          updatedPrompts[currentPromptIndex].appliedToCards.push(cardIndex);
+          setGlobalPrompts(updatedPrompts);
+          return updatedPrompts[currentPromptIndex];
+        }
+      }
+      return p;
+    }));
+  };
+
+  const removeGlobalPrompt = (promptId: string) => {
+    setGlobalPrompts(globalPrompts.filter(p => p.id !== promptId));
+  };
+
+  // Управление глобальными референсами
+  const addGlobalReference = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        const newRef: GlobalReference = {
+          id: `ref_${Date.now()}`,
+          base64,
+          appliedToCards: Array.from({ length: carouselCards.length }, (_, i) => i) // По умолчанию ко всем
+        };
+        setGlobalReferences([...globalReferences, newRef]);
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
+
+  const toggleReferenceForCard = (refId: string, cardIndex: number) => {
+    setGlobalReferences(globalReferences.map(r => {
+      if (r.id === refId) {
+        if (r.appliedToCards.includes(cardIndex)) {
+          return { ...r, appliedToCards: r.appliedToCards.filter(i => i !== cardIndex) };
+        } else {
+          return { ...r, appliedToCards: [...r.appliedToCards, cardIndex] };
+        }
+      }
+      return r;
+    }));
+  };
+
+  const removeGlobalReference = (refId: string) => {
+    setGlobalReferences(globalReferences.filter(r => r.id !== refId));
+  };
+
+  // Вспомогательные функции для сборки данных из глобальных промптов/референсов
+  const buildCustomPromptsArray = (): (string | null)[] => {
+    return carouselCards.map((_, cardIndex) => {
+      // Находим промпт, который применён к этой карточке
+      const applicablePrompt = globalPrompts.find(p => p.appliedToCards.includes(cardIndex));
+      return applicablePrompt?.text || null;
+    });
+  };
+
+  const buildReferenceImagesArray = (): (string | null)[] => {
+    return carouselCards.map((_, cardIndex) => {
+      // Находим все референсы, которые применены к этой карточке
+      const applicableRefs = globalReferences.filter(r => r.appliedToCards.includes(cardIndex));
+      // Если есть хотя бы один - возвращаем первый (можно расширить логику для нескольких)
+      // Пока API поддерживает один референс на карточку, берём первый
+      return applicableRefs.length > 0 ? applicableRefs[0].base64 : null;
+    });
+  };
 
   // Генерация текстов для карточек
   const handleGenerateTexts = async () => {
@@ -98,31 +218,6 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setCarouselCards(updated);
   };
 
-  // Обновление кастомного промпта карточки
-  const updateCardCustomPrompt = (index: number, prompt: string) => {
-    const updated = [...carouselCards];
-    updated[index].custom_prompt = prompt;
-    setCarouselCards(updated);
-  };
-
-  // Upload референсного изображения
-  const handleReferenceImageUpload = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const base64 = reader.result as string;
-      const base64Data = base64.split(',')[1]; // Убираем data:image/...;base64,
-
-      const updated = [...carouselCards];
-      updated[index].reference_image = base64Data;
-      setCarouselCards(updated);
-      toast.success('Изображение загружено');
-    };
-    reader.readAsDataURL(file);
-  };
-
   // Перегенерация текста одной карточки
   const handleRegenerateCardText = async (index: number) => {
     if (!userId || !carouselCards.length) return;
@@ -162,10 +257,42 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     }
 
     setIsGeneratingCarousel(true);
+
+    // Прогресс-тост с обновлениями
+    const totalCards = carouselCards.length;
+    let currentProgress = 0;
+    let progressToastId: string | number | undefined;
+
+    // Первый этап: генерация промптов
+    progressToastId = toast.loading('🎨 Генерация промптов для изображений...');
+
+    // Таймер для имитации прогресса (примерно 5-10 секунд на промпты)
+    const promptTimer = setTimeout(() => {
+      if (progressToastId) {
+        toast.loading(`🖼️ Генерация изображения 1 из ${totalCards}...`, { id: progressToastId });
+        currentProgress = 1;
+      }
+    }, 8000);
+
+    // Таймеры для имитации прогресса генерации изображений
+    const imageTimers: NodeJS.Timeout[] = [];
+    const averageTimePerImage = totalCards <= 3 ? 25000 : totalCards <= 5 ? 20000 : 15000;
+
+    for (let i = 2; i <= totalCards; i++) {
+      const timer = setTimeout(() => {
+        if (progressToastId && currentProgress < totalCards) {
+          currentProgress = i;
+          toast.loading(`🖼️ Генерация изображения ${i} из ${totalCards}...`, { id: progressToastId });
+        }
+      }, 8000 + (i - 1) * averageTimePerImage);
+      imageTimers.push(timer);
+    }
+
     try {
       const texts = carouselCards.map(c => c.text);
-      const customPrompts = carouselCards.map(c => c.custom_prompt || null);
-      const referenceImages = carouselCards.map(c => c.reference_image || null);
+      // Используем глобальные промпты/референсы из UI
+      const customPrompts = buildCustomPromptsArray();
+      const referenceImages = buildReferenceImagesArray();
 
       const response = await carouselApi.generateCarousel({
         user_id: userId,
@@ -176,20 +303,137 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         direction_id: selectedDirectionId || undefined
       });
 
+      // Очищаем все таймеры
+      clearTimeout(promptTimer);
+      imageTimers.forEach(timer => clearTimeout(timer));
+
       if (response.success && response.carousel_data) {
         setGeneratedCarouselId(response.carousel_id!);
         setCarouselCards(response.carousel_data);
         setCreativeGenerationsAvailable(response.generations_remaining!);
-        toast.success('Карусель успешно сгенерирована!');
+
+        if (progressToastId) {
+          toast.success(`✅ Карусель из ${totalCards} карточек успешно сгенерирована!`, { id: progressToastId });
+        }
       } else {
-        toast.error(response.error || 'Ошибка генерации карусели');
+        if (progressToastId) {
+          toast.error(response.error || 'Ошибка генерации карусели', { id: progressToastId });
+        }
       }
     } catch (error) {
       console.error('Error generating carousel:', error);
-      toast.error('Ошибка при генерации карусели');
+
+      // Очищаем все таймеры
+      clearTimeout(promptTimer);
+      imageTimers.forEach(timer => clearTimeout(timer));
+
+      if (progressToastId) {
+        toast.error('Ошибка при генерации карусели', { id: progressToastId });
+      }
     } finally {
       setIsGeneratingCarousel(false);
     }
+  };
+
+  // Перегенерация всей карусели (с теми же текстами, но новым стилем/промптами)
+  const handleRegenerateAllCarousel = async () => {
+    if (!userId) return;
+
+    if (creativeGenerationsAvailable < carouselCards.length) {
+      toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
+      return;
+    }
+
+    setIsGeneratingCarousel(true);
+
+    // Прогресс-тост с обновлениями
+    const totalCards = carouselCards.length;
+    let currentProgress = 0;
+    let progressToastId: string | number | undefined;
+
+    // Первый этап: генерация промптов
+    progressToastId = toast.loading('🎨 Генерация промптов для изображений...');
+
+    // Таймер для имитации прогресса (примерно 5-10 секунд на промпты)
+    const promptTimer = setTimeout(() => {
+      if (progressToastId) {
+        toast.loading(`🖼️ Генерация изображения 1 из ${totalCards}...`, { id: progressToastId });
+        currentProgress = 1;
+      }
+    }, 8000);
+
+    // Таймеры для имитации прогресса генерации изображений
+    const imageTimers: NodeJS.Timeout[] = [];
+    const averageTimePerImage = totalCards <= 3 ? 25000 : totalCards <= 5 ? 20000 : 15000;
+
+    for (let i = 2; i <= totalCards; i++) {
+      const timer = setTimeout(() => {
+        if (progressToastId && currentProgress < totalCards) {
+          currentProgress = i;
+          toast.loading(`🖼️ Генерация изображения ${i} из ${totalCards}...`, { id: progressToastId });
+        }
+      }, 8000 + (i - 1) * averageTimePerImage);
+      imageTimers.push(timer);
+    }
+
+    try {
+      const texts = carouselCards.map(c => c.text);
+      // Используем глобальные промпты/референсы из UI
+      const customPrompts = buildCustomPromptsArray();
+      const referenceImages = buildReferenceImagesArray();
+
+      const response = await carouselApi.generateCarousel({
+        user_id: userId,
+        carousel_texts: texts,
+        visual_style: visualStyle,
+        custom_prompts: customPrompts,
+        reference_images: referenceImages,
+        direction_id: selectedDirectionId || undefined
+      });
+
+      // Очищаем все таймеры
+      clearTimeout(promptTimer);
+      imageTimers.forEach(timer => clearTimeout(timer));
+
+      if (response.success && response.carousel_data) {
+        setGeneratedCarouselId(response.carousel_id!);
+        setCarouselCards(response.carousel_data);
+        setCreativeGenerationsAvailable(response.generations_remaining!);
+
+        if (progressToastId) {
+          toast.success(`✅ Карусель из ${totalCards} карточек успешно перегенерирована!`, { id: progressToastId });
+        }
+      } else {
+        if (progressToastId) {
+          toast.error(response.error || 'Ошибка перегенерации карусели', { id: progressToastId });
+        }
+      }
+    } catch (error) {
+      console.error('Error regenerating all carousel:', error);
+
+      // Очищаем все таймеры
+      clearTimeout(promptTimer);
+      imageTimers.forEach(timer => clearTimeout(timer));
+
+      if (progressToastId) {
+        toast.error('Ошибка при перегенерации карусели', { id: progressToastId });
+      }
+    } finally {
+      setIsGeneratingCarousel(false);
+    }
+  };
+
+  // Сброс изображений (вернуться к редактированию текстов)
+  const handleResetImages = () => {
+    // Сбрасываем изображения, но сохраняем тексты и промпты
+    const resetCards = carouselCards.map(card => ({
+      ...card,
+      image_url: undefined,
+      image_url_4k: undefined
+    }));
+    setCarouselCards(resetCards);
+    setGeneratedCarouselId('');
+    toast.info('Изображения сброшены. Вы можете изменить параметры и перегенерировать.');
   };
 
   // Перегенерация отдельной карточки
@@ -268,22 +512,41 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setIsDownloading(true);
     setDownloadProgress({ current: 0, total: carouselCards.length });
 
-    toast.info('Подготовка к скачиванию...');
+    const totalCards = carouselCards.length;
+    let progressToastId: string | number | undefined;
 
     try {
       // Шаг 1: Upscale до 4K
-      toast.info(`Upscale до 4K... (0/${carouselCards.length})`);
+      progressToastId = toast.loading('🔄 Подготовка к апскейлу...');
+
+      // Таймеры для имитации прогресса апскейла (примерно 15-20 секунд на изображение)
+      const upscaleTimers: NodeJS.Timeout[] = [];
+      const averageTimePerUpscale = 18000; // 18 секунд на изображение
+
+      for (let i = 1; i <= totalCards; i++) {
+        const timer = setTimeout(() => {
+          if (progressToastId) {
+            toast.loading(`🔍 Апскейл изображения ${i} из ${totalCards} до 4K...`, { id: progressToastId });
+          }
+        }, i * averageTimePerUpscale);
+        upscaleTimers.push(timer);
+      }
 
       const response = await carouselApi.upscaleToThe4K({
         user_id: userId,
         carousel_id: generatedCarouselId
       });
 
+      // Очищаем таймеры апскейла
+      upscaleTimers.forEach(timer => clearTimeout(timer));
+
       if (response.success && response.carousel_data) {
         // Обновляем карточки с 4K URLs
         setCarouselCards(response.carousel_data);
 
-        toast.success('Upscale завершен! Создаём архив...');
+        if (progressToastId) {
+          toast.loading('📦 Создание архива...', { id: progressToastId });
+        }
 
         // Шаг 2: Создаём ZIP архив со всеми картинками
         const zip = new JSZip();
@@ -293,7 +556,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
           if (card.image_url_4k) {
             setDownloadProgress({ current: i + 1, total: response.carousel_data.length });
-            toast.info(`Добавление в архив: ${i + 1}/${response.carousel_data.length}`);
+
+            if (progressToastId) {
+              toast.loading(`📥 Загрузка изображения ${i + 1} из ${totalCards}...`, { id: progressToastId });
+            }
 
             // Загружаем изображение как blob
             const imageResponse = await fetch(card.image_url_4k);
@@ -305,7 +571,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         }
 
         // Генерируем ZIP файл
-        toast.info('Упаковка архива...');
+        if (progressToastId) {
+          toast.loading('🗜️ Упаковка архива...', { id: progressToastId });
+        }
         const zipBlob = await zip.generateAsync({ type: 'blob' });
 
         // Скачиваем архив одним файлом
@@ -318,13 +586,19 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
 
-        toast.success(`Архив с ${response.carousel_data.length} картинками успешно скачан!`);
+        if (progressToastId) {
+          toast.success(`✅ Архив с ${totalCards} картинками 4K успешно скачан!`, { id: progressToastId });
+        }
       } else {
-        toast.error(response.error || 'Ошибка upscale');
+        if (progressToastId) {
+          toast.error(response.error || 'Ошибка апскейла', { id: progressToastId });
+        }
       }
     } catch (error) {
       console.error('Error downloading:', error);
-      toast.error('Ошибка при скачивании');
+      if (progressToastId) {
+        toast.error('Ошибка при скачивании', { id: progressToastId });
+      }
     } finally {
       setIsDownloading(false);
       setDownloadProgress({ current: 0, total: 0 });
@@ -591,35 +865,6 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     )}
                     Перегенерировать текст
                   </Button>
-
-                  <div>
-                    <Label htmlFor={`custom-prompt-${currentCardIndex}`} className="text-xs">
-                      Дополнительный промпт (опционально)
-                    </Label>
-                    <Input
-                      id={`custom-prompt-${currentCardIndex}`}
-                      value={carouselCards[currentCardIndex].custom_prompt || ''}
-                      onChange={(e) => updateCardCustomPrompt(currentCardIndex, e.target.value)}
-                      placeholder="Например: добавь больше контраста..."
-                      className="mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor={`reference-image-${currentCardIndex}`} className="text-xs">
-                      Референсное изображение (опционально)
-                    </Label>
-                    <Input
-                      id={`reference-image-${currentCardIndex}`}
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleReferenceImageUpload(currentCardIndex, e)}
-                      className="mt-1"
-                    />
-                    {carouselCards[currentCardIndex].reference_image && (
-                      <p className="text-sm text-green-600 dark:text-green-400 mt-1">✓ Изображение загружено</p>
-                    )}
-                  </div>
                 </>
               )}
             </div>
@@ -658,6 +903,110 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   </p>
                 </div>
 
+                {/* Промпты для карточек */}
+                <div className="space-y-3 pt-2 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Промпты для карточек (опционально)</Label>
+                    <Button size="sm" variant="outline" onClick={addGlobalPrompt}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Добавить промпт
+                    </Button>
+                  </div>
+
+                  {globalPrompts.length > 0 && (
+                    <div className="space-y-3">
+                      {globalPrompts.map((prompt, index) => (
+                        <Card key={prompt.id} className="p-3">
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2">
+                              <Textarea
+                                placeholder="Опишите дополнительные требования..."
+                                value={prompt.text}
+                                onChange={(e) => updateGlobalPromptText(prompt.id, e.target.value)}
+                                className="flex-1 min-h-[60px]"
+                              />
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => removeGlobalPrompt(prompt.id)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <span className="text-xs text-muted-foreground">Применить к:</span>
+                              {carouselCards.map((_, cardIndex) => (
+                                <label key={cardIndex} className="flex items-center gap-1.5 cursor-pointer">
+                                  <Checkbox
+                                    checked={prompt.appliedToCards.includes(cardIndex)}
+                                    onCheckedChange={() => togglePromptForCard(prompt.id, cardIndex)}
+                                  />
+                                  <span className="text-xs">Карточка {cardIndex + 1}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Референсные изображения */}
+                <div className="space-y-3 pt-2 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Референсные изображения (опционально)</Label>
+                    <Button size="sm" variant="outline" onClick={addGlobalReference}>
+                      <Plus className="h-4 w-4 mr-1" />
+                      Добавить референс
+                    </Button>
+                  </div>
+
+                  {globalReferences.length > 0 && (
+                    <div className="space-y-3">
+                      {globalReferences.map((ref, index) => (
+                        <Card key={ref.id} className="p-3">
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2">
+                              <img
+                                src={`data:image/jpeg;base64,${ref.base64}`}
+                                alt={`Референс ${index + 1}`}
+                                className="w-20 h-20 object-cover rounded"
+                              />
+                              <div className="flex-1 space-y-2">
+                                <div className="flex justify-between items-start">
+                                  <span className="text-sm font-medium">Референс #{index + 1}</span>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => removeGlobalReference(ref.id)}
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </Button>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2 items-center">
+                                  <span className="text-xs text-muted-foreground">Применить к:</span>
+                                  {carouselCards.map((_, cardIndex) => (
+                                    <label key={cardIndex} className="flex items-center gap-1.5 cursor-pointer">
+                                      <Checkbox
+                                        checked={ref.appliedToCards.includes(cardIndex)}
+                                        onCheckedChange={() => toggleReferenceForCard(ref.id, cardIndex)}
+                                      />
+                                      <span className="text-xs">Карточка {cardIndex + 1}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <Button
                   onClick={handleGenerateCarousel}
                   disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
@@ -667,7 +1016,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   {isGeneratingCarousel ? (
                     <>
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Генерация карусели... Это может занять несколько минут
+                      Генерация карусели...
                     </>
                   ) : (
                     <>
@@ -680,6 +1029,51 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
             ) : (
               /* Показываем действия после генерации */
               <div className="max-w-md mx-auto space-y-3 pt-4 border-t border-border">
+                {/* Изменение стиля и перегенерация */}
+                <div className="space-y-2">
+                  <Label htmlFor="visual-style-after">Изменить визуальный стиль</Label>
+                  <Select value={visualStyle} onValueChange={(value) => setVisualStyle(value as CarouselVisualStyle)}>
+                    <SelectTrigger id="visual-style-after">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="clean_minimal">Чистый минимализм</SelectItem>
+                      <SelectItem value="story_illustration">Визуальный сторителлинг</SelectItem>
+                      <SelectItem value="photo_ugc">Живые фото (UGC)</SelectItem>
+                      <SelectItem value="asset_focus">Фокус на товаре/скриншоте</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleRegenerateAllCarousel}
+                    variant="outline"
+                    className="flex-1"
+                    disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
+                  >
+                    {isGeneratingCarousel ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Генерация...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Перегенерировать карусель
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    onClick={handleResetImages}
+                    variant="outline"
+                    disabled={isGeneratingCarousel}
+                  >
+                    Сбросить изображения
+                  </Button>
+                </div>
+
                 <Button
                   onClick={handleDownloadAll}
                   variant="outline"

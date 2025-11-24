@@ -159,6 +159,9 @@ export async function generateCarouselImages(
     const mainUserReference = referenceImages?.find(img => img !== null) || null;
 
     for (let i = 0; i < totalCards; i++) {
+      const cardStartTime = Date.now();
+      console.log(`[Gemini Carousel] Starting generation for card ${i + 1}/${totalCards}...`);
+
       const cardText = carouselTexts[i];
       const customPrompt = customPrompts?.[i] || undefined;
 
@@ -194,6 +197,10 @@ export async function generateCarouselImages(
       );
 
       generatedImages.push(image);
+
+      const cardEndTime = Date.now();
+      const cardDuration = ((cardEndTime - cardStartTime) / 1000).toFixed(2);
+      console.log(`[Gemini Carousel] Card ${i + 1}/${totalCards} generated in ${cardDuration}s`);
 
       // Небольшая пауза между генерациями, чтобы не перегрузить API
       if (i < totalCards - 1) {

@@ -11,9 +11,7 @@ export interface CarouselCard {
   text: string;
   image_url?: string;
   image_url_4k?: string;
-  custom_prompt?: string;
   reference_image_url?: string;
-  reference_image?: string; // base64 для локального использования (не отправляется на сервер)
 }
 
 export interface GenerateCarouselTextsRequest {
