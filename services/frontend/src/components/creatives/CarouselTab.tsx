@@ -48,6 +48,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [cardRegenerationPrompts, setCardRegenerationPrompts] = useState<{[key: number]: string}>({});
   const [cardRegenerationImages, setCardRegenerationImages] = useState<{[key: number]: string}>({});
 
+  // State для отслеживания загрузки изображений
+  const [loadedImages, setLoadedImages] = useState<{[key: number]: boolean}>({});
+
   // Генерация текстов для карточек
   const handleGenerateTexts = async () => {
     if (!userId || !carouselIdea) {
@@ -409,11 +412,25 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   <div className="relative aspect-[4/5] bg-gradient-to-br from-muted/80 to-muted border border-border rounded-lg overflow-hidden">
                     {/* Если есть изображение - показываем его */}
                     {hasGeneratedImages && carouselCards[currentCardIndex].image_url ? (
-                      <img
-                        src={carouselCards[currentCardIndex].image_url}
-                        alt={`Карточка ${currentCardIndex + 1}`}
-                        className="w-full h-full object-cover"
-                      />
+                      <>
+                        <img
+                          src={carouselCards[currentCardIndex].image_url}
+                          alt={`Карточка ${currentCardIndex + 1}`}
+                          className={`w-full h-full object-cover transition-opacity duration-300 ${
+                            loadedImages[currentCardIndex] ? 'opacity-100' : 'opacity-0'
+                          }`}
+                          onLoad={() => setLoadedImages(prev => ({ ...prev, [currentCardIndex]: true }))}
+                        />
+                        {/* Прогресс-бар загрузки */}
+                        {!loadedImages[currentCardIndex] && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-muted/80">
+                            <div className="text-center space-y-3">
+                              <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                              <p className="text-sm text-muted-foreground">Загрузка изображения...</p>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     ) : (
                       /* Иначе показываем текстовое поле */
                       <div className="w-full h-full flex items-center justify-center p-8">
