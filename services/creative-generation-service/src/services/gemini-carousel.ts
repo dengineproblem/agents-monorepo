@@ -155,28 +155,31 @@ export async function generateCarouselImages(
     const generatedImages: string[] = [];
     const totalCards = carouselTexts.length;
 
+    // Определяем основной пользовательский референс (если есть хоть одно изображение в массиве)
+    const mainUserReference = referenceImages?.find(img => img !== null) || null;
+
     for (let i = 0; i < totalCards; i++) {
       const cardText = carouselTexts[i];
       const customPrompt = customPrompts?.[i] || undefined;
-      const userReferenceImage = referenceImages?.[i] || null;
 
-      // Собираем референсные изображения для этой карточки
+      // Собираем referencer изображения для этой карточки
       const cardReferenceImages: string[] = [];
 
-      // Если пользователь прикрепил свое изображение к этой карточке, добавляем его
-      if (userReferenceImage) {
-        cardReferenceImages.push(userReferenceImage);
+      // КРИТИЧЕСКИ ВАЖНО: Если пользователь предоставил референсное изображение,
+      // оно должно быть добавлено к КАЖДОЙ карточке для поддержания консистентности персонажа
+      if (mainUserReference) {
+        cardReferenceImages.push(mainUserReference);
       }
 
       // Стратегия консистентности:
-      // - Карточка 0 (первая): генерируется без референсов (или только с пользовательским)
-      // - Карточка 1 (вторая): добавляем карточку 0 как референс
-      // - Карточки 2+ (остальные): добавляем карточку 1 как референс для единого стиля
+      // - Карточка 0 (первая): только пользовательский референс (если есть)
+      // - Карточка 1 (вторая): пользовательский референс + карточка 0 как референс стиля
+      // - Карточки 2+ (остальные): пользовательский референс + карточка 1 как референс стиля
       if (i === 1 && generatedImages.length >= 1) {
-        // Вторая карточка: передаем первую как референс
+        // Вторая карточка: добавляем первую сгенерированную как референс
         cardReferenceImages.push(generatedImages[0]);
       } else if (i >= 2 && generatedImages.length >= 2) {
-        // Третья и последующие: передаем вторую как референс
+        // Третья и последующие: добавляем вторую сгенерированную как референс
         cardReferenceImages.push(generatedImages[1]);
       }
 
