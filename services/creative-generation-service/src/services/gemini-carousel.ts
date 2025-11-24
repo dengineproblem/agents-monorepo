@@ -290,7 +290,8 @@ export async function upscaleCarouselTo4K(
 
       const upscaledImage = await upscaleImageTo4K(
         images[i],
-        prompts[i] || 'Premium минималистичный рекламный креатив'
+        prompts[i] || 'Premium минималистичный рекламный креатив',
+        '4:5' // Карусель всегда в формате 4:5
       );
 
       upscaledImages.push(upscaledImage);

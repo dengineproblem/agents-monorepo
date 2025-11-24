@@ -164,10 +164,12 @@ export async function generateCreativeImage(
  */
 export async function upscaleImageTo4K(
   base64Image: string,
-  originalPrompt: string
+  originalPrompt: string,
+  aspectRatio: '9:16' | '4:5' = '9:16' // Дефолт для одиночных креативов
 ): Promise<string> {
   try {
     console.log('[Gemini Upscale] Starting image upscale to 4K...');
+    console.log('[Gemini Upscale] Aspect ratio:', aspectRatio);
 
     const client = getGeminiClient();
     const model = client.getGenerativeModel({
@@ -191,7 +193,7 @@ export async function upscaleImageTo4K(
     const generationConfig = {
       responseModalities: ['IMAGE'],
       imageConfig: {
-        aspectRatio: '9:16',
+        aspectRatio: aspectRatio,
         imageSize: '4K'
       },
       temperature: 0.1, // Низкая температура для точного воспроизведения
