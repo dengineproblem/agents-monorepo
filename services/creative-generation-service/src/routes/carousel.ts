@@ -527,9 +527,12 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const images4K = await upscaleCarouselTo4K(images2K, prompts);
 
         // Загружаем 4K версии в Storage
+        console.log('[Upscale Carousel] Uploading 4K images to Storage...');
         for (let i = 0; i < images4K.length; i++) {
+          console.log(`[Upscale Carousel] Uploading card ${i + 1}/${images4K.length} to Storage...`);
           const base64Image = images4K[i];
           const imageBuffer = Buffer.from(base64Image, 'base64');
+          console.log(`[Upscale Carousel] Image size: ${(imageBuffer.length / 1024 / 1024).toFixed(2)} MB`);
 
           const timestamp = Date.now();
           const randomStr = Math.random().toString(36).substring(7);
@@ -552,7 +555,9 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
             .getPublicUrl(fileName);
 
           carouselData[i].image_url_4k = urlData.publicUrl;
+          console.log(`[Upscale Carousel] Card ${i + 1}/${images4K.length} uploaded successfully`);
         }
+        console.log('[Upscale Carousel] All 4K images uploaded to Storage');
 
         // Обновляем БД
         const { error: updateError } = await supabase
