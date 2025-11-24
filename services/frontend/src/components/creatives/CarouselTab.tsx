@@ -10,6 +10,7 @@ import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, Refr
 import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
 import type { CarouselCard, CarouselVisualStyle } from '@/types/carousel';
+import JSZip from 'jszip';
 
 interface CarouselTabProps {
   userId: string | null;
@@ -282,39 +283,42 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         // Обновляем карточки с 4K URLs
         setCarouselCards(response.carousel_data);
 
-        toast.success('Upscale завершен! Начинаем скачивание...');
+        toast.success('Upscale завершен! Создаём архив...');
 
-        // Шаг 2: Скачиваем все картинки по очереди с прогрессом
+        // Шаг 2: Создаём ZIP архив со всеми картинками
+        const zip = new JSZip();
+
         for (let i = 0; i < response.carousel_data.length; i++) {
           const card = response.carousel_data[i];
 
           if (card.image_url_4k) {
             setDownloadProgress({ current: i + 1, total: response.carousel_data.length });
+            toast.info(`Добавление в архив: ${i + 1}/${response.carousel_data.length}`);
 
-            // Скачиваем изображение через fetch для контроля процесса
+            // Загружаем изображение как blob
             const imageResponse = await fetch(card.image_url_4k);
             const blob = await imageResponse.blob();
-            const url = window.URL.createObjectURL(blob);
 
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `carousel_card_${card.order + 1}_4k.png`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            // Освобождаем URL
-            window.URL.revokeObjectURL(url);
-
-            // Обновляем toast с прогрессом
-            toast.info(`Скачивание: ${i + 1}/${response.carousel_data.length} картинок`);
-
-            // Небольшая задержка между скачиваниями
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // Добавляем в ZIP
+            zip.file(`carousel_card_${card.order + 1}_4k.png`, blob);
           }
         }
 
-        toast.success(`Все ${response.carousel_data.length} картинок успешно скачаны!`);
+        // Генерируем ZIP файл
+        toast.info('Упаковка архива...');
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+        // Скачиваем архив одним файлом
+        const url = window.URL.createObjectURL(zipBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `carousel_4k_${Date.now()}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+
+        toast.success(`Архив с ${response.carousel_data.length} картинками успешно скачан!`);
       } else {
         toast.error(response.error || 'Ошибка upscale');
       }
@@ -685,12 +689,12 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   {isDownloading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Скачивание {downloadProgress.current}/{downloadProgress.total}
+                      Упаковка {downloadProgress.current}/{downloadProgress.total}
                     </>
                   ) : (
                     <>
                       <Download className="mr-2 h-4 w-4" />
-                      Скачать все (4K)
+                      Скачать ZIP (4K)
                     </>
                   )}
                 </Button>
