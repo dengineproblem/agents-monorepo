@@ -51,6 +51,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   // State для отслеживания загрузки изображений
   const [loadedImages, setLoadedImages] = useState<{[key: number]: boolean}>({});
 
+  // State для отслеживания прогресса скачивания
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
+
   // Генерация текстов для карточек
   const handleGenerateTexts = async () => {
     if (!userId || !carouselIdea) {
@@ -258,11 +262,17 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
   // Скачивание всех картинок
   const handleDownloadAll = async () => {
-    if (!userId || !generatedCarouselId) return;
+    if (!userId || !generatedCarouselId || isDownloading) return;
 
-    toast.info('Upscale до 4K...');
+    setIsDownloading(true);
+    setDownloadProgress({ current: 0, total: carouselCards.length });
+
+    toast.info('Подготовка к скачиванию...');
 
     try {
+      // Шаг 1: Upscale до 4K
+      toast.info(`Upscale до 4K... (0/${carouselCards.length})`);
+
       const response = await carouselApi.upscaleToThe4K({
         user_id: userId,
         carousel_id: generatedCarouselId
@@ -272,28 +282,48 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         // Обновляем карточки с 4K URLs
         setCarouselCards(response.carousel_data);
 
-        // Скачиваем все картинки
-        for (const card of response.carousel_data) {
+        toast.success('Upscale завершен! Начинаем скачивание...');
+
+        // Шаг 2: Скачиваем все картинки по очереди с прогрессом
+        for (let i = 0; i < response.carousel_data.length; i++) {
+          const card = response.carousel_data[i];
+
           if (card.image_url_4k) {
+            setDownloadProgress({ current: i + 1, total: response.carousel_data.length });
+
+            // Скачиваем изображение через fetch для контроля процесса
+            const imageResponse = await fetch(card.image_url_4k);
+            const blob = await imageResponse.blob();
+            const url = window.URL.createObjectURL(blob);
+
             const link = document.createElement('a');
-            link.href = card.image_url_4k;
+            link.href = url;
             link.download = `carousel_card_${card.order + 1}_4k.png`;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+
+            // Освобождаем URL
+            window.URL.revokeObjectURL(url);
+
+            // Обновляем toast с прогрессом
+            toast.info(`Скачивание: ${i + 1}/${response.carousel_data.length} картинок`);
 
             // Небольшая задержка между скачиваниями
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
 
-        toast.success('Все картинки скачаны!');
+        toast.success(`Все ${response.carousel_data.length} картинок успешно скачаны!`);
       } else {
         toast.error(response.error || 'Ошибка upscale');
       }
     } catch (error) {
       console.error('Error downloading:', error);
       toast.error('Ошибка при скачивании');
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress({ current: 0, total: 0 });
     }
   };
 
@@ -646,9 +676,23 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
             ) : (
               /* Показываем действия после генерации */
               <div className="max-w-md mx-auto space-y-3 pt-4 border-t border-border">
-                <Button onClick={handleDownloadAll} variant="outline" className="w-full">
-                  <Download className="mr-2 h-4 w-4" />
-                  Скачать все (4K)
+                <Button
+                  onClick={handleDownloadAll}
+                  variant="outline"
+                  className="w-full"
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Скачивание {downloadProgress.current}/{downloadProgress.total}
+                    </>
+                  ) : (
+                    <>
+                      <Download className="mr-2 h-4 w-4" />
+                      Скачать все (4K)
+                    </>
+                  )}
                 </Button>
 
                 <div className="flex gap-2">
