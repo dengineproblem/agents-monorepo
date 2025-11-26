@@ -9,10 +9,13 @@ import type {
   RegenerateCarouselCardRequest,
   RegenerateCarouselCardResponse,
   UpscaleCarouselRequest,
-  UpscaleCarouselResponse
+  UpscaleCarouselResponse,
+  CreateCarouselCreativeRequest,
+  CreateCarouselCreativeResponse
 } from '../types/carousel';
 
 const CREATIVE_GENERATION_SERVICE_URL = import.meta.env.VITE_CREATIVE_GENERATION_SERVICE_URL || 'http://localhost:8085';
+const AGENT_SERVICE_URL = import.meta.env.VITE_AGENT_SERVICE_URL || 'http://localhost:8082';
 
 export const carouselApi = {
   /**
@@ -115,6 +118,31 @@ export const carouselApi = {
       return {
         success: false,
         error: error.response?.data?.error || error.message || 'Failed to upscale carousel'
+      };
+    }
+  },
+
+  /**
+   * Создание креатива в Facebook
+   * Загружает изображения карусели в Facebook и создаёт ad creative
+   * ВАЖНО: Этот метод идёт в agent-service, а не creative-generation-service
+   */
+  async createCreative(request: CreateCarouselCreativeRequest): Promise<CreateCarouselCreativeResponse> {
+    try {
+      const response = await axios.post<CreateCarouselCreativeResponse>(
+        `${AGENT_SERVICE_URL}/create-carousel-creative`,
+        request,
+        {
+          timeout: 300000 // 5 минут (загрузка изображений может занять время)
+        }
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('[Carousel API] Error creating creative:', error);
+      return {
+        success: false,
+        error: error.response?.data?.error || error.message || 'Failed to create carousel creative',
+        facebook_error: error.response?.data?.facebook_error
       };
     }
   }

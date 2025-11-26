@@ -631,10 +631,65 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     }
   };
 
-  // Создание креатива (TODO: интеграция с Facebook)
-  const handleCreateCreative = () => {
-    toast.info('Функция интеграции с Facebook в разработке');
-    // TODO: Реализовать загрузку в Facebook как carousel_ad
+  // Создание креатива в Facebook
+  const handleCreateCreative = async () => {
+    if (!userId || !generatedCarouselId || !selectedDirectionId) {
+      toast.error('Выберите направление для создания креатива');
+      return;
+    }
+
+    setIsCreatingCreative(true);
+    const toastId = toast.loading('Подготавливаем изображения...');
+
+    try {
+      // Проверяем, есть ли 4K версии у всех карточек
+      const needsUpscale = carouselCards.some(card => !card.image_url_4k);
+
+      if (needsUpscale) {
+        toast.loading('Апскейлим изображения до 4K...', { id: toastId });
+
+        const upscaleResponse = await carouselApi.upscaleToThe4K({
+          user_id: userId,
+          carousel_id: generatedCarouselId
+        });
+
+        if (!upscaleResponse.success) {
+          toast.error(upscaleResponse.error || 'Ошибка апскейла изображений', { id: toastId });
+          return;
+        }
+
+        // Обновляем локальное состояние карточек с 4K URL
+        if (upscaleResponse.carousel_data) {
+          setCarouselCards(upscaleResponse.carousel_data);
+        }
+      }
+
+      toast.loading('Загружаем карусель в Facebook...', { id: toastId });
+
+      const response = await carouselApi.createCreative({
+        user_id: userId,
+        carousel_id: generatedCarouselId,
+        direction_id: selectedDirectionId
+      });
+
+      if (response.success) {
+        toast.success(
+          `Креатив создан! ID: ${response.fb_creative_id}`,
+          { id: toastId }
+        );
+      } else {
+        // Показываем детальную ошибку
+        const errorMessage = response.facebook_error
+          ? `Facebook API: ${response.error}`
+          : response.error || 'Ошибка создания креатива';
+        toast.error(errorMessage, { id: toastId });
+      }
+    } catch (error: any) {
+      console.error('[CarouselTab] Error creating creative:', error);
+      toast.error('Ошибка при создании креатива', { id: toastId });
+    } finally {
+      setIsCreatingCreative(false);
+    }
   };
 
   // Сброс формы

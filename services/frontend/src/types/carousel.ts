@@ -82,3 +82,20 @@ export interface UpscaleCarouselResponse {
   carousel_data?: CarouselCard[];
   error?: string;
 }
+
+// Типы для создания креатива в Facebook
+export interface CreateCarouselCreativeRequest {
+  user_id: string;
+  carousel_id: string;
+  direction_id: string;
+}
+
+export interface CreateCarouselCreativeResponse {
+  success: boolean;
+  fb_creative_id?: string;
+  user_creative_id?: string;
+  objective?: 'whatsapp' | 'instagram_traffic' | 'site_leads';
+  cards_count?: number;
+  error?: string;
+  facebook_error?: any;
+}

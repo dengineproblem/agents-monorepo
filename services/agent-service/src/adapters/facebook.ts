@@ -527,7 +527,7 @@ export async function createWhatsAppImageCreative(
     instagram_user_id: params.instagramId,
     link_data: {
       image_hash: params.imageHash,
-      link: "https://dummyimage.com/1200x628/ffffff/ffffff.png", // Заглушка для валидации
+      link: "https://www.facebook.com/", // Facebook требует валидный URL, но для WhatsApp он игнорируется
       message: params.message,
       call_to_action: callToAction,
       page_welcome_message: pageWelcomeMessage
@@ -610,6 +610,187 @@ export async function createWebsiteLeadsImageCreative(
     }
   };
 
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+// ============================================
+// CAROUSEL CREATIVES
+// ============================================
+
+interface CarouselCardParams {
+  imageHash: string;
+  text: string;
+  link?: string;
+}
+
+/**
+ * Создаёт WhatsApp carousel creative
+ * Каждая карточка карусели ведёт на WhatsApp
+ */
+export async function createWhatsAppCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId: string;
+    message: string;
+    clientQuestion: string;
+  }
+): Promise<{ id: string }> {
+  const pageWelcomeMessage = JSON.stringify({
+    type: "VISUAL_EDITOR",
+    version: 2,
+    landing_screen_type: "welcome_message",
+    media_type: "text",
+    text_format: {
+      customer_action_type: "autofill_message",
+      message: {
+        autofill_message: { content: params.clientQuestion },
+        text: "Здравствуйте! Чем можем помочь?"
+      }
+    }
+  });
+
+  // Facebook требует валидный URL, но для WhatsApp он игнорируется
+  const dummyLink = "https://www.facebook.com/";
+
+  // Создаём child_attachments для каждой карточки
+  const childAttachments = params.cards.map((card, index) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50), // Facebook ограничивает name до 50 символов
+    description: card.text,
+    link: dummyLink,
+    call_to_action: {
+      type: "WHATSAPP_MESSAGE"
+    }
+  }));
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      message: params.message,
+      link: dummyLink,
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: {
+        type: "WHATSAPP_MESSAGE"
+      },
+      page_welcome_message: pageWelcomeMessage
+    }
+  };
+
+  const payload = {
+    name: "Carousel CTWA – WhatsApp",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating WhatsApp carousel creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создаёт Instagram Traffic carousel creative
+ * Каждая карточка ведёт на профиль Instagram
+ */
+export async function createInstagramCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId: string;
+    instagramUsername: string;
+    message: string;
+  }
+): Promise<{ id: string }> {
+  const landingLink = `https://www.instagram.com/${params.instagramUsername}`;
+
+  const childAttachments = params.cards.map((card) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50),
+    description: card.text,
+    link: card.link || landingLink,
+    call_to_action: {
+      type: "LEARN_MORE",
+      value: { link: card.link || landingLink }
+    }
+  }));
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      message: params.message,
+      link: landingLink,
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: {
+        type: "LEARN_MORE",
+        value: { link: landingLink }
+      }
+    }
+  };
+
+  const payload = {
+    name: "Instagram Profile Carousel Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Instagram carousel creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создаёт Website Leads carousel creative
+ * Каждая карточка ведёт на сайт
+ */
+export async function createWebsiteLeadsCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId: string;
+    message: string;
+    siteUrl: string;
+    utm?: string;
+  }
+): Promise<{ id: string }> {
+  const childAttachments = params.cards.map((card) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50),
+    description: card.text,
+    link: card.link || params.siteUrl,
+    call_to_action: {
+      type: "SIGN_UP",
+      value: { link: card.link || params.siteUrl }
+    }
+  }));
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      message: params.message,
+      link: params.siteUrl,
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: { link: params.siteUrl }
+      }
+    }
+  };
+
+  const payload: any = {
+    name: "Website Leads Carousel Creative",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Website Leads carousel creative');
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 
