@@ -19,7 +19,6 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param offer - Заголовок креатива
  * @param bullets - Буллеты
  * @param profits - Выгода
- * @param cta - Call-to-action
  * @param userPrompt4 - Пользовательский промпт для стилизации изображения (PROMPT4)
  * @param styleId - Выбранный стиль креатива
  * @param referenceImage - Референсное изображение (base64 или URL)
@@ -31,7 +30,6 @@ export async function generateCreativeImage(
   offer: string,
   bullets: string,
   profits: string,
-  cta: string,
   userPrompt4: string,
   styleId: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero',
   referenceImage?: string,
@@ -51,8 +49,7 @@ export async function generateCreativeImage(
       styleId,
       offer,
       bullets,
-      profits,
-      cta
+      profits
     );
 
     // Если есть reference_image_prompt, добавляем его к промпту
@@ -263,11 +260,15 @@ export async function adaptImageToAspectRatio(
     const adaptPrompt = `${originalPrompt}
 
 ЗАДАЧА: Адаптируй это изображение под формат ${targetAspectRatio}, сохранив:
-- Основной контент и композицию
+- Точно такой же контент изображения (дублируй без изменений)
 - Цветовую гамму и стиль
-- Все важные элементы (текст, объекты, людей)
+- Все элементы (текст, объекты, людей) в том же виде
 
-Расширь или перекомпонуй изображение так, чтобы оно органично смотрелось в новом формате.`;
+ВАЖНО для адаптации из 9:16 в 4:5:
+- Сохрани изображение без изменений
+- Уменьши нижние поля по сравнению с оригиналом
+- Сделай верхние и нижние поля пропорциональными друг другу
+- Центрируй основной контент с учётом новых пропорций`;
 
     const contentParts: any[] = [
       { text: adaptPrompt },

@@ -634,7 +634,7 @@ export async function createWhatsAppImageCreativeMultiFormat(
     clientQuestion: string;
   }
 ): Promise<{ id: string }> {
-  const pageWelcomeMessage = {
+  const pageWelcomeMessage = JSON.stringify({
     type: "VISUAL_EDITOR",
     version: 2,
     landing_screen_type: "welcome_message",
@@ -646,25 +646,32 @@ export async function createWhatsAppImageCreativeMultiFormat(
         text: "Здравствуйте! Чем можем помочь?"
       }
     }
+  });
+
+  // Для WhatsApp с asset_feed_spec используем object_story_spec с link_data
+  // и добавляем asset_feed_spec для multi-format
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash4x5, // Основное изображение (будет заменено через asset_customization)
+      link: "https://www.facebook.com/",
+      message: params.message,
+      call_to_action: { type: "WHATSAPP_MESSAGE" },
+      page_welcome_message: pageWelcomeMessage
+    }
   };
 
   const payload = {
     name: "Image CTWA – WhatsApp (Multi-Format)",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId
-    },
-    asset_feed_spec: {
+    object_story_spec: JSON.stringify(objectStorySpec),
+    asset_feed_spec: JSON.stringify({
       images: [
         { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
         { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
-      ],
-      bodies: [{ text: params.message }],
-      call_to_action_types: ["WHATSAPP_MESSAGE"],
-      link_urls: [{ website_url: "https://www.facebook.com/" }], // Dummy URL для WhatsApp
-      ad_formats: ["SINGLE_IMAGE"]
-    },
-    asset_customization_rules: [
+      ]
+    }),
+    asset_customization_rules: JSON.stringify([
       {
         customization_spec: {
           publisher_platforms: ["facebook", "instagram"],
@@ -681,13 +688,7 @@ export async function createWhatsAppImageCreativeMultiFormat(
         },
         image_label: { name: "story_image" }
       }
-    ],
-    call_to_action: {
-      type: "WHATSAPP_MESSAGE",
-      value: {
-        page_welcome_message: JSON.stringify(pageWelcomeMessage)
-      }
-    }
+    ])
   };
 
   log.debug({ adAccountId, params: { ...params, imageHash9x16: '***', imageHash4x5: '***' } }, 'Creating WhatsApp multi-format image creative');
@@ -711,23 +712,30 @@ export async function createInstagramImageCreativeMultiFormat(
 ): Promise<{ id: string }> {
   const landingLink = `https://www.instagram.com/${params.instagramUsername}`;
 
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash4x5,
+      link: landingLink,
+      message: params.message,
+      call_to_action: {
+        type: "LEARN_MORE",
+        value: { link: landingLink }
+      }
+    }
+  };
+
   const payload = {
     name: "Instagram Profile Image Creative (Multi-Format)",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId
-    },
-    asset_feed_spec: {
+    object_story_spec: JSON.stringify(objectStorySpec),
+    asset_feed_spec: JSON.stringify({
       images: [
         { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
         { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
-      ],
-      bodies: [{ text: params.message }],
-      call_to_action_types: ["LEARN_MORE"],
-      link_urls: [{ website_url: landingLink }],
-      ad_formats: ["SINGLE_IMAGE"]
-    },
-    asset_customization_rules: [
+      ]
+    }),
+    asset_customization_rules: JSON.stringify([
       {
         customization_spec: {
           publisher_platforms: ["facebook", "instagram"],
@@ -744,7 +752,7 @@ export async function createInstagramImageCreativeMultiFormat(
         },
         image_label: { name: "story_image" }
       }
-    ]
+    ])
   };
 
   log.debug({ adAccountId, instagramUsername: params.instagramUsername }, 'Creating Instagram multi-format image creative');
@@ -767,24 +775,31 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
     utm?: string;
   }
 ): Promise<{ id: string }> {
-  const payload = {
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      image_hash: params.imageHash4x5,
+      link: params.siteUrl,
+      message: params.message,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: { link: params.siteUrl }
+      }
+    }
+  };
+
+  const payload: any = {
     name: "Website Leads Image Creative (Multi-Format)",
     url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_user_id: params.instagramId
-    },
-    asset_feed_spec: {
+    object_story_spec: JSON.stringify(objectStorySpec),
+    asset_feed_spec: JSON.stringify({
       images: [
         { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
         { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
-      ],
-      bodies: [{ text: params.message }],
-      call_to_action_types: ["SIGN_UP"],
-      link_urls: [{ website_url: params.siteUrl }],
-      ad_formats: ["SINGLE_IMAGE"]
-    },
-    asset_customization_rules: [
+      ]
+    }),
+    asset_customization_rules: JSON.stringify([
       {
         customization_spec: {
           publisher_platforms: ["facebook", "instagram"],
@@ -801,7 +816,7 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
         },
         image_label: { name: "story_image" }
       }
-    ]
+    ])
   };
 
   log.debug({ adAccountId, siteUrl: params.siteUrl }, 'Creating Website Leads multi-format image creative');

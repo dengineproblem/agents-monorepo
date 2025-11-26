@@ -23,7 +23,7 @@ export interface GenerateCreativeRequest {
   offer: string;
   bullets: string;
   profits: string;
-  cta: string;
+  cta?: string; // deprecated - CTA не рисуется на изображении, FB добавляет кнопку автоматически
   direction_id?: string;
   style_id?: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'; // Стиль креатива
   // Новое поле для референсного изображения

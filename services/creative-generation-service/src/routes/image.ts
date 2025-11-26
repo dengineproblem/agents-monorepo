@@ -60,19 +60,18 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       const selectedStyle = style_id || 'modern_performance';
       app.log.info('[Generate Creative] Generating creative image with Gemini 3 Pro Image Preview...');
       app.log.info(`[Generate Creative] Style: ${selectedStyle}`);
-      app.log.info(`[Generate Creative] Texts: offer="${offer}", bullets="${bullets}", profits="${profits}", cta="${cta}"`);
+      app.log.info(`[Generate Creative] Texts: offer="${offer}", bullets="${bullets}", profits="${profits}"`);
       if (reference_image) {
         app.log.info(`[Generate Creative] Using reference image (type: ${reference_image_type})`);
         if (reference_image_prompt) {
           app.log.info(`[Generate Creative] Reference prompt: "${reference_image_prompt}"`);
         }
       }
-      
+
       const base64Image = await generateCreativeImage(
         offer,
         bullets,
         profits,
-        cta,
         user.prompt4 || 'Современный профессиональный дизайн',
         selectedStyle,
         reference_image,
@@ -263,9 +262,6 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       }
       if (creative.profits && creative.profits.trim()) {
         promptParts.push(`Profits: ${creative.profits}`);
-      }
-      if (creative.cta && creative.cta.trim()) {
-        promptParts.push(`CTA: ${creative.cta}`);
       }
       promptParts.push(`Style: ${creative.style_id}`);
 

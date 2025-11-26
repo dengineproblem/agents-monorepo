@@ -21,22 +21,19 @@ interface CreativeTexts {
   offer: string;
   bullets: string;
   profits: string;
-  cta: string;
 }
 
 const CreativeGeneration = () => {
   const [texts, setTexts] = useState<CreativeTexts>({
     offer: '',
     bullets: '',
-    profits: '',
-    cta: ''
+    profits: ''
   });
 
   const [loading, setLoading] = useState({
     offer: false,
     bullets: false,
     profits: false,
-    cta: false,
     image: false
   });
 
@@ -75,8 +72,7 @@ const CreativeGeneration = () => {
   const CHARACTER_LIMITS = {
     offer: 60,    // Заголовок
     bullets: 120, // Буллеты (все 3)
-    profits: 50,  // Выгода  
-    cta: 40       // CTA
+    profits: 50   // Выгода
   };
 
   // Очистка blob URL при размонтировании компонента
@@ -210,9 +206,6 @@ const CreativeGeneration = () => {
             case 'profits':
               fieldName = 'existing_benefits';
               break;
-            case 'cta':
-              fieldName = 'existing_cta';
-              break;
             default:
               fieldName = key;
           }
@@ -278,8 +271,7 @@ const CreativeGeneration = () => {
       const fieldMappings: Record<string, string[]> = {
         offer: ['offer', 'headline', 'title', 'generated_offer'],
         bullets: ['bullets', 'bullet_points', 'generated_bullets'],
-        profits: ['profits', 'benefits', 'generated_benefits', 'generated_profits'],
-        cta: ['cta', 'call_to_action', 'generated_cta']
+        profits: ['profits', 'benefits', 'generated_benefits', 'generated_profits']
       };
       
       const possibleFields = [type, ...(fieldMappings[type] || []), 'text', 'result', 'generated_text'];
@@ -406,7 +398,6 @@ const CreativeGeneration = () => {
         offer: texts.offer,
         bullets: texts.bullets,
         profits: texts.profits,
-        cta: texts.cta,
         direction_id: selectedDirectionId || undefined,
         style_id: selectedStyle,
         reference_image: referenceImageBase64,
@@ -556,8 +547,7 @@ const CreativeGeneration = () => {
     const labels = {
       offer: 'Основной оффер',
       bullets: 'Буллеты',
-      profits: 'Выгода',
-      cta: 'CTA (призыв к действию)'
+      profits: 'Выгода'
     };
     return labels[type];
   };
@@ -588,9 +578,9 @@ const CreativeGeneration = () => {
     setIsCreatingCreative(true);
 
     try {
-      toast.loading('Подготовка 4K версии для креатива...', { id: 'upscale-create' });
+      toast.loading('Подготовка 4K версий (9:16 + 4:5)...', { id: 'upscale-create' });
 
-      // Вызываем upscale до 4K (аналогично скачиванию)
+      // 1. Вызываем upscale до 4K - создаст обе версии (9:16 и 4:5)
       const upscaleResponse = await fetch('http://localhost:8085/upscale-to-4k', {
         method: 'POST',
         headers: {
@@ -604,41 +594,41 @@ const CreativeGeneration = () => {
 
       const upscaleData = await upscaleResponse.json();
 
-      if (!upscaleData.success || !upscaleData.image_url_4k) {
-        throw new Error('Не удалось улучшить качество изображения');
+      if (!upscaleData.success || !upscaleData.image_url_4k || !upscaleData.image_url_4k_4x5) {
+        throw new Error('Не удалось создать 4K версии изображения');
       }
 
-      toast.success('4K версия готова, создание креатива...', { id: 'upscale-create' });
+      toast.success('4K версии готовы, создание креатива в Facebook...', { id: 'upscale-create' });
 
-      // Скачиваем 4K версию
-      const response = await fetch(upscaleData.image_url_4k);
-      const blob = await response.blob();
-      const imageFile = new File([blob], 'generated_creative_4k.png', { type: 'image/png' });
+      // 2. Вызываем новый API для создания multi-format креатива
+      const createResponse = await fetch('http://localhost:8082/create-image-creative', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          creative_id: generatedCreativeId,
+          direction_id: selectedDirectionId
+        }),
+      });
 
-      // Используем существующий API для загрузки
-      const success = await creativesApi.uploadToWebhook(
-        imageFile,
-        `Креатив ${new Date().toLocaleDateString()}`,
-        null,
-        {},
-        undefined,
-        undefined,
-        selectedDirectionId
-      );
+      const createData = await createResponse.json();
 
-      if (success) {
-        toast.success('Креатив в 4K успешно создан!', { id: 'upscale-create' });
-        // Очищаем форму
-        setGeneratedImage(null);
-        setGeneratedCreativeId('');
-        setTexts({ offer: '', bullets: '', profits: '', cta: '' });
-        setSelectedDirectionId('');
-      } else {
-        toast.error('Ошибка создания креатива', { id: 'upscale-create' });
+      if (!createData.success) {
+        throw new Error(createData.error || 'Ошибка создания креатива в Facebook');
       }
-    } catch (error) {
+
+      toast.success(`Креатив создан! (9:16 для Stories + 4:5 для Feed)`, { id: 'upscale-create' });
+
+      // Очищаем форму
+      setGeneratedImage(null);
+      setGeneratedCreativeId('');
+      setTexts({ offer: '', bullets: '', profits: '' });
+      setSelectedDirectionId('');
+    } catch (error: any) {
       console.error('Ошибка при создании креатива:', error);
-      toast.error('Ошибка создания креатива', { id: 'upscale-create' });
+      toast.error(error.message || 'Ошибка создания креатива', { id: 'upscale-create' });
     } finally {
       setIsCreatingCreative(false);
     }
