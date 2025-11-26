@@ -820,91 +820,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
               </Button>
             </div>
 
-            {/* Инструменты редактирования под карточкой */}
-            <div className="max-w-md mx-auto space-y-3">
-              {hasGeneratedImages ? (
-                /* Инструменты для перегенерации изображения */
-                <>
-                  <div>
-                    <Label htmlFor={`regen-prompt-${currentCardIndex}`} className="text-xs text-muted-foreground">
-                      Дополнительный промпт
-                    </Label>
-                    <Input
-                      id={`regen-prompt-${currentCardIndex}`}
-                      value={cardRegenerationPrompts[currentCardIndex] || ''}
-                      onChange={(e) => setCardRegenerationPrompts({
-                        ...cardRegenerationPrompts,
-                        [currentCardIndex]: e.target.value
-                      })}
-                      placeholder="Например: добавь больше контраста..."
-                      disabled={regeneratingCardIndex === currentCardIndex}
-                      className="mt-1"
-                    />
-                  </div>
-
-                  {/* Референсное изображение - компактный вид */}
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Референсное изображение</Label>
-                    <div className="mt-1 flex items-center gap-2">
-                      {cardRegenerationImages[currentCardIndex] ? (
-                        <>
-                          <img
-                            src={`data:image/jpeg;base64,${cardRegenerationImages[currentCardIndex]}`}
-                            alt="Референс"
-                            className="w-12 h-12 object-cover rounded border"
-                          />
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              const newImages = {...cardRegenerationImages};
-                              delete newImages[currentCardIndex];
-                              setCardRegenerationImages(newImages);
-                            }}
-                            disabled={regeneratingCardIndex === currentCardIndex}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            const input = document.createElement('input');
-                            input.type = 'file';
-                            input.accept = 'image/*';
-                            input.onchange = (e: any) => handleCardRegenerationImageUpload(currentCardIndex, e);
-                            input.click();
-                          }}
-                          disabled={regeneratingCardIndex === currentCardIndex}
-                          className="h-12 w-12 p-0"
-                        >
-                          <Plus className="h-5 w-5" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleRegenerateCard(currentCardIndex)}
-                    disabled={regeneratingCardIndex === currentCardIndex}
-                    className="w-full"
-                  >
-                    {regeneratingCardIndex === currentCardIndex ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                    )}
-                    Перегенерировать карточку
-                  </Button>
-                </>
-              ) : (
-                /* Инструменты для редактирования текста */
-                <>
-                  <Button
+            {/* Инструменты редактирования под карточкой (только для режима редактирования текстов) */}
+            {!hasGeneratedImages && (
+              <div className="max-w-md mx-auto space-y-3">
+                <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleRegenerateCardText(currentCardIndex)}
@@ -917,10 +836,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                       <Sparkles className="h-4 w-4 mr-2" />
                     )}
                     Перегенерировать текст
-                  </Button>
-                </>
-              )}
-            </div>
+                </Button>
+              </div>
+            )}
 
             {/* Кнопка генерации и действия */}
             {!hasGeneratedImages ? (
@@ -1090,28 +1008,114 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
               </div>
             ) : (
               /* Показываем действия после генерации */
-              <div className="max-w-md mx-auto space-y-3 pt-4 border-t border-border">
-                {/* Изменение стиля и перегенерация */}
-                <div className="space-y-2">
-                  <Label htmlFor="visual-style-after">Изменить визуальный стиль</Label>
-                  <Select value={visualStyle} onValueChange={(value) => setVisualStyle(value as CarouselVisualStyle)}>
-                    <SelectTrigger id="visual-style-after">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="clean_minimal">Чистый минимализм</SelectItem>
-                      <SelectItem value="story_illustration">Визуальный сторителлинг</SelectItem>
-                      <SelectItem value="photo_ugc">Живые фото (UGC)</SelectItem>
-                      <SelectItem value="asset_focus">Фокус на товаре/скриншоте</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <div className="max-w-md mx-auto space-y-6 pt-4 border-t border-border">
+
+                {/* Раздел: Перегенерировать карточку */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-muted-foreground">Перегенерировать карточку</h4>
+                  <div className="space-y-2">
+                    <div>
+                      <Label htmlFor={`regen-prompt-section-${currentCardIndex}`} className="text-xs text-muted-foreground">
+                        Дополнительный промпт
+                      </Label>
+                      <Input
+                        id={`regen-prompt-section-${currentCardIndex}`}
+                        value={cardRegenerationPrompts[currentCardIndex] || ''}
+                        onChange={(e) => setCardRegenerationPrompts({
+                          ...cardRegenerationPrompts,
+                          [currentCardIndex]: e.target.value
+                        })}
+                        placeholder="Например: добавь больше контраста..."
+                        disabled={regeneratingCardIndex === currentCardIndex}
+                        className="mt-1"
+                      />
+                    </div>
+
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Референсное изображение</Label>
+                      <div className="mt-1 flex items-center gap-2">
+                        {cardRegenerationImages[currentCardIndex] ? (
+                          <>
+                            <img
+                              src={`data:image/jpeg;base64,${cardRegenerationImages[currentCardIndex]}`}
+                              alt="Референс"
+                              className="w-10 h-10 object-cover rounded border"
+                            />
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                const newImages = {...cardRegenerationImages};
+                                delete newImages[currentCardIndex];
+                                setCardRegenerationImages(newImages);
+                              }}
+                              disabled={regeneratingCardIndex === currentCardIndex}
+                              className="h-8 px-2"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              const input = document.createElement('input');
+                              input.type = 'file';
+                              input.accept = 'image/*';
+                              input.onchange = (e: any) => handleCardRegenerationImageUpload(currentCardIndex, e);
+                              input.click();
+                            }}
+                            disabled={regeneratingCardIndex === currentCardIndex}
+                            className="w-full text-muted-foreground hover:text-foreground"
+                          >
+                            <Plus className="h-4 w-4 mr-2" />
+                            Выбрать файл
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleRegenerateCard(currentCardIndex)}
+                      disabled={regeneratingCardIndex === currentCardIndex}
+                      className="w-full"
+                    >
+                      {regeneratingCardIndex === currentCardIndex ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Перегенерировать карточку {currentCardIndex + 1}
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="flex gap-2">
+                {/* Раздел: Все карточки */}
+                <div className="space-y-3 pt-4 border-t border-border">
+                  <h4 className="text-sm font-medium text-muted-foreground">Все карточки</h4>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="visual-style-after" className="text-xs text-muted-foreground">Визуальный стиль</Label>
+                    <Select value={visualStyle} onValueChange={(value) => setVisualStyle(value as CarouselVisualStyle)}>
+                      <SelectTrigger id="visual-style-after">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="clean_minimal">Чистый минимализм</SelectItem>
+                        <SelectItem value="story_illustration">Визуальный сторителлинг</SelectItem>
+                        <SelectItem value="photo_ugc">Живые фото (UGC)</SelectItem>
+                        <SelectItem value="asset_focus">Фокус на товаре/скриншоте</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <Button
                     onClick={handleRegenerateAllCarousel}
                     variant="outline"
-                    className="flex-1"
+                    className="w-full"
                     disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
                   >
                     {isGeneratingCarousel ? (
@@ -1122,108 +1126,116 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     ) : (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4" />
-                        Перегенерировать карусель
+                        Перегенерировать всю карусель
                       </>
                     )}
                   </Button>
 
                   <Button
                     onClick={handleResetImages}
-                    variant="outline"
+                    variant="ghost"
+                    className="w-full text-muted-foreground hover:text-foreground"
                     disabled={isGeneratingCarousel}
                   >
                     Сбросить изображения
                   </Button>
-                </div>
 
-                {/* Выбор карточек для скачивания */}
-                <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">Скачать карточки</Label>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setSelectedCardsForDownload(carouselCards.map((_, i) => i))}
-                        className="h-7 text-xs"
-                      >
-                        Все
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setSelectedCardsForDownload([])}
-                        className="h-7 text-xs"
-                      >
-                        Сбросить
-                      </Button>
+                  {/* Скачивание */}
+                  <div className="space-y-2 pt-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs text-muted-foreground">Скачать карточки</Label>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSelectedCardsForDownload(carouselCards.map((_, i) => i))}
+                          className="h-6 text-xs px-2"
+                        >
+                          Все
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setSelectedCardsForDownload([])}
+                          className="h-6 text-xs px-2"
+                        >
+                          Сбросить
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {carouselCards.map((_, cardIndex) => (
+                        <label
+                          key={cardIndex}
+                          className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors ${
+                            selectedCardsForDownload.includes(cardIndex)
+                              ? 'bg-primary/10 border border-primary/30'
+                              : 'bg-background border border-border hover:border-primary/30'
+                          }`}
+                        >
+                          <Checkbox
+                            checked={selectedCardsForDownload.includes(cardIndex)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedCardsForDownload([...selectedCardsForDownload, cardIndex]);
+                              } else {
+                                setSelectedCardsForDownload(selectedCardsForDownload.filter(i => i !== cardIndex));
+                              }
+                            }}
+                          />
+                          <span className="text-xs font-medium">{cardIndex + 1}</span>
+                        </label>
+                      ))}
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {carouselCards.map((_, cardIndex) => (
-                      <label
-                        key={cardIndex}
-                        className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors ${
-                          selectedCardsForDownload.includes(cardIndex)
-                            ? 'bg-primary/10 border border-primary/30'
-                            : 'bg-background border border-border hover:border-primary/30'
-                        }`}
-                      >
-                        <Checkbox
-                          checked={selectedCardsForDownload.includes(cardIndex)}
-                          onCheckedChange={(checked) => {
-                            if (checked) {
-                              setSelectedCardsForDownload([...selectedCardsForDownload, cardIndex]);
-                            } else {
-                              setSelectedCardsForDownload(selectedCardsForDownload.filter(i => i !== cardIndex));
-                            }
-                          }}
-                        />
-                        <span className="text-xs font-medium">{cardIndex + 1}</span>
-                      </label>
-                    ))}
-                  </div>
+
+                  <Button
+                    onClick={handleDownloadAll}
+                    variant="outline"
+                    className="w-full"
+                    disabled={isDownloading}
+                  >
+                    {isDownloading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Упаковка {downloadProgress.current}/{downloadProgress.total}
+                      </>
+                    ) : (
+                      <>
+                        <Download className="mr-2 h-4 w-4" />
+                        {selectedCardsForDownload.length > 0
+                          ? `Скачать ${selectedCardsForDownload.length} ${selectedCardsForDownload.length === 1 ? 'карточку' : selectedCardsForDownload.length < 5 ? 'карточки' : 'карточек'} (4K)`
+                          : 'Скачать все карточки (4K)'
+                        }
+                      </>
+                    )}
+                  </Button>
                 </div>
 
-                <Button
-                  onClick={handleDownloadAll}
-                  variant="outline"
-                  className="w-full"
-                  disabled={isDownloading}
-                >
-                  {isDownloading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Упаковка {downloadProgress.current}/{downloadProgress.total}
-                    </>
-                  ) : (
-                    <>
-                      <Download className="mr-2 h-4 w-4" />
-                      {selectedCardsForDownload.length > 0
-                        ? `Скачать ${selectedCardsForDownload.length} ${selectedCardsForDownload.length === 1 ? 'карточку' : selectedCardsForDownload.length < 5 ? 'карточки' : 'карточек'} (4K)`
-                        : 'Скачать все карточки (4K)'
-                      }
-                    </>
-                  )}
-                </Button>
+                {/* Раздел: Создание креатива */}
+                <div className="space-y-3 pt-4 border-t border-border">
+                  <h4 className="text-sm font-medium text-muted-foreground">Создание креатива</h4>
 
-                <div className="flex gap-2">
-                  <Select value={selectedDirectionId} onValueChange={setSelectedDirectionId} disabled={!directions.length}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Выберите направление" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {directions.map(d => (
-                        <SelectItem key={d.id} value={d.id}>
-                          {d.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Направление</Label>
+                    <Select value={selectedDirectionId} onValueChange={setSelectedDirectionId} disabled={!directions.length}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Выберите направление" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {directions.map(d => (
+                          <SelectItem key={d.id} value={d.id}>
+                            {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                   <Button
                     onClick={handleCreateCreative}
                     disabled={!selectedDirectionId || isCreatingCreative}
+                    className="w-full"
                   >
                     {isCreatingCreative && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Создать креатив
