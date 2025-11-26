@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { generateCreativeImage, upscaleImageTo4K } from '../services/gemini-image'; // Gemini для изображений!
+import { generateCreativeImage, upscaleImageTo4K, adaptImageToAspectRatio } from '../services/gemini-image';
 import { supabase, logSupabaseError } from '../db/supabase';
 import { GenerateCreativeRequest, GenerateCreativeResponse } from '../types';
 
@@ -225,12 +225,13 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // Проверяем, не был ли уже upscale
-      if (creative.image_url_4k) {
-        app.log.info(`[Upscale to 4K] 4K version already exists: ${creative.image_url_4k}`);
+      // Проверяем, не был ли уже upscale (обе версии)
+      if (creative.image_url_4k && creative.image_url_4k_4x5) {
+        app.log.info(`[Upscale to 4K] Both 4K versions already exist`);
         return {
           success: true,
-          image_url_4k: creative.image_url_4k
+          image_url_4k: creative.image_url_4k,
+          image_url_4k_4x5: creative.image_url_4k_4x5
         };
       }
 
@@ -270,57 +271,106 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
       const originalPrompt = promptParts.join('\n');
 
-      // Upscale изображения
-      const upscaled4KImage = await upscaleImageTo4K(base64Image, originalPrompt);
+      // Параллельно генерируем обе версии: 9:16 4K и 4:5 4K
+      app.log.info('[Upscale to 4K] Starting parallel generation of 9:16 and 4:5 versions...');
 
-      // Сохраняем 4K версию в storage
-      const imageBuffer = Buffer.from(upscaled4KImage, 'base64');
-      const fileName4K = imagePath.replace('.png', '_4k.png');
+      const [upscaled9x16Image, adapted4x5Image] = await Promise.all([
+        // 1. Upscale 9:16 версии до 4K
+        creative.image_url_4k
+          ? null // Уже есть, пропускаем
+          : upscaleImageTo4K(base64Image, originalPrompt, '9:16'),
+        // 2. Адаптация под 4:5 и upscale до 4K
+        creative.image_url_4k_4x5
+          ? null // Уже есть, пропускаем
+          : adaptImageToAspectRatio(base64Image, originalPrompt, '4:5')
+      ]);
 
-      app.log.info(`[Upscale to 4K] Uploading 4K version: ${fileName4K}`);
+      let publicUrl9x16 = creative.image_url_4k;
+      let publicUrl4x5 = creative.image_url_4k_4x5;
 
-      const { error: uploadError } = await supabase.storage
-        .from('creo')
-        .upload(fileName4K, imageBuffer, {
-          contentType: 'image/png',
-          upsert: false,
-          cacheControl: '3600'
-        });
+      // Сохраняем 9:16 4K версию (если генерировали)
+      if (upscaled9x16Image) {
+        const imageBuffer9x16 = Buffer.from(upscaled9x16Image, 'base64');
+        const fileName4K = imagePath.replace('.png', '_4k.png');
 
-      if (uploadError) {
-        logSupabaseError('Upload 4K image', uploadError);
-        throw new Error(`Failed to upload 4K image: ${uploadError.message}`);
+        app.log.info(`[Upscale to 4K] Uploading 9:16 4K version: ${fileName4K}`);
+
+        const { error: uploadError9x16 } = await supabase.storage
+          .from('creo')
+          .upload(fileName4K, imageBuffer9x16, {
+            contentType: 'image/png',
+            upsert: false,
+            cacheControl: '3600'
+          });
+
+        if (uploadError9x16) {
+          logSupabaseError('Upload 9:16 4K image', uploadError9x16);
+          throw new Error(`Failed to upload 9:16 4K image: ${uploadError9x16.message}`);
+        }
+
+        const { data: urlData9x16 } = supabase.storage
+          .from('creo')
+          .getPublicUrl(fileName4K);
+
+        publicUrl9x16 = urlData9x16?.publicUrl || null;
+        app.log.info(`[Upscale to 4K] 9:16 4K version uploaded: ${publicUrl9x16}`);
       }
 
-      // Получаем публичный URL для 4K версии
-      const { data: publicUrlData } = supabase.storage
-        .from('creo')
-        .getPublicUrl(fileName4K);
+      // Сохраняем 4:5 4K версию (если генерировали)
+      if (adapted4x5Image) {
+        const imageBuffer4x5 = Buffer.from(adapted4x5Image, 'base64');
+        const fileName4x5 = imagePath.replace('.png', '_4k_4x5.png');
 
-      if (!publicUrlData?.publicUrl) {
-        throw new Error('Failed to get public URL for 4K image');
+        app.log.info(`[Upscale to 4K] Uploading 4:5 4K version: ${fileName4x5}`);
+
+        const { error: uploadError4x5 } = await supabase.storage
+          .from('creo')
+          .upload(fileName4x5, imageBuffer4x5, {
+            contentType: 'image/png',
+            upsert: false,
+            cacheControl: '3600'
+          });
+
+        if (uploadError4x5) {
+          logSupabaseError('Upload 4:5 4K image', uploadError4x5);
+          throw new Error(`Failed to upload 4:5 4K image: ${uploadError4x5.message}`);
+        }
+
+        const { data: urlData4x5 } = supabase.storage
+          .from('creo')
+          .getPublicUrl(fileName4x5);
+
+        publicUrl4x5 = urlData4x5?.publicUrl || null;
+        app.log.info(`[Upscale to 4K] 4:5 4K version uploaded: ${publicUrl4x5}`);
       }
 
-      app.log.info(`[Upscale to 4K] 4K version uploaded: ${publicUrlData.publicUrl}`);
-
-      // Обновляем запись в БД
-      const { error: updateError } = await supabase
-        .from('generated_creatives')
-        .update({
-          image_url_4k: publicUrlData.publicUrl
-        })
-        .eq('id', creative_id);
-
-      if (updateError) {
-        logSupabaseError('Update creative with 4K URL', updateError);
-        // Не критично, продолжаем
+      // Обновляем запись в БД с обоими URL
+      const updateData: Record<string, string | null> = {};
+      if (publicUrl9x16 && !creative.image_url_4k) {
+        updateData.image_url_4k = publicUrl9x16;
+      }
+      if (publicUrl4x5 && !creative.image_url_4k_4x5) {
+        updateData.image_url_4k_4x5 = publicUrl4x5;
       }
 
-      app.log.info('[Upscale to 4K] Successfully completed');
+      if (Object.keys(updateData).length > 0) {
+        const { error: updateError } = await supabase
+          .from('generated_creatives')
+          .update(updateData)
+          .eq('id', creative_id);
+
+        if (updateError) {
+          logSupabaseError('Update creative with 4K URLs', updateError);
+          // Не критично, продолжаем
+        }
+      }
+
+      app.log.info('[Upscale to 4K] Successfully completed both versions');
 
       return {
         success: true,
-        image_url_4k: publicUrlData.publicUrl
+        image_url_4k: publicUrl9x16,
+        image_url_4k_4x5: publicUrl4x5
       };
 
     } catch (error: any) {

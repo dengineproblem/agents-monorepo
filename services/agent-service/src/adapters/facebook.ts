@@ -614,6 +614,201 @@ export async function createWebsiteLeadsImageCreative(
 }
 
 // ============================================
+// MULTI-FORMAT IMAGE CREATIVES (asset_feed_spec)
+// Для автоматического показа разных форматов в разных плейсментах
+// ============================================
+
+/**
+ * Создает WhatsApp креатив с несколькими форматами изображений
+ * 9:16 для Stories/Reels, 4:5 для Feed
+ */
+export async function createWhatsAppImageCreativeMultiFormat(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash9x16: string;  // для Stories/Reels
+    imageHash4x5: string;   // для Feed
+    pageId: string;
+    instagramId: string;
+    message: string;
+    clientQuestion: string;
+  }
+): Promise<{ id: string }> {
+  const pageWelcomeMessage = {
+    type: "VISUAL_EDITOR",
+    version: 2,
+    landing_screen_type: "welcome_message",
+    media_type: "text",
+    text_format: {
+      customer_action_type: "autofill_message",
+      message: {
+        autofill_message: { content: params.clientQuestion },
+        text: "Здравствуйте! Чем можем помочь?"
+      }
+    }
+  };
+
+  const payload = {
+    name: "Image CTWA – WhatsApp (Multi-Format)",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId
+    },
+    asset_feed_spec: {
+      images: [
+        { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
+        { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
+      ],
+      bodies: [{ text: params.message }],
+      call_to_action_types: ["WHATSAPP_MESSAGE"],
+      link_urls: [{ website_url: "https://www.facebook.com/" }], // Dummy URL для WhatsApp
+      ad_formats: ["SINGLE_IMAGE"]
+    },
+    asset_customization_rules: [
+      {
+        customization_spec: {
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["feed"],
+          instagram_positions: ["stream"]
+        },
+        image_label: { name: "feed_image" }
+      },
+      {
+        customization_spec: {
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["story"],
+          instagram_positions: ["story", "reels"]
+        },
+        image_label: { name: "story_image" }
+      }
+    ],
+    call_to_action: {
+      type: "WHATSAPP_MESSAGE",
+      value: {
+        page_welcome_message: JSON.stringify(pageWelcomeMessage)
+      }
+    }
+  };
+
+  log.debug({ adAccountId, params: { ...params, imageHash9x16: '***', imageHash4x5: '***' } }, 'Creating WhatsApp multi-format image creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создает Instagram Traffic креатив с несколькими форматами изображений
+ */
+export async function createInstagramImageCreativeMultiFormat(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash9x16: string;
+    imageHash4x5: string;
+    pageId: string;
+    instagramId: string;
+    instagramUsername: string;
+    message: string;
+  }
+): Promise<{ id: string }> {
+  const landingLink = `https://www.instagram.com/${params.instagramUsername}`;
+
+  const payload = {
+    name: "Instagram Profile Image Creative (Multi-Format)",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId
+    },
+    asset_feed_spec: {
+      images: [
+        { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
+        { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
+      ],
+      bodies: [{ text: params.message }],
+      call_to_action_types: ["LEARN_MORE"],
+      link_urls: [{ website_url: landingLink }],
+      ad_formats: ["SINGLE_IMAGE"]
+    },
+    asset_customization_rules: [
+      {
+        customization_spec: {
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["feed"],
+          instagram_positions: ["stream"]
+        },
+        image_label: { name: "feed_image" }
+      },
+      {
+        customization_spec: {
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["story"],
+          instagram_positions: ["story", "reels"]
+        },
+        image_label: { name: "story_image" }
+      }
+    ]
+  };
+
+  log.debug({ adAccountId, instagramUsername: params.instagramUsername }, 'Creating Instagram multi-format image creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создает Website Leads креатив с несколькими форматами изображений
+ */
+export async function createWebsiteLeadsImageCreativeMultiFormat(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash9x16: string;
+    imageHash4x5: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    siteUrl: string;
+    utm?: string;
+  }
+): Promise<{ id: string }> {
+  const payload = {
+    name: "Website Leads Image Creative (Multi-Format)",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId
+    },
+    asset_feed_spec: {
+      images: [
+        { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
+        { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
+      ],
+      bodies: [{ text: params.message }],
+      call_to_action_types: ["SIGN_UP"],
+      link_urls: [{ website_url: params.siteUrl }],
+      ad_formats: ["SINGLE_IMAGE"]
+    },
+    asset_customization_rules: [
+      {
+        customization_spec: {
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["feed"],
+          instagram_positions: ["stream"]
+        },
+        image_label: { name: "feed_image" }
+      },
+      {
+        customization_spec: {
+          publisher_platforms: ["facebook", "instagram"],
+          facebook_positions: ["story"],
+          instagram_positions: ["story", "reels"]
+        },
+        image_label: { name: "story_image" }
+      }
+    ]
+  };
+
+  log.debug({ adAccountId, siteUrl: params.siteUrl }, 'Creating Website Leads multi-format image creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+// ============================================
 // CAROUSEL CREATIVES
 // ============================================
 

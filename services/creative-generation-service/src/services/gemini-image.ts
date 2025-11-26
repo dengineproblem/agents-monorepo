@@ -239,6 +239,97 @@ export async function upscaleImageTo4K(
 }
 
 /**
+ * Адаптация изображения под другой aspect ratio
+ * Используется для создания 4:5 версии из 9:16 для Feed плейсментов
+ * @param base64Image - Исходное изображение в base64 (9:16)
+ * @param originalPrompt - Оригинальный промпт для сохранения стиля
+ * @param targetAspectRatio - Целевое соотношение сторон
+ * @returns Base64 изображение в 4K с новым aspect ratio
+ */
+export async function adaptImageToAspectRatio(
+  base64Image: string,
+  originalPrompt: string,
+  targetAspectRatio: '4:5' | '1:1' = '4:5'
+): Promise<string> {
+  try {
+    console.log('[Gemini Adapt] Starting image adaptation to', targetAspectRatio);
+
+    const client = getGeminiClient();
+    const model = client.getGenerativeModel({
+      model: 'gemini-3-pro-image-preview'
+    });
+
+    // Промпт для адаптации - просим сохранить контент и стиль
+    const adaptPrompt = `${originalPrompt}
+
+ЗАДАЧА: Адаптируй это изображение под формат ${targetAspectRatio}, сохранив:
+- Основной контент и композицию
+- Цветовую гамму и стиль
+- Все важные элементы (текст, объекты, людей)
+
+Расширь или перекомпонуй изображение так, чтобы оно органично смотрелось в новом формате.`;
+
+    const contentParts: any[] = [
+      { text: adaptPrompt },
+      {
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: base64Image
+        }
+      }
+    ];
+
+    // Конфигурация для 4K с новым aspect ratio
+    const generationConfig = {
+      responseModalities: ['IMAGE'],
+      imageConfig: {
+        aspectRatio: targetAspectRatio,
+        imageSize: '4K'
+      },
+      temperature: 0.3, // Немного выше чем upscale, т.к. нужна адаптация
+      topK: 20,
+      topP: 0.85
+    };
+
+    console.log('[Gemini Adapt] Generating adapted version...');
+
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: contentParts }],
+      generationConfig
+    });
+
+    const response = result.response;
+
+    if (!response.candidates || response.candidates.length === 0) {
+      throw new Error('No image generated during adaptation');
+    }
+
+    const candidate = response.candidates[0];
+
+    if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
+      throw new Error('No image parts in adaptation response');
+    }
+
+    const imagePart = candidate.content.parts.find((part: any) => part.inlineData);
+
+    if (!imagePart || !imagePart.inlineData || !imagePart.inlineData.data) {
+      throw new Error('No image data in adaptation response');
+    }
+
+    const adaptedImage = imagePart.inlineData.data;
+
+    console.log('[Gemini Adapt] Adapted image generated successfully');
+    console.log('[Gemini Adapt] Target aspect ratio:', targetAspectRatio);
+    console.log('[Gemini Adapt] Image size:', adaptedImage.length, 'bytes (base64)');
+
+    return adaptedImage;
+  } catch (error: any) {
+    console.error('[Gemini Adapt] Error adapting image:', error);
+    throw new Error(`Image adaptation failed: ${error.message}`);
+  }
+}
+
+/**
  * Инициализация и проверка доступности Gemini API
  */
 export async function initializeGeminiImageAPI(): Promise<void> {
