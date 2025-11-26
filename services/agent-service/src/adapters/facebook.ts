@@ -620,79 +620,35 @@ export async function createWebsiteLeadsImageCreative(
 
 /**
  * Создает WhatsApp креатив с несколькими форматами изображений
- * 9:16 для Stories/Reels, 4:5 для Feed
+ * ВАЖНО: CTWA (Click-to-WhatsApp) креативы НЕ поддерживают asset_feed_spec + asset_customization_rules
+ * с link_data в object_story_spec (ошибка 1885374). Используем только 4:5 формат который работает везде.
+ *
+ * Для полноценной multi-format поддержки WhatsApp нужно создавать отдельные креативы
+ * для разных плейсментов и использовать их в разных ad sets.
  */
 export async function createWhatsAppImageCreativeMultiFormat(
   adAccountId: string,
   token: string,
   params: {
-    imageHash9x16: string;  // для Stories/Reels
-    imageHash4x5: string;   // для Feed
+    imageHash9x16: string;  // для Stories/Reels (не используется для CTWA)
+    imageHash4x5: string;   // для Feed (используется как основной)
     pageId: string;
     instagramId: string;
     message: string;
     clientQuestion: string;
   }
 ): Promise<{ id: string }> {
-  const pageWelcomeMessage = JSON.stringify({
-    type: "VISUAL_EDITOR",
-    version: 2,
-    landing_screen_type: "welcome_message",
-    media_type: "text",
-    text_format: {
-      customer_action_type: "autofill_message",
-      message: {
-        autofill_message: { content: params.clientQuestion },
-        text: "Здравствуйте! Чем можем помочь?"
-      }
-    }
+  // Для CTWA используем стандартный подход без asset_feed_spec
+  // 4:5 формат работает во всех плейсментах (хоть и не оптимально для Stories)
+  log.warn('WhatsApp CTWA не поддерживает multi-format (asset_feed_spec), используем 4:5 формат для всех плейсментов');
+
+  return await createWhatsAppImageCreative(adAccountId, token, {
+    imageHash: params.imageHash4x5, // Используем 4:5 для всех плейсментов
+    pageId: params.pageId,
+    instagramId: params.instagramId,
+    message: params.message,
+    clientQuestion: params.clientQuestion
   });
-
-  // Для WhatsApp с asset_feed_spec используем object_story_spec с link_data
-  // и добавляем asset_feed_spec для multi-format
-  const objectStorySpec = {
-    page_id: params.pageId,
-    instagram_user_id: params.instagramId,
-    link_data: {
-      image_hash: params.imageHash4x5, // Основное изображение (будет заменено через asset_customization)
-      link: "https://www.facebook.com/",
-      message: params.message,
-      call_to_action: { type: "WHATSAPP_MESSAGE" },
-      page_welcome_message: pageWelcomeMessage
-    }
-  };
-
-  const payload = {
-    name: "Image CTWA – WhatsApp (Multi-Format)",
-    object_story_spec: JSON.stringify(objectStorySpec),
-    asset_feed_spec: JSON.stringify({
-      images: [
-        { hash: params.imageHash4x5, adlabels: [{ name: "feed_image" }] },
-        { hash: params.imageHash9x16, adlabels: [{ name: "story_image" }] }
-      ]
-    }),
-    asset_customization_rules: JSON.stringify([
-      {
-        customization_spec: {
-          publisher_platforms: ["facebook", "instagram"],
-          facebook_positions: ["feed"],
-          instagram_positions: ["stream"]
-        },
-        image_label: { name: "feed_image" }
-      },
-      {
-        customization_spec: {
-          publisher_platforms: ["facebook", "instagram"],
-          facebook_positions: ["story"],
-          instagram_positions: ["story", "reels"]
-        },
-        image_label: { name: "story_image" }
-      }
-    ])
-  };
-
-  log.debug({ adAccountId, params: { ...params, imageHash9x16: '***', imageHash4x5: '***' } }, 'Creating WhatsApp multi-format image creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 
 /**

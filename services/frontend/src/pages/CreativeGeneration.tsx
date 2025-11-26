@@ -578,9 +578,9 @@ const CreativeGeneration = () => {
     setIsCreatingCreative(true);
 
     try {
-      toast.loading('Подготовка 4K версий (9:16 + 4:5)...', { id: 'upscale-create' });
+      toast.loading('Подготовка 4K версии (9:16)...', { id: 'upscale-create' });
 
-      // 1. Вызываем upscale до 4K - создаст обе версии (9:16 и 4:5)
+      // 1. Вызываем upscale до 4K - расширяет 4:5 до 9:16
       const upscaleResponse = await fetch('http://localhost:8085/upscale-to-4k', {
         method: 'POST',
         headers: {
@@ -594,13 +594,13 @@ const CreativeGeneration = () => {
 
       const upscaleData = await upscaleResponse.json();
 
-      if (!upscaleData.success || !upscaleData.image_url_4k || !upscaleData.image_url_4k_4x5) {
-        throw new Error('Не удалось создать 4K версии изображения');
+      if (!upscaleData.success || !upscaleData.image_url_4k) {
+        throw new Error('Не удалось создать 4K версию изображения');
       }
 
-      toast.success('4K версии готовы, создание креатива в Facebook...', { id: 'upscale-create' });
+      toast.success('4K версия готова, создание креатива в Facebook...', { id: 'upscale-create' });
 
-      // 2. Вызываем новый API для создания multi-format креатива
+      // 2. Вызываем API для создания креатива (одно 9:16 изображение)
       const createResponse = await fetch('http://localhost:8082/create-image-creative', {
         method: 'POST',
         headers: {
@@ -619,7 +619,7 @@ const CreativeGeneration = () => {
         throw new Error(createData.error || 'Ошибка создания креатива в Facebook');
       }
 
-      toast.success(`Креатив создан! (9:16 для Stories + 4:5 для Feed)`, { id: 'upscale-create' });
+      toast.success('Креатив создан в Facebook!', { id: 'upscale-create' });
 
       // Очищаем форму
       setGeneratedImage(null);

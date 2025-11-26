@@ -9,10 +9,7 @@ import {
   uploadImage,
   createWhatsAppImageCreative,
   createInstagramImageCreative,
-  createWebsiteLeadsImageCreative,
-  createWhatsAppImageCreativeMultiFormat,
-  createInstagramImageCreativeMultiFormat,
-  createWebsiteLeadsImageCreativeMultiFormat
+  createWebsiteLeadsImageCreative
 } from '../adapters/facebook.js';
 
 const ProcessImageSchema = z.object({
@@ -337,7 +334,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * POST /create-image-creative
-   * Создаёт FB креатив из generated_creative с multi-format поддержкой (9:16 + 4:5)
+   * Создаёт FB креатив из generated_creative
+   * Использует единственное 9:16 изображение - Meta сама кропнет до 4:5 для Feed плейсментов
    */
   app.post<{ Body: CreateImageCreativeBody }>('/create-image-creative', async (request, reply) => {
     try {
@@ -362,19 +360,13 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // 2. Проверяем наличие 4K версий
-      if (!creative.image_url_4k || !creative.image_url_4k_4x5) {
-        app.log.error({
-          has_4k: !!creative.image_url_4k,
-          has_4k_4x5: !!creative.image_url_4k_4x5
-        }, '4K versions not available');
+      // 2. Проверяем наличие 4K версии (9:16)
+      if (!creative.image_url_4k) {
+        app.log.error({ has_4k: !!creative.image_url_4k }, '4K version not available');
         return reply.status(400).send({
           success: false,
-          error: '4K versions are required. Please upscale the image first.',
-          details: {
-            has_image_url_4k: !!creative.image_url_4k,
-            has_image_url_4k_4x5: !!creative.image_url_4k_4x5
-          }
+          error: '4K version is required. Please upscale the image first.',
+          details: { has_image_url_4k: !!creative.image_url_4k }
         });
       }
 
@@ -432,45 +424,28 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
       const normalizedAdAccountId = normalizeAdAccountId(userAccount.ad_account_id);
 
-      // 6. Скачиваем и загружаем оба изображения в Facebook
-      app.log.info('Downloading and uploading both image formats to Facebook');
+      // 6. Скачиваем и загружаем 9:16 изображение в Facebook
+      // Meta сама кропнет 9:16 до 4:5 для Feed плейсментов (текст в центре сохранится)
+      app.log.info('Downloading and uploading 9:16 image to Facebook');
 
-      // Скачиваем 9:16 версию
-      const image9x16Response = await fetch(creative.image_url_4k);
-      if (!image9x16Response.ok) {
+      const imageResponse = await fetch(creative.image_url_4k);
+      if (!imageResponse.ok) {
         throw new Error('Failed to download 9:16 4K image');
       }
-      const image9x16Buffer = Buffer.from(await image9x16Response.arrayBuffer());
-      app.log.info({ sizeKB: Math.round(image9x16Buffer.length / 1024) }, '9:16 4K image downloaded');
+      const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+      app.log.info({ sizeKB: Math.round(imageBuffer.length / 1024) }, '9:16 4K image downloaded');
 
-      // Скачиваем 4:5 версию
-      const image4x5Response = await fetch(creative.image_url_4k_4x5);
-      if (!image4x5Response.ok) {
-        throw new Error('Failed to download 4:5 4K image');
-      }
-      const image4x5Buffer = Buffer.from(await image4x5Response.arrayBuffer());
-      app.log.info({ sizeKB: Math.round(image4x5Buffer.length / 1024) }, '4:5 4K image downloaded');
+      const fbImage = await uploadImage(normalizedAdAccountId, ACCESS_TOKEN, imageBuffer);
+      app.log.info({ hash: fbImage.hash }, 'Image uploaded to Facebook');
 
-      // Загружаем оба в Facebook параллельно
-      const [fbImage9x16, fbImage4x5] = await Promise.all([
-        uploadImage(normalizedAdAccountId, ACCESS_TOKEN, image9x16Buffer),
-        uploadImage(normalizedAdAccountId, ACCESS_TOKEN, image4x5Buffer)
-      ]);
-
-      app.log.info({
-        hash9x16: fbImage9x16.hash,
-        hash4x5: fbImage4x5.hash
-      }, 'Both images uploaded to Facebook');
-
-      // 7. Создаём multi-format креатив в зависимости от objective
-      app.log.info({ objective }, 'Creating multi-format creative in Facebook');
+      // 7. Создаём креатив в зависимости от objective
+      app.log.info({ objective }, 'Creating creative in Facebook');
 
       let fbCreativeId = '';
 
       if (objective === 'whatsapp') {
-        const result = await createWhatsAppImageCreativeMultiFormat(normalizedAdAccountId, ACCESS_TOKEN, {
-          imageHash9x16: fbImage9x16.hash,
-          imageHash4x5: fbImage4x5.hash,
+        const result = await createWhatsAppImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          imageHash: fbImage.hash,
           pageId: userAccount.page_id,
           instagramId: userAccount.instagram_id,
           message: description,
@@ -478,9 +453,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
         fbCreativeId = result.id;
       } else if (objective === 'instagram_traffic') {
-        const result = await createInstagramImageCreativeMultiFormat(normalizedAdAccountId, ACCESS_TOKEN, {
-          imageHash9x16: fbImage9x16.hash,
-          imageHash4x5: fbImage4x5.hash,
+        const result = await createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          imageHash: fbImage.hash,
           pageId: userAccount.page_id,
           instagramId: userAccount.instagram_id,
           instagramUsername: userAccount.instagram_username || '',
@@ -494,9 +468,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             error: 'site_url is required for site_leads objective. Please configure it in direction settings.'
           });
         }
-        const result = await createWebsiteLeadsImageCreativeMultiFormat(normalizedAdAccountId, ACCESS_TOKEN, {
-          imageHash9x16: fbImage9x16.hash,
-          imageHash4x5: fbImage4x5.hash,
+        const result = await createWebsiteLeadsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          imageHash: fbImage.hash,
           pageId: userAccount.page_id,
           instagramId: userAccount.instagram_id,
           message: description,
@@ -511,7 +484,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      app.log.info({ fbCreativeId, objective }, 'Multi-format creative created in Facebook');
+      app.log.info({ fbCreativeId, objective }, 'Creative created in Facebook');
 
       // 8. Создаём запись в user_creatives
       const { data: userCreative, error: insertError } = await supabase
@@ -522,7 +495,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           title: creative.offer || 'Image Creative',
           status: 'ready',
           media_type: 'image',
-          fb_image_hash: fbImage9x16.hash, // Сохраняем основной hash
+          fb_image_hash: fbImage.hash,
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
           ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
@@ -551,10 +524,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         fb_creative_id: fbCreativeId,
         user_creative_id: userCreative?.id,
         objective,
-        formats: {
-          '9x16': { hash: fbImage9x16.hash },
-          '4x5': { hash: fbImage4x5.hash }
-        }
+        image_hash: fbImage.hash
       });
 
     } catch (error: any) {

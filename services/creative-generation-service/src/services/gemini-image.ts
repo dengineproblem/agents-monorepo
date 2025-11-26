@@ -101,12 +101,13 @@ export async function generateCreativeImage(
       }
     }
 
-    // Конфигурация для генерации в формате 9:16 для Instagram Reels/Stories
-    // Используем 2K для preview, позже можно будет upscale до 4K
+    // Конфигурация для генерации в формате 4:5
+    // Генерируем в 4:5 - при upscale расширим до 9:16 (достроим снизу)
+    // Это позволяет Meta корректно кропать 9:16 → 4:5 для Feed плейсментов
     const generationConfig = {
       responseModalities: ['IMAGE'],
       imageConfig: {
-        aspectRatio: '9:16',
+        aspectRatio: '4:5',
         imageSize: '2K'
       },
       temperature: 1.0,
@@ -114,7 +115,7 @@ export async function generateCreativeImage(
       topP: 0.95
     };
 
-    console.log('[Gemini] Image config: 9:16 aspect ratio, 2K resolution');
+    console.log('[Gemini] Image config: 4:5 aspect ratio, 2K resolution');
 
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: contentParts }],
@@ -236,42 +237,55 @@ export async function upscaleImageTo4K(
 }
 
 /**
- * Адаптация изображения под другой aspect ratio
- * Используется для создания 4:5 версии из 9:16 для Feed плейсментов
- * @param base64Image - Исходное изображение в base64 (9:16)
+ * Расширение изображения из 4:5 до 9:16
+ * Достраивает фон СНИЗУ, сохраняя весь контент 4:5 в верхней части
+ * @param base64Image - Исходное изображение в base64 (4:5)
  * @param originalPrompt - Оригинальный промпт для сохранения стиля
- * @param targetAspectRatio - Целевое соотношение сторон
- * @returns Base64 изображение в 4K с новым aspect ratio
+ * @returns Base64 изображение в 4K с aspect ratio 9:16
  */
-export async function adaptImageToAspectRatio(
+export async function expandTo9x16(
   base64Image: string,
-  originalPrompt: string,
-  targetAspectRatio: '4:5' | '1:1' = '4:5'
+  originalPrompt: string
 ): Promise<string> {
   try {
-    console.log('[Gemini Adapt] Starting image adaptation to', targetAspectRatio);
+    console.log('[Gemini Expand] Starting image expansion from 4:5 to 9:16...');
 
     const client = getGeminiClient();
     const model = client.getGenerativeModel({
       model: 'gemini-3-pro-image-preview'
     });
 
-    // Промпт для адаптации - просим сохранить контент и стиль
-    const adaptPrompt = `${originalPrompt}
+    // Промпт для outpainting - бесшовное расширение фона
+    const expandPrompt = `SEAMLESS OUTPAINTING: Extend this 4:5 image to 9:16 by continuing the background.
 
-ЗАДАЧА: Адаптируй это изображение под формат ${targetAspectRatio}, сохранив:
-- Точно такой же контент изображения (дублируй без изменений)
-- Цветовую гамму и стиль
-- Все элементы (текст, объекты, людей) в том же виде
+CRITICAL: This is OUTPAINTING - you must generate MORE of the SAME background above and below the image.
 
-ВАЖНО для адаптации из 9:16 в 4:5:
-- Сохрани изображение без изменений
-- Уменьши нижние поля по сравнению с оригиналом
-- Сделай верхние и нижние поля пропорциональными друг другу
-- Центрируй основной контент с учётом новых пропорций`;
+The original image has a background (gradient, color, texture, pattern, or scene).
+Your job is to SEAMLESSLY CONTINUE that exact same background in the new vertical space.
+
+REQUIREMENTS:
+1. KEEP the original image EXACTLY as-is in the CENTER
+2. EXTEND the background UPWARD - analyze the top edge pixels and generate matching continuation
+3. EXTEND the background DOWNWARD - analyze the bottom edge pixels and generate matching continuation
+4. NO VISIBLE SEAMS - the transition must be INVISIBLE, like the background was always larger
+5. MATCH everything: colors, gradients, lighting, texture, blur level, grain
+
+TECHNICAL:
+- If the top has a blue gradient → continue that blue gradient upward with the same direction
+- If the bottom has a blurred background → continue that same blur level
+- If there's a pattern → continue the pattern seamlessly
+- The edges of the original must BLEND PERFECTLY into the new areas
+
+DO NOT:
+- Move, resize, or modify ANY content from the original image
+- Add new objects, text, or elements to the extended areas
+- Create any visible line, border, or color shift at the original edges
+- Change the original image in any way
+
+The result should look like ONE seamless image that was always 9:16, not a 4:5 image with added borders.`;
 
     const contentParts: any[] = [
-      { text: adaptPrompt },
+      { text: expandPrompt },
       {
         inlineData: {
           mimeType: 'image/jpeg',
@@ -280,19 +294,19 @@ export async function adaptImageToAspectRatio(
       }
     ];
 
-    // Конфигурация для 4K с новым aspect ratio
+    // Конфигурация для 4K с aspect ratio 9:16
     const generationConfig = {
       responseModalities: ['IMAGE'],
       imageConfig: {
-        aspectRatio: targetAspectRatio,
+        aspectRatio: '9:16',
         imageSize: '4K'
       },
-      temperature: 0.3, // Немного выше чем upscale, т.к. нужна адаптация
+      temperature: 0.2, // Низкая температура для точного следования оригиналу
       topK: 20,
-      topP: 0.85
+      topP: 0.8
     };
 
-    console.log('[Gemini Adapt] Generating adapted version...');
+    console.log('[Gemini Expand] Generating 9:16 version with extended background...');
 
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: contentParts }],
@@ -302,31 +316,30 @@ export async function adaptImageToAspectRatio(
     const response = result.response;
 
     if (!response.candidates || response.candidates.length === 0) {
-      throw new Error('No image generated during adaptation');
+      throw new Error('No image generated during expansion');
     }
 
     const candidate = response.candidates[0];
 
     if (!candidate.content || !candidate.content.parts || candidate.content.parts.length === 0) {
-      throw new Error('No image parts in adaptation response');
+      throw new Error('No image parts in expansion response');
     }
 
     const imagePart = candidate.content.parts.find((part: any) => part.inlineData);
 
     if (!imagePart || !imagePart.inlineData || !imagePart.inlineData.data) {
-      throw new Error('No image data in adaptation response');
+      throw new Error('No image data in expansion response');
     }
 
-    const adaptedImage = imagePart.inlineData.data;
+    const expandedImage = imagePart.inlineData.data;
 
-    console.log('[Gemini Adapt] Adapted image generated successfully');
-    console.log('[Gemini Adapt] Target aspect ratio:', targetAspectRatio);
-    console.log('[Gemini Adapt] Image size:', adaptedImage.length, 'bytes (base64)');
+    console.log('[Gemini Expand] 9:16 image generated successfully');
+    console.log('[Gemini Expand] Image size:', expandedImage.length, 'bytes (base64)');
 
-    return adaptedImage;
+    return expandedImage;
   } catch (error: any) {
-    console.error('[Gemini Adapt] Error adapting image:', error);
-    throw new Error(`Image adaptation failed: ${error.message}`);
+    console.error('[Gemini Expand] Error expanding image:', error);
+    throw new Error(`Image expansion failed: ${error.message}`);
   }
 }
 
