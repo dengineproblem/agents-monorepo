@@ -45,3 +45,4 @@ npm run dev
 
 Проверьте логи - должна появиться строка "Gemini API initialized successfully"
 
+

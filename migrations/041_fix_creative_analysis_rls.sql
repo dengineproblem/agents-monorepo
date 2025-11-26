@@ -16,3 +16,4 @@ CREATE POLICY "Service role can modify creative analyses"
   ON creative_analysis FOR ALL
   USING (auth.role() = 'service_role');
 
+

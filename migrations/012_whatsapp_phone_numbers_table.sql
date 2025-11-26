@@ -192,3 +192,4 @@ ALTER TABLE whatsapp_phone_numbers DISABLE ROW LEVEL SECURITY;
 
 
 
+

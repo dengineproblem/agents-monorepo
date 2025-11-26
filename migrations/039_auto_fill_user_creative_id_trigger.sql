@@ -40,3 +40,4 @@ CREATE TRIGGER trigger_auto_fill_user_creative_id
 COMMENT ON FUNCTION auto_fill_user_creative_id() IS 
 'Автоматически заполняет user_creative_id на основе ad_id через ad_creative_mapping';
 
+

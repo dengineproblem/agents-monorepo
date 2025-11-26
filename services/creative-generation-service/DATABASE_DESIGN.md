@@ -325,3 +325,4 @@ WHERE status = 'generated'
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Общая архитектура сервиса
 - `migrations/032_create_generated_creatives.sql` - SQL миграция
 
+

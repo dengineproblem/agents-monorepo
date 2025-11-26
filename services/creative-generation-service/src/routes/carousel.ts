@@ -305,7 +305,15 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
       try {
         const { user_id, carousel_id, card_index, custom_prompt, reference_image, text } = request.body;
 
-        console.log('[Regenerate Card] Request:', { user_id, carousel_id, card_index });
+        console.log('[Regenerate Card] Request:', {
+          user_id,
+          carousel_id,
+          card_index,
+          has_custom_prompt: !!custom_prompt,
+          custom_prompt_length: custom_prompt?.length || 0,
+          has_reference_image: !!reference_image,
+          reference_image_length: reference_image?.length || 0
+        });
 
         // Валидация
         if (!user_id || !carousel_id || card_index === undefined || !text) {

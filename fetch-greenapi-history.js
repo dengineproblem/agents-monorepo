@@ -278,3 +278,4 @@ function printStatistics(totalMessages, messagesWithAds, phoneToAds) {
 
 
 
+

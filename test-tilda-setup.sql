@@ -74,3 +74,4 @@ SELECT ad_id, user_creative_id, direction_id, source FROM ad_creative_mapping WH
 
 
 
+

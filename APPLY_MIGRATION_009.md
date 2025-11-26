@@ -94,3 +94,4 @@ DROP INDEX IF EXISTS idx_campaign_messages_status_user;
 - `CAMPAIGN_AUTOMATION_FLOW.md` - общая документация по кампаниям
 
 
+

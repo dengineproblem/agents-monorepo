@@ -19,3 +19,4 @@ curl -X POST http://localhost:8085/generate-creative \
 echo -e "\n\n✅ Запрос отправлен!"
 echo "Проверьте response выше для получения URL изображения"
 
+

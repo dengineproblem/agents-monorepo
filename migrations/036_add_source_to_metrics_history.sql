@@ -43,3 +43,4 @@ COMMENT ON COLUMN creative_metrics_history.source IS
 - При сохранении указывать соответствующий source
 */
 
+

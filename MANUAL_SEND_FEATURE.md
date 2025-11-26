@@ -272,3 +272,4 @@ docker logs agents-monorepo-chatbot-service-1 --tail 100 | grep "Campaign worker
 - `services/crm-backend/migrations/009_add_manual_send_field.sql` - миграция БД
 
 
+

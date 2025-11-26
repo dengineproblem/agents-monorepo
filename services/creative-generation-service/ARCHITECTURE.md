@@ -268,3 +268,4 @@ CORS_ORIGIN=*
 - [SETUP_GOOGLE_AI.md](./SETUP_GOOGLE_AI.md) - Настройка Google AI API
 - [../MIGRATION_SUMMARY.md](../../MIGRATION_SUMMARY.md) - Сравнение с n8n
 
+

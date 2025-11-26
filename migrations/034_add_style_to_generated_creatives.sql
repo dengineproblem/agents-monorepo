@@ -9,3 +9,4 @@ ADD COLUMN IF NOT EXISTS style_id TEXT;
 -- Комментарий к новому полю
 COMMENT ON COLUMN generated_creatives.style_id IS 'Стиль креатива: modern_performance (современная графика), live_ugc (живой UGC-контент) или visual_hook (визуальный зацеп)';
 
+

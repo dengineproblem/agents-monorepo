@@ -106,3 +106,4 @@ export interface GenerateCreativeRequest {
 
 Обновлено для поддержки референсных изображений в Gemini 3 Pro Image Preview
 
+

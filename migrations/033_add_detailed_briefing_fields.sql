@@ -17,3 +17,4 @@ COMMENT ON COLUMN user_briefing_responses.social_proof IS 'Социальные 
 COMMENT ON COLUMN user_briefing_responses.guarantees IS 'Гарантии (возврат денег, бесплатный период, пробное занятие и т.п.)';
 COMMENT ON COLUMN user_briefing_responses.tone_of_voice IS 'Тон общения бренда (дружелюбный, экспертный, вдохновляющий и т.п.)';
 
+

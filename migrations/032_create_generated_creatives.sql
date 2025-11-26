@@ -91,3 +91,4 @@ CREATE POLICY "Users can delete their own generated creatives"
     FOR DELETE
     USING (auth.uid() = user_id);
 
+

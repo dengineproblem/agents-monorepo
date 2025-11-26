@@ -194,3 +194,4 @@ docker-compose up -d --build agent-service frontend
 **Статус**: ✅ Готово к тестированию и deployment
 **Дата**: 21 ноября 2025
 
+

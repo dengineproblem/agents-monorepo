@@ -41,3 +41,4 @@ CREATE POLICY chatbot_configs_user_access ON chatbot_configurations
 
 
 
+

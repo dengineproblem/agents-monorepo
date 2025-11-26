@@ -130,3 +130,4 @@ CREATE TABLE user_briefing_responses (
 
 **Следующий шаг:** Применить миграцию `031_create_user_briefing_responses.sql` в Supabase
 
+

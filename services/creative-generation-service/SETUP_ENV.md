@@ -89,3 +89,4 @@ curl http://localhost:8085/health
 2. Или получите новый на https://platform.openai.com/api-keys
 3. Добавьте в `.env` файл сервиса
 
+

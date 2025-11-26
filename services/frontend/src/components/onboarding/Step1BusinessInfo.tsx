@@ -111,3 +111,4 @@ export const Step1BusinessInfo: React.FC<Step1Props> = ({ data, onNext }) => {
   );
 };
 
+

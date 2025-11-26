@@ -248,3 +248,4 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION get_avg_time_to_action IS 'Возвращает среднее время до целевого действия в днях';
 
 
+

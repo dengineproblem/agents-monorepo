@@ -97,3 +97,4 @@ export const Step2OnlinePresence: React.FC<Step2Props> = ({ data, onNext, onBack
   );
 };
 
+

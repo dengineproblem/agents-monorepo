@@ -18,3 +18,4 @@ UNIQUE (creative_id, user_account_id, source);
 COMMENT ON CONSTRAINT creative_analysis_unique_per_source ON creative_analysis IS
 'Гарантирует что для каждого креатива есть только один актуальный анализ из каждого источника (test/manual/scheduled)';
 
+

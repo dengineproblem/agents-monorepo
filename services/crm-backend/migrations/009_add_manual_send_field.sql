@@ -18,3 +18,4 @@ COMMENT ON COLUMN campaign_messages.manual_send_requested_at IS
 'Timestamp when user manually requested to send this queue. Used to prioritize manual sends over autopilot.';
 
 
+

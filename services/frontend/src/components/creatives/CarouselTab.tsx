@@ -73,6 +73,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState({ current: 0, total: 0 });
 
+  // State для выбора карточек для скачивания
+  const [selectedCardsForDownload, setSelectedCardsForDownload] = useState<number[]>([]);
+
   // Управление глобальными промптами
   const addGlobalPrompt = () => {
     const newPrompt: GlobalPrompt = {
@@ -131,7 +134,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         const newRef: GlobalReference = {
           id: `ref_${Date.now()}`,
           base64,
-          appliedToCards: Array.from({ length: carouselCards.length }, (_, i) => i) // По умолчанию ко всем
+          appliedToCards: [] // По умолчанию пустой — пользователь сам выбирает карточки
         };
         setGlobalReferences([...globalReferences, newRef]);
       };
@@ -445,6 +448,14 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       const customPrompt = cardRegenerationPrompts[cardIndex] || undefined;
       const referenceImage = cardRegenerationImages[cardIndex] || undefined;
 
+      console.log('[CarouselTab] Regenerating card:', {
+        cardIndex,
+        hasCustomPrompt: !!customPrompt,
+        customPromptLength: customPrompt?.length || 0,
+        hasReferenceImage: !!referenceImage,
+        referenceImageLength: referenceImage?.length || 0
+      });
+
       const response = await carouselApi.regenerateCard({
         user_id: userId,
         carousel_id: generatedCarouselId,
@@ -505,14 +516,24 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Скачивание всех картинок
+  // Скачивание картинок (всех или выбранных)
   const handleDownloadAll = async () => {
     if (!userId || !generatedCarouselId || isDownloading) return;
 
-    setIsDownloading(true);
-    setDownloadProgress({ current: 0, total: carouselCards.length });
+    // Определяем какие карточки скачиваем: выбранные или все
+    const cardsToDownload = selectedCardsForDownload.length > 0
+      ? selectedCardsForDownload.sort((a, b) => a - b)
+      : carouselCards.map((_, i) => i);
 
-    const totalCards = carouselCards.length;
+    if (cardsToDownload.length === 0) {
+      toast.error('Выберите карточки для скачивания');
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadProgress({ current: 0, total: cardsToDownload.length });
+
+    const totalCards = cardsToDownload.length;
     let progressToastId: string | number | undefined;
 
     try {
@@ -548,17 +569,19 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
           toast.loading('📦 Создание архива...', { id: progressToastId });
         }
 
-        // Шаг 2: Создаём ZIP архив со всеми картинками
+        // Шаг 2: Создаём ZIP архив с выбранными картинками
         const zip = new JSZip();
 
-        for (let i = 0; i < response.carousel_data.length; i++) {
-          const card = response.carousel_data[i];
+        let downloadedCount = 0;
+        for (const cardIndex of cardsToDownload) {
+          const card = response.carousel_data[cardIndex];
 
-          if (card.image_url_4k) {
-            setDownloadProgress({ current: i + 1, total: response.carousel_data.length });
+          if (card && card.image_url_4k) {
+            downloadedCount++;
+            setDownloadProgress({ current: downloadedCount, total: totalCards });
 
             if (progressToastId) {
-              toast.loading(`📥 Загрузка изображения ${i + 1} из ${totalCards}...`, { id: progressToastId });
+              toast.loading(`📥 Загрузка изображения ${downloadedCount} из ${totalCards}...`, { id: progressToastId });
             }
 
             // Загружаем изображение как blob
@@ -566,7 +589,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
             const blob = await imageResponse.blob();
 
             // Добавляем в ZIP
-            zip.file(`carousel_card_${card.order + 1}_4k.png`, blob);
+            zip.file(`carousel_card_${cardIndex + 1}_4k.png`, blob);
           }
         }
 
@@ -589,6 +612,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         if (progressToastId) {
           toast.success(`✅ Архив с ${totalCards} картинками 4K успешно скачан!`, { id: progressToastId });
         }
+
+        // Очищаем выбор после скачивания
+        setSelectedCardsForDownload([]);
       } else {
         if (progressToastId) {
           toast.error(response.error || 'Ошибка апскейла', { id: progressToastId });
@@ -799,24 +825,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
               {hasGeneratedImages ? (
                 /* Инструменты для перегенерации изображения */
                 <>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleRegenerateCard(currentCardIndex)}
-                    disabled={regeneratingCardIndex === currentCardIndex}
-                    className="w-full"
-                  >
-                    {regeneratingCardIndex === currentCardIndex ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                    )}
-                    Перегенерировать карточку
-                  </Button>
-
                   <div>
-                    <Label htmlFor={`regen-prompt-${currentCardIndex}`} className="text-xs">
-                      Дополнительный промпт (опционально)
+                    <Label htmlFor={`regen-prompt-${currentCardIndex}`} className="text-xs text-muted-foreground">
+                      Дополнительный промпт
                     </Label>
                     <Input
                       id={`regen-prompt-${currentCardIndex}`}
@@ -831,22 +842,64 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     />
                   </div>
 
+                  {/* Референсное изображение - компактный вид */}
                   <div>
-                    <Label htmlFor={`regen-image-${currentCardIndex}`} className="text-xs">
-                      Референсное изображение (опционально)
-                    </Label>
-                    <Input
-                      id={`regen-image-${currentCardIndex}`}
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => handleCardRegenerationImageUpload(currentCardIndex, e)}
-                      disabled={regeneratingCardIndex === currentCardIndex}
-                      className="mt-1"
-                    />
-                    {cardRegenerationImages[currentCardIndex] && (
-                      <p className="text-sm text-green-600 dark:text-green-400 mt-1">✓ Изображение загружено</p>
-                    )}
+                    <Label className="text-xs text-muted-foreground">Референсное изображение</Label>
+                    <div className="mt-1 flex items-center gap-2">
+                      {cardRegenerationImages[currentCardIndex] ? (
+                        <>
+                          <img
+                            src={`data:image/jpeg;base64,${cardRegenerationImages[currentCardIndex]}`}
+                            alt="Референс"
+                            className="w-12 h-12 object-cover rounded border"
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              const newImages = {...cardRegenerationImages};
+                              delete newImages[currentCardIndex];
+                              setCardRegenerationImages(newImages);
+                            }}
+                            disabled={regeneratingCardIndex === currentCardIndex}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = 'image/*';
+                            input.onchange = (e: any) => handleCardRegenerationImageUpload(currentCardIndex, e);
+                            input.click();
+                          }}
+                          disabled={regeneratingCardIndex === currentCardIndex}
+                          className="h-12 w-12 p-0"
+                        >
+                          <Plus className="h-5 w-5" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleRegenerateCard(currentCardIndex)}
+                    disabled={regeneratingCardIndex === currentCardIndex}
+                    className="w-full"
+                  >
+                    {regeneratingCardIndex === currentCardIndex ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Перегенерировать карточку
+                  </Button>
                 </>
               ) : (
                 /* Инструменты для редактирования текста */
@@ -904,17 +957,11 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                 </div>
 
                 {/* Промпты для карточек */}
-                <div className="space-y-3 pt-2 border-t border-border">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">Промпты для карточек (опционально)</Label>
-                    <Button size="sm" variant="outline" onClick={addGlobalPrompt}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      Добавить промпт
-                    </Button>
-                  </div>
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <Label className="text-sm text-muted-foreground">Промпты (опционально)</Label>
 
                   {globalPrompts.length > 0 && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {globalPrompts.map((prompt, index) => (
                         <Card key={prompt.id} className="p-3">
                           <div className="space-y-2">
@@ -951,20 +998,24 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                       ))}
                     </div>
                   )}
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={addGlobalPrompt}
+                    className="w-full text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Добавить промпт
+                  </Button>
                 </div>
 
                 {/* Референсные изображения */}
-                <div className="space-y-3 pt-2 border-t border-border">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">Референсные изображения (опционально)</Label>
-                    <Button size="sm" variant="outline" onClick={addGlobalReference}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      Добавить референс
-                    </Button>
-                  </div>
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <Label className="text-sm text-muted-foreground">Референсы (опционально)</Label>
 
                   {globalReferences.length > 0 && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {globalReferences.map((ref, index) => (
                         <Card key={ref.id} className="p-3">
                           <div className="space-y-2">
@@ -972,7 +1023,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                               <img
                                 src={`data:image/jpeg;base64,${ref.base64}`}
                                 alt={`Референс ${index + 1}`}
-                                className="w-20 h-20 object-cover rounded"
+                                className="w-16 h-16 object-cover rounded"
                               />
                               <div className="flex-1 space-y-2">
                                 <div className="flex justify-between items-start">
@@ -981,8 +1032,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                                     size="icon"
                                     variant="ghost"
                                     onClick={() => removeGlobalReference(ref.id)}
+                                    className="h-6 w-6"
                                   >
-                                    <X className="h-4 w-4" />
+                                    <X className="h-3 w-3" />
                                   </Button>
                                 </div>
 
@@ -1005,6 +1057,16 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                       ))}
                     </div>
                   )}
+
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={addGlobalReference}
+                    className="w-full text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Добавить референс
+                  </Button>
                 </div>
 
                 <Button
@@ -1074,6 +1136,55 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   </Button>
                 </div>
 
+                {/* Выбор карточек для скачивания */}
+                <div className="space-y-2 p-3 bg-muted/50 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Скачать карточки</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSelectedCardsForDownload(carouselCards.map((_, i) => i))}
+                        className="h-7 text-xs"
+                      >
+                        Все
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setSelectedCardsForDownload([])}
+                        className="h-7 text-xs"
+                      >
+                        Сбросить
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {carouselCards.map((_, cardIndex) => (
+                      <label
+                        key={cardIndex}
+                        className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors ${
+                          selectedCardsForDownload.includes(cardIndex)
+                            ? 'bg-primary/10 border border-primary/30'
+                            : 'bg-background border border-border hover:border-primary/30'
+                        }`}
+                      >
+                        <Checkbox
+                          checked={selectedCardsForDownload.includes(cardIndex)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedCardsForDownload([...selectedCardsForDownload, cardIndex]);
+                            } else {
+                              setSelectedCardsForDownload(selectedCardsForDownload.filter(i => i !== cardIndex));
+                            }
+                          }}
+                        />
+                        <span className="text-xs font-medium">{cardIndex + 1}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
                 <Button
                   onClick={handleDownloadAll}
                   variant="outline"
@@ -1088,7 +1199,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   ) : (
                     <>
                       <Download className="mr-2 h-4 w-4" />
-                      Скачать ZIP (4K)
+                      {selectedCardsForDownload.length > 0
+                        ? `Скачать ${selectedCardsForDownload.length} ${selectedCardsForDownload.length === 1 ? 'карточку' : selectedCardsForDownload.length < 5 ? 'карточки' : 'карточек'} (4K)`
+                        : 'Скачать все карточки (4K)'
+                      }
                     </>
                   )}
                 </Button>

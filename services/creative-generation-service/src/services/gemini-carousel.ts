@@ -24,7 +24,8 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param userPrompt1 - PROMPT1 пользователя
  * @param visualStyle - Визуальный стиль карусели
  * @param customPrompt - Дополнительный промпт от пользователя (опционально)
- * @param referenceImages - Массив референсных изображений для передачи в Gemini (base64)
+ * @param styleReferenceImage - Референс для консистентности стиля (предыдущая карточка)
+ * @param contentReferenceImage - Референс контента от пользователя (товар, персонаж и т.п.)
  * @returns Base64 изображение
  */
 async function generateCarouselCard(
@@ -34,10 +35,13 @@ async function generateCarouselCard(
   userPrompt1: string,
   visualStyle: CarouselVisualStyle,
   customPrompt?: string,
-  referenceImages?: string[]
+  styleReferenceImage?: string,
+  contentReferenceImage?: string
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Generating card ${cardIndex + 1}/${totalCards}...`);
+    console.log('[Gemini Carousel] Has style reference:', !!styleReferenceImage);
+    console.log('[Gemini Carousel] Has content reference:', !!contentReferenceImage);
 
     // Генерируем промпт через LLM-агент
     const prompt = await generateCarouselCardPrompt(
@@ -50,7 +54,6 @@ async function generateCarouselCard(
     );
 
     console.log('[Gemini Carousel] Generated prompt length:', prompt.length);
-    console.log('[Gemini Carousel] Reference images count:', referenceImages?.length || 0);
 
     const client = getGeminiClient();
     const model = client.getGenerativeModel({
@@ -60,21 +63,37 @@ async function generateCarouselCard(
     // Формируем массив частей контента
     const contentParts: any[] = [];
 
-    // Добавляем текстовый промпт
+    // Добавляем основной промпт
     contentParts.push({ text: prompt });
 
-    // Добавляем референсные изображения (если есть)
-    if (referenceImages && referenceImages.length > 0) {
-      console.log(`[Gemini Carousel] Adding ${referenceImages.length} reference image(s)...`);
+    // Добавляем референс контента (товар/персонаж от пользователя) — ПЕРВЫМ
+    // Это то, что пользователь хочет ВИДЕТЬ на карточке
+    if (contentReferenceImage) {
+      console.log('[Gemini Carousel] Adding CONTENT reference (user product/asset)...');
+      contentParts.push({
+        text: '\n\n[РЕФЕРЕНС КОНТЕНТА - ВАЖНО!]\nЭто изображение показывает товар/объект/персонажа, который ОБЯЗАТЕЛЬНО должен быть размещён на карточке. Используй ИМЕННО этот объект как главный элемент изображения. Сохрани его внешний вид, форму и детали.'
+      });
+      contentParts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: contentReferenceImage
+        }
+      });
+    }
 
-      for (const refImage of referenceImages) {
-        contentParts.push({
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: refImage
-          }
-        });
-      }
+    // Добавляем референс стиля (предыдущая карточка) — ВТОРЫМ
+    // Это для консистентности дизайна
+    if (styleReferenceImage) {
+      console.log('[Gemini Carousel] Adding STYLE reference (previous card)...');
+      contentParts.push({
+        text: '\n\n[РЕФЕРЕНС СТИЛЯ]\nЭто предыдущая карточка карусели. Используй её только для консистентности СТИЛЯ: той же палитры, типографики, композиции, расположения текста. НЕ копируй содержимое — создай НОВЫЙ кадр с ДРУГИМ ракурсом/действием, но в том же визуальном стиле.'
+      });
+      contentParts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: styleReferenceImage
+        }
+      });
     }
 
     // Конфигурация для генерации в формате 4:5 для Instagram карусели
@@ -130,15 +149,15 @@ async function generateCarouselCard(
 /**
  * Генерирует все карточки карусели последовательно
  * Стратегия:
- * 1. Генерируем 1-ю карточку (без референсов)
- * 2. Генерируем 2-ю карточку (передаем 1-ю как референс)
- * 3. Генерируем остальные карточки (передаем 2-ю как референс для консистентности)
+ * 1. Генерируем 1-ю карточку (только контент-референс от пользователя, если есть)
+ * 2. Генерируем 2-ю карточку (контент-референс + карточка 0 как стиль-референс)
+ * 3. Генерируем остальные карточки (контент-референс + карточка 1 как стиль-референс)
  *
  * @param carouselTexts - Массив текстов для карточек
  * @param userPrompt1 - PROMPT1 пользователя
  * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompts - Опциональные кастомные промпты для каждой карточки
- * @param referenceImages - Опциональные референсные изображения для каждой карточки (base64)
+ * @param referenceImages - Опциональные референсные изображения КОНТЕНТА для каждой карточки (base64)
  * @returns Массив base64 изображений
  */
 export async function generateCarouselImages(
@@ -155,9 +174,6 @@ export async function generateCarouselImages(
     const generatedImages: string[] = [];
     const totalCards = carouselTexts.length;
 
-    // Определяем основной пользовательский референс (если есть хоть одно изображение в массиве)
-    const mainUserReference = referenceImages?.find(img => img !== null) || null;
-
     for (let i = 0; i < totalCards; i++) {
       const cardStartTime = Date.now();
       console.log(`[Gemini Carousel] Starting generation for card ${i + 1}/${totalCards}...`);
@@ -165,25 +181,17 @@ export async function generateCarouselImages(
       const cardText = carouselTexts[i];
       const customPrompt = customPrompts?.[i] || undefined;
 
-      // Собираем referencer изображения для этой карточки
-      const cardReferenceImages: string[] = [];
+      // Референс КОНТЕНТА от пользователя (товар, персонаж и т.п.) — только для этой карточки
+      const contentReference = referenceImages?.[i] || undefined;
 
-      // КРИТИЧЕСКИ ВАЖНО: Если пользователь предоставил референсное изображение,
-      // оно должно быть добавлено к КАЖДОЙ карточке для поддержания консистентности персонажа
-      if (mainUserReference) {
-        cardReferenceImages.push(mainUserReference);
-      }
-
-      // Стратегия консистентности:
-      // - Карточка 0 (первая): только пользовательский референс (если есть)
-      // - Карточка 1 (вторая): пользовательский референс + карточка 0 как референс стиля
-      // - Карточки 2+ (остальные): пользовательский референс + карточка 1 как референс стиля
+      // Референс СТИЛЯ (предыдущая сгенерированная карточка) — для консистентности дизайна
+      let styleReference: string | undefined;
       if (i === 1 && generatedImages.length >= 1) {
-        // Вторая карточка: добавляем первую сгенерированную как референс
-        cardReferenceImages.push(generatedImages[0]);
+        // Вторая карточка: используем первую как референс стиля
+        styleReference = generatedImages[0];
       } else if (i >= 2 && generatedImages.length >= 2) {
-        // Третья и последующие: добавляем вторую сгенерированную как референс
-        cardReferenceImages.push(generatedImages[1]);
+        // Третья и последующие: используем вторую как референс стиля
+        styleReference = generatedImages[1];
       }
 
       const image = await generateCarouselCard(
@@ -193,7 +201,8 @@ export async function generateCarouselImages(
         userPrompt1,
         visualStyle,
         customPrompt,
-        cardReferenceImages.length > 0 ? cardReferenceImages : undefined
+        styleReference,
+        contentReference
       );
 
       generatedImages.push(image);
@@ -225,7 +234,7 @@ export async function generateCarouselImages(
  * @param userPrompt1 - PROMPT1 пользователя
  * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompt - Дополнительный промпт от пользователя
- * @param userReferenceImage - Дополнительное референсное изображение от пользователя (base64)
+ * @param contentReferenceImage - Референс контента от пользователя (товар, персонаж и т.п.)
  * @returns Base64 изображение
  */
 export async function regenerateCarouselCard(
@@ -235,26 +244,26 @@ export async function regenerateCarouselCard(
   userPrompt1: string,
   visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompt?: string,
-  userReferenceImage?: string
+  contentReferenceImage?: string
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Regenerating card ${cardIndex + 1}...`);
+    console.log('[Gemini Carousel] Has content reference from user:', !!contentReferenceImage);
 
     const totalCards = existingImages.length;
-    const cardReferenceImages: string[] = [];
 
-    // Если пользователь прикрепил свое изображение, добавляем его
-    if (userReferenceImage) {
-      cardReferenceImages.push(userReferenceImage);
-    }
-
-    // Для консистентности используем вторую карточку как референс (если она есть и это не сама вторая карточка)
-    if (cardIndex !== 1 && existingImages.length >= 2) {
-      cardReferenceImages.push(existingImages[1]);
-    }
-    // Если регенерируем вторую карточку, используем первую
-    else if (cardIndex === 1 && existingImages.length >= 1) {
-      cardReferenceImages.push(existingImages[0]);
+    // Референс СТИЛЯ — берём из существующих карточек для консистентности
+    // Но ТОЛЬКО если это не первая карточка (для первой нет смысла брать референс стиля)
+    let styleReference: string | undefined;
+    if (cardIndex === 0) {
+      // Первая карточка: не используем референс стиля — она сама задаёт стиль
+      styleReference = undefined;
+    } else if (cardIndex === 1 && existingImages.length >= 1) {
+      // Вторая карточка: используем первую как референс стиля
+      styleReference = existingImages[0];
+    } else if (cardIndex >= 2 && existingImages.length >= 2) {
+      // Третья и далее: используем вторую карточку как референс стиля
+      styleReference = existingImages[1];
     }
 
     const image = await generateCarouselCard(
@@ -264,7 +273,8 @@ export async function regenerateCarouselCard(
       userPrompt1,
       visualStyle,
       customPrompt,
-      cardReferenceImages.length > 0 ? cardReferenceImages : undefined
+      styleReference,
+      contentReferenceImage
     );
 
     console.log(`[Gemini Carousel] Card ${cardIndex + 1} regenerated successfully`);
