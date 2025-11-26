@@ -518,10 +518,12 @@ export async function createWhatsAppImageCreative(
     }
   });
 
+  // Для WhatsApp кампаний (OUTCOME_ENGAGEMENT) ОБЯЗАТЕЛЕН тип WHATSAPP_MESSAGE
+  // LEARN_MORE несовместим с целью WhatsApp (error_subcode: 1487891)
   const callToAction: any = { type: "WHATSAPP_MESSAGE" };
 
   log.debug({ adAccountId, callToAction }, 'WhatsApp image creative callToAction');
-  
+
   const objectStorySpec = {
     page_id: params.pageId,
     instagram_user_id: params.instagramId,
