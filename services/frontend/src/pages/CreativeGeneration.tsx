@@ -662,7 +662,7 @@ const CreativeGeneration = () => {
             <TabsList className="grid w-full grid-cols-3 mb-6">
               <TabsTrigger value="images">Картинки</TabsTrigger>
               <TabsTrigger value="carousels">Карусели</TabsTrigger>
-              <TabsTrigger value="video-scripts">Видео-сценарии</TabsTrigger>
+              <TabsTrigger value="video-scripts">Текст</TabsTrigger>
             </TabsList>
 
             <TabsContent value="images" className="mt-0">
@@ -1086,7 +1086,7 @@ const CreativeGeneration = () => {
             </TabsContent>
 
             <TabsContent value="video-scripts" className="mt-0">
-              <VideoScriptsTab />
+              <VideoScriptsTab userId={userId} />
             </TabsContent>
           </Tabs>
         </div>

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { textsRoutes } from './routes/texts';
 import { imageRoutes } from './routes/image';
 import carouselRoutes from './routes/carousel';
+import { textCreativesRoutes } from './routes/textCreatives';
 import { initializeOpenAI } from './services/openai'; // OpenAI для текстов
 import { initializeGeminiImageAPI } from './services/gemini-image'; // Gemini для изображений
 
@@ -38,6 +39,7 @@ app.register(cors, {
 app.register(textsRoutes);
 app.register(imageRoutes);
 app.register(carouselRoutes);
+app.register(textCreativesRoutes);
 
 // Root endpoint
 app.get('/', async (request, reply) => {
@@ -62,6 +64,10 @@ app.get('/', async (request, reply) => {
         'POST /generate-carousel',
         'POST /regenerate-carousel-card',
         'POST /upscale-carousel-to-4k'
+      ],
+      textCreatives: [
+        'POST /generate-text-creative',
+        'POST /edit-text-creative'
       ],
       health: [
         'GET /health'

@@ -20,20 +20,21 @@ function getOpenAIClient(): OpenAI {
  * Генерация текста через OpenAI
  * @param systemPrompt - Системный промпт с инструкциями
  * @param userPrompt - Промпт пользователя
- * @param options - Дополнительные опции (temperature, seed для вариативности)
+ * @param options - Дополнительные опции (temperature, seed, model для вариативности)
  * @returns Сгенерированный текст
  */
 export async function generateText(
-  systemPrompt: string, 
+  systemPrompt: string,
   userPrompt: string,
-  options?: { temperature?: number; seed?: number }
+  options?: { temperature?: number; seed?: number; model?: string }
 ): Promise<string> {
   try {
-    console.log('[OpenAI] Generating text with model:', model);
+    const useModel = options?.model || model;
+    console.log('[OpenAI] Generating text with model:', useModel);
     
-    // GPT-5-mini не поддерживает кастомную temperature (только 1.0)
+    // GPT-5 не поддерживает кастомную temperature (только 1.0)
     const requestParams: any = {
-      model: model,
+      model: useModel,
       messages: [
         {
           role: 'system',
@@ -48,7 +49,7 @@ export async function generateText(
     };
     
     // Для старых моделей добавляем temperature
-    if (!model.includes('gpt-5')) {
+    if (!useModel.includes('gpt-5')) {
       // Используем переданную temperature или 0.9 по умолчанию для большей вариативности
       requestParams.temperature = options?.temperature ?? 0.9;
     }
