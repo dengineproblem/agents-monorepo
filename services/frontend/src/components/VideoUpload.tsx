@@ -1195,11 +1195,53 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
       const data = await response.json();
 
-      if (data.success || response.ok) {
-        toast.success('Реклама успешно запущена!');
+      if (data.success && data.results) {
+        // Проверяем результаты по каждому направлению
+        const successResults = data.results.filter((r: any) => r.status === 'success');
+        const failedResults = data.results.filter((r: any) => r.status === 'failed');
+        const skippedResults = data.results.filter((r: any) => r.skipped);
+
+        if (failedResults.length > 0) {
+          // Есть ошибки - показываем их
+          for (const failed of failedResults) {
+            toast.error(`${failed.direction_name}: ${failed.error || 'Ошибка создания рекламы'}`, {
+              duration: 10000
+            });
+          }
+        }
+
+        if (skippedResults.length > 0) {
+          // Есть пропущенные
+          for (const skipped of skippedResults) {
+            toast.warning(`${skipped.direction_name}: ${skipped.reason || 'Пропущено'}`, {
+              duration: 5000
+            });
+          }
+        }
+
+        if (successResults.length > 0) {
+          // Показываем успешные результаты
+          const successMessage = successResults.map((r: any) => {
+            const adsInfo = r.ads_created ? ` (${r.ads_created} объявлений)` : '';
+            return `✅ ${r.direction_name}${adsInfo}`;
+          }).join('\n');
+
+          toast.success(
+            <div>
+              <div className="font-semibold mb-1">Реклама запущена!</div>
+              <div className="text-sm whitespace-pre-line">{successMessage}</div>
+            </div>,
+            { duration: 8000 }
+          );
+        }
+
+        if (successResults.length === 0 && failedResults.length === 0 && skippedResults.length === 0) {
+          toast.warning('Нет направлений для запуска');
+        }
+
         setLaunchDialogOpen(false);
       } else {
-        toast.error('Не удалось запустить рекламу');
+        toast.error(data.error || 'Не удалось запустить рекламу');
       }
     } catch (error) {
       console.error('Ошибка запуска рекламы:', error);

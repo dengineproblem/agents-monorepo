@@ -476,11 +476,23 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         }
       }
       
+      // Check if all adsets failed
+      const successCount = results.filter(r => r.success).length;
+      const failedCount = results.filter(r => !r.success).length;
+
+      if (successCount === 0 && failedCount > 0) {
+        // All adsets failed - throw error with details
+        const firstError = results.find(r => r.error)?.error || 'All ad sets failed to create';
+        throw new Error(`All ${failedCount} ad sets failed: ${firstError}`);
+      }
+
       return {
-        success: true,
+        success: successCount > 0,
         mode: 'api_create_multiple',
         total_adsets: results.length,
         total_ads: results.reduce((sum, r) => sum + (r.ads_created || 0), 0),
+        success_count: successCount,
+        failed_count: failedCount,
         adsets: results
       };
     }
@@ -839,11 +851,23 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         });
       }
       
+      // Check if all adsets failed
+      const successCount = results.filter(r => r.success).length;
+      const failedCount = results.filter(r => !r.success).length;
+
+      if (successCount === 0 && failedCount > 0) {
+        // All adsets failed - throw error with details
+        const firstError = results.find(r => r.error)?.error || 'All ad sets failed';
+        throw new Error(`All ${failedCount} ad sets failed: ${firstError}`);
+      }
+
       return {
-        success: true,
+        success: successCount > 0,
         mode: 'use_existing_multiple',
         total_adsets: results.length,
         total_ads: results.reduce((sum, r) => sum + (r.ads_created || 0), 0),
+        success_count: successCount,
+        failed_count: failedCount,
         adsets: results
       };
     }
