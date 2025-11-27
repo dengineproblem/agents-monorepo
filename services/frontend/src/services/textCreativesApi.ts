@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const CREATIVE_GENERATION_SERVICE_URL = import.meta.env.VITE_CREATIVE_GENERATION_SERVICE_URL || 'http://localhost:8085';
+const CREATIVE_GENERATION_SERVICE_URL = import.meta.env.VITE_CREATIVE_GENERATION_SERVICE_URL
+  || (import.meta.env.DEV ? 'http://localhost:8085' : 'https://app.performanteaiagency.com/api/creative');
 
 // Типы текстовых креативов
 export type TextCreativeType = 'storytelling' | 'direct_offer' | 'expert_video' | 'telegram_post' | 'threads_post';

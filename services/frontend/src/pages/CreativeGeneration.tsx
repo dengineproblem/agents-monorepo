@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '@/config/api';
 import { supabase } from '@/integrations/supabase/client';
 import { useDirections } from '@/hooks/useDirections';
 import { creativesApi } from '@/services/creativesApi';
@@ -170,8 +171,9 @@ const CreativeGeneration = () => {
   }, []);
 
   // API базовый URL для creative-generation-service
-  // В dev используем локальный сервер, в production - прокси через nginx
-  const CREATIVE_API_BASE = import.meta.env.VITE_CREATIVE_API_URL || 'http://localhost:8085';
+  // В dev используем локальный сервер, в production - прокси через nginx (через /api/creative)
+  const CREATIVE_API_BASE = import.meta.env.VITE_CREATIVE_API_URL
+    || (import.meta.env.DEV ? 'http://localhost:8085' : 'https://app.performanteaiagency.com/api/creative');
 
   const generateText = async (type: keyof CreativeTexts) => {
     setLoading(prev => ({ ...prev, [type]: true }));
@@ -496,7 +498,7 @@ const CreativeGeneration = () => {
       toast.loading('Подготовка 4K версии для скачивания...', { id: 'upscale' });
 
       // Вызываем upscale до 4K
-      const upscaleResponse = await fetch('http://localhost:8085/upscale-to-4k', {
+      const upscaleResponse = await fetch(`${CREATIVE_API_BASE}/upscale-to-4k`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -581,7 +583,7 @@ const CreativeGeneration = () => {
       toast.loading('Подготовка 4K версии (9:16)...', { id: 'upscale-create' });
 
       // 1. Вызываем upscale до 4K - расширяет 4:5 до 9:16
-      const upscaleResponse = await fetch('http://localhost:8085/upscale-to-4k', {
+      const upscaleResponse = await fetch(`${CREATIVE_API_BASE}/upscale-to-4k`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -601,7 +603,7 @@ const CreativeGeneration = () => {
       toast.success('4K версия готова, создание креатива в Facebook...', { id: 'upscale-create' });
 
       // 2. Вызываем API для создания креатива (одно 9:16 изображение)
-      const createResponse = await fetch('http://localhost:8082/create-image-creative', {
+      const createResponse = await fetch(`${API_BASE_URL}/create-image-creative`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

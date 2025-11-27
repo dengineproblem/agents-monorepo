@@ -14,8 +14,10 @@ import type {
   CreateCarouselCreativeResponse
 } from '../types/carousel';
 
-const CREATIVE_GENERATION_SERVICE_URL = import.meta.env.VITE_CREATIVE_GENERATION_SERVICE_URL || 'http://localhost:8085';
-const AGENT_SERVICE_URL = import.meta.env.VITE_AGENT_SERVICE_URL || 'http://localhost:8082';
+const CREATIVE_GENERATION_SERVICE_URL = import.meta.env.VITE_CREATIVE_GENERATION_SERVICE_URL
+  || (import.meta.env.DEV ? 'http://localhost:8085' : 'https://app.performanteaiagency.com/api/creative');
+const AGENT_SERVICE_URL = import.meta.env.VITE_AGENT_SERVICE_URL
+  || (import.meta.env.DEV ? 'http://localhost:8082' : 'https://app.performanteaiagency.com/api');
 
 export const carouselApi = {
   /**
