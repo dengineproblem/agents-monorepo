@@ -280,19 +280,16 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           app.log.error(`Failed to save transcription: ${transcriptError.message}`);
         }
 
-        // Обновляем запись креатива - заполняем только нужное поле в зависимости от objective
+        // Обновляем запись креатива - новый стандарт: один креатив = один objective
         const updateData: any = {
           fb_video_id: fbVideo.id,
-          status: 'ready'
+          status: 'ready',
+          fb_creative_id: fbCreativeId,
+          // Старые поля для обратной совместимости (deprecated)
+          ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
+          ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
+          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
         };
-
-        if (objective === 'whatsapp') {
-          updateData.fb_creative_id_whatsapp = fbCreativeId;
-        } else if (objective === 'instagram_traffic') {
-          updateData.fb_creative_id_instagram_traffic = fbCreativeId;
-        } else if (objective === 'site_leads') {
-          updateData.fb_creative_id_site_leads = fbCreativeId;
-        }
 
         const { error: updateError } = await supabase
           .from('user_creatives')

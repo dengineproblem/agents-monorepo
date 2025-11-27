@@ -180,24 +180,29 @@ export async function workflowCreateAdSetInDirection(
       throw new Error(`Unknown objective: ${direction.objective}`);
   }
 
-  // Для каждого креатива извлекаем соответствующий fb_creative_id
+  // Для каждого креатива извлекаем fb_creative_id
+  // Новый стандарт: один креатив = один objective, используем fb_creative_id
+  // Фолбэк на старые поля для обратной совместимости
   const creative_data = creatives.map((creative, index) => {
-    let fb_creative_id: string | null = null;
-    
-    switch (direction.objective) {
-      case 'whatsapp':
-        fb_creative_id = creative.fb_creative_id_whatsapp;
-        break;
-      case 'instagram_traffic':
-        fb_creative_id = creative.fb_creative_id_instagram_traffic;
-        break;
-      case 'site_leads':
-        fb_creative_id = creative.fb_creative_id_site_leads;
-        break;
+    let fb_creative_id: string | null = creative.fb_creative_id;
+
+    // Фолбэк на старые поля (deprecated)
+    if (!fb_creative_id) {
+      switch (direction.objective) {
+        case 'whatsapp':
+          fb_creative_id = creative.fb_creative_id_whatsapp;
+          break;
+        case 'instagram_traffic':
+          fb_creative_id = creative.fb_creative_id_instagram_traffic;
+          break;
+        case 'site_leads':
+          fb_creative_id = creative.fb_creative_id_site_leads;
+          break;
+      }
     }
 
     if (!fb_creative_id) {
-      throw new Error(`Creative ${creative.id} does not have fb_creative_id for ${direction.objective}`);
+      throw new Error(`Creative ${creative.id} does not have fb_creative_id`);
     }
 
     return {

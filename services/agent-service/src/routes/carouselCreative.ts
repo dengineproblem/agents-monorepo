@@ -226,7 +226,9 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           title: `Carousel - ${carouselData.length} cards`,
           status: 'ready',
           media_type: 'carousel',
-          // Заполняем только поле для соответствующего objective
+          // Новый стандарт: один креатив = один objective
+          fb_creative_id: fbCreativeId,
+          // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
           ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })

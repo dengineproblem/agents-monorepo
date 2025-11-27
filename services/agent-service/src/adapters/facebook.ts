@@ -806,31 +806,18 @@ export async function createWhatsAppCarouselCreative(
     clientQuestion: string;
   }
 ): Promise<{ id: string }> {
-  const pageWelcomeMessage = JSON.stringify({
-    type: "VISUAL_EDITOR",
-    version: 2,
-    landing_screen_type: "welcome_message",
-    media_type: "text",
-    text_format: {
-      customer_action_type: "autofill_message",
-      message: {
-        autofill_message: { content: params.clientQuestion },
-        text: "Здравствуйте! Чем можем помочь?"
-      }
-    }
-  });
-
-  // Facebook требует валидный URL, но для WhatsApp он игнорируется
-  const dummyLink = "https://www.facebook.com/";
+  // Для CTWA карусели используем WhatsApp API link
+  const whatsappLink = "https://api.whatsapp.com/send";
 
   // Создаём child_attachments для каждой карточки
   const childAttachments = params.cards.map((card, index) => ({
     image_hash: card.imageHash,
     name: card.text.substring(0, 50), // Facebook ограничивает name до 50 символов
     description: card.text,
-    link: dummyLink,
+    link: whatsappLink,
     call_to_action: {
-      type: "WHATSAPP_MESSAGE"
+      type: "WHATSAPP_MESSAGE",
+      value: { app_destination: "WHATSAPP" }
     }
   }));
 
@@ -839,13 +826,14 @@ export async function createWhatsAppCarouselCreative(
     instagram_user_id: params.instagramId,
     link_data: {
       message: params.message,
-      link: dummyLink,
+      link: whatsappLink,
       multi_share_optimized: true,
       child_attachments: childAttachments,
       call_to_action: {
-        type: "WHATSAPP_MESSAGE"
-      },
-      page_welcome_message: pageWelcomeMessage
+        type: "WHATSAPP_MESSAGE",
+        value: { app_destination: "WHATSAPP" }
+      }
+      // page_welcome_message убран - вызывает "unknown error" при создании креатива
     }
   };
 

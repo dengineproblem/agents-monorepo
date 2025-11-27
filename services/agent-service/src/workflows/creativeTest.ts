@@ -118,25 +118,30 @@ export async function workflowStartCreativeTest(
     throw new Error(`Direction not found for creative: ${creative.direction_id}`);
   }
 
-  // Динамически выбираем fb_creative_id в зависимости от objective направления
-  let fb_creative_id: string | null = null;
-  switch (direction.objective) {
-    case 'whatsapp':
-      fb_creative_id = creative.fb_creative_id_whatsapp;
-      break;
-    case 'instagram_traffic':
-      fb_creative_id = creative.fb_creative_id_instagram_traffic;
-      break;
-    case 'site_leads':
-      fb_creative_id = creative.fb_creative_id_site_leads;
-      break;
-    default:
-      throw new Error(`Unknown objective: ${direction.objective}`);
+  // Получаем fb_creative_id - новый стандарт: один креатив = один objective
+  // Сначала проверяем новое поле fb_creative_id, потом старые для обратной совместимости
+  let fb_creative_id: string | null = creative.fb_creative_id;
+
+  if (!fb_creative_id) {
+    // Фолбэк на старые поля (deprecated)
+    switch (direction.objective) {
+      case 'whatsapp':
+        fb_creative_id = creative.fb_creative_id_whatsapp;
+        break;
+      case 'instagram_traffic':
+        fb_creative_id = creative.fb_creative_id_instagram_traffic;
+        break;
+      case 'site_leads':
+        fb_creative_id = creative.fb_creative_id_site_leads;
+        break;
+      default:
+        throw new Error(`Unknown objective: ${direction.objective}`);
+    }
   }
 
   if (!fb_creative_id) {
     throw new Error(
-      `Creative does not have ${direction.objective} creative ID. ` +
+      `Creative does not have Facebook creative ID. ` +
       `Please create a creative for ${direction.objective} objective first.`
     );
   }
