@@ -17,6 +17,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDirections } from "@/hooks/useDirections";
 import { OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
@@ -284,6 +285,18 @@ const DirectionBadge: React.FC<DirectionBadgeProps> = ({
   );
 };
 
+type TestLaunchResult = {
+  success: boolean;
+  test_id: string;
+  campaign_id: string;
+  adset_id: string;
+  ad_id: string;
+  rule_id: string | null;
+  objective: string;
+  direction_id: string;
+  message: string;
+};
+
 const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativeIds, demoMode = false }) => {
   const [loading, setLoading] = useState(true);
   const [transcript, setTranscript] = useState<string | null>(null);
@@ -292,6 +305,8 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   const [stopTestLoading, setStopTestLoading] = useState(false);
   const [refreshLoading, setRefreshLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [testResultDialogOpen, setTestResultDialogOpen] = useState(false);
+  const [testLaunchResult, setTestLaunchResult] = useState<TestLaunchResult | null>(null);
 
   const fetchData = useCallback(async () => {
     const transcriptPromise = creativesService.getTranscript(creativeId).catch((error) => {
@@ -509,9 +524,10 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       const data = await response.json();
 
       if (data.success) {
-        toast.success(`Тест запущен! Campaign ID: ${data.campaign_id}`);
-        toast.info(data.message);
-        
+        // Сохраняем результат и открываем модальное окно
+        setTestLaunchResult(data as TestLaunchResult);
+        setTestResultDialogOpen(true);
+
         // Перезагружаем аналитику
         const freshData = await fetchData();
         setTranscript(freshData.transcript);
@@ -879,6 +895,74 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
           {loadError ? 'Статистика временно недоступна' : 'Нет данных. Запустите быстрый тест, чтобы увидеть статистику.'}
           </div>
       )}
+
+      {/* Модальное окно с результатом запуска теста */}
+      <Dialog open={testResultDialogOpen} onOpenChange={setTestResultDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Тест запущен!</DialogTitle>
+            <DialogDescription>
+              {testLaunchResult?.message || 'Тест креатива успешно запущен'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {testLaunchResult && (
+              <>
+                {/* Информация о кампании */}
+                <div className="space-y-2">
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Objective:</span>{' '}
+                    <span className="font-medium">{OBJECTIVE_LABELS[testLaunchResult.objective as keyof typeof OBJECTIVE_LABELS] || testLaunchResult.objective}</span>
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                    <span className="font-mono text-xs">{testLaunchResult.campaign_id}</span>
+                  </div>
+                </div>
+
+                {/* Информация об Ad Set и Ad */}
+                <div className="p-4 bg-muted/30 rounded-lg space-y-2">
+                  <div className="text-sm font-medium">Ad Set</div>
+                  <div className="text-xs text-muted-foreground font-mono">
+                    ID: {testLaunchResult.adset_id}
+                  </div>
+                  <div className="text-sm pt-2 border-t border-border/50">
+                    <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                    <span className="font-medium">$20</span>
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Цель:</span>{' '}
+                    <span className="font-medium">1000 показов</span>
+                  </div>
+                </div>
+
+                {/* Ad ID */}
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">Объявление</div>
+                  <div className="p-3 border rounded-lg text-sm">
+                    <div className="text-xs text-muted-foreground font-mono">
+                      Ad ID: {testLaunchResult.ad_id}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setTestResultDialogOpen(false);
+                setTestLaunchResult(null);
+              }}
+            >
+              Закрыть
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

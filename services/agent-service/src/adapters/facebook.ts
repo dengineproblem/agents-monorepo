@@ -809,8 +809,23 @@ export async function createWhatsAppCarouselCreative(
   // Для CTWA карусели используем WhatsApp API link
   const whatsappLink = "https://api.whatsapp.com/send";
 
+  // page_welcome_message с вопросом клиента (autofill в WhatsApp)
+  const pageWelcomeMessage = JSON.stringify({
+    type: "VISUAL_EDITOR",
+    version: 2,
+    landing_screen_type: "welcome_message",
+    media_type: "text",
+    text_format: {
+      customer_action_type: "autofill_message",
+      message: {
+        autofill_message: { content: params.clientQuestion },
+        text: "Здравствуйте! Чем можем помочь?"
+      }
+    }
+  });
+
   // Создаём child_attachments для каждой карточки
-  const childAttachments = params.cards.map((card, index) => ({
+  const childAttachments = params.cards.map((card) => ({
     image_hash: card.imageHash,
     name: card.text.substring(0, 50), // Facebook ограничивает name до 50 символов
     description: card.text,
@@ -832,8 +847,8 @@ export async function createWhatsAppCarouselCreative(
       call_to_action: {
         type: "WHATSAPP_MESSAGE",
         value: { app_destination: "WHATSAPP" }
-      }
-      // page_welcome_message убран - вызывает "unknown error" при создании креатива
+      },
+      page_welcome_message: pageWelcomeMessage
     }
   };
 
