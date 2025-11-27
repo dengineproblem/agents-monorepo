@@ -516,7 +516,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Скачивание картинок (всех или выбранных)
+  // Скачивание картинок (всех или выбранных) - без апскейла, используем 2K
   const handleDownloadAll = async () => {
     if (!userId || !generatedCarouselId || isDownloading) return;
 
@@ -537,89 +537,54 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     let progressToastId: string | number | undefined;
 
     try {
-      // Шаг 1: Upscale до 4K
-      progressToastId = toast.loading('🔄 Подготовка к апскейлу...');
+      progressToastId = toast.loading('📦 Создание архива...');
 
-      // Таймеры для имитации прогресса апскейла (примерно 15-20 секунд на изображение)
-      const upscaleTimers: NodeJS.Timeout[] = [];
-      const averageTimePerUpscale = 18000; // 18 секунд на изображение
+      // Создаём ZIP архив с выбранными картинками (используем 2K изображения)
+      const zip = new JSZip();
 
-      for (let i = 1; i <= totalCards; i++) {
-        const timer = setTimeout(() => {
+      let downloadedCount = 0;
+      for (const cardIndex of cardsToDownload) {
+        const card = carouselCards[cardIndex];
+
+        if (card && card.image_url) {
+          downloadedCount++;
+          setDownloadProgress({ current: downloadedCount, total: totalCards });
+
           if (progressToastId) {
-            toast.loading(`🔍 Апскейл изображения ${i} из ${totalCards} до 4K...`, { id: progressToastId });
+            toast.loading(`📥 Загрузка изображения ${downloadedCount} из ${totalCards}...`, { id: progressToastId });
           }
-        }, i * averageTimePerUpscale);
-        upscaleTimers.push(timer);
+
+          // Загружаем изображение как blob
+          const imageResponse = await fetch(card.image_url);
+          const blob = await imageResponse.blob();
+
+          // Добавляем в ZIP
+          zip.file(`carousel_card_${cardIndex + 1}.png`, blob);
+        }
       }
 
-      const response = await carouselApi.upscaleToThe4K({
-        user_id: userId,
-        carousel_id: generatedCarouselId
-      });
-
-      // Очищаем таймеры апскейла
-      upscaleTimers.forEach(timer => clearTimeout(timer));
-
-      if (response.success && response.carousel_data) {
-        // Обновляем карточки с 4K URLs
-        setCarouselCards(response.carousel_data);
-
-        if (progressToastId) {
-          toast.loading('📦 Создание архива...', { id: progressToastId });
-        }
-
-        // Шаг 2: Создаём ZIP архив с выбранными картинками
-        const zip = new JSZip();
-
-        let downloadedCount = 0;
-        for (const cardIndex of cardsToDownload) {
-          const card = response.carousel_data[cardIndex];
-
-          if (card && card.image_url_4k) {
-            downloadedCount++;
-            setDownloadProgress({ current: downloadedCount, total: totalCards });
-
-            if (progressToastId) {
-              toast.loading(`📥 Загрузка изображения ${downloadedCount} из ${totalCards}...`, { id: progressToastId });
-            }
-
-            // Загружаем изображение как blob
-            const imageResponse = await fetch(card.image_url_4k);
-            const blob = await imageResponse.blob();
-
-            // Добавляем в ZIP
-            zip.file(`carousel_card_${cardIndex + 1}_4k.png`, blob);
-          }
-        }
-
-        // Генерируем ZIP файл
-        if (progressToastId) {
-          toast.loading('🗜️ Упаковка архива...', { id: progressToastId });
-        }
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-
-        // Скачиваем архив одним файлом
-        const url = window.URL.createObjectURL(zipBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `carousel_4k_${Date.now()}.zip`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-
-        if (progressToastId) {
-          toast.success(`✅ Архив с ${totalCards} картинками 4K успешно скачан!`, { id: progressToastId });
-        }
-
-        // Очищаем выбор после скачивания
-        setSelectedCardsForDownload([]);
-      } else {
-        if (progressToastId) {
-          toast.error(response.error || 'Ошибка апскейла', { id: progressToastId });
-        }
+      // Генерируем ZIP файл
+      if (progressToastId) {
+        toast.loading('🗜️ Упаковка архива...', { id: progressToastId });
       }
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+
+      // Скачиваем архив одним файлом
+      const url = window.URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `carousel_${Date.now()}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      if (progressToastId) {
+        toast.success(`✅ Архив с ${totalCards} картинками успешно скачан!`, { id: progressToastId });
+      }
+
+      // Очищаем выбор после скачивания
+      setSelectedCardsForDownload([]);
     } catch (error) {
       console.error('Error downloading:', error);
       if (progressToastId) {
@@ -631,7 +596,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     }
   };
 
-  // Создание креатива в Facebook
+  // Создание креатива в Facebook (используем 2K изображения напрямую)
   const handleCreateCreative = async () => {
     if (!userId || !generatedCarouselId || !selectedDirectionId) {
       toast.error('Выберите направление для создания креатива');
@@ -639,33 +604,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     }
 
     setIsCreatingCreative(true);
-    const toastId = toast.loading('Подготавливаем изображения...');
+    const toastId = toast.loading('Загружаем карусель в Facebook...');
 
     try {
-      // Проверяем, есть ли 4K версии у всех карточек
-      const needsUpscale = carouselCards.some(card => !card.image_url_4k);
-
-      if (needsUpscale) {
-        toast.loading('Апскейлим изображения до 4K...', { id: toastId });
-
-        const upscaleResponse = await carouselApi.upscaleToThe4K({
-          user_id: userId,
-          carousel_id: generatedCarouselId
-        });
-
-        if (!upscaleResponse.success) {
-          toast.error(upscaleResponse.error || 'Ошибка апскейла изображений', { id: toastId });
-          return;
-        }
-
-        // Обновляем локальное состояние карточек с 4K URL
-        if (upscaleResponse.carousel_data) {
-          setCarouselCards(upscaleResponse.carousel_data);
-        }
-      }
-
-      toast.loading('Загружаем карусель в Facebook...', { id: toastId });
-
       const response = await carouselApi.createCreative({
         user_id: userId,
         carousel_id: generatedCarouselId,
@@ -1259,8 +1200,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                       <>
                         <Download className="mr-2 h-4 w-4" />
                         {selectedCardsForDownload.length > 0
-                          ? `Скачать ${selectedCardsForDownload.length} ${selectedCardsForDownload.length === 1 ? 'карточку' : selectedCardsForDownload.length < 5 ? 'карточки' : 'карточек'} (4K)`
-                          : 'Скачать все карточки (4K)'
+                          ? `Скачать ${selectedCardsForDownload.length} ${selectedCardsForDownload.length === 1 ? 'карточку' : selectedCardsForDownload.length < 5 ? 'карточки' : 'карточек'}`
+                          : 'Скачать все карточки'
                         }
                       </>
                     )}

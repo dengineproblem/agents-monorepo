@@ -23,13 +23,13 @@ export const translations = {
     menu: {
       dashboard: 'Dashboard',
       campaigns: 'Campaigns',
-      creatives: 'Creatives',
+      creatives: 'Content Generation',
       directions: 'Directions',
       profile: 'Profile',
       settings: 'Settings',
       roi: 'ROI Analytics',
       consultations: 'Consultations',
-      videos: 'Videos',
+      videos: 'Upload Creatives',
     },
     sidebar: {
       navigation: 'Navigation'
@@ -288,13 +288,13 @@ export const translations = {
     menu: {
       dashboard: 'Главная',
       campaigns: 'Кампании',
-      creatives: 'Креативы',
+      creatives: 'Генерация контента',
       directions: 'Направления',
       profile: 'Профиль',
       settings: 'Настройки',
       roi: 'ROI Аналитика',
       consultations: 'Консультации',
-      videos: 'Видео',
+      videos: 'Загрузка креативов',
     },
     sidebar: {
       navigation: 'Навигация'
