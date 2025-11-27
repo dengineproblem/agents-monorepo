@@ -185,6 +185,7 @@ export type Database = {
            current_campaign_goal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null
            current_campaign_goal_changed_at?: string | null
           ig_seed_audience_id: string | null
+          fb_connection_status: 'pending_review' | 'approved' | 'rejected' | null
         }
         Insert: {
           access_token: string
@@ -219,6 +220,7 @@ export type Database = {
            current_campaign_goal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null
            current_campaign_goal_changed_at?: string | null
           ig_seed_audience_id?: string | null
+          fb_connection_status?: 'pending_review' | 'approved' | 'rejected' | null
         }
         Update: {
           access_token?: string
@@ -253,6 +255,7 @@ export type Database = {
            current_campaign_goal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null
            current_campaign_goal_changed_at?: string | null
           ig_seed_audience_id?: string | null
+          fb_connection_status?: 'pending_review' | 'approved' | 'rejected' | null
         }
         Relationships: []
       }

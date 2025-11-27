@@ -22,6 +22,7 @@ import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
+import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
  
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
@@ -152,6 +153,9 @@ const Profile: React.FC = () => {
   const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
   const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
   const [amocrmKeyStagesModal, setAmocrmKeyStagesModal] = useState(false);
+
+  // Facebook Manual Connect Modal
+  const [facebookManualModal, setFacebookManualModal] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -1055,23 +1059,21 @@ const Profile: React.FC = () => {
                 id: 'facebook',
                 title: 'Facebook Ads',
                 connected: Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== ''),
+                status: user?.fb_connection_status as 'pending_review' | 'approved' | 'rejected' | undefined,
                 onClick: () => {
+                  // Если статус pending_review - показываем toast
+                  if (user?.fb_connection_status === 'pending_review') {
+                    toast.info('Ваша заявка на рассмотрении. Специалисты проверят данные в ближайшее время.');
+                    return;
+                  }
+
                   if (user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '') {
                     if (confirm(t('profile.confirmDisconnectFacebook'))) {
                       handleDisconnectInstagram(); // Reuse the same function as it clears access_token
                     }
                   } else {
-                    // Redirect to Facebook OAuth
-                    const FB_APP_ID = '1441781603583445';
-                    const FB_REDIRECT_URI = 'https://performanteaiagency.com/profile';
-                    const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads,pages_read_engagement';
-                    const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?` +
-                      `client_id=${FB_APP_ID}&` +
-                      `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
-                      `scope=${FB_SCOPE}&` +
-                      `response_type=code&` +
-                      `state=${Date.now()}`;
-                    window.location.href = authUrl;
+                    // Показываем модалку ручного подключения вместо OAuth
+                    setFacebookManualModal(true);
                   }
                 },
                 disabled: false,
@@ -1687,6 +1689,17 @@ const Profile: React.FC = () => {
           </DialogContent>
         </Dialog>
         */}
+
+        {/* Facebook Manual Connect Modal */}
+        <FacebookManualConnectModal
+          open={facebookManualModal}
+          onOpenChange={setFacebookManualModal}
+          onComplete={() => {
+            setFacebookManualModal(false);
+            // window.location.reload(); // Reload to update UI with new status
+          }}
+          showSkipButton={false}
+        />
       </div>
     </div>
   );

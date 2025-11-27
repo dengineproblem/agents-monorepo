@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X } from 'lucide-react';
+import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X, Clock, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../i18n/LanguageContext';
 
@@ -27,6 +27,7 @@ export interface ConnectionItem {
   onClick: () => void;
   disabled?: boolean;
   badge?: string;
+  status?: 'pending_review' | 'approved' | 'rejected';
 }
 
 const brandBg: Record<ConnectionItem['id'], string> = {
@@ -89,6 +90,16 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                           </span>
                         )}
                       </>
+                    ) : it.status === 'pending_review' ? (
+                      <>
+                        <Clock className="h-3.5 w-3.5 text-yellow-600" />
+                        <span className="text-yellow-600">Ожидает проверки</span>
+                      </>
+                    ) : it.status === 'rejected' ? (
+                      <>
+                        <XCircle className="h-3.5 w-3.5 text-red-600" />
+                        <span className="text-red-600">Отклонено</span>
+                      </>
                     ) : (
                       <>
                         <CircleDashed className="h-3.5 w-3.5" />
@@ -99,11 +110,11 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                 </div>
               </div>
               <Button
-                variant={it.connected ? "outline" : "default"}
+                variant={it.connected ? "outline" : it.status === 'pending_review' ? "outline" : "default"}
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[ConnectionsGrid] Button clicked:', it.id, it.connected);
+                  console.log('[ConnectionsGrid] Button clicked:', it.id, it.connected, it.status);
                   it.onClick();
                 }}
                 disabled={it.disabled}
@@ -113,6 +124,11 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                   <>
                     <X className="h-4 w-4 sm:mr-2" />
                     <span className="hidden sm:inline">{t('profile.disconnect')}</span>
+                  </>
+                ) : it.status === 'pending_review' ? (
+                  <>
+                    <Clock className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Ожидает</span>
                   </>
                 ) : (
                   <>

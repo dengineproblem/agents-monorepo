@@ -29,6 +29,7 @@ import CarouselTest from './pages/CarouselTest';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
+import { FacebookManualConnectModal } from './components/profile/FacebookManualConnectModal';
 
 const queryClient = new QueryClient();
 
@@ -45,6 +46,7 @@ const AppRoutes = () => {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
 
   useEffect(() => {
     // Проверяем наличие пользовательских данных в localStorage
@@ -106,8 +108,31 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         setUser(parsedUser);
         setShowOnboarding(false);
+
+        // После онбординга проверяем, подключен ли Facebook
+        // Показываем модалку если нет access_token и статус не pending_review
+        const hasFacebookConnection = parsedUser.access_token && parsedUser.access_token !== '';
+        const isPendingReview = parsedUser.fb_connection_status === 'pending_review';
+
+        if (!hasFacebookConnection && !isPendingReview) {
+          setShowFacebookManualModal(true);
+        }
       } catch (error) {
         console.error('Ошибка при обновлении user после онбординга:', error);
+      }
+    }
+  };
+
+  const handleFacebookModalComplete = () => {
+    setShowFacebookManualModal(false);
+    // Обновляем user из localStorage
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+      } catch (error) {
+        console.error('Ошибка при обновлении user после Facebook подключения:', error);
       }
     }
   };
@@ -125,6 +150,15 @@ const AppRoutes = () => {
         <>
           {/* Онбординг показывается поверх всего если prompt1 не заполнен */}
           {showOnboarding && <OnboardingWizard onComplete={handleOnboardingComplete} />}
+
+          {/* Модалка ручного подключения Facebook показывается после онбординга */}
+          <FacebookManualConnectModal
+            open={showFacebookManualModal}
+            onOpenChange={setShowFacebookManualModal}
+            onComplete={handleFacebookModalComplete}
+            onSkip={() => setShowFacebookManualModal(false)}
+            showSkipButton={true}
+          />
         
           {isNoSidebarRoute ? (
             // Routes without sidebar (e.g., WhatsApp CRM)

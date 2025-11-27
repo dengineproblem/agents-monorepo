@@ -5,6 +5,7 @@
 import { format, subDays, addDays } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { toastT } from '@/utils/toastUtils';
+import { API_BASE_URL } from '@/config/api';
 
 // Types
 export interface Campaign {
@@ -1097,6 +1098,67 @@ export const facebookApi = {
           type: 'optimization'
         }
       ];
+    }
+  },
+
+  /**
+   * Submit manual Facebook connection for review
+   * User provides IDs manually after granting access via Business Portfolio
+   */
+  submitManualConnection: async (data: {
+    page_id: string;
+    instagram_id?: string;
+    ad_account_id: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // Get user_id from localStorage
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) {
+        return { success: false, error: 'Пользователь не авторизован' };
+      }
+
+      const userData = JSON.parse(storedUser);
+      if (!userData.id) {
+        return { success: false, error: 'ID пользователя не найден' };
+      }
+
+      console.log('[facebookApi] Submitting manual connection:', {
+        user_id: userData.id,
+        page_id: data.page_id,
+        instagram_id: data.instagram_id,
+        ad_account_id: data.ad_account_id
+      });
+
+      const response = await fetch(`${API_BASE_URL}/facebook/manual-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userData.id,
+          page_id: data.page_id,
+          instagram_id: data.instagram_id || null,
+          ad_account_id: data.ad_account_id
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Update localStorage with new data
+        userData.page_id = data.page_id;
+        userData.instagram_id = data.instagram_id || null;
+        userData.ad_account_id = data.ad_account_id.startsWith('act_')
+          ? data.ad_account_id
+          : `act_${data.ad_account_id}`;
+        userData.fb_connection_status = 'pending_review';
+        localStorage.setItem('user', JSON.stringify(userData));
+
+        console.log('[facebookApi] Manual connection submitted successfully');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('[facebookApi] Error submitting manual connection:', error);
+      return { success: false, error: 'Не удалось подключиться к серверу' };
     }
   }
 };

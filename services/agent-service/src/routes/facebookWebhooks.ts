@@ -10,6 +10,38 @@ const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const FB_APP_ID = process.env.FB_APP_ID || '1441781603583445';
 const FB_REDIRECT_URI = process.env.FB_REDIRECT_URI || 'https://performanteaiagency.com/profile';
 
+// Telegram notifications for manual Facebook connections
+const TELEGRAM_BOT_TOKEN = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
+const TELEGRAM_TECH_CHAT_ID = '-5079020326';
+
+async function sendTelegramNotification(text: string): Promise<void> {
+  if (!TELEGRAM_BOT_TOKEN) {
+    log.warn('TELEGRAM_BOT_TOKEN not set, skipping notification');
+    return;
+  }
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_TECH_CHAT_ID,
+        text,
+        parse_mode: 'HTML'
+      })
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      log.error({ status: res.status, body }, 'Failed to send Telegram notification');
+    } else {
+      log.info('Telegram notification sent successfully');
+    }
+  } catch (err) {
+    log.error({ err }, 'Error sending Telegram notification');
+  }
+}
+
 export default async function facebookWebhooks(app: FastifyInstance) {
   
   /**
@@ -495,6 +527,126 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       });
     } catch (error) {
       log.error({ error }, 'Error validating Facebook connection');
+      return res.status(500).send({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  });
+
+  /**
+   * Manual Facebook Connection - Submit user-provided IDs for review
+   *
+   * Пользователь предоставляет доступ через Business Portfolio и вводит свои ID.
+   * Данные сохраняются со статусом 'pending_review' для проверки специалистом.
+   */
+  app.post('/facebook/manual-connect', async (req, res) => {
+    try {
+      log.info('Processing manual Facebook connection request');
+
+      const { user_id, page_id, instagram_id, ad_account_id } = req.body as {
+        user_id?: string;
+        page_id?: string;
+        instagram_id?: string;
+        ad_account_id?: string;
+      };
+
+      // Validate required fields
+      if (!user_id) {
+        log.error('Missing user_id in manual connect request');
+        return res.status(400).send({
+          success: false,
+          error: 'Missing user_id'
+        });
+      }
+
+      if (!page_id) {
+        log.error('Missing page_id in manual connect request');
+        return res.status(400).send({
+          success: false,
+          error: 'Page ID обязателен'
+        });
+      }
+
+      if (!ad_account_id) {
+        log.error('Missing ad_account_id in manual connect request');
+        return res.status(400).send({
+          success: false,
+          error: 'Ad Account ID обязателен'
+        });
+      }
+
+      // Normalize ad_account_id - ensure it starts with 'act_'
+      const normalizedAdAccountId = ad_account_id.startsWith('act_')
+        ? ad_account_id
+        : `act_${ad_account_id}`;
+
+      log.info({
+        user_id,
+        page_id,
+        instagram_id: instagram_id || null,
+        ad_account_id: normalizedAdAccountId
+      }, 'Saving manual Facebook connection');
+
+      // Update user_accounts with provided IDs and set status to pending_review
+      const { error: updateError } = await supabase
+        .from('user_accounts')
+        .update({
+          page_id,
+          instagram_id: instagram_id || null,
+          ad_account_id: normalizedAdAccountId,
+          fb_connection_status: 'pending_review',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', user_id);
+
+      if (updateError) {
+        log.error({ error: updateError, user_id }, 'Failed to save manual Facebook connection');
+        return res.status(500).send({
+          success: false,
+          error: 'Ошибка сохранения данных'
+        });
+      }
+
+      log.info({
+        user_id,
+        page_id,
+        ad_account_id: normalizedAdAccountId,
+        status: 'pending_review'
+      }, 'Manual Facebook connection saved successfully');
+
+      // Get user info for notification
+      const { data: userData } = await supabase
+        .from('user_accounts')
+        .select('username, telegram_id')
+        .eq('id', user_id)
+        .single();
+
+      // Send Telegram notification to tech specialists
+      const notificationText = `🔔 <b>Новая заявка на подключение Facebook</b>
+
+👤 Пользователь: ${userData?.username || user_id}
+${userData?.telegram_id ? `📱 Telegram: ${userData.telegram_id}` : ''}
+
+📋 <b>Данные для проверки:</b>
+• Page ID: <code>${page_id}</code>
+• Ad Account ID: <code>${normalizedAdAccountId}</code>
+${instagram_id ? `• Instagram ID: <code>${instagram_id}</code>` : '• Instagram ID: не указан'}
+
+⏳ Статус: ожидает проверки`;
+
+      // Send notification in background (don't await to not delay response)
+      sendTelegramNotification(notificationText).catch(err => {
+        log.error({ err }, 'Failed to send Telegram notification for manual connect');
+      });
+
+      return res.send({
+        success: true,
+        message: 'Заявка отправлена на проверку'
+      });
+
+    } catch (error) {
+      log.error({ error }, 'Error processing manual Facebook connection');
       return res.status(500).send({
         success: false,
         error: 'Internal server error'
