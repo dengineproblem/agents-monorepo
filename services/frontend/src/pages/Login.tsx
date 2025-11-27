@@ -114,7 +114,8 @@ const Login = () => {
         username: user.username,
         ad_account_id: user.ad_account_id || '',
         page_id: user.page_id || '',
-        access_token: user.access_token || ''
+        access_token: user.access_token || '',
+        prompt1: user.prompt1 || null
       };
       
       // Подробно логируем данные, сохраняемые в localStorage
