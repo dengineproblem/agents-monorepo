@@ -52,17 +52,17 @@ const MEDIA_TYPE_CONFIG: Record<string, { icon: React.ComponentType<{ className?
   video: {
     icon: Video,
     label: 'Видео',
-    className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
+    className: 'bg-muted text-muted-foreground'
   },
   image: {
     icon: Image,
     label: 'Картинка',
-    className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+    className: 'bg-muted text-muted-foreground'
   },
   carousel: {
     icon: Images,
     label: 'Карусель',
-    className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200'
+    className: 'bg-muted text-muted-foreground'
   }
 };
 
@@ -550,11 +550,16 @@ const ROIAnalytics: React.FC = () => {
           <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
         </div>
         
-        {/* Фильтры */}
-        <div className="mb-4 space-y-3">
-          {/* Фильтр по направлениям */}
+        {/* Подраздел: Обзор */}
+        <div className="mb-6">
+          <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Обзор
+          </h2>
+
+          {/* Фильтр по направлениям - в стиле табов */}
           {directions.length > 0 && (
-            <div>
+            <div className="mb-4">
               {/* Десктоп: табы */}
               <div className="hidden md:block">
                 <Tabs value={selectedDirectionId || 'all'} onValueChange={(value) => setSelectedDirectionId(value === 'all' ? null : value)}>
@@ -569,7 +574,7 @@ const ROIAnalytics: React.FC = () => {
                 </Tabs>
               </div>
 
-              {/* Мобилка: кнопка-бургер */}
+              {/* Мобилка: выпадающий список */}
               <div className="md:hidden">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -600,40 +605,7 @@ const ROIAnalytics: React.FC = () => {
             </div>
           )}
 
-          {/* Фильтр по типу медиа */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">Тип креатива:</span>
-            <Select value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
-              <SelectTrigger className="w-[140px] h-8 text-xs">
-                <SelectValue placeholder="Тип" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все типы</SelectItem>
-                <SelectItem value="video">
-                  <span className="flex items-center gap-2">
-                    <Video className="h-3 w-3" />
-                    Видео
-                  </span>
-                </SelectItem>
-                <SelectItem value="image">
-                  <span className="flex items-center gap-2">
-                    <Image className="h-3 w-3" />
-                    Картинки
-                  </span>
-                </SelectItem>
-                <SelectItem value="carousel">
-                  <span className="flex items-center gap-2">
-                    <Images className="h-3 w-3" />
-                    Карусели
-                  </span>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Общая статистика */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           <Card className="transition-all duration-200 hover:shadow-md shadow-sm">
             <CardContent className="p-3">
               <div className="flex items-center gap-2 mb-2">
@@ -723,15 +695,71 @@ const ROIAnalytics: React.FC = () => {
             </CardContent>
           </Card>
           */}
+          </div>
         </div>
 
-                {/* Креативы */}
+        {/* Подраздел: Креативы */}
         <div className="mb-6">
           <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
             Креативы ({roiData?.campaigns?.length || 0})
           </h2>
-          
+
+          {/* Фильтр по типу медиа - в стиле табов */}
+          <div className="mb-4">
+            {/* Десктоп: табы */}
+            <div className="hidden md:block">
+              <Tabs value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
+                <TabsList className="bg-muted">
+                  <TabsTrigger value="all">Все типы</TabsTrigger>
+                  <TabsTrigger value="video" className="flex items-center gap-1.5">
+                    <Video className="h-3.5 w-3.5" />
+                    Видео
+                  </TabsTrigger>
+                  <TabsTrigger value="image" className="flex items-center gap-1.5">
+                    <Image className="h-3.5 w-3.5" />
+                    Картинки
+                  </TabsTrigger>
+                  <TabsTrigger value="carousel" className="flex items-center gap-1.5">
+                    <Images className="h-3.5 w-3.5" />
+                    Карусели
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            {/* Мобилка: выпадающий список */}
+            <div className="md:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    <span className="flex items-center gap-2">
+                      {mediaTypeFilter === 'all' && 'Все типы'}
+                      {mediaTypeFilter === 'video' && <><Video className="h-3.5 w-3.5" /> Видео</>}
+                      {mediaTypeFilter === 'image' && <><Image className="h-3.5 w-3.5" /> Картинки</>}
+                      {mediaTypeFilter === 'carousel' && <><Images className="h-3.5 w-3.5" /> Карусели</>}
+                    </span>
+                    <ChevronDown className="h-4 w-4 ml-2" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)]">
+                  <DropdownMenuItem onClick={() => setMediaTypeFilter('all')}>
+                    Все типы
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setMediaTypeFilter('video')} className="flex items-center gap-2">
+                    <Video className="h-3.5 w-3.5" /> Видео
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setMediaTypeFilter('image')} className="flex items-center gap-2">
+                    <Image className="h-3.5 w-3.5" /> Картинки
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setMediaTypeFilter('carousel')} className="flex items-center gap-2">
+                    <Images className="h-3.5 w-3.5" /> Карусели
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+
           {roiData?.campaigns && roiData.campaigns.length > 0 ? (
             <>
               {/* Десктопная таблица */}
@@ -811,7 +839,7 @@ const ROIAnalytics: React.FC = () => {
                                 <td className="py-2 px-3 text-center">
                                   <button
                                     onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
-                                    className="inline-flex items-center justify-center text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                                    className="inline-flex items-center justify-center text-slate-600 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors"
                                     title="View funnel distribution"
                                   >
                                     <Filter className="h-4 w-4" />
@@ -1158,7 +1186,7 @@ const ROIAnalytics: React.FC = () => {
                         )}
                         <button
                           onClick={() => handleOpenFunnelModal(campaign.id, campaign.name)}
-                          className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 flex items-center gap-1 transition-colors font-medium"
+                          className="text-xs text-slate-600 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 flex items-center gap-1 transition-colors font-medium"
                         >
                           <Filter className="h-3 w-3" />
                           Воронка
@@ -1351,7 +1379,7 @@ const ROIAnalytics: React.FC = () => {
                                 size="sm"
                                 onClick={() => analyzeCreative(campaign.id)}
                                 disabled={analyzingCreative === campaign.id}
-                                className="w-full flex items-center justify-center gap-2 h-9 bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
+                                className="w-full flex items-center justify-center gap-2 h-9 bg-slate-600 hover:bg-slate-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
                               >
                                 {analyzingCreative === campaign.id ? (
                                   <>
