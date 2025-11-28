@@ -5,12 +5,12 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import { salesApi, ROIData, CampaignROI, Direction } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  DollarSign, 
-  Target, 
-  Users, 
+import {
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Target,
+  Users,
   BarChart3,
   ExternalLink,
   RefreshCw,
@@ -23,7 +23,8 @@ import {
   X,
   ShoppingCart,
   Play,
-  Filter
+  Filter,
+  Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -1084,66 +1085,6 @@ const ROIAnalytics: React.FC = () => {
                                 </CardContent>
                               </Card>
 
-                              {/* Кнопка анализа */}
-                              <div className="flex items-center justify-between">
-                                <h5 className="font-semibold text-xs">LLM Анализ</h5>
-                                <Button
-                                  size="sm"
-                                  onClick={() => analyzeCreative(campaign.id)}
-                                  disabled={analyzingCreative === campaign.id}
-                                  className="flex items-center gap-1 text-xs h-7"
-                                >
-                                  {analyzingCreative === campaign.id ? (
-                                    <>
-                                      <RefreshCw className="h-3 w-3 animate-spin" />
-                                      Анализ...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Play className="h-3 w-3" />
-                                      Анализ
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
-
-                              {/* LLM Анализ */}
-                              {creativeAnalysis && creativeAnalysis.score !== null && (
-                                <div className="border-primary/30 bg-primary/5 rounded p-3 space-y-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className={`rounded-full px-2 py-0.5 text-xs ${verdictMeta[creativeAnalysis.verdict]?.className || ''}`}>
-                                      {verdictMeta[creativeAnalysis.verdict]?.emoji} {verdictMeta[creativeAnalysis.verdict]?.label}
-                                    </span>
-                                    <span className="text-xs text-muted-foreground">Оценка: {creativeAnalysis.score}/100</span>
-                                  </div>
-                                  {creativeAnalysis.reasoning && (
-                                    <div className="text-xs text-muted-foreground">{creativeAnalysis.reasoning}</div>
-                                  )}
-                                  {creativeAnalysis.video_analysis && (
-                                    <div className="text-xs">
-                                      <span className="font-medium text-foreground">Видео:</span> {creativeAnalysis.video_analysis}
-                                    </div>
-                                  )}
-                                  {creativeAnalysis.text_recommendations && (
-                                    <div className="text-xs">
-                                      <span className="font-medium text-foreground">Текст:</span> {creativeAnalysis.text_recommendations}
-                                    </div>
-                                  )}
-                                  {creativeAnalysis.transcript_suggestions && Array.isArray(creativeAnalysis.transcript_suggestions) && creativeAnalysis.transcript_suggestions.length > 0 && (
-                                    <div className="space-y-2">
-                                      <div className="text-xs font-medium text-foreground">Предложения по тексту</div>
-                                      {creativeAnalysis.transcript_suggestions.map((suggestion: any, index: number) => (
-                                        <div key={`${suggestion.from}-${index}`} className="rounded border p-2 space-y-1">
-                                          <div className="text-xs text-muted-foreground">"{suggestion.from}"</div>
-                                          <div className="text-xs font-medium text-foreground">→ "{suggestion.to}"</div>
-                                          <div className="text-xs text-muted-foreground">{suggestion.reason}</div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
                               {/* Статистика креатива за выбранный период */}
                               {creativeMetrics.length > 0 && (() => {
                                 // Вычисляем СУММУ за весь период
@@ -1171,7 +1112,7 @@ const ROIAnalytics: React.FC = () => {
                                 
                                 return (
                                   <div className="bg-primary/5 rounded-lg p-3 border border-primary/10">
-                                    <h5 className="font-semibold text-xs mb-2 text-primary">📊 Статистика креатива</h5>
+                                    <h5 className="font-semibold text-xs mb-2 text-primary">Статистика креатива</h5>
                                     <div className="grid grid-cols-2 gap-2 text-xs">
                                       <div className="font-medium"><span className="text-muted-foreground">Показы:</span> {formatNumber(totalMetrics.impressions)}</div>
                                       <div className="font-medium"><span className="text-muted-foreground">Охват:</span> {formatNumber(totalMetrics.reach)}</div>
@@ -1193,6 +1134,63 @@ const ROIAnalytics: React.FC = () => {
                                   </div>
                                 );
                               })()}
+
+                              {/* Кнопка AI анализа */}
+                              <Button
+                                size="sm"
+                                onClick={() => analyzeCreative(campaign.id)}
+                                disabled={analyzingCreative === campaign.id}
+                                className="w-full flex items-center justify-center gap-2 h-9 bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
+                              >
+                                {analyzingCreative === campaign.id ? (
+                                  <>
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                    Анализирую...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="h-4 w-4" />
+                                    Анализ с AI
+                                  </>
+                                )}
+                              </Button>
+
+                              {/* Результаты LLM анализа */}
+                              {creativeAnalysis && creativeAnalysis.score !== null && (
+                                <div className="border border-primary/20 bg-primary/5 rounded-lg p-3 space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${verdictMeta[creativeAnalysis.verdict]?.className || ''}`}>
+                                      {verdictMeta[creativeAnalysis.verdict]?.emoji} {verdictMeta[creativeAnalysis.verdict]?.label}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">Оценка: {creativeAnalysis.score}/100</span>
+                                  </div>
+                                  {creativeAnalysis.reasoning && (
+                                    <div className="text-xs text-muted-foreground">{creativeAnalysis.reasoning}</div>
+                                  )}
+                                  {creativeAnalysis.video_analysis && (
+                                    <div className="text-xs">
+                                      <span className="font-medium text-foreground">Видео:</span> {creativeAnalysis.video_analysis}
+                                    </div>
+                                  )}
+                                  {creativeAnalysis.text_recommendations && (
+                                    <div className="text-xs">
+                                      <span className="font-medium text-foreground">Рекомендации:</span> {creativeAnalysis.text_recommendations}
+                                    </div>
+                                  )}
+                                  {creativeAnalysis.transcript_suggestions && Array.isArray(creativeAnalysis.transcript_suggestions) && creativeAnalysis.transcript_suggestions.length > 0 && (
+                                    <div className="space-y-2 pt-2 border-t border-primary/10">
+                                      <div className="text-xs font-medium text-foreground">Предложения по тексту:</div>
+                                      {creativeAnalysis.transcript_suggestions.map((suggestion: any, index: number) => (
+                                        <div key={`${suggestion.from}-${index}`} className="rounded border border-muted p-2 space-y-1 bg-background/50">
+                                          <div className="text-xs text-muted-foreground line-through">"{suggestion.from}"</div>
+                                          <div className="text-xs font-medium text-foreground">→ "{suggestion.to}"</div>
+                                          <div className="text-xs text-muted-foreground italic">{suggestion.reason}</div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
