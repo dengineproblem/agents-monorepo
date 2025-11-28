@@ -16,25 +16,30 @@ import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 
 /**
  * Schema for creating a lead from website
+ * Note: Tilda sends null for empty fields, so we use .nullable() to accept null
+ * and .transform() to convert null to undefined
  */
+const nullableString = z.string().nullable().optional().transform(val => val ?? undefined);
+const nullableEmail = z.string().email().nullable().optional().transform(val => val ?? undefined);
+
 const CreateLeadSchema = z.object({
   userAccountId: z.string().uuid(),
   name: z.string().min(1).max(255),
   phone: z.string().min(5).max(20),
 
-  // UTM tracking parameters
-  utm_source: z.string().optional(),
-  utm_medium: z.string().optional(),
-  utm_campaign: z.string().optional(),
-  utm_term: z.string().optional(),
-  utm_content: z.string().optional(), // Can contain Facebook ad_id
+  // UTM tracking parameters - Tilda sends null for empty fields
+  utm_source: nullableString,
+  utm_medium: nullableString,
+  utm_campaign: nullableString,
+  utm_term: nullableString,
+  utm_content: nullableString, // Can contain Facebook ad_id
 
   // Facebook Ad ID (can be passed directly or via utm_content)
-  ad_id: z.string().optional(),
+  ad_id: nullableString,
 
   // Optional fields
-  email: z.string().email().optional(),
-  message: z.string().optional()
+  email: nullableEmail,
+  message: nullableString
 });
 
 type CreateLeadInput = z.infer<typeof CreateLeadSchema>;
