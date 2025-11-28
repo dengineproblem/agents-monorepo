@@ -7,6 +7,7 @@ import DirectionsTable from '../components/DirectionsTable';
 import MonthlyPlanFact from '../components/MonthlyPlanFact';
 import TargetologJournal from '../components/TargetologJournal';
 import PageHero from '../components/common/PageHero';
+import { FacebookManualConnectModal } from '../components/profile/FacebookManualConnectModal';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
@@ -47,6 +48,7 @@ const Dashboard: React.FC = () => {
   const [userTarif, setUserTarif] = useState<string | null>(null);
   const [hideDebtBanner, setHideDebtBanner] = useState<boolean>(false);
   const [userName, setUserName] = useState<string | null>(null);
+  const [showFacebookConnectModal, setShowFacebookConnectModal] = useState(false);
 
   // Проверка на блокировку кабинета (account_status === 3)
   const isPaymentFailed = accountStatus && Number(accountStatus.account_status) === 3;
@@ -284,18 +286,9 @@ const Dashboard: React.FC = () => {
           const u = stored ? JSON.parse(stored) : null;
           const isFbConnected = !!u?.access_token && u?.access_token !== '' && !!u?.ad_account_id && u?.ad_account_id !== '';
           const isTtConnected = tiktokConnected || !!u?.tiktok_business_id;
-          
-          const openFacebookAuth = () => {
-            const FB_APP_ID = '1441781603583445';
-            const FB_REDIRECT_URI = 'https://performanteaiagency.com/profile';
-            const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,pages_manage_ads,pages_read_engagement';
-            const authUrl = `https://www.facebook.com/v21.0/dialog/oauth?` +
-              `client_id=${FB_APP_ID}&` +
-              `redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&` +
-              `scope=${FB_SCOPE}&` +
-              `response_type=code&` +
-              `state=${Date.now()}`;
-            window.location.href = authUrl;
+
+          const openFacebookConnect = () => {
+            setShowFacebookConnectModal(true);
           };
           
           const openTikTokAuth = () => {
@@ -364,10 +357,10 @@ const Dashboard: React.FC = () => {
                         <AlertCircle className="h-4 w-4 flex-shrink-0" />
                         <span className="text-sm">{t('dashboard.connectFacebookDescription')}</span>
                       </div>
-                      <Button 
+                      <Button
                         variant="outline"
                         size="sm"
-                        onClick={openFacebookAuth}
+                        onClick={openFacebookConnect}
                         className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300 shadow-sm flex-shrink-0 transition-all duration-200"
                       >
                         {t('profile.connect')}
@@ -486,6 +479,16 @@ const Dashboard: React.FC = () => {
       </div>
       
       <DateRangePicker open={datePickerOpen} onOpenChange={setDatePickerOpen} />
+
+      {/* Facebook Manual Connect Modal */}
+      <FacebookManualConnectModal
+        open={showFacebookConnectModal}
+        onOpenChange={setShowFacebookConnectModal}
+        onComplete={() => {
+          setShowFacebookConnectModal(false);
+          window.location.reload();
+        }}
+      />
     </div>
   );
 };

@@ -177,6 +177,10 @@ export function FacebookManualConnectModal({
       newErrors.ad_account_id = 'Ad Account ID обязателен';
     }
 
+    if (!formData.instagram_id.trim()) {
+      newErrors.instagram_id = 'Instagram ID обязателен';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -502,16 +506,21 @@ export function FacebookManualConnectModal({
 
             <div className="space-y-2">
               <Label htmlFor="instagram_id">
-                Instagram Account ID <span className="text-muted-foreground">(необязательно)</span>
+                Instagram Account ID <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="instagram_id"
                 placeholder="Например: 123456789012345"
                 value={formData.instagram_id}
-                onChange={(e) =>
-                  setFormData({ ...formData, instagram_id: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, instagram_id: e.target.value });
+                  if (errors.instagram_id) setErrors({ ...errors, instagram_id: '' });
+                }}
+                className={errors.instagram_id ? 'border-red-500' : ''}
               />
+              {errors.instagram_id && (
+                <p className="text-sm text-red-500">{errors.instagram_id}</p>
+              )}
               <p className="text-xs text-muted-foreground">
                 ID аккаунта Instagram из раздела "Аккаунты Instagram"
               </p>

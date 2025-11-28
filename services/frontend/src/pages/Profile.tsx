@@ -1063,14 +1063,7 @@ const Profile: React.FC = () => {
                 id: 'facebook',
                 title: 'Facebook Ads',
                 connected: Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== ''),
-                status: user?.fb_connection_status as 'pending_review' | 'approved' | 'rejected' | undefined,
                 onClick: () => {
-                  // Если статус pending_review - показываем toast
-                  if (user?.fb_connection_status === 'pending_review') {
-                    toast.info('Ваша заявка на рассмотрении. Специалисты проверят данные в ближайшее время.');
-                    return;
-                  }
-
                   if (user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '') {
                     if (confirm(t('profile.confirmDisconnectFacebook'))) {
                       handleDisconnectInstagram(); // Reuse the same function as it clears access_token
