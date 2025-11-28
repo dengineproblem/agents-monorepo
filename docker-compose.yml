@@ -235,10 +235,11 @@ services:
     restart: unless-stopped
 
   # Evolution API - WhatsApp integration
-  # ВАЖНО: Образ собран локально из исходников GitHub (v2.3.6)
-  # Обновление: cd ~/evolution-api && git checkout NEW_VERSION && docker build -t atendai/evolution-api:NEW_VERSION .
+  # ВАЖНО: Используется кастомный форк с патчем extractAdMetadata для извлечения sourceId из рекламных сообщений
+  # Репозиторий: https://github.com/dengineproblem/evolution-api-fork
+  # Обновление: cd ~/evolution-api && git pull origin main && docker build -t atendai/evolution-api:2.3.6-patched .
   evolution-api:
-    image: atendai/evolution-api:2.3.6
+    image: atendai/evolution-api:2.3.6-patched
     container_name: evolution-api
     ports:
       - "8080:8080"
