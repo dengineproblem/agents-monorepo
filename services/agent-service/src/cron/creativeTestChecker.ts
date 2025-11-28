@@ -102,9 +102,9 @@ export function startCreativeTestCron(app: FastifyInstance) {
             
             // ВЫЗЫВАЕМ ANALYZER
             try {
-              app.log.info(`[Cron] Calling analyzer at ${ANALYZER_URL}/api/analyzer/analyze-test for test ${test.id}`);
-              
-              const analyzerResponse = await axios.post(`${ANALYZER_URL}/api/analyzer/analyze-test`, {
+              app.log.info(`[Cron] Calling analyzer at ${ANALYZER_URL}/analyze-test for test ${test.id}`);
+
+              const analyzerResponse = await axios.post(`${ANALYZER_URL}/analyze-test`, {
                 test_id: test.id
               }, {
                 timeout: 60000, // 60 секунд

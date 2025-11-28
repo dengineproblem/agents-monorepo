@@ -230,8 +230,9 @@ class SalesApiService {
   }
 
   // Получение ROI данных по user_account_id с опциональным фильтром по direction
+  // НОВАЯ ЛОГИКА: начинаем с user_creatives, метрики берём из creative_metrics_history
   async getROIData(
-    userAccountId: string, 
+    userAccountId: string,
     directionId: string | null = null,
     timeframeDays: 7 | 30 | 90 | 'all' = 'all'
   ): Promise<ROIData> {
@@ -243,252 +244,202 @@ class SalesApiService {
         if (timeframeDays === 'all') return null;
         const d = new Date();
         d.setDate(d.getDate() - timeframeDays);
-        // усечем до дня
         d.setHours(0, 0, 0, 0);
-        return d.toISOString();
+        return d.toISOString().split('T')[0]; // YYYY-MM-DD для сравнения с date
       })();
 
-      // Получаем статистику лидов с именем креатива через ad_creative_mapping -> user_creatives
+      // Курс доллара к тенге
+      const usdToKztRate = 530;
+
+      // ШАГ 1: Загружаем ВСЕ user_creatives для пользователя
+      let creativesQuery = (supabase as any)
+        .from('user_creatives')
+        .select('id, title, created_at')
+        .eq('user_id', userAccountId)
+        .eq('status', 'ready')
+        .order('created_at', { ascending: false });
+
+      // Примечание: фильтрация по direction_id будет через ad_creative_mapping
+
+      const { data: creatives, error: creativesError } = await creativesQuery;
+
+      if (creativesError) {
+        console.error('Ошибка загрузки креативов:', creativesError);
+        throw creativesError;
+      }
+
+      console.log('📊 Загружено креативов:', creatives?.length || 0);
+
+      if (!creatives || creatives.length === 0) {
+        return {
+          totalRevenue: 0,
+          totalSpend: 0,
+          totalROI: 0,
+          totalLeads: 0,
+          totalConversions: 0,
+          campaigns: []
+        };
+      }
+
+      const creativeIds = creatives.map((c: any) => c.id);
+
+      // ШАГ 2: Загружаем метрики из creative_metrics_history для всех креативов
+      let metricsQuery = (supabase as any)
+        .from('creative_metrics_history')
+        .select('user_creative_id, impressions, reach, clicks, leads, spend, date')
+        .in('user_creative_id', creativeIds)
+        .eq('user_account_id', userAccountId)
+        .eq('source', 'production');
+
+      if (since) {
+        metricsQuery = metricsQuery.gte('date', since);
+      }
+
+      const { data: metricsHistory, error: metricsError } = await metricsQuery;
+
+      if (metricsError) {
+        console.error('Ошибка загрузки метрик:', metricsError);
+        // Продолжаем без метрик
+      }
+
+      console.log('📊 Загружено записей метрик:', metricsHistory?.length || 0);
+
+      // Агрегируем метрики по креативам
+      const metricsMap = new Map<string, { impressions: number; reach: number; clicks: number; leads: number; spend: number }>();
+      for (const metric of metricsHistory || []) {
+        const creativeId = metric.user_creative_id;
+        if (!metricsMap.has(creativeId)) {
+          metricsMap.set(creativeId, { impressions: 0, reach: 0, clicks: 0, leads: 0, spend: 0 });
+        }
+        const agg = metricsMap.get(creativeId)!;
+        agg.impressions += metric.impressions || 0;
+        agg.reach += metric.reach || 0;
+        agg.clicks += metric.clicks || 0;
+        agg.leads += metric.leads || 0;
+        agg.spend += metric.spend || 0;
+      }
+
+      // ШАГ 3: Загружаем лиды для расчёта выручки (связь с purchases)
       let leadsQuery = (supabase as any)
         .from('leads')
-        .select(`
-          id, 
-          chat_id, 
-          sale_amount, 
-          source_id, 
-          creative_id, 
-          creative_url, 
-          created_at, 
-          direction_id
-        `)
-        .eq('user_account_id', userAccountId);
-      
-      // Фильтр по направлению (если выбрано)
+        .select('id, chat_id, creative_id, direction_id')
+        .eq('user_account_id', userAccountId)
+        .in('creative_id', creativeIds);
+
       if (directionId) {
         leadsQuery = leadsQuery.eq('direction_id', directionId);
       }
-      
-      if (since) leadsQuery = leadsQuery.gte('created_at', since);
-      const { data: leadsStats, error: leadsError } = await leadsQuery;
+
+      if (since) {
+        leadsQuery = leadsQuery.gte('created_at', since + 'T00:00:00.000Z');
+      }
+
+      const { data: leadsData, error: leadsError } = await leadsQuery;
 
       if (leadsError) {
         console.error('Ошибка загрузки лидов:', leadsError);
-        throw leadsError;
       }
 
-      console.log('📊 Загружено лидов:', leadsStats?.length || 0);
+      console.log('📊 Загружено лидов для выручки:', leadsData?.length || 0);
 
-      // Получаем маппинг ad_id -> creative_name через ad_creative_mapping -> user_creatives
-      const adIds = leadsStats?.map(l => l.source_id).filter(Boolean) || [];
-      let creativeNamesMap = new Map<string, string>();
-      
-      if (adIds.length > 0) {
-        const { data: creativeMappings, error: creativeMappingsError } = await (supabase as any)
-          .from('ad_creative_mapping')
-          .select(`
-            ad_id,
-            user_creatives!inner(title)
-          `)
-          .in('ad_id', adIds);
-        
-        if (!creativeMappingsError && creativeMappings) {
-          creativeMappings.forEach((mapping: any) => {
-            if (mapping.user_creatives?.title) {
-              creativeNamesMap.set(mapping.ad_id, mapping.user_creatives.title);
-            }
-          });
-          console.log('📊 Загружено названий креативов:', creativeNamesMap.size);
-        }
-      }
+      // ШАГ 4: Загружаем продажи для расчёта выручки
+      const leadPhones = leadsData?.map((l: any) => l.chat_id).filter(Boolean) || [];
 
-      // Получаем все продажи через JOIN с leads (по client_phone)
-      // Это позволяет фильтровать purchases через связь с leads
-      const leadPhones = leadsStats?.map(l => l.chat_id) || [];
-      
       let purchasesQuery = (supabase as any)
         .from('purchases')
         .select('id, client_phone, amount, created_at')
-        .eq('user_account_id', userAccountId)
-        .in('client_phone', leadPhones.length > 0 ? leadPhones : ['__no_match__']);
-      
-      if (since) purchasesQuery = purchasesQuery.gte('created_at', since);
-      const { data: purchasesStats, error: purchasesError } = await purchasesQuery;
+        .eq('user_account_id', userAccountId);
+
+      if (leadPhones.length > 0) {
+        purchasesQuery = purchasesQuery.in('client_phone', leadPhones);
+      } else {
+        purchasesQuery = purchasesQuery.in('client_phone', ['__no_match__']);
+      }
+
+      if (since) {
+        purchasesQuery = purchasesQuery.gte('created_at', since + 'T00:00:00.000Z');
+      }
+
+      const { data: purchasesData, error: purchasesError } = await purchasesQuery;
 
       if (purchasesError) {
         console.error('Ошибка загрузки продаж:', purchasesError);
-        throw purchasesError;
       }
 
-      console.log('📊 Загружено продаж:', purchasesStats?.length || 0);
+      console.log('📊 Загружено продаж:', purchasesData?.length || 0);
 
-      // Курс доллара к тенге
-      const usdToKztRate = 500;
-
-      // Получаем access_token один раз
-      let fbAccessToken: string | null = null;
-      let fbAdAccountId: string | null = null;
-      try {
-        console.log('🔄 Получаем access_token из таблицы user_accounts');
-        const { data: userData, error: userError } = await (supabase as any)
-          .from('user_accounts')
-          .select('access_token, ad_account_id')
-          .eq('id', userAccountId)
-          .single();
-
-        if (!userError && userData?.access_token) {
-          fbAccessToken = userData.access_token;
-          fbAdAccountId = userData.ad_account_id;
-          console.log('✅ Access token найден, будем запрашивать расходы напрямую по ad_id');
-        } else {
-          console.log('⚠️ Access token не найден, используем 30% формулу для затрат');
+      // Группируем продажи по номеру телефона
+      const purchasesByPhone = new Map<string, { count: number; amount: number }>();
+      for (const purchase of purchasesData || []) {
+        const phone = purchase.client_phone;
+        if (!purchasesByPhone.has(phone)) {
+          purchasesByPhone.set(phone, { count: 0, amount: 0 });
         }
-      } catch (fbError) {
-        console.warn('⚠️ Не удалось получить данные из Facebook API:', fbError);
+        const p = purchasesByPhone.get(phone)!;
+        p.count++;
+        p.amount += Number(purchase.amount) || 0;
       }
 
-      // Группируем по creative_id (ID креатива)
-      const campaignMap = new Map<string, CampaignROI>();
+      // Группируем лиды по креативам для расчёта выручки и конверсий
+      const revenueByCreative = new Map<string, { revenue: number; conversions: number; leadsCount: number }>();
+      for (const lead of leadsData || []) {
+        const creativeId = lead.creative_id;
+        if (!creativeId) continue;
+
+        if (!revenueByCreative.has(creativeId)) {
+          revenueByCreative.set(creativeId, { revenue: 0, conversions: 0, leadsCount: 0 });
+        }
+        const rev = revenueByCreative.get(creativeId)!;
+        rev.leadsCount++;
+
+        const purchaseData = purchasesByPhone.get(lead.chat_id);
+        if (purchaseData) {
+          rev.revenue += purchaseData.amount;
+          rev.conversions += purchaseData.count;
+        }
+      }
+
+      // ШАГ 5: Формируем результат
+      const campaigns: CampaignROI[] = [];
       let totalRevenue = 0;
-      let totalLeads = leadsStats?.length || 0;
+      let totalSpend = 0;
+      let totalLeads = 0;
       let totalConversions = 0;
 
-      // Обрабатываем каждый лид асинхронно
-      for (const lead of leadsStats || []) {
-        const creativeId = lead.creative_id || 'unknown_creative';
-        
-        // Находим все продажи для этого лида
-        const leadPurchases = purchasesStats?.filter(p => p.client_phone === lead.chat_id) || [];
-        const purchaseCount = leadPurchases.length;
-        
-        // Считаем выручку из реальных продаж, а не из поля leads.sale_amount
-        const revenue = leadPurchases.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-        const hasConversion = revenue > 0;
-        
-        // console.log(`📊 Лид ${lead.id}: creative_id=${creativeId}, revenue=${revenue}, hasConversion=${hasConversion}, purchases=${purchaseCount}`);
-        
-        if (hasConversion) {
-          totalConversions += purchaseCount; // Считаем количество продаж
-        }
-        totalRevenue += revenue;
+      for (const creative of creatives) {
+        const creativeId = creative.id;
+        const metrics = metricsMap.get(creativeId) || { impressions: 0, reach: 0, clicks: 0, leads: 0, spend: 0 };
+        const revenueData = revenueByCreative.get(creativeId) || { revenue: 0, conversions: 0, leadsCount: 0 };
 
-        // Группируем по creative_id
-        if (!campaignMap.has(creativeId)) {
-          console.log(`🔍 Создаем запись для креатива: ${creativeId}`);
-          
-          // Название креатива - берём из маппинга по source_id (ad_id)
-          let creativeName = creativeId === 'unknown_creative' 
-            ? 'Без креатива' 
-            : (creativeNamesMap.get(lead.source_id) || `Креатив ${creativeId.substring(0, 8)}...`);
-          
-          console.log(`📋 Название креатива: ${creativeName}`);
-          
-          campaignMap.set(creativeId, {
-            id: creativeId,
-            name: creativeName,
-            creative_url: lead.creative_url || '',
-            spend: 0, // Будет рассчитан ниже
-            revenue: 0,
-            roi: 0,
-            leads: 0,
-            conversions: 0
-          });
-        }
+        // Лиды берём из creative_metrics_history (метрики FB), не из таблицы leads
+        const leads = metrics.leads;
+        const spend = Math.round(metrics.spend * usdToKztRate); // spend в USD -> KZT
+        const revenue = revenueData.revenue;
+        const conversions = revenueData.conversions;
 
-        const campaign = campaignMap.get(creativeId)!;
-        campaign.leads++;
-        campaign.revenue += revenue;
-        if (hasConversion) campaign.conversions += purchaseCount;
-        
-        // Обновляем creative_url если его не было
-        if (!campaign.creative_url && lead.creative_url) {
-          campaign.creative_url = lead.creative_url;
-        }
-      }
+        // ROI расчёт
+        const roi = spend > 0 ? Math.round(((revenue - spend) / spend) * 100) : 0;
 
-      // Создаём мапу creative_id → source_ids для подсчёта затрат
-      const creativeToSourceIds = new Map<string, Set<string>>();
-      for (const lead of leadsStats || []) {
-        const creativeId = lead.creative_id || 'unknown_creative';
-        const sourceId = lead.source_id;
-        if (sourceId) {
-          if (!creativeToSourceIds.has(creativeId)) {
-            creativeToSourceIds.set(creativeId, new Set());
-          }
-          creativeToSourceIds.get(creativeId)!.add(sourceId);
-        }
-      }
-      console.log('📊 Мапа креативов к объявлениям:', Array.from(creativeToSourceIds.entries()).map(([k, v]) => `${k}: ${v.size} ads`));
-
-      // Вычисляем ROI с реальными затратами или временной формулой
-      const campaigns = Array.from(campaignMap.values());
-      
-      // Получаем реальные затраты для каждого креатива (параллельно, с ограничением)
-      // Для 'all' используем last_90d (максимально доступный стандартный период в FB API)
-      const datePreset: 'last_7d' | 'last_30d' | 'last_90d' =
-        timeframeDays === 7 ? 'last_7d' : timeframeDays === 30 ? 'last_30d' : 'last_90d';
-
-      const concurrency = 6;
-      const queue: Promise<void>[] = [];
-      let active = 0;
-      const runTask = async (task: () => Promise<void>) => {
-        active++;
-        try {
-          await task();
-        } finally {
-          active--;
-        }
-      };
-
-      const schedule = async (task: () => Promise<void>): Promise<void> => {
-        while (active >= concurrency) {
-          await Promise.race(queue);
-        }
-        const p = runTask(task);
-        queue.push(p);
-        p.finally(() => {
-          const idx = queue.indexOf(p);
-          if (idx >= 0) queue.splice(idx, 1);
+        campaigns.push({
+          id: creativeId,
+          name: creative.title || `Креатив ${creativeId.substring(0, 8)}...`,
+          creative_url: '', // URL будет добавлен позже если нужно
+          spend,
+          revenue,
+          roi,
+          leads,
+          conversions
         });
-        return p; // ВАЖНО: возвращаем промис!
-      };
 
-      await Promise.all(
-        campaigns.map((campaign) =>
-          schedule(async () => {
-            const creativeId = campaign.id;
-            let spendInKzt = 0;
-            
-            // Собираем затраты со всех source_id (объявлений), использующих этот креатив
-            const sourceIds = creativeToSourceIds.get(creativeId);
-            
-            if (sourceIds && sourceIds.size > 0 && fbAccessToken) {
-              // Суммируем затраты по всем объявлениям этого креатива
-              for (const sourceId of sourceIds) {
-                try {
-                  const spendInUsd = await this.getAdSpend(fbAccessToken, sourceId, datePreset);
-                  spendInKzt += Math.round(spendInUsd * usdToKztRate);
-                } catch (error) {
-                  console.error(`❌ Ошибка получения затрат для объявления ${sourceId}:`, error);
-                }
-              }
-              
-              // Если не удалось получить ни одних затрат, используем формулу
-              if (spendInKzt === 0) {
-                spendInKzt = Math.round(campaign.revenue * 0.3);
-              }
-            } else {
-              // Нет source_id или нет доступа к Facebook API - используем формулу
-              spendInKzt = Math.round(campaign.revenue * 0.3);
-            }
-            
-            const roi = spendInKzt > 0 ? Math.round(((campaign.revenue - spendInKzt) / spendInKzt) * 100) : 0;
-            campaign.spend = spendInKzt;
-            campaign.roi = roi;
-          })
-        )
-      );
+        totalRevenue += revenue;
+        totalSpend += spend;
+        totalLeads += leads;
+        totalConversions += conversions;
+      }
 
-      const totalSpend = campaigns.reduce((sum, c) => sum + c.spend, 0);
+      // Сортируем по количеству лидов (от большего к меньшему)
+      campaigns.sort((a, b) => b.leads - a.leads);
+
       const totalROI = totalSpend > 0 ? Math.round(((totalRevenue - totalSpend) / totalSpend) * 100) : 0;
 
       const result: ROIData = {
