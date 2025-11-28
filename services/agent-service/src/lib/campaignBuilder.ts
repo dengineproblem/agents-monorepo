@@ -2080,12 +2080,16 @@ export async function createAdsInAdSet(params: {
       const ad = await response.json();
       log.info({
         adId: ad.id,
-        adName: ad.name,
         userCreativeId: creative.user_creative_id,
         creativeTitle: creative.title,
         fbCreativeId: creativeId
       }, 'Ad created successfully');
-      ads.push(ad);
+      ads.push({
+        ad_id: ad.id,
+        name: `Ad - ${creative.title}`,
+        user_creative_id: creative.user_creative_id,
+        creative_title: creative.title
+      });
 
       // Сохраняем маппинг для трекинга лидов (если есть userId)
       if (userId && ad.id) {
@@ -2118,7 +2122,7 @@ export async function createAdsInAdSet(params: {
     totalCreatives: creatives.length,
     successfulAds: ads.length,
     failedAds: creatives.length - ads.length,
-    adsCreated: ads.map(ad => ({ id: ad.id, name: ad.name }))
+    adsCreated: ads.map(ad => ({ id: ad.ad_id, name: ad.name }))
   }, 'Finished creating ads in ad set');
 
   return ads;

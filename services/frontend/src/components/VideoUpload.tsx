@@ -3048,99 +3048,86 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
           </DialogContent>
         </Dialog>
 
-        {/* Модальное окно с результатами auto-launch */}
+        {/* Модальное окно с результатами auto-launch (идентично manual launch) */}
         <Dialog open={autoLaunchResultDialogOpen} onOpenChange={setAutoLaunchResultDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Результаты запуска рекламы</DialogTitle>
+              <DialogTitle>Реклама запущена!</DialogTitle>
               <DialogDescription>
-                {autoLaunchResults && (() => {
-                  const success = autoLaunchResults.filter((r: any) => r.status === 'success').length;
-                  const failed = autoLaunchResults.filter((r: any) => r.status === 'failed').length;
-                  const skipped = autoLaunchResults.filter((r: any) => r.skipped).length;
-                  return `Обработано ${autoLaunchResults.length} направлений: ${success} успешно, ${failed} ошибок, ${skipped} пропущено`;
-                })()}
+                Реклама успешно запущена
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
               {autoLaunchResults && autoLaunchResults.map((result: any, index: number) => (
-                <div
-                  key={result.direction_id || index}
-                  className={`p-4 rounded-lg border ${
-                    result.status === 'success'
-                      ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
-                      : result.status === 'failed'
-                      ? 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
-                      : 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800'
-                  }`}
-                >
-                  {/* Заголовок направления */}
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium">{result.direction_name}</span>
-                    <span className={`text-xs px-2 py-1 rounded ${
-                      result.status === 'success'
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
-                        : result.status === 'failed'
-                        ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
-                        : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
-                    }`}>
-                      {result.status === 'success' ? '✅ Успешно' : result.status === 'failed' ? '❌ Ошибка' : '⏭️ Пропущено'}
-                    </span>
-                  </div>
-
-                  {/* Успешный результат */}
-                  {result.status === 'success' && (
-                    <div className="space-y-2 text-sm">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <span className="text-muted-foreground">Campaign ID:</span>
-                          <div className="font-mono text-xs">{result.campaign_id}</div>
+                <div key={result.direction_id || index}>
+                  {result.status === 'success' ? (
+                    <>
+                      {/* Информация о направлении */}
+                      <div className="space-y-2">
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Направление:</span>{' '}
+                          <span className="font-medium">{result.direction_name}</span>
                         </div>
-                        <div>
-                          <span className="text-muted-foreground">AdSet ID:</span>
-                          <div className="font-mono text-xs">{result.adset_id}</div>
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                          <span className="font-mono text-xs">{result.campaign_id}</span>
                         </div>
                       </div>
-                      {result.adset_name && (
-                        <div>
-                          <span className="text-muted-foreground">Ad Set:</span> {result.adset_name}
-                        </div>
-                      )}
-                      {result.ads_created > 0 && (
-                        <div>
-                          <span className="text-muted-foreground">Создано объявлений:</span>{' '}
-                          <span className="font-medium">{result.ads_created}</span>
-                        </div>
-                      )}
-                      {result.daily_budget_cents && (
-                        <div>
-                          <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                          <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
-                        </div>
-                      )}
-                      <div className="text-xs text-muted-foreground">
-                        Режим: {result.mode === 'llm' ? 'AI' : 'Детерминистический'}
-                      </div>
-                    </div>
-                  )}
 
-                  {/* Ошибка */}
-                  {result.status === 'failed' && (
-                    <div className="space-y-1 text-sm">
-                      <div className="text-red-600 dark:text-red-400">{result.error}</div>
+                      {/* Информация об Ad Set */}
+                      <div className="p-4 bg-muted/30 rounded-lg space-y-2 mt-3">
+                        <div className="text-sm font-medium">Ad Set</div>
+                        <div className="text-sm text-muted-foreground">{result.adset_name}</div>
+                        <div className="text-xs text-muted-foreground font-mono">
+                          ID: {result.adset_id}
+                        </div>
+                        {result.daily_budget_cents && (
+                          <div className="text-sm pt-2 border-t border-border/50">
+                            <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                            <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Список созданных объявлений */}
+                      {result.ads && result.ads.length > 0 && (
+                        <div className="space-y-2 mt-3">
+                          <div className="text-sm font-medium">
+                            Создано объявлений: {result.ads_created}
+                          </div>
+                          <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                            {result.ads.map((ad: any, adIndex: number) => (
+                              <div
+                                key={ad.ad_id}
+                                className="p-3 border rounded-lg text-sm space-y-1"
+                              >
+                                <div className="font-medium">
+                                  {adIndex + 1}. {ad.name}
+                                </div>
+                                <div className="text-xs text-muted-foreground font-mono">
+                                  ID: {ad.ad_id}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : result.status === 'failed' ? (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950/30 dark:border-red-800">
+                      <div className="font-medium text-red-600 dark:text-red-400">{result.direction_name}</div>
+                      <div className="text-sm text-red-600 dark:text-red-400 mt-1">{result.error}</div>
                       {result.error_details && (
-                        <div className="text-xs text-muted-foreground">{result.error_details}</div>
+                        <div className="text-xs text-muted-foreground mt-1">{result.error_details}</div>
                       )}
                     </div>
-                  )}
-
-                  {/* Пропущено */}
-                  {result.skipped && (
-                    <div className="text-sm text-muted-foreground">
-                      {result.reason}
+                  ) : result.skipped ? (
+                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-950/30 dark:border-yellow-800">
+                      <div className="font-medium">{result.direction_name}</div>
+                      <div className="text-sm text-muted-foreground mt-1">{result.reason}</div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ))}
             </div>

@@ -24,39 +24,43 @@ GET http://localhost:8082/api/api/directions  ❌
 
 ## ✅ РЕШЕНИЕ: Единый стандарт
 
-### 📐 ПРАВИЛО #1: API_BASE_URL содержит `/api`
+### 📐 ПРАВИЛО #1: API_BASE_URL зависит от окружения
 
-**`API_BASE_URL`** — это полный базовый URL до API endpoints (включая `/api`).
+**`API_BASE_URL`** — базовый URL для API endpoints. **РАЗНЫЙ для локальной разработки и production:**
 
 ```typescript
 // ✅ ПРАВИЛЬНО
-API_BASE_URL = "http://localhost:8082/api"           // Локально
-API_BASE_URL = "https://app.performanteaiagency.com/api"  // Production
+API_BASE_URL = "http://localhost:8082"               // Локально (БЕЗ /api, т.к. нет nginx)
+API_BASE_URL = "https://app.performanteaiagency.com/api"  // Production (С /api, т.к. nginx убирает его)
 ```
 
 ```typescript
-// ❌ НЕПРАВИЛЬНО  
-API_BASE_URL = "http://localhost:8082"               // БЕЗ /api
+// ❌ НЕПРАВИЛЬНО
+API_BASE_URL = "http://localhost:8082/api"           // Локально НЕ нужен /api!
 API_BASE_URL = "http://localhost:8082/api/"          // С / в конце
 ```
+
+**Почему так:**
+- **Локально**: запросы идут напрямую в agent-service:8082, nginx отсутствует, роуты зарегистрированы как `/directions`
+- **Production**: nginx получает `/api/directions` и проксирует как `/directions` в agent-service (убирает `/api` prefix)
 
 ---
 
 ### 📐 ПРАВИЛО #2: API сервисы НЕ добавляют `/api`
 
-В API сервисах **НЕ добавляем** `/api/` к путям — он уже есть в `API_BASE_URL`.
+В API сервисах **НЕ добавляем** `/api/` к путям — на production он уже в `API_BASE_URL`, локально его нет вообще.
 
 ```typescript
 // ✅ ПРАВИЛЬНО
-fetch(`${API_BASE_URL}/directions`)              // → /api/directions
-fetch(`${API_BASE_URL}/whatsapp-numbers`)        // → /api/whatsapp-numbers  
-fetch(`${API_BASE_URL}/creatives/upload`)        // → /api/creatives/upload
+fetch(`${API_BASE_URL}/directions`)              // Локально: /directions, Production: /api/directions
+fetch(`${API_BASE_URL}/whatsapp-numbers`)        // Локально: /whatsapp-numbers, Production: /api/whatsapp-numbers
+fetch(`${API_BASE_URL}/creatives/upload`)        // Локально: /creatives/upload, Production: /api/creatives/upload
 ```
 
 ```typescript
 // ❌ НЕПРАВИЛЬНО
-fetch(`${API_BASE_URL}/api/directions`)          // → /api/api/directions ❌
-fetch(`${API_BASE_URL}/api/whatsapp-numbers`)    // → /api/api/whatsapp-numbers ❌
+fetch(`${API_BASE_URL}/api/directions`)          // Production: /api/api/directions ❌
+fetch(`${API_BASE_URL}/api/whatsapp-numbers`)    // Production: /api/api/whatsapp-numbers ❌
 ```
 
 ---
@@ -65,7 +69,8 @@ fetch(`${API_BASE_URL}/api/whatsapp-numbers`)    // → /api/api/whatsapp-number
 
 #### Для локальной разработки (`.env.local`):
 ```bash
-VITE_API_BASE_URL=http://localhost:8082/api
+# НЕ НУЖНО создавать! По умолчанию используется http://localhost:8082 (без /api)
+# VITE_API_BASE_URL=http://localhost:8082
 ```
 
 #### Для production (Docker Dockerfile):
@@ -82,13 +87,13 @@ VITE_API_BASE_URL=https://app.performanteaiagency.com/api
 ### 📐 ПРАВИЛО #4: Конфигурация в `config/api.ts`
 
 ```typescript
-// ✅ ПРАВИЛЬНО
-export const API_BASE_URL = 
+// ✅ ПРАВИЛЬНО (текущая конфигурация)
+export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL !== undefined
     ? import.meta.env.VITE_API_BASE_URL
-    : (import.meta.env.DEV 
-        ? 'http://localhost:8082/api'      // DEV с /api
-        : 'https://app.performanteaiagency.com/api');  // PROD с /api
+    : (import.meta.env.DEV
+        ? 'http://localhost:8082'                      // DEV БЕЗ /api (напрямую в agent-service)
+        : 'https://app.performanteaiagency.com/api'); // PROD С /api (через nginx)
 ```
 
 ---
@@ -227,7 +232,7 @@ http://localhost:8082/api  ✅
 
 | Окружение | Файл конфигурации | API_BASE_URL |
 |-----------|------------------|--------------|
-| **Vite Dev** | `.env.local` | `http://localhost:8082/api` |
+| **Vite Dev** | `config/api.ts` (default) | `http://localhost:8082` (БЕЗ /api) |
 | **Docker Local** | `Dockerfile` BUILD_MODE=production | `https://app.performanteaiagency.com/api` |
 | **Production** | `Dockerfile` BUILD_MODE=production | `https://app.performanteaiagency.com/api` |
 | **App Review** | `Dockerfile` BUILD_MODE=appreview | `https://performanteaiagency.com/api` |
@@ -363,17 +368,18 @@ npm run dev
 
 ## 📞 ИТОГО: Золотое правило
 
-> **API_BASE_URL ВСЕГДА содержит `/api` в конце**  
+> **API_BASE_URL НЕ содержит `/api` локально, но содержит `/api` на production**
 > **API сервисы НИКОГДА не добавляют `/api/` в начале пути**
 
 ```typescript
 // ✅ ВСЕГДА ТАК:
-const url = `${API_BASE_URL}/directions`;  
-// Результат: http://localhost:8082/api/directions ✅
+const url = `${API_BASE_URL}/directions`;
+// Локально: http://localhost:8082/directions ✅
+// Production: https://app.performanteaiagency.com/api/directions ✅
 
 // ❌ НИКОГДА ТАК:
 const url = `${API_BASE_URL}/api/directions`;
-// Результат: http://localhost:8082/api/api/directions ❌
+// Production: https://app.performanteaiagency.com/api/api/directions ❌
 ```
 
 ---

@@ -477,6 +477,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               adset_name: `${direction.name} - Ad Set`,
               daily_budget_cents: direction.daily_budget_cents,
               ads_created: ads.length,
+              ads: ads, // Массив созданных объявлений с деталями
               creatives_used: creativesToUse.map(c => c.user_creative_id),
               mode: 'deterministic',
               status: 'success',
@@ -786,7 +787,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           adset_name: `${direction.name} - Ad Set`,
           ads_created: ads.length,
           ads: ads.map(ad => ({
-            ad_id: ad.id,
+            ad_id: ad.ad_id,
             name: ad.name,
           })),
         });
