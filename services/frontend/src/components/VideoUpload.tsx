@@ -169,9 +169,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [salePhone, setSalePhone] = useState('');
   const [saleAmount, setSaleAmount] = useState('');
   const [showCreateLead, setShowCreateLead] = useState(false);
-  const [existingCampaigns, setExistingCampaigns] = useState<Array<{id: string, name: string, creative_url?: string}>>([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState('');
-  const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false);
+  const [existingCreatives, setExistingCreatives] = useState<Array<{id: string, title: string, image_url?: string, direction_id?: string}>>([]);
+  const [selectedCreativeId, setSelectedCreativeId] = useState('');
+  const [isLoadingCreatives, setIsLoadingCreatives] = useState(false);
   const IMAGE_WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/image';
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [showImageForm, setShowImageForm] = useState(false);
@@ -1118,9 +1118,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     setIsUploading(true);
     
     try {
-      const businessId = await salesApi.getCurrentUserBusinessId();
-      if (!businessId) {
-        toast.error('Business ID не найден. Обратитесь к администратору.');
+      const userAccountId = await salesApi.getCurrentUserAccountId();
+      if (!userAccountId) {
+        toast.error('User Account ID не найден. Обратитесь к администратору.');
         return;
       }
 
@@ -1128,7 +1128,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       await salesApi.addSale({
         client_phone: normalizedPhone,
         amount: amount,
-        business_id: businessId
+        user_account_id: userAccountId
       });
       
       toast.success('Продажа успешно добавлена! 🎉');
@@ -1142,7 +1142,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       if (error instanceof Error && error.message.includes('не найден в базе лидов')) {
         // Лид не найден - показываем форму выбора креатива
         setShowCreateLead(true);
-        loadExistingCampaigns();
+        loadExistingCreatives();
       } else {
         let errorMessage = 'Не удалось добавить продажу. Попробуйте еще раз.';
         
@@ -1215,80 +1215,95 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
     }
   };
 
-  // Загрузка существующих кампаний
-  const loadExistingCampaigns = async () => {
-    setIsLoadingCampaigns(true);
+  // Загрузка существующих креативов пользователя
+  const loadExistingCreatives = async () => {
+    setIsLoadingCreatives(true);
     try {
-      const businessId = await salesApi.getCurrentUserBusinessId();
-      if (businessId) {
-        const campaigns = await salesApi.getExistingCampaigns(businessId);
-        setExistingCampaigns(campaigns);
+      const userAccountId = await salesApi.getCurrentUserAccountId();
+      console.log('🔍 Загружаем креативы для user_account_id:', userAccountId);
+
+      if (userAccountId) {
+        // Загружаем креативы из user_creatives (колонка называется user_id)
+        const { data: creatives, error } = await (supabase as any)
+          .from('user_creatives')
+          .select('id, title, image_url, direction_id')
+          .eq('user_id', userAccountId)
+          .eq('status', 'ready')
+          .order('created_at', { ascending: false });
+
+        console.log('🔍 Результат загрузки креативов:', { creatives, error, count: creatives?.length });
+
+        if (error) throw error;
+        setExistingCreatives(creatives || []);
+      } else {
+        console.error('❌ user_account_id не найден!');
       }
     } catch (error) {
-      console.error('Ошибка загрузки кампаний:', error);
-      toast.error('Не удалось загрузить список кампаний');
+      console.error('Ошибка загрузки креативов:', error);
+      toast.error('Не удалось загрузить список креативов');
     } finally {
-      setIsLoadingCampaigns(false);
+      setIsLoadingCreatives(false);
     }
   };
 
   // Добавление продажи с выбранным креативом
-  const handleAddSaleWithCampaign = async () => {
-    if (!selectedCampaignId) {
-      toast.error('Выберите кампанию');
+  const handleAddSaleWithCreative = async () => {
+    if (!selectedCreativeId) {
+      toast.error('Выберите креатив');
       return;
     }
 
     const cleanPhone = salePhone.replace(/[\s\-\(\)]/g, '');
     let normalizedPhone = cleanPhone;
-    
+
     // Убираем + если есть
     if (normalizedPhone.startsWith('+')) {
       normalizedPhone = normalizedPhone.substring(1);
     }
-    
+
     // Если начинается с 8, заменяем на 7
     if (normalizedPhone.startsWith('8') && normalizedPhone.length === 11) {
       normalizedPhone = '7' + normalizedPhone.substring(1);
     }
-    
+
     // Если начинается с 77 (12 цифр), убираем первую 7
     if (normalizedPhone.startsWith('77') && normalizedPhone.length === 12) {
       normalizedPhone = normalizedPhone.substring(1);
     }
-    
+
     const amount = Number(saleAmount);
 
-    // Получаем данные выбранной кампании
-    const selectedCampaign = existingCampaigns.find(c => c.id === selectedCampaignId);
-    if (!selectedCampaign) {
-      toast.error('Выбранная кампания не найдена');
+    // Получаем данные выбранного креатива
+    const selectedCreative = existingCreatives.find(c => c.id === selectedCreativeId);
+    if (!selectedCreative) {
+      toast.error('Выбранный креатив не найден');
       return;
     }
 
     setIsUploading(true);
-    
+
     try {
-      const businessId = await salesApi.getCurrentUserBusinessId();
-      if (!businessId) {
-        toast.error('Business ID не найден. Обратитесь к администратору.');
+      const userAccountId = await salesApi.getCurrentUserAccountId();
+      if (!userAccountId) {
+        toast.error('User Account ID не найден. Обратитесь к администратору.');
         return;
       }
 
-      // Добавляем продажу с указанной кампанией
-      await salesApi.addSale({
+      // Добавляем продажу с указанным креативом
+      await salesApi.addSaleWithCreative({
         client_phone: normalizedPhone,
         amount: amount,
-        business_id: businessId,
-        manual_source_id: selectedCampaign.id,
-        manual_creative_url: selectedCampaign.creative_url || ''
+        user_account_id: userAccountId,
+        creative_id: selectedCreative.id,
+        creative_url: selectedCreative.image_url || '',
+        direction_id: selectedCreative.direction_id
       });
-      
-      toast.success('Продажа и лид успешно добавлены! 🎉');
+
+      toast.success('Продажа и лид успешно добавлены!');
       resetSaleForm();
-      
+
     } catch (error) {
-      console.error('Ошибка добавления продажи с кампанией:', error);
+      console.error('Ошибка добавления продажи с креативом:', error);
       toast.error('Не удалось добавить продажу. Попробуйте еще раз.');
     } finally {
       setIsUploading(false);
@@ -1298,7 +1313,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const resetSaleForm = () => {
     setSalePhone('');
     setSaleAmount('');
-    setSelectedCampaignId('');
+    setSelectedCreativeId('');
     setShowSaleForm(false);
     setShowCreateLead(false);
   };
@@ -2262,58 +2277,60 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
             {/* Форма выбора креатива - показывается если лид не найден */}
             {showCreateLead ? (
-              <div className="space-y-4 p-4 border rounded-lg bg-yellow-50 border-yellow-200">
-                <div className="flex items-center gap-2">
-                  <span className="text-yellow-600 text-lg">⚠️</span>
-                  <h4 className="font-medium text-yellow-800">Лид не найден</h4>
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/50 dark:bg-muted/20 border-border">
+                <div>
+                  <h4 className="font-medium text-foreground">Выберите креатив</h4>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Клиент с номером {salePhone} новый. Укажите креатив, с которого он пришёл.
+                  </p>
                 </div>
-                <p className="text-sm text-yellow-700">
-                  Клиент с номером {salePhone} не найден в базе лидов. Выберите кампанию, с которой он пришел.
-                </p>
 
                 <div>
-                  <label className="block mb-2 font-medium text-sm">Выберите кампанию</label>
-                  {isLoadingCampaigns ? (
-                    <div className="py-4 text-center text-gray-500">Загружаем кампании...</div>
-                  ) : existingCampaigns.length > 0 ? (
-                    <div className="space-y-2 max-h-40 overflow-y-auto">
-                      {existingCampaigns.map((campaign) => (
-                        <label key={campaign.id} className="flex items-start gap-2 p-2 border rounded cursor-pointer hover:bg-gray-50">
+                  {isLoadingCreatives ? (
+                    <div className="py-4 text-center text-muted-foreground">Загружаем креативы...</div>
+                  ) : existingCreatives.length > 0 ? (
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {existingCreatives.map((creative) => (
+                        <label key={creative.id} className="flex items-start gap-3 p-2 border rounded cursor-pointer hover:bg-accent/50 dark:hover:bg-accent/30 transition-colors">
                           <input
                             type="radio"
-                            name="campaign"
-                            value={campaign.id}
-                            checked={selectedCampaignId === campaign.id}
-                            onChange={(e) => setSelectedCampaignId(e.target.value)}
+                            name="creative"
+                            value={creative.id}
+                            checked={selectedCreativeId === creative.id}
+                            onChange={(e) => setSelectedCreativeId(e.target.value)}
                             className="mt-1"
                           />
-                          <div className="flex-1">
-                            <div className="font-medium">{campaign.name}</div>
-                            <div className="text-xs text-gray-500">ID: {campaign.id}</div>
+                          {creative.image_url && (
+                            <img
+                              src={creative.image_url}
+                              alt={creative.title}
+                              className="w-12 h-12 object-cover rounded"
+                            />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{creative.title || 'Без названия'}</div>
+                            <div className="text-xs text-muted-foreground truncate">ID: {creative.id.slice(0, 8)}...</div>
                           </div>
                         </label>
                       ))}
                     </div>
                   ) : (
-                    <div className="py-4 text-center text-gray-500">Кампании не найдены</div>
+                    <div className="py-4 text-center text-muted-foreground">Креативы не найдены</div>
                   )}
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-2 sm:gap-4">
-                  <Button 
-                    onClick={handleAddSaleWithCampaign}
-                    disabled={isUploading || !selectedCampaignId}
-                    variant="outline"
-                    className="w-full sm:w-auto border-emerald-200 bg-gradient-to-r from-emerald-50 to-green-50 hover:from-emerald-100 hover:to-green-100 text-emerald-700 hover:text-emerald-800 shadow-sm transition-all duration-200"
+                  <Button
+                    onClick={handleAddSaleWithCreative}
+                    disabled={isUploading || !selectedCreativeId}
                   >
                     <DollarSign className="mr-2 h-4 w-4" />
                     {isUploading ? 'Добавляется...' : 'Добавить продажу'}
                   </Button>
-                  <Button 
+                  <Button
                     variant="outline"
                     onClick={() => setShowCreateLead(false)}
                     disabled={isUploading}
-                    className="w-full sm:w-auto transition-all duration-200 hover:bg-gray-50"
                   >
                     Отмена
                   </Button>
@@ -2321,11 +2338,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
               </div>
             ) : (
               <div className="flex items-center gap-4">
-                <Button 
+                <Button
                   onClick={handleSaleSubmit}
                   disabled={isUploading || !salePhone || !saleAmount}
-                  variant="outline"
-                  className="border-emerald-200 bg-gradient-to-r from-emerald-50 to-green-50 hover:from-emerald-100 hover:to-green-100 text-emerald-700 hover:text-emerald-800 shadow-sm transition-all duration-200"
                 >
                   <DollarSign className="mr-2 h-4 w-4" />
                   {isUploading ? 'Добавляется...' : 'Добавить продажу'}

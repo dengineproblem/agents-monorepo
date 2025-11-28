@@ -485,15 +485,15 @@ class SalesApiService {
   }
 
   // Получение списка существующих кампаний для выбора
-  public async getExistingCampaigns(businessId: string): Promise<Array<{id: string, name: string, creative_url?: string}>> {
+  public async getExistingCampaigns(userAccountId: string): Promise<Array<{id: string, name: string, creative_url?: string}>> {
     try {
-      console.log('🔄 Загружаем существующие кампании для business_id:', businessId);
+      console.log('🔄 Загружаем существующие кампании для user_account_id:', userAccountId);
 
       // Получаем уникальные source_id из таблицы leads
       const { data: campaignsData, error: campaignsError } = await (supabase as any)
         .from('leads')
         .select('source_id, creative_url')
-        .eq('business_id', businessId)
+        .eq('user_account_id', userAccountId)
         .not('source_id', 'is', null);
 
       if (campaignsError) {
@@ -503,7 +503,7 @@ class SalesApiService {
 
       // Убираем дубликаты и создаем список кампаний
       const uniqueCampaigns = new Map<string, {id: string, name: string, creative_url?: string}>();
-      
+
       for (const campaign of campaignsData || []) {
         if (campaign.source_id && !uniqueCampaigns.has(campaign.source_id)) {
           uniqueCampaigns.set(campaign.source_id, {
@@ -519,13 +519,13 @@ class SalesApiService {
         const { data: userData, error: userError } = await (supabase as any)
           .from('user_accounts')
           .select('access_token, ad_account_id')
-          .eq('business_id', businessId)
+          .eq('id', userAccountId)
           .single();
 
         if (!userError && userData?.access_token && userData?.ad_account_id) {
           console.log('✅ Загружаем реальные названия кампаний из Facebook API...');
           const facebookCampaigns = await this.getFacebookCampaignsData(userData.access_token, userData.ad_account_id);
-          
+
           // Обновляем названия кампаний
           for (const [sourceId, campaignInfo] of uniqueCampaigns) {
             try {
@@ -555,32 +555,33 @@ class SalesApiService {
     }
   }
 
-  // Получение business_id текущего пользователя
-  public async getCurrentUserBusinessId(): Promise<string | null> {
+  // Получение user_account_id (UUID) текущего пользователя
+  // Это ID из таблицы user_accounts, используется для связи с leads/purchases
+  public async getCurrentUserAccountId(): Promise<string | null> {
     try {
       const storedUser = localStorage.getItem('user');
       if (!storedUser) {
         throw new Error('Пользователь не авторизован');
       }
-      
+
       const userData = JSON.parse(storedUser);
-      
-      // Если business_id есть в localStorage, используем его
-      if (userData.business_id) {
-        return userData.business_id;
-      }
-      
-      // Если нет - используем ID пользователя как business_id
+
+      // Используем ID пользователя (UUID из user_accounts)
       if (userData.id) {
-        console.log('✅ Используем user.id как business_id:', userData.id);
+        console.log('✅ User Account ID:', userData.id);
         return userData.id;
       }
-      
-      throw new Error('Business ID не найден');
+
+      throw new Error('User Account ID не найден');
     } catch (error) {
-      console.error('Ошибка получения business_id:', error);
+      console.error('Ошибка получения user_account_id:', error);
       return null;
     }
+  }
+
+  // Получение business_id текущего пользователя (legacy, для старого кода)
+  public async getCurrentUserBusinessId(): Promise<string | null> {
+    return this.getCurrentUserAccountId();
   }
 
   // Обновляем sale_amount в лиде после добавления продажи
@@ -786,13 +787,17 @@ class SalesApiService {
       console.log('👤 User Account ID:', saleData.user_account_id);
       console.log('📋 Source ID:', saleData.manual_source_id);
 
-      // Проверяем есть ли лид с таким номером
+      // Проверяем есть ли лид с таким номером у текущего пользователя
       const { data: existingLead, error: leadCheckError } = await (supabase as any)
         .from('leads')
-        .select('id, source_id, creative_url, direction_id, user_account_id')
+        .select('id, source_id, creative_url, direction_id, user_account_id, creative_id')
         .eq('user_account_id', saleData.user_account_id)
         .eq('chat_id', saleData.client_phone)
         .single();
+
+      console.log('🔍 Поиск лида по user_account_id:', saleData.user_account_id, 'и chat_id:', saleData.client_phone);
+      console.log('🔍 Результат:', existingLead);
+      console.log('🔍 Ошибка:', leadCheckError);
 
       if (leadCheckError && leadCheckError.code !== 'PGRST116') {
         console.error('❌ Ошибка проверки лида:', leadCheckError);
@@ -801,9 +806,9 @@ class SalesApiService {
 
       // Если лид не найден
       if (!existingLead) {
-        // Если НЕТ manual_source_id - выбрасываем ошибку (первый клик)
+        // Если НЕТ manual_creative_id - выбрасываем ошибку (первый клик)
         if (!saleData.manual_source_id) {
-          console.log('⚠️ Лид не найден в базе, нужно выбрать кампанию');
+          console.log('⚠️ Лид не найден в базе, нужно выбрать креатив');
           throw new Error(`Клиент с номером ${saleData.client_phone} не найден в базе лидов`);
         }
         
@@ -864,6 +869,75 @@ class SalesApiService {
 
     } catch (error) {
       console.error('❌ Ошибка в addSale:', error);
+      throw error;
+    }
+  }
+
+  // Добавление продажи с выбранным креативом (когда лид не найден)
+  public async addSaleWithCreative(saleData: {
+    client_phone: string;
+    amount: number;
+    user_account_id: string;
+    creative_id: string;
+    creative_url?: string;
+    direction_id?: string;
+  }) {
+    try {
+      console.log('🔄 Добавляем продажу с креативом:', saleData);
+
+      // Создаём новый лид с привязкой к креативу
+      const leadInsertData = {
+        user_account_id: saleData.user_account_id,
+        chat_id: saleData.client_phone,
+        creative_id: saleData.creative_id,
+        creative_url: saleData.creative_url || '',
+        direction_id: saleData.direction_id || null,
+        source_type: 'manual',
+        created_at: new Date().toISOString()
+      };
+
+      console.log('📝 Создаём лид:', leadInsertData);
+
+      const { data: newLead, error: leadError } = await (supabase as any)
+        .from('leads')
+        .insert(leadInsertData)
+        .select()
+        .single();
+
+      if (leadError) {
+        console.error('❌ Ошибка создания лида:', leadError);
+        throw leadError;
+      }
+
+      console.log('✅ Лид создан:', newLead);
+
+      // Добавляем продажу
+      const purchaseInsertData = {
+        user_account_id: saleData.user_account_id,
+        client_phone: saleData.client_phone,
+        amount: saleData.amount
+      };
+
+      const { data: purchaseData, error: purchaseError } = await (supabase as any)
+        .from('purchases')
+        .insert(purchaseInsertData)
+        .select()
+        .single();
+
+      if (purchaseError) {
+        console.error('❌ Ошибка добавления продажи:', purchaseError);
+        throw purchaseError;
+      }
+
+      console.log('✅ Продажа добавлена:', purchaseData);
+
+      // Обновляем sale_amount в лиде
+      await this.updateLeadSaleAmount(saleData.client_phone, saleData.user_account_id);
+
+      return { success: true, data: purchaseData };
+
+    } catch (error) {
+      console.error('❌ Ошибка в addSaleWithCreative:', error);
       throw error;
     }
   }
