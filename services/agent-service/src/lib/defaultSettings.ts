@@ -149,7 +149,7 @@ export async function getDefaultAdSettingsWithFallback(
       ? 'Здравствуйте! Хочу узнать об этом подробнее.'
       : undefined,
     utm_tag: campaignGoal === 'site_leads'
-      ? 'utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.name}}'
+      ? 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}'
       : undefined,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()

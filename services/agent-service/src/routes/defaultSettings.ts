@@ -196,7 +196,7 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             instagram_url: input.instagram_url,
             site_url: input.site_url,
             pixel_id: input.pixel_id,
-            utm_tag: input.utm_tag ?? 'utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.name}}',
+            utm_tag: input.utm_tag ?? 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}',
           })
           .select()
           .single();

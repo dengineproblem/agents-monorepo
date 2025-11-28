@@ -402,7 +402,7 @@ export async function createWebsiteLeadsCreative(
 
   const payload: any = {
     name: "Website Leads Creative",
-    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
     object_story_spec: {
       page_id: params.pageId,
       instagram_user_id: params.instagramId,
@@ -594,7 +594,7 @@ export async function createWebsiteLeadsImageCreative(
 ): Promise<{ id: string }> {
   const payload: any = {
     name: "Website Leads Image Creative",
-    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
     object_story_spec: {
       page_id: params.pageId,
       instagram_user_id: params.instagramId,
@@ -749,7 +749,7 @@ export async function createWebsiteLeadsImageCreativeMultiFormat(
 
   const payload: any = {
     name: "Website Leads Image Creative (Multi-Format)",
-    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
     object_story_spec: JSON.stringify(objectStorySpec),
     asset_feed_spec: JSON.stringify({
       images: [
@@ -957,7 +957,7 @@ export async function createWebsiteLeadsCarouselCreative(
 
   const payload: any = {
     name: "Website Leads Carousel Creative",
-    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}",
+    url_tags: params.utm || "utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}",
     object_story_spec: JSON.stringify(objectStorySpec)
   };
 

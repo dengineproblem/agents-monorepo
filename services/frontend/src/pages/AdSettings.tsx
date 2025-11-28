@@ -88,7 +88,7 @@ const AdSettings: React.FC = () => {
       description: 'Узнайте больше на нашем сайте',
       siteUrl: '',
       pixelId: '',
-      utmTag: 'utm_source=facebook&utm_medium=cpc&utm_campaign={{campaign.name}}',
+      utmTag: 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}',
     },
   });
 

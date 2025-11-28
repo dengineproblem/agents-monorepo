@@ -34,7 +34,7 @@ const TIKTOK_VIDEO_WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/ti
 const MAX_FILE_SIZE = 512 * 1024 * 1024; // 512 МиБ
 const MAX_RETRY_ATTEMPTS = 3; // Максимум 3 попытки
 const RETRY_DELAYS = [2000, 5000, 10000]; // Задержки между попытками: 2с, 5с, 10с
-const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{adset.name}}&utm_content={{ad.name}}';
+const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}';
 
 // Список городов Казахстана и других стран
 // Instagram/Meta IDs сохраняем как были (для IG). Для TikTok используем отдельную карту ID.

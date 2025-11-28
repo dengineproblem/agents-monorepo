@@ -108,12 +108,12 @@ export const TildaInstructionsDialog: React.FC<TildaInstructionsDialogProps> = (
 
             <div className="flex items-center gap-2 ml-7">
               <code className="flex-1 p-2 bg-muted rounded text-sm font-mono">
-                utm_content={'{{ad.id}}'}
+                utm_medium={'{{ad.id}}'}
               </code>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => copyToClipboard('utm_content={{ad.id}}', 'UTM параметр')}
+                onClick={() => copyToClipboard('utm_medium={{ad.id}}', 'UTM параметр')}
               >
                 <Copy className="h-3 w-3" />
               </Button>
