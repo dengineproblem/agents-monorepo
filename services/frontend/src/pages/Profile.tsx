@@ -17,6 +17,7 @@ import PageHero from '@/components/common/PageHero';
 import ConnectionsGrid from '@/components/profile/ConnectionsGrid';
 import DirectionsCard from '@/components/profile/DirectionsCard';
 import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionCard';
+import { TildaConnectionCard, TildaInstructionsDialog } from '@/components/profile/TildaConnectionCard';
 // TEMPORARILY HIDDEN: import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -156,6 +157,9 @@ const Profile: React.FC = () => {
 
   // Facebook Manual Connect Modal
   const [facebookManualModal, setFacebookManualModal] = useState(false);
+
+  // Tilda Instructions Modal
+  const [tildaInstructionsModal, setTildaInstructionsModal] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -1120,6 +1124,12 @@ const Profile: React.FC = () => {
                 onClick: handleAmoCRMConnect,
                 badge: amocrmConnected && amocrmWebhookActive ? 'Webhook' : undefined,
               },
+              ...(FEATURES.SHOW_DIRECTIONS ? [{
+                id: 'tilda' as const,
+                title: 'Tilda (сайт)',
+                connected: false,
+                onClick: () => setTildaInstructionsModal(true),
+              }] : []),
             ]}
           />
         </div>
@@ -1699,6 +1709,13 @@ const Profile: React.FC = () => {
             // window.location.reload(); // Reload to update UI with new status
           }}
           showSkipButton={false}
+        />
+
+        {/* Tilda Instructions Modal */}
+        <TildaInstructionsDialog
+          open={tildaInstructionsModal}
+          onOpenChange={setTildaInstructionsModal}
+          userAccountId={user?.id || null}
         />
       </div>
     </div>

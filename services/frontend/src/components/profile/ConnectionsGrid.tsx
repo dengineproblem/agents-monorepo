@@ -21,7 +21,7 @@ const AmoCRMIcon = () => (
 );
 
 export interface ConnectionItem {
-  id: 'facebook' | 'instagram' | 'tiktok' | 'amocrm';
+  id: 'facebook' | 'instagram' | 'tiktok' | 'amocrm' | 'tilda';
   title: string;
   connected: boolean;
   onClick: () => void;
@@ -35,6 +35,7 @@ const brandBg: Record<ConnectionItem['id'], string> = {
   instagram: 'bg-gradient-to-br from-purple-500/10 to-pink-500/10 text-pink-600',
   tiktok: 'bg-gradient-to-br from-cyan-500/10 to-blue-500/10 text-cyan-600',
   amocrm: 'bg-gradient-to-br from-green-500/10 to-emerald-500/10 text-green-600',
+  tilda: 'bg-gradient-to-br from-yellow-500/10 to-orange-500/10 text-yellow-600',
 };
 
 const FacebookIcon = () => (
@@ -43,11 +44,19 @@ const FacebookIcon = () => (
   </svg>
 );
 
+// Tilda icon SVG
+const TildaIcon = () => (
+  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-11h4v2h-4v-2zm0 4h4v2h-4v-2z"/>
+  </svg>
+);
+
 const brandIcon: Record<ConnectionItem['id'], React.ReactNode> = {
   facebook: <FacebookIcon />,
   instagram: <Instagram className="h-5 w-5" />,
   tiktok: <TikTokIcon />,
   amocrm: <AmoCRMIcon />,
+  tilda: <TildaIcon />,
 };
 
 interface ConnectionsGridProps {
