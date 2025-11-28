@@ -238,8 +238,9 @@ export default async function leadsRoutes(app: FastifyInstance) {
         });
       }
 
-      // 3. Extract ad_id from utm_content or direct parameter
-      const sourceId = leadData.ad_id || leadData.utm_content || null;
+      // 3. Extract ad_id from multiple sources (priority order)
+      // ad_id (direct) > utm_term > utm_content
+      const sourceId = leadData.ad_id || leadData.utm_term || leadData.utm_content || null;
 
       // 4. Resolve creative_id and direction_id from ad_id
       let creativeId: string | null = null;
