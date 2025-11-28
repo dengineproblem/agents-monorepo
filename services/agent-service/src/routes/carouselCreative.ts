@@ -228,6 +228,10 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           media_type: 'carousel',
           // Новый стандарт: один креатив = один objective
           fb_creative_id: fbCreativeId,
+          // Связь с generated_creative для получения текстов карусели
+          generated_creative_id: carousel_id,
+          // Данные карусели для отображения миниатюр и текстов
+          carousel_data: carouselData,
           // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),

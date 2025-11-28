@@ -10,6 +10,14 @@ export interface ROIData {
   campaigns: CampaignROI[];
 }
 
+// Тип для карточки карусели (синхронизирован с creativesApi.ts)
+export interface CarouselCardROI {
+  order: number;
+  text: string;
+  image_url?: string;
+  image_url_4k?: string;
+}
+
 export interface CampaignROI {
   id: string;
   name: string;
@@ -24,6 +32,11 @@ export interface CampaignROI {
     total: number;
     rate: number;
   };
+  // Новые поля для типа медиа и миниатюр
+  media_type?: 'video' | 'image' | 'carousel' | null;
+  image_url?: string | null;
+  carousel_data?: CarouselCardROI[] | null;
+  generated_creative_id?: string | null;
 }
 
 export interface Direction {
@@ -229,12 +242,13 @@ class SalesApiService {
     }
   }
 
-  // Получение ROI данных по user_account_id с опциональным фильтром по direction
+  // Получение ROI данных по user_account_id с опциональным фильтром по direction и типу медиа
   // НОВАЯ ЛОГИКА: начинаем с user_creatives, метрики берём из creative_metrics_history
   async getROIData(
     userAccountId: string,
     directionId: string | null = null,
-    timeframeDays: 7 | 30 | 90 | 'all' = 'all'
+    timeframeDays: 7 | 30 | 90 | 'all' = 'all',
+    mediaType: 'video' | 'image' | 'carousel' | null = null
   ): Promise<ROIData> {
     try {
       console.log('🔄 Загружаем ROI данные для user_account_id:', userAccountId, 'direction:', directionId || 'все');
@@ -251,13 +265,18 @@ class SalesApiService {
       // Курс доллара к тенге
       const usdToKztRate = 530;
 
-      // ШАГ 1: Загружаем ВСЕ user_creatives для пользователя
+      // ШАГ 1: Загружаем ВСЕ user_creatives для пользователя с новыми полями
       let creativesQuery = (supabase as any)
         .from('user_creatives')
-        .select('id, title, created_at')
+        .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id')
         .eq('user_id', userAccountId)
         .eq('status', 'ready')
         .order('created_at', { ascending: false });
+
+      // Фильтрация по типу медиа
+      if (mediaType) {
+        creativesQuery = creativesQuery.eq('media_type', mediaType);
+      }
 
       // Примечание: фильтрация по direction_id будет через ad_creative_mapping
 
@@ -428,7 +447,12 @@ class SalesApiService {
           revenue,
           roi,
           leads,
-          conversions
+          conversions,
+          // Новые поля для типа медиа и миниатюр
+          media_type: creative.media_type || null,
+          image_url: creative.image_url || null,
+          carousel_data: creative.carousel_data || null,
+          generated_creative_id: creative.generated_creative_id || null
         });
 
         totalRevenue += revenue;

@@ -1,6 +1,14 @@
 import { supabase } from '@/integrations/supabase/client';
 import { API_BASE_URL } from '@/config/api';
 
+// Тип для карточки карусели
+export type CarouselCard = {
+  order: number;
+  text: string;
+  image_url?: string;
+  image_url_4k?: string;
+};
+
 export type UserCreative = {
   id: string;
   user_id: string;
@@ -15,8 +23,14 @@ export type UserCreative = {
   error_text: string | null;
   created_at: string;
   updated_at: string;
-  // Тип медиа, если есть (video | image)
-  media_type?: 'video' | 'image' | null;
+  // Тип медиа: video, image или carousel
+  media_type?: 'video' | 'image' | 'carousel' | null;
+  // Связь с generated_creative для получения текстов
+  generated_creative_id?: string | null;
+  // URL изображения для миниатюр (image креативы)
+  image_url?: string | null;
+  // Данные карусели (carousel креативы)
+  carousel_data?: CarouselCard[] | null;
 };
 
 export type CreativeTestStatus = {
@@ -71,6 +85,82 @@ export const creativesApi = {
       return (anyData && typeof anyData.text === 'string') ? (anyData.text as string) : null;
     } catch {
       return null;
+    }
+  },
+
+  /**
+   * Получает текст креатива в зависимости от типа:
+   * - video: транскрибация из creative_transcripts
+   * - image: offer + bullets + profits из generated_creatives
+   * - carousel: тексты всех карточек
+   */
+  async getCreativeText(
+    userCreativeId: string,
+    mediaType: string,
+    carouselData?: CarouselCard[] | null
+  ): Promise<{ text: string | null }> {
+    // Для video - используем транскрибацию
+    if (mediaType === 'video') {
+      const transcript = await this.getTranscript(userCreativeId);
+      return { text: transcript };
+    }
+
+    // Для carousel - если есть carousel_data, используем тексты из него
+    if (mediaType === 'carousel' && carouselData && carouselData.length > 0) {
+      const texts = carouselData
+        .sort((a, b) => a.order - b.order)
+        .map((card, idx) => `Карточка ${idx + 1}:\n${card.text}`)
+        .join('\n\n');
+      return { text: texts };
+    }
+
+    // Для image/carousel без данных - получаем из generated_creatives
+    try {
+      // Шаг 1: Получаем generated_creative_id из user_creatives
+      const { data: creative, error: creativeError } = await supabase
+        .from('user_creatives')
+        .select('generated_creative_id, carousel_data')
+        .eq('id', userCreativeId)
+        .single();
+
+      if (creativeError || !creative?.generated_creative_id) {
+        return { text: null };
+      }
+
+      // Шаг 2: Получаем тексты из generated_creatives
+      const { data: generated, error: generatedError } = await supabase
+        .from('generated_creatives' as any)
+        .select('offer, bullets, profits, carousel_data, creative_type')
+        .eq('id', creative.generated_creative_id)
+        .single();
+
+      if (generatedError || !generated) {
+        return { text: null };
+      }
+
+      const genData = generated as any;
+
+      // Для карусели - собираем тексты карточек
+      if (genData.creative_type === 'carousel' && genData.carousel_data) {
+        const carouselCards = genData.carousel_data as CarouselCard[];
+        const texts = carouselCards
+          .sort((a, b) => a.order - b.order)
+          .map((card, idx) => `Карточка ${idx + 1}:\n${card.text}`)
+          .join('\n\n');
+        return { text: texts };
+      }
+
+      // Для image - возвращаем offer/bullets/profits
+      const textParts = [
+        genData.offer && `Оффер: ${genData.offer}`,
+        genData.bullets && `Буллеты:\n${genData.bullets}`,
+        genData.profits && `Выгоды: ${genData.profits}`
+      ].filter(Boolean);
+
+      return { text: textParts.join('\n\n') || null };
+    } catch (e) {
+      console.error('getCreativeText error:', e);
+      return { text: null };
     }
   },
 

@@ -495,6 +495,10 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           fb_image_hash: fbImage.hash,
           // Новый стандарт: один креатив = один objective
           fb_creative_id: fbCreativeId,
+          // Связь с generated_creative для получения текстов (offer, bullets, profits)
+          generated_creative_id: creative_id,
+          // URL изображения для миниатюр
+          image_url: creative.image_url_4k || creative.image_url,
           // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),

@@ -9,7 +9,9 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { creativesApi as creativesService } from "@/services/creativesApi";
 import { API_BASE_URL } from "@/config/api";
@@ -295,6 +297,140 @@ type TestLaunchResult = {
   objective: string;
   direction_id: string;
   message: string;
+};
+
+// Форматирование даты+времени по часовому поясу Алматы (UTC+5)
+const formatDateAlmaty = (dateString: string): string => {
+  const date = new Date(dateString);
+  const almatyOffset = 5 * 60; // UTC+5 в минутах
+  const localOffset = date.getTimezoneOffset();
+  const almatyDate = new Date(date.getTime() + (almatyOffset + localOffset) * 60 * 1000);
+  return format(almatyDate, 'yyyy-MM-dd HH:mm');
+};
+
+// Конфигурация для badge типа медиа
+type MediaType = 'video' | 'image' | 'carousel' | null | undefined;
+
+const MEDIA_TYPE_CONFIG: Record<string, { icon: React.ComponentType<{ className?: string }>; label: string; className: string }> = {
+  video: {
+    icon: Video,
+    label: 'Видео',
+    className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
+  },
+  image: {
+    icon: Image,
+    label: 'Картинка',
+    className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+  },
+  carousel: {
+    icon: Images,
+    label: 'Карусель',
+    className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200'
+  }
+};
+
+// Компонент Badge типа медиа
+type MediaTypeBadgeProps = {
+  mediaType: MediaType;
+  showLabel?: boolean;
+};
+
+const MediaTypeBadge: React.FC<MediaTypeBadgeProps> = ({ mediaType, showLabel = true }) => {
+  if (!mediaType) return null;
+
+  const config = MEDIA_TYPE_CONFIG[mediaType];
+  if (!config) return null;
+
+  const Icon = config.icon;
+
+  return (
+    <Badge className={`text-xs px-2 py-0.5 gap-1 flex items-center ${config.className}`}>
+      <Icon className="h-3 w-3" />
+      {showLabel && <span>{config.label}</span>}
+    </Badge>
+  );
+};
+
+// Компонент для inline-редактирования названия
+type EditableTitleProps = {
+  title: string;
+  creativeId: string;
+  onSave: (id: string, newTitle: string) => Promise<void>;
+};
+
+const EditableTitle: React.FC<EditableTitleProps> = ({ title, creativeId, onSave }) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(title);
+  const [isSaving, setIsSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isEditing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    setEditValue(title);
+  }, [title]);
+
+  const handleSave = async () => {
+    if (editValue.trim() === title || !editValue.trim()) {
+      setEditValue(title);
+      setIsEditing(false);
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await onSave(creativeId, editValue.trim());
+    } finally {
+      setIsSaving(false);
+      setIsEditing(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSave();
+    }
+    if (e.key === 'Escape') {
+      setEditValue(title);
+      setIsEditing(false);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <Input
+          ref={inputRef}
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={handleSave}
+          disabled={isSaving}
+          className="h-7 text-sm py-1 px-2 max-w-[200px]"
+        />
+        {isSaving && <Loader2 className="h-3 w-3 animate-spin" />}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="font-medium text-left truncate max-w-[200px] sm:max-w-none cursor-pointer hover:underline group flex items-center gap-1"
+      title={`${title} (нажмите для редактирования)`}
+      onClick={(e) => {
+        e.stopPropagation();
+        setIsEditing(true);
+      }}
+    >
+      <span className="truncate">{title}</span>
+      <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-50 transition-opacity flex-shrink-0" />
+    </div>
+  );
 };
 
 const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativeIds, demoMode = false }) => {
@@ -977,6 +1113,24 @@ const Creatives: React.FC = () => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const processingRef = useRef(false);
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
+
+  // Фильтрация креативов по типу медиа
+  const filteredItems = useMemo(() => {
+    if (mediaTypeFilter === 'all') return items;
+    return items.filter(item => item.media_type === mediaTypeFilter);
+  }, [items, mediaTypeFilter]);
+
+  // Обработчик обновления названия креатива
+  const handleTitleUpdate = async (id: string, newTitle: string) => {
+    const success = await creativesApi.update(id, { title: newTitle });
+    if (success) {
+      await reload();
+      toast.success('Название обновлено');
+    } else {
+      toast.error('Не удалось обновить название');
+    }
+  };
   
   // Получаем user_id для загрузки направлений (один раз)
   const [userId] = useState<string | null>(() => {
@@ -1286,16 +1440,47 @@ const Creatives: React.FC = () => {
               <CardTitle>Загруженные креативы</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm text-muted-foreground">Всего: {items.length}</div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm text-muted-foreground">
+                    Всего: {items.length}{mediaTypeFilter !== 'all' && ` (показано: ${filteredItems.length})`}
+                  </div>
+                  {/* Фильтр по типу */}
+                  <Select value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
+                    <SelectTrigger className="w-[130px] h-8 text-xs">
+                      <SelectValue placeholder="Тип" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все типы</SelectItem>
+                      <SelectItem value="video">
+                        <span className="flex items-center gap-2">
+                          <Video className="h-3 w-3" />
+                          Видео
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="image">
+                        <span className="flex items-center gap-2">
+                          <Image className="h-3 w-3" />
+                          Картинки
+                        </span>
+                      </SelectItem>
+                      <SelectItem value="carousel">
+                        <span className="flex items-center gap-2">
+                          <Images className="h-3 w-3" />
+                          Карусели
+                        </span>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="flex items-center gap-2">
                 <Button size="sm" variant="ghost" onClick={reload} disabled={loading}>
                   <RefreshCw className="h-4 w-4" />
                 </Button>
                   {items.length > 0 && (
-                    <Button 
-                      size="sm" 
-                      variant="destructive" 
+                    <Button
+                      size="sm"
+                      variant="destructive"
                       onClick={async () => {
                         if (confirm(`Удалить все креативы (${items.length} шт.)?`)) {
                           try {
@@ -1308,7 +1493,7 @@ const Creatives: React.FC = () => {
                             toast.error('Не удалось удалить все креативы');
                           }
                         }
-                      }} 
+                      }}
                       disabled={loading}
                     >
                       <Trash2 className="h-4 w-4 mr-1" />
@@ -1321,9 +1506,11 @@ const Creatives: React.FC = () => {
                 <div className="text-sm text-muted-foreground">Загрузка...</div>
               ) : items.length === 0 ? (
                 <div className="text-sm text-muted-foreground">Пока нет креативов</div>
+              ) : filteredItems.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Нет креативов выбранного типа</div>
               ) : (
                 <Accordion type="single" collapsible className="w-full">
-                  {items.map((it, index) => {
+                  {filteredItems.map((it, index) => {
                     const currentDirection = it.direction_id 
                       ? directions.find(d => d.id === it.direction_id)
                       : null;
@@ -1350,8 +1537,17 @@ const Creatives: React.FC = () => {
                       <div className="flex items-center justify-between w-full py-2 gap-4">
                         <div className="min-w-0 flex-1 flex items-center gap-2">
                           <AccordionTrigger className="hover:no-underline min-w-0">
-                            <div className="font-medium text-left truncate max-w-[200px] sm:max-w-none" title={it.title}>{it.title}</div>
+                            <EditableTitle
+                              title={it.title}
+                              creativeId={it.id}
+                              onSave={handleTitleUpdate}
+                            />
                           </AccordionTrigger>
+
+                          {/* Badge типа медиа */}
+                          <div className="flex-shrink-0 hidden sm:block">
+                            <MediaTypeBadge mediaType={it.media_type} showLabel={false} />
+                          </div>
 
                           {/* Индикатор статуса теста */}
                           <div className="flex-shrink-0">
@@ -1373,24 +1569,22 @@ const Creatives: React.FC = () => {
                           </div>
                         </div>
                         <div className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
-                          {format(new Date(it.created_at), 'yyyy-MM-dd')}
+                          {formatDateAlmaty(it.created_at)}
                         </div>
                         <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <label className="flex items-center gap-1 cursor-pointer text-xs whitespace-nowrap">
-                            <input
-                              type="checkbox"
+                          <div className="flex items-center gap-2">
+                            <Switch
                               checked={it.is_active ?? true}
-                              onChange={async (e) => {
-                                e.stopPropagation();
-                                const newActive = e.target.checked;
-                                await creativesApi.toggleActive(it.id, newActive);
+                              onCheckedChange={async (checked) => {
+                                await creativesApi.toggleActive(it.id, checked);
                                 await reload();
-                                toast.success(newActive ? 'Креатив активирован' : 'Креатив деактивирован');
+                                toast.success(checked ? 'Креатив активирован' : 'Креатив деактивирован');
                               }}
-                              className="w-4 h-4 shrink-0"
                             />
-                            <span className="text-muted-foreground hidden sm:inline">Активен</span>
-                          </label>
+                            <span className="text-xs text-muted-foreground hidden sm:inline">
+                              {it.is_active ? 'Активен' : 'Неактивен'}
+                            </span>
+                          </div>
                           <Button
                             size="sm"
                             variant="ghost"

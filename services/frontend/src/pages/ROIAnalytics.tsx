@@ -24,8 +24,13 @@ import {
   ShoppingCart,
   Play,
   Filter,
-  Sparkles
+  Sparkles,
+  Video,
+  Image,
+  Images
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -40,6 +45,56 @@ import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
 import { API_BASE_URL, ANALYTICS_API_BASE_URL } from '@/config/api';
 import { creativesApi } from '@/services/creativesApi';
 
+// Конфигурация для badge типа медиа
+type MediaType = 'video' | 'image' | 'carousel' | null | undefined;
+
+const MEDIA_TYPE_CONFIG: Record<string, { icon: React.ComponentType<{ className?: string }>; label: string; className: string }> = {
+  video: {
+    icon: Video,
+    label: 'Видео',
+    className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200'
+  },
+  image: {
+    icon: Image,
+    label: 'Картинка',
+    className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200'
+  },
+  carousel: {
+    icon: Images,
+    label: 'Карусель',
+    className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-200'
+  }
+};
+
+// Компонент Badge типа медиа
+const MediaTypeBadge: React.FC<{ mediaType: MediaType; showLabel?: boolean }> = ({ mediaType, showLabel = true }) => {
+  if (!mediaType) return null;
+
+  const config = MEDIA_TYPE_CONFIG[mediaType];
+  if (!config) return null;
+
+  const Icon = config.icon;
+
+  return (
+    <Badge className={`text-xs px-2 py-0.5 gap-1 flex items-center ${config.className}`}>
+      <Icon className="h-3 w-3" />
+      {showLabel && <span>{config.label}</span>}
+    </Badge>
+  );
+};
+
+// Утилита для получения thumbnail URL через Supabase Transform
+const getThumbnailUrl = (url: string | null | undefined, width = 200, height = 250): string | null => {
+  if (!url) return null;
+
+  // Проверяем, что это Supabase Storage URL
+  if (!url.includes('supabase')) return url;
+
+  // Добавляем параметры трансформации
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}width=${width}&height=${height}`;
+};
+
 const ROIAnalytics: React.FC = () => {
   const [roiData, setRoiData] = useState<ROIData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +103,7 @@ const ROIAnalytics: React.FC = () => {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [selectedDirectionId, setSelectedDirectionId] = useState<string | null>(null);
   const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false);
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
 
   // Funnel modal state
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
@@ -189,9 +245,10 @@ const ROIAnalytics: React.FC = () => {
       });
       
       const data = await salesApi.getROIData(
-        userId, 
+        userId,
         selectedDirectionId,
-        tf || 'all'
+        tf || 'all',
+        mediaTypeFilter === 'all' ? null : mediaTypeFilter
       );
       
       console.log('✅ ROI данные загружены:', data);
@@ -222,7 +279,7 @@ const ROIAnalytics: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Перезагрузка при смене направления
+  // Перезагрузка при смене направления или типа медиа
   useEffect(() => {
     if (userAccountId) {
       loadROIData();
@@ -257,7 +314,7 @@ const ROIAnalytics: React.FC = () => {
       */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDirectionId, directions]);
+  }, [selectedDirectionId, directions, mediaTypeFilter]);
 
   const getROIBadgeVariant = (roi: number) => {
     if (roi > 0) return 'outline';
@@ -274,8 +331,8 @@ const ROIAnalytics: React.FC = () => {
     setFunnelModalOpen(true);
   };
 
-  // Загрузка метрик креатива, транскрипции и анализа
-  const loadCreativeMetrics = async (creativeId: string) => {
+  // Загрузка метрик креатива, транскрипции/текста и анализа
+  const loadCreativeMetrics = async (creativeId: string, campaign?: CampaignROI) => {
     if (expandedCreativeId === creativeId) {
       // Закрыть, если уже открыт
       setExpandedCreativeId(null);
@@ -287,22 +344,26 @@ const ROIAnalytics: React.FC = () => {
 
     setExpandedCreativeId(creativeId);
     setLoadingMetrics(true);
-    
+
+    // Определяем тип медиа для креатива
+    const mediaType = campaign?.media_type || 'video';
+
     try {
-      // Параллельная загрузка метрик, анализа и транскрипции
-      const [metricsResult, analysisResult, transcriptText] = await Promise.all([
+      // Параллельная загрузка метрик, анализа и текста/транскрипции
+      const [metricsResult, analysisResult, textData] = await Promise.all([
         salesApi.getCreativeMetrics(creativeId, userAccountId, 30),
         salesApi.getCreativeAnalysis(creativeId, userAccountId),
-        creativesApi.getTranscript(creativeId).catch(() => null)
+        // Используем универсальный метод: для video - транскрипция, для image/carousel - текст
+        creativesApi.getCreativeText(creativeId, mediaType, campaign?.carousel_data).catch(() => ({ text: null }))
       ]);
-      
+
       if (metricsResult.error) {
         console.error('Ошибка загрузки метрик:', metricsResult.error);
         setCreativeMetrics([]);
       } else {
         setCreativeMetrics(metricsResult.data || []);
       }
-      
+
       if (analysisResult.error) {
         console.log('Анализ не найден (ожидаемо при первой загрузке)', analysisResult.error);
         setCreativeAnalysis(null);
@@ -310,9 +371,9 @@ const ROIAnalytics: React.FC = () => {
         console.log('✅ Загружен анализ креатива:', analysisResult.data);
         setCreativeAnalysis(analysisResult.data);
       }
-      
-      setCreativeTranscript(transcriptText);
-      
+
+      setCreativeTranscript(textData.text);
+
     } catch (err) {
       console.error('Ошибка загрузки данных креатива:', err);
       setCreativeMetrics([]);
@@ -489,53 +550,87 @@ const ROIAnalytics: React.FC = () => {
           <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
         </div>
         
-        {/* Фильтр по направлениям */}
-        {directions.length > 0 && (
-          <div className="mb-4">
-            {/* Десктоп: табы */}
-            <div className="hidden md:block">
-              <Tabs value={selectedDirectionId || 'all'} onValueChange={(value) => setSelectedDirectionId(value === 'all' ? null : value)}>
-                <TabsList className="bg-muted">
-                  <TabsTrigger value="all">Все направления</TabsTrigger>
-                  {directions.map((direction) => (
-                    <TabsTrigger key={direction.id} value={direction.id}>
-                      {direction.name}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </Tabs>
-            </div>
-            
-            {/* Мобилка: кнопка-бургер */}
-            <div className="md:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="w-full justify-between">
-                    <span>
-                      {selectedDirectionId 
-                        ? directions.find(d => d.id === selectedDirectionId)?.name 
-                        : 'Все направления'}
-                    </span>
-                    <ChevronDown className="h-4 w-4 ml-2" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)]">
-                  <DropdownMenuItem onClick={() => setSelectedDirectionId(null)}>
-                    Все направления
-                  </DropdownMenuItem>
-                  {directions.map((direction) => (
-                    <DropdownMenuItem 
-                      key={direction.id} 
-                      onClick={() => setSelectedDirectionId(direction.id)}
-                    >
-                      {direction.name}
+        {/* Фильтры */}
+        <div className="mb-4 space-y-3">
+          {/* Фильтр по направлениям */}
+          {directions.length > 0 && (
+            <div>
+              {/* Десктоп: табы */}
+              <div className="hidden md:block">
+                <Tabs value={selectedDirectionId || 'all'} onValueChange={(value) => setSelectedDirectionId(value === 'all' ? null : value)}>
+                  <TabsList className="bg-muted">
+                    <TabsTrigger value="all">Все направления</TabsTrigger>
+                    {directions.map((direction) => (
+                      <TabsTrigger key={direction.id} value={direction.id}>
+                        {direction.name}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </Tabs>
+              </div>
+
+              {/* Мобилка: кнопка-бургер */}
+              <div className="md:hidden">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span>
+                        {selectedDirectionId
+                          ? directions.find(d => d.id === selectedDirectionId)?.name
+                          : 'Все направления'}
+                      </span>
+                      <ChevronDown className="h-4 w-4 ml-2" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)]">
+                    <DropdownMenuItem onClick={() => setSelectedDirectionId(null)}>
+                      Все направления
                     </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                    {directions.map((direction) => (
+                      <DropdownMenuItem
+                        key={direction.id}
+                        onClick={() => setSelectedDirectionId(direction.id)}
+                      >
+                        {direction.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
+          )}
+
+          {/* Фильтр по типу медиа */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground">Тип креатива:</span>
+            <Select value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
+              <SelectTrigger className="w-[140px] h-8 text-xs">
+                <SelectValue placeholder="Тип" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Все типы</SelectItem>
+                <SelectItem value="video">
+                  <span className="flex items-center gap-2">
+                    <Video className="h-3 w-3" />
+                    Видео
+                  </span>
+                </SelectItem>
+                <SelectItem value="image">
+                  <span className="flex items-center gap-2">
+                    <Image className="h-3 w-3" />
+                    Картинки
+                  </span>
+                </SelectItem>
+                <SelectItem value="carousel">
+                  <span className="flex items-center gap-2">
+                    <Images className="h-3 w-3" />
+                    Карусели
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        )}
+        </div>
 
         {/* Общая статистика */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 mb-4">
@@ -648,6 +743,7 @@ const ROIAnalytics: React.FC = () => {
                         <thead className="bg-muted/50 border-b">
                           <tr>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Название креатива</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Тип</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Выручка</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Затраты</th>
                             <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">ROI</th>
@@ -667,9 +763,15 @@ const ROIAnalytics: React.FC = () => {
                         <tbody>
                           {roiData.campaigns.map((campaign, index) => (
                             <React.Fragment key={campaign.id}>
-                              <tr className="border-b hover:bg-muted/30 transition-colors">
+                              <tr className={cn(
+                                "border-b hover:bg-muted/30 transition-all duration-200",
+                                expandedCreativeId === campaign.id && "ring-2 ring-primary/50 bg-primary/5"
+                              )}>
                                 <td className="py-2 px-3">
                                   <div className="font-medium text-sm">{campaign.name}</div>
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <MediaTypeBadge mediaType={campaign.media_type} showLabel={false} />
                                 </td>
                                 <td className="py-2 px-3 text-right text-sm font-medium text-green-600 dark:text-green-500/70">
                                   {formatCurrency(campaign.revenue)}
@@ -678,7 +780,7 @@ const ROIAnalytics: React.FC = () => {
                                   {formatCurrency(campaign.spend)}
                                 </td>
                                 <td className="py-2 px-3 text-right">
-                                  <Badge 
+                                  <Badge
                                     variant={getROIBadgeVariant(campaign.roi)}
                                     className={`text-xs ${getROIBadgeClass(campaign.roi)}`}
                                   >
@@ -717,9 +819,9 @@ const ROIAnalytics: React.FC = () => {
                                 </td>
                                 <td className="py-2 px-3 text-center">
                                   {campaign.creative_url ? (
-                                    <a 
-                                      href={campaign.creative_url} 
-                                      target="_blank" 
+                                    <a
+                                      href={campaign.creative_url}
+                                      target="_blank"
                                       rel="noopener noreferrer"
                                       className="inline-flex items-center justify-center text-foreground hover:text-foreground/70 transition-colors"
                                     >
@@ -731,7 +833,7 @@ const ROIAnalytics: React.FC = () => {
                                 </td>
                                 <td className="py-2 px-3 text-center">
                                   <button
-                                    onClick={() => loadCreativeMetrics(campaign.id)}
+                                    onClick={() => loadCreativeMetrics(campaign.id, campaign)}
                                     className="inline-flex items-center justify-center text-foreground hover:text-foreground/70 transition-colors"
                                     title="Показать детали"
                                   >
@@ -745,7 +847,7 @@ const ROIAnalytics: React.FC = () => {
                               </tr>
                               {expandedCreativeId === campaign.id && (
                                 <tr className="border-b">
-                                  <td colSpan={10} className="p-4 bg-muted/20">
+                                  <td colSpan={11} className="p-4 bg-muted/20">
                                     {loadingMetrics ? (
                                       <div className="text-center py-4">
                                         <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
@@ -753,16 +855,68 @@ const ROIAnalytics: React.FC = () => {
                                       </div>
                                     ) : (
                                       <div className="space-y-4">
-                                        {/* Транскрипция */}
+                                        {/* Миниатюры для image/carousel */}
+                                        {campaign.media_type === 'image' && campaign.image_url && (
+                                          <Card className="bg-muted/30">
+                                            <CardHeader className="pb-3">
+                                              <CardTitle className="text-sm flex items-center gap-2">
+                                                🖼️ Превью креатива
+                                              </CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                              <img
+                                                src={getThumbnailUrl(campaign.image_url) || campaign.image_url}
+                                                alt={campaign.name}
+                                                className="rounded-lg max-w-[200px] max-h-[250px] object-contain"
+                                                loading="lazy"
+                                              />
+                                            </CardContent>
+                                          </Card>
+                                        )}
+
+                                        {campaign.media_type === 'carousel' && campaign.carousel_data && campaign.carousel_data.length > 0 && (
+                                          <Card className="bg-muted/30">
+                                            <CardHeader className="pb-3">
+                                              <CardTitle className="text-sm flex items-center gap-2">
+                                                🖼️ Карточки карусели ({campaign.carousel_data.length})
+                                              </CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                              <div className="flex gap-3 overflow-x-auto pb-2">
+                                                {campaign.carousel_data
+                                                  .sort((a, b) => a.order - b.order)
+                                                  .map((card, idx) => (
+                                                    <div key={idx} className="flex-shrink-0">
+                                                      <img
+                                                        src={getThumbnailUrl(card.image_url || card.image_url_4k) || card.image_url || card.image_url_4k}
+                                                        alt={`Карточка ${idx + 1}`}
+                                                        className="rounded-lg w-[150px] h-[188px] object-cover"
+                                                        loading="lazy"
+                                                      />
+                                                      <div className="text-xs text-muted-foreground mt-1 text-center">
+                                                        Карточка {idx + 1}
+                                                      </div>
+                                                    </div>
+                                                  ))}
+                                              </div>
+                                            </CardContent>
+                                          </Card>
+                                        )}
+
+                                        {/* Текст/Транскрипция */}
                                         <Card className="bg-muted/30">
                                           <CardHeader className="pb-3">
                                             <CardTitle className="text-sm flex items-center gap-2">
-                                              📝 Транскрибация видео
+                                              {campaign.media_type === 'video' ? '📝 Транскрибация видео' : '📝 Текст креатива'}
                                             </CardTitle>
                                           </CardHeader>
                                           <CardContent>
                                             <div className="text-sm whitespace-pre-wrap text-muted-foreground">
-                                              {creativeTranscript || 'Транскрибация еще не готова. Она появится после обработки видео.'}
+                                              {creativeTranscript || (
+                                                campaign.media_type === 'video'
+                                                  ? 'Транскрибация еще не готова. Она появится после обработки видео.'
+                                                  : 'Текст недоступен'
+                                              )}
                                             </div>
                                           </CardContent>
                                         </Card>
@@ -968,24 +1122,33 @@ const ROIAnalytics: React.FC = () => {
               {/* Мобильные карточки */}
               <div className="md:hidden space-y-2">
                 {roiData.campaigns.map((campaign) => (
-                  <Card key={campaign.id} className="shadow-sm hover:shadow-md transition-all duration-200">
+                  <Card
+                    key={campaign.id}
+                    className={cn(
+                      "shadow-sm hover:shadow-md transition-all duration-200",
+                      expandedCreativeId === campaign.id && "ring-2 ring-primary shadow-lg shadow-primary/20"
+                    )}
+                  >
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-medium truncate pr-2">
-                          {campaign.name}
-                        </h3>
-                        <Badge 
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <MediaTypeBadge mediaType={campaign.media_type} showLabel={false} />
+                          <h3 className="text-sm font-medium truncate pr-2">
+                            {campaign.name}
+                          </h3>
+                        </div>
+                        <Badge
                           variant={getROIBadgeVariant(campaign.roi)}
-                          className={`text-xs ${getROIBadgeClass(campaign.roi)}`}
+                          className={`text-xs flex-shrink-0 ${getROIBadgeClass(campaign.roi)}`}
                         >
                           {formatPercent(campaign.roi)}
                         </Badge>
                       </div>
                       <div className="flex gap-2 mb-3 flex-wrap">
                         {campaign.creative_url && (
-                          <a 
-                            href={campaign.creative_url} 
-                            target="_blank" 
+                          <a
+                            href={campaign.creative_url}
+                            target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs text-foreground hover:text-foreground/70 flex items-center gap-1 transition-colors font-medium"
                           >
@@ -1001,7 +1164,7 @@ const ROIAnalytics: React.FC = () => {
                           Воронка
                         </button>
                         <button
-                          onClick={() => loadCreativeMetrics(campaign.id)}
+                          onClick={() => loadCreativeMetrics(campaign.id, campaign)}
                           className="text-xs text-foreground hover:text-foreground/70 flex items-center gap-1 transition-colors font-medium"
                         >
                           {expandedCreativeId === campaign.id ? (
@@ -1071,16 +1234,64 @@ const ROIAnalytics: React.FC = () => {
                             </div>
                           ) : (
                             <div className="space-y-3">
-                              {/* Транскрипция */}
+                              {/* Миниатюры для image/carousel */}
+                              {campaign.media_type === 'image' && campaign.image_url && (
+                                <Card className="bg-muted/30">
+                                  <CardHeader className="pb-3">
+                                    <CardTitle className="text-xs flex items-center gap-2">
+                                      🖼️ Превью креатива
+                                    </CardTitle>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <img
+                                      src={getThumbnailUrl(campaign.image_url) || campaign.image_url}
+                                      alt={campaign.name}
+                                      className="rounded-lg max-w-[150px] max-h-[188px] object-contain"
+                                      loading="lazy"
+                                    />
+                                  </CardContent>
+                                </Card>
+                              )}
+
+                              {campaign.media_type === 'carousel' && campaign.carousel_data && campaign.carousel_data.length > 0 && (
+                                <Card className="bg-muted/30">
+                                  <CardHeader className="pb-3">
+                                    <CardTitle className="text-xs flex items-center gap-2">
+                                      🖼️ Карточки ({campaign.carousel_data.length})
+                                    </CardTitle>
+                                  </CardHeader>
+                                  <CardContent>
+                                    <div className="flex gap-2 overflow-x-auto pb-2">
+                                      {campaign.carousel_data
+                                        .sort((a, b) => a.order - b.order)
+                                        .map((card, idx) => (
+                                          <img
+                                            key={idx}
+                                            src={getThumbnailUrl(card.image_url || card.image_url_4k, 100, 125) || card.image_url || card.image_url_4k}
+                                            alt={`Карточка ${idx + 1}`}
+                                            className="rounded-lg w-[100px] h-[125px] object-cover flex-shrink-0"
+                                            loading="lazy"
+                                          />
+                                        ))}
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              )}
+
+                              {/* Текст/Транскрипция */}
                               <Card className="bg-muted/30">
                                 <CardHeader className="pb-3">
                                   <CardTitle className="text-xs flex items-center gap-2">
-                                    📝 Транскрибация видео
+                                    {campaign.media_type === 'video' ? '📝 Транскрибация видео' : '📝 Текст креатива'}
                                   </CardTitle>
                                 </CardHeader>
                                 <CardContent>
                                   <div className="text-xs whitespace-pre-wrap text-muted-foreground">
-                                    {creativeTranscript || 'Транскрибация еще не готова. Она появится после обработки видео.'}
+                                    {creativeTranscript || (
+                                      campaign.media_type === 'video'
+                                        ? 'Транскрибация еще не готова. Она появится после обработки видео.'
+                                        : 'Текст недоступен'
+                                    )}
                                   </div>
                                 </CardContent>
                               </Card>
