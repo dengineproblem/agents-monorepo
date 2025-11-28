@@ -267,7 +267,8 @@ fastify.post('/analyze-test', async (request, reply) => {
           id,
           title,
           user_id,
-          fb_video_id
+          fb_video_id,
+          media_type
         )
       `)
       .eq('id', test_id)
@@ -300,9 +301,13 @@ fastify.post('/analyze-test', async (request, reply) => {
 
     const transcriptText = transcript?.text || null;
 
-    fastify.log.info({ 
-      where: 'analyzeTest', 
-      test_id, 
+    // Определяем тип медиа (video по умолчанию для обратной совместимости)
+    const mediaType = test.user_creatives?.media_type || 'video';
+
+    fastify.log.info({
+      where: 'analyzeTest',
+      test_id,
+      media_type: mediaType,
       has_transcript: !!transcriptText,
       impressions: test.impressions,
       leads: test.leads
@@ -334,9 +339,9 @@ fastify.post('/analyze-test', async (request, reply) => {
     };
 
     // ===================================================
-    // STEP 4: Анализируем через LLM
+    // STEP 4: Анализируем через LLM (с учетом типа медиа)
     // ===================================================
-    const analysis = await analyzeCreativeTest(testData, transcriptText);
+    const analysis = await analyzeCreativeTest(testData, transcriptText, mediaType);
 
     fastify.log.info({ 
       where: 'analyzeTest', 
@@ -639,6 +644,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         fb_creative_id_instagram_traffic,
         fb_creative_id_site_leads,
         direction_id,
+        media_type,
         account_directions (
           id,
           name
@@ -818,10 +824,11 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         };
       } else {
         // Делаем новый анализ через OpenAI
-        fastify.log.info({ user_creative_id, test_status: test.status }, 'Analyzing with LLM');
-        
+        const mediaType = creative.media_type || 'video';
+        fastify.log.info({ user_creative_id, test_status: test.status, media_type: mediaType }, 'Analyzing with LLM');
+
         try {
-          analysis = await analyzeCreativeTest(testMetrics, transcriptText);
+          analysis = await analyzeCreativeTest(testMetrics, transcriptText, mediaType);
 
           fastify.log.info({ 
             user_creative_id, 
@@ -1027,11 +1034,11 @@ fastify.post('/analyze-creative', async (request, reply) => {
     const video_avg_watch_time_sec = latestMetric.video_avg_watch_time_sec || 0;
 
     // ===================================================
-    // STEP 2: Получаем информацию о креативе
+    // STEP 2: Получаем информацию о креативе (включая media_type)
     // ===================================================
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
-      .select('id, title')
+      .select('id, title, media_type')
       .eq('id', creative_id)
       .single();
 
@@ -1053,9 +1060,13 @@ fastify.post('/analyze-creative', async (request, reply) => {
 
     const transcriptText = transcript?.text || null;
 
-    fastify.log.info({ 
-      where: 'analyzeCreative', 
-      creative_id, 
+    // Определяем тип медиа (video по умолчанию для обратной совместимости)
+    const mediaType = creative.media_type || 'video';
+
+    fastify.log.info({
+      where: 'analyzeCreative',
+      creative_id,
+      media_type: mediaType,
       has_transcript: !!transcriptText,
       impressions: aggregatedMetrics.impressions,
       leads: aggregatedMetrics.leads
@@ -1089,9 +1100,9 @@ fastify.post('/analyze-creative', async (request, reply) => {
     };
 
     // ===================================================
-    // STEP 5: Анализируем через LLM
+    // STEP 5: Анализируем через LLM (с учетом типа медиа)
     // ===================================================
-    const analysis = await analyzeCreativeTest(testData, transcriptText);
+    const analysis = await analyzeCreativeTest(testData, transcriptText, mediaType);
 
     fastify.log.info({ 
       where: 'analyzeCreative', 

@@ -1,26 +1,25 @@
 /**
  * Creative Test Analyzer - LLM Субагент
- * 
+ *
  * Анализирует результаты быстрого теста креатива:
  * - Метрики (CPL, CTR, CPM, видео)
- * - Транскрибацию
+ * - Транскрибацию (для видео)
  * - Дает оценку и рекомендации
+ *
+ * Поддерживает типы креативов:
+ * - video: видеокреативы с транскрибацией
+ * - image: статичные изображения
+ * - carousel: карусели из нескольких изображений
  */
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
 
 /**
- * Промпт для анализа креатива
+ * Базовые метрики для всех типов креативов
  */
-function buildAnalysisPrompt(testData, transcript) {
-  return `Ты — эксперт по Facebook рекламе и видеокреативам. Проанализируй результаты быстрого теста креатива.
-
-# ДАННЫЕ ТЕСТА
-
-**Креатив:** ${testData.creative_title || 'Untitled'}
-
-**Метрики:**
+function formatBaseMetrics(testData) {
+  return `**Метрики:**
 - Показы (Impressions): ${testData.impressions}
 - Охват (Reach): ${testData.reach}
 - Частота (Frequency): ${testData.frequency || 'N/A'}
@@ -32,7 +31,21 @@ function buildAnalysisPrompt(testData, transcript) {
 - Затраты: $${(testData.spend_cents / 100).toFixed(2)}
 - CPM: $${(testData.cpm_cents / 100).toFixed(2)}
 - CPC: $${(testData.cpc_cents / 100).toFixed(2)}
-- CPL: ${testData.cpl_cents ? '$' + (testData.cpl_cents / 100).toFixed(2) : 'N/A'}
+- CPL: ${testData.cpl_cents ? '$' + (testData.cpl_cents / 100).toFixed(2) : 'N/A'}`;
+}
+
+/**
+ * Промпт для ВИДЕО креатива
+ */
+function buildVideoPrompt(testData, transcript) {
+  return `Ты — эксперт по Facebook рекламе и видеокреативам. Проанализируй результаты быстрого теста ВИДЕО креатива.
+
+# ДАННЫЕ ТЕСТА
+
+**Креатив:** ${testData.creative_title || 'Untitled'}
+**Тип:** Видео
+
+${formatBaseMetrics(testData)}
 
 **Видео метрики:**
 ${testData.video_views > 0 ? `
@@ -87,10 +100,132 @@ ${transcript || 'Транскрибация недоступна'}
 }
 
 /**
- * Анализирует результаты теста через LLM
+ * Промпт для ИЗОБРАЖЕНИЯ
  */
-async function analyzeCreativeTest(testData, transcript) {
-  const prompt = buildAnalysisPrompt(testData, transcript);
+function buildImagePrompt(testData) {
+  return `Ты — эксперт по Facebook рекламе и статичным креативам. Проанализируй результаты быстрого теста креатива с ИЗОБРАЖЕНИЕМ.
+
+# ДАННЫЕ ТЕСТА
+
+**Креатив:** ${testData.creative_title || 'Untitled'}
+**Тип:** Статичное изображение
+
+${formatBaseMetrics(testData)}
+
+---
+
+# ТВОЯ ЗАДАЧА
+
+1. **Оцени креатив** от 0 до 100 на основе метрик
+2. **Определи вердикт**: 'excellent' (80-100), 'good' (60-79), 'average' (40-59), 'poor' (0-39)
+3. **Проанализируй эффективность**: CTR, конверсию в лиды, стоимость
+4. **Дай рекомендации по улучшению**: Что можно улучшить в изображении/тексте объявления
+
+# ФОРМАТ ОТВЕТА
+
+Верни ТОЛЬКО JSON в следующем формате (без markdown, без комментариев):
+
+{
+  "score": 85,
+  "verdict": "excellent",
+  "reasoning": "Подробный анализ метрик в 2-3 предложениях",
+  "video_analysis": null,
+  "text_recommendations": "Рекомендации по улучшению изображения и текста объявления",
+  "transcript_match_quality": null,
+  "transcript_suggestions": []
+}
+
+ВАЖНО:
+- Для изображений video_analysis и transcript_match_quality всегда null
+- transcript_suggestions всегда пустой массив []
+- Оценка базируется на CTR, CPL, конверсии
+- Низкий CTR → проблема с привлекательностью изображения
+- Высокий CTR но мало лидов → проблема с целевой страницей или оффером`;
+}
+
+/**
+ * Промпт для КАРУСЕЛИ
+ */
+function buildCarouselPrompt(testData) {
+  return `Ты — эксперт по Facebook рекламе и карусельным креативам. Проанализируй результаты быстрого теста КАРУСЕЛИ.
+
+# ДАННЫЕ ТЕСТА
+
+**Креатив:** ${testData.creative_title || 'Untitled'}
+**Тип:** Карусель (несколько изображений)
+
+${formatBaseMetrics(testData)}
+
+---
+
+# ТВОЯ ЗАДАЧА
+
+1. **Оцени креатив** от 0 до 100 на основе метрик
+2. **Определи вердикт**: 'excellent' (80-100), 'good' (60-79), 'average' (40-59), 'poor' (0-39)
+3. **Проанализируй эффективность карусели**: CTR, вовлеченность, конверсию
+4. **Дай рекомендации**: Как улучшить порядок слайдов, контент, призывы к действию
+
+# ФОРМАТ ОТВЕТА
+
+Верни ТОЛЬКО JSON в следующем формате (без markdown, без комментариев):
+
+{
+  "score": 85,
+  "verdict": "excellent",
+  "reasoning": "Подробный анализ метрик в 2-3 предложениях",
+  "video_analysis": null,
+  "text_recommendations": "Рекомендации по улучшению карусели: порядок слайдов, контент, CTA",
+  "transcript_match_quality": null,
+  "transcript_suggestions": []
+}
+
+ВАЖНО:
+- Для карусели video_analysis и transcript_match_quality всегда null
+- transcript_suggestions всегда пустой массив []
+- Карусели часто имеют более высокий CTR благодаря интерактивности
+- Низкий CTR → первый слайд не привлекает внимание
+- Высокий CTR но мало лидов → проблема с последовательностью слайдов или оффером`;
+}
+
+/**
+ * Выбирает правильный промпт на основе media_type
+ */
+function buildAnalysisPrompt(testData, transcript, mediaType = 'video') {
+  switch (mediaType) {
+    case 'image':
+      return buildImagePrompt(testData);
+    case 'carousel':
+      return buildCarouselPrompt(testData);
+    case 'video':
+    default:
+      return buildVideoPrompt(testData, transcript);
+  }
+}
+
+/**
+ * Возвращает system prompt на основе media_type
+ */
+function getSystemPrompt(mediaType) {
+  switch (mediaType) {
+    case 'image':
+      return 'Ты — эксперт по анализу Facebook рекламы и статичных креативов. Всегда отвечаешь только валидным JSON без комментариев.';
+    case 'carousel':
+      return 'Ты — эксперт по анализу Facebook рекламы и карусельных креативов. Всегда отвечаешь только валидным JSON без комментариев.';
+    case 'video':
+    default:
+      return 'Ты — эксперт по анализу Facebook рекламы и видеокреативов. Всегда отвечаешь только валидным JSON без комментариев.';
+  }
+}
+
+/**
+ * Анализирует результаты теста через LLM
+ * @param {Object} testData - данные теста с метриками
+ * @param {string|null} transcript - транскрибация (только для видео)
+ * @param {string} mediaType - тип креатива: 'video', 'image', 'carousel'
+ */
+async function analyzeCreativeTest(testData, transcript, mediaType = 'video') {
+  const prompt = buildAnalysisPrompt(testData, transcript, mediaType);
+  const systemPrompt = getSystemPrompt(mediaType);
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -103,7 +238,7 @@ async function analyzeCreativeTest(testData, transcript) {
       messages: [
         {
           role: 'system',
-          content: 'Ты — эксперт по анализу Facebook рекламы и видеокреативов. Всегда отвечаешь только валидным JSON без комментариев.'
+          content: systemPrompt
         },
         {
           role: 'user',
@@ -133,12 +268,12 @@ async function analyzeCreativeTest(testData, transcript) {
 
   try {
     const analysis = JSON.parse(jsonStr);
-    
+
     // Валидация
     if (typeof analysis.score !== 'number' || analysis.score < 0 || analysis.score > 100) {
       throw new Error('Invalid score');
     }
-    
+
     if (!['excellent', 'good', 'average', 'poor'].includes(analysis.verdict)) {
       // Автоматический вердикт на основе score
       if (analysis.score >= 80) analysis.verdict = 'excellent';
@@ -147,10 +282,17 @@ async function analyzeCreativeTest(testData, transcript) {
       else analysis.verdict = 'poor';
     }
 
+    // Для не-видео креативов убеждаемся что video-specific поля null/пустые
+    if (mediaType !== 'video') {
+      analysis.video_analysis = null;
+      analysis.transcript_match_quality = null;
+      analysis.transcript_suggestions = [];
+    }
+
     return analysis;
-    
+
   } catch (parseError) {
-    fastify.log.error({ json: jsonStr }, 'Failed to parse LLM response');
+    console.error('Failed to parse LLM response:', jsonStr);
     throw new Error(`Failed to parse LLM response: ${parseError.message}`);
   }
 }
