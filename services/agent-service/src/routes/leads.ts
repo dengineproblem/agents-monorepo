@@ -118,42 +118,78 @@ export default async function leadsRoutes(app: FastifyInstance) {
       }
 
       // Парсим UTM из TILDAUTM cookie (если передано)
+      // Формат TILDAUTM: utm_source=value|||utm_campaign=value|||utm_content=value
       let utmParams: any = {};
+      let fbcAdId: string | null = null;
+
       if (body.COOKIES) {
+        // 1. Парсим TILDAUTM cookie
         const tildaUtm = body.COOKIES.match(/TILDAUTM=([^;]+)/);
         if (tildaUtm) {
           try {
             const decoded = decodeURIComponent(tildaUtm[1]);
-            // Парсим utm_source=x&utm_medium=y...
-            const params = new URLSearchParams(decoded);
-            utmParams = {
-              utm_source: params.get('utm_source'),
-              utm_medium: params.get('utm_medium'),
-              utm_campaign: params.get('utm_campaign'),
-              utm_term: params.get('utm_term'),
-              utm_content: params.get('utm_content')
-            };
+            // TILDAUTM использует ||| как разделитель между параметрами
+            const parts = decoded.split('|||');
+            for (const part of parts) {
+              const [key, value] = part.split('=');
+              if (key && value) {
+                utmParams[key] = value;
+              }
+            }
+            app.log.info({ utmParams, decoded }, 'Parsed TILDAUTM cookie');
           } catch (e) {
             app.log.warn({ error: e, cookies: body.COOKIES }, 'Failed to parse TILDAUTM cookie');
+          }
+        }
+
+        // 2. Парсим _fbc cookie (Facebook Click ID) - содержит ad_id
+        // Формат: fb.1.timestamp.encoded_data (где encoded_data содержит ad_id в base64)
+        const fbcMatch = body.COOKIES.match(/_fbc=([^;]+)/);
+        if (fbcMatch) {
+          try {
+            const fbcValue = fbcMatch[1];
+            // _fbc содержит закодированные данные, попробуем извлечь ad_id
+            // Формат новый: fb.1.timestamp.PAZXh0bg... (base64 с ad данными)
+            const parts = fbcValue.split('.');
+            if (parts.length >= 4) {
+              const encodedPart = parts.slice(3).join('.');
+              // Попробуем декодировать base64
+              try {
+                const decoded = Buffer.from(encodedPart, 'base64').toString('utf-8');
+                // Ищем ad_id в декодированных данных (может быть в формате adid=XXX)
+                const adIdMatch = decoded.match(/adid[^\d]*(\d+)/i);
+                if (adIdMatch) {
+                  fbcAdId = adIdMatch[1];
+                  app.log.info({ fbcAdId, decoded }, 'Extracted ad_id from _fbc cookie');
+                }
+              } catch (decodeErr) {
+                // base64 декодирование не удалось, это нормально для старого формата
+              }
+            }
+            app.log.info({ fbcValue, fbcAdId }, 'Parsed _fbc cookie');
+          } catch (e) {
+            app.log.warn({ error: e }, 'Failed to parse _fbc cookie');
           }
         }
       }
 
       // Нормализуем данные от Tilda (поля могут быть Name, Phone или name, phone)
       // Приоритет userAccountId: URL > body.userAccountId > body.user_account_id
+      // Используем || undefined чтобы null превращался в undefined (для Zod .optional())
       const normalizedBody = {
         userAccountId: urlUserAccountId || body.userAccountId || body.user_account_id,
         name: body.name || body.Name,
         phone: body.phone || body.Phone,
-        email: body.email || body.Email,
-        message: body.message || body.Message || body.Comments,
+        email: body.email || body.Email || undefined,
+        message: body.message || body.Message || body.Comments || undefined,
         // Приоритет: прямые параметры > UTM из cookies
-        utm_source: body.utm_source || utmParams.utm_source,
-        utm_medium: body.utm_medium || utmParams.utm_medium,
-        utm_campaign: body.utm_campaign || utmParams.utm_campaign,
-        utm_term: body.utm_term || utmParams.utm_term,
-        utm_content: body.utm_content || utmParams.utm_content,
-        ad_id: body.ad_id
+        utm_source: body.utm_source || utmParams.utm_source || undefined,
+        utm_medium: body.utm_medium || utmParams.utm_medium || undefined,
+        utm_campaign: body.utm_campaign || utmParams.utm_campaign || undefined,
+        utm_term: body.utm_term || utmParams.utm_term || undefined,
+        utm_content: body.utm_content || utmParams.utm_content || undefined,
+        // ad_id: прямой параметр > из _fbc cookie
+        ad_id: body.ad_id || fbcAdId || undefined
       };
 
       // 1. Validate request body
