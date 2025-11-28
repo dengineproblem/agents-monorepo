@@ -192,6 +192,10 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [loadingCreatives, setLoadingCreatives] = useState(false);
   const [launchResult, setLaunchResult] = useState<ManualLaunchResponse | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
+
+  // Для результатов auto-launch
+  const [autoLaunchResults, setAutoLaunchResults] = useState<any[] | null>(null);
+  const [autoLaunchResultDialogOpen, setAutoLaunchResultDialogOpen] = useState(false);
   const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(10); // Дневной бюджет в USD
   const [launchedBudget, setLaunchedBudget] = useState<number>(10); // Сохраненный бюджет для показа в результате
   const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('now'); // По умолчанию "Сейчас"
@@ -1196,49 +1200,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       const data = await response.json();
 
       if (data.success && data.results) {
-        // Проверяем результаты по каждому направлению
-        const successResults = data.results.filter((r: any) => r.status === 'success');
-        const failedResults = data.results.filter((r: any) => r.status === 'failed');
-        const skippedResults = data.results.filter((r: any) => r.skipped);
-
-        if (failedResults.length > 0) {
-          // Есть ошибки - показываем их
-          for (const failed of failedResults) {
-            toast.error(`${failed.direction_name}: ${failed.error || 'Ошибка создания рекламы'}`, {
-              duration: 10000
-            });
-          }
-        }
-
-        if (skippedResults.length > 0) {
-          // Есть пропущенные
-          for (const skipped of skippedResults) {
-            toast.warning(`${skipped.direction_name}: ${skipped.reason || 'Пропущено'}`, {
-              duration: 5000
-            });
-          }
-        }
-
-        if (successResults.length > 0) {
-          // Показываем успешные результаты
-          const successMessage = successResults.map((r: any) => {
-            const adsInfo = r.ads_created ? ` (${r.ads_created} объявлений)` : '';
-            return `✅ ${r.direction_name}${adsInfo}`;
-          }).join('\n');
-
-          toast.success(
-            <div>
-              <div className="font-semibold mb-1">Реклама запущена!</div>
-              <div className="text-sm whitespace-pre-line">{successMessage}</div>
-            </div>,
-            { duration: 8000 }
-          );
-        }
-
-        if (successResults.length === 0 && failedResults.length === 0 && skippedResults.length === 0) {
-          toast.warning('Нет направлений для запуска');
-        }
-
+        // Сохраняем результаты и показываем модалку
+        setAutoLaunchResults(data.results);
+        setAutoLaunchResultDialogOpen(true);
         setLaunchDialogOpen(false);
       } else {
         toast.error(data.error || 'Не удалось запустить рекламу');
@@ -3076,6 +3040,117 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 onClick={() => {
                   setResultDialogOpen(false);
                   setLaunchResult(null);
+                }}
+              >
+                Закрыть
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Модальное окно с результатами auto-launch */}
+        <Dialog open={autoLaunchResultDialogOpen} onOpenChange={setAutoLaunchResultDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Результаты запуска рекламы</DialogTitle>
+              <DialogDescription>
+                {autoLaunchResults && (() => {
+                  const success = autoLaunchResults.filter((r: any) => r.status === 'success').length;
+                  const failed = autoLaunchResults.filter((r: any) => r.status === 'failed').length;
+                  const skipped = autoLaunchResults.filter((r: any) => r.skipped).length;
+                  return `Обработано ${autoLaunchResults.length} направлений: ${success} успешно, ${failed} ошибок, ${skipped} пропущено`;
+                })()}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {autoLaunchResults && autoLaunchResults.map((result: any, index: number) => (
+                <div
+                  key={result.direction_id || index}
+                  className={`p-4 rounded-lg border ${
+                    result.status === 'success'
+                      ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
+                      : result.status === 'failed'
+                      ? 'bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800'
+                      : 'bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800'
+                  }`}
+                >
+                  {/* Заголовок направления */}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium">{result.direction_name}</span>
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      result.status === 'success'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                        : result.status === 'failed'
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                        : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+                    }`}>
+                      {result.status === 'success' ? '✅ Успешно' : result.status === 'failed' ? '❌ Ошибка' : '⏭️ Пропущено'}
+                    </span>
+                  </div>
+
+                  {/* Успешный результат */}
+                  {result.status === 'success' && (
+                    <div className="space-y-2 text-sm">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <span className="text-muted-foreground">Campaign ID:</span>
+                          <div className="font-mono text-xs">{result.campaign_id}</div>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">AdSet ID:</span>
+                          <div className="font-mono text-xs">{result.adset_id}</div>
+                        </div>
+                      </div>
+                      {result.adset_name && (
+                        <div>
+                          <span className="text-muted-foreground">Ad Set:</span> {result.adset_name}
+                        </div>
+                      )}
+                      {result.ads_created > 0 && (
+                        <div>
+                          <span className="text-muted-foreground">Создано объявлений:</span>{' '}
+                          <span className="font-medium">{result.ads_created}</span>
+                        </div>
+                      )}
+                      {result.daily_budget_cents && (
+                        <div>
+                          <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                          <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground">
+                        Режим: {result.mode === 'llm' ? 'AI' : 'Детерминистический'}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Ошибка */}
+                  {result.status === 'failed' && (
+                    <div className="space-y-1 text-sm">
+                      <div className="text-red-600 dark:text-red-400">{result.error}</div>
+                      {result.error_details && (
+                        <div className="text-xs text-muted-foreground">{result.error_details}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Пропущено */}
+                  {result.skipped && (
+                    <div className="text-sm text-muted-foreground">
+                      {result.reason}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAutoLaunchResultDialogOpen(false);
+                  setAutoLaunchResults(null);
                 }}
               >
                 Закрыть

@@ -262,7 +262,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               idempotencyKey: `ai-autolaunch-v2-${direction.id}-${Date.now()}`,
               account: {
                 userAccountId: user_account_id,
-                whatsappPhoneNumber: userAccount.whatsapp_phone_number,
+                ...(userAccount.whatsapp_phone_number && { whatsappPhoneNumber: userAccount.whatsapp_phone_number }),
               },
               actions: [action],
               source: 'ai-campaign-builder-v2',
@@ -276,7 +276,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
             if (actionsResponse.statusCode === 202) {
               const executionResult = JSON.parse(actionsResponse.body);
-              
+
               results.push({
                 direction_id: direction.id,
                 direction_name: direction.name,
@@ -291,12 +291,18 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               });
 
               llmSuccess = true;
-              log.info({ 
-                directionId: direction.id, 
-                executionId: executionResult.executionId 
+              log.info({
+                directionId: direction.id,
+                executionId: executionResult.executionId
               }, 'LLM launch successful');
             } else {
-              throw new Error(`Actions API returned ${actionsResponse.statusCode}`);
+              log.error({
+                statusCode: actionsResponse.statusCode,
+                body: actionsResponse.body,
+                action: action.type,
+                directionId: direction.id
+              }, 'Actions API error - full response');
+              throw new Error(`Actions API returned ${actionsResponse.statusCode}: ${actionsResponse.body}`);
             }
           } catch (llmError: any) {
             log.warn({ 
@@ -349,10 +355,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               promoted_object = {
                 page_id: userAccount.page_id
               };
-            } else if (direction.objective === 'site_leads' && defaultSettings?.site_url) {
+            } else if (direction.objective === 'site_leads') {
+              // Для site_leads (OFFSITE_CONVERSIONS) promoted_object содержит pixel_id и custom_event_type
+              // link НЕ нужен в promoted_object — он уже в креативе
               promoted_object = {
-                link: defaultSettings.site_url,
-                ...(defaultSettings.pixel_id && { pixel_id: defaultSettings.pixel_id }),
+                ...(defaultSettings?.pixel_id && { pixel_id: defaultSettings.pixel_id }),
+                custom_event_type: 'LEAD'
               };
             }
 
