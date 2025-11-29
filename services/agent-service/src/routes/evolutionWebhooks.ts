@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
+import { matchMessageToDirection } from '../lib/textMatcher.js';
+import { sendTelegramNotification, formatManualMatchMessage } from '../lib/telegramNotifier.js';
 import axios from 'axios';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
@@ -126,16 +128,17 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     messageText: messageText.substring(0, 50)
   }, 'Incoming message structure');
 
-  // ✅ Строгая проверка: обрабатываем ТОЛЬКО сообщения с реальными данными рекламы
-  // Игнорируем: обычные сообщения, групповые чаты, сообщения без externalAdReply
+  // ✅ Проверка: сообщения с реальными данными рекламы обрабатываем напрямую
+  // Сообщения без externalAdReply пробуем сопоставить через client_question
   if (!finalSourceId || !externalAdReply) {
-    app.log.debug({
-      instance,
-      remoteJid,
-      hasExternalAdReply: !!externalAdReply,
-      hasSourceId: !!finalSourceId,
-      messageText: messageText.substring(0, 30)
-    }, 'Ignoring message: not from Facebook ad (no externalAdReply or sourceId)');
+    // Пропускаем групповые чаты
+    if (remoteJid.endsWith('@g.us')) {
+      app.log.debug({ instance, remoteJid }, 'Ignoring group chat message');
+      return;
+    }
+
+    // Пробуем умный матчинг по client_question
+    await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, message, app);
     return;
   }
 
@@ -478,5 +481,220 @@ async function handleQRCodeUpdate(event: any, app: FastifyInstance) {
     app.log.error({ error, instance }, 'Failed to update QR code');
   } else {
     app.log.info({ instance }, 'Updated QR code for WhatsApp instance');
+  }
+}
+
+/**
+ * Умный матчинг для сообщений без FB метаданных
+ * Сравнивает текст сообщения с client_question направлений пользователя
+ */
+async function handleSmartMatching(
+  event: any,
+  instance: string,
+  remoteJid: string,
+  remoteJidAlt: string | undefined,
+  messageText: string,
+  message: any,
+  app: FastifyInstance
+) {
+  // Найти инстанс в БД
+  const { data: instanceData, error: instanceError } = await supabase
+    .from('whatsapp_instances')
+    .select('id, user_account_id, phone_number')
+    .eq('instance_name', instance)
+    .single();
+
+  if (instanceError || !instanceData) {
+    app.log.debug({ instance }, 'Instance not found, ignoring message');
+    return;
+  }
+
+  // Пробуем найти направление по совпадению с client_question
+  const matchResult = await matchMessageToDirection(
+    messageText,
+    instanceData.user_account_id,
+    0.7 // Порог 70%
+  );
+
+  if (!matchResult.matched) {
+    app.log.debug({
+      instance,
+      remoteJid,
+      similarity: matchResult.similarity,
+      messageText: messageText.substring(0, 50)
+    }, 'No match found via client_question, ignoring message');
+    return;
+  }
+
+  app.log.info({
+    instance,
+    remoteJid,
+    similarity: matchResult.similarity,
+    directionId: matchResult.directionId,
+    directionName: matchResult.directionName
+  }, 'Smart matching: found direction via client_question');
+
+  // Определяем номер телефона клиента
+  let clientPhone: string;
+  if (remoteJid.endsWith('@lid')) {
+    clientPhone = (remoteJidAlt || remoteJid)
+      .replace('@s.whatsapp.net', '')
+      .replace('@c.us', '')
+      .replace('@lid', '');
+  } else {
+    clientPhone = remoteJid
+      .replace('@s.whatsapp.net', '')
+      .replace('@c.us', '');
+  }
+
+  // Найти whatsapp_phone_number_id
+  const { data: whatsappNumber } = await supabase
+    .from('whatsapp_phone_numbers')
+    .select('id')
+    .eq('phone_number', instanceData.phone_number)
+    .eq('user_account_id', instanceData.user_account_id)
+    .single();
+
+  const timestamp = new Date(message.messageTimestamp * 1000 || Date.now());
+
+  // Создать лида БЕЗ креатива, но С направлением
+  await createLeadWithoutCreative({
+    userAccountId: instanceData.user_account_id,
+    whatsappPhoneNumberId: whatsappNumber?.id,
+    instancePhone: instanceData.phone_number,
+    instanceName: instance,
+    clientPhone,
+    directionId: matchResult.directionId!,
+    directionName: matchResult.directionName!,
+    similarity: matchResult.similarity,
+    messageText,
+    timestamp
+  }, app);
+
+  // Отправить уведомление в Telegram о необходимости ручного сопоставления
+  await notifyManualMatchRequired(instanceData.user_account_id, clientPhone, matchResult, app);
+}
+
+/**
+ * Создать лида без креатива (требует ручного сопоставления)
+ */
+async function createLeadWithoutCreative(params: {
+  userAccountId: string;
+  whatsappPhoneNumberId?: string;
+  instancePhone: string;
+  instanceName: string;
+  clientPhone: string;
+  directionId: string;
+  directionName: string;
+  similarity: number;
+  messageText: string;
+  timestamp: Date;
+}, app: FastifyInstance) {
+  const {
+    userAccountId,
+    whatsappPhoneNumberId,
+    instancePhone,
+    instanceName,
+    clientPhone,
+    directionId,
+    similarity,
+    messageText,
+    timestamp
+  } = params;
+
+  // Проверить, существует ли уже лид
+  const { data: existingLead } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('chat_id', clientPhone)
+    .maybeSingle();
+
+  if (existingLead) {
+    // Обновить существующий лид только если у него нет creative_id
+    const { error } = await supabase
+      .from('leads')
+      .update({
+        direction_id: directionId,
+        whatsapp_phone_number_id: whatsappPhoneNumberId,
+        user_account_id: userAccountId,
+        needs_manual_match: true,
+        updated_at: timestamp
+      })
+      .eq('id', existingLead.id)
+      .is('creative_id', null);
+
+    if (error) {
+      app.log.error({ error, leadId: existingLead.id }, 'Failed to update lead for manual match');
+    } else {
+      app.log.info({ leadId: existingLead.id, similarity }, 'Updated existing lead (needs manual match)');
+    }
+  } else {
+    // Создать новый лид
+    const { data: newLead, error } = await supabase
+      .from('leads')
+      .insert({
+        user_account_id: userAccountId,
+        business_id: instancePhone,
+        chat_id: clientPhone,
+        conversion_source: 'Evolution_API_SmartMatch',
+        direction_id: directionId,
+        whatsapp_phone_number_id: whatsappPhoneNumberId,
+        funnel_stage: 'new_lead',
+        status: 'active',
+        needs_manual_match: true,
+        created_at: timestamp,
+        updated_at: timestamp
+      })
+      .select()
+      .single();
+
+    if (error) {
+      app.log.error({ error, clientPhone }, 'Failed to create lead from smart match');
+    } else {
+      app.log.info({ leadId: newLead?.id, similarity }, 'Created new lead from smart match (needs manual creative)');
+    }
+  }
+
+  // Создать запись в dialog_analysis для чат-бота
+  await upsertDialogAnalysis({
+    userAccountId,
+    instanceName,
+    contactPhone: clientPhone,
+    messageText,
+    timestamp
+  }, app);
+}
+
+/**
+ * Уведомить пользователя в Telegram о необходимости ручного сопоставления креатива
+ */
+async function notifyManualMatchRequired(
+  userAccountId: string,
+  clientPhone: string,
+  matchResult: { similarity: number; directionName: string | null },
+  app: FastifyInstance
+) {
+  // Получить telegram_id пользователя
+  const { data: user } = await supabase
+    .from('user_accounts')
+    .select('telegram_id')
+    .eq('id', userAccountId)
+    .single();
+
+  if (!user?.telegram_id) {
+    app.log.debug({ userAccountId }, 'User has no telegram_id, skipping notification');
+    return;
+  }
+
+  const message = formatManualMatchMessage({
+    phone: clientPhone,
+    direction: matchResult.directionName || 'Неизвестно',
+    similarity: Math.round(matchResult.similarity * 100)
+  });
+
+  const sent = await sendTelegramNotification(user.telegram_id, message);
+
+  if (sent) {
+    app.log.info({ userAccountId, clientPhone }, 'Sent manual match notification to Telegram');
   }
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import { salesApi, ROIData, CampaignROI, Direction } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
@@ -27,8 +27,10 @@ import {
   Sparkles,
   Video,
   Image,
-  Images
+  Images,
+  Download
 } from 'lucide-react';
+import { exportToCSV, formatAmountForExport } from '@/lib/exportUtils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -41,6 +43,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import SalesList from '@/components/SalesList';
+import { LeadsTab } from '@/components/roi/LeadsTab';
 import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
 import { API_BASE_URL, ANALYTICS_API_BASE_URL } from '@/config/api';
 import { creativesApi } from '@/services/creativesApi';
@@ -104,6 +107,7 @@ const ROIAnalytics: React.FC = () => {
   const [selectedDirectionId, setSelectedDirectionId] = useState<string | null>(null);
   const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false);
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
+  const [activeMainTab, setActiveMainTab] = useState<'creatives' | 'leads' | 'sales'>('creatives');
 
   // Funnel modal state
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
@@ -164,6 +168,30 @@ const ROIAnalytics: React.FC = () => {
 
   const formatPercent = (percent: number) => {
     return `${percent.toFixed(1)}%`;
+  };
+
+  const getMediaTypeLabel = (type: string | null | undefined) => {
+    switch (type) {
+      case 'video': return 'Видео';
+      case 'image': return 'Картинка';
+      case 'carousel': return 'Карусель';
+      default: return '';
+    }
+  };
+
+  const handleExportCreatives = () => {
+    if (!roiData?.campaigns) return;
+
+    exportToCSV(roiData.campaigns, [
+      { header: 'Название', accessor: (c) => c.name },
+      { header: 'Тип', accessor: (c) => getMediaTypeLabel(c.media_type) },
+      { header: 'Выручка', accessor: (c) => formatAmountForExport(c.revenue) },
+      { header: 'Затраты', accessor: (c) => formatAmountForExport(c.spend) },
+      { header: 'ROI %', accessor: (c) => c.roi.toFixed(1) },
+      { header: 'Лиды', accessor: (c) => c.leads },
+      { header: 'Конверсии', accessor: (c) => c.conversions },
+      { header: 'Конверсия %', accessor: (c) => c.leads > 0 ? ((c.conversions / c.leads) * 100).toFixed(1) : '0' },
+    ], 'creatives');
   };
 
   // Verdict metadata для отображения оценки
@@ -698,15 +726,29 @@ const ROIAnalytics: React.FC = () => {
           </div>
         </div>
 
+        {/* Главные табы: Креативы / Лиды / Продажи */}
+        <Tabs value={activeMainTab} onValueChange={(v) => setActiveMainTab(v as typeof activeMainTab)} className="mb-6">
+          <TabsList className="bg-muted mb-4">
+            <TabsTrigger value="creatives" className="flex items-center gap-1.5">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Креативы ({roiData?.campaigns?.length || 0})
+            </TabsTrigger>
+            <TabsTrigger value="leads" className="flex items-center gap-1.5">
+              <Users className="h-3.5 w-3.5" />
+              Лиды
+            </TabsTrigger>
+            <TabsTrigger value="sales" className="flex items-center gap-1.5">
+              <ShoppingCart className="h-3.5 w-3.5" />
+              Продажи
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Контент: Креативы */}
+          <TabsContent value="creatives">
         {/* Подраздел: Креативы */}
         <div className="mb-6">
-          <h2 className="text-base font-semibold mb-3 flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Креативы ({roiData?.campaigns?.length || 0})
-          </h2>
-
-          {/* Фильтр по типу медиа - в стиле табов */}
-          <div className="mb-4">
+          {/* Фильтр по типу медиа - в стиле табов + кнопка экспорта */}
+          <div className="mb-4 flex items-center justify-between gap-4">
             {/* Десктоп: табы */}
             <div className="hidden md:block">
               <Tabs value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
@@ -729,7 +771,7 @@ const ROIAnalytics: React.FC = () => {
             </div>
 
             {/* Мобилка: выпадающий список */}
-            <div className="md:hidden">
+            <div className="md:hidden flex-1">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline" className="w-full justify-between">
@@ -758,6 +800,19 @@ const ROIAnalytics: React.FC = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+
+            {/* Кнопка экспорта */}
+            {roiData?.campaigns && roiData.campaigns.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs flex-shrink-0"
+                onClick={handleExportCreatives}
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Экспорт
+              </Button>
+            )}
           </div>
 
           {roiData?.campaigns && roiData.campaigns.length > 0 ? (
@@ -771,13 +826,13 @@ const ROIAnalytics: React.FC = () => {
                         <thead className="bg-muted/50 border-b">
                           <tr>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Название креатива</th>
-                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Тип</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Выручка</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Затраты</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">ROI</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Лиды</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсии</th>
-                            <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground">Конверсия %</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Тип</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Выручка</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Затраты</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">ROI</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Лиды</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Конверсии</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Конверсия %</th>
                             {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
                               <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ключевые этапы</th>
@@ -798,16 +853,16 @@ const ROIAnalytics: React.FC = () => {
                                 <td className="py-2 px-3">
                                   <div className="font-medium text-sm">{campaign.name}</div>
                                 </td>
-                                <td className="py-2 px-3 text-center">
+                                <td className="py-2 px-3 text-left">
                                   <MediaTypeBadge mediaType={campaign.media_type} showLabel={false} />
                                 </td>
-                                <td className="py-2 px-3 text-right text-sm font-medium text-green-600 dark:text-green-500/70">
+                                <td className="py-2 px-3 text-left text-sm font-medium text-green-600 dark:text-green-500/70">
                                   {formatCurrency(campaign.revenue)}
                                 </td>
-                                <td className="py-2 px-3 text-right text-sm font-medium text-slate-600">
+                                <td className="py-2 px-3 text-left text-sm font-medium text-slate-600">
                                   {formatCurrency(campaign.spend)}
                                 </td>
-                                <td className="py-2 px-3 text-right">
+                                <td className="py-2 px-3 text-left">
                                   <Badge
                                     variant={getROIBadgeVariant(campaign.roi)}
                                     className={`text-xs ${getROIBadgeClass(campaign.roi)}`}
@@ -815,13 +870,13 @@ const ROIAnalytics: React.FC = () => {
                                     {formatPercent(campaign.roi)}
                                   </Badge>
                                 </td>
-                                <td className="py-2 px-3 text-right text-sm">
+                                <td className="py-2 px-3 text-left text-sm">
                                   {formatNumber(campaign.leads)}
                                 </td>
-                                <td className="py-2 px-3 text-right text-sm">
+                                <td className="py-2 px-3 text-left text-sm">
                                   {formatNumber(campaign.conversions)}
                                 </td>
-                                <td className="py-2 px-3 text-right text-sm">
+                                <td className="py-2 px-3 text-left text-sm">
                                   {campaign.leads > 0 ?
                                     `${((campaign.conversions / campaign.leads) * 100).toFixed(1)}%`
                                     : '0%'
@@ -1455,9 +1510,23 @@ const ROIAnalytics: React.FC = () => {
             </Card>
           )}
         </div>
+          </TabsContent>
 
-        {/* Список продаж */}
-        {userAccountId && <SalesList userAccountId={userAccountId} />}
+          {/* Контент: Лиды */}
+          <TabsContent value="leads">
+            {userAccountId && (
+              <LeadsTab
+                userAccountId={userAccountId}
+                directionId={selectedDirectionId}
+              />
+            )}
+          </TabsContent>
+
+          {/* Контент: Продажи */}
+          <TabsContent value="sales">
+            {userAccountId && <SalesList userAccountId={userAccountId} />}
+          </TabsContent>
+        </Tabs>
 
         {/* Funnel Modal */}
         {selectedCreative && (

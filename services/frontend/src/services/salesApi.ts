@@ -1023,6 +1023,179 @@ class SalesApiService {
       throw error;
     }
   }
+  // Получение лидов для ROI Analytics с возможностью фильтрации по направлению
+  async getLeadsForROI(
+    userAccountId: string,
+    directionId: string | null
+  ): Promise<{ data: any[]; error: any }> {
+    try {
+      // Шаг 1: Получаем лиды
+      let query = (supabase as any)
+        .from('leads')
+        .select(`
+          id,
+          chat_id,
+          creative_id,
+          direction_id,
+          needs_manual_match,
+          sale_amount,
+          created_at
+        `)
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: false });
+
+      if (directionId) {
+        query = query.eq('direction_id', directionId);
+      }
+
+      const { data: leads, error } = await query;
+
+      if (error) {
+        console.error('Ошибка загрузки лидов:', error);
+        return { data: [], error };
+      }
+
+      if (!leads || leads.length === 0) {
+        return { data: [], error: null };
+      }
+
+      // Шаг 2: Собираем уникальные ID креативов и направлений
+      const creativeIdsArray: string[] = [];
+      const directionIdsArray: string[] = [];
+
+      leads.forEach((lead: any) => {
+        if (lead.creative_id && !creativeIdsArray.includes(lead.creative_id)) {
+          creativeIdsArray.push(lead.creative_id);
+        }
+        if (lead.direction_id && !directionIdsArray.includes(lead.direction_id)) {
+          directionIdsArray.push(lead.direction_id);
+        }
+      });
+
+      // Шаг 3: Загружаем креативы
+      const creativesMap: Record<string, string> = {};
+      if (creativeIdsArray.length > 0) {
+        const { data: creatives } = await (supabase as any)
+          .from('user_creatives')
+          .select('id, title')
+          .in('id', creativeIdsArray);
+
+        if (creatives) {
+          creatives.forEach((c: any) => {
+            creativesMap[c.id] = c.title;
+          });
+        }
+      }
+
+      // Шаг 4: Загружаем направления
+      const directionsMap: Record<string, string> = {};
+      if (directionIdsArray.length > 0) {
+        const { data: directions } = await (supabase as any)
+          .from('account_directions')
+          .select('id, name')
+          .in('id', directionIdsArray);
+
+        if (directions) {
+          directions.forEach((d: any) => {
+            directionsMap[d.id] = d.name;
+          });
+        }
+      }
+
+      // Шаг 5: Трансформируем данные
+      const transformedData = leads.map((lead: any) => ({
+        id: lead.id,
+        chat_id: lead.chat_id,
+        creative_id: lead.creative_id,
+        creative_name: lead.creative_id ? creativesMap[lead.creative_id] || null : null,
+        direction_id: lead.direction_id,
+        direction_name: lead.direction_id ? directionsMap[lead.direction_id] || null : null,
+        needs_manual_match: lead.needs_manual_match || false,
+        sale_amount: lead.sale_amount,
+        created_at: lead.created_at
+      }));
+
+      return { data: transformedData, error: null };
+    } catch (error) {
+      console.error('Ошибка в getLeadsForROI:', error);
+      return { data: [], error };
+    }
+  }
+
+  // Получение креативов для выбора при ручной привязке
+  async getCreativesForAssignment(
+    userAccountId: string,
+    directionId: string | null
+  ): Promise<{ data: any[]; error: any }> {
+    try {
+      let query = (supabase as any)
+        .from('user_creatives')
+        .select(`
+          id,
+          title,
+          media_type,
+          direction_id,
+          account_directions!left(name)
+        `)
+        .eq('user_id', userAccountId)
+        .order('created_at', { ascending: false });
+
+      // Если указано направление, фильтруем по нему
+      if (directionId) {
+        query = query.eq('direction_id', directionId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Ошибка загрузки креативов:', error);
+        return { data: [], error };
+      }
+
+      // Трансформируем данные
+      const transformedData = (data || []).map((creative: any) => ({
+        id: creative.id,
+        title: creative.title || `Креатив ${creative.id.substring(0, 8)}`,
+        media_type: creative.media_type || 'video',
+        direction_name: creative.account_directions?.name || null
+      }));
+
+      return { data: transformedData, error: null };
+    } catch (error) {
+      console.error('Ошибка в getCreativesForAssignment:', error);
+      return { data: [], error };
+    }
+  }
+
+  // Привязка креатива к лиду
+  async assignCreativeToLead(
+    leadId: string,
+    creativeId: string
+  ): Promise<{ data: any; error: any }> {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('leads')
+        .update({
+          creative_id: creativeId,
+          needs_manual_match: false,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', leadId)
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Ошибка привязки креатива:', error);
+        return { data: null, error };
+      }
+
+      console.log('✅ Креатив привязан к лиду:', data);
+      return { data, error: null };
+    } catch (error) {
+      console.error('Ошибка в assignCreativeToLead:', error);
+      return { data: null, error };
+    }
+  }
 }
 
 export const salesApi = new SalesApiService(); 

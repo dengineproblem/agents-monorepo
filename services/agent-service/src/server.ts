@@ -29,6 +29,7 @@ import leadsRoutes from './routes/leads.js';
 import { briefingRoutes } from './routes/briefingRoutes.js';
 import { carouselCreativeRoutes } from './routes/carouselCreative.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
+import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
 import { logger as baseLogger } from './lib/logger.js';
 
 // Load env from Docker path or local path
@@ -88,6 +89,9 @@ app.register(carouselCreativeRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
+
+// Запускаем cron для мониторинга WhatsApp инстансов (каждые 5 минут)
+startWhatsAppMonitorCron(app as any);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);
