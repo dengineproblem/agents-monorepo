@@ -59,12 +59,54 @@ class SalesApiService {
   // Получение всех продаж по пользователю
   async getAllPurchases(userAccountId: string): Promise<{ data: any[]; error: any }> {
     try {
-      const { data, error } = await (supabase as any)
+      // Загружаем purchases
+      const { data: purchases, error } = await (supabase as any)
         .from('purchases')
         .select('*')
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false });
-      return { data, error };
+
+      if (error || !purchases || purchases.length === 0) {
+        return { data: purchases || [], error };
+      }
+
+      // Получаем уникальные телефоны для поиска связанных лидов
+      const phones = [...new Set(purchases.map((p: any) => p.client_phone))];
+
+      // Загружаем лиды с creative_id для этих телефонов
+      const { data: leads } = await (supabase as any)
+        .from('leads')
+        .select('chat_id, creative_id')
+        .eq('user_account_id', userAccountId)
+        .in('chat_id', phones)
+        .not('creative_id', 'is', null);
+
+      if (!leads || leads.length === 0) {
+        return { data: purchases, error: null };
+      }
+
+      // Получаем названия креативов
+      const creativeIds = [...new Set(leads.map((l: any) => l.creative_id))];
+      const { data: creatives } = await (supabase as any)
+        .from('user_creatives')
+        .select('id, title')
+        .in('id', creativeIds);
+
+      // Создаём map phone -> creative_id -> title
+      const phoneToCreativeId = new Map(leads.map((l: any) => [l.chat_id, l.creative_id]));
+      const creativeIdToTitle = new Map(creatives?.map((c: any) => [c.id, c.title]) || []);
+
+      // Добавляем название креатива к каждой продаже
+      const enrichedPurchases = purchases.map((p: any) => {
+        const creativeId = phoneToCreativeId.get(p.client_phone);
+        const creativeName = creativeId ? creativeIdToTitle.get(creativeId) : null;
+        return {
+          ...p,
+          campaign_name: creativeName || p.campaign_name || null
+        };
+      });
+
+      return { data: enrichedPurchases, error: null };
     } catch (error) {
       return { data: [], error };
     }
