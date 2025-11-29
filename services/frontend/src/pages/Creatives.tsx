@@ -1734,6 +1734,14 @@ const Creatives: React.FC = () => {
                     return (
                     <AccordionItem key={it.id} value={it.id}>
                       <div className="flex items-center justify-between w-full py-2 gap-4">
+                        {/* Checkbox в начале строки */}
+                        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selectedCreativeIds.has(it.id)}
+                            onCheckedChange={() => toggleCreativeSelection(it.id)}
+                            className="h-5 w-5"
+                          />
+                        </div>
                         <div className="min-w-0 flex-1 flex items-center gap-2">
                           <AccordionTrigger className="hover:no-underline min-w-0">
                             <EditableTitle
@@ -1770,25 +1778,18 @@ const Creatives: React.FC = () => {
                         <div className="shrink-0 text-xs text-muted-foreground whitespace-nowrap hidden sm:block">
                           {formatDateAlmaty(it.created_at)}
                         </div>
-                        <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center gap-2">
-                            <Switch
-                              checked={it.is_active ?? true}
-                              onCheckedChange={async (checked) => {
-                                await creativesApi.toggleActive(it.id, checked);
-                                await reload();
-                                toast.success(checked ? 'Креатив активирован' : 'Креатив деактивирован');
-                              }}
-                            />
-                            <span className="text-xs text-muted-foreground hidden sm:inline">
-                              {it.is_active ? 'Активен' : 'Неактивен'}
-                            </span>
-                          </div>
-                          <Checkbox
-                            checked={selectedCreativeIds.has(it.id)}
-                            onCheckedChange={() => toggleCreativeSelection(it.id)}
-                            className="h-5 w-5"
+                        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <Switch
+                            checked={it.is_active ?? true}
+                            onCheckedChange={async (checked) => {
+                              await creativesApi.toggleActive(it.id, checked);
+                              await reload();
+                              toast.success(checked ? 'Креатив активирован' : 'Креатив деактивирован');
+                            }}
                           />
+                          <span className="text-xs text-muted-foreground hidden sm:inline">
+                            {it.is_active ? 'Активен' : 'Неактивен'}
+                          </span>
                         </div>
                       </div>
                       <AccordionContent>
