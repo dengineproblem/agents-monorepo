@@ -463,10 +463,21 @@ class SalesApiService {
         // ROI расчёт
         const roi = spend > 0 ? Math.round(((revenue - spend) / spend) * 100) : 0;
 
+        // Определяем URL креатива в зависимости от типа
+        let creativeUrl = '';
+        if (creative.media_type === 'image' && creative.image_url) {
+          creativeUrl = creative.image_url;
+        } else if (creative.media_type === 'carousel' && creative.carousel_data?.length > 0) {
+          // Берём первую картинку карусели
+          const firstCard = creative.carousel_data[0];
+          creativeUrl = firstCard?.image_url_4k || firstCard?.image_url || '';
+        }
+        // Для video URL нет в user_creatives (видео хранится в FB)
+
         campaigns.push({
           id: creativeId,
           name: creative.title || `Креатив ${creativeId.substring(0, 8)}...`,
-          creative_url: '', // URL будет добавлен позже если нужно
+          creative_url: creativeUrl,
           spend,
           revenue,
           roi,
