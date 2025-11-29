@@ -307,20 +307,23 @@ class SalesApiService {
       // Курс доллара к тенге
       const usdToKztRate = 530;
 
-      // ШАГ 1: Загружаем ВСЕ user_creatives для пользователя с новыми полями
+      // ШАГ 1: Загружаем user_creatives для пользователя с фильтрами
       let creativesQuery = (supabase as any)
         .from('user_creatives')
-        .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id, fb_video_id')
+        .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id, fb_video_id, direction_id')
         .eq('user_id', userAccountId)
         .eq('status', 'ready')
         .order('created_at', { ascending: false });
+
+      // Фильтрация по направлению
+      if (directionId) {
+        creativesQuery = creativesQuery.eq('direction_id', directionId);
+      }
 
       // Фильтрация по типу медиа
       if (mediaType) {
         creativesQuery = creativesQuery.eq('media_type', mediaType);
       }
-
-      // Примечание: фильтрация по direction_id будет через ad_creative_mapping
 
       const { data: creatives, error: creativesError } = await creativesQuery;
 
