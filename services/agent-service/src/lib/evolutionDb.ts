@@ -127,6 +127,54 @@ export async function getInstanceMessages(instanceName: string, maxContacts?: nu
 }
 
 /**
+ * Получить время последнего сообщения от контакта (до текущего)
+ * Используется для определения, является ли сообщение "первым" за последние N дней
+ *
+ * @param instanceName Имя инстанса Evolution API
+ * @param remoteJid JID контакта (например, 77059517867@s.whatsapp.net)
+ * @param currentTimestamp Timestamp текущего сообщения (исключаем его из поиска)
+ * @returns Timestamp последнего сообщения или null если сообщений нет
+ */
+export async function getLastMessageTime(
+  instanceName: string,
+  remoteJid: string,
+  currentTimestamp: number
+): Promise<number | null> {
+  try {
+    const query = `
+      SELECT MAX("messageTimestamp") as last_timestamp
+      FROM "Message"
+      WHERE "instanceId" = (SELECT id FROM "Instance" WHERE name = $1)
+        AND "key"->>'remoteJid' = $2
+        AND "messageTimestamp" < $3
+    `;
+
+    const result = await evolutionQuery(query, [instanceName, remoteJid, currentTimestamp]);
+
+    if (result.rows.length > 0 && result.rows[0].last_timestamp) {
+      const lastTimestamp = parseInt(result.rows[0].last_timestamp, 10);
+      log.debug({
+        instanceName,
+        remoteJid,
+        lastTimestamp,
+        currentTimestamp
+      }, 'Found previous message timestamp');
+      return lastTimestamp;
+    }
+
+    log.debug({ instanceName, remoteJid }, 'No previous messages found');
+    return null;
+  } catch (error: any) {
+    log.error({
+      error: error.message,
+      instanceName,
+      remoteJid
+    }, 'Failed to get last message time');
+    return null;
+  }
+}
+
+/**
  * Close the Evolution PostgreSQL connection pool
  * (Should be called on application shutdown)
  */

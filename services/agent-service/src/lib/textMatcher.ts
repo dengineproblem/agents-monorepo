@@ -50,6 +50,11 @@ export function calculateSimilarity(text1: string, text2: string): number {
   const norm1 = normalize(text1);
   const norm2 = normalize(text2);
 
+  // Если хотя бы один текст пустой — нет совпадения
+  if (norm1.length === 0 || norm2.length === 0) {
+    return 0;
+  }
+
   // Точное совпадение после нормализации
   if (norm1 === norm2) {
     return 1.0;

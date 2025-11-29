@@ -3,7 +3,11 @@ import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { matchMessageToDirection } from '../lib/textMatcher.js';
 import { sendTelegramNotification, formatManualMatchMessage } from '../lib/telegramNotifier.js';
+import { getLastMessageTime } from '../lib/evolutionDb.js';
 import axios from 'axios';
+
+// Период "тишины" в днях - если последнее сообщение было раньше, считаем текущее "первым"
+const SMART_MATCH_SILENCE_DAYS = 7;
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -134,6 +138,12 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     // Пропускаем групповые чаты
     if (remoteJid.endsWith('@g.us')) {
       app.log.debug({ instance, remoteJid }, 'Ignoring group chat message');
+      return;
+    }
+
+    // Пропускаем нетекстовые сообщения (голосовые, картинки, видео и т.д.)
+    if (!messageText || messageText.trim().length === 0) {
+      app.log.debug({ instance, remoteJid }, 'Empty/non-text message, skipping smart matching');
       return;
     }
 
@@ -497,6 +507,34 @@ async function handleSmartMatching(
   message: any,
   app: FastifyInstance
 ) {
+  const currentTimestamp = message.messageTimestamp || Math.floor(Date.now() / 1000);
+
+  // Проверяем, было ли предыдущее сообщение от этого контакта за последние N дней
+  const lastMessageTime = await getLastMessageTime(instance, remoteJid, currentTimestamp);
+
+  if (lastMessageTime !== null) {
+    const silenceThreshold = currentTimestamp - (SMART_MATCH_SILENCE_DAYS * 24 * 60 * 60);
+
+    if (lastMessageTime > silenceThreshold) {
+      // Есть недавнее сообщение — это не "первое" сообщение, пропускаем smart matching
+      const daysSinceLastMessage = (currentTimestamp - lastMessageTime) / (24 * 60 * 60);
+      app.log.debug({
+        instance,
+        remoteJid,
+        lastMessageTime,
+        daysSinceLastMessage: daysSinceLastMessage.toFixed(1),
+        silenceDays: SMART_MATCH_SILENCE_DAYS
+      }, 'Recent message exists, skipping smart matching');
+      return;
+    }
+
+    app.log.info({
+      instance,
+      remoteJid,
+      daysSinceLastMessage: ((currentTimestamp - lastMessageTime) / (24 * 60 * 60)).toFixed(1)
+    }, 'No recent messages, treating as new lead for smart matching');
+  }
+
   // Найти инстанс в БД
   const { data: instanceData, error: instanceError } = await supabase
     .from('whatsapp_instances')
