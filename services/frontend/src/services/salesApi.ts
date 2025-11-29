@@ -1087,18 +1087,23 @@ class SalesApiService {
         }
       }
 
-      // Шаг 4: Загружаем направления
+      // Шаг 4: Загружаем направления через API (RLS блокирует прямой доступ к account_directions)
       const directionsMap: Record<string, string> = {};
       if (directionIdsArray.length > 0) {
-        const { data: directions } = await (supabase as any)
-          .from('account_directions')
-          .select('id, name')
-          .in('id', directionIdsArray);
-
-        if (directions) {
-          directions.forEach((d: any) => {
-            directionsMap[d.id] = d.name;
-          });
+        try {
+          const response = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.directions) {
+              data.directions.forEach((d: any) => {
+                if (directionIdsArray.includes(d.id)) {
+                  directionsMap[d.id] = d.name;
+                }
+              });
+            }
+          }
+        } catch (e) {
+          console.error('Ошибка загрузки направлений:', e);
         }
       }
 
