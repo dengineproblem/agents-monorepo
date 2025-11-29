@@ -66,7 +66,32 @@ export const creativesApi = {
       console.error('creativesApi.list error:', error);
       return [];
     }
-    return (data as unknown as UserCreative[]) || [];
+
+    const creatives = (data as unknown as UserCreative[]) || [];
+
+    // Carousel_data в user_creatives берём из generated_creatives (источник правды)
+    const carouselsWithGenId = creatives.filter(
+      c => c.media_type === 'carousel' && c.generated_creative_id
+    );
+
+    if (carouselsWithGenId.length > 0) {
+      const generatedIds = carouselsWithGenId.map(c => c.generated_creative_id!);
+      const { data: generatedData } = await supabase
+        .from('generated_creatives' as any)
+        .select('id, carousel_data')
+        .in('id', generatedIds);
+
+      if (generatedData) {
+        const generatedMap = new Map(generatedData.map((g: any) => [g.id, g.carousel_data]));
+        for (const creative of creatives) {
+          if (creative.media_type === 'carousel' && creative.generated_creative_id) {
+            creative.carousel_data = generatedMap.get(creative.generated_creative_id) || creative.carousel_data;
+          }
+        }
+      }
+    }
+
+    return creatives;
   },
 
   async getTranscript(userCreativeId: string): Promise<string | null> {

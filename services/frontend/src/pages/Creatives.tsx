@@ -2,14 +2,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Header from "@/components/Header";
 import PageHero from "@/components/common/PageHero";
 import { useUserCreatives } from "@/hooks/useUserCreatives";
-import { creativesApi, UserCreative } from "@/services/creativesApi";
+import { creativesApi, UserCreative, CarouselCard } from "@/services/creativesApi";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { manualLaunchAds } from "@/services/manualLaunchApi";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -25,6 +27,24 @@ import { OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
 import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativeAnalyticsApi";
 import { TestStatusIndicator } from "@/components/TestStatusIndicator";
+
+// Утилита для получения thumbnail URL через Supabase Transform
+const getThumbnailUrl = (url: string | null | undefined, width = 200, height = 250): string | null => {
+  if (!url) return null;
+
+  // Проверяем, что это Supabase Storage URL
+  if (!url.includes('supabase')) return url;
+
+  // Разбиваем URL на части
+  const urlParts = url.split('/storage/v1/object/public/');
+  if (urlParts.length !== 2) return url;
+
+  const baseUrl = urlParts[0];
+  const pathPart = urlParts[1];
+
+  // Формируем URL с трансформацией
+  return `${baseUrl}/storage/v1/render/image/public/${pathPart}?width=${width}&height=${height}&resize=contain`;
+};
 
 type UploadItemStatus = "queued" | "uploading" | "success" | "error";
 
@@ -43,6 +63,9 @@ type CreativeDetailsProps = {
   createdAt: string;
   fbCreativeIds: string[];
   demoMode?: boolean;
+  mediaType?: 'video' | 'image' | 'carousel' | null;
+  imageUrl?: string | null;
+  carouselData?: CarouselCard[] | null;
 };
 
 type TranscriptSuggestion = {
@@ -433,7 +456,7 @@ const EditableTitle: React.FC<EditableTitleProps> = ({ title, creativeId, onSave
   );
 };
 
-const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativeIds, demoMode = false }) => {
+const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativeIds, demoMode = false, mediaType, imageUrl, carouselData }) => {
   const [loading, setLoading] = useState(true);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<CreativeAnalytics | null>(null);
@@ -837,19 +860,93 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
   return (
     <div className="space-y-4">
-      {/* Транскрибация - показываем сразу */}
-      <Card className="bg-muted/30">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            📝 Транскрибация видео
-          </CardTitle>
+      {/* Миниатюра для image креатива */}
+      {mediaType === 'image' && imageUrl && (
+        <Card className="bg-muted/30">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              🖼️ Превью креатива
+            </CardTitle>
           </CardHeader>
-        <CardContent>
-        <div className="text-sm whitespace-pre-wrap text-muted-foreground">
-            {transcript ? transcript : 'Транскрибация еще не готова. Она появится после обработки видео.'}
+          <CardContent>
+            <div className="flex justify-center">
+              <img
+                src={getThumbnailUrl(imageUrl, 300, 375) || imageUrl}
+                alt="Превью креатива"
+                className="max-w-full h-auto rounded-lg border max-h-[300px] object-contain"
+                onError={(e) => {
+                  // Fallback на оригинальный URL при ошибке
+                  (e.target as HTMLImageElement).src = imageUrl;
+                }}
+              />
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Миниатюры для carousel креатива */}
+      {mediaType === 'carousel' && carouselData && carouselData.length > 0 && (
+        <Card className="bg-muted/30">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              🖼️ Карточки карусели ({carouselData.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {carouselData
+                .sort((a, b) => a.order - b.order)
+                .map((card, index) => {
+                  const cardImageUrl = card.image_url_4k || card.image_url;
+                  return (
+                <div key={index} className="relative group">
+                  {cardImageUrl ? (
+                    <img
+                      src={getThumbnailUrl(cardImageUrl, 150, 150) || cardImageUrl}
+                      alt={`Карточка ${index + 1}`}
+                      className="w-full aspect-square object-cover rounded-lg border"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = cardImageUrl;
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full aspect-square bg-muted rounded-lg border flex items-center justify-center">
+                      <Images className="h-6 w-6 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-1 left-1 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded">
+                    {index + 1}
+                  </div>
+                  {card.text && (
+                    <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg p-2 flex items-center justify-center">
+                      <span className="text-white text-xs text-center line-clamp-4">{card.text}</span>
+                    </div>
+                  )}
+                </div>
+                  );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Транскрибация для video или текст для других типов */}
+      <Card className="bg-muted/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            {mediaType === 'video' ? '📝 Транскрибация видео' : '📝 Текст креатива'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm whitespace-pre-wrap text-muted-foreground">
+            {transcript ? transcript : (
+              mediaType === 'video'
+                ? 'Транскрибация еще не готова. Она появится после обработки видео.'
+                : 'Текст недоступен'
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
         <Button
@@ -1114,6 +1211,8 @@ const Creatives: React.FC = () => {
   const processingRef = useRef(false);
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
+  const [selectedCreativeIds, setSelectedCreativeIds] = useState<Set<string>>(new Set());
+  const [isLaunching, setIsLaunching] = useState(false);
 
   // Фильтрация креативов по типу медиа
   const filteredItems = useMemo(() => {
@@ -1131,7 +1230,99 @@ const Creatives: React.FC = () => {
       toast.error('Не удалось обновить название');
     }
   };
-  
+
+  // Переключение выбора креатива
+  const toggleCreativeSelection = (id: string) => {
+    setSelectedCreativeIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  // Выбрать/снять все креативы
+  const toggleSelectAll = () => {
+    if (selectedCreativeIds.size === filteredItems.length) {
+      setSelectedCreativeIds(new Set());
+    } else {
+      setSelectedCreativeIds(new Set(filteredItems.map(it => it.id)));
+    }
+  };
+
+  // Удалить выбранные креативы
+  const handleDeleteSelected = async () => {
+    if (selectedCreativeIds.size === 0) return;
+    if (!confirm(`Удалить выбранные креативы (${selectedCreativeIds.size} шт.)?`)) return;
+
+    try {
+      const deletePromises = Array.from(selectedCreativeIds).map(id => creativesApi.delete(id));
+      await Promise.all(deletePromises);
+      setSelectedCreativeIds(new Set());
+      await reload();
+      toast.success(`Удалено ${selectedCreativeIds.size} креативов`);
+    } catch (error) {
+      console.error('Ошибка при удалении креативов:', error);
+      toast.error('Не удалось удалить креативы');
+    }
+  };
+
+  // Создать adset с выбранными креативами
+  const handleCreateAdset = async () => {
+    if (selectedCreativeIds.size === 0) {
+      toast.error('Выберите хотя бы один креатив');
+      return;
+    }
+
+    // Получаем направление из первого выбранного креатива
+    const firstSelectedId = Array.from(selectedCreativeIds)[0];
+    const firstCreative = items.find(it => it.id === firstSelectedId);
+
+    if (!firstCreative?.direction_id) {
+      toast.error('Выберите креатив с назначенным направлением');
+      return;
+    }
+
+    // Проверяем, что все выбранные креативы из одного направления
+    const selectedItems = items.filter(it => selectedCreativeIds.has(it.id));
+    const differentDirections = selectedItems.some(it => it.direction_id !== firstCreative.direction_id);
+    if (differentDirections) {
+      toast.error('Все выбранные креативы должны быть из одного направления');
+      return;
+    }
+
+    setIsLaunching(true);
+    try {
+      // Получаем user_account_id из направления
+      const direction = directions.find(d => d.id === firstCreative.direction_id);
+      if (!direction?.user_account_id) {
+        toast.error('Направление не связано с рекламным аккаунтом');
+        return;
+      }
+
+      const result = await manualLaunchAds({
+        user_account_id: direction.user_account_id,
+        direction_id: firstCreative.direction_id,
+        creative_ids: Array.from(selectedCreativeIds),
+      });
+
+      if (result.success) {
+        toast.success(`Создано объявлений: ${result.ads_created || 0}`);
+        setSelectedCreativeIds(new Set());
+      } else {
+        toast.error(result.error || 'Ошибка создания adset');
+      }
+    } catch (error) {
+      console.error('Ошибка создания adset:', error);
+      toast.error('Не удалось создать adset');
+    } finally {
+      setIsLaunching(false);
+    }
+  };
+
   // Получаем user_id для загрузки направлений (один раз)
   const [userId] = useState<string | null>(() => {
     try {
@@ -1440,14 +1631,14 @@ const Creatives: React.FC = () => {
               <CardTitle>Загруженные креативы</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="text-sm text-muted-foreground">
-                    Всего: {items.length}{mediaTypeFilter !== 'all' && ` (показано: ${filteredItems.length})`}
+              <div className="flex items-center justify-between mb-3 gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-sm text-muted-foreground whitespace-nowrap">
+                    {items.length}{mediaTypeFilter !== 'all' && ` / ${filteredItems.length}`}
                   </div>
                   {/* Фильтр по типу */}
                   <Select value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
-                    <SelectTrigger className="w-[130px] h-8 text-xs">
+                    <SelectTrigger className="w-[110px] h-7 text-xs">
                       <SelectValue placeholder="Тип" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1473,33 +1664,41 @@ const Creatives: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2">
-                <Button size="sm" variant="ghost" onClick={reload} disabled={loading}>
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-                  {items.length > 0 && (
+                <div className="flex items-center gap-1">
+                  {/* Кнопка создать adset */}
+                  {selectedCreativeIds.size > 0 && (
                     <Button
                       size="sm"
-                      variant="destructive"
-                      onClick={async () => {
-                        if (confirm(`Удалить все креативы (${items.length} шт.)?`)) {
-                          try {
-                            const deletePromises = items.map(item => creativesApi.delete(item.id));
-                            await Promise.all(deletePromises);
-                            await reload();
-                            toast.success(`Удалено ${items.length} креативов`);
-                          } catch (error) {
-                            console.error('Ошибка при удалении креативов:', error);
-                            toast.error('Не удалось удалить все креативы');
-                          }
-                        }
-                      }}
-                      disabled={loading}
+                      variant="default"
+                      onClick={handleCreateAdset}
+                      disabled={isLaunching}
+                      className="h-7 px-2 text-xs gap-1"
                     >
-                      <Trash2 className="h-4 w-4 mr-1" />
-                      Удалить все
+                      {isLaunching ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Megaphone className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">Запустить</span>
+                      <span className="sm:hidden">{selectedCreativeIds.size}</span>
                     </Button>
                   )}
+                  {/* Кнопка удалить выбранные */}
+                  {selectedCreativeIds.size > 0 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleDeleteSelected}
+                      disabled={loading}
+                      className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                      title={`Удалить выбранные (${selectedCreativeIds.size})`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={reload} disabled={loading} className="h-7 w-7 p-0">
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
               </div>
               {loading || directionsLoading ? (
@@ -1568,7 +1767,7 @@ const Creatives: React.FC = () => {
                             />
                           </div>
                         </div>
-                        <div className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                        <div className="shrink-0 text-xs text-muted-foreground whitespace-nowrap hidden sm:block">
                           {formatDateAlmaty(it.created_at)}
                         </div>
                         <div className="flex items-center gap-3 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -1585,30 +1784,23 @@ const Creatives: React.FC = () => {
                               {it.is_active ? 'Активен' : 'Неактивен'}
                             </span>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (confirm(`Удалить креатив "${it.title}"?`)) {
-                                await creativesApi.delete(it.id);
-                                await reload();
-                                toast.success('Креатив удален');
-                              }
-                            }}
-                            className="h-8 w-8 p-0 shrink-0"
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          <Checkbox
+                            checked={selectedCreativeIds.has(it.id)}
+                            onCheckedChange={() => toggleCreativeSelection(it.id)}
+                            className="h-5 w-5"
+                          />
                         </div>
                       </div>
                       <AccordionContent>
                     <div className="space-y-4">
-                      <CreativeDetails 
+                      <CreativeDetails
                         creativeId={it.id}
                         createdAt={it.created_at}
-                        fbCreativeIds={[it.fb_creative_id_whatsapp, it.fb_creative_id_instagram_traffic, it.fb_creative_id_site_leads].filter(Boolean) as string[]} 
+                        fbCreativeIds={[it.fb_creative_id_whatsapp, it.fb_creative_id_instagram_traffic, it.fb_creative_id_site_leads].filter(Boolean) as string[]}
                         demoMode={false}
+                        mediaType={it.media_type}
+                        imageUrl={it.image_url}
+                        carouselData={it.carousel_data}
                       />
                     </div>
                       </AccordionContent>

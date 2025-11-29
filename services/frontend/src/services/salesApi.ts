@@ -300,6 +300,30 @@ class SalesApiService {
         };
       }
 
+      // ВАЖНО: carousel_data в user_creatives может быть неправильной (баг миграции).
+      // Всегда загружаем актуальные данные из generated_creatives по generated_creative_id
+      const carouselsWithGenId = creatives.filter(
+        (c: any) => c.media_type === 'carousel' && c.generated_creative_id
+      );
+
+      if (carouselsWithGenId.length > 0) {
+        const generatedIds = carouselsWithGenId.map((c: any) => c.generated_creative_id);
+        const { data: generatedData } = await (supabase as any)
+          .from('generated_creatives')
+          .select('id, carousel_data')
+          .in('id', generatedIds);
+
+        if (generatedData) {
+          const generatedMap = new Map(generatedData.map((g: any) => [g.id, g.carousel_data]));
+          for (const creative of creatives) {
+            if (creative.media_type === 'carousel' && creative.generated_creative_id) {
+              // Перезаписываем carousel_data из generated_creatives (источник правды)
+              creative.carousel_data = generatedMap.get(creative.generated_creative_id) || creative.carousel_data;
+            }
+          }
+        }
+      }
+
       const creativeIds = creatives.map((c: any) => c.id);
 
       // ШАГ 2: Загружаем метрики из creative_metrics_history для всех креативов

@@ -322,7 +322,7 @@ const ROIAnalytics: React.FC = () => {
   };
 
   const getROIBadgeClass = (roi: number) => {
-    if (roi > 0) return 'bg-green-100 text-green-800 border-green-300';
+    if (roi > 0) return 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-700';
     return '';
   };
 
