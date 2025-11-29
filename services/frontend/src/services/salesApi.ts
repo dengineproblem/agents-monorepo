@@ -64,7 +64,8 @@ class SalesApiService {
         .from('purchases')
         .select('*')
         .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(10000);
 
       if (error || !purchases || purchases.length === 0) {
         return { data: purchases || [], error };
@@ -313,7 +314,8 @@ class SalesApiService {
         .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id, fb_video_id, direction_id')
         .eq('user_id', userAccountId)
         .eq('status', 'ready')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(10000);
 
       // Фильтрация по направлению
       if (directionId) {
@@ -1042,7 +1044,8 @@ class SalesApiService {
           created_at
         `)
         .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(10000);
 
       if (directionId) {
         query = query.eq('direction_id', directionId);
