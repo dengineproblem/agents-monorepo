@@ -468,9 +468,9 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   const [testLaunchResult, setTestLaunchResult] = useState<TestLaunchResult | null>(null);
 
   const fetchData = useCallback(async () => {
-    const transcriptPromise = creativesService.getTranscript(creativeId).catch((error) => {
-      console.error("creative transcript load error", error);
-      return null;
+    const transcriptPromise = creativesService.getCreativeText(creativeId, mediaType || 'video', carouselData).catch((error) => {
+      console.error("creative text load error", error);
+      return { text: null };
     });
 
     const analyticsPromise = (async () => {
@@ -507,9 +507,9 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       }
     })();
 
-    const [t, analyticsData] = await Promise.all([transcriptPromise, analyticsPromise]);
-    return { transcript: t, analytics: analyticsData };
-  }, [creativeId]);
+    const [textResult, analyticsData] = await Promise.all([transcriptPromise, analyticsPromise]);
+    return { transcript: textResult.text, analytics: analyticsData };
+  }, [creativeId, mediaType, carouselData]);
 
   // Загружаем данные при открытии креатива
   useEffect(() => {
@@ -1779,6 +1779,14 @@ const Creatives: React.FC = () => {
                           {formatDateAlmaty(it.created_at)}
                         </div>
                         <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <span
+                            className={`inline-block w-2.5 h-2.5 rounded-full transition-all ${
+                              it.is_active
+                                ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm'
+                                : 'bg-gray-300 dark:bg-gray-600'
+                            }`}
+                            title={it.is_active ? 'Активен' : 'Неактивен'}
+                          />
                           <Switch
                             checked={it.is_active ?? true}
                             onCheckedChange={async (checked) => {
@@ -1787,9 +1795,6 @@ const Creatives: React.FC = () => {
                               toast.success(checked ? 'Креатив активирован' : 'Креатив деактивирован');
                             }}
                           />
-                          <span className="text-xs text-muted-foreground hidden sm:inline">
-                            {it.is_active ? 'Активен' : 'Неактивен'}
-                          </span>
                         </div>
                       </div>
                       <AccordionContent>
