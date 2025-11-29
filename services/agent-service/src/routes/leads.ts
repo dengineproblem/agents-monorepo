@@ -219,10 +219,27 @@ export default async function leadsRoutes(app: FastifyInstance) {
         userAccountId: leadData.userAccountId,
         name: leadData.name,
         phone: leadData.phone,
+        utm_medium: leadData.utm_medium,
         utm_campaign: leadData.utm_campaign,
         ad_id: leadData.ad_id,
         utm_content: leadData.utm_content
       }, 'Received lead from website');
+
+      // Фильтрация: пропускаем только лидов с utm_medium = ad_id (числовой ID рекламы Facebook)
+      // Наши лиды имеют числовой ad_id в utm_medium, остальные (organic, cpc, etc.) игнорируем
+      const isNumericAdId = leadData.utm_medium && /^\d+$/.test(leadData.utm_medium);
+      if (!isNumericAdId) {
+        app.log.info({
+          name: leadData.name,
+          phone: leadData.phone,
+          utm_medium: leadData.utm_medium
+        }, 'Skipping lead: utm_medium is not a numeric ad_id (not our lead)');
+
+        return reply.send({
+          success: true,
+          message: 'Lead skipped: not from our ads (utm_medium is not ad_id)'
+        });
+      }
 
       // 2. Verify user account exists
       const { data: userAccount, error: userError } = await supabase
