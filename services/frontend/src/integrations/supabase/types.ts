@@ -9,6 +9,53 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      brain_executions: {
+        Row: {
+          id: string
+          user_account_id: string
+          idempotency_key: string | null
+          plan_json: Json
+          actions_json: Json
+          executor_response_json: Json | null
+          report_text: string | null
+          status: string
+          duration_ms: number | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_account_id: string
+          idempotency_key?: string | null
+          plan_json?: Json
+          actions_json?: Json
+          executor_response_json?: Json | null
+          report_text?: string | null
+          status?: string
+          duration_ms?: number | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_account_id?: string
+          idempotency_key?: string | null
+          plan_json?: Json
+          actions_json?: Json
+          executor_response_json?: Json | null
+          report_text?: string | null
+          status?: string
+          duration_ms?: number | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brain_executions_user_account_id_fkey"
+            columns: ["user_account_id"]
+            isOneToOne: false
+            referencedRelation: "user_accounts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       campaign_reports: {
         Row: {
           created_at: string

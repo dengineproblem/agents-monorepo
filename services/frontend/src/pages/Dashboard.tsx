@@ -8,15 +8,14 @@ import MonthlyPlanFact from '../components/MonthlyPlanFact';
 import TargetologJournal from '../components/TargetologJournal';
 import PageHero from '../components/common/PageHero';
 import { FacebookManualConnectModal } from '../components/profile/FacebookManualConnectModal';
+import { AutopilotSection } from '../components/AutopilotSection';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
-import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Bot, ChevronDown, Instagram, AlertCircle, Calendar } from 'lucide-react';
+import { Instagram, AlertCircle, Calendar } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -49,6 +48,7 @@ const Dashboard: React.FC = () => {
   const [hideDebtBanner, setHideDebtBanner] = useState<boolean>(false);
   const [userName, setUserName] = useState<string | null>(null);
   const [showFacebookConnectModal, setShowFacebookConnectModal] = useState(false);
+  const [userAccountId, setUserAccountId] = useState<string | null>(null);
 
   // Проверка на блокировку кабинета (account_status === 3)
   const isPaymentFailed = accountStatus && Number(accountStatus.account_status) === 3;
@@ -71,13 +71,16 @@ const Dashboard: React.FC = () => {
   const params = new URLSearchParams(window.location.search);
   const telegram_id = params.get('telegram_id');
 
-  // Загружаем тариф пользователя
+  // Загружаем тариф пользователя и userAccountId
   useEffect(() => {
     const loadUserTarif = async () => {
       try {
         const userData = localStorage.getItem('user');
         if (userData) {
           const user = JSON.parse(userData);
+          if (user?.id) {
+            setUserAccountId(user.id);
+          }
           if (user?.username) {
             setUserName(user.username);
           }
@@ -426,43 +429,14 @@ const Dashboard: React.FC = () => {
         ) : (
           <>
             {/* Стандартный дашборд (AI автопилот + кампании) */}
-        {/* AI автопилот - только для Instagram и только в Production режиме */}
-            {platform === 'instagram' && FEATURES.SHOW_AI_AUTOPILOT && (
-              <Card className="mb-6 shadow-sm overflow-hidden">
-                <CardHeader className="pb-3 bg-gradient-to-r from-gray-50 to-slate-50 dark:from-transparent dark:to-transparent">
-            <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-gray-600 to-slate-700 dark:from-gray-700/50 dark:to-slate-800/50 flex items-center justify-center shadow-sm">
-                        <Bot className="h-5 w-5 text-white dark:text-gray-300" />
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg">AI автопилот</CardTitle>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          Автоматическое управление кампаниями
-                        </p>
-                      </div>
-              </div>
-              <div className="flex items-center gap-2">
-                      <span 
-                        className={`inline-block w-2.5 h-2.5 rounded-full transition-all ${
-                          aiAutopilot ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm' : 'bg-gray-300 dark:bg-gray-600'
-                        }`}
-                        title={aiAutopilot ? 'Автопилот включен' : 'Автопилот выключен'}
-                      />
-                <Switch 
-                  checked={aiAutopilot} 
-                  onCheckedChange={toggleAiAutopilot}
-                  disabled={aiAutopilotLoading}
-                />
-              </div>
-            </div>
-                </CardHeader>
-                <CardContent className="pt-4">
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Оптимизация бюджета и управление ставками с помощью искусственного интеллекта для достижения максимальной эффективности
-            </p>
-                </CardContent>
-              </Card>
+            {/* AI автопилот - только для Instagram и только в Production режиме */}
+            {platform === 'instagram' && FEATURES.SHOW_AI_AUTOPILOT && userAccountId && (
+              <AutopilotSection
+                aiAutopilot={aiAutopilot}
+                toggleAiAutopilot={toggleAiAutopilot}
+                aiAutopilotLoading={aiAutopilotLoading}
+                userAccountId={userAccountId}
+              />
             )}
         
         {/* Секция действий */}

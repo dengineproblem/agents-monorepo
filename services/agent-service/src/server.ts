@@ -28,6 +28,7 @@ import amocrmManagementRoutes from './routes/amocrmManagement.js';
 import leadsRoutes from './routes/leads.js';
 import { briefingRoutes } from './routes/briefingRoutes.js';
 import { carouselCreativeRoutes } from './routes/carouselCreative.js';
+import { autopilotRoutes } from './routes/autopilot.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
 import { logger as baseLogger } from './lib/logger.js';
@@ -86,6 +87,7 @@ app.register(amocrmManagementRoutes);
 app.register(leadsRoutes);
 app.register(briefingRoutes, { prefix: '/briefing' });
 app.register(carouselCreativeRoutes);
+app.register(autopilotRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
