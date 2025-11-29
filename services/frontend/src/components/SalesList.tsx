@@ -127,7 +127,7 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId }) => {
                     <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Дата</th>
                     <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap">Телефон</th>
                     <th className="py-2 px-3 text-right text-xs font-medium text-muted-foreground whitespace-nowrap">Сумма</th>
-                    <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">Кампания</th>
+                    <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground whitespace-nowrap hidden sm:table-cell">Креатив</th>
                     <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground whitespace-nowrap">Действия</th>
                   </tr>
                 </thead>

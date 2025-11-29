@@ -268,7 +268,7 @@ class SalesApiService {
       // ШАГ 1: Загружаем ВСЕ user_creatives для пользователя с новыми полями
       let creativesQuery = (supabase as any)
         .from('user_creatives')
-        .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id')
+        .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id, fb_video_id')
         .eq('user_id', userAccountId)
         .eq('status', 'ready')
         .order('created_at', { ascending: false });
@@ -465,14 +465,16 @@ class SalesApiService {
 
         // Определяем URL креатива в зависимости от типа
         let creativeUrl = '';
-        if (creative.media_type === 'image' && creative.image_url) {
+        if (creative.media_type === 'video' && creative.fb_video_id) {
+          // Для видео - ссылка на Facebook видео
+          creativeUrl = `https://www.facebook.com/watch/?v=${creative.fb_video_id}`;
+        } else if (creative.media_type === 'image' && creative.image_url) {
           creativeUrl = creative.image_url;
         } else if (creative.media_type === 'carousel' && creative.carousel_data?.length > 0) {
           // Берём первую картинку карусели
           const firstCard = creative.carousel_data[0];
           creativeUrl = firstCard?.image_url_4k || firstCard?.image_url || '';
         }
-        // Для video URL нет в user_creatives (видео хранится в FB)
 
         campaigns.push({
           id: creativeId,
