@@ -26,6 +26,7 @@ import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import OAuthCallback from './pages/OAuthCallback';
 import CarouselTest from './pages/CarouselTest';
+import Competitors from './pages/Competitors';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
@@ -184,6 +185,7 @@ const AppRoutes = () => {
                       {FEATURES.SHOW_CREATIVES && <Route path="/creatives" element={<CreativeGeneration />} />}
                       {FEATURES.SHOW_CREATIVES && <Route path="/videos" element={<Creatives />} />}
                       {FEATURES.SHOW_CREATIVES && <Route path="/carousel-test" element={<CarouselTest />} />}
+                      {FEATURES.SHOW_COMPETITORS && <Route path="/competitors" element={<Competitors />} />}
                       <Route path="/profile" element={<Profile />} />
                       {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
                       <Route path="*" element={<NotFound />} />

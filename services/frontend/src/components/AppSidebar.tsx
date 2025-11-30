@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe, Users2 } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -41,6 +41,12 @@ const menuItems = [
     label: 'menu.videos',
     icon: Upload,
     show: FEATURES.SHOW_VIDEOS,
+  },
+  {
+    path: '/competitors',
+    label: 'menu.competitors',
+    icon: Users2,
+    show: FEATURES.SHOW_COMPETITORS,
   },
   {
     path: '/profile',

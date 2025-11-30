@@ -37,6 +37,9 @@ export const FEATURES = {
 
   // Показывать переключатель языка (скрыт)
   SHOW_LANGUAGE_SWITCHER: false,
+
+  // Скрыть раздел Конкуренты в App Review
+  SHOW_COMPETITORS: !APP_REVIEW_MODE,
 };
 
 /**
