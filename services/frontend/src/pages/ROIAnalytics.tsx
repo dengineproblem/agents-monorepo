@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import { salesApi, ROIData, CampaignROI, Direction } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
+import { AdAccountSwitcher } from '@/components/AdAccountSwitcher';
 import {
   TrendingUp,
   TrendingDown,
@@ -99,6 +100,9 @@ const getThumbnailUrl = (url: string | null | undefined, width = 200, height = 2
 };
 
 const ROIAnalytics: React.FC = () => {
+  // Получаем currentAdAccountId из контекста для мультиаккаунтности
+  const { currentAdAccountId } = useAppContext();
+
   const [roiData, setRoiData] = useState<ROIData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -276,7 +280,8 @@ const ROIAnalytics: React.FC = () => {
         userId,
         selectedDirectionId,
         tf || 'all',
-        mediaTypeFilter === 'all' ? null : mediaTypeFilter
+        mediaTypeFilter === 'all' ? null : mediaTypeFilter,
+        currentAdAccountId || undefined  // UUID для мультиаккаунтности
       );
       
       console.log('✅ ROI данные загружены:', data);
@@ -307,7 +312,7 @@ const ROIAnalytics: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Перезагрузка при смене направления или типа медиа
+  // Перезагрузка при смене направления, типа медиа или аккаунта
   useEffect(() => {
     if (userAccountId) {
       loadROIData();
@@ -342,7 +347,7 @@ const ROIAnalytics: React.FC = () => {
       */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDirectionId, directions, mediaTypeFilter]);
+  }, [selectedDirectionId, directions, mediaTypeFilter, currentAdAccountId]);
 
   const getROIBadgeVariant = (roi: number) => {
     if (roi > 0) return 'outline';
@@ -574,8 +579,14 @@ const ROIAnalytics: React.FC = () => {
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
         {/* Хедер с заголовком */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
-          <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
+              <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
+            </div>
+            {/* Селектор аккаунта для мультиаккаунтности */}
+            <AdAccountSwitcher />
+          </div>
         </div>
         
         {/* Подраздел: Обзор */}

@@ -20,6 +20,8 @@ import {
 import { CompetitorCreativesList } from '@/components/competitors/CompetitorCreativesList';
 import type { Competitor, CompetitorCreative, CompetitorsPagination } from '@/types/competitor';
 import { useTranslation } from '@/i18n/LanguageContext';
+import { useAppContext } from '@/context/AppContext';
+import { AdAccountSwitcher } from '@/components/AdAccountSwitcher';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,6 +35,8 @@ import {
 
 export default function Competitors() {
   const { t } = useTranslation();
+  // Получаем currentAdAccountId из контекста для мультиаккаунтности
+  const { currentAdAccountId } = useAppContext();
 
   // User state
   const [userId, setUserId] = useState<string | null>(null);
@@ -83,13 +87,13 @@ export default function Competitors() {
     if (!userId) return;
 
     try {
-      const data = await competitorsApi.list(userId);
+      const data = await competitorsApi.list(userId, currentAdAccountId || undefined);
       setCompetitors(data);
     } catch (error) {
       console.error('Error fetching competitors:', error);
       toast.error('Ошибка загрузки конкурентов');
     }
-  }, [userId]);
+  }, [userId, currentAdAccountId]);
 
   useEffect(() => {
     if (userId) {
@@ -112,6 +116,7 @@ export default function Competitors() {
           page,
           limit: 20,
           mediaType: mediaTypeFilter,
+          accountId: currentAdAccountId || undefined,  // UUID для мультиаккаунтности
         });
       } else {
         // Все креативы всех конкурентов
@@ -119,6 +124,7 @@ export default function Competitors() {
           page,
           limit: 20,
           mediaType: mediaTypeFilter,
+          accountId: currentAdAccountId || undefined,  // UUID для мультиаккаунтности
         });
       }
 
@@ -130,7 +136,7 @@ export default function Competitors() {
     } finally {
       setCreativesLoading(false);
     }
-  }, [userId, selectedCompetitorId, mediaTypeFilter]);
+  }, [userId, selectedCompetitorId, mediaTypeFilter, currentAdAccountId]);
 
   useEffect(() => {
     if (userId && competitors.length > 0) {
@@ -248,6 +254,7 @@ export default function Competitors() {
       <PageHero
         title={t('competitors.title')}
         subtitle={t('competitors.subtitle')}
+        rightContent={<AdAccountSwitcher />}
       />
 
       <div className="container mx-auto px-4 py-6">

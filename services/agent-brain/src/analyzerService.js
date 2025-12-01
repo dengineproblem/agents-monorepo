@@ -1047,7 +1047,7 @@ fastify.post('/analyze-creative', async (request, reply) => {
     // ===================================================
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
-      .select('id, title, media_type')
+      .select('id, title, media_type, account_id')
       .eq('id', creative_id)
       .single();
 
@@ -1126,11 +1126,15 @@ fastify.post('/analyze-creative', async (request, reply) => {
     try {
       // Используем upsert вместо delete + insert для атомарной операции
       // Это гарантирует что анализ всегда сохраняется, даже если страница обновляется
+      // account_id из креатива для мультиаккаунтности (null для legacy)
+      const accountId = creative.account_id || null;
+
       const { error: analysisError } = await supabase
         .from('creative_analysis')
         .upsert({
           creative_id: creative_id,
           user_account_id: user_id,
+          account_id: accountId,
           source: 'manual',
           date_from: metricsHistory[metricsHistory.length - 1].date,
           date_to: metricsHistory[0].date,

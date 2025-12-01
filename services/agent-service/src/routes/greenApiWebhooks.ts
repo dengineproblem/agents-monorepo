@@ -156,6 +156,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     .from('leads')
     .insert({
       user_account_id: whatsappNumberData.userAccountId,
+      account_id: whatsappNumberData.accountId || null,  // UUID для мультиаккаунтности
       business_id: finalWhatsappPhoneNumberId ? instancePhone : clientPhone, // legacy fallback
       whatsapp_phone_number_id: finalWhatsappPhoneNumberId, // Use WhatsApp from direction!
       chat_id: clientPhone,
@@ -261,11 +262,11 @@ function extractFacebookAdMetadata(messageData: any): {
 async function findWhatsAppNumber(
   instancePhone: string,
   app: FastifyInstance
-): Promise<{ id: string; userAccountId: string } | null> {
+): Promise<{ id: string; userAccountId: string; accountId: string | null } | null> {
   // Try with + prefix first (international format)
   const { data, error } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('id, user_account_id')
+    .select('id, user_account_id, account_id')
     .eq('phone_number', `+${instancePhone}`)
     .maybeSingle();
 
@@ -278,13 +279,14 @@ async function findWhatsAppNumber(
     return {
       id: data.id,
       userAccountId: data.user_account_id,
+      accountId: data.account_id || null,
     };
   }
 
   // Try without + prefix as fallback
   const { data: dataWithoutPlus } = await supabase
     .from('whatsapp_phone_numbers')
-    .select('id, user_account_id')
+    .select('id, user_account_id, account_id')
     .eq('phone_number', instancePhone)
     .maybeSingle();
 
@@ -292,6 +294,7 @@ async function findWhatsAppNumber(
     return {
       id: dataWithoutPlus.id,
       userAccountId: dataWithoutPlus.user_account_id,
+      accountId: dataWithoutPlus.account_id || null,
     };
   }
 

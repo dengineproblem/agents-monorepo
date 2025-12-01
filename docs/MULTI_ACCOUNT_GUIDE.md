@@ -1975,3 +1975,59 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-01 | 1.2 | - | Идемпотентные миграции с DO-блоками |
 | 2025-12-01 | 2.0 | - | Расширенная документация: блок-схемы, frontend интеграция, FAQ |
 | 2025-12-01 | 2.1 | - | Миграция 067: ROI аналитика (leads, purchases, sales), конкуренты, WhatsApp, метрики |
+| 2025-12-01 | 2.2 | - | Имплементация account_id в webhooks, frontend, agent-brain (см. ниже) |
+
+### Версия 2.2 — Детали имплементации
+
+**Webhooks (agent-service):**
+
+| Файл | Изменения |
+|------|-----------|
+| `routes/greenApiWebhooks.ts` | Добавлен `account_id` в `findWhatsAppNumber()` return type и select query. Передача в создание лидов. |
+| `routes/evolutionWebhooks.ts` | Уже поддерживал `account_id` (проверено при аудите) |
+
+**Frontend:**
+
+| Файл | Изменения |
+|------|-----------|
+| `pages/ROIAnalytics.tsx` | Добавлен `currentAdAccountId` из `useAppContext()`, передача в `salesApi.getROIData()`, добавлен в deps `useEffect` |
+| `pages/Competitors.tsx` | Добавлен `currentAdAccountId` из `useAppContext()`, передача в `competitorsApi.list()` и `getAllCreatives()` |
+| `components/common/PageHero.tsx` | Добавлен prop `rightContent?: React.ReactNode` для размещения `AdAccountSwitcher` |
+
+**Agent-brain:**
+
+| Файл | Изменения |
+|------|-----------|
+| `server.js` | Добавлен `account_id` в select креатива и insert в `creative_analysis` (endpoint `/api/analyzer/analyze-creative`) |
+| `analyzerService.js` | Добавлен `account_id` в select креатива и upsert в `creative_analysis` (endpoint `/analyze-creative`) |
+
+**Паттерн изменений:**
+
+```typescript
+// 1. Получение account_id из связанной сущности
+const { data: creative } = await supabase
+  .from('user_creatives')
+  .select('id, title, account_id')  // ← добавлен account_id
+  .eq('id', creative_id)
+  .single();
+
+const accountId = creative.account_id || null;  // null для legacy
+
+// 2. Передача в insert/upsert
+await supabase
+  .from('creative_analysis')
+  .insert({
+    creative_id,
+    user_account_id: user_id,
+    account_id: accountId,  // ← UUID для мультиаккаунтности, null для legacy
+    // ...
+  });
+```
+
+**Готовность к тестированию:** ✅
+
+- Все компоненты поддерживают nullable `account_id`
+- Legacy режим (>150 клиентов) не затронут — везде паттерн `|| null`
+- Webhooks передают `account_id` в leads
+- Frontend страницы фильтруют по выбранному аккаунту
+- agent-brain сохраняет `account_id` в `creative_analysis`

@@ -3610,10 +3610,10 @@ fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
       ? aggregatedMetrics.impressions / aggregatedMetrics.reach 
       : 0;
 
-    // Получаем креатив
+    // Получаем креатив с account_id для мультиаккаунтности
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
-      .select('id, title')
+      .select('id, title, account_id')
       .eq('id', creative_id)
       .single();
 
@@ -3621,6 +3621,9 @@ fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
       fastify.log.error({ where: 'analyzeCreative', creative_id, error: creativeError });
       return reply.code(404).send({ error: 'Creative not found' });
     }
+
+    // account_id для мультиаккаунтности (UUID или null для legacy)
+    const accountId = creative.account_id || null;
 
     // Получаем транскрибацию
     const { data: transcript } = await supabase
@@ -3674,6 +3677,7 @@ fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
         .insert({
           creative_id: creative_id,
           user_account_id: user_id,
+          account_id: accountId,  // UUID для мультиаккаунтности, null для legacy
           source: 'manual',
           date_from: metricsData[metricsData.length - 1]?.date || new Date().toISOString().split('T')[0],
           date_to: metricsData[0]?.date || new Date().toISOString().split('T')[0],
