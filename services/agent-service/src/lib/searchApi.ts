@@ -61,6 +61,7 @@ export interface CompetitorCreativeData {
   platforms: string[];
   first_shown_date: string | null;
   is_active: boolean;
+  ad_variations: number; // Количество вариаций (карточки + видео + изображения)
   raw_data: SearchApiAd;
 }
 
@@ -277,6 +278,12 @@ export function transformAdToCreativeData(ad: SearchApiAd): CompetitorCreativeDa
   // CTA: snapshot.cta_type или верхний уровень
   const ctaType = ad.snapshot?.cta_type || ad.call_to_action_type || null;
 
+  // Количество вариаций: карточки + видео + изображения (минимум 1)
+  const videos = getVideos(ad);
+  const images = getImages(ad);
+  const cards = getCards(ad);
+  const adVariations = Math.max(1, cards.length + videos.length + images.length);
+
   return {
     fb_ad_archive_id: ad.ad_archive_id,
     media_type: detectMediaType(ad),
@@ -288,6 +295,7 @@ export function transformAdToCreativeData(ad: SearchApiAd): CompetitorCreativeDa
     platforms: ad.publisher_platform || ['facebook'],
     first_shown_date: ad.start_date || null,
     is_active: ad.is_active ?? true,
+    ad_variations: adVariations,
     raw_data: ad,
   };
 }

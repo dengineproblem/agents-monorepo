@@ -58,6 +58,9 @@ export default function Competitors() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [competitorToDelete, setCompetitorToDelete] = useState<Competitor | null>(null);
 
+  // Extract text state
+  const [extractingCreativeId, setExtractingCreativeId] = useState<string | null>(null);
+
   // Get user ID from localStorage
   useEffect(() => {
     try {
@@ -204,6 +207,24 @@ export default function Competitors() {
     console.log('Creative clicked:', creative);
   };
 
+  const handleExtractText = async (creativeId: string) => {
+    setExtractingCreativeId(creativeId);
+    try {
+      const result = await competitorsApi.extractText(creativeId);
+      if (result.success) {
+        toast.success(`Извлечено ${result.text?.length || 0} символов текста`);
+        // Обновляем креативы чтобы показать текст
+        fetchCreatives(pagination.page);
+      } else {
+        toast.error(result.error || 'Ошибка извлечения текста');
+      }
+    } catch (error) {
+      toast.error('Ошибка извлечения текста');
+    } finally {
+      setExtractingCreativeId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -315,6 +336,8 @@ export default function Competitors() {
                     onPageChange={fetchCreatives}
                     onCreativeClick={handleCreativeClick}
                     showCompetitorBadge={selectedCompetitorId === null}
+                    onExtractText={handleExtractText}
+                    extractingCreativeId={extractingCreativeId}
                   />
                 )}
               </CardContent>

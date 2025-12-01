@@ -215,19 +215,32 @@ export const competitorsApi = {
       page?: number;
       limit?: number;
       mediaType?: 'video' | 'image' | 'carousel' | 'all';
+      top10Only?: boolean;
+      includeAll?: boolean;
+      newOnly?: boolean;
     } = {}
   ): Promise<{
     creatives: CompetitorCreative[];
     pagination: CompetitorsPagination;
   }> {
     try {
-      const { page = 1, limit = 20, mediaType = 'all' } = options;
+      const {
+        page = 1,
+        limit = 20,
+        mediaType = 'all',
+        top10Only = true,
+        includeAll = false,
+        newOnly = false,
+      } = options;
 
       const params = new URLSearchParams({
         userAccountId,
         page: page.toString(),
         limit: limit.toString(),
         mediaType,
+        top10Only: top10Only.toString(),
+        includeAll: includeAll.toString(),
+        newOnly: newOnly.toString(),
       });
 
       const response = await fetch(
@@ -254,6 +267,69 @@ export const competitorsApi = {
         creatives: [],
         pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
       };
+    }
+  },
+
+  /**
+   * Получить ТОП-10 креативы для референса при генерации
+   * (сортировка по score, только is_top10=true)
+   */
+  async getTop10ForReference(
+    userAccountId: string,
+    options: {
+      mediaType?: 'video' | 'image' | 'carousel' | 'all';
+      limit?: number;
+    } = {}
+  ): Promise<CompetitorCreative[]> {
+    try {
+      const { mediaType = 'all', limit = 20 } = options;
+
+      const params = new URLSearchParams({
+        userAccountId,
+        page: '1',
+        limit: limit.toString(),
+        mediaType,
+        top10Only: 'true',
+      });
+
+      const response = await fetch(
+        `${API_BASE_URL}/competitors/all-creatives?${params}`
+      );
+
+      if (!response.ok) {
+        console.error('[competitorsApi.getTop10ForReference] Ошибка HTTP:', response.statusText);
+        return [];
+      }
+
+      const data: GetCreativesResponse = await response.json();
+      return data.creatives || [];
+    } catch (error) {
+      console.error('[competitorsApi.getTop10ForReference] Исключение:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Извлечь текст из креатива конкурента (OCR для картинок, транскрипция для видео)
+   */
+  async extractText(creativeId: string): Promise<{
+    success: boolean;
+    text?: string;
+    media_type?: 'video' | 'image' | 'carousel';
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/competitors/extract-text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creativeId }),
+      });
+
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('[competitorsApi.extractText] Исключение:', error);
+      return { success: false, error: 'Ошибка сети' };
     }
   },
 };

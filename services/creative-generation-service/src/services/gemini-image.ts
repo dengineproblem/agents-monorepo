@@ -344,12 +344,97 @@ The result should look like ONE seamless image that was always 9:16, not a 4:5 i
 }
 
 /**
+ * OCR - извлечение текста из изображения через Gemini Vision
+ * @param imageUrl - URL изображения или base64
+ * @param imageType - Тип: 'url' или 'base64'
+ * @returns Извлечённый текст
+ */
+export async function extractTextFromImage(
+  imageUrl: string,
+  imageType: 'url' | 'base64' = 'url'
+): Promise<string> {
+  try {
+    console.log('[Gemini OCR] Starting text extraction...');
+    console.log('[Gemini OCR] Image type:', imageType);
+
+    const client = getGeminiClient();
+    // Используем gemini-2.0-flash для OCR
+    const model = client.getGenerativeModel({
+      model: 'gemini-2.0-flash'
+    });
+
+    // Формируем контент
+    const contentParts: any[] = [];
+
+    // Добавляем промпт для OCR
+    contentParts.push({
+      text: `Внимательно проанализируй это изображение рекламного креатива.
+
+Твоя задача - извлечь ВЕСЬ текст, который виден на изображении:
+- Заголовки и подзаголовки
+- Основной текст
+- Call-to-action (кнопки, призывы к действию)
+- Мелкий текст (дисклеймеры, условия)
+- Текст на продуктах, если виден
+- Любые надписи и логотипы
+
+Верни ТОЛЬКО извлечённый текст, без комментариев и пояснений.
+Если текста нет - верни пустую строку.
+Сохраняй структуру текста (переносы строк между блоками).`
+    });
+
+    // Добавляем изображение
+    if (imageType === 'url') {
+      console.log('[Gemini OCR] Fetching image from URL...');
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.statusText}`);
+      }
+      const buffer = await response.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      const mimeType = response.headers.get('content-type') || 'image/jpeg';
+
+      contentParts.push({
+        inlineData: {
+          mimeType,
+          data: base64
+        }
+      });
+      console.log('[Gemini OCR] Image fetched, size:', base64.length, 'bytes');
+    } else {
+      // Уже base64
+      contentParts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: imageUrl
+        }
+      });
+    }
+
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: contentParts }]
+    });
+
+    const response = result.response;
+    const text = response.text() || '';
+
+    console.log('[Gemini OCR] Text extracted successfully, length:', text.length);
+
+    return text.trim();
+  } catch (error: any) {
+    console.error('[Gemini OCR] Error extracting text:', error);
+    throw new Error(`OCR failed: ${error.message}`);
+  }
+}
+
+/**
  * Инициализация и проверка доступности Gemini API
  */
 export async function initializeGeminiImageAPI(): Promise<void> {
   try {
     console.log('[Gemini Image] Initializing API...');
     console.log('[Gemini Image] Model: gemini-3-pro-image-preview');
+    console.log('[Gemini Image] OCR Model: gemini-2.0-flash');
     console.log('[Gemini Image] API initialized successfully');
   } catch (error: any) {
     console.error('[Gemini Image] Failed to initialize API:', error);

@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { generateCreativeImage, upscaleImageTo4K, expandTo9x16 } from '../services/gemini-image';
+import { generateCreativeImage, upscaleImageTo4K, expandTo9x16, extractTextFromImage } from '../services/gemini-image';
 import { supabase, logSupabaseError } from '../db/supabase';
 import { GenerateCreativeRequest, GenerateCreativeResponse } from '../types';
 
@@ -321,6 +321,50 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(500).send({
         success: false,
         error: 'Failed to upscale image to 4K',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
+  /**
+   * POST /ocr
+   *
+   * Извлекает текст из изображения с помощью Gemini Vision
+   * Используется для анализа креативов конкурентов
+   */
+  app.post<{
+    Body: {
+      image_url: string;
+      image_type?: 'url' | 'base64';
+    };
+  }>('/ocr', async (request, reply) => {
+    const { image_url, image_type = 'url' } = request.body;
+
+    try {
+      app.log.info(`[OCR] Request for image: ${image_url.substring(0, 100)}...`);
+
+      if (!image_url) {
+        return reply.status(400).send({
+          success: false,
+          error: 'image_url is required'
+        });
+      }
+
+      const extractedText = await extractTextFromImage(image_url, image_type);
+
+      app.log.info(`[OCR] Extracted ${extractedText.length} characters`);
+
+      return {
+        success: true,
+        text: extractedText
+      };
+
+    } catch (error: any) {
+      app.log.error('[OCR] Error:', error);
+
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to extract text from image',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }

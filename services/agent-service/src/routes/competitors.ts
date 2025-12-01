@@ -12,6 +12,15 @@ import {
   transformAdToCreativeData,
   type CompetitorCreativeData,
 } from '../lib/searchApi.js';
+import { calculateCreativeScore } from '../lib/competitorScoring.js';
+import { processVideoTranscription } from '../lib/transcription.js';
+import { createWriteStream, promises as fs } from 'fs';
+import { pipeline } from 'stream/promises';
+import path from 'path';
+import { randomUUID } from 'crypto';
+
+const TOP_CREATIVES_LIMIT = 10;
+const MAX_CREATIVES_PER_COMPETITOR = 50;
 
 const log = createLogger({ module: 'competitorsRoutes' });
 
@@ -44,6 +53,8 @@ const GetCreativesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   mediaType: z.enum(['video', 'image', 'carousel', 'all']).default('all'),
+  top10Only: z.coerce.boolean().default(true), // По умолчанию только ТОП-10
+  includeAll: z.coerce.boolean().default(false), // Показать все 50 креативов
 });
 
 const DeleteCompetitorSchema = z.object({
@@ -56,19 +67,82 @@ type AddCompetitorInput = z.infer<typeof AddCompetitorSchema>;
 // HELPER FUNCTIONS
 // ========================================
 
+interface ScoredCreative extends CompetitorCreativeData {
+  score: number;
+  duration_days: number;
+}
+
 /**
- * Сохранить креативы в БД с дедупликацией
+ * Добавить score к креативам
  */
-async function saveCreatives(
+function scoreCreatives(creatives: CompetitorCreativeData[]): ScoredCreative[] {
+  return creatives.map(creative => {
+    const scoreResult = calculateCreativeScore({
+      is_active: creative.is_active,
+      first_shown_date: creative.first_shown_date,
+      media_type: creative.media_type,
+      ad_variations: creative.ad_variations,
+      platforms: creative.platforms,
+    });
+
+    return {
+      ...creative,
+      score: scoreResult.score,
+      duration_days: scoreResult.duration_days,
+    };
+  });
+}
+
+/**
+ * Получить текущий ТОП-10 из БД
+ */
+async function getCurrentTop10(competitorId: string): Promise<Set<string>> {
+  const { data } = await supabase
+    .from('competitor_creatives')
+    .select('fb_ad_archive_id')
+    .eq('competitor_id', competitorId)
+    .eq('is_top10', true);
+
+  return new Set((data || []).map(c => c.fb_ad_archive_id));
+}
+
+/**
+ * Сохранить креативы в БД с расчетом score и ТОП-10 флагом
+ */
+async function saveCreativesWithScoring(
   competitorId: string,
   creatives: CompetitorCreativeData[]
-): Promise<{ found: number; new: number }> {
-  let newCount = 0;
+): Promise<{ found: number; new: number; newInTop10: number }> {
+  // Рассчитываем score
+  const scoredCreatives = scoreCreatives(creatives);
 
-  for (const creative of creatives) {
+  // Получаем текущий ТОП-10
+  const currentTop10Ids = await getCurrentTop10(competitorId);
+
+  // Сортируем по score и берём ТОП-10
+  const sortedCreatives = [...scoredCreatives].sort((a, b) => b.score - a.score);
+  const top10 = sortedCreatives.slice(0, TOP_CREATIVES_LIMIT);
+  const top10Ids = new Set(top10.map(c => c.fb_ad_archive_id));
+
+  let upsertedCount = 0;
+  let newInTop10Count = 0;
+  const now = new Date().toISOString();
+
+  // 1. Сначала сбрасываем is_top10 для всех креативов этого конкурента
+  await supabase
+    .from('competitor_creatives')
+    .update({ is_top10: false })
+    .eq('competitor_id', competitorId);
+
+  // 2. Upsert ТОП-10 креативов
+  for (const creative of top10) {
+    const isNewInTop = !currentTop10Ids.has(creative.fb_ad_archive_id);
+    if (isNewInTop) {
+      newInTop10Count++;
+    }
+
     try {
-      // Используем upsert с conflict on fb_ad_archive_id
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('competitor_creatives')
         .upsert(
           {
@@ -83,25 +157,88 @@ async function saveCreatives(
             platforms: creative.platforms,
             first_shown_date: creative.first_shown_date,
             is_active: creative.is_active,
+            ad_variations: creative.ad_variations,
             raw_data: creative.raw_data,
+            // Поля скоринга
+            score: creative.score,
+            duration_days: creative.duration_days,
+            is_top10: true,
+            entered_top10_at: isNewInTop ? now : undefined,
+            last_seen_at: now,
           },
           {
             onConflict: 'fb_ad_archive_id',
             ignoreDuplicates: false,
           }
-        )
-        .select('id')
-        .single();
+        );
 
-      if (!error && data) {
-        newCount++;
+      if (!error) {
+        upsertedCount++;
       }
     } catch (err) {
       log.warn({ err, adArchiveId: creative.fb_ad_archive_id }, 'Ошибка при сохранении креатива');
     }
   }
 
-  return { found: creatives.length, new: newCount };
+  // 3. Также сохраняем остальные креативы (не топ-10), но только до лимита 50
+  const remainingCreatives = sortedCreatives.slice(TOP_CREATIVES_LIMIT);
+
+  // Получаем текущее количество креативов
+  const { count: currentCount } = await supabase
+    .from('competitor_creatives')
+    .select('*', { count: 'exact', head: true })
+    .eq('competitor_id', competitorId);
+
+  const availableSlots = MAX_CREATIVES_PER_COMPETITOR - (currentCount || 0);
+
+  if (availableSlots > 0 && remainingCreatives.length > 0) {
+    const creativesToAdd = remainingCreatives.slice(0, availableSlots);
+
+    for (const creative of creativesToAdd) {
+      try {
+        await supabase
+          .from('competitor_creatives')
+          .upsert(
+            {
+              competitor_id: competitorId,
+              fb_ad_archive_id: creative.fb_ad_archive_id,
+              media_type: creative.media_type,
+              media_urls: creative.media_urls,
+              thumbnail_url: creative.thumbnail_url,
+              body_text: creative.body_text,
+              headline: creative.headline,
+              cta_type: creative.cta_type,
+              platforms: creative.platforms,
+              first_shown_date: creative.first_shown_date,
+              is_active: creative.is_active,
+              ad_variations: creative.ad_variations,
+              raw_data: creative.raw_data,
+              score: creative.score,
+              duration_days: creative.duration_days,
+              is_top10: false,
+              last_seen_at: now,
+            },
+            {
+              onConflict: 'fb_ad_archive_id',
+              ignoreDuplicates: false,
+            }
+          );
+        upsertedCount++;
+      } catch (err) {
+        // Игнорируем ошибки для не-топ креативов
+      }
+    }
+  }
+
+  log.info({
+    competitorId,
+    found: creatives.length,
+    upserted: upsertedCount,
+    newInTop10: newInTop10Count,
+    top10Scores: top10.map(c => c.score),
+  }, 'Скоринг креативов завершен');
+
+  return { found: creatives.length, new: upsertedCount, newInTop10: newInTop10Count };
 }
 
 /**
@@ -329,8 +466,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         }
       }
       try {
-        const creatives = await fetchCompetitorCreatives(searchQuery, input.countryCode, { targetPageId: pageId, limit: 10 });
-        const result = await saveCreatives(competitorId, creatives);
+        const creatives = await fetchCompetitorCreatives(searchQuery, input.countryCode, { targetPageId: pageId, limit: 50 });
+        const result = await saveCreativesWithScoring(competitorId, creatives);
 
         // Обновляем статус и счетчик
         await supabase
@@ -464,9 +601,9 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         const creatives = await fetchCompetitorCreatives(
           searchQuery,
           competitor.country_code,
-          { targetPageId: competitor.fb_page_id, limit: 10 }
+          { targetPageId: competitor.fb_page_id, limit: 50 }
         );
-        const result = await saveCreatives(competitorId, creatives);
+        const result = await saveCreativesWithScoring(competitorId, creatives);
 
         // Обновляем job
         await supabase
@@ -534,6 +671,11 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
   /**
    * GET /competitors/:competitorId/creatives - Список креативов конкурента
+   *
+   * Query params:
+   * - top10Only: true (default) - только ТОП-10 по score
+   * - includeAll: true - показать все креативы (до 50)
+   * - mediaType: video | image | carousel | all
    */
   app.get('/competitors/:competitorId/creatives', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -553,8 +695,14 @@ export default async function competitorsRoutes(app: FastifyInstance) {
           )
         `, { count: 'exact' })
         .eq('competitor_id', competitorId)
-        .order('created_at', { ascending: false })
+        .order('score', { ascending: false, nullsFirst: false }) // Сортировка по score
+        .order('created_at', { ascending: false }) // Вторичная сортировка
         .range(offset, offset + query.limit - 1);
+
+      // Фильтр ТОП-10 (если не запрошены все)
+      if (query.top10Only && !query.includeAll) {
+        dbQuery = dbQuery.eq('is_top10', true);
+      }
 
       // Фильтр по типу медиа
       if (query.mediaType !== 'all') {
@@ -589,10 +737,25 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
   /**
    * GET /competitors/all-creatives - Все креативы всех конкурентов пользователя
+   *
+   * Query params:
+   * - userAccountId: UUID пользователя (обязательный)
+   * - top10Only: true (default) - только ТОП-10 по score
+   * - includeAll: true - показать все креативы (до 50 на конкурента)
+   * - newOnly: true - только новые в ТОП-10 (за 7 дней)
+   * - mediaType: video | image | carousel | all
    */
   app.get('/competitors/all-creatives', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId, page = '1', limit = '20', mediaType = 'all' } = request.query as Record<string, string>;
+      const {
+        userAccountId,
+        page = '1',
+        limit = '20',
+        mediaType = 'all',
+        top10Only = 'true',
+        includeAll = 'false',
+        newOnly = 'false',
+      } = request.query as Record<string, string>;
 
       if (!userAccountId) {
         return reply.status(400).send({ success: false, error: 'userAccountId обязателен' });
@@ -601,6 +764,9 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       const pageNum = parseInt(page);
       const limitNum = Math.min(parseInt(limit), 50);
       const offset = (pageNum - 1) * limitNum;
+      const isTop10Only = top10Only === 'true';
+      const isIncludeAll = includeAll === 'true';
+      const isNewOnly = newOnly === 'true';
 
       // Получаем ID конкурентов пользователя
       const { data: userCompetitors } = await supabase
@@ -635,9 +801,24 @@ export default async function competitorsRoutes(app: FastifyInstance) {
           )
         `, { count: 'exact' })
         .in('competitor_id', competitorIds)
-        .order('created_at', { ascending: false })
+        .order('score', { ascending: false, nullsFirst: false }) // Сортировка по score
+        .order('created_at', { ascending: false }) // Вторичная сортировка
         .range(offset, offset + limitNum - 1);
 
+      // Фильтр ТОП-10 (если не запрошены все)
+      if (isTop10Only && !isIncludeAll) {
+        dbQuery = dbQuery.eq('is_top10', true);
+      }
+
+      // Фильтр только новые в ТОП-10 (за последние 7 дней)
+      if (isNewOnly) {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        dbQuery = dbQuery
+          .eq('is_top10', true)
+          .gte('entered_top10_at', weekAgo);
+      }
+
+      // Фильтр по типу медиа
       if (mediaType !== 'all') {
         dbQuery = dbQuery.eq('media_type', mediaType);
       }
@@ -661,6 +842,152 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ err: error }, 'Ошибка в GET /competitors/all-creatives');
+      return reply.status(500).send({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * POST /competitors/extract-text - Извлечь текст из креатива конкурента
+   *
+   * Для image: OCR через Gemini
+   * Для video: Транскрибация через существующий сервис
+   *
+   * Body:
+   * - creativeId: UUID креатива
+   */
+  app.post('/competitors/extract-text', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { creativeId } = request.body as { creativeId: string };
+
+      if (!creativeId) {
+        return reply.status(400).send({ success: false, error: 'creativeId обязателен' });
+      }
+
+      log.info({ creativeId }, '[Extract Text] Начинаем извлечение текста');
+
+      // Получаем креатив
+      const { data: creative, error: creativeError } = await supabase
+        .from('competitor_creatives')
+        .select('id, media_type, media_urls, thumbnail_url')
+        .eq('id', creativeId)
+        .single();
+
+      if (creativeError || !creative) {
+        log.error({ err: creativeError, creativeId }, '[Extract Text] Креатив не найден');
+        return reply.status(404).send({ success: false, error: 'Креатив не найден' });
+      }
+
+      let extractedText = '';
+      const mediaUrl = creative.thumbnail_url || creative.media_urls?.[0];
+
+      if (!mediaUrl) {
+        return reply.status(400).send({ success: false, error: 'Нет медиа URL для анализа' });
+      }
+
+      if (creative.media_type === 'image' || creative.media_type === 'carousel') {
+        // OCR через creative-generation-service
+        log.info({ creativeId, mediaUrl }, '[Extract Text] Вызываем OCR для изображения');
+
+        const ocrResponse = await fetch('http://creative-generation-service:8085/ocr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_url: mediaUrl, image_type: 'url' }),
+        });
+
+        if (!ocrResponse.ok) {
+          const errorText = await ocrResponse.text();
+          log.error({ creativeId, status: ocrResponse.status, errorText }, '[Extract Text] Ошибка OCR');
+          return reply.status(500).send({ success: false, error: 'Ошибка OCR сервиса' });
+        }
+
+        const ocrResult = await ocrResponse.json() as { success: boolean; text?: string };
+        extractedText = ocrResult.text || '';
+        log.info({ creativeId, textLength: extractedText.length }, '[Extract Text] OCR завершен');
+
+      } else if (creative.media_type === 'video') {
+        // Транскрибация видео через Whisper
+        const videoUrl = creative.media_urls?.[0];
+        if (!videoUrl) {
+          return reply.status(400).send({ success: false, error: 'Нет URL видео для транскрибации' });
+        }
+
+        log.info({ creativeId, videoUrl }, '[Extract Text] Скачиваем видео для транскрибации');
+
+        let videoPath: string | null = null;
+        try {
+          // Скачиваем видео во временный файл
+          videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
+
+          const videoResponse = await fetch(videoUrl);
+          if (!videoResponse.ok || !videoResponse.body) {
+            throw new Error(`Не удалось скачать видео: ${videoResponse.status}`);
+          }
+
+          // Создаём поток для записи на диск
+          const writeStream = createWriteStream(videoPath);
+
+          // Node 18+ поддерживает ReadableStream.from()
+          const reader = videoResponse.body.getReader();
+          const nodeStream = new (await import('stream')).Readable({
+            async read() {
+              const { done, value } = await reader.read();
+              if (done) {
+                this.push(null);
+              } else {
+                this.push(Buffer.from(value));
+              }
+            }
+          });
+
+          await pipeline(nodeStream, writeStream);
+
+          log.info({ creativeId, videoPath }, '[Extract Text] Видео скачано, запускаем транскрибацию');
+
+          // Транскрибируем через Whisper
+          const transcription = await processVideoTranscription(videoPath, 'ru');
+          extractedText = transcription.text;
+
+          log.info({ creativeId, textLength: extractedText.length }, '[Extract Text] Транскрибация завершена');
+
+        } finally {
+          // Удаляем временный файл
+          if (videoPath) {
+            try {
+              await fs.unlink(videoPath);
+            } catch (err) {
+              log.warn({ err, videoPath }, '[Extract Text] Не удалось удалить временный файл');
+            }
+          }
+        }
+      }
+
+      // Сохраняем результат в competitor_creative_analysis
+      const { error: upsertError } = await supabase
+        .from('competitor_creative_analysis')
+        .upsert({
+          creative_id: creativeId,
+          ocr_text: creative.media_type !== 'video' ? extractedText : null,
+          transcript: creative.media_type === 'video' ? extractedText : null,
+          processing_status: 'completed',
+        }, {
+          onConflict: 'creative_id',
+        });
+
+      if (upsertError) {
+        log.error({ err: upsertError, creativeId }, '[Extract Text] Ошибка сохранения анализа');
+        // Не фатально, возвращаем текст
+      }
+
+      log.info({ creativeId, textLength: extractedText.length }, '[Extract Text] Успешно завершено');
+
+      return reply.send({
+        success: true,
+        text: extractedText,
+        media_type: creative.media_type,
+      });
+
+    } catch (error: any) {
+      log.error({ err: error }, 'Ошибка в POST /competitors/extract-text');
       return reply.status(500).send({ success: false, error: error.message });
     }
   });

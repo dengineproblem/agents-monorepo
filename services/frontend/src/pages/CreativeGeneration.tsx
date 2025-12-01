@@ -17,6 +17,7 @@ import { useDirections } from '@/hooks/useDirections';
 import { creativesApi } from '@/services/creativesApi';
 import { CarouselTab } from '@/components/creatives/CarouselTab';
 import { VideoScriptsTab } from '@/components/creatives/VideoScriptsTab';
+import { CompetitorReferenceSelector, type CompetitorReference } from '@/components/creatives/CompetitorReferenceSelector';
 
 interface CreativeTexts {
   offer: string;
@@ -52,6 +53,9 @@ const CreativeGeneration = () => {
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
   const [referenceImagePrompt, setReferenceImagePrompt] = useState<string>('');
+
+  // State для референса конкурента
+  const [competitorReference, setCompetitorReference] = useState<CompetitorReference | null>(null);
 
   // State для редактирования
   const [isEditMode, setIsEditMode] = useState(false);
@@ -214,14 +218,29 @@ const CreativeGeneration = () => {
           return { ...acc, [fieldName]: value };
         }, {});
 
+      // Добавляем референс конкурента, если выбран
+      const competitorReferenceData = competitorReference ? {
+        competitor_reference: {
+          body_text: competitorReference.body_text,
+          headline: competitorReference.headline,
+          ocr_text: competitorReference.ocr_text,
+          transcript: competitorReference.transcript,
+          competitor_name: competitorReference.competitor_name,
+        }
+      } : {};
+
       const requestData = {
         user_id: userId,
         prompt: userPrompt || '',
-        ...otherTexts
+        ...otherTexts,
+        ...competitorReferenceData
       };
 
       console.log(`Отправляем запрос на генерацию ${type}:`, requestData);
       console.log(`User ID: ${userId}, Prompt length: ${userPrompt?.length || 0}`);
+      if (competitorReference) {
+        console.log('Competitor reference:', competitorReference.competitor_name);
+      }
 
       // Вызываем новый API creative-generation-service
       const response = await fetch(`${CREATIVE_API_BASE}/generate-${type}`, {
@@ -395,6 +414,17 @@ const CreativeGeneration = () => {
         referenceImageBase64 = base64;
       }
 
+      // Добавляем референс конкурента, если выбран
+      const competitorReferenceData = competitorReference ? {
+        competitor_reference: {
+          body_text: competitorReference.body_text,
+          headline: competitorReference.headline,
+          ocr_text: competitorReference.ocr_text,
+          transcript: competitorReference.transcript,
+          competitor_name: competitorReference.competitor_name,
+        }
+      } : {};
+
       const requestData = {
         user_id: userId,
         offer: texts.offer,
@@ -405,13 +435,15 @@ const CreativeGeneration = () => {
         reference_image: referenceImageBase64,
         reference_image_type: referenceImageBase64 ? 'base64' : undefined,
         // При редактировании используем editPrompt, иначе referenceImagePrompt
-        reference_image_prompt: isEdit ? editPrompt : (referenceImagePrompt || undefined)
+        reference_image_prompt: isEdit ? editPrompt : (referenceImagePrompt || undefined),
+        ...competitorReferenceData
       };
 
       console.log(`Отправляем запрос на генерацию креатива через Gemini API (isEdit: ${isEdit}):`, {
         ...requestData,
         reference_image: referenceImageBase64 ? '[base64 data]' : undefined,
-        reference_image_prompt_length: requestData.reference_image_prompt?.length || 0
+        reference_image_prompt_length: requestData.reference_image_prompt?.length || 0,
+        has_competitor_reference: !!competitorReference
       });
 
       // Вызываем новый API creative-generation-service
@@ -770,6 +802,37 @@ const CreativeGeneration = () => {
                 </CardContent>
               </Card>
             ))}
+
+            {/* Референс конкурента */}
+            {userId && (
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-lg">Референс конкурента (опционально)</CardTitle>
+                  <CardDescription>
+                    Используйте креатив конкурента как вдохновение для текстов и стиля
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <CompetitorReferenceSelector
+                    userAccountId={userId}
+                    selectedReference={competitorReference}
+                    onSelect={setCompetitorReference}
+                    mediaTypeFilter="image"
+                  />
+                  {competitorReference && (competitorReference.body_text || competitorReference.headline) && (
+                    <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                      <p className="text-xs text-muted-foreground mb-2">Тексты из креатива конкурента:</p>
+                      {competitorReference.headline && (
+                        <p className="text-sm font-medium mb-1">{competitorReference.headline}</p>
+                      )}
+                      {competitorReference.body_text && (
+                        <p className="text-xs text-muted-foreground">{competitorReference.body_text}</p>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Референсное изображение */}
             <Card className="shadow-sm">

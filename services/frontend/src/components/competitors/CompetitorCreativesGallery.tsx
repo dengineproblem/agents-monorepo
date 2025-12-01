@@ -12,6 +12,8 @@ interface CompetitorCreativesGalleryProps {
   onPageChange: (page: number) => void;
   onCreativeClick?: (creative: CompetitorCreative) => void;
   showCompetitorBadge?: boolean;
+  onExtractText?: (creativeId: string) => Promise<void>;
+  extractingCreativeId?: string | null;
 }
 
 export function CompetitorCreativesGallery({
@@ -21,6 +23,8 @@ export function CompetitorCreativesGallery({
   onPageChange,
   onCreativeClick,
   showCompetitorBadge = false,
+  onExtractText,
+  extractingCreativeId,
 }: CompetitorCreativesGalleryProps) {
   const { t } = useTranslation();
 
@@ -53,6 +57,8 @@ export function CompetitorCreativesGallery({
             creative={creative}
             onClick={() => onCreativeClick?.(creative)}
             showCompetitorBadge={showCompetitorBadge}
+            onExtractText={onExtractText}
+            isExtracting={extractingCreativeId === creative.id}
           />
         ))}
       </div>
