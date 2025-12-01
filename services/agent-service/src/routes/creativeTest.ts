@@ -5,12 +5,14 @@ import { supabase } from '../lib/supabase.js';
 import { workflowStartCreativeTest, fetchCreativeTestInsights } from '../workflows/creativeTest.js';
 import { graph } from '../adapters/facebook.js';
 import { getWhatsAppPhoneNumber } from '../lib/settingsHelpers.js';
+import { getCredentials } from '../lib/adAccountHelper.js';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
 const StartTestSchema = z.object({
   user_creative_id: z.string().uuid(),
   user_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(), // UUID из ad_accounts (для мультиаккаунтности)
   force: z.boolean().optional()
 });
 
@@ -34,19 +36,23 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      const { user_creative_id, user_id, force = false } = parsed.data;
+      const { user_creative_id, user_id, account_id, force = false } = parsed.data;
 
-      // Получаем данные пользователя
-      const { data: userAccount, error: userError } = await supabase
-        .from('user_accounts')
-        .select('id, access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
-        .eq('id', user_id)
-        .single();
-
-      if (userError || !userAccount) {
-        return reply.status(404).send({
+      // Получаем учётные данные через getCredentials (поддержка мультиаккаунта)
+      let credentials;
+      try {
+        credentials = await getCredentials(user_id, account_id);
+      } catch (credError: any) {
+        return reply.status(400).send({
           success: false,
-          error: 'User account not found'
+          error: credError.message,
+        });
+      }
+
+      if (!credentials.fbAccessToken) {
+        return reply.status(400).send({
+          success: false,
+          error: 'No Facebook access token configured'
         });
       }
 
@@ -114,12 +120,12 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       const result = await workflowStartCreativeTest(
         { user_creative_id, user_id },
         {
-          ad_account_id: userAccount.ad_account_id,
-          page_id: userAccount.page_id,
-          instagram_id: userAccount.instagram_id,
+          ad_account_id: credentials.fbAdAccountId!,
+          page_id: credentials.fbPageId!,
+          instagram_id: credentials.fbInstagramId,
           whatsapp_phone_number: whatsapp_phone_number_for_test
         },
-        userAccount.access_token
+        credentials.fbAccessToken!
       );
 
       return reply.send(result);

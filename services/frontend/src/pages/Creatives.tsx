@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAppContext } from "@/context/AppContext";
 import Header from "@/components/Header";
 import PageHero from "@/components/common/PageHero";
 import { useUserCreatives } from "@/hooks/useUserCreatives";
@@ -1204,6 +1205,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 const Creatives: React.FC = () => {
   const { items, loading, reload, testStatuses } = useUserCreatives();
   const navigate = useNavigate();
+  const { currentAdAccountId } = useAppContext();
 
   const [queue, setQueue] = useState<UploadItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1409,7 +1411,8 @@ const Creatives: React.FC = () => {
                 setQueue(prev2 => prev2.map((it) => it.id === item.id ? { ...it, progress: pct } : it));
         },
         undefined, // description
-        selectedDirectionId || null // directionId
+        selectedDirectionId || null, // directionId
+        currentAdAccountId || null // adAccountId (UUID из ad_accounts)
       );
 
       if (!ok) {
@@ -1436,7 +1439,7 @@ const Creatives: React.FC = () => {
         return prev.map((it, idx) => idx === nextIndex ? { ...it, status: "uploading", progress: 0 } : it);
       });
     });
-  }, [selectedDirectionId]);
+  }, [selectedDirectionId, currentAdAccountId]);
 
   const startProcessing = useCallback(async () => {
     if (processingRef.current) {

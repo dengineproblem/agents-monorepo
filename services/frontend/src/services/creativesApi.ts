@@ -305,7 +305,8 @@ export const creativesApi = {
     goals: any,
     onProgress?: (pct: number) => void,
     description?: string,
-    directionId?: string | null
+    directionId?: string | null,
+    adAccountId?: string | null // UUID из ad_accounts (для мультиаккаунтности)
   ): Promise<boolean> {
     // Выбираем эндпоинт по типу файла
     // ✅ Следуем правилам: API_BASE_URL уже содержит /api, не добавляем его в путь
@@ -334,24 +335,10 @@ export const creativesApi = {
       console.log('[creativesApi.uploadToWebhook] direction_id НЕ добавлен (значение:', directionId, ')');
     }
 
-    // проброс всех стандартных полей как в VideoUpload
-    const stored = localStorage.getItem('user');
-    if (stored) {
-      try {
-        const u = JSON.parse(stored);
-        if (u?.instagram_id) form.append('instagram_id', String(u.instagram_id));
-        if (u?.instagram_username) form.append('instagram_username', String(u.instagram_username));
-        if (u?.telegram_id) form.append('telegram_id', String(u.telegram_id));
-        if (u?.telegram_bot_token) form.append('telegram_bot_token', String(u.telegram_bot_token));
-        if (u?.access_token) form.append('page_access_token', String(u.access_token));
-        if (u?.page_id) form.append('page_id', String(u.page_id));
-        if (u?.ad_account_id) form.append('ad_account_id', String(u.ad_account_id));
-        if (u?.facebook_pixel_id) form.append('facebook_pixel_id', String(u.facebook_pixel_id));
-        if (u?.prompt1) form.append('prompt1', String(u.prompt1));
-        if (u?.prompt2) form.append('prompt2', String(u.prompt2));
-        if (u?.prompt3) form.append('prompt3', String(u.prompt3));
-        if (u?.username) form.append('username', String(u.username));
-      } catch {}
+    // ad_account_id (UUID из ad_accounts) для мультиаккаунтности
+    if (adAccountId) {
+      console.log('[creativesApi.uploadToWebhook] Добавляем ad_account_id в FormData:', adAccountId);
+      form.append('ad_account_id', adAccountId);
     }
     
     // Язык для транскрибации добавляем только для видео

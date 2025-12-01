@@ -24,6 +24,7 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
+import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
  
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
@@ -904,6 +905,9 @@ const Profile: React.FC = () => {
               expiry={formattedExpiry}
               onChangePassword={() => setPasswordModal(true)}
             />
+
+              {/* Ad Accounts Manager - для мультиаккаунтности */}
+              <AdAccountsManager />
 
               {/* Telegram ID Card */}
               <Card>

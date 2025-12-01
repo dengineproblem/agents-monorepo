@@ -15,6 +15,7 @@ import JSZip from 'jszip';
 
 interface CarouselTabProps {
   userId: string | null;
+  currentAdAccountId?: string | null; // UUID из ad_accounts (для мультиаккаунтности)
   creativeGenerationsAvailable: number;
   setCreativeGenerationsAvailable: (value: number) => void;
   directions: any[];
@@ -22,6 +23,7 @@ interface CarouselTabProps {
 
 export const CarouselTab: React.FC<CarouselTabProps> = ({
   userId,
+  currentAdAccountId,
   creativeGenerationsAvailable,
   setCreativeGenerationsAvailable,
   directions
@@ -609,6 +611,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     try {
       const response = await carouselApi.createCreative({
         user_id: userId,
+        ad_account_id: currentAdAccountId || undefined,
         carousel_id: generatedCarouselId,
         direction_id: selectedDirectionId
       });

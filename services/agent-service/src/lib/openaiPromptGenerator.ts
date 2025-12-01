@@ -253,6 +253,7 @@ export interface BriefingData {
   social_proof?: string;
   guarantees?: string;
   tone_of_voice?: string;
+  competitor_instagrams?: string[]; // До 5 Instagram аккаунтов конкурентов
 }
 
 /**

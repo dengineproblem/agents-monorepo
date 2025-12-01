@@ -4,6 +4,8 @@ import { tiktokApi } from '@/services/tiktokApi';
 import { format, subDays } from 'date-fns';
 import { toast } from 'sonner';
 import { supabase } from '../integrations/supabase/client';
+import { adAccountsApi } from '@/services/adAccountsApi';
+import type { AdAccount, AdAccountSummary } from '@/types/adAccount';
 
 interface AppContextType {
   campaigns: Campaign[];
@@ -30,6 +32,12 @@ interface AppContextType {
   setPlatform: (p: 'instagram' | 'tiktok') => void;
   tiktokConnected: boolean;
   checkTikTokConnected: () => Promise<boolean>;
+  // Multi-account support
+  multiAccountEnabled: boolean;
+  adAccounts: AdAccountSummary[];
+  currentAdAccountId: string | null;
+  setCurrentAdAccountId: (id: string | null) => void;
+  loadAdAccounts: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -54,7 +62,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [userTarif, setUserTarif] = useState<string | null>(null);
   const [platform, setPlatform] = useState<'instagram' | 'tiktok'>('instagram');
   const [tiktokConnected, setTiktokConnected] = useState<boolean>(false);
-  
+
+  // Multi-account state
+  const [multiAccountEnabled, setMultiAccountEnabled] = useState<boolean>(false);
+  const [adAccounts, setAdAccounts] = useState<AdAccountSummary[]>([]);
+  const [currentAdAccountId, setCurrentAdAccountId] = useState<string | null>(null);
+
   // Устанавливаем значение по умолчанию для диапазона дат (только сегодня)
   const today = new Date();
   const [dateRange, setDateRange] = useState<DateRange>({
@@ -186,6 +199,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     };
     
     loadAiAutopilotState();
+    loadAdAccounts();
   }, []);
 
   // Функция для переключения состояния AI автопилота
@@ -489,6 +503,69 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
   };
 
+  // Функция для загрузки рекламных аккаунтов (мультиаккаунтность)
+  const loadAdAccounts = async () => {
+    try {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) return;
+
+      const userData = JSON.parse(storedUser);
+      if (!userData.id) return;
+
+      const response = await adAccountsApi.list(userData.id);
+
+      setMultiAccountEnabled(response.multi_account_enabled);
+      setAdAccounts(response.ad_accounts.map(acc => ({
+        id: acc.id,
+        name: acc.name,
+        username: acc.username,
+        is_default: acc.is_default,
+        is_active: acc.is_active,
+        tarif: acc.tarif,
+        tarif_expires: acc.tarif_expires,
+        connection_status: acc.connection_status,
+      })));
+
+      // Устанавливаем текущий аккаунт (только из активных)
+      if (response.multi_account_enabled && response.ad_accounts.length > 0) {
+        const activeAccounts = response.ad_accounts.filter(a => a.is_active);
+
+        if (activeAccounts.length > 0) {
+          // Восстанавливаем из localStorage или берём дефолтный активный
+          const savedAdAccountId = localStorage.getItem('currentAdAccountId');
+          const validSavedId = activeAccounts.find(a => a.id === savedAdAccountId);
+
+          if (validSavedId) {
+            setCurrentAdAccountId(savedAdAccountId);
+          } else {
+            const defaultAccount = activeAccounts.find(a => a.is_default);
+            const accountToUse = defaultAccount || activeAccounts[0];
+            setCurrentAdAccountId(accountToUse.id);
+            localStorage.setItem('currentAdAccountId', accountToUse.id);
+          }
+        } else {
+          // Нет активных аккаунтов
+          setCurrentAdAccountId(null);
+          localStorage.removeItem('currentAdAccountId');
+        }
+      }
+
+      console.log('[AppContext] Загружены рекламные аккаунты:', {
+        multiAccountEnabled: response.multi_account_enabled,
+        count: response.ad_accounts.length,
+      });
+    } catch (error) {
+      console.error('[AppContext] Ошибка загрузки рекламных аккаунтов:', error);
+    }
+  };
+
+  // Сохраняем currentAdAccountId в localStorage при изменении
+  useEffect(() => {
+    if (currentAdAccountId) {
+      localStorage.setItem('currentAdAccountId', currentAdAccountId);
+    }
+  }, [currentAdAccountId]);
+
   // Функция для обновления параметра оптимизации
   const updateOptimization = async (optimizationType: string) => {
     // Проверяем business_id для ROI оптимизации
@@ -567,6 +644,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setPlatform,
       tiktokConnected,
       checkTikTokConnected,
+      // Multi-account support
+      multiAccountEnabled,
+      adAccounts,
+      currentAdAccountId,
+      setCurrentAdAccountId,
+      loadAdAccounts,
     }}>
       {children}
     </AppContext.Provider>

@@ -86,6 +86,7 @@ export interface UpscaleCarouselResponse {
 // Типы для создания креатива в Facebook
 export interface CreateCarouselCreativeRequest {
   user_id: string;
+  ad_account_id?: string; // UUID из ad_accounts (для мультиаккаунтности)
   carousel_id: string;
   direction_id: string;
 }

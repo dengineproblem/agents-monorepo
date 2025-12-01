@@ -17,6 +17,7 @@ import {
 
 const ProcessVideoSchema = z.object({
   user_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(), // UUID FK из ad_accounts.id (для мультиаккаунтности)
   title: z.string().optional(),
   description: z.string().optional(),
   language: z.string().default('ru'),
@@ -75,12 +76,12 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       const body = ProcessVideoSchema.parse(bodyData);
 
-      app.log.info(`Processing video for user_id: ${body.user_id}, direction_id: ${body.direction_id || 'null (legacy)'}`);
-      app.log.info(`Fetching user account data for user_id: ${body.user_id}`);
-      
+      app.log.info(`Processing video for user_id: ${body.user_id}, account_id: ${body.account_id || 'null'}, direction_id: ${body.direction_id || 'null'}`);
+
+      // Проверяем флаг мультиаккаунтности
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username, whatsapp_phone_number')
+        .select('id, multi_account_enabled, access_token, ad_account_id, page_id, instagram_id, instagram_username, whatsapp_phone_number')
         .eq('id', body.user_id)
         .single();
 
@@ -92,22 +93,81 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
-        return reply.status(400).send({
-          success: false,
-          error: 'User account incomplete',
-          message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
-        });
+      let ACCESS_TOKEN: string;
+      let fbAdAccountId: string;
+      let pageId: string;
+      let instagramId: string;
+      let instagramUsername: string | null = null;
+      let whatsappPhoneNumber: string | null = null;
+
+      if (userAccount.multi_account_enabled) {
+        // Мультиаккаунт включён — требуем account_id
+        if (!body.account_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'account_id is required when multi_account_enabled is true'
+          });
+        }
+
+        app.log.info(`Multi-account mode: fetching ad_account ${body.account_id}`);
+
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username')
+          .eq('id', body.account_id)
+          .eq('user_account_id', body.user_id)
+          .single();
+
+        if (adError || !adAccount) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Ad account not found',
+            details: adError?.message
+          });
+        }
+
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Ad account incomplete',
+            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+          });
+        }
+
+        ACCESS_TOKEN = adAccount.access_token;
+        fbAdAccountId = adAccount.ad_account_id;
+        pageId = adAccount.page_id;
+        instagramId = adAccount.instagram_id;
+        instagramUsername = adAccount.instagram_username;
+      } else {
+        // Мультиаккаунт выключен — используем user_accounts
+        app.log.info('Single-account mode: using user_accounts credentials');
+
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'User account incomplete',
+            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+          });
+        }
+
+        ACCESS_TOKEN = userAccount.access_token;
+        fbAdAccountId = userAccount.ad_account_id;
+        pageId = userAccount.page_id;
+        instagramId = userAccount.instagram_id;
+        instagramUsername = userAccount.instagram_username;
+        whatsappPhoneNumber = userAccount.whatsapp_phone_number;
       }
 
-      const normalizedAdAccountId = normalizeAdAccountId(userAccount.ad_account_id);
+      const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
 
       app.log.info({
         user_id: body.user_id,
-        ad_account_id: userAccount.ad_account_id,
+        account_id: body.account_id,
+        fb_ad_account_id: fbAdAccountId,
         normalized_ad_account_id: normalizedAdAccountId,
-        has_instagram: !!userAccount.instagram_id,
-        token_preview: userAccount.access_token.substring(0, 30)
+        has_instagram: !!instagramId,
+        token_preview: ACCESS_TOKEN.substring(0, 30)
       });
 
       app.log.info('Starting transcription...');
@@ -130,6 +190,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         .from('user_creatives')
         .insert({
           user_id: body.user_id,
+          account_id: body.account_id || null, // UUID FK для мультиаккаунтности
           title: body.title || 'Untitled Creative',
           status: 'processing',
           direction_id: body.direction_id || null // Сохраняем direction_id (null для legacy)
@@ -149,7 +210,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       app.log.info(`Video file read (${Math.round(videoBuffer.length / 1024 / 1024)}MB), uploading to Facebook...`);
 
-      const fbVideo = await uploadVideo(normalizedAdAccountId, userAccount.access_token, videoBuffer);
+      const fbVideo = await uploadVideo(normalizedAdAccountId, ACCESS_TOKEN, videoBuffer);
 
       app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, waiting for processing...`);
 
@@ -159,9 +220,9 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       // Извлекаем первый кадр видео для обложки
       app.log.info('Extracting thumbnail from first frame...');
       const thumbnailBuffer = await extractVideoThumbnail(videoPath);
-      
+
       app.log.info('Uploading thumbnail to Facebook...');
-      const thumbnailResult = await uploadImage(normalizedAdAccountId, userAccount.access_token, thumbnailBuffer);
+      const thumbnailResult = await uploadImage(normalizedAdAccountId, ACCESS_TOKEN, thumbnailBuffer);
       
       app.log.info(`Thumbnail uploaded with hash: ${thumbnailResult.hash}, loading direction settings...`);
 
@@ -258,22 +319,22 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
       try {
         if (objective === 'whatsapp') {
-          const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, userAccount.access_token, {
+          const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
-            pageId: userAccount.page_id,
-            instagramId: userAccount.instagram_id,
+            pageId: pageId,
+            instagramId: instagramId,
             message: description,
             clientQuestion: clientQuestion,
-            whatsappPhoneNumber: userAccount.whatsapp_phone_number || undefined,
+            whatsappPhoneNumber: whatsappPhoneNumber || undefined,
             thumbnailHash: thumbnailResult.hash
           });
           fbCreativeId = whatsappCreative.id;
         } else if (objective === 'instagram_traffic') {
-          const instagramCreative = await createInstagramCreative(normalizedAdAccountId, userAccount.access_token, {
+          const instagramCreative = await createInstagramCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
-            pageId: userAccount.page_id,
-            instagramId: userAccount.instagram_id,
-            instagramUsername: userAccount.instagram_username || '',
+            pageId: pageId,
+            instagramId: instagramId,
+            instagramUsername: instagramUsername || '',
             message: description,
             thumbnailHash: thumbnailResult.hash
           });
@@ -283,10 +344,10 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
             app.log.error('site_leads objective requires site_url in direction settings');
             throw new Error('site_url is required for site_leads objective');
           }
-          const websiteCreative = await createWebsiteLeadsCreative(normalizedAdAccountId, userAccount.access_token, {
+          const websiteCreative = await createWebsiteLeadsCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
-            pageId: userAccount.page_id,
-            instagramId: userAccount.instagram_id,
+            pageId: pageId,
+            instagramId: instagramId,
             message: description,
             siteUrl: siteUrl,
             utm: utm,

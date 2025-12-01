@@ -14,6 +14,7 @@ import {
 
 const ProcessImageSchema = z.object({
   user_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(), // UUID из ad_accounts (для мультиаккаунтности)
   title: z.string().optional(),
   description: z.string().optional(),
   client_question: z.string().optional(),
@@ -27,6 +28,7 @@ type ProcessImageBody = z.infer<typeof ProcessImageSchema>;
 
 const CreateImageCreativeSchema = z.object({
   user_id: z.string().uuid(),
+  account_id: z.string().uuid().optional(), // UUID FK из ad_accounts.id (для мультиаккаунтности)
   creative_id: z.string().uuid(), // ID из generated_creatives
   direction_id: z.string().uuid()
 });
@@ -82,12 +84,12 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       }
       const body = ProcessImageSchema.parse(bodyData);
 
-      app.log.info(`Processing image for user_id: ${body.user_id}, direction_id: ${body.direction_id || 'null (legacy)'}`);
-      app.log.info(`Fetching user account data for user_id: ${body.user_id}`);
-      
+      app.log.info(`Processing image for user_id: ${body.user_id}, account_id: ${body.account_id || 'null'}, direction_id: ${body.direction_id || 'null'}`);
+
+      // Проверяем флаг мультиаккаунтности
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username, whatsapp_phone_number')
+        .select('id, multi_account_enabled, access_token, ad_account_id, page_id, instagram_id, instagram_username, whatsapp_phone_number')
         .eq('id', body.user_id)
         .single();
 
@@ -99,17 +101,71 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const ACCESS_TOKEN = body.page_access_token || userAccount.access_token;
+      let ACCESS_TOKEN: string;
+      let fbAdAccountId: string;
+      let pageId: string;
+      let instagramId: string;
+      let instagramUsername: string | null = null;
 
-      if (!ACCESS_TOKEN || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
-        return reply.status(400).send({
-          success: false,
-          error: 'User account incomplete',
-          message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
-        });
+      if (userAccount.multi_account_enabled) {
+        // Мультиаккаунт включён — требуем account_id
+        if (!body.account_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'account_id is required when multi_account_enabled is true'
+          });
+        }
+
+        app.log.info(`Multi-account mode: fetching ad_account ${body.account_id}`);
+
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username')
+          .eq('id', body.account_id)
+          .eq('user_account_id', body.user_id)
+          .single();
+
+        if (adError || !adAccount) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Ad account not found',
+            details: adError?.message
+          });
+        }
+
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Ad account incomplete',
+            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+          });
+        }
+
+        ACCESS_TOKEN = body.page_access_token || adAccount.access_token;
+        fbAdAccountId = adAccount.ad_account_id;
+        pageId = adAccount.page_id;
+        instagramId = adAccount.instagram_id;
+        instagramUsername = adAccount.instagram_username;
+      } else {
+        // Мультиаккаунт выключен — используем user_accounts
+        app.log.info('Single-account mode: using user_accounts credentials');
+
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'User account incomplete',
+            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+          });
+        }
+
+        ACCESS_TOKEN = body.page_access_token || userAccount.access_token;
+        fbAdAccountId = userAccount.ad_account_id;
+        pageId = userAccount.page_id;
+        instagramId = userAccount.instagram_id;
+        instagramUsername = userAccount.instagram_username;
       }
 
-      const normalizedAdAccountId = normalizeAdAccountId(userAccount.ad_account_id);
+      const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
 
       app.log.info('Creating creative record in database...');
 
@@ -118,6 +174,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         .from('user_creatives')
         .insert({
           user_id: body.user_id,
+          account_id: body.account_id || null, // UUID FK для мультиаккаунтности
           direction_id: body.direction_id || null,
           title: body.title || 'Untitled Image Creative',
           status: 'processing',
@@ -205,8 +262,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         if (objective === 'whatsapp') {
           const whatsappCreative = await createWhatsAppImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
-            pageId: userAccount.page_id,
-            instagramId: userAccount.instagram_id,
+            pageId: pageId,
+            instagramId: instagramId,
             message: description,
             clientQuestion: clientQuestion
           });
@@ -214,9 +271,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         } else if (objective === 'instagram_traffic') {
           const instagramCreative = await createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
-            pageId: userAccount.page_id,
-            instagramId: userAccount.instagram_id,
-            instagramUsername: userAccount.instagram_username || '',
+            pageId: pageId,
+            instagramId: instagramId,
+            instagramUsername: instagramUsername || '',
             message: description
           });
           fbCreativeId = instagramCreative.id;
@@ -227,8 +284,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           }
           const websiteCreative = await createWebsiteLeadsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
-            pageId: userAccount.page_id,
-            instagramId: userAccount.instagram_id,
+            pageId: pageId,
+            instagramId: instagramId,
             message: description,
             siteUrl: siteUrl,
             utm: utm || undefined
@@ -337,9 +394,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: CreateImageCreativeBody }>('/create-image-creative', async (request, reply) => {
     try {
       const body = CreateImageCreativeSchema.parse(request.body);
-      const { user_id, creative_id, direction_id } = body;
+      const { user_id, account_id, creative_id, direction_id } = body;
 
-      app.log.info({ user_id, creative_id, direction_id }, 'Creating image creative from generated_creative');
+      app.log.info({ user_id, account_id, creative_id, direction_id }, 'Creating image creative from generated_creative');
 
       // 1. Загружаем креатив из generated_creatives
       const { data: creative, error: creativeError } = await supabase
@@ -397,10 +454,10 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
 
-      // 5. Загружаем user_account для Facebook credentials
+      // 5. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username')
+        .select('id, multi_account_enabled, access_token, ad_account_id, page_id, instagram_id, instagram_username')
         .eq('id', user_id)
         .single();
 
@@ -411,15 +468,66 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const ACCESS_TOKEN = userAccount.access_token;
-      if (!ACCESS_TOKEN || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
-        return reply.status(400).send({
-          success: false,
-          error: 'User account incomplete (missing access_token, ad_account_id, page_id, or instagram_id)'
-        });
+      let ACCESS_TOKEN: string;
+      let fbAdAccountId: string;
+      let pageId: string;
+      let instagramId: string;
+      let instagramUsername: string | null = null;
+
+      if (userAccount.multi_account_enabled) {
+        // Мультиаккаунт включён — требуем account_id
+        if (!account_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'account_id is required when multi_account_enabled is true'
+          });
+        }
+
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('id, access_token, ad_account_id, page_id, instagram_id, instagram_username')
+          .eq('id', account_id)
+          .eq('user_account_id', user_id)
+          .single();
+
+        if (adError || !adAccount) {
+          return reply.status(404).send({
+            success: false,
+            error: 'Ad account not found',
+            details: adError?.message
+          });
+        }
+
+        if (!adAccount.access_token || !adAccount.ad_account_id || !adAccount.page_id || !adAccount.instagram_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Ad account incomplete',
+            message: 'Missing required fields: access_token, ad_account_id, page_id, or instagram_id'
+          });
+        }
+
+        ACCESS_TOKEN = adAccount.access_token;
+        fbAdAccountId = adAccount.ad_account_id;
+        pageId = adAccount.page_id;
+        instagramId = adAccount.instagram_id;
+        instagramUsername = adAccount.instagram_username;
+      } else {
+        // Мультиаккаунт выключен — используем user_accounts
+        if (!userAccount.access_token || !userAccount.ad_account_id || !userAccount.page_id || !userAccount.instagram_id) {
+          return reply.status(400).send({
+            success: false,
+            error: 'User account incomplete (missing access_token, ad_account_id, page_id, or instagram_id)'
+          });
+        }
+
+        ACCESS_TOKEN = userAccount.access_token;
+        fbAdAccountId = userAccount.ad_account_id;
+        pageId = userAccount.page_id;
+        instagramId = userAccount.instagram_id;
+        instagramUsername = userAccount.instagram_username;
       }
 
-      const normalizedAdAccountId = normalizeAdAccountId(userAccount.ad_account_id);
+      const normalizedAdAccountId = normalizeAdAccountId(fbAdAccountId);
 
       // 6. Скачиваем и загружаем 9:16 изображение в Facebook
       // Meta сама кропнет 9:16 до 4:5 для Feed плейсментов (текст в центре сохранится)
@@ -443,8 +551,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       if (objective === 'whatsapp') {
         const result = await createWhatsAppImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           imageHash: fbImage.hash,
-          pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
+          pageId: pageId,
+          instagramId: instagramId,
           message: description,
           clientQuestion: clientQuestion
         });
@@ -452,9 +560,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       } else if (objective === 'instagram_traffic') {
         const result = await createInstagramImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           imageHash: fbImage.hash,
-          pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
-          instagramUsername: userAccount.instagram_username || '',
+          pageId: pageId,
+          instagramId: instagramId,
+          instagramUsername: instagramUsername || '',
           message: description
         });
         fbCreativeId = result.id;
@@ -467,8 +575,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         }
         const result = await createWebsiteLeadsImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           imageHash: fbImage.hash,
-          pageId: userAccount.page_id,
-          instagramId: userAccount.instagram_id,
+          pageId: pageId,
+          instagramId: instagramId,
           message: description,
           siteUrl: siteUrl,
           utm: utm || undefined
@@ -488,6 +596,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         .from('user_creatives')
         .insert({
           user_id,
+          account_id: account_id || null, // UUID FK для мультиаккаунтности
           direction_id,
           title: creative.offer || 'Image Creative',
           status: 'ready',

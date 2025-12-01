@@ -24,10 +24,11 @@ function toParams(p: Record<string, any>) {
 type StartCreativeTestParams = {
   user_creative_id: string;
   user_id: string;
+  db_ad_account_id?: string; // UUID из ad_accounts (для мультиаккаунтности)
 };
 
 type CreativeTestContext = {
-  ad_account_id: string;
+  ad_account_id: string; // Facebook Ad Account ID (act_xxx)
   page_id?: string;
   instagram_id?: string;
   whatsapp_phone_number?: string;

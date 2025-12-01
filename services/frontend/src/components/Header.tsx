@@ -16,6 +16,7 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { FEATURES } from '../config/appReview';
 import { supabase } from '../integrations/supabase/client';
 import { appReviewText } from '@/utils/appReviewText';
+import { AdAccountSwitcher } from './ad-accounts/AdAccountSwitcher';
 
 interface HeaderProps { 
   onOpenDatePicker: () => void;
@@ -278,6 +279,9 @@ const Header: React.FC<HeaderProps> = ({
                 <h1 className="text-xl font-semibold hidden sm:block">performante.ai</h1>
               </button>
             )}
+
+            {/* Ad Account Switcher - показывается только для мультиаккаунтов */}
+            <AdAccountSwitcher className="hidden sm:flex ml-4" />
           </div>
         
         <TooltipProvider>

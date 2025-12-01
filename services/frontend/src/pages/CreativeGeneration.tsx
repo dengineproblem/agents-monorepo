@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { useAppContext } from '@/context/AppContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -28,6 +29,7 @@ interface CreativeTexts {
 
 const CreativeGeneration = () => {
   const location = useLocation();
+  const { currentAdAccountId } = useAppContext();
 
   // Читаем URL параметры
   const searchParams = new URLSearchParams(location.search);
@@ -653,6 +655,7 @@ const CreativeGeneration = () => {
         },
         body: JSON.stringify({
           user_id: userId,
+          ad_account_id: currentAdAccountId || undefined,
           creative_id: generatedCreativeId,
           direction_id: selectedDirectionId
         }),
@@ -1155,6 +1158,7 @@ const CreativeGeneration = () => {
             <TabsContent value="carousels" className="mt-0">
               <CarouselTab
                 userId={userId}
+                currentAdAccountId={currentAdAccountId}
                 creativeGenerationsAvailable={creativeGenerationsAvailable}
                 setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
                 directions={directions}

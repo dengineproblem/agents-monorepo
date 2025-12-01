@@ -33,6 +33,7 @@ import {
   incrementAdsCount,
   hasAvailableAdSets
 } from '../lib/directionAdSets.js';
+import { getCredentials } from '../lib/adAccountHelper.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -91,6 +92,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           properties: {
             user_account_id: { type: 'string', format: 'uuid' },
             userId: { type: 'string', format: 'uuid' },
+            account_id: { type: 'string', format: 'uuid' }, // UUID из ad_accounts (для мультиаккаунтности)
           },
           anyOf: [
             { required: ['user_account_id'] },
@@ -104,10 +106,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
       const body = request.body as {
         user_account_id?: string;
         userId?: string;
+        account_id?: string;
       };
 
       const user_account_id = body.user_account_id || body.userId;
-      
+      const account_id = body.account_id;
+
       if (!user_account_id) {
         return reply.status(400).send({
           success: false,
@@ -115,30 +119,40 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      log.info({ userAccountId: user_account_id }, 'Auto-launch request for all directions');
+      log.info({ userAccountId: user_account_id, accountId: account_id }, 'Auto-launch request for all directions');
 
       try {
-        // Получаем данные пользователя
-        const { data: userAccount, error: userError } = await supabase
-          .from('user_accounts')
-          .select('*')
-          .eq('id', user_account_id)
-          .single();
-
-        if (userError || !userAccount) {
-          log.warn({ userAccountId: user_account_id, err: userError }, 'User account not found for auto-launch');
-          return reply.status(404).send({
+        // Получаем credentials (с поддержкой мультиаккаунтности)
+        let credentials;
+        try {
+          credentials = await getCredentials(user_account_id, account_id);
+        } catch (credError: any) {
+          return reply.status(400).send({
             success: false,
-            error: 'User account not found',
+            error: credError.message,
           });
         }
 
-        // Находим ВСЕ активные направления пользователя
-        const { data: directions, error: directionsError } = await supabase
+        if (!credentials.fbAccessToken || !credentials.fbAdAccountId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required Facebook credentials',
+          });
+        }
+
+        // Находим активные направления (с учётом account_id для мультиаккаунта)
+        let directionsQuery = supabase
           .from('account_directions')
           .select('*')
           .eq('user_account_id', user_account_id)
           .eq('is_active', true);
+
+        // Если мультиаккаунт - фильтруем по account_id (UUID FK на ad_accounts.id)
+        if (credentials.isMultiAccountMode && account_id) {
+          directionsQuery = directionsQuery.eq('account_id', account_id);
+        }
+
+        const { data: directions, error: directionsError } = await directionsQuery;
 
         if (directionsError) {
           log.error({ err: directionsError, userAccountId: user_account_id }, 'Failed to fetch directions');
@@ -151,11 +165,13 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         const activeDirections = directions || [];
 
         if (activeDirections.length === 0) {
-          log.warn({ userAccountId: user_account_id }, 'No active directions found');
+          log.warn({ userAccountId: user_account_id, accountId: account_id }, 'No active directions found');
           return reply.status(400).send({
             success: false,
             error: 'No active directions found',
-            hint: 'Create a direction first or check that directions are active',
+            hint: credentials.isMultiAccountMode
+              ? 'Create a direction for this ad account first'
+              : 'Create a direction first or check that directions are active',
           });
         }
 
@@ -164,12 +180,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // ===================================================
         // STEP 2: Пауза активных ad set'ов направлений (игнорируем тестовые кампании)
         // ===================================================
-        log.info({ userAccountId: userAccount.id }, 'Pausing active ad sets for directions...');
+        log.info({ userAccountId: user_account_id }, 'Pausing active ad sets for directions...');
 
         try {
           const activeCampaigns = await getActiveCampaigns(
-            userAccount.ad_account_id,
-            userAccount.access_token
+            credentials.fbAdAccountId!,
+            credentials.fbAccessToken!
           );
 
           const directionCampaigns = activeDirections
@@ -186,7 +202,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
             for (const campaignId of campaignIdsToPause) {
               try {
-                await pauseAdSetsForCampaign(campaignId, userAccount.access_token);
+                await pauseAdSetsForCampaign(campaignId, credentials.fbAccessToken!);
                 log.info({ campaignId }, 'Paused ad sets for campaign');
               } catch (pauseError: any) {
                 log.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
@@ -196,7 +212,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             log.info('No campaigns found for pausing');
           }
         } catch (error: any) {
-          log.error({ err: error, userAccountId: userAccount.id, userAccountName: userAccount.username }, 'Error pausing ad sets');
+          log.error({ err: error, userAccountId: user_account_id, adAccountName: credentials.adAccountName }, 'Error pausing ad sets');
         }
 
         const results: any[] = [];
@@ -208,7 +224,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             directionName: direction.name,
             objective: direction.objective,
             userAccountId: user_account_id,
-            userAccountName: userAccount.username
+            adAccountName: credentials.adAccountName
           }, 'Processing direction');
 
           // Получаем креативы для этого направления (используем objective направления)
@@ -262,7 +278,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               idempotencyKey: `ai-autolaunch-v2-${direction.id}-${Date.now()}`,
               account: {
                 userAccountId: user_account_id,
-                ...(userAccount.whatsapp_phone_number && { whatsappPhoneNumber: userAccount.whatsapp_phone_number }),
+                ...(credentials.whatsappPhoneNumber && { whatsappPhoneNumber: credentials.whatsappPhoneNumber }),
               },
               actions: [action],
               source: 'ai-campaign-builder-v2',
@@ -328,7 +344,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               directionId: direction.id,
               hasDefaultSettings: Boolean(defaultSettings),
               userAccountId: user_account_id,
-              userAccountName: userAccount.username
+              adAccountName: credentials.adAccountName
             }, 'Default settings status');
 
             // Строим таргетинг (используем objective направления)
@@ -346,14 +362,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               // Если получим ошибку 2446885, createAdSetInCampaign автоматически повторит без номера
               const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
               promoted_object = {
-                page_id: userAccount.page_id,
+                page_id: credentials.fbPageId,
                 ...(whatsapp_phone_number && { whatsapp_phone_number })
               };
             } else if (direction.objective === 'instagram_traffic') {
               // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
               // Ссылка уже в креативе в call_to_action
               promoted_object = {
-                page_id: userAccount.page_id
+                page_id: credentials.fbPageId
               };
             } else if (direction.objective === 'site_leads') {
               // Для site_leads (OFFSITE_CONVERSIONS) promoted_object содержит pixel_id и custom_event_type
@@ -367,7 +383,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             // Создаём Ad Set в существующей кампании или используем pre-created
             let adsetId: string;
 
-            if (userAccount.default_adset_mode === 'use_existing') {
+            if (credentials.defaultAdsetMode === 'use_existing') {
               // РЕЖИМ: использовать pre-created ad set
               const hasAvailable = await hasAvailableAdSets(direction.id);
               
@@ -404,7 +420,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               await activateAdSet(
                 availableAdSet.id,
                 availableAdSet.fb_adset_id,
-                userAccount.access_token
+                credentials.fbAccessToken!
               );
 
               adsetId = availableAdSet.fb_adset_id;
@@ -414,15 +430,15 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 adsetId,
                 mode: 'use_existing',
                 userAccountId: user_account_id,
-                userAccountName: userAccount.username
+                adAccountName: credentials.adAccountName
               }, 'Using pre-created ad set in auto-launch');
 
             } else {
               // РЕЖИМ: создать новый ad set через API
               const adset = await createAdSetInCampaign({
                 campaignId: direction.fb_campaign_id,
-                adAccountId: userAccount.ad_account_id,
-                accessToken: userAccount.access_token,
+                adAccountId: credentials.fbAdAccountId!,
+                accessToken: credentials.fbAccessToken!,
                 name: `${direction.name} - ${new Date().toISOString().split('T')[0]}`,
                 dailyBudget: direction.daily_budget_cents,
                 targeting,
@@ -434,12 +450,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
               adsetId = adset.id;
 
-              log.info({ 
-                directionId: direction.id, 
-                adsetId, 
+              log.info({
+                directionId: direction.id,
+                adsetId,
                 mode: 'api_create',
-                userAccountId: user_account_id, 
-                userAccountName: userAccount.username 
+                userAccountId: user_account_id,
+                adAccountName: credentials.adAccountName
               }, 'Ad set created for direction');
             }
 
@@ -447,9 +463,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             const creativesToUse = creatives.slice(0, 5);
             const ads = await createAdsInAdSet({
               adsetId,
-              adAccountId: userAccount.ad_account_id,
+              adAccountId: credentials.fbAdAccountId!,
               creatives: creativesToUse,
-              accessToken: userAccount.access_token,
+              accessToken: credentials.fbAccessToken!,
               objective: direction.objective, // Используем objective направления
               userId: user_account_id,
               directionId: direction.id,
@@ -459,7 +475,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             log.info({ directionId: direction.id, adsetId, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
 
             // Инкрементировать счетчик для use_existing режима
-            if (userAccount.default_adset_mode === 'use_existing') {
+            if (credentials.defaultAdsetMode === 'use_existing') {
               const newCount = await incrementAdsCount(adsetId, ads.length);
               log.info({
                 directionId: direction.id,
@@ -561,6 +577,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           required: ['user_account_id', 'direction_id', 'creative_ids'],
           properties: {
             user_account_id: { type: 'string', format: 'uuid' },
+            account_id: { type: 'string', format: 'uuid' }, // UUID из ad_accounts (для мультиаккаунтности)
             direction_id: { type: 'string', format: 'uuid' },
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
             daily_budget_cents: { type: 'number', minimum: 500 },
@@ -572,28 +589,30 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request: any, reply: any) => {
       const log = getWorkflowLogger(request as FastifyRequest, 'manualLaunch');
-      const { user_account_id, direction_id, creative_ids, daily_budget_cents, targeting, start_mode } = request.body;
+      const { user_account_id, account_id, direction_id, creative_ids, daily_budget_cents, targeting, start_mode } = request.body;
 
       log.info({
         userAccountId: user_account_id,
-        objective: request.body?.objective,
-        adAccountId: request.body?.ad_account_id,
-        campaignId: request.body?.campaign_id,
-        directionId: request.body?.direction_id,
+        accountId: account_id,
+        directionId: direction_id,
       }, 'Manual launch request');
 
       try {
-        // Получаем данные пользователя
-        const { data: userAccount, error: userError } = await supabase
-          .from('user_accounts')
-          .select('*')
-          .eq('id', user_account_id)
-          .single();
-
-        if (userError || !userAccount) {
-          return reply.status(404).send({
+        // Получаем credentials (с поддержкой мультиаккаунтности)
+        let credentials;
+        try {
+          credentials = await getCredentials(user_account_id, account_id);
+        } catch (credError: any) {
+          return reply.status(400).send({
             success: false,
-            error: 'User account not found',
+            error: credError.message,
+          });
+        }
+
+        if (!credentials.fbAccessToken || !credentials.fbAdAccountId || !credentials.fbPageId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Missing required Facebook credentials (access_token, ad_account_id, or page_id)',
           });
         }
 
@@ -658,16 +677,16 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         if (direction.objective === 'whatsapp') {
           // Всегда включаем номер из направления (если есть)
           // Если получим ошибку 2446885, createAdSetInCampaign автоматически повторит без номера
-          const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+          const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || credentials.whatsappPhoneNumber || undefined;
           promoted_object = {
-            page_id: userAccount.page_id,
+            page_id: credentials.fbPageId,
             ...(whatsapp_phone_number && { whatsapp_phone_number })
           };
         } else if (direction.objective === 'instagram_traffic') {
           // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
           // Ссылка уже в креативе в call_to_action
           promoted_object = {
-            page_id: userAccount.page_id
+            page_id: credentials.fbPageId
           };
         } else if (direction.objective === 'site_leads') {
           // Для Site Leads используем pixel_id и custom_event_type (как в n8n)
@@ -687,17 +706,17 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // Создаём Ad Set или используем pre-created
         let adsetId: string;
 
-        if (userAccount.default_adset_mode === 'use_existing') {
+        if (credentials.defaultAdsetMode === 'use_existing') {
           // РЕЖИМ: использовать pre-created ad set
           const availableAdSet = await getAvailableAdSet(direction.id);
-          
+
           if (!availableAdSet) {
             log.warn({
               directionId: direction.id,
               directionName: direction.name,
               userAccountId: user_account_id
             }, 'No available pre-created ad sets for manual launch');
-            
+
             return reply.status(400).send({
               success: false,
               error: 'No available pre-created ad sets',
@@ -709,23 +728,23 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           await activateAdSet(
             availableAdSet.id,
             availableAdSet.fb_adset_id,
-            userAccount.access_token
+            credentials.fbAccessToken!
           );
 
           adsetId = availableAdSet.fb_adset_id;
 
-          log.info({ 
-            adsetId, 
+          log.info({
+            adsetId,
             mode: 'use_existing',
-            directionId: direction.id 
+            directionId: direction.id
           }, 'Using pre-created ad set for manual launch');
 
         } else {
           // РЕЖИМ: создать новый ad set через API
           const adset = await createAdSetInCampaign({
             campaignId: direction.fb_campaign_id,
-            adAccountId: userAccount.ad_account_id,
-            accessToken: userAccount.access_token,
+            adAccountId: credentials.fbAdAccountId!,
+            accessToken: credentials.fbAccessToken!,
             name: `${direction.name} - Ручной запуск - ${new Date().toISOString().split('T')[0]}`,
             dailyBudget: finalBudget,
             targeting: finalTargeting,
@@ -737,8 +756,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
           adsetId = adset.id;
 
-          log.info({ 
-            adsetId, 
+          log.info({
+            adsetId,
             mode: 'api_create',
             start_mode: start_mode || 'now'
           }, 'Manual launch ad set created');
@@ -756,9 +775,9 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
         const ads = await createAdsInAdSet({
           adsetId,
-          adAccountId: userAccount.ad_account_id,
+          adAccountId: credentials.fbAdAccountId!,
           creatives: creativesForAds,
-          accessToken: userAccount.access_token,
+          accessToken: credentials.fbAccessToken!,
           objective: direction.objective,
           userId: user_account_id,
           directionId: direction.id,
@@ -768,7 +787,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         log.info({ adsCount: ads.length }, 'Manual launch ads created');
 
         // Инкрементировать счетчик для use_existing режима
-        if (userAccount.default_adset_mode === 'use_existing') {
+        if (credentials.defaultAdsetMode === 'use_existing') {
           const newCount = await incrementAdsCount(adsetId, ads.length);
           log.info({
             adsetId,
@@ -873,6 +892,15 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           return reply.status(404).send({
             success: false,
             error: 'User account not found',
+          });
+        }
+
+        // Проверяем, что пользователь НЕ в мультиаккаунт режиме
+        // Для мультиаккаунта используйте auto-launch-v2
+        if (userAccount.multi_account_enabled) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Legacy auto-launch is not supported for multi-account mode. Use /campaign-builder/auto-launch-v2 with ad_account_id instead.',
           });
         }
 

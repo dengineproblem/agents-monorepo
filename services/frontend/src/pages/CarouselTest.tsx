@@ -4,11 +4,13 @@ import PageHero from '@/components/common/PageHero';
 import { CarouselTab } from '@/components/creatives/CarouselTab';
 import { supabase } from '@/integrations/supabase/client';
 import { useDirections } from '@/hooks/useDirections';
+import { useAppContext } from '@/context/AppContext';
 
 const CarouselTest = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [creativeGenerationsAvailable, setCreativeGenerationsAvailable] = useState(0);
   const { directions } = useDirections(userId);
+  const { currentAdAccountId } = useAppContext();
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -42,6 +44,7 @@ const CarouselTest = () => {
         <div className="container mx-auto px-4 py-6">
           <CarouselTab
             userId={userId}
+            currentAdAccountId={currentAdAccountId}
             creativeGenerationsAvailable={creativeGenerationsAvailable}
             setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
             directions={directions}
