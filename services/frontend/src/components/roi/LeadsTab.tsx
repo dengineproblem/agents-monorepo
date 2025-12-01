@@ -23,9 +23,10 @@ interface Lead {
 interface LeadsTabProps {
   userAccountId: string;
   directionId: string | null;
+  accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
-export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId }) => {
+export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, accountId }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -35,7 +36,8 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId }
   const loadLeads = async () => {
     setLoading(true);
     try {
-      const { data, error } = await salesApi.getLeadsForROI(userAccountId, directionId);
+      // Передаём accountId для фильтрации по рекламному аккаунту
+      const { data, error } = await salesApi.getLeadsForROI(userAccountId, directionId, accountId);
       if (!error && data) {
         setLeads(data);
       }
@@ -51,7 +53,7 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId }
       loadLeads();
       setCurrentPage(1); // Сбрасываем страницу при смене фильтров
     }
-  }, [userAccountId, directionId]);
+  }, [userAccountId, directionId, accountId]);
 
   const handleAssignCreative = (lead: Lead) => {
     setSelectedLead(lead);

@@ -55,6 +55,7 @@ interface CompetitorReferenceSelectorProps {
   onSelect: (reference: CompetitorReference | null) => void;
   mediaTypeFilter?: 'video' | 'image' | 'carousel' | 'all';
   className?: string;
+  accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
 const mediaTypeIcon = {
@@ -82,6 +83,7 @@ export function CompetitorReferenceSelector({
   onSelect,
   mediaTypeFilter = 'all',
   className,
+  accountId,
 }: CompetitorReferenceSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -100,7 +102,8 @@ export function CompetitorReferenceSelector({
 
   const loadCompetitors = async () => {
     try {
-      const data = await competitorsApi.list(userAccountId);
+      // Передаём accountId для фильтрации по рекламному аккаунту
+      const data = await competitorsApi.list(userAccountId, accountId);
       setCompetitors(data.map(c => ({ id: c.id, name: c.name })));
     } catch (error) {
       console.error('Ошибка загрузки конкурентов:', error);
@@ -111,11 +114,13 @@ export function CompetitorReferenceSelector({
     setLoading(true);
     try {
       // Загружаем ВСЕ креативы (не только TOP-10), сортированные по score
+      // Передаём accountId для фильтрации по рекламному аккаунту
       const { creatives: data } = await competitorsApi.getAllCreatives(userAccountId, {
         mediaType: filter === 'all' ? 'all' : filter,
         limit: 100,
         top10Only: false,
         includeAll: true,
+        accountId: accountId || undefined,
       });
       // Сортируем по score descending
       data.sort((a, b) => (b.score || 0) - (a.score || 0));

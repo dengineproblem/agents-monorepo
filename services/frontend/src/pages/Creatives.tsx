@@ -1203,9 +1203,10 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 };
 
 const Creatives: React.FC = () => {
-  const { items, loading, reload, testStatuses } = useUserCreatives();
   const navigate = useNavigate();
   const { currentAdAccountId } = useAppContext();
+  // Передаём currentAdAccountId для фильтрации креативов по выбранному рекламному аккаунту
+  const { items, loading, reload, testStatuses } = useUserCreatives(currentAdAccountId);
 
   const [queue, setQueue] = useState<UploadItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);

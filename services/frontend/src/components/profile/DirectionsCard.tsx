@@ -17,11 +17,12 @@ import { OBJECTIVE_LABELS } from '@/types/direction';
 
 interface DirectionsCardProps {
   userAccountId: string | null;
+  accountId?: string | null; // UUID из ad_accounts.id для мультиаккаунтности
 }
 
-const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId }) => {
+const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountId }) => {
   const { directions, loading, createDirection, updateDirection, deleteDirection } =
-    useDirections(userAccountId);
+    useDirections(userAccountId, accountId);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);

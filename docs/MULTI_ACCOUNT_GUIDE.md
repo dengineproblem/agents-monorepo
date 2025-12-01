@@ -1976,6 +1976,7 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-01 | 2.0 | - | Расширенная документация: блок-схемы, frontend интеграция, FAQ |
 | 2025-12-01 | 2.1 | - | Миграция 067: ROI аналитика (leads, purchases, sales), конкуренты, WhatsApp, метрики |
 | 2025-12-01 | 2.2 | - | Имплементация account_id в webhooks, frontend, agent-brain (см. ниже) |
+| 2025-12-01 | 2.3 | - | Финальные исправления: directions, scoring.js, analyzerService.js (см. ниже) |
 
 ### Версия 2.2 — Детали имплементации
 
@@ -2031,3 +2032,91 @@ await supabase
 - Webhooks передают `account_id` в leads
 - Frontend страницы фильтруют по выбранному аккаунту
 - agent-brain сохраняет `account_id` в `creative_analysis`
+
+### Версия 2.3 — Финальные исправления
+
+**Backend (agent-service):**
+
+| Файл | Изменения |
+|------|-----------|
+| `routes/directions.ts` | Добавлен `accountId` query param в GET `/directions`, добавлен `accountId` в CreateDirectionSchema, передача `account_id` в INSERT |
+
+**Frontend:**
+
+| Файл | Изменения |
+|------|-----------|
+| `services/directionsApi.ts` | Добавлен `accountId` параметр в `list()`, формирование URL с accountId |
+| `types/direction.ts` | Добавлен `accountId?: string \| null` в `CreateDirectionPayload` |
+| `hooks/useDirections.ts` | Добавлен `accountId` параметр, передача в `directionsApi.list()` и `create()` |
+| `components/profile/DirectionsCard.tsx` | Добавлен prop `accountId`, передача в `useDirections()` |
+| `pages/Profile.tsx` | Добавлен `currentAdAccountId` из `useAppContext()`, передача в `DirectionsCard` |
+
+**Agent-brain:**
+
+| Файл | Изменения |
+|------|-----------|
+| `scoring.js` | Добавлен параметр `accountId` в `getCreativeMetricsFromDB()`, фильтрация `creative_metrics_history` по `account_id`. Все 3 вызова обновлены для передачи `accountUUID`. |
+| `analyzerService.js` | Endpoint `/analyze-creative`: получение `account_id` из `user_creatives`, условная фильтрация `creative_metrics_history` по `account_id` |
+
+**Паттерн изменений в scoring.js:**
+
+```javascript
+// Функция с опциональной фильтрацией по account_id
+async function getCreativeMetricsFromDB(supabase, userAccountId, fbCreativeId, days = 30, accountId = null) {
+  let query = supabase
+    .from('creative_metrics_history')
+    .select('*')
+    .eq('user_account_id', userAccountId)
+    .eq('creative_id', fbCreativeId)
+    .eq('source', 'production');
+
+  // Фильтрация по account_id если передан
+  if (accountId) {
+    query = query.eq('account_id', accountId);
+  }
+
+  const { data, error } = await query;
+  return { data, error };
+}
+
+// Вызов с accountUUID
+const stats = await getCreativeMetricsFromDB(supabase, userAccountId, creative.fb_creative_id, 30, accountUUID);
+```
+
+**Паттерн изменений в analyzerService.js:**
+
+```javascript
+// Получение account_id из креатива
+const { data: creativeForAccountId } = await supabase
+  .from('user_creatives')
+  .select('account_id')
+  .eq('id', creative_id)
+  .single();
+
+const accountId = creativeForAccountId?.account_id || null;
+
+// Условная фильтрация запроса
+let metricsQuery = supabase
+  .from('creative_metrics_history')
+  .select('*')
+  .eq('user_creative_id', creative_id)
+  .eq('user_account_id', user_id);
+
+if (accountId) {
+  metricsQuery = metricsQuery.eq('account_id', accountId);
+}
+
+const { data: metricsHistory } = await metricsQuery;
+```
+
+**Статус миграции 067:** ✅ Применена
+
+**Полностью покрытые компоненты:**
+- ✅ Directions (backend + frontend)
+- ✅ ROI Analytics (leads, purchases, sales)
+- ✅ Competitors
+- ✅ WhatsApp instances
+- ✅ Creative metrics history
+- ✅ Creative analysis
+- ✅ Scoring (agent-brain)
+- ✅ Analyzer service (agent-brain)

@@ -2,25 +2,31 @@ import { useEffect, useState, useCallback } from 'react';
 import { creativesApi, UserCreative, CreativeTestStatus } from '@/services/creativesApi';
 import { supabase } from '@/integrations/supabase/client';
 
-export const useUserCreatives = () => {
+/**
+ * Хук для получения креативов пользователя
+ * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
+ *                    Если передан - возвращает креативы только этого аккаунта
+ *                    Если null/undefined - возвращает все креативы пользователя (legacy режим)
+ */
+export const useUserCreatives = (accountId?: string | null) => {
   const [items, setItems] = useState<UserCreative[]>([]);
   const [loading, setLoading] = useState(false);
   const [testStatuses, setTestStatuses] = useState<Record<string, CreativeTestStatus>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await creativesApi.list();
+    const data = await creativesApi.list(accountId);
     setItems(data);
-    
+
     // Загружаем статусы тестов для всех креативов
     if (data.length > 0) {
       const creativeIds = data.map(c => c.id);
       const statuses = await creativesApi.getCreativeTestStatuses(creativeIds);
       setTestStatuses(statuses);
     }
-    
+
     setLoading(false);
-  }, []);
+  }, [accountId]);
 
   useEffect(() => { load(); }, [load]);
 

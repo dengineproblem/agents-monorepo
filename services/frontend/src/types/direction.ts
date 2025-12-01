@@ -26,6 +26,7 @@ export interface Direction {
 
 export interface CreateDirectionPayload {
   userAccountId: string;
+  accountId?: string | null; // UUID из ad_accounts.id для мультиаккаунтности
   name: string;
   objective: DirectionObjective;
   daily_budget_cents: number;

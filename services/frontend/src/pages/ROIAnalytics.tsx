@@ -1582,13 +1582,14 @@ const ROIAnalytics: React.FC = () => {
               <LeadsTab
                 userAccountId={userAccountId}
                 directionId={selectedDirectionId}
+                accountId={currentAdAccountId}
               />
             )}
           </TabsContent>
 
           {/* Контент: Продажи */}
           <TabsContent value="sales">
-            {userAccountId && <SalesList userAccountId={userAccountId} />}
+            {userAccountId && <SalesList userAccountId={userAccountId} accountId={currentAdAccountId} />}
           </TabsContent>
         </Tabs>
 

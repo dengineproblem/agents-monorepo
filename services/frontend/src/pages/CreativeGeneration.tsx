@@ -832,6 +832,7 @@ const CreativeGeneration = () => {
                     selectedReference={competitorReference}
                     onSelect={setCompetitorReference}
                     mediaTypeFilter="image"
+                    accountId={currentAdAccountId}
                   />
                   {competitorReference && (competitorReference.body_text || competitorReference.headline) && (
                     <div className="mt-3 p-3 bg-muted/50 rounded-lg">
@@ -1170,6 +1171,7 @@ const CreativeGeneration = () => {
                 userId={userId}
                 initialPrompt={promptFromUrl || undefined}
                 initialTextType={textTypeFromUrl as any || undefined}
+                accountId={currentAdAccountId}
               />
             </TabsContent>
           </Tabs>

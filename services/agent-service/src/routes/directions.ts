@@ -12,6 +12,7 @@ const log = createLogger({ module: 'directionsRoutes' });
 
 const CreateDirectionSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
   name: z.string().min(2).max(100),
   objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']),
   daily_budget_cents: z.number().int().min(500), // минимум $5
@@ -235,10 +236,13 @@ export async function directionsRoutes(app: FastifyInstance) {
   /**
    * GET /api/directions
    * Получить все направления пользователя
+   * @query userAccountId - ID пользователя из user_accounts (обязательный)
+   * @query accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
    */
   app.get('/directions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const userAccountId = (request.query as any).userAccountId;
+      const accountId = (request.query as any).accountId; // UUID из ad_accounts.id (опционально)
 
       if (!userAccountId) {
         return reply.code(400).send({
@@ -247,16 +251,22 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      log.info({ userAccountId }, 'Fetching directions for user');
+      log.info({ userAccountId, accountId }, 'Fetching directions for user');
 
-      const { data: directions, error } = await supabase
+      let query = supabase
         .from('account_directions')
         .select(`
           *,
           whatsapp_phone_number:whatsapp_phone_numbers!whatsapp_phone_number_id(phone_number)
         `)
-        .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: false });
+        .eq('user_account_id', userAccountId);
+
+      // Фильтрация по рекламному аккаунту для мультиаккаунтного режима
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
+
+      const { data: directions, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         log.error({ err: error, userAccountId }, 'Error fetching directions');
@@ -429,6 +439,7 @@ export async function directionsRoutes(app: FastifyInstance) {
           .from('account_directions')
           .insert({
             user_account_id: userAccountId,
+            account_id: input.accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
             name: input.name,
             objective: input.objective,
             daily_budget_cents: input.daily_budget_cents,

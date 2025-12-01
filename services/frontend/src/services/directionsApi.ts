@@ -11,29 +11,37 @@ interface ApiResponse<T> {
 export const directionsApi = {
   /**
    * Получить список направлений пользователя
+   * @param userAccountId - ID пользователя из user_accounts
+   * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
    */
-  async list(userAccountId: string): Promise<Direction[]> {
+  async list(userAccountId: string, accountId?: string | null): Promise<Direction[]> {
     try {
-      console.log('[directionsApi.list] Запрос направлений для user_account_id:', userAccountId);
-      
-      const response = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`);
-      
+      console.log('[directionsApi.list] Запрос направлений для user_account_id:', userAccountId, 'account_id:', accountId);
+
+      // Строим URL с параметрами
+      const params = new URLSearchParams({ userAccountId });
+      if (accountId) {
+        params.append('accountId', accountId);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/directions?${params.toString()}`);
+
       console.log('[directionsApi.list] HTTP статус:', response.status);
-      
+
       if (!response.ok) {
         console.error('[directionsApi.list] Ошибка HTTP:', response.statusText);
         return [];
       }
-      
+
       const data = await response.json();
       console.log('[directionsApi.list] Результат от API:', data);
-      
+
       // Бэкенд возвращает: { success: true, directions: [...] }
       if (data.success && data.directions) {
         console.log('[directionsApi.list] Найдено направлений:', data.directions.length);
         return data.directions;
       }
-      
+
       return [];
     } catch (error) {
       console.error('[directionsApi.list] Исключение при получении направлений:', error);

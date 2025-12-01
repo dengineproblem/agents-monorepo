@@ -34,9 +34,10 @@ interface Purchase {
 
 interface SalesListProps {
   userAccountId: string;
+  accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
-const SalesList: React.FC<SalesListProps> = ({ userAccountId }) => {
+const SalesList: React.FC<SalesListProps> = ({ userAccountId, accountId }) => {
   const [sales, setSales] = useState<Purchase[]>([]);
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -55,7 +56,8 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId }) => {
 
   const loadSales = async () => {
     setLoading(true);
-    const { data, error } = await salesApi.getAllPurchases(userAccountId);
+    // Передаём accountId для фильтрации по рекламному аккаунту
+    const { data, error } = await salesApi.getAllPurchases(userAccountId, accountId);
     if (!error && data) setSales(data);
     setLoading(false);
   };
@@ -75,7 +77,7 @@ const SalesList: React.FC<SalesListProps> = ({ userAccountId }) => {
   useEffect(() => {
     if (userAccountId) loadSales();
     // eslint-disable-next-line
-  }, [userAccountId]);
+  }, [userAccountId, accountId]);
 
   const startEdit = (sale: Purchase) => {
     setEditingId(sale.id);

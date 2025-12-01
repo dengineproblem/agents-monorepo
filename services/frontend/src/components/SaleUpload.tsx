@@ -5,7 +5,11 @@ import { toast } from 'sonner';
 import { DollarSign } from 'lucide-react';
 import { salesApi } from '@/services/salesApi';
 
-export function SaleUpload() {
+interface SaleUploadProps {
+  accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
+}
+
+export function SaleUpload({ accountId }: SaleUploadProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   
@@ -73,7 +77,8 @@ export function SaleUpload() {
       await salesApi.addSale({
         client_phone: normalizedPhone,
         amount: amount,
-        business_id: businessId
+        business_id: businessId,
+        account_id: accountId || undefined  // UUID для мультиаккаунтности
       });
       
       toast.success('Продажа успешно добавлена! 🎉');
@@ -183,7 +188,8 @@ export function SaleUpload() {
         amount: amount,
         business_id: businessId,
         manual_source_id: selectedCampaign.id,
-        manual_creative_url: selectedCampaign.creative_url || ''
+        manual_creative_url: selectedCampaign.creative_url || '',
+        account_id: accountId || undefined  // UUID для мультиаккаунтности
       });
       
       toast.success('Продажа и лид успешно добавлены! 🎉');

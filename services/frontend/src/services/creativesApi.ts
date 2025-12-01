@@ -56,14 +56,28 @@ const getUserId = (): string | null => {
 const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? (crypto as any).randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 
 export const creativesApi = {
-  async list(): Promise<UserCreative[]> {
+  /**
+   * Получает список креативов пользователя
+   * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
+   *                    Если передан - возвращает креативы только этого аккаунта
+   *                    Если null/undefined - возвращает все креативы пользователя (legacy режим)
+   */
+  async list(accountId?: string | null): Promise<UserCreative[]> {
     const userId = getUserId();
     if (!userId) return [];
-    const { data, error } = await supabase
+
+    let query = supabase
       .from('user_creatives')
       .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+      .eq('user_id', userId);
+
+    // Фильтрация по account_id для мультиаккаунтности
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+
     if (error) {
       console.error('creativesApi.list error:', error);
       return [];

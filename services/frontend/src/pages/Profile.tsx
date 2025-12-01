@@ -25,7 +25,8 @@ import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
- 
+import { useAppContext } from '@/contexts/AppContext';
+
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;
 
@@ -46,6 +47,7 @@ const tarifColor: Record<Exclude<Tarif, null>, string> = {
 const Profile: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { currentAdAccountId } = useAppContext();
   const storedUser = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const user = storedUser ? (() => { try { return JSON.parse(storedUser); } catch { return null; } })() : null;
   const isLoading = !storedUser;
@@ -1054,7 +1056,7 @@ const Profile: React.FC = () => {
               */}
 
               {/* Направления бизнеса */}
-              {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} />}
+              {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} accountId={currentAdAccountId} />}
 
               {/* WhatsApp Connection Card */}
               {FEATURES.SHOW_WHATSAPP && <WhatsAppConnectionCard userAccountId={user?.id || null} />}

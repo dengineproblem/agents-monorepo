@@ -13,9 +13,10 @@ interface TextTabProps {
   userId: string | null;
   initialPrompt?: string;
   initialTextType?: TextCreativeType;
+  accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
-export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt, initialTextType }) => {
+export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt, initialTextType, accountId }) => {
   // State
   const [textType, setTextType] = useState<TextCreativeType>(initialTextType || 'storytelling');
   const [userPrompt, setUserPrompt] = useState(initialPrompt || '');
@@ -234,6 +235,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
                 selectedReference={competitorReference}
                 onSelect={setCompetitorReference}
                 mediaTypeFilter="video"
+                accountId={accountId}
               />
               <p className="text-xs text-muted-foreground">
                 Выберите видео конкурента — его транскрипция автоматически подгрузится в поле задачи.

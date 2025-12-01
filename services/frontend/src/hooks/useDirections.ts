@@ -2,7 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { directionsApi } from '@/services/directionsApi';
 import type { Direction, CreateDirectionPayload, UpdateDirectionPayload } from '@/types/direction';
 
-export const useDirections = (userAccountId: string | null) => {
+/**
+ * Хук для работы с направлениями
+ * @param userAccountId - ID пользователя из user_accounts
+ * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
+ */
+export const useDirections = (userAccountId: string | null, accountId?: string | null) => {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +24,7 @@ export const useDirections = (userAccountId: string | null) => {
     setError(null);
 
     try {
-      const data = await directionsApi.list(userAccountId);
+      const data = await directionsApi.list(userAccountId, accountId);
       setDirections(data);
     } catch (err) {
       console.error('Ошибка при загрузке направлений:', err);
@@ -27,11 +32,11 @@ export const useDirections = (userAccountId: string | null) => {
     } finally {
       setLoading(false);
     }
-  }, [userAccountId]);
+  }, [userAccountId, accountId]);
 
   // Создание направления
   const createDirection = useCallback(
-    async (payload: Omit<CreateDirectionPayload, 'userAccountId'>) => {
+    async (payload: Omit<CreateDirectionPayload, 'userAccountId' | 'accountId'>) => {
       if (!userAccountId) {
         return { success: false, error: 'User account ID отсутствует' };
       }
@@ -39,6 +44,7 @@ export const useDirections = (userAccountId: string | null) => {
       const result = await directionsApi.create({
         ...payload,
         userAccountId,
+        accountId: accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
       });
 
       if (result.success) {
@@ -47,7 +53,7 @@ export const useDirections = (userAccountId: string | null) => {
 
       return result;
     },
-    [userAccountId, loadDirections]
+    [userAccountId, accountId, loadDirections]
   );
 
   // Обновление направления

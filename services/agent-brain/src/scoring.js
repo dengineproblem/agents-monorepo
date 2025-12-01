@@ -709,26 +709,38 @@ async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, opt
 /**
  * Получить метрики креатива из creative_metrics_history
  * Агрегирует за последние N дней
+ * @param {Object} supabase - Supabase client
+ * @param {string} userAccountId - ID из user_accounts
+ * @param {string} fbCreativeId - ID креатива Facebook
+ * @param {number} days - Количество дней для агрегации (по умолчанию 30)
+ * @param {string|null} accountId - UUID из ad_accounts.id для мультиаккаунтности (опционально)
  * @returns {Object|null} Метрики или null если данных нет (первый запуск)
  */
-async function getCreativeMetricsFromDB(supabase, userAccountId, fbCreativeId, days = 30) {
+async function getCreativeMetricsFromDB(supabase, userAccountId, fbCreativeId, days = 30, accountId = null) {
   const dateFrom = new Date();
   dateFrom.setDate(dateFrom.getDate() - days);
-  
-  const { data, error } = await supabase
+
+  let query = supabase
     .from('creative_metrics_history')
     .select('*')
     .eq('user_account_id', userAccountId)
     .eq('creative_id', fbCreativeId)
     .eq('source', 'production')
-    .gte('date', dateFrom.toISOString().split('T')[0])
-    .order('date', { ascending: false });
-  
+    .gte('date', dateFrom.toISOString().split('T')[0]);
+
+  // Фильтрация по рекламному аккаунту для мультиаккаунтного режима
+  if (accountId) {
+    query = query.eq('account_id', accountId);
+  }
+
+  const { data, error } = await query.order('date', { ascending: false });
+
   if (error) {
-    logger.warn({ 
-      error: error.message, 
+    logger.warn({
+      error: error.message,
       creative_id: fbCreativeId,
-      user_account_id: userAccountId
+      user_account_id: userAccountId,
+      account_id: accountId
     }, 'Failed to fetch metrics from creative_metrics_history');
     return null;
   }
@@ -1339,9 +1351,10 @@ export async function runScoringAgent(userAccount, options = {}) {
           supabase,
           userAccountId,
           uc.fb_creative_id_whatsapp,
-          30
+          30,
+          accountUUID // UUID из ad_accounts.id для мультиаккаунтности
         );
-        
+
         creatives.push({
           objective: 'MESSAGES',
           fb_creative_id: uc.fb_creative_id_whatsapp,
@@ -1349,16 +1362,17 @@ export async function runScoringAgent(userAccount, options = {}) {
           has_data: stats !== null  // НОВОЕ: флаг наличия данных
         });
       }
-      
+
       // Site Leads (OUTCOME_LEADS)
       if (uc.fb_creative_id_site_leads) {
         const stats = await getCreativeMetricsFromDB(
           supabase,
           userAccountId,
           uc.fb_creative_id_site_leads,
-          30
+          30,
+          accountUUID // UUID из ad_accounts.id для мультиаккаунтности
         );
-        
+
         creatives.push({
           objective: 'OUTCOME_LEADS',
           fb_creative_id: uc.fb_creative_id_site_leads,
@@ -1366,16 +1380,17 @@ export async function runScoringAgent(userAccount, options = {}) {
           has_data: stats !== null  // НОВОЕ: флаг наличия данных
         });
       }
-      
+
       // Instagram Traffic (OUTCOME_TRAFFIC)
       if (uc.fb_creative_id_instagram_traffic) {
         const stats = await getCreativeMetricsFromDB(
           supabase,
           userAccountId,
           uc.fb_creative_id_instagram_traffic,
-          30
+          30,
+          accountUUID // UUID из ad_accounts.id для мультиаккаунтности
         );
-        
+
         creatives.push({
           objective: 'OUTCOME_TRAFFIC',
           fb_creative_id: uc.fb_creative_id_instagram_traffic,

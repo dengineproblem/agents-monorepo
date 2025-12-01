@@ -968,21 +968,38 @@ fastify.post('/analyze-creative', async (request, reply) => {
     // ===================================================
     // STEP 1: Получаем последние агрегированные метрики креатива
     // ===================================================
+    // Сначала получаем account_id креатива для фильтрации метрик
+    const { data: creativeForAccountId, error: creativeAccountError } = await supabase
+      .from('user_creatives')
+      .select('account_id')
+      .eq('id', creative_id)
+      .single();
+
+    const accountId = creativeForAccountId?.account_id || null;
+
     // ✅ Теперь просто ищем по user_creative_id - никаких джойнов!
-    const { data: metricsHistory, error: metricsError } = await supabase
+    let metricsQuery = supabase
       .from('creative_metrics_history')
       .select('*')
       .eq('user_creative_id', creative_id)  // ✅ Используем user_creative_id напрямую!
-      .eq('user_account_id', user_id)
+      .eq('user_account_id', user_id);
+
+    // Фильтрация по рекламному аккаунту для мультиаккаунтного режима
+    if (accountId) {
+      metricsQuery = metricsQuery.eq('account_id', accountId);
+    }
+
+    const { data: metricsHistory, error: metricsError } = await metricsQuery
       .order('date', { ascending: false })
       .limit(30); // Берем последние 30 дней
 
-    fastify.log.info({ 
-      where: 'analyzeCreative', 
-      creative_id, 
+    fastify.log.info({
+      where: 'analyzeCreative',
+      creative_id,
       user_id,
+      account_id: accountId,
       metricsFound: metricsHistory?.length || 0,
-      metricsError: metricsError?.message 
+      metricsError: metricsError?.message
     });
 
     if (metricsError || !metricsHistory || metricsHistory.length === 0) {
