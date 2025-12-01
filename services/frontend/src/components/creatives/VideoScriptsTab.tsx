@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Copy, Check, FileText, Pencil, X } from 'lucide-react';
+import { Sparkles, Loader2, Copy, Check, FileText, Pencil, X, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { textCreativesApi, TEXT_TYPES, TextCreativeType } from '@/services/textCreativesApi';
+import { CompetitorReferenceSelector, type CompetitorReference } from './CompetitorReferenceSelector';
 
 interface TextTabProps {
   userId: string | null;
@@ -36,6 +37,30 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
   const [isEditMode, setIsEditMode] = useState(false);
   const [editInstructions, setEditInstructions] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+
+  // Competitor reference state (для типа 'reference')
+  const [competitorReference, setCompetitorReference] = useState<CompetitorReference | null>(null);
+
+  // Автозаполнение userPrompt при выборе референса
+  useEffect(() => {
+    if (competitorReference && textType === 'reference') {
+      // Приоритет: transcript > ocr_text > body_text
+      const referenceText = competitorReference.transcript
+        || competitorReference.ocr_text
+        || competitorReference.body_text
+        || '';
+      if (referenceText) {
+        setUserPrompt(referenceText);
+      }
+    }
+  }, [competitorReference, textType]);
+
+  // Сбрасываем референс при смене типа текста
+  useEffect(() => {
+    if (textType !== 'reference') {
+      setCompetitorReference(null);
+    }
+  }, [textType]);
 
   // Генерация текста
   const handleGenerate = async () => {
@@ -196,6 +221,25 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
               <p><strong>Референс</strong> — адаптация текста конкурента под ваш бизнес. Сохраняет структуру и крючки, заменяет детали.</p>
             )}
           </div>
+
+          {/* Селектор референса конкурента (только для типа 'reference') */}
+          {textType === 'reference' && userId && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Выберите креатив конкурента
+              </Label>
+              <CompetitorReferenceSelector
+                userAccountId={userId}
+                selectedReference={competitorReference}
+                onSelect={setCompetitorReference}
+                mediaTypeFilter="video"
+              />
+              <p className="text-xs text-muted-foreground">
+                Выберите видео конкурента — его транскрипция автоматически подгрузится в поле задачи.
+              </p>
+            </div>
+          )}
 
           {/* Поле для задачи */}
           <div className="space-y-2">

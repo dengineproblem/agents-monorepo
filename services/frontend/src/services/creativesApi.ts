@@ -29,6 +29,8 @@ export type UserCreative = {
   generated_creative_id?: string | null;
   // URL изображения для миниатюр (image креативы)
   image_url?: string | null;
+  // Миниатюра видео (скриншот первого кадра)
+  thumbnail_url?: string | null;
   // Данные карусели (carousel креативы)
   carousel_data?: CarouselCard[] | null;
 };

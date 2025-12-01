@@ -228,8 +228,8 @@ export const competitorsApi = {
         page = 1,
         limit = 20,
         mediaType = 'all',
-        top10Only = true,
-        includeAll = false,
+        top10Only = false,
+        includeAll = true,
         newOnly = false,
       } = options;
 

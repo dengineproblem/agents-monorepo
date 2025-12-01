@@ -1742,6 +1742,32 @@ const Creatives: React.FC = () => {
                             className="h-5 w-5"
                           />
                         </div>
+                        {/* Миниатюра креатива 40x40 */}
+                        <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center">
+                          {(() => {
+                            // Для видео - thumbnail_url, для картинки - image_url, для карусели - первая картинка
+                            const previewUrl = it.media_type === 'video'
+                              ? it.thumbnail_url
+                              : it.media_type === 'carousel' && it.carousel_data?.[0]
+                                ? (it.carousel_data[0].image_url || it.carousel_data[0].image_url_4k)
+                                : it.image_url;
+
+                            if (previewUrl) {
+                              return (
+                                <img
+                                  src={getThumbnailUrl(previewUrl, 80, 80) || previewUrl}
+                                  alt=""
+                                  className="w-full h-full object-cover"
+                                  loading="lazy"
+                                />
+                              );
+                            }
+
+                            // Fallback - иконка типа медиа
+                            const Icon = it.media_type === 'video' ? Video : it.media_type === 'carousel' ? Images : Image;
+                            return <Icon className="w-5 h-5 text-muted-foreground" />;
+                          })()}
+                        </div>
                         <div className="min-w-0 flex-1 flex items-center gap-2">
                           <AccordionTrigger className="hover:no-underline min-w-0">
                             <EditableTitle

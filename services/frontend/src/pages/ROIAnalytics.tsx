@@ -851,7 +851,37 @@ const ROIAnalytics: React.FC = () => {
                                 expandedCreativeId === campaign.id && "ring-2 ring-primary/50 bg-primary/5"
                               )}>
                                 <td className="py-2 px-3">
-                                  <div className="font-medium text-sm">{campaign.name}</div>
+                                  <div className="flex items-center gap-2">
+                                    {/* Миниатюра креатива 40x40 */}
+                                    <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center">
+                                      {(() => {
+                                        // Для видео - используем thumbnail_url
+                                        // Для картинки - image_url
+                                        // Для карусели - первая картинка из carousel_data
+                                        const previewUrl = campaign.media_type === 'video'
+                                          ? campaign.thumbnail_url
+                                          : campaign.media_type === 'carousel' && campaign.carousel_data?.[0]
+                                            ? (campaign.carousel_data[0].image_url || campaign.carousel_data[0].image_url_4k)
+                                            : campaign.image_url;
+
+                                        if (previewUrl) {
+                                          return (
+                                            <img
+                                              src={getThumbnailUrl(previewUrl, 80, 80) || previewUrl}
+                                              alt=""
+                                              className="w-full h-full object-cover"
+                                              loading="lazy"
+                                            />
+                                          );
+                                        }
+
+                                        // Fallback - иконка типа медиа
+                                        const Icon = campaign.media_type ? MEDIA_TYPE_CONFIG[campaign.media_type]?.icon : Image;
+                                        return Icon ? <Icon className="w-5 h-5 text-muted-foreground" /> : null;
+                                      })()}
+                                    </div>
+                                    <div className="font-medium text-sm">{campaign.name}</div>
+                                  </div>
                                 </td>
                                 <td className="py-2 px-3 text-left">
                                   <MediaTypeBadge mediaType={campaign.media_type} showLabel={false} />
@@ -1215,7 +1245,30 @@ const ROIAnalytics: React.FC = () => {
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <MediaTypeBadge mediaType={campaign.media_type} showLabel={false} />
+                          {/* Миниатюра креатива 40x40 */}
+                          <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center">
+                            {(() => {
+                              const previewUrl = campaign.media_type === 'video'
+                                ? campaign.thumbnail_url
+                                : campaign.media_type === 'carousel' && campaign.carousel_data?.[0]
+                                  ? (campaign.carousel_data[0].image_url || campaign.carousel_data[0].image_url_4k)
+                                  : campaign.image_url;
+
+                              if (previewUrl) {
+                                return (
+                                  <img
+                                    src={getThumbnailUrl(previewUrl, 80, 80) || previewUrl}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                  />
+                                );
+                              }
+
+                              const Icon = campaign.media_type ? MEDIA_TYPE_CONFIG[campaign.media_type]?.icon : Image;
+                              return Icon ? <Icon className="w-5 h-5 text-muted-foreground" /> : null;
+                            })()}
+                          </div>
                           <h3 className="text-sm font-medium truncate pr-2">
                             {campaign.name}
                           </h3>

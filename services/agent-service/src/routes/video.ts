@@ -166,6 +166,38 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       app.log.info(`Thumbnail uploaded with hash: ${thumbnailResult.hash}, loading direction settings...`);
 
       // ===================================================
+      // СОХРАНЯЕМ THUMBNAIL В SUPABASE STORAGE
+      // ===================================================
+      let thumbnailUrl: string | null = null;
+      try {
+        const thumbnailFileName = `video-thumbnails/${body.user_id}/${creative.id}_${Date.now()}.jpg`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('creo')
+          .upload(thumbnailFileName, thumbnailBuffer, {
+            contentType: 'image/jpeg',
+            upsert: false,
+            cacheControl: '3600'
+          });
+
+        if (uploadError) {
+          app.log.warn(`Failed to upload thumbnail to Supabase Storage: ${uploadError.message}`);
+        } else {
+          const { data: publicUrlData } = supabase.storage
+            .from('creo')
+            .getPublicUrl(thumbnailFileName);
+
+          if (publicUrlData?.publicUrl) {
+            thumbnailUrl = publicUrlData.publicUrl;
+            app.log.info(`Thumbnail saved to Supabase Storage: ${thumbnailUrl}`);
+          }
+        }
+      } catch (storageErr: any) {
+        app.log.warn(`Failed to save thumbnail to storage: ${storageErr.message}`);
+        // Не прерываем - это не критично
+      }
+
+      // ===================================================
       // ЗАГРУЗКА НАСТРОЕК И OBJECTIVE ИЗ НАПРАВЛЕНИЯ
       // ===================================================
       let description = 'Напишите нам, чтобы узнать подробности';
@@ -285,6 +317,8 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           fb_video_id: fbVideo.id,
           status: 'ready',
           fb_creative_id: fbCreativeId,
+          // Thumbnail URL для превью видео
+          ...(thumbnailUrl && { thumbnail_url: thumbnailUrl }),
           // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),

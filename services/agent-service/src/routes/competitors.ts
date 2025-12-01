@@ -51,10 +51,10 @@ const GetCompetitorsQuerySchema = z.object({
 
 const GetCreativesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   mediaType: z.enum(['video', 'image', 'carousel', 'all']).default('all'),
-  top10Only: z.coerce.boolean().default(true), // По умолчанию только ТОП-10
-  includeAll: z.coerce.boolean().default(false), // Показать все 50 креативов
+  top10Only: z.coerce.boolean().default(false), // Показывать все креативы по умолчанию
+  includeAll: z.coerce.boolean().default(true), // Показать все креативы (до 100)
 });
 
 const DeleteCompetitorSchema = z.object({
@@ -825,8 +825,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
    * GET /competitors/:competitorId/creatives - Список креативов конкурента
    *
    * Query params:
-   * - top10Only: true (default) - только ТОП-10 по score
-   * - includeAll: true - показать все креативы (до 50)
+   * - top10Only: false (default) - показать все креативы
+   * - includeAll: true (default) - показать все креативы (до 50)
    * - mediaType: video | image | carousel | all
    */
   app.get('/competitors/:competitorId/creatives', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -892,8 +892,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
    *
    * Query params:
    * - userAccountId: UUID пользователя (обязательный)
-   * - top10Only: true (default) - только ТОП-10 по score
-   * - includeAll: true - показать все креативы (до 50 на конкурента)
+   * - top10Only: false (default) - показать все креативы
+   * - includeAll: true (default) - показать все креативы (до 50 на конкурента)
    * - newOnly: true - только новые в ТОП-10 (за 7 дней)
    * - mediaType: video | image | carousel | all
    */
@@ -904,8 +904,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         page = '1',
         limit = '20',
         mediaType = 'all',
-        top10Only = 'true',
-        includeAll = 'false',
+        top10Only = 'false',
+        includeAll = 'true',
         newOnly = 'false',
       } = request.query as Record<string, string>;
 
@@ -914,7 +914,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       }
 
       const pageNum = parseInt(page);
-      const limitNum = Math.min(parseInt(limit), 50);
+      const limitNum = Math.min(parseInt(limit), 100); // Увеличен лимит до 100
       const offset = (pageNum - 1) * limitNum;
       const isTop10Only = top10Only === 'true';
       const isIncludeAll = includeAll === 'true';

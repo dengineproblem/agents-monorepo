@@ -71,6 +71,11 @@ const scoreColorClasses = {
   gray: 'bg-gray-500/20 text-gray-700 border-gray-500/30',
 };
 
+interface Competitor {
+  id: string;
+  name: string;
+}
+
 export function CompetitorReferenceSelector({
   userAccountId,
   selectedReference,
@@ -81,22 +86,39 @@ export function CompetitorReferenceSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [creatives, setCreatives] = useState<CompetitorCreative[]>([]);
+  const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [filter, setFilter] = useState<'all' | 'video' | 'image' | 'carousel'>(mediaTypeFilter);
+  const [competitorFilter, setCompetitorFilter] = useState<string>('all');
 
-  // Загружаем креативы при открытии диалога
+  // Загружаем конкурентов и креативы при открытии диалога
   useEffect(() => {
     if (isOpen && creatives.length === 0) {
+      loadCompetitors();
       loadCreatives();
     }
   }, [isOpen]);
 
+  const loadCompetitors = async () => {
+    try {
+      const data = await competitorsApi.list(userAccountId);
+      setCompetitors(data.map(c => ({ id: c.id, name: c.name })));
+    } catch (error) {
+      console.error('Ошибка загрузки конкурентов:', error);
+    }
+  };
+
   const loadCreatives = async () => {
     setLoading(true);
     try {
-      const data = await competitorsApi.getTop10ForReference(userAccountId, {
+      // Загружаем ВСЕ креативы (не только TOP-10), сортированные по score
+      const { creatives: data } = await competitorsApi.getAllCreatives(userAccountId, {
         mediaType: filter === 'all' ? 'all' : filter,
-        limit: 50,
+        limit: 100,
+        top10Only: false,
+        includeAll: true,
       });
+      // Сортируем по score descending
+      data.sort((a, b) => (b.score || 0) - (a.score || 0));
       setCreatives(data);
     } catch (error) {
       console.error('Ошибка загрузки креативов:', error);
@@ -105,7 +127,7 @@ export function CompetitorReferenceSelector({
     }
   };
 
-  // Перезагружаем при изменении фильтра
+  // Перезагружаем при изменении фильтра типа медиа
   useEffect(() => {
     if (isOpen) {
       loadCreatives();
@@ -135,10 +157,12 @@ export function CompetitorReferenceSelector({
     onSelect(null);
   };
 
-  // Фильтруем креативы
-  const filteredCreatives = filter === 'all'
-    ? creatives
-    : creatives.filter(c => c.media_type === filter);
+  // Фильтруем креативы по типу и конкуренту
+  const filteredCreatives = creatives.filter(c => {
+    const mediaMatch = filter === 'all' || c.media_type === filter;
+    const competitorMatch = competitorFilter === 'all' || c.competitor?.id === competitorFilter;
+    return mediaMatch && competitorMatch;
+  });
 
   return (
     <div className={className}>
@@ -222,20 +246,46 @@ export function CompetitorReferenceSelector({
             </DialogTitle>
           </DialogHeader>
 
-          {/* Фильтр типа медиа */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Тип:</span>
-            <Select value={filter} onValueChange={(v) => setFilter(v as any)}>
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все</SelectItem>
-                <SelectItem value="video">Видео</SelectItem>
-                <SelectItem value="image">Изображения</SelectItem>
-                <SelectItem value="carousel">Карусели</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Фильтры */}
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Фильтр по конкуренту */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Конкурент:</span>
+              <Select value={competitorFilter} onValueChange={setCompetitorFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Все конкуренты" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все конкуренты</SelectItem>
+                  {competitors.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Фильтр типа медиа */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Тип:</span>
+              <Select value={filter} onValueChange={(v) => setFilter(v as any)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Все</SelectItem>
+                  <SelectItem value="video">Видео</SelectItem>
+                  <SelectItem value="image">Изображения</SelectItem>
+                  <SelectItem value="carousel">Карусели</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Количество */}
+            <span className="text-sm text-muted-foreground ml-auto">
+              {filteredCreatives.length} креативов
+            </span>
           </div>
 
           {/* Список креативов */}
@@ -253,7 +303,7 @@ export function CompetitorReferenceSelector({
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pr-4">
+              <div className="flex flex-col gap-2 pr-4">
                 {filteredCreatives.map((creative) => {
                   const MediaIcon = mediaTypeIcon[creative.media_type];
                   const previewUrl = creative.thumbnail_url || creative.media_urls?.[0];
@@ -263,17 +313,17 @@ export function CompetitorReferenceSelector({
                   const hasText = creativeAnalysis?.transcript || creativeAnalysis?.ocr_text;
 
                   return (
-                    <Card
+                    <div
                       key={creative.id}
                       className={cn(
-                        'overflow-hidden cursor-pointer transition-all',
-                        'hover:ring-2 hover:ring-primary',
+                        'flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all',
+                        'hover:bg-accent/50',
                         isSelected && 'ring-2 ring-primary bg-primary/5'
                       )}
                       onClick={() => handleSelect(creative)}
                     >
-                      {/* Превью */}
-                      <div className="relative aspect-[4/5] bg-muted">
+                      {/* Миниатюра 40x40 */}
+                      <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center relative">
                         {previewUrl ? (
                           <img
                             src={previewUrl}
@@ -282,66 +332,62 @@ export function CompetitorReferenceSelector({
                             loading="lazy"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <MediaIcon className="w-8 h-8 text-muted-foreground" />
-                          </div>
+                          <MediaIcon className="w-5 h-5 text-muted-foreground" />
                         )}
-
-                        {/* Иконка типа медиа */}
                         {creative.media_type === 'video' && (
-                          <div className="absolute top-2 right-2">
-                            <div className="bg-black/70 rounded-full p-1">
-                              <PlayCircle className="w-3 h-3 text-white" />
-                            </div>
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                            <PlayCircle className="w-4 h-4 text-white" />
                           </div>
                         )}
+                      </div>
 
-                        {/* Score badge */}
-                        {creative.score !== undefined && (
-                          <div className="absolute top-2 left-2">
-                            <Badge
-                              variant="outline"
-                              className={cn('text-xs font-bold', scoreColorClasses[scoreCategory.color])}
-                            >
-                              {scoreCategory.emoji} {creative.score}
-                            </Badge>
-                          </div>
+                      {/* Score */}
+                      <div className="shrink-0 w-16 text-center">
+                        {creative.score !== undefined ? (
+                          <Badge
+                            variant="outline"
+                            className={cn('text-xs font-bold', scoreColorClasses[scoreCategory.color])}
+                          >
+                            {scoreCategory.emoji} {creative.score}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
+                      </div>
 
-                        {/* Галочка выбора */}
+                      {/* Конкурент */}
+                      <div className="shrink-0 w-24 truncate text-xs text-muted-foreground">
+                        {creative.competitor?.name || '—'}
+                      </div>
+
+                      {/* Описание и наличие текста */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">
+                          {creative.body_text || creative.headline || 'Без описания'}
+                        </p>
+                      </div>
+
+                      {/* Индикатор наличия текста */}
+                      <div className="shrink-0 w-16">
+                        {hasText ? (
+                          <Badge variant="secondary" className="text-xs">
+                            <FileText className="w-3 h-3 mr-1" />
+                            Текст
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </div>
+
+                      {/* Галочка выбора */}
+                      <div className="shrink-0 w-6">
                         {isSelected && (
-                          <div className="absolute bottom-2 right-2">
-                            <div className="bg-primary rounded-full p-1">
-                              <Check className="w-4 h-4 text-primary-foreground" />
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Индикатор наличия текста */}
-                        {hasText && (
-                          <div className="absolute bottom-2 left-2">
-                            <div className="bg-background/80 rounded px-1.5 py-0.5 flex items-center gap-1">
-                              <FileText className="w-3 h-3 text-primary" />
-                              <span className="text-xs">Текст</span>
-                            </div>
+                          <div className="bg-primary rounded-full p-1">
+                            <Check className="w-3 h-3 text-primary-foreground" />
                           </div>
                         )}
                       </div>
-
-                      {/* Информация */}
-                      <div className="p-2">
-                        {creative.competitor && (
-                          <p className="text-xs text-muted-foreground truncate">
-                            {creative.competitor.name}
-                          </p>
-                        )}
-                        {creative.body_text && (
-                          <p className="text-xs line-clamp-1 mt-0.5">
-                            {creative.body_text}
-                          </p>
-                        )}
-                      </div>
-                    </Card>
+                    </div>
                   );
                 })}
               </div>

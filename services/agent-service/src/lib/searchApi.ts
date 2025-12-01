@@ -372,10 +372,41 @@ export async function fetchCompetitorCreatives(
       ads = filtered;
     }
 
+    // =====================================================
+    // ОПТИМИЗАЦИЯ: предварительная фильтрация и сортировка
+    // Вместо скоринга всех 800+ креативов, отбираем 50 лучших кандидатов
+    // Критерии: активные + самые долго работающие (по start_date)
+    // =====================================================
+    const PREFILTER_LIMIT = 50;
+
+    if (ads.length > PREFILTER_LIMIT) {
+      // Сначала активные, потом неактивные
+      // Внутри каждой группы - по start_date ASC (самые старые первые = долго работают)
+      ads.sort((a, b) => {
+        // Активные выше неактивных
+        if (a.is_active !== b.is_active) {
+          return a.is_active ? -1 : 1;
+        }
+        // По дате старта (старые первые)
+        const dateA = a.start_date ? new Date(a.start_date).getTime() : Date.now();
+        const dateB = b.start_date ? new Date(b.start_date).getTime() : Date.now();
+        return dateA - dateB;
+      });
+
+      const beforeCount = ads.length;
+      ads = ads.slice(0, PREFILTER_LIMIT);
+
+      log.info({
+        beforePrefilter: beforeCount,
+        afterPrefilter: ads.length,
+        limit: PREFILTER_LIMIT
+      }, 'Применена предварительная фильтрация (активные + долго работающие)');
+    }
+
     // Преобразуем в формат для БД
     const creatives = ads.map(transformAdToCreativeData);
 
-    // Ограничиваем если нужно
+    // Ограничиваем если нужно (дополнительно к PREFILTER_LIMIT)
     if (options.limit && creatives.length > options.limit) {
       return creatives.slice(0, options.limit);
     }

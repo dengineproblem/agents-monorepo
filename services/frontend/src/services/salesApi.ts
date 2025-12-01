@@ -35,6 +35,7 @@ export interface CampaignROI {
   // Новые поля для типа медиа и миниатюр
   media_type?: 'video' | 'image' | 'carousel' | null;
   image_url?: string | null;
+  thumbnail_url?: string | null; // Миниатюра для видео (скриншот первого кадра)
   carousel_data?: CarouselCardROI[] | null;
   generated_creative_id?: string | null;
 }
@@ -311,7 +312,7 @@ class SalesApiService {
       // ШАГ 1: Загружаем user_creatives для пользователя с фильтрами
       let creativesQuery = (supabase as any)
         .from('user_creatives')
-        .select('id, title, created_at, media_type, image_url, carousel_data, generated_creative_id, fb_video_id, direction_id')
+        .select('id, title, created_at, media_type, image_url, thumbnail_url, carousel_data, generated_creative_id, fb_video_id, direction_id')
         .eq('user_id', userAccountId)
         .eq('status', 'ready')
         .order('created_at', { ascending: false })
@@ -535,6 +536,7 @@ class SalesApiService {
           // Новые поля для типа медиа и миниатюр
           media_type: creative.media_type || null,
           image_url: creative.image_url || null,
+          thumbnail_url: creative.thumbnail_url || null, // Миниатюра для видео
           carousel_data: creative.carousel_data || null,
           generated_creative_id: creative.generated_creative_id || null
         });
