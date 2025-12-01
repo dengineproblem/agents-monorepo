@@ -16,8 +16,8 @@ import { competitorsApi } from '@/services/competitorsApi';
 import {
   AddCompetitorDialog,
   CompetitorsList,
-  CompetitorCreativesGallery,
 } from '@/components/competitors';
+import { CompetitorCreativesList } from '@/components/competitors/CompetitorCreativesList';
 import type { Competitor, CompetitorCreative, CompetitorsPagination } from '@/types/competitor';
 import { useTranslation } from '@/i18n/LanguageContext';
 import {
@@ -154,7 +154,13 @@ export default function Competitors() {
       const result = await competitorsApi.refresh(competitor.id);
 
       if (result.success) {
-        toast.success(`Найдено ${result.result?.creatives_found || 0} креативов`);
+        const newCount = result.result?.creatives_new || 0;
+        const totalCount = result.result?.creatives_found || 0;
+        toast.success(
+          newCount > 0
+            ? `+${newCount} новых креативов (всего ${totalCount})`
+            : `Обновлено. Всего ${totalCount} креативов`
+        );
         fetchCompetitors();
         if (selectedCompetitorId === competitor.id || selectedCompetitorId === null) {
           fetchCreatives(1);
@@ -200,11 +206,6 @@ export default function Competitors() {
       setDeleteDialogOpen(false);
       setCompetitorToDelete(null);
     }
-  };
-
-  const handleCreativeClick = (creative: CompetitorCreative) => {
-    // TODO: Открыть модалку с детальным просмотром
-    console.log('Creative clicked:', creative);
   };
 
   const handleExtractText = async (creativeId: string) => {
@@ -329,13 +330,11 @@ export default function Competitors() {
                     </p>
                   </div>
                 ) : (
-                  <CompetitorCreativesGallery
+                  <CompetitorCreativesList
                     creatives={creatives}
                     loading={creativesLoading}
                     pagination={pagination}
                     onPageChange={fetchCreatives}
-                    onCreativeClick={handleCreativeClick}
-                    showCompetitorBadge={selectedCompetitorId === null}
                     onExtractText={handleExtractText}
                     extractingCreativeId={extractingCreativeId}
                   />

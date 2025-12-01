@@ -270,6 +270,136 @@ async function createAnalysisRecords(competitorId: string): Promise<void> {
   log.info({ count: analysisRecords.length, competitorId }, 'Созданы записи анализа для новых креативов');
 }
 
+/**
+ * Фоновая обработка pending креативов (OCR/транскрипция)
+ * Запускается асинхронно, не блокирует основной поток
+ */
+async function processPendingAnalysis(competitorId?: string): Promise<void> {
+  try {
+    // Получаем pending креативы
+    let query = supabase
+      .from('competitor_creative_analysis')
+      .select('creative_id, competitor_creatives!inner(id, media_type, media_urls, thumbnail_url)')
+      .eq('processing_status', 'pending')
+      .limit(10); // Обрабатываем по 10 за раз
+
+    if (competitorId) {
+      query = query.eq('competitor_creatives.competitor_id', competitorId);
+    }
+
+    const { data: pendingAnalysis, error } = await query;
+
+    if (error || !pendingAnalysis || pendingAnalysis.length === 0) {
+      return;
+    }
+
+    log.info({ count: pendingAnalysis.length, competitorId }, '[Batch Analysis] Начинаем обработку pending креативов');
+
+    for (const analysis of pendingAnalysis) {
+      const creative = analysis.competitor_creatives as any;
+      if (!creative) continue;
+
+      const creativeId = creative.id;
+
+      try {
+        // Отмечаем как processing
+        await supabase
+          .from('competitor_creative_analysis')
+          .update({ processing_status: 'processing' })
+          .eq('creative_id', creativeId);
+
+        let extractedText = '';
+        const mediaUrl = creative.thumbnail_url || creative.media_urls?.[0];
+
+        if (!mediaUrl) {
+          await supabase
+            .from('competitor_creative_analysis')
+            .update({ processing_status: 'failed' })
+            .eq('creative_id', creativeId);
+          continue;
+        }
+
+        if (creative.media_type === 'image' || creative.media_type === 'carousel') {
+          // OCR через creative-generation-service
+          const ocrResponse = await fetch('http://creative-generation-service:8085/ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_url: mediaUrl, image_type: 'url' }),
+          });
+
+          if (ocrResponse.ok) {
+            const ocrResult = await ocrResponse.json() as { success: boolean; text?: string };
+            extractedText = ocrResult.text || '';
+          }
+
+        } else if (creative.media_type === 'video') {
+          // Транскрибация видео
+          const videoUrl = creative.media_urls?.[0];
+          if (videoUrl) {
+            let videoPath: string | null = null;
+            try {
+              videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
+
+              const videoResponse = await fetch(videoUrl);
+              if (videoResponse.ok && videoResponse.body) {
+                const writeStream = createWriteStream(videoPath);
+                const reader = videoResponse.body.getReader();
+                const nodeStream = new (await import('stream')).Readable({
+                  async read() {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                      this.push(null);
+                    } else {
+                      this.push(Buffer.from(value));
+                    }
+                  }
+                });
+
+                await pipeline(nodeStream, writeStream);
+                const transcription = await processVideoTranscription(videoPath, 'ru');
+                extractedText = transcription.text;
+              }
+            } finally {
+              if (videoPath) {
+                try {
+                  await fs.unlink(videoPath);
+                } catch {}
+              }
+            }
+          }
+        }
+
+        // Сохраняем результат
+        await supabase
+          .from('competitor_creative_analysis')
+          .update({
+            ocr_text: creative.media_type !== 'video' ? extractedText : null,
+            transcript: creative.media_type === 'video' ? extractedText : null,
+            processing_status: 'completed',
+          })
+          .eq('creative_id', creativeId);
+
+        log.info({ creativeId, textLength: extractedText.length }, '[Batch Analysis] Креатив обработан');
+
+        // Пауза между обработками чтобы не перегружать сервисы
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+      } catch (err) {
+        log.warn({ err, creativeId }, '[Batch Analysis] Ошибка обработки креатива');
+        await supabase
+          .from('competitor_creative_analysis')
+          .update({ processing_status: 'failed' })
+          .eq('creative_id', creativeId);
+      }
+    }
+
+    log.info({ count: pendingAnalysis.length, competitorId }, '[Batch Analysis] Обработка завершена');
+
+  } catch (err) {
+    log.error({ err }, '[Batch Analysis] Ошибка batch-обработки');
+  }
+}
+
 // ========================================
 // ROUTES
 // ========================================
@@ -469,6 +599,12 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         const creatives = await fetchCompetitorCreatives(searchQuery, input.countryCode, { targetPageId: pageId, limit: 50 });
         const result = await saveCreativesWithScoring(competitorId, creatives);
 
+        // Считаем реальное количество креативов в БД
+        const { count: actualCount } = await supabase
+          .from('competitor_creatives')
+          .select('*', { count: 'exact', head: true })
+          .eq('competitor_id', competitorId);
+
         // Обновляем статус и счетчик
         await supabase
           .from('competitors')
@@ -476,12 +612,17 @@ export default async function competitorsRoutes(app: FastifyInstance) {
             status: 'active',
             last_crawled_at: new Date().toISOString(),
             next_crawl_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // +7 дней
-            creatives_count: result.found,
+            creatives_count: actualCount || 0,
           })
           .eq('id', competitorId);
 
         // Создаем записи для анализа
         await createAnalysisRecords(competitorId);
+
+        // Запускаем фоновую обработку (OCR/транскрипция)
+        processPendingAnalysis(competitorId).catch(err =>
+          log.warn({ err, competitorId }, 'Ошибка фоновой обработки анализа')
+        );
 
         log.info({ competitorId, pageId, creativesFound: result.found }, 'Первичный сбор креативов завершен');
       } catch (crawlError: any) {
@@ -616,6 +757,12 @@ export default async function competitorsRoutes(app: FastifyInstance) {
           })
           .eq('id', job?.id);
 
+        // Считаем реальное количество креативов в БД
+        const { count: actualCount } = await supabase
+          .from('competitor_creatives')
+          .select('*', { count: 'exact', head: true })
+          .eq('competitor_id', competitorId);
+
         // Обновляем конкурента
         await supabase
           .from('competitors')
@@ -623,7 +770,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
             status: 'active',
             last_crawled_at: new Date().toISOString(),
             next_crawl_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            creatives_count: result.found,
+            creatives_count: actualCount || 0,
             last_error: null,
           })
           .eq('id', competitorId);
@@ -631,13 +778,18 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         // Создаем записи для анализа новых креативов
         await createAnalysisRecords(competitorId);
 
-        log.info({ competitorId, result }, 'Обновление креативов завершено');
+        // Запускаем фоновую обработку (OCR/транскрипция)
+        processPendingAnalysis(competitorId).catch(err =>
+          log.warn({ err, competitorId }, 'Ошибка фоновой обработки анализа')
+        );
+
+        log.info({ competitorId, result, actualCount }, 'Обновление креативов завершено');
 
         return reply.send({
           success: true,
           result: {
-            creatives_found: result.found,
-            creatives_new: result.new,
+            creatives_found: actualCount || 0, // Реальное количество в БД
+            creatives_new: result.newInTop10,  // Новые в TOP-10
           },
         });
       } catch (crawlError: any) {

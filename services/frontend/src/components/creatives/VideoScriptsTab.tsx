@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -10,12 +10,20 @@ import { textCreativesApi, TEXT_TYPES, TextCreativeType } from '@/services/textC
 
 interface TextTabProps {
   userId: string | null;
+  initialPrompt?: string;
 }
 
-export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId }) => {
+export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt }) => {
   // State
   const [textType, setTextType] = useState<TextCreativeType>('storytelling');
-  const [userPrompt, setUserPrompt] = useState('');
+  const [userPrompt, setUserPrompt] = useState(initialPrompt || '');
+
+  // Устанавливаем initialPrompt при изменении
+  useEffect(() => {
+    if (initialPrompt) {
+      setUserPrompt(initialPrompt);
+    }
+  }, [initialPrompt]);
   const [generatedText, setGeneratedText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);

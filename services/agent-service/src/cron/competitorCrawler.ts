@@ -16,6 +16,11 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { fetchCompetitorCreatives, type CompetitorCreativeData } from '../lib/searchApi.js';
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
+import { processVideoTranscription } from '../lib/transcription.js';
+import { createWriteStream, promises as fs } from 'fs';
+import { pipeline } from 'stream/promises';
+import path from 'path';
+import { randomUUID } from 'crypto';
 
 const TOP_CREATIVES_LIMIT = 10;
 const MAX_CREATIVES_PER_COMPETITOR = 50;
@@ -460,4 +465,137 @@ export function startCompetitorCrawlerCron(app: FastifyInstance) {
       app.log.error({ error }, '[CompetitorCron] Pending check failed');
     }
   });
+
+  // Каждые 30 минут обрабатываем pending анализы (OCR/транскрипция)
+  cron.schedule('*/30 * * * *', async () => {
+    try {
+      await processPendingAnalysisBatch(app.log);
+    } catch (error) {
+      app.log.error({ error }, '[CompetitorCron] Analysis processing failed');
+    }
+  });
+}
+
+/**
+ * Обработка pending анализов (OCR/транскрипция)
+ */
+async function processPendingAnalysisBatch(log: any): Promise<void> {
+  // Получаем pending креативы
+  const { data: pendingAnalysis, error } = await supabase
+    .from('competitor_creative_analysis')
+    .select('creative_id, competitor_creatives!inner(id, media_type, media_urls, thumbnail_url, competitor_id)')
+    .eq('processing_status', 'pending')
+    .limit(10);
+
+  if (error || !pendingAnalysis || pendingAnalysis.length === 0) {
+    return;
+  }
+
+  log.info({ count: pendingAnalysis.length }, '[Analysis Cron] Начинаем обработку pending креативов');
+
+  for (const analysis of pendingAnalysis) {
+    const creative = analysis.competitor_creatives as any;
+    if (!creative) continue;
+
+    const creativeId = creative.id;
+
+    try {
+      // Отмечаем как processing
+      await supabase
+        .from('competitor_creative_analysis')
+        .update({ processing_status: 'processing' })
+        .eq('creative_id', creativeId);
+
+      let extractedText = '';
+      const mediaUrl = creative.thumbnail_url || creative.media_urls?.[0];
+
+      if (!mediaUrl) {
+        await supabase
+          .from('competitor_creative_analysis')
+          .update({ processing_status: 'failed' })
+          .eq('creative_id', creativeId);
+        continue;
+      }
+
+      if (creative.media_type === 'image' || creative.media_type === 'carousel') {
+        // OCR через creative-generation-service
+        try {
+          const ocrResponse = await fetch('http://creative-generation-service:8085/ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_url: mediaUrl, image_type: 'url' }),
+          });
+
+          if (ocrResponse.ok) {
+            const ocrResult = await ocrResponse.json() as { success: boolean; text?: string };
+            extractedText = ocrResult.text || '';
+          }
+        } catch (ocrErr) {
+          log.warn({ err: ocrErr, creativeId }, '[Analysis Cron] Ошибка OCR');
+        }
+
+      } else if (creative.media_type === 'video') {
+        // Транскрибация видео
+        const videoUrl = creative.media_urls?.[0];
+        if (videoUrl) {
+          let videoPath: string | null = null;
+          try {
+            videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
+
+            const videoResponse = await fetch(videoUrl);
+            if (videoResponse.ok && videoResponse.body) {
+              const writeStream = createWriteStream(videoPath);
+              const reader = videoResponse.body.getReader();
+              const nodeStream = new (await import('stream')).Readable({
+                async read() {
+                  const { done, value } = await reader.read();
+                  if (done) {
+                    this.push(null);
+                  } else {
+                    this.push(Buffer.from(value));
+                  }
+                }
+              });
+
+              await pipeline(nodeStream, writeStream);
+              const transcription = await processVideoTranscription(videoPath, 'ru');
+              extractedText = transcription.text;
+            }
+          } catch (videoErr) {
+            log.warn({ err: videoErr, creativeId }, '[Analysis Cron] Ошибка транскрипции');
+          } finally {
+            if (videoPath) {
+              try {
+                await fs.unlink(videoPath);
+              } catch {}
+            }
+          }
+        }
+      }
+
+      // Сохраняем результат
+      await supabase
+        .from('competitor_creative_analysis')
+        .update({
+          ocr_text: creative.media_type !== 'video' ? extractedText : null,
+          transcript: creative.media_type === 'video' ? extractedText : null,
+          processing_status: 'completed',
+        })
+        .eq('creative_id', creativeId);
+
+      log.info({ creativeId, textLength: extractedText.length }, '[Analysis Cron] Креатив обработан');
+
+      // Пауза между обработками
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+    } catch (err) {
+      log.warn({ err, creativeId }, '[Analysis Cron] Ошибка обработки креатива');
+      await supabase
+        .from('competitor_creative_analysis')
+        .update({ processing_status: 'failed' })
+        .eq('creative_id', creativeId);
+    }
+  }
+
+  log.info({ count: pendingAnalysis.length }, '[Analysis Cron] Обработка завершена');
 }

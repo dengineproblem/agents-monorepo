@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -26,6 +27,15 @@ interface CreativeTexts {
 }
 
 const CreativeGeneration = () => {
+  const location = useLocation();
+
+  // Читаем URL параметры
+  const searchParams = new URLSearchParams(location.search);
+  const tabFromUrl = searchParams.get('tab');
+  const promptFromUrl = searchParams.get('prompt');
+
+  const [activeTab, setActiveTab] = useState(tabFromUrl || 'images');
+
   const [texts, setTexts] = useState<CreativeTexts>({
     offer: '',
     bullets: '',
@@ -692,7 +702,7 @@ const CreativeGeneration = () => {
             subtitle="Создавайте профессиональные креативы для Instagram с помощью AI"
           />
 
-          <Tabs defaultValue="images" className="w-full mt-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full mt-6">
             <TabsList className="grid w-full grid-cols-3 mb-6">
               <TabsTrigger value="images">Картинки</TabsTrigger>
               <TabsTrigger value="carousels">Карусели</TabsTrigger>
@@ -1151,7 +1161,7 @@ const CreativeGeneration = () => {
             </TabsContent>
 
             <TabsContent value="video-scripts" className="mt-0">
-              <VideoScriptsTab userId={userId} />
+              <VideoScriptsTab userId={userId} initialPrompt={promptFromUrl || undefined} />
             </TabsContent>
           </Tabs>
         </div>
