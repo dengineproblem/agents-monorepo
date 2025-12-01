@@ -13,11 +13,12 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
    * ВНИМАНИЕ: DALL-E 3 генерирует только фон, текст накладывается отдельно
    */
   app.post<{ Body: GenerateCreativeRequest }>('/generate-creative', async (request, reply) => {
-    const { 
-      user_id, 
-      offer, 
-      bullets, 
-      profits, 
+    const {
+      user_id,
+      account_id,  // UUID рекламного аккаунта для мультиаккаунтности, NULL для legacy
+      offer,
+      bullets,
+      profits,
       cta,
       direction_id,
       style_id,
@@ -122,6 +123,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         .from('generated_creatives')
         .insert({
           user_id,
+          account_id: account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
           direction_id: direction_id || null,
           offer,
           bullets,

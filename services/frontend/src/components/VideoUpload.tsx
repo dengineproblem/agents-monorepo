@@ -124,7 +124,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [userData, setUserData] = useState<any>(null);
-  const { refreshData } = useAppContext();
+  const { refreshData, currentAdAccountId } = useAppContext();
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [dailyBudget, setDailyBudget] = useState(10); // по умолчанию 10$ (используется в форме изображений)
   const [dailyBudgetInstagram, setDailyBudgetInstagram] = useState(10); // Instagram (USD)
@@ -384,6 +384,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       
       const result = await manualLaunchAds({
         user_account_id: userData.id,
+        account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
         direction_id: selectedManualDirection,
         creative_ids: selectedCreativeIds,
         start_mode: manualStartMode,

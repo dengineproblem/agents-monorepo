@@ -20,6 +20,7 @@ export interface GenerateTextResponse {
 
 export interface GenerateCreativeRequest {
   user_id: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности, NULL для legacy
   offer: string;
   bullets: string;
   profits: string;

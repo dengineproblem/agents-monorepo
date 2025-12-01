@@ -267,6 +267,7 @@ fastify.post('/analyze-test', async (request, reply) => {
           id,
           title,
           user_id,
+          account_id,
           fb_video_id,
           media_type
         )
@@ -379,11 +380,15 @@ fastify.post('/analyze-test', async (request, reply) => {
     try {
       const today = new Date().toISOString().split('T')[0];
       
+      // Получаем account_id из user_creatives или creative_tests
+      const accountId = test.account_id || test.user_creatives?.account_id || null;
+
       const { error: analysisInsertError } = await supabase
         .from('creative_analysis')
         .insert({
           creative_id: test.user_creative_id,
           user_account_id: test.user_id,
+          account_id: accountId,  // UUID для мультиаккаунтности, NULL для legacy
           source: 'test',
           test_id: test_id,
           date_from: today,
@@ -448,10 +453,14 @@ fastify.post('/analyze-test', async (request, reply) => {
             .single();
           
           if (userAccount) {
+            // Получаем account_id для мультиаккаунтности
+            const metricsAccountId = test.account_id || test.user_creatives?.account_id || null;
+
             const { error: historyError } = await supabase
               .from('creative_metrics_history')
               .upsert({
                 user_account_id: userAccount.id,
+                account_id: metricsAccountId,  // UUID для мультиаккаунтности, NULL для legacy
                 // user_creative_id заполнится автоматически через триггер на основе ad_id
                 date: today,
                 ad_id: test.ad_id,                    // Test ad (уникальный!)
@@ -476,7 +485,7 @@ fastify.post('/analyze-test', async (request, reply) => {
                 video_views_95_percent: test.video_views_95_percent || 0,
                 video_avg_watch_time_sec: test.video_avg_watch_time_sec || null,
                 source: 'test'
-              }, { 
+              }, {
                 onConflict: 'user_account_id,ad_id,date',
                 ignoreDuplicates: false  // Обновляем если есть
               });

@@ -563,6 +563,7 @@ export async function syncCreativeLeadsFromAmoCRM(
                   amocrm_pipeline_id: newPipelineId,
                   amocrm_status_id: newStatusId,
                   user_account_id: userAccountId,
+                  account_id: localLead.account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
                   updated_at: new Date().toISOString()
                 };
 

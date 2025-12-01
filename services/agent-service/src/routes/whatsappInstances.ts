@@ -8,6 +8,7 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 // Схемы валидации
 const CreateInstanceSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(), // UUID рекламного аккаунта для мультиаккаунтности
   phoneNumberId: z.string().uuid().optional(),
 });
 
@@ -52,6 +53,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
         .from('whatsapp_instances')
         .insert({
           user_account_id: userAccountId,
+          account_id: body.accountId || null,  // UUID для мультиаккаунтности, NULL для legacy
           instance_name: instanceName,
           instance_id: evolutionData.instance?.instanceName || instanceName,
           status: 'connecting',
@@ -130,18 +132,25 @@ export default async function whatsappInstances(app: FastifyInstance) {
    * GET /api/whatsapp/instances - List all instances for user
    */
   app.get('/whatsapp/instances', async (request, reply) => {
-    const { userAccountId } = request.query as any;
+    const { userAccountId, accountId } = request.query as any;
 
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
     }
 
     try {
-      const { data: instances, error } = await supabase
+      let dbQuery = supabase
         .from('whatsapp_instances')
         .select('*')
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false });
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        dbQuery = dbQuery.eq('account_id', accountId);
+      }
+
+      const { data: instances, error } = await dbQuery;
 
       if (error) {
         return reply.status(500).send({ error: error.message });

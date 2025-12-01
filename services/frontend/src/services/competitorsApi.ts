@@ -16,13 +16,19 @@ import { API_BASE_URL } from '@/config/api';
 export const competitorsApi = {
   /**
    * Получить список конкурентов пользователя
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async list(userAccountId: string): Promise<Competitor[]> {
+  async list(userAccountId: string, accountId?: string): Promise<Competitor[]> {
     try {
-      console.log('[competitorsApi.list] Запрос конкурентов для user_account_id:', userAccountId);
+      console.log('[competitorsApi.list] Запрос конкурентов для user_account_id:', userAccountId, 'account_id:', accountId);
+
+      const params = new URLSearchParams({ userAccountId });
+      if (accountId) {
+        params.append('accountId', accountId);
+      }
 
       const response = await fetch(
-        `${API_BASE_URL}/competitors?userAccountId=${userAccountId}`
+        `${API_BASE_URL}/competitors?${params}`
       );
 
       if (!response.ok) {
@@ -208,6 +214,7 @@ export const competitorsApi = {
 
   /**
    * Получить все креативы всех конкурентов пользователя
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
   async getAllCreatives(
     userAccountId: string,
@@ -218,6 +225,7 @@ export const competitorsApi = {
       top10Only?: boolean;
       includeAll?: boolean;
       newOnly?: boolean;
+      accountId?: string; // UUID для мультиаккаунтности
     } = {}
   ): Promise<{
     creatives: CompetitorCreative[];
@@ -231,6 +239,7 @@ export const competitorsApi = {
         top10Only = false,
         includeAll = true,
         newOnly = false,
+        accountId,
       } = options;
 
       const params = new URLSearchParams({
@@ -242,6 +251,10 @@ export const competitorsApi = {
         includeAll: includeAll.toString(),
         newOnly: newOnly.toString(),
       });
+
+      if (accountId) {
+        params.append('accountId', accountId);
+      }
 
       const response = await fetch(
         `${API_BASE_URL}/competitors/all-creatives?${params}`
@@ -273,16 +286,18 @@ export const competitorsApi = {
   /**
    * Получить ТОП-10 креативы для референса при генерации
    * (сортировка по score, только is_top10=true)
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
   async getTop10ForReference(
     userAccountId: string,
     options: {
       mediaType?: 'video' | 'image' | 'carousel' | 'all';
       limit?: number;
+      accountId?: string; // UUID для мультиаккаунтности
     } = {}
   ): Promise<CompetitorCreative[]> {
     try {
-      const { mediaType = 'all', limit = 20 } = options;
+      const { mediaType = 'all', limit = 20, accountId } = options;
 
       const params = new URLSearchParams({
         userAccountId,
@@ -291,6 +306,10 @@ export const competitorsApi = {
         mediaType,
         top10Only: 'true',
       });
+
+      if (accountId) {
+        params.append('accountId', accountId);
+      }
 
       const response = await fetch(
         `${API_BASE_URL}/competitors/all-creatives?${params}`

@@ -1307,6 +1307,7 @@ const Creatives: React.FC = () => {
 
       const result = await manualLaunchAds({
         user_account_id: direction.user_account_id,
+        account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
         direction_id: firstCreative.direction_id,
         creative_ids: Array.from(selectedCreativeIds),
       });

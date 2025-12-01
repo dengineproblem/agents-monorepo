@@ -154,6 +154,26 @@ if (account_id) {
 │ account_id    │ │ account_id │ │ account_id     │ │ account_id │ │account_id│
 │ (UUID FK)     │ │ (UUID FK)  │ │ (UUID FK)      │ │ (UUID FK)  │ │(UUID FK)│
 └───────────────┘ └────────────┘ └────────────────┘ └────────────┘ └─────────┘
+        │
+        │ + Миграция 067 (ROI аналитика, конкуренты, WhatsApp, метрики)
+        │
+        ┌─────────────┼─────────────┬─────────────────┬──────────────┐
+        ▼             ▼             ▼                 ▼              ▼
+┌───────────────┐ ┌────────────┐ ┌────────────────┐ ┌────────────┐ ┌─────────┐
+│    leads      │ │ purchases  │ │    sales       │ │user_       │ │whatsapp_│
+│               │ │            │ │                │ │competitors │ │instances│
+│ account_id    │ │ account_id │ │ account_id     │ │ account_id │ │account_id│
+│ (UUID FK)     │ │ (UUID FK)  │ │ (UUID FK)      │ │ (UUID FK)  │ │(UUID FK)│
+└───────────────┘ └────────────┘ └────────────────┘ └────────────┘ └─────────┘
+        │
+        ┌─────────────┼─────────────┐
+        ▼             ▼             ▼
+┌───────────────┐ ┌────────────────────┐
+│creative_      │ │creative_analysis   │
+│metrics_history│ │                    │
+│ account_id    │ │ account_id         │
+│ (UUID FK)     │ │ (UUID FK)          │
+└───────────────┘ └────────────────────┘
 ```
 
 ---
@@ -515,6 +535,69 @@ ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
 -- Уникальный индекс: один брифинг на пользователя+аккаунт
 CREATE UNIQUE INDEX idx_user_briefing_unique_per_account
   ON user_briefing_responses(user_id, COALESCE(account_id, '00000000-0000-0000-0000-000000000000'::uuid));
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- leads - лиды для ROI аналитики (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE leads
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_leads_account_id
+  ON leads(account_id) WHERE account_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- purchases - продажи из AmoCRM (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE purchases
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_purchases_account_id
+  ON purchases(account_id) WHERE account_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- sales - альтернативная таблица продаж (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE sales
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_sales_account_id
+  ON sales(account_id) WHERE account_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- user_competitors - связь пользователя с конкурентами (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE user_competitors
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_user_competitors_account_id
+  ON user_competitors(account_id) WHERE account_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- whatsapp_instances - WhatsApp инстансы (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE whatsapp_instances
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_whatsapp_instances_account_id
+  ON whatsapp_instances(account_id) WHERE account_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- creative_metrics_history - история метрик креативов (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE creative_metrics_history
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_creative_metrics_history_account_id
+  ON creative_metrics_history(account_id) WHERE account_id IS NOT NULL;
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- creative_analysis - AI анализ креативов (миграция 067)
+-- ═══════════════════════════════════════════════════════════════════════
+ALTER TABLE creative_analysis
+ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_creative_analysis_account_id
+  ON creative_analysis(account_id) WHERE account_id IS NOT NULL;
 ```
 
 ---
@@ -533,6 +616,7 @@ CREATE UNIQUE INDEX idx_user_briefing_unique_per_account
 | 064 | `064_add_ad_account_id_to_creative_tests.sql` | Добавление `account_id` в creative_tests (сразу с правильным именем) | ✅ Applied |
 | 065 | `065_rename_ad_accounts_fb_columns.sql` | Переименование `fb_*` → стандартные имена в `ad_accounts` | ✅ Applied |
 | 066 | `066_rename_fk_ad_account_id_to_account_id.sql` | Переименование FK колонок `ad_account_id` → `account_id` | ✅ Applied |
+| 067 | `067_add_account_id_to_remaining_tables.sql` | Добавление `account_id` в ROI, конкуренты, WhatsApp и метрики | ⏳ Pending |
 
 ### Детали ключевых миграций
 
@@ -576,6 +660,63 @@ user_creatives.account_id         -- UUID (FK к ad_accounts.id)
 ad_accounts.ad_account_id         -- TEXT (Facebook act_xxx)
 -- ^^^ Разные имена для разных целей
 ```
+
+#### Миграция 067: ROI аналитика и дополнительные таблицы
+
+**Цель:** Расширить мультиаккаунтность на оставшиеся таблицы — ROI аналитику, конкурентов, WhatsApp и метрики.
+
+**Затронутые таблицы:**
+
+| Таблица | Назначение |
+|---------|------------|
+| `leads` | Лиды для ROI аналитики |
+| `purchases` | Продажи из AmoCRM |
+| `sales` | Альтернативная таблица продаж |
+| `user_competitors` | Связь пользователя с конкурентами |
+| `whatsapp_instances` | WhatsApp инстансы |
+| `creative_metrics_history` | История метрик креативов (agent-brain) |
+| `creative_analysis` | AI анализ креативов (agent-brain) |
+
+**Код изменения:**
+
+```sql
+-- Добавление колонки с FK
+ALTER TABLE leads ADD COLUMN account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+-- Partial индекс для быстрой фильтрации
+CREATE INDEX idx_leads_account_id ON leads(account_id) WHERE account_id IS NOT NULL;
+
+-- Комментарий для документации
+COMMENT ON COLUMN leads.account_id IS 'UUID FK to ad_accounts.id for multi-account mode. NULL for legacy mode.';
+```
+
+**Backend изменения (agent-service):**
+
+| Файл | Изменения |
+|------|-----------|
+| `routes/leads.ts` | Добавлен `accountId` в схему `CreateLeadSchema`, фильтрация в GET `/leads` |
+| `routes/evolutionWebhooks.ts` | Передача `account_id` из WhatsApp инстанса в лиды |
+| `workflows/amocrmSync.ts` | Сохранение `account_id` в purchases и sales при закрытии сделки |
+| `workflows/amocrmLeadsSync.ts` | Передача `account_id` в purchases |
+
+**Backend изменения (agent-brain):**
+
+| Файл | Изменения |
+|------|-----------|
+| `server.js` | Функция `getAccountUUID()` для резолва UUID из Facebook ad_account_id |
+| `scoring.js` | Передача `accountUUID` в `creative_metrics_history` |
+| `analyzerService.js` | Передача `accountUUID` в `creative_analysis` |
+
+**Frontend изменения:**
+
+| Файл | Изменения |
+|------|-----------|
+| `services/manualLaunchApi.ts` | Добавлен `account_id` в `ManualLaunchRequest` |
+| `services/competitorsApi.ts` | Добавлен `accountId` в `list()`, `getAllCreatives()`, `getTop10ForReference()` |
+| `services/salesApi.ts` | Добавлен `accountId` в `getAllPurchases()`, `getROIData()`, `addSale()`, `addSaleWithCreative()`, `getLeadsForROI()` |
+| `types/competitor.ts` | Добавлен `accountId` в `AddCompetitorRequest` |
+| `pages/Creatives.tsx` | Передача `currentAdAccountId` в `manualLaunchAds()` |
+| `components/VideoUpload.tsx` | Передача `currentAdAccountId` в `manualLaunchAds()` |
 
 ### Идемпотентность миграций
 
@@ -1193,6 +1334,65 @@ GET /api/autopilot/status?userAccountId=uuid&accountId=uuid
 }
 ```
 
+### Leads (ROI Analytics)
+
+#### POST /leads
+
+Создаёт лид (с сайта или WhatsApp).
+
+```typescript
+// Request
+POST /leads
+Content-Type: application/json
+
+{
+  "userAccountId": "uuid",
+  "accountId": "uuid",        // UUID FK к ad_accounts.id (опционально)
+  "name": "Иван Петров",
+  "phone": "+77001234567",
+  "email": "ivan@example.com",
+  "utm_source": "facebook",
+  "utm_campaign": "promo_dec"
+}
+
+// Response
+{
+  "success": true,
+  "lead": {
+    "id": "uuid",
+    "user_account_id": "uuid",
+    "account_id": "uuid",
+    "phone": "+77001234567",
+    "created_at": "2025-12-01T10:00:00Z"
+  }
+}
+```
+
+#### GET /leads
+
+Получает список лидов с фильтрацией по аккаунту.
+
+```typescript
+// Request
+GET /leads?userAccountId=uuid&accountId=uuid&limit=50&offset=0
+
+// Response
+{
+  "success": true,
+  "leads": [
+    {
+      "id": "uuid",
+      "user_account_id": "uuid",
+      "account_id": "uuid",           // UUID FK для мультиаккаунтности
+      "chat_id": "+77001234567",
+      "creative_id": "uuid",
+      "direction_id": "uuid",
+      "created_at": "2025-12-01T10:00:00Z"
+    }
+  ]
+}
+```
+
 ### Creative Tests
 
 #### POST /api/creative-test/start
@@ -1475,6 +1675,74 @@ for (const account of accounts) {
 }
 ```
 
+### Пример 6: ROI аналитика с фильтрацией по аккаунту
+
+```typescript
+// Получить лиды конкретного рекламного аккаунта
+const { data: leads } = await supabase
+  .from('leads')
+  .select('*')
+  .eq('user_account_id', userId)
+  .eq('account_id', accountId);  // UUID FK к ad_accounts.id
+
+// Получить продажи конкретного аккаунта
+const { data: purchases } = await supabase
+  .from('purchases')
+  .select('*')
+  .eq('user_account_id', userId)
+  .eq('account_id', accountId);
+
+// Frontend: использование salesApi с accountId
+import { salesApi } from '@/services/salesApi';
+
+const roiData = await salesApi.getROIData(
+  userAccountId,
+  directionId,
+  30,           // timeframeDays
+  'video',      // mediaType
+  accountId     // UUID для мультиаккаунтности
+);
+
+// Добавление продажи с привязкой к аккаунту
+await salesApi.addSale({
+  client_phone: '+77001234567',
+  amount: 50000,
+  user_account_id: userId,
+  account_id: currentAdAccountId,  // UUID для мультиаккаунтности
+  direction_id: directionId
+});
+```
+
+### Пример 7: Конкуренты с фильтрацией по аккаунту
+
+```typescript
+import { competitorsApi } from '@/services/competitorsApi';
+
+// Получить конкурентов конкретного аккаунта
+const competitors = await competitorsApi.list(userAccountId, accountId);
+
+// Получить креативы конкурентов с фильтром по аккаунту
+const { creatives, pagination } = await competitorsApi.getAllCreatives(
+  userAccountId,
+  {
+    page: 1,
+    limit: 20,
+    mediaType: 'video',
+    accountId: currentAdAccountId  // UUID для мультиаккаунтности
+  }
+);
+
+// Получить TOP-10 креативов для референса
+const top10 = await competitorsApi.getTop10ForReference(
+  userAccountId,
+  {
+    mediaType: 'image',
+    limit: 10,
+    accountId: currentAdAccountId
+  }
+);
+```
+
 ---
 
 ## Troubleshooting
@@ -1582,6 +1850,35 @@ LEFT JOIN user_creatives uc ON uc.account_id = aa.id
 LEFT JOIN brain_executions be ON be.account_id = aa.id
 WHERE aa.user_account_id = 'user-uuid'
 GROUP BY aa.id, aa.name;
+
+-- ROI статистика по аккаунтам
+SELECT
+  aa.name,
+  COUNT(DISTINCT l.id) as leads_count,
+  COUNT(DISTINCT p.id) as purchases_count,
+  COALESCE(SUM(p.amount), 0) as total_revenue
+FROM ad_accounts aa
+LEFT JOIN leads l ON l.account_id = aa.id
+LEFT JOIN purchases p ON p.account_id = aa.id
+WHERE aa.user_account_id = 'user-uuid'
+GROUP BY aa.id, aa.name;
+
+-- Лиды и продажи конкретного аккаунта
+SELECT l.*, p.amount as purchase_amount
+FROM leads l
+LEFT JOIN purchases p ON p.client_phone = l.chat_id
+WHERE l.user_account_id = 'user-uuid'
+  AND l.account_id = 'account-uuid'
+ORDER BY l.created_at DESC;
+
+-- Конкуренты по аккаунтам
+SELECT
+  aa.name as account_name,
+  COUNT(uc.id) as competitors_count
+FROM ad_accounts aa
+LEFT JOIN user_competitors uc ON uc.account_id = aa.id
+WHERE aa.user_account_id = 'user-uuid'
+GROUP BY aa.id, aa.name;
 ```
 
 ---
@@ -1677,3 +1974,4 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-01 | 1.1 | - | Переименование FK колонок ad_account_id → account_id |
 | 2025-12-01 | 1.2 | - | Идемпотентные миграции с DO-блоками |
 | 2025-12-01 | 2.0 | - | Расширенная документация: блок-схемы, frontend интеграция, FAQ |
+| 2025-12-01 | 2.1 | - | Миграция 067: ROI аналитика (leads, purchases, sales), конкуренты, WhatsApp, метрики |

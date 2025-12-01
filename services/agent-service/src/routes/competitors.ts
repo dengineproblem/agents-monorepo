@@ -30,6 +30,7 @@ const log = createLogger({ module: 'competitorsRoutes' });
 
 const AddCompetitorSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(), // UUID рекламного аккаунта для мультиаккаунтности
   // Принимаем Facebook URL, Instagram URL или @handle
   socialUrl: z.string().min(1).refine(
     url => {
@@ -47,6 +48,7 @@ const AddCompetitorSchema = z.object({
 
 const GetCompetitorsQuerySchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(), // UUID рекламного аккаунта для мультиаккаунтности
 });
 
 const GetCreativesQuerySchema = z.object({
@@ -412,7 +414,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
     try {
       const query = GetCompetitorsQuerySchema.parse(request.query);
 
-      const { data, error } = await supabase
+      let dbQuery = supabase
         .from('user_competitors')
         .select(`
           id,
@@ -420,6 +422,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
           is_favorite,
           is_active,
           created_at,
+          account_id,
           competitor:competitors (
             id,
             fb_page_id,
@@ -435,6 +438,13 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         .eq('user_account_id', query.userAccountId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (query.accountId) {
+        dbQuery = dbQuery.eq('account_id', query.accountId);
+      }
+
+      const { data, error } = await dbQuery;
 
       if (error) {
         log.error({ err: error, userAccountId: query.userAccountId }, 'Ошибка получения конкурентов');
@@ -576,6 +586,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
           .from('user_competitors')
           .insert({
             user_account_id: input.userAccountId,
+            account_id: input.accountId || null,  // UUID для мультиаккаунтности, NULL для legacy
             competitor_id: competitorId,
             display_name: input.name,
           });
@@ -901,6 +912,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
     try {
       const {
         userAccountId,
+        accountId, // UUID рекламного аккаунта для мультиаккаунтности
         page = '1',
         limit = '20',
         mediaType = 'all',
@@ -921,11 +933,18 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       const isNewOnly = newOnly === 'true';
 
       // Получаем ID конкурентов пользователя
-      const { data: userCompetitors } = await supabase
+      let competitorsQuery = supabase
         .from('user_competitors')
         .select('competitor_id')
         .eq('user_account_id', userAccountId)
         .eq('is_active', true);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        competitorsQuery = competitorsQuery.eq('account_id', accountId);
+      }
+
+      const { data: userCompetitors } = await competitorsQuery;
 
       if (!userCompetitors || userCompetitors.length === 0) {
         return reply.send({

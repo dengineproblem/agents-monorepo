@@ -174,7 +174,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   // Find instance in database
   const { data: instanceData, error: instanceError } = await supabase
     .from('whatsapp_instances')
-    .select('id, user_account_id, phone_number')
+    .select('id, user_account_id, account_id, phone_number')
     .eq('instance_name', instance)
     .single();
 
@@ -240,6 +240,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   // Process as lead from Facebook ad
   await processAdLead({
     userAccountId: instanceData.user_account_id,
+    accountId: instanceData.account_id || null,  // UUID для мультиаккаунтности
     whatsappPhoneNumberId: finalWhatsappPhoneNumberId,
     instancePhone: instanceData.phone_number,
     instanceName: instance,
@@ -261,13 +262,14 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
  */
 async function processAdLead(params: {
   userAccountId: string;
+  accountId?: string | null;   // UUID для мультиаккаунтности
   whatsappPhoneNumberId?: string;
   instancePhone: string;
   instanceName: string;
   clientPhone: string;
   sourceId: string;
-  creativeId: string | null;   // NEW
-  directionId: string | null;  // NEW
+  creativeId: string | null;
+  directionId: string | null;
   creativeUrl?: string;
   messageText: string;
   timestamp: Date;
@@ -275,6 +277,7 @@ async function processAdLead(params: {
 }, app: FastifyInstance) {
   const {
     userAccountId,
+    accountId,
     whatsappPhoneNumberId,
     instancePhone,
     instanceName,
@@ -308,6 +311,7 @@ async function processAdLead(params: {
         direction_id: directionId,
         whatsapp_phone_number_id: whatsappPhoneNumberId,
         user_account_id: userAccountId,
+        account_id: accountId || null,  // UUID для мультиаккаунтности
         updated_at: timestamp
       })
       .eq('id', existingLead.id);
@@ -323,6 +327,7 @@ async function processAdLead(params: {
       .from('leads')
       .insert({
         user_account_id: userAccountId,
+        account_id: accountId || null,  // UUID для мультиаккаунтности
         business_id: instancePhone, // Instance phone number (our business number)
         chat_id: clientPhone,
         source_id: sourceId,
@@ -538,7 +543,7 @@ async function handleSmartMatching(
   // Найти инстанс в БД
   const { data: instanceData, error: instanceError } = await supabase
     .from('whatsapp_instances')
-    .select('id, user_account_id, phone_number')
+    .select('id, user_account_id, account_id, phone_number')
     .eq('instance_name', instance)
     .single();
 
@@ -598,6 +603,7 @@ async function handleSmartMatching(
   // Создать лида БЕЗ креатива, но С направлением
   await createLeadWithoutCreative({
     userAccountId: instanceData.user_account_id,
+    accountId: instanceData.account_id || null,  // UUID для мультиаккаунтности
     whatsappPhoneNumberId: whatsappNumber?.id,
     instancePhone: instanceData.phone_number,
     instanceName: instance,
@@ -618,6 +624,7 @@ async function handleSmartMatching(
  */
 async function createLeadWithoutCreative(params: {
   userAccountId: string;
+  accountId?: string | null;  // UUID для мультиаккаунтности
   whatsappPhoneNumberId?: string;
   instancePhone: string;
   instanceName: string;
@@ -630,6 +637,7 @@ async function createLeadWithoutCreative(params: {
 }, app: FastifyInstance) {
   const {
     userAccountId,
+    accountId,
     whatsappPhoneNumberId,
     instancePhone,
     instanceName,
@@ -655,6 +663,7 @@ async function createLeadWithoutCreative(params: {
         direction_id: directionId,
         whatsapp_phone_number_id: whatsappPhoneNumberId,
         user_account_id: userAccountId,
+        account_id: accountId || null,  // UUID для мультиаккаунтности
         needs_manual_match: true,
         updated_at: timestamp
       })
@@ -672,6 +681,7 @@ async function createLeadWithoutCreative(params: {
       .from('leads')
       .insert({
         user_account_id: userAccountId,
+        account_id: accountId || null,  // UUID для мультиаккаунтности
         business_id: instancePhone,
         chat_id: clientPhone,
         conversion_source: 'Evolution_API_SmartMatch',

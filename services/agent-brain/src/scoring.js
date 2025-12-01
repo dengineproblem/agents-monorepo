@@ -872,14 +872,19 @@ async function getActiveCreativeIds(adAccountId, accessToken) {
 
 /**
  * Опционально: сохранить snapshot метрик для аудита
+ * @param {Object} supabase - Supabase client
+ * @param {string} userAccountId - ID пользователя
+ * @param {Array} adsets - массив adsets с метриками
+ * @param {string|null} accountUUID - UUID рекламного аккаунта (для мультиаккаунтности), NULL для legacy
  */
-async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
+async function saveMetricsSnapshot(supabase, userAccountId, adsets, accountUUID = null) {
   if (!adsets || !adsets.length) return;
-  
+
   const today = new Date().toISOString().split('T')[0];
-  
+
   const records = adsets.map(a => ({
     user_account_id: userAccountId,
+    account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
     date: today,
     adset_id: a.adset_id,
     campaign_id: a.campaign_id,
@@ -892,7 +897,7 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
     engagement_rate_ranking: a.diagnostics?.engagement_rate_ranking,
     conversion_rate_ranking: a.diagnostics?.conversion_rate_ranking
   }));
-  
+
   // Insert (ignore duplicates)
   await supabase
     .from('creative_metrics_history')
@@ -901,12 +906,19 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets) {
 
 /**
  * Сохранить метрики креативов за вчерашний день в creative_metrics_history
- * 
+ *
  * Получает метрики на уровне Ad (не AdSet) для каждого креатива
  * Использует ad_creative_mapping для точного мэтчинга
  * Собирает инкрементальные данные за вчерашний день
+ *
+ * @param {Object} supabase - Supabase client
+ * @param {string} userAccountId - ID пользователя
+ * @param {Array} readyCreatives - массив креативов
+ * @param {string} adAccountId - Facebook Ad Account ID (act_xxx)
+ * @param {string} accessToken - Facebook Access Token
+ * @param {string|null} accountUUID - UUID рекламного аккаунта (для мультиаккаунтности), NULL для legacy
  */
-async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken) {
+async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken, accountUUID = null) {
   if (!readyCreatives || !readyCreatives.length) return;
   
   // Вчерашний день (метрики собираются на следующий день после показов)
@@ -994,13 +1006,14 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
 
           records.push({
             user_account_id: userAccountId,
+            account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
             // user_creative_id заполнится автоматически через триггер на основе ad_id
             date: yesterdayStr,  // Вчерашний день
             ad_id: mapping.ad_id,
             creative_id: mapping.fb_creative_id,
             adset_id: mapping.adset_id,
             campaign_id: mapping.campaign_id,
-            
+
             // Абсолютные метрики
             impressions: impressions,
             reach: parseInt(insights.reach || 0),
@@ -1008,13 +1021,13 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
             clicks: parseInt(insights.clicks || 0),
             link_clicks: linkClicks,
             leads: leads,
-            
+
             // Вычисляемые метрики (сохраняем сразу)
             ctr: parseFloat(insights.ctr || 0),
             cpm: parseFloat(insights.cpm || 0),
             cpl: cpl,
             frequency: parseFloat(insights.frequency || 0),
-            
+
             // Видео метрики
             video_views: videoMetrics.video_views,
             video_views_25_percent: videoMetrics.video_views_25_percent,
@@ -1022,12 +1035,12 @@ async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreati
             video_views_75_percent: videoMetrics.video_views_75_percent,
             video_views_95_percent: videoMetrics.video_views_95_percent,
             video_avg_watch_time_sec: videoMetrics.video_avg_watch_time_sec,
-            
+
             // Diagnostics (на уровне ad)
             quality_ranking: insights.quality_ranking || null,
             engagement_rate_ranking: insights.engagement_rate_ranking || null,
             conversion_rate_ranking: insights.conversion_rate_ranking || null,
-            
+
             source: 'production'
           });
 
@@ -1166,19 +1179,27 @@ function calculateRiskScoreWithROI(performance, roiData, targetCPL = 200) {
 
 /**
  * ОСНОВНАЯ ФУНКЦИЯ: Запуск Scoring Agent
+ * @param {Object} userAccount - данные пользователя из user_accounts
+ * @param {Object} options - опции
+ * @param {Object} options.supabase - Supabase client
+ * @param {Object} options.logger - logger
+ * @param {string|null} options.accountUUID - UUID рекламного аккаунта (для мультиаккаунтности), NULL для legacy
  */
 export async function runScoringAgent(userAccount, options = {}) {
   const startTime = Date.now();
   const { ad_account_id, access_token, id: userAccountId, username } = userAccount;
-  
+
   const supabase = options.supabase || createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE
   );
-  
+
   const logger = options.logger || console;
-  
-  logger.info({ where: 'scoring_agent', phase: 'start', userId: userAccountId, username });
+
+  // UUID рекламного аккаунта для мультиаккаунтности (NULL для legacy)
+  const accountUUID = options.accountUUID || null;
+
+  logger.info({ where: 'scoring_agent', phase: 'start', userId: userAccountId, username, accountUUID });
   
   try {
     // ========================================
@@ -1262,7 +1283,7 @@ export async function runScoringAgent(userAccount, options = {}) {
     
     // Опционально: сохраняем snapshot для аудита
     if (options.saveSnapshot !== false) {
-      await saveMetricsSnapshot(supabase, userAccountId, adsetsWithTrends);
+      await saveMetricsSnapshot(supabase, userAccountId, adsetsWithTrends, accountUUID);
     }
     
     // ========================================
@@ -1414,11 +1435,12 @@ export async function runScoringAgent(userAccount, options = {}) {
     // Сохраняем метрики за вчерашний день для всех активных ads
     try {
       await saveCreativeMetricsToHistory(
-        supabase, 
-        userAccountId, 
-        readyCreatives, 
-        ad_account_id, 
-        access_token
+        supabase,
+        userAccountId,
+        readyCreatives,
+        ad_account_id,
+        access_token,
+        accountUUID
       );
       
       logger.info({ 

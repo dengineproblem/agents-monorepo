@@ -226,7 +226,10 @@ fastify.post('/api/brain/test-scoring', async (request, reply) => {
     if (uaError || !ua) {
       return reply.code(404).send({ error: 'User account not found' });
     }
-    
+
+    // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
+    const accountUUID = await getAccountUUID(userAccountId, ua);
+
     // Run scoring agent
     const scoringOutput = await runScoringAgent(ua, {
       supabase,
@@ -234,7 +237,8 @@ fastify.post('/api/brain/test-scoring', async (request, reply) => {
       useLLM: true,
       responsesCreate: responsesCreateWithRetry,
       minImpressions: SCORING_MIN_IMPRESSIONS,
-      predictionDays: SCORING_PREDICTION_DAYS
+      predictionDays: SCORING_PREDICTION_DAYS,
+      accountUUID: accountUUID
     });
     
     return reply.send({
@@ -262,15 +266,19 @@ fastify.post('/api/brain/test-merger', async (request, reply) => {
     }
     
     fastify.log.info({ where: 'test_merger', userAccountId });
-    
+
     const ua = await getUserAccount(userAccountId);
-    
+
+    // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
+    const accountUUID = await getAccountUUID(userAccountId, ua);
+
     // 1. Run Scoring Agent
     const scoringData = await runScoringAgent(ua, {
       supabase,
       logger: fastify.log,
       responsesCreate: responsesCreateWithRetry,
-      saveExecution: false
+      saveExecution: false,
+      accountUUID: accountUUID
     });
     
     // 2. Fetch FB data and calculate Health Score
@@ -409,14 +417,64 @@ function genIdem() {
 const toInt = (v) => Number.isFinite(+v) ? Math.round(+v) : null;
 
 async function getUserAccount(userAccountId) {
-  return await supabaseQuery('user_accounts', 
+  return await supabaseQuery('user_accounts',
     async () => await supabase
       .from('user_accounts')
-      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode')
+      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode, multi_account_enabled')
       .eq('id', userAccountId)
       .single(),
     { userAccountId }
   );
+}
+
+/**
+ * Получает UUID рекламного аккаунта (ad_accounts.id) для мультиаккаунтного режима.
+ * Возвращает null для legacy режима (multi_account_enabled = false).
+ *
+ * @param {string} userAccountId - UUID пользователя из user_accounts
+ * @param {object} ua - объект пользователя с multi_account_enabled и ad_account_id
+ * @returns {Promise<string|null>} UUID из ad_accounts.id или null
+ */
+async function getAccountUUID(userAccountId, ua) {
+  if (!ua?.multi_account_enabled) {
+    return null; // Legacy режим - account_id не используется
+  }
+
+  if (!ua.ad_account_id) {
+    fastify.log.warn({
+      msg: 'getAccountUUID: multi_account_enabled but no ad_account_id',
+      userAccountId
+    });
+    return null;
+  }
+
+  try {
+    const { data: adAccount, error } = await supabase
+      .from('ad_accounts')
+      .select('id')
+      .eq('user_account_id', userAccountId)
+      .eq('ad_account_id', ua.ad_account_id)
+      .single();
+
+    if (error || !adAccount) {
+      fastify.log.warn({
+        msg: 'getAccountUUID: ad_account not found',
+        userAccountId,
+        fbAdAccountId: ua.ad_account_id,
+        error: error?.message
+      });
+      return null;
+    }
+
+    return adAccount.id;
+  } catch (e) {
+    fastify.log.warn({
+      msg: 'getAccountUUID: error',
+      userAccountId,
+      error: String(e)
+    });
+    return null;
+  }
 }
 
 async function getLastReports(telegramId) {
@@ -2084,13 +2142,18 @@ fastify.post('/api/brain/run', async (request, reply) => {
     }
 
     const ua = await getUserAccount(userAccountId);
-    
+
+    // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
+    const accountUUID = await getAccountUUID(userAccountId, ua);
+
     // Логируем старт с username для Grafana
-    fastify.log.info({ 
-      where: 'brain_run', 
-      phase: 'start', 
+    fastify.log.info({
+      where: 'brain_run',
+      phase: 'start',
       userId: userAccountId,
-      username: ua.username 
+      username: ua.username,
+      multiAccountEnabled: !!ua.multi_account_enabled,
+      accountUUID: accountUUID || null
     });
     
     // ========================================
@@ -2118,7 +2181,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
           useLLM: CAN_USE_LLM,
           responsesCreate: responsesCreateWithRetry,
           minImpressions: SCORING_MIN_IMPRESSIONS,
-          predictionDays: SCORING_PREDICTION_DAYS
+          predictionDays: SCORING_PREDICTION_DAYS,
+          accountUUID: accountUUID  // UUID для мультиаккаунтности, NULL для legacy
         });
         fastify.log.info({ 
           where: 'brain_run', 
@@ -2964,6 +3028,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       try {
         await supabase.from('campaign_reports').insert({
           telegram_id: String(ua.telegram_id || ''),
+          account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
           report_data: { text: reportText, date, planNote, actions }
         });
       } catch (e) {
@@ -2972,6 +3037,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       try {
         await supabase.from('brain_executions').insert({
           user_account_id: userAccountId,
+          account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
           idempotency_key: idem,
           plan_json: plan,
           actions_json: actions,

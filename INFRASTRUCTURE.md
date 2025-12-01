@@ -216,6 +216,146 @@ creative-generation-service (GPT-5)
 
 ---
 
+## 🔄 MULTI-ACCOUNT SYSTEM (Мультиаккаунтность)
+
+**Статус:** ✅ Активна (с 1 декабря 2025)
+
+### **Концепция:**
+
+Каждый `ad_account` (рекламный аккаунт Facebook) — это **полностью независимый бизнес** со своими:
+- ✅ Креативами и направлениями
+- ✅ ROI аналитикой (leads, purchases, sales)
+- ✅ Конкурентами
+- ✅ WhatsApp инстансами
+- ✅ Agent Brain метриками
+- ✅ AmoCRM интеграцией
+
+**Общее только:** login/password через `user_accounts` (один пользователь может управлять несколькими рекламными аккаунтами).
+
+### **Архитектура:**
+
+```
+user_accounts (пользователь)
+    │
+    ├─ multi_account_enabled: true/false (флаг режима)
+    │
+    └─ ad_accounts (рекламные аккаунты)
+           │
+           ├─ id: UUID (внутренний ID, используется как account_id)
+           ├─ ad_account_id: TEXT (Facebook ID, формат act_xxx)
+           │
+           └─ Связанные данные:
+               ├─ leads (account_id → ad_accounts.id)
+               ├─ purchases (account_id → ad_accounts.id)
+               ├─ sales (account_id → ad_accounts.id)
+               ├─ user_competitors (account_id → ad_accounts.id)
+               ├─ whatsapp_instances (account_id → ad_accounts.id)
+               ├─ creative_metrics_history (account_id → ad_accounts.id)
+               ├─ creative_analysis (account_id → ad_accounts.id)
+               └─ generated_creatives (account_id → ad_accounts.id)
+```
+
+### **Терминология:**
+
+| Поле | Тип | Описание |
+|------|-----|----------|
+| `account_id` | UUID | Внутренний ID из `ad_accounts.id`. Используется во всех FK |
+| `ad_account_id` | TEXT | Facebook Ad Account ID (формат `act_xxx`). Используется для API запросов |
+| `user_account_id` | UUID | ID пользователя из `user_accounts.id` |
+| `multi_account_enabled` | BOOL | Флаг в `user_accounts`. Включает мультиаккаунтность |
+
+### **Обратная совместимость:**
+
+Все колонки `account_id` **nullable** — `NULL` для legacy режима:
+- Если `multi_account_enabled = false` → `account_id = NULL` везде
+- Если `multi_account_enabled = true` → `account_id = UUID` конкретного рекламного аккаунта
+
+### **Таблицы с account_id:**
+
+**Миграция:** `067_add_account_id_to_remaining_tables.sql`
+
+1. **`leads`** — лиды (ROI аналитика)
+2. **`purchases`** — продажи из AmoCRM
+3. **`sales`** — альтернативная таблица продаж
+4. **`user_competitors`** — связь пользователя с конкурентами
+5. **`whatsapp_instances`** — WhatsApp инстансы
+6. **`creative_metrics_history`** — история метрик креативов
+7. **`creative_analysis`** — AI анализ креативов
+
+### **Backend изменения:**
+
+**agent-brain:**
+- `server.js` — `getAccountUUID()` для резолва UUID из Facebook ad_account_id
+- `scoring.js` — передача `accountUUID` в `creative_metrics_history`
+- `analyzerService.js` — передача `accountUUID` в `creative_analysis`
+
+**agent-service:**
+- `competitors.ts` — фильтрация по `accountId` в GET/POST
+- `whatsappInstances.ts` — сохранение `account_id` при создании
+- `evolutionWebhooks.ts` — передача `account_id` из WhatsApp инстанса в leads
+- `leads.ts` — сохранение и фильтрация по `accountId`
+- `amocrmSync.ts` — передача `account_id` в purchases и sales
+- `amocrmLeadsSync.ts` — передача `account_id` в purchases
+
+**creative-generation-service:**
+- `image.ts` — сохранение `account_id` в `generated_creatives`
+
+### **Frontend изменения:**
+
+**API сервисы:**
+- `manualLaunchApi.ts` — `account_id` в `ManualLaunchRequest`
+- `competitorsApi.ts` — `accountId` в `list()`, `getAllCreatives()`, `getTop10ForReference()`
+- `salesApi.ts` — `accountId` в `getAllPurchases()`, `getROIData()`, `addSale()`, `getLeadsForROI()`
+
+**Компоненты:**
+- `Creatives.tsx` — передача `currentAdAccountId` в `manualLaunchAds()`
+- `VideoUpload.tsx` — передача `currentAdAccountId` в `manualLaunchAds()`
+
+**Типы:**
+- `competitor.ts` — `accountId` в `AddCompetitorRequest`
+
+### **Паттерн использования:**
+
+```typescript
+// Frontend: получение accountId из контекста
+const { currentAdAccountId } = useAppContext();
+
+// API запрос с accountId
+const result = await manualLaunchAds({
+  user_account_id: userId,
+  account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
+  direction_id: directionId,
+  creative_ids: selectedIds,
+});
+
+// Backend: фильтрация по accountId
+let dbQuery = supabase
+  .from('leads')
+  .select('*')
+  .eq('user_account_id', userAccountId);
+
+// Фильтр по account_id для мультиаккаунтности
+if (accountId) {
+  dbQuery = dbQuery.eq('account_id', accountId);
+}
+```
+
+### **SQL пример:**
+
+```sql
+-- Лиды конкретного рекламного аккаунта
+SELECT * FROM leads
+WHERE user_account_id = 'user-uuid'
+  AND account_id = 'ad-account-uuid';
+
+-- Все лиды пользователя (legacy режим)
+SELECT * FROM leads
+WHERE user_account_id = 'user-uuid';
+-- account_id будет NULL для legacy данных
+```
+
+---
+
 ## 🌐 ДОМЕНЫ И ИХ НАЗНАЧЕНИЕ
 
 ### **1. `performanteaiagency.com` (App Review версия)**

@@ -102,6 +102,7 @@ export interface CompetitorsPagination {
 
 export interface AddCompetitorRequest {
   userAccountId: string;
+  accountId?: string; // UUID рекламного аккаунта для мультиаккаунтности
   socialUrl: string; // Facebook URL, Instagram URL или @handle
   name: string;
   countryCode?: string;

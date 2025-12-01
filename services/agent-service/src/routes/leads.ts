@@ -24,6 +24,7 @@ const nullableEmail = z.string().email().nullable().optional().transform(val => 
 
 const CreateLeadSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().nullable().optional().transform(val => val ?? undefined), // UUID для мультиаккаунтности
   name: z.string().min(1).max(255),
   phone: z.string().min(5).max(20),
 
@@ -183,6 +184,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
       // Используем || undefined чтобы null превращался в undefined (для Zod .optional())
       const normalizedBody = {
         userAccountId: urlUserAccountId || body.userAccountId || body.user_account_id,
+        accountId: body.accountId || body.account_id || undefined,  // UUID для мультиаккаунтности
         name: body.name || body.Name,
         phone: body.phone || body.Phone,
         email: body.email || body.Email || undefined,
@@ -288,7 +290,8 @@ export default async function leadsRoutes(app: FastifyInstance) {
         .from('leads')
         .insert({
           user_account_id: leadData.userAccountId,
-          
+          account_id: leadData.accountId || null,  // UUID для мультиаккаунтности
+
           // Website lead fields
           name: leadData.name,
           phone: leadData.phone,
@@ -424,8 +427,9 @@ export default async function leadsRoutes(app: FastifyInstance) {
    */
   app.get('/leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId, limit = '50', offset = '0' } = request.query as {
+      const { userAccountId, accountId, limit = '50', offset = '0' } = request.query as {
         userAccountId?: string;
+        accountId?: string;  // UUID для мультиаккаунтности
         limit?: string;
         offset?: string;
       };
@@ -437,12 +441,19 @@ export default async function leadsRoutes(app: FastifyInstance) {
         });
       }
 
-      const { data: leads, error } = await supabase
+      let dbQuery = supabase
         .from('leads')
         .select('*')
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false })
         .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        dbQuery = dbQuery.eq('account_id', accountId);
+      }
+
+      const { data: leads, error } = await dbQuery;
 
       if (error) {
         app.log.error({ error }, 'Failed to fetch leads');

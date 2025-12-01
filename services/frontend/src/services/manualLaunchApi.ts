@@ -4,6 +4,7 @@ import { API_BASE_URL } from '@/config/api';
 
 export interface ManualLaunchRequest {
   user_account_id: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности, undefined для legacy
   direction_id: string;
   creative_ids: string[];
   daily_budget_cents?: number;

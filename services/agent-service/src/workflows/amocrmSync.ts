@@ -400,6 +400,7 @@ export async function processDealWebhook(
       amocrm_pipeline_id: pipelineId,
       amocrm_status_id: dealStatus,
       user_account_id: userAccountId,
+      account_id: ourLead.account_id || null,  // UUID для мультиаккаунтности
       updated_at: new Date().toISOString()
     };
 
@@ -778,6 +779,7 @@ async function handleDealClosureFromStatusChange(
       amocrm_pipeline_id: amocrmLead.pipeline_id,
       amocrm_status_id: statusId,
       created_by: userAccountId,
+      account_id: lead.account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
       updated_at: new Date().toISOString()
     };
 

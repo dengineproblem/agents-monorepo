@@ -58,15 +58,23 @@ export interface Direction {
 
 class SalesApiService {
   // Получение всех продаж по пользователю
-  async getAllPurchases(userAccountId: string): Promise<{ data: any[]; error: any }> {
+  // accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
+  async getAllPurchases(userAccountId: string, accountId?: string): Promise<{ data: any[]; error: any }> {
     try {
       // Загружаем purchases
-      const { data: purchases, error } = await (supabase as any)
+      let purchasesQuery = (supabase as any)
         .from('purchases')
         .select('*')
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false })
         .limit(10000);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        purchasesQuery = purchasesQuery.eq('account_id', accountId);
+      }
+
+      const { data: purchases, error } = await purchasesQuery;
 
       if (error || !purchases || purchases.length === 0) {
         return { data: purchases || [], error };
@@ -288,11 +296,13 @@ class SalesApiService {
 
   // Получение ROI данных по user_account_id с опциональным фильтром по direction и типу медиа
   // НОВАЯ ЛОГИКА: начинаем с user_creatives, метрики берём из creative_metrics_history
+  // accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
   async getROIData(
     userAccountId: string,
     directionId: string | null = null,
     timeframeDays: 7 | 30 | 90 | 'all' = 'all',
-    mediaType: 'video' | 'image' | 'carousel' | null = null
+    mediaType: 'video' | 'image' | 'carousel' | null = null,
+    accountId?: string
   ): Promise<ROIData> {
     try {
       console.log('🔄 Загружаем ROI данные для user_account_id:', userAccountId, 'direction:', directionId || 'все');
@@ -317,6 +327,11 @@ class SalesApiService {
         .eq('status', 'ready')
         .order('created_at', { ascending: false })
         .limit(10000);
+
+      // Фильтрация по account_id для мультиаккаунтности
+      if (accountId) {
+        creativesQuery = creativesQuery.eq('account_id', accountId);
+      }
 
       // Фильтрация по направлению
       if (directionId) {
@@ -417,6 +432,11 @@ class SalesApiService {
         .eq('user_account_id', userAccountId)
         .in('creative_id', creativeIds);
 
+      // Фильтрация по account_id для мультиаккаунтности
+      if (accountId) {
+        leadsQuery = leadsQuery.eq('account_id', accountId);
+      }
+
       if (directionId) {
         leadsQuery = leadsQuery.eq('direction_id', directionId);
       }
@@ -440,6 +460,11 @@ class SalesApiService {
         .from('purchases')
         .select('id, client_phone, amount, created_at')
         .eq('user_account_id', userAccountId);
+
+      // Фильтрация по account_id для мультиаккаунтности
+      if (accountId) {
+        purchasesQuery = purchasesQuery.eq('account_id', accountId);
+      }
 
       if (leadPhones.length > 0) {
         purchasesQuery = purchasesQuery.in('client_phone', leadPhones);
@@ -858,10 +883,12 @@ class SalesApiService {
   }
 
   // Добавление продажи
+  // account_id - UUID рекламного аккаунта для мультиаккаунтности (опционально)
   public async addSale(saleData: {
     client_phone: string;
     amount: number;
     user_account_id: string;
+    account_id?: string; // UUID для мультиаккаунтности
     manual_source_id?: string;
     manual_creative_url?: string;
     direction_id?: string;
@@ -903,6 +930,7 @@ class SalesApiService {
         
         const leadInsertData = {
           user_account_id: saleData.user_account_id,
+          account_id: saleData.account_id || null, // UUID для мультиаккаунтности
           chat_id: saleData.client_phone,
           source_id: saleData.manual_source_id,
           creative_url: saleData.manual_creative_url || '',
@@ -929,6 +957,7 @@ class SalesApiService {
       // Добавляем продажу в таблицу purchases
       const purchaseInsertData = {
         user_account_id: saleData.user_account_id,
+        account_id: saleData.account_id || null, // UUID для мультиаккаунтности
         client_phone: saleData.client_phone,
         amount: saleData.amount
       };
@@ -960,10 +989,12 @@ class SalesApiService {
   }
 
   // Добавление продажи с выбранным креативом (когда лид не найден)
+  // account_id - UUID рекламного аккаунта для мультиаккаунтности (опционально)
   public async addSaleWithCreative(saleData: {
     client_phone: string;
     amount: number;
     user_account_id: string;
+    account_id?: string; // UUID для мультиаккаунтности
     creative_id: string;
     creative_url?: string;
     direction_id?: string;
@@ -974,6 +1005,7 @@ class SalesApiService {
       // Создаём новый лид с привязкой к креативу
       const leadInsertData = {
         user_account_id: saleData.user_account_id,
+        account_id: saleData.account_id || null, // UUID для мультиаккаунтности
         chat_id: saleData.client_phone,
         creative_id: saleData.creative_id,
         creative_url: saleData.creative_url || '',
@@ -1000,6 +1032,7 @@ class SalesApiService {
       // Добавляем продажу
       const purchaseInsertData = {
         user_account_id: saleData.user_account_id,
+        account_id: saleData.account_id || null, // UUID для мультиаккаунтности
         client_phone: saleData.client_phone,
         amount: saleData.amount
       };
@@ -1028,9 +1061,11 @@ class SalesApiService {
     }
   }
   // Получение лидов для ROI Analytics с возможностью фильтрации по направлению
+  // accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
   async getLeadsForROI(
     userAccountId: string,
-    directionId: string | null
+    directionId: string | null,
+    accountId?: string
   ): Promise<{ data: any[]; error: any }> {
     try {
       // Шаг 1: Получаем лиды
@@ -1048,6 +1083,11 @@ class SalesApiService {
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false })
         .limit(10000);
+
+      // Фильтрация по account_id для мультиаккаунтности
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
 
       if (directionId) {
         query = query.eq('direction_id', directionId);
