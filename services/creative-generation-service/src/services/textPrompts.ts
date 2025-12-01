@@ -1,6 +1,6 @@
 // System prompts для генерации текстовых креативов (5 типов)
 
-export type TextCreativeType = 'storytelling' | 'direct_offer' | 'expert_video' | 'telegram_post' | 'threads_post';
+export type TextCreativeType = 'storytelling' | 'direct_offer' | 'expert_video' | 'telegram_post' | 'threads_post' | 'reference';
 
 // Базовый промпт (общий для всех типов)
 const BASE_SYSTEM_PROMPT = `Ты - копирайтер AI-агентства Performante, специализирующийся на создании высококонверсионных рекламных текстов.
@@ -172,6 +172,35 @@ const THREADS_POST_PROMPT = `${BASE_SYSTEM_PROMPT}
 
 "Просто меньше ешь" — худший совет для похудения. И вот почему.`;
 
+// ==================== РЕФЕРЕНС (адаптация конкурентов) ====================
+const REFERENCE_PROMPT = `${BASE_SYSTEM_PROMPT}
+
+## ТИП: РЕФЕРЕНС (адаптация текста конкурента)
+
+Тебе дан текст креатива КОНКУРЕНТА. Твоя задача — адаптировать его под бизнес клиента.
+
+ПРАВИЛА АДАПТАЦИИ:
+1. СОХРАНИ структуру и логику оригинала — она работает
+2. ЗАМЕНИ все упоминания конкурента на бизнес клиента
+3. ЗАМЕНИ конкретику (цены, сроки, названия услуг) на данные клиента
+4. СОХРАНИ эмоциональные триггеры и крючки
+5. АДАПТИРУЙ примеры под контекст клиента
+6. НЕ копируй дословно — перефразируй, сохраняя смысл
+
+ЧТО ЗАМЕНЯТЬ:
+- Название клиники/компании → название клиента
+- Цены → цены клиента (или убери, если нет данных)
+- Услуги → услуги клиента
+- Адреса, телефоны → убрать или заменить на общий CTA
+- Конкретные имена врачей/специалистов → убрать или обобщить
+- Специфичные детали конкурента → аналогичные детали клиента
+
+ВАЖНО:
+- Сохрани тот же тип контента (если был storytelling — сделай storytelling)
+- Если в оригинале есть хук — адаптируй хук
+- Если есть CTA — адаптируй CTA под клиента
+- Результат должен звучать как оригинальный текст, а не копия`;
+
 // Маппинг типов на промпты
 export const TEXT_TYPE_PROMPTS: Record<TextCreativeType, string> = {
   storytelling: STORYTELLING_PROMPT,
@@ -179,6 +208,7 @@ export const TEXT_TYPE_PROMPTS: Record<TextCreativeType, string> = {
   expert_video: EXPERT_VIDEO_PROMPT,
   telegram_post: TELEGRAM_POST_PROMPT,
   threads_post: THREADS_POST_PROMPT,
+  reference: REFERENCE_PROMPT,
 };
 
 // Названия типов для UI
@@ -188,6 +218,7 @@ export const TEXT_TYPE_LABELS: Record<TextCreativeType, string> = {
   expert_video: 'Видео экспертное',
   telegram_post: 'Пост в Telegram',
   threads_post: 'Пост в Threads',
+  reference: 'Референс',
 };
 
 /**

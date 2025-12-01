@@ -97,7 +97,7 @@ export function CompetitorCreativesList({
     }
 
     const encodedText = encodeURIComponent(text);
-    navigate(`/creatives?tab=video-scripts&prompt=${encodedText}`);
+    navigate(`/creatives?tab=video-scripts&textType=reference&prompt=${encodedText}`);
   };
 
   // Открыть оригинал в новой вкладке

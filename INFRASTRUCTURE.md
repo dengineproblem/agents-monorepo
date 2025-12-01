@@ -130,6 +130,7 @@ docker logs agents-monorepo-agent-service-1 | grep "fromDB"
 - ✅ OCR для изображений (Gemini 2.0 Flash)
 - ✅ Транскрипция видео (OpenAI Whisper)
 - ✅ Еженедельное обновление креативов (cron)
+- ✅ Генерация "Референс" — адаптация текста конкурента под клиента (GPT-5)
 
 ### **Архитектура:**
 
@@ -146,6 +147,11 @@ agent-service (API + cron)
     ↓         ↓
 Gemini OCR  Whisper (транскрипция)
 (images)    (videos)
+         ↓
+Frontend: "Переписать сценарий" → /creatives?textType=reference
+         ↓
+creative-generation-service (GPT-5)
+    └─ POST /generate-text-creative (text_type: 'reference')
 ```
 
 ### **Система скоринга:**
@@ -186,6 +192,27 @@ Gemini OCR  Whisper (транскрипция)
 - Проверка: каждый час
 - Сбор: до 50 креативов на конкурента
 - Скоринг: автоматический пересчёт при каждом сборе
+
+### **Генерация текстовых креативов:**
+
+Файл: `services/creative-generation-service/src/services/textPrompts.ts`
+
+**Типы текста (`TextCreativeType`):**
+- `storytelling` — Эмоциональная история с хуками
+- `direct_offer` — Прямой оффер (цена + результат + CTA)
+- `expert_video` — Экспертное видео с вирусным хуком
+- `telegram_post` — Пост для Telegram (информационный)
+- `threads_post` — Короткий провокационный пост
+- `reference` — **Адаптация текста конкурента под клиента**
+
+**Функция "Референс":**
+1. Пользователь нажимает "Переписать сценарий" в разделе Конкуренты
+2. Открывается `/creatives?tab=video-scripts&textType=reference&prompt=...`
+3. AI (GPT-5) адаптирует текст: сохраняет структуру, заменяет детали на клиентские
+
+**API:**
+- `POST /generate-text-creative` — генерация (text_type: 'reference')
+- `POST /edit-text-creative` — редактирование сгенерированного текста
 
 ---
 

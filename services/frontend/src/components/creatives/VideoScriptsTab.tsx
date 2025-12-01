@@ -11,19 +11,23 @@ import { textCreativesApi, TEXT_TYPES, TextCreativeType } from '@/services/textC
 interface TextTabProps {
   userId: string | null;
   initialPrompt?: string;
+  initialTextType?: TextCreativeType;
 }
 
-export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt }) => {
+export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt, initialTextType }) => {
   // State
-  const [textType, setTextType] = useState<TextCreativeType>('storytelling');
+  const [textType, setTextType] = useState<TextCreativeType>(initialTextType || 'storytelling');
   const [userPrompt, setUserPrompt] = useState(initialPrompt || '');
 
-  // Устанавливаем initialPrompt при изменении
+  // Устанавливаем initialPrompt и initialTextType при изменении
   useEffect(() => {
     if (initialPrompt) {
       setUserPrompt(initialPrompt);
     }
-  }, [initialPrompt]);
+    if (initialTextType) {
+      setTextType(initialTextType);
+    }
+  }, [initialPrompt, initialTextType]);
   const [generatedText, setGeneratedText] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
@@ -133,6 +137,8 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt 
         return 'Например: Пост о важности регулярных осмотров у стоматолога. Информационный, не рекламный...';
       case 'threads_post':
         return 'Например: Провокационный пост о мифах в стоматологии. Короткий, вовлекающий в дискуссию...';
+      case 'reference':
+        return 'Вставьте текст креатива конкурента. AI адаптирует его под вашу клинику...';
       default:
         return 'Опишите, о чём должен быть текст...';
     }
@@ -185,6 +191,9 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt 
             )}
             {textType === 'threads_post' && (
               <p><strong>Пост в Threads</strong> — короткий провокационный пост для вовлечения в дискуссию.</p>
+            )}
+            {textType === 'reference' && (
+              <p><strong>Референс</strong> — адаптация текста конкурента под ваш бизнес. Сохраняет структуру и крючки, заменяет детали.</p>
             )}
           </div>
 

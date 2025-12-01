@@ -33,6 +33,7 @@ const CreativeGeneration = () => {
   const searchParams = new URLSearchParams(location.search);
   const tabFromUrl = searchParams.get('tab');
   const promptFromUrl = searchParams.get('prompt');
+  const textTypeFromUrl = searchParams.get('textType');
 
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'images');
 
@@ -1161,7 +1162,11 @@ const CreativeGeneration = () => {
             </TabsContent>
 
             <TabsContent value="video-scripts" className="mt-0">
-              <VideoScriptsTab userId={userId} initialPrompt={promptFromUrl || undefined} />
+              <VideoScriptsTab
+                userId={userId}
+                initialPrompt={promptFromUrl || undefined}
+                initialTextType={textTypeFromUrl as any || undefined}
+              />
             </TabsContent>
           </Tabs>
         </div>

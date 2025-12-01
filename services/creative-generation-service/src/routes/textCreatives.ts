@@ -41,7 +41,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         app.log.info(`[Generate Text Creative] Request from user: ${user_id}, type: ${text_type}`);
 
         // Валидация типа текста
-        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post'];
+        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
         if (!validTypes.includes(text_type)) {
           return reply.status(400).send({
             success: false,
@@ -204,7 +204,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         app.log.info(`[Edit Text Creative] Request from user: ${user_id}, type: ${text_type}`);
 
         // Валидация
-        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post'];
+        const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
         if (!validTypes.includes(text_type)) {
           return reply.status(400).send({
             success: false,
