@@ -50,7 +50,7 @@ export async function workflowStartCreativeTest(
   const log = options.logger
     ? options.logger.child({ module: 'creativeTestWorkflow' })
     : baseLog;
-  const { user_creative_id, user_id } = params;
+  const { user_creative_id, user_id, db_ad_account_id } = params;
   const { ad_account_id, page_id, instagram_id } = context;
 
   const { data: userAccountProfile } = await supabase
@@ -369,6 +369,7 @@ export async function workflowStartCreativeTest(
     .insert({
       user_creative_id,
       user_id,
+      account_id: db_ad_account_id || null, // UUID для мультиаккаунтности, NULL для legacy
       campaign_id,
       adset_id,
       ad_id,

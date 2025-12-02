@@ -118,7 +118,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
 
       // Запускаем тест
       const result = await workflowStartCreativeTest(
-        { user_creative_id, user_id },
+        { user_creative_id, user_id, db_ad_account_id: account_id },
         {
           ad_account_id: credentials.fbAdAccountId!,
           page_id: credentials.fbPageId!,
