@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase } from './supabase.js';
 
 /**
  * Тип учётных данных для работы с рекламными платформами
