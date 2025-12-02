@@ -562,12 +562,21 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       }
 
       // 3. Проверяем, не связан ли уже этот конкурент с пользователем
-      const { data: existingLink } = await supabase
+      // В мультиаккаунтном режиме проверяем user_account_id + competitor_id + account_id
+      // В legacy режиме (без account_id) проверяем только user_account_id + competitor_id
+      let existingLinkQuery = supabase
         .from('user_competitors')
         .select('id, is_active')
         .eq('user_account_id', input.userAccountId)
-        .eq('competitor_id', competitorId)
-        .single();
+        .eq('competitor_id', competitorId);
+
+      if (input.accountId) {
+        existingLinkQuery = existingLinkQuery.eq('account_id', input.accountId);
+      } else {
+        existingLinkQuery = existingLinkQuery.is('account_id', null);
+      }
+
+      const { data: existingLink } = await existingLinkQuery.single();
 
       if (existingLink) {
         if (existingLink.is_active) {
