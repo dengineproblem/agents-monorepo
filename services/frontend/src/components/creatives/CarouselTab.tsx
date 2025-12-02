@@ -28,6 +28,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   setCreativeGenerationsAvailable,
   directions
 }) => {
+  // В мультиаккаунтном режиме генерации безлимитные
+  const isMultiAccountMode = !!currentAdAccountId;
   // State для шага 1: Ввод идеи
   const [carouselIdea, setCarouselIdea] = useState('');
   const [cardsCount, setCardsCount] = useState(3);
@@ -258,7 +260,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const handleGenerateCarousel = async () => {
     if (!userId) return;
 
-    if (creativeGenerationsAvailable < carouselCards.length) {
+    // В мультиаккаунтном режиме генерации безлимитные
+    if (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length) {
       toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
       return;
     }
@@ -347,7 +350,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const handleRegenerateAllCarousel = async () => {
     if (!userId) return;
 
-    if (creativeGenerationsAvailable < carouselCards.length) {
+    // В мультиаккаунтном режиме генерации безлимитные
+    if (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length) {
       toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
       return;
     }
@@ -849,12 +853,16 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
               /* Показываем кнопку генерации, если картинок ещё нет */
               <div className="max-w-md mx-auto space-y-4 pt-4 border-t border-border">
                 <div className="flex items-center gap-4 justify-center">
-                  <Badge variant="secondary">
-                    Стоимость: {carouselCards.length} {carouselCards.length === 1 ? 'генерация' : carouselCards.length < 5 ? 'генерации' : 'генераций'}
-                  </Badge>
-                  <Badge variant={creativeGenerationsAvailable >= carouselCards.length ? "default" : "destructive"}>
-                    Доступно: {creativeGenerationsAvailable}
-                  </Badge>
+                  {!isMultiAccountMode && (
+                    <>
+                      <Badge variant="secondary">
+                        Стоимость: {carouselCards.length} {carouselCards.length === 1 ? 'генерация' : carouselCards.length < 5 ? 'генерации' : 'генераций'}
+                      </Badge>
+                      <Badge variant={creativeGenerationsAvailable >= carouselCards.length ? "default" : "destructive"}>
+                        Доступно: {creativeGenerationsAvailable}
+                      </Badge>
+                    </>
+                  )}
                 </div>
 
                 <div className="space-y-2">

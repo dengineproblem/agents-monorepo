@@ -31,6 +31,9 @@ const CreativeGeneration = () => {
   const location = useLocation();
   const { currentAdAccountId } = useAppContext();
 
+  // В мультиаккаунтном режиме генерации безлимитные
+  const isMultiAccountMode = !!currentAdAccountId;
+
   // Читаем URL параметры
   const searchParams = new URLSearchParams(location.search);
   const tabFromUrl = searchParams.get('tab');
@@ -431,7 +434,6 @@ const CreativeGeneration = () => {
 
   const generateCreative = async (isEdit: boolean = false) => {
     // Проверяем лимит генераций (пропускаем для мультиаккаунтного режима)
-    const isMultiAccountMode = !!currentAdAccountId;
     if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
       toast.error('У вас закончились генерации креативов. Приобретите дополнительный пакет.');
       return;
@@ -771,30 +773,32 @@ const CreativeGeneration = () => {
             </Card>
           )}
           
-          {/* Уведомление о количестве оставшихся генераций */}
-          <Card className="mb-6 shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-muted">
-                  <Wand2 className="h-5 w-5 text-foreground" />
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-medium text-foreground">Доступно генераций:</span>
-                    <Badge variant="secondary" className="font-semibold">
-                      {creativeGenerationsAvailable}
-                    </Badge>
+          {/* Уведомление о количестве оставшихся генераций (скрыто в мультиаккаунтном режиме) */}
+          {!isMultiAccountMode && (
+            <Card className="mb-6 shadow-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-muted">
+                    <Wand2 className="h-5 w-5 text-foreground" />
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {creativeGenerationsAvailable === 0 
-                      ? 'Для генерации креативов приобретите дополнительный пакет'
-                      : `Вы можете сгенерировать еще ${creativeGenerationsAvailable} креатив${creativeGenerationsAvailable === 1 ? '' : creativeGenerationsAvailable < 5 ? 'а' : 'ов'}`
-                    }
-                  </p>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-medium text-foreground">Доступно генераций:</span>
+                      <Badge variant="secondary" className="font-semibold">
+                        {creativeGenerationsAvailable}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {creativeGenerationsAvailable === 0
+                        ? 'Для генерации креативов приобретите дополнительный пакет'
+                        : `Вы можете сгенерировать еще ${creativeGenerationsAvailable} креатив${creativeGenerationsAvailable === 1 ? '' : creativeGenerationsAvailable < 5 ? 'а' : 'ов'}`
+                      }
+                    </p>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
           
           <div className="grid gap-6">
             {/* Секции для каждого типа текста */}
@@ -1008,7 +1012,7 @@ const CreativeGeneration = () => {
             {/* Кнопка генерации креатива */}
             <Button
               onClick={() => generateCreative(false)}
-              disabled={loading.image || (!currentAdAccountId && creativeGenerationsAvailable <= 0)}
+              disabled={loading.image || (!isMultiAccountMode && creativeGenerationsAvailable <= 0)}
               className="w-full bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
               size="lg"
             >
