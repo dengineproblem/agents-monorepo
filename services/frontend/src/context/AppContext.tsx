@@ -290,10 +290,25 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         return;
       }
 
-      // Проверяем наличие Facebook данных
+      // Проверяем наличие Facebook данных с учётом мультиаккаунтного режима
       const storedUser = localStorage.getItem('user');
       const userData = storedUser ? JSON.parse(storedUser) : null;
-      const hasFacebookData = userData?.access_token && userData?.ad_account_id;
+
+      // Проверяем мультиаккаунтный режим из localStorage (он сохраняется в loadAdAccounts)
+      const storedMultiAccountEnabled = localStorage.getItem('multiAccountEnabled') === 'true';
+      const storedAdAccounts = localStorage.getItem('adAccounts');
+
+      let hasFacebookData = false;
+      if (storedMultiAccountEnabled && storedAdAccounts) {
+        // В мультиаккаунтном режиме проверяем данные в текущем ad_account из localStorage
+        const parsedAccounts = JSON.parse(storedAdAccounts);
+        const currentAcc = parsedAccounts.find((a: any) => a.is_default) || parsedAccounts[0];
+        hasFacebookData = !!currentAcc?.access_token && !!currentAcc?.ad_account_id;
+        console.log('[AppContext] Мультиаккаунт: hasFacebookData =', hasFacebookData, { access_token: !!currentAcc?.access_token, ad_account_id: currentAcc?.ad_account_id });
+      } else {
+        // Legacy режим — проверяем в user_accounts
+        hasFacebookData = !!(userData?.access_token && userData?.ad_account_id);
+      }
 
       if (!hasFacebookData) {
         console.log('Facebook данные отсутствуют. Пропускаем загрузку данных Facebook.');
@@ -447,11 +462,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
   };
 
-  // Обновляем данные при изменении диапазона дат
+  // Обновляем данные при изменении диапазона дат или загрузке ad_accounts
   useEffect(() => {
-    console.log('Изменение параметров (даты/платформа), обновляем данные:', { dateRange, platform });
+    console.log('Изменение параметров (даты/платформа/adAccounts), обновляем данные:', { dateRange, platform, adAccountsCount: adAccounts.length });
     refreshData();
-  }, [dateRange, platform]);
+  }, [dateRange, platform, adAccounts]);
 
   // Функция для проверки наличия business_id
   const checkBusinessId = async (): Promise<boolean> => {
@@ -521,8 +536,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       const response = await adAccountsApi.list(userData.id);
 
-      setMultiAccountEnabled(response.multi_account_enabled);
-      setAdAccounts(response.ad_accounts.map(acc => ({
+      const mappedAccounts = response.ad_accounts.map(acc => ({
         id: acc.id,
         name: acc.name,
         username: acc.username,
@@ -531,9 +545,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         tarif: acc.tarif,
         tarif_expires: acc.tarif_expires,
         connection_status: acc.connection_status,
-        ad_account_id: acc.ad_account_id,
-        access_token: acc.access_token,
-      })));
+        ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
+        access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
+      }));
+
+      setMultiAccountEnabled(response.multi_account_enabled);
+      setAdAccounts(mappedAccounts);
+
+      // Сохраняем в localStorage для использования в facebookApi
+      localStorage.setItem('multiAccountEnabled', String(response.multi_account_enabled));
+      localStorage.setItem('adAccounts', JSON.stringify(mappedAccounts));
 
       // Устанавливаем текущий аккаунт (только из активных)
       if (response.multi_account_enabled && response.ad_accounts.length > 0) {

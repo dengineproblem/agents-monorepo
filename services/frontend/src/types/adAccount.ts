@@ -73,7 +73,7 @@ export interface AdAccount {
   updated_at: string;
 }
 
-// Сокращённый тип для списка аккаунтов
+// Сокращённый тип для списка аккаунтов (используется в AppContext)
 export interface AdAccountSummary {
   id: string;
   name: string;
@@ -83,9 +83,9 @@ export interface AdAccountSummary {
   tarif: string | null;
   tarif_expires: string | null;
   connection_status: 'pending' | 'connected' | 'error';
-  // Facebook данные для проверки подключения
-  ad_account_id: string | null;
-  access_token: string | null;
+  // Facebook данные для проверки подключения (маппятся из fb_*)
+  ad_account_id: string | null;   // из fb_ad_account_id
+  access_token: string | null;    // из fb_access_token
 }
 
 export interface CreateAdAccountPayload {

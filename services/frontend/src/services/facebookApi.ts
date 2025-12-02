@@ -51,20 +51,45 @@ export interface TargetologAction {
 const getCurrentUserConfig = async () => {
   // Получаем данные из localStorage
   const storedUser = localStorage.getItem('user');
-  
+
   if (storedUser) {
     try {
       const userData = JSON.parse(storedUser);
-      
-      // Убедимся, что у нас есть все необходимые данные
+
+      // Проверяем мультиаккаунтный режим
+      const storedAdAccounts = localStorage.getItem('adAccounts');
+      const storedMultiAccountEnabled = localStorage.getItem('multiAccountEnabled');
+
+      if (storedMultiAccountEnabled === 'true' && storedAdAccounts) {
+        // Мультиаккаунтный режим — берём данные из ad_accounts
+        const adAccounts = JSON.parse(storedAdAccounts);
+        const currentAcc = adAccounts.find((a: any) => a.is_default) || adAccounts[0];
+
+        if (currentAcc && currentAcc.ad_account_id && currentAcc.access_token) {
+          console.log('[facebookApi] Мультиаккаунт: используем учетные данные:', {
+            name: currentAcc.name,
+            ad_account_id: currentAcc.ad_account_id,
+            access_token_length: currentAcc.access_token ? currentAcc.access_token.length : 0
+          });
+
+          return {
+            access_token: currentAcc.access_token,
+            ad_account_id: currentAcc.ad_account_id,
+            api_version: 'v18.0',
+            base_url: 'https://graph.facebook.com'
+          };
+        }
+      }
+
+      // Legacy режим — берём данные из user_accounts
       if (userData && userData.ad_account_id && userData.access_token) {
-        console.log('Используем учетные данные пользователя:', { 
+        console.log('Используем учетные данные пользователя:', {
           username: userData.username,
           ad_account_id: userData.ad_account_id,
           // Скрываем токен из логов
           access_token_length: userData.access_token ? userData.access_token.length : 0
         });
-        
+
         return {
           access_token: userData.access_token,
           ad_account_id: userData.ad_account_id,
@@ -84,7 +109,7 @@ const getCurrentUserConfig = async () => {
   } else {
     console.error('Данные пользователя не найдены в localStorage');
   }
-  
+
   // Если не смогли получить данные из localStorage, используем моковые данные
   console.warn('Используются моковые данные. Пользователь не авторизован или нет нужных данных.');
   return {
