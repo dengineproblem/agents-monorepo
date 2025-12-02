@@ -349,10 +349,10 @@ export const creativesApi = {
       console.log('[creativesApi.uploadToWebhook] direction_id НЕ добавлен (значение:', directionId, ')');
     }
 
-    // ad_account_id (UUID из ad_accounts) для мультиаккаунтности
+    // account_id (UUID из ad_accounts) для мультиаккаунтности
     if (adAccountId) {
-      console.log('[creativesApi.uploadToWebhook] Добавляем ad_account_id в FormData:', adAccountId);
-      form.append('ad_account_id', adAccountId);
+      console.log('[creativesApi.uploadToWebhook] Добавляем account_id в FormData:', adAccountId);
+      form.append('account_id', adAccountId);
     }
     
     // Язык для транскрибации добавляем только для видео
