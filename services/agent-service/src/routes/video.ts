@@ -469,4 +469,228 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       }
     }
   });
+
+  // ===================================================
+  // POST /re-transcribe - Перетранскрибация видео
+  // ===================================================
+  app.post('/re-transcribe', async (request, reply) => {
+    let videoPath: string | null = null;
+
+    try {
+      const body = z.object({
+        creative_id: z.string().uuid(),
+        user_id: z.string().uuid(),
+        language: z.string().default('ru'),
+      }).parse(request.body);
+
+      app.log.info({ creative_id: body.creative_id, user_id: body.user_id }, 'Re-transcribe request');
+
+      // Получаем креатив и проверяем владельца
+      const { data: creative, error: creativeError } = await supabase
+        .from('user_creatives')
+        .select('id, user_id, account_id, fb_video_id, media_type')
+        .eq('id', body.creative_id)
+        .eq('user_id', body.user_id)
+        .single();
+
+      if (creativeError || !creative) {
+        return reply.status(404).send({
+          success: false,
+          error: 'Creative not found or access denied'
+        });
+      }
+
+      // Проверяем что это видео
+      if (creative.media_type && creative.media_type !== 'video') {
+        return reply.status(400).send({
+          success: false,
+          error: 'Only video creatives can be re-transcribed'
+        });
+      }
+
+      if (!creative.fb_video_id) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Creative has no associated video'
+        });
+      }
+
+      // Получаем access_token
+      let accessToken: string;
+
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('access_token, multi_account_enabled')
+        .eq('id', body.user_id)
+        .single();
+
+      if (!userAccount) {
+        return reply.status(404).send({
+          success: false,
+          error: 'User account not found'
+        });
+      }
+
+      if (userAccount.multi_account_enabled && creative.account_id) {
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('access_token')
+          .eq('id', creative.account_id)
+          .eq('user_account_id', body.user_id)
+          .single();
+
+        if (!adAccount?.access_token) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Ad account access token not found'
+          });
+        }
+        accessToken = adAccount.access_token;
+      } else {
+        if (!userAccount.access_token) {
+          return reply.status(400).send({
+            success: false,
+            error: 'User account access token not found'
+          });
+        }
+        accessToken = userAccount.access_token;
+      }
+
+      // Получаем URL видео из Facebook
+      app.log.info({ fb_video_id: creative.fb_video_id }, 'Fetching video URL from Facebook');
+
+      const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
+      const videoInfoUrl = `https://graph.facebook.com/${FB_API_VERSION}/${creative.fb_video_id}?fields=source&access_token=${accessToken}`;
+
+      const videoInfoResponse = await fetch(videoInfoUrl);
+      const videoInfo = await videoInfoResponse.json() as { source?: string; error?: any };
+
+      if (!videoInfoResponse.ok || !videoInfo.source) {
+        app.log.error({ error: videoInfo.error }, 'Failed to get video URL from Facebook');
+        return reply.status(500).send({
+          success: false,
+          error: 'Failed to get video URL from Facebook',
+          details: videoInfo.error?.message
+        });
+      }
+
+      const videoUrl = videoInfo.source;
+      app.log.info({ videoUrl: videoUrl.substring(0, 100) + '...' }, 'Got video URL, downloading...');
+
+      // Скачиваем видео
+      videoPath = path.join('/var/tmp', `retranscribe_${randomUUID()}.mp4`);
+
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      try {
+        await execAsync(
+          `curl -sL -o "${videoPath}" --connect-timeout 30 --max-time 300 "${videoUrl}"`,
+          { timeout: 310000 }
+        );
+
+        const stats = await fs.stat(videoPath);
+        if (stats.size === 0) {
+          throw new Error('Downloaded empty video file');
+        }
+
+        app.log.info({ videoPath, fileSize: stats.size }, 'Video downloaded successfully');
+      } catch (downloadError: any) {
+        app.log.error({ error: downloadError.message }, 'Failed to download video');
+        return reply.status(500).send({
+          success: false,
+          error: 'Failed to download video for re-transcription'
+        });
+      }
+
+      // Транскрибируем
+      app.log.info('Starting re-transcription...');
+      const transcription = await processVideoTranscription(videoPath, body.language);
+      app.log.info({ textLength: transcription.text.length }, 'Re-transcription completed');
+
+      // Обновляем или создаём запись в creative_transcripts
+      const { data: existingTranscript } = await supabase
+        .from('creative_transcripts')
+        .select('id')
+        .eq('creative_id', body.creative_id)
+        .maybeSingle();
+
+      if (existingTranscript) {
+        // Обновляем существующую запись
+        const { error: updateError } = await supabase
+          .from('creative_transcripts')
+          .update({
+            lang: body.language,
+            source: 'whisper',
+            text: transcription.text,
+            duration_sec: transcription.duration ? Math.round(transcription.duration) : null,
+            status: 'ready',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingTranscript.id);
+
+        if (updateError) {
+          app.log.error({ error: updateError }, 'Failed to update transcript');
+        }
+      } else {
+        // Создаём новую запись
+        const { error: insertError } = await supabase
+          .from('creative_transcripts')
+          .insert({
+            creative_id: body.creative_id,
+            lang: body.language,
+            source: 'whisper',
+            text: transcription.text,
+            duration_sec: transcription.duration ? Math.round(transcription.duration) : null,
+            status: 'ready'
+          });
+
+        if (insertError) {
+          app.log.error({ error: insertError }, 'Failed to insert transcript');
+        }
+      }
+
+      app.log.info({ creative_id: body.creative_id }, 'Re-transcription saved successfully');
+
+      return reply.send({
+        success: true,
+        message: 'Re-transcription completed successfully',
+        data: {
+          creative_id: body.creative_id,
+          transcription: {
+            text: transcription.text,
+            language: transcription.language,
+            duration_sec: transcription.duration ? Math.round(transcription.duration) : null
+          }
+        }
+      });
+
+    } catch (error: any) {
+      app.log.error({ error: error.message, stack: error.stack }, 'Re-transcribe error');
+
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          success: false,
+          error: 'Validation error',
+          details: error.errors
+        });
+      }
+
+      return reply.status(500).send({
+        success: false,
+        error: error.message || 'Internal server error'
+      });
+
+    } finally {
+      if (videoPath) {
+        try {
+          await fs.unlink(videoPath);
+          app.log.info('Temporary video file deleted');
+        } catch (err: any) {
+          app.log.warn({ error: err.message }, 'Failed to delete temp video file');
+        }
+      }
+    }
+  });
 };

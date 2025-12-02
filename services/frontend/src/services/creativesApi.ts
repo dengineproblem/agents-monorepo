@@ -312,6 +312,52 @@ export const creativesApi = {
     }
   },
 
+  /**
+   * Перетранскрибировать видео креатив
+   */
+  async reTranscribe(creativeId: string, language: string = 'ru'): Promise<{
+    success: boolean;
+    text?: string;
+    error?: string;
+  }> {
+    const userId = getUserId();
+    if (!userId) {
+      return { success: false, error: 'User not authenticated' };
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/re-transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          creative_id: creativeId,
+          user_id: userId,
+          language
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to re-transcribe'
+        };
+      }
+
+      return {
+        success: true,
+        text: data.data?.transcription?.text
+      };
+    } catch (error) {
+      console.error('creativesApi.reTranscribe error:', error);
+      return {
+        success: false,
+        error: 'Network error during re-transcription'
+      };
+    }
+  },
+
   async uploadToWebhook(
     file: File,
     title: string,
