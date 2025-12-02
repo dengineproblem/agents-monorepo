@@ -33,7 +33,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       // ====== ШАГ 1: Проверяем лимит генераций и загружаем prompt4 ======
       const { data: user, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, creative_generations_available, prompt4')
+        .select('id, creative_generations_available, prompt4, multi_account_enabled')
         .eq('id', user_id)
         .single();
 
@@ -45,17 +45,38 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // Проверка лимита
-      if (!user.creative_generations_available || user.creative_generations_available <= 0) {
+      // Проверка лимита (пропускаем для мультиаккаунтного режима)
+      const isMultiAccountMode = user.multi_account_enabled === true;
+      if (!isMultiAccountMode && (!user.creative_generations_available || user.creative_generations_available <= 0)) {
         app.log.warn(`[Generate Creative] No generations available for user: ${user_id}`);
-        return reply.status(403).send({ 
-          success: false, 
+        return reply.status(403).send({
+          success: false,
           error: 'No generations available',
           generations_remaining: 0
         });
       }
 
       app.log.info(`[Generate Creative] Generations available: ${user.creative_generations_available}`);
+
+      // Определяем prompt4: в мультиаккаунтном режиме берём из ad_accounts
+      let userPrompt4 = user.prompt4 || '';
+
+      if (isMultiAccountMode && account_id) {
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('prompt4')
+          .eq('id', account_id)
+          .eq('user_account_id', user_id)
+          .single();
+
+        if (!adError && adAccount?.prompt4) {
+          userPrompt4 = adAccount.prompt4;
+        }
+      }
+
+      if (!userPrompt4) {
+        userPrompt4 = 'Современный профессиональный дизайн';
+      }
 
       // ====== ШАГ 2: Генерируем изображение через Gemini 3 Pro Image Preview ======
       const selectedStyle = style_id || 'modern_performance';
@@ -73,7 +94,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         offer,
         bullets,
         profits,
-        user.prompt4 || 'Современный профессиональный дизайн',
+        userPrompt4,
         selectedStyle,
         reference_image,
         reference_image_type,
@@ -143,21 +164,27 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
       app.log.info(`[Generate Creative] Generated creative record created: ${creative.id}`);
 
-      // ====== ШАГ 5: Уменьшаем счетчик генераций ======
-      const newGenerationsCount = user.creative_generations_available - 1;
-      
-      const { error: updateError } = await supabase
-        .from('user_accounts')
-        .update({ 
-          creative_generations_available: newGenerationsCount 
-        })
-        .eq('id', user_id);
+      // ====== ШАГ 5: Уменьшаем счетчик генераций (только для не-мультиаккаунтного режима) ======
+      let newGenerationsCount = user.creative_generations_available;
 
-      if (updateError) {
-        logSupabaseError('Update generations count', updateError);
-        // Не критичная ошибка, продолжаем
+      if (!isMultiAccountMode) {
+        newGenerationsCount = user.creative_generations_available - 1;
+
+        const { error: updateError } = await supabase
+          .from('user_accounts')
+          .update({
+            creative_generations_available: newGenerationsCount
+          })
+          .eq('id', user_id);
+
+        if (updateError) {
+          logSupabaseError('Update generations count', updateError);
+          // Не критичная ошибка, продолжаем
+        } else {
+          app.log.info(`[Generate Creative] Generations remaining: ${newGenerationsCount}`);
+        }
       } else {
-        app.log.info(`[Generate Creative] Generations remaining: ${newGenerationsCount}`);
+        app.log.info(`[Generate Creative] Multi-account mode - skipping generation counter decrement`);
       }
 
       // ====== ШАГ 6: Возвращаем результат ======

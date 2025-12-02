@@ -16,6 +16,7 @@ export interface CarouselCard {
 
 export interface GenerateCarouselTextsRequest {
   user_id: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
   carousel_idea: string;
   cards_count: number;
 }
@@ -28,6 +29,7 @@ export interface GenerateCarouselTextsResponse {
 
 export interface RegenerateCarouselCardTextRequest {
   user_id: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
   carousel_id: string;
   card_index: number;
   existing_texts: string[];
@@ -41,6 +43,7 @@ export interface RegenerateCarouselCardTextResponse {
 
 export interface GenerateCarouselRequest {
   user_id: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
   carousel_texts: string[];
   visual_style?: CarouselVisualStyle;
   custom_prompts?: (string | null)[];
@@ -58,6 +61,7 @@ export interface GenerateCarouselResponse {
 
 export interface RegenerateCarouselCardRequest {
   user_id: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
   carousel_id: string;
   card_index: number;
   custom_prompt?: string;

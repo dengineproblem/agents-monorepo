@@ -56,8 +56,10 @@ const getUserId = (): string | null => {
 export const briefingApi = {
   /**
    * Генерация prompt1 на основе ответов брифа
+   * @param data - данные брифинга
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async generatePrompt(data: BriefingFormData): Promise<GeneratePromptResponse> {
+  async generatePrompt(data: BriefingFormData, accountId?: string): Promise<GeneratePromptResponse> {
     const userId = getUserId();
     if (!userId) {
       return {
@@ -74,6 +76,7 @@ export const briefingApi = {
         },
         body: JSON.stringify({
           user_id: userId,
+          account_id: accountId || undefined,
           ...data,
         }),
       });
@@ -115,8 +118,9 @@ export const briefingApi = {
 
   /**
    * Получить сохраненные ответы брифа пользователя
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async getBriefing(): Promise<GetBriefingResponse> {
+  async getBriefing(accountId?: string): Promise<GetBriefingResponse> {
     const userId = getUserId();
     if (!userId) {
       return {
@@ -127,7 +131,14 @@ export const briefingApi = {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/briefing/${userId}`, {
+      const params = new URLSearchParams();
+      if (accountId) {
+        params.append('accountId', accountId);
+      }
+      const queryString = params.toString();
+      const url = `${API_BASE_URL}/briefing/${userId}${queryString ? `?${queryString}` : ''}`;
+
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

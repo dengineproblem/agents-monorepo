@@ -89,11 +89,18 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       const whatsapp_phone_number_for_test = await getWhatsAppPhoneNumber(direction, user_id, supabase) || undefined;
 
       // Проверяем, не запускался ли тест ранее
-      const { data: existingTests, error: existingError } = await supabase
+      // Фильтруем по account_id для изоляции в мультиаккаунтном режиме
+      let existingTestsQuery = supabase
         .from('creative_tests')
         .select('id, status, adset_id, ad_id, started_at')
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', user_id);
+
+      if (account_id) {
+        existingTestsQuery = existingTestsQuery.eq('account_id', account_id);
+      }
+
+      const { data: existingTests, error: existingError } = await existingTestsQuery;
 
       if (!existingError && existingTests && existingTests.length > 0) {
         const runningTests = existingTests.filter((t: any) => t.status === 'running');
@@ -238,21 +245,25 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      // Получаем access_token отдельно
-      const { data: userAccount, error: userError } = await supabase
-        .from('user_accounts')
-        .select('access_token')
-        .eq('id', test.user_id)
-        .single();
-
-      if (userError || !userAccount) {
-        return reply.status(404).send({
+      // Получаем access_token через getCredentials (поддержка мультиаккаунта)
+      let credentials;
+      try {
+        credentials = await getCredentials(test.user_id, test.account_id || undefined);
+      } catch (credError: any) {
+        return reply.status(400).send({
           success: false,
-          error: 'User account not found'
+          error: credError.message,
         });
       }
 
-      const accessToken = userAccount.access_token;
+      if (!credentials.fbAccessToken) {
+        return reply.status(400).send({
+          success: false,
+          error: 'No Facebook access token configured'
+        });
+      }
+
+      const accessToken = credentials.fbAccessToken;
 
       // Получаем insights
       const insights = await fetchCreativeTestInsights(test.ad_id, accessToken);
@@ -383,20 +394,31 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       }
 
       if (tests && tests.length > 0) {
-        const { data: userAccount, error: userAccountError } = await supabase
+        // Получаем default_adset_mode из user_accounts
+        const { data: userAccount } = await supabase
           .from('user_accounts')
-          .select('access_token, default_adset_mode')
+          .select('default_adset_mode')
           .eq('id', String(user_id))
           .single();
 
-        if (userAccountError || !userAccount?.access_token) {
-          app.log.warn({ user_id }, 'Cannot pause creative test assets: no access_token');
-        } else {
-          const accessToken = userAccount.access_token;
-          const isUseExistingMode = userAccount.default_adset_mode === 'use_existing';
+        const isUseExistingMode = userAccount?.default_adset_mode === 'use_existing';
 
-          for (const test of tests) {
-            if (isUseExistingMode) {
+        for (const test of tests) {
+          // Получаем access_token через getCredentials (поддержка мультиаккаунта)
+          let accessToken: string | null = null;
+          try {
+            const credentials = await getCredentials(test.user_id, test.account_id || undefined);
+            accessToken = credentials.fbAccessToken;
+          } catch (credError: any) {
+            app.log.warn({ user_id, account_id: test.account_id, error: credError.message }, 'Cannot get credentials for pausing creative test assets');
+          }
+
+          if (!accessToken) {
+            app.log.warn({ user_id, account_id: test.account_id }, 'Cannot pause creative test assets: no access_token');
+            continue;
+          }
+
+          if (isUseExistingMode) {
               // В режиме use_existing - деактивируем только adset и все ads внутри
               app.log.info({ 
                 adset_id: test.adset_id,
@@ -454,7 +476,6 @@ export async function creativeTestRoutes(app: FastifyInstance) {
             }
           }
         }
-      }
 
       await supabase
         .from('creative_tests')

@@ -1978,6 +1978,7 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-01 | 2.2 | - | Имплементация account_id в webhooks, frontend, agent-brain (см. ниже) |
 | 2025-12-01 | 2.3 | - | Финальные исправления: directions, scoring.js, analyzerService.js (см. ниже) |
 | 2025-12-02 | 2.4 | - | Исправления: manual-connect webhook, Dashboard FB connection check (см. ниже) |
+| 2025-12-02 | 2.5 | - | Creative Generation Service: prompt1/prompt4 из ad_accounts, пропуск лимитов генераций |
 
 ### Версия 2.2 — Детали имплементации
 
@@ -2306,3 +2307,120 @@ if (!fbAdAccountId || !fbAccessToken) {
 - Dashboard корректно определяет FB connection status в мультиаккаунтном режиме
 - Directions создаются с правильными credentials
 - Legacy режим не затронут
+
+### Версия 2.5 — Creative Generation Service: мультиаккаунтность
+
+**Проблема 1: Промпты (prompt1/prompt4) загружались из user_accounts вместо ad_accounts**
+
+В мультиаккаунтном режиме промпты для генерации текстов и изображений хранятся в таблице `ad_accounts`, но creative-generation-service загружал их из `user_accounts`.
+
+**Решение:**
+
+| Файл | Изменения |
+|------|-----------|
+| `services/creative-generation-service/src/routes/carousel.ts` | Все 4 эндпоинта: загрузка `prompt1` из `ad_accounts` в мультиаккаунтном режиме |
+| `services/creative-generation-service/src/routes/image.ts` | `/generate-creative`: загрузка `prompt4` из `ad_accounts` в мультиаккаунтном режиме |
+| `services/creative-generation-service/src/types/index.ts` | Добавлен `account_id` во все Request типы |
+| `services/frontend/src/types/carousel.ts` | Добавлен `account_id` во все Request типы |
+| `services/frontend/src/components/creatives/CarouselTab.tsx` | Передача `currentAdAccountId` во все API вызовы |
+| `services/frontend/src/pages/CreativeGeneration.tsx` | Загрузка `prompt4` из `ad_accounts`, убран блок кнопки для multi-account |
+
+**Паттерн изменения в carousel.ts:**
+
+```typescript
+// 1. Получаем флаг мультиаккаунтности
+const { data: user } = await supabase
+  .from('user_accounts')
+  .select('prompt1, multi_account_enabled')
+  .eq('id', user_id)
+  .single();
+
+// 2. В мультиаккаунтном режиме берём prompt из ad_accounts
+let userPrompt1 = user.prompt1 || '';
+const isMultiAccountMode = user.multi_account_enabled === true;
+
+if (isMultiAccountMode && account_id) {
+  const { data: adAccount } = await supabase
+    .from('ad_accounts')
+    .select('prompt1')
+    .eq('id', account_id)
+    .eq('user_account_id', user_id)
+    .single();
+
+  if (adAccount?.prompt1) {
+    userPrompt1 = adAccount.prompt1;
+  }
+}
+```
+
+**Проблема 2: Лимит генераций блокировал мультиаккаунтный режим**
+
+Кнопка "Сгенерировать креатив" была заблокирована когда `creative_generations_available <= 0`, но в мультиаккаунтном режиме лимиты не применяются.
+
+**Решение:**
+
+| Файл | Изменения |
+|------|-----------|
+| `services/creative-generation-service/src/routes/image.ts` | Пропуск проверки лимита для мультиаккаунтного режима |
+| `services/creative-generation-service/src/routes/carousel.ts` | Пропуск проверки лимита для мультиаккаунтного режима |
+| `services/frontend/src/pages/CreativeGeneration.tsx` | Кнопка не блокируется в мультиаккаунтном режиме |
+
+**Паттерн изменения в image.ts:**
+
+```typescript
+// Проверка лимита (пропускаем для мультиаккаунтного режима)
+const isMultiAccountMode = user.multi_account_enabled === true;
+if (!isMultiAccountMode && (!user.creative_generations_available || user.creative_generations_available <= 0)) {
+  return reply.status(403).send({
+    success: false,
+    error: 'No generations available',
+    generations_remaining: 0
+  });
+}
+
+// Уменьшаем счетчик только для legacy режима
+if (!isMultiAccountMode) {
+  await supabase
+    .from('user_accounts')
+    .update({ creative_generations_available: user.creative_generations_available - 1 })
+    .eq('id', user_id);
+}
+```
+
+**Паттерн изменения в CreativeGeneration.tsx:**
+
+```typescript
+// Кнопка генерации — не блокируется в мультиаккаунтном режиме
+<Button
+  disabled={loading.image || (!currentAdAccountId && creativeGenerationsAvailable <= 0)}
+>
+  Сгенерировать креатив
+</Button>
+
+// Проверка перед генерацией
+const generateCreative = async () => {
+  const isMultiAccountMode = !!currentAdAccountId;
+  if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
+    toast.error('У вас закончились генерации...');
+    return;
+  }
+  // ... генерация
+};
+```
+
+**Затронутые эндпоинты creative-generation-service:**
+
+| Эндпоинт | Промпт | Лимит |
+|----------|--------|-------|
+| `POST /generate-carousel-texts` | prompt1 | нет |
+| `POST /regenerate-carousel-card-text` | prompt1 | нет |
+| `POST /generate-carousel` | prompt1 | пропуск для multi-account |
+| `POST /regenerate-carousel-card` | prompt1 | пропуск для multi-account |
+| `POST /generate-creative` | prompt4 | пропуск для multi-account |
+
+**Готовность к тестированию:** ✅
+
+- Промпты загружаются из правильной таблицы (ad_accounts для multi-account)
+- Лимиты генераций не блокируют multi-account пользователей
+- UI кнопки активны в multi-account режиме
+- Legacy режим работает как раньше

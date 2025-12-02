@@ -4,38 +4,44 @@ import { supabase } from '@/integrations/supabase/client';
 export const dialogAnalysisService = {
   /**
    * Get analysis results with filters
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async getAnalysis(userAccountId: string, filters?: DialogFilters): Promise<{ results: DialogAnalysis[]; count: number }> {
+  async getAnalysis(userAccountId: string, filters?: DialogFilters, accountId?: string): Promise<{ results: DialogAnalysis[]; count: number }> {
     let query = supabase
       .from('dialog_analysis')
       .select('*')
       .eq('user_account_id', userAccountId)
       .order('score', { ascending: false })
       .order('last_message', { ascending: false });
-    
+
+    // Фильтрация по аккаунту для multi-account режима
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
     if (filters?.interestLevel) {
       query = query.eq('interest_level', filters.interestLevel);
     }
-    
+
     if (filters?.funnelStage) {
       query = query.eq('funnel_stage', filters.funnelStage);
     }
-    
+
     if (filters?.minScore !== undefined) {
       query = query.gte('score', filters.minScore);
     }
-    
+
     if (filters?.qualificationComplete !== undefined) {
       query = query.eq('qualification_complete', filters.qualificationComplete);
     }
-    
+
     const { data, error, count } = await query;
-    
+
     if (error) {
       console.error('Supabase error:', error);
       throw new Error('Failed to fetch dialog analysis');
     }
-    
+
     return {
       results: (data || []) as DialogAnalysis[],
       count: count || data?.length || 0,
@@ -44,12 +50,20 @@ export const dialogAnalysisService = {
 
   /**
    * Get statistics
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async getStats(userAccountId: string): Promise<DialogStats> {
-    const { data, error } = await supabase
+  async getStats(userAccountId: string, accountId?: string): Promise<DialogStats> {
+    let query = supabase
       .from('dialog_analysis')
       .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
       .eq('user_account_id', userAccountId);
+
+    // Фильтрация по аккаунту для multi-account режима
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { data, error } = await query;
     
     if (error) {
       console.error('Supabase error:', error);
@@ -102,14 +116,20 @@ export const dialogAnalysisService = {
 
   /**
    * Export to CSV
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async exportToCsv(userAccountId: string, filters?: DialogFilters): Promise<Blob> {
+  async exportToCsv(userAccountId: string, filters?: DialogFilters, accountId?: string): Promise<Blob> {
     let query = supabase
       .from('dialog_analysis')
       .select('contact_phone, contact_name, interest_level, score, business_type, funnel_stage, instagram_url, ad_budget, qualification_complete, is_owner, has_sales_dept, uses_ads_now, objection, next_message, incoming_count, outgoing_count, last_message')
       .eq('user_account_id', userAccountId)
       .order('score', { ascending: false });
-    
+
+    // Фильтрация по аккаунту для multi-account режима
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
     if (filters?.interestLevel) {
       query = query.eq('interest_level', filters.interestLevel);
     }
@@ -185,6 +205,7 @@ export const dialogAnalysisService = {
 
   /**
    * Create a new lead manually
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
   async createLead(data: {
     phone: string;
@@ -195,6 +216,7 @@ export const dialogAnalysisService = {
     userAccountId: string;
     instanceName: string;
     notes?: string;
+    accountId?: string;
   }): Promise<DialogAnalysis> {
     const { data: lead, error } = await supabase
       .from('dialog_analysis')
@@ -205,6 +227,7 @@ export const dialogAnalysisService = {
         is_medical: data.isMedical || false,
         funnel_stage: data.funnelStage,
         user_account_id: data.userAccountId,
+        account_id: data.accountId || null,
         instance_name: data.instanceName,
         interest_level: 'cold',
         score: 5,
@@ -293,13 +316,21 @@ export const dialogAnalysisService = {
 
   /**
    * Get WhatsApp instances for user
+   * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
    */
-  async getInstances(userAccountId: string): Promise<Array<{ id: string; instance_name: string }>> {
-    const { data, error } = await supabase
+  async getInstances(userAccountId: string, accountId?: string): Promise<Array<{ id: string; instance_name: string }>> {
+    let query = supabase
       .from('whatsapp_instances')
       .select('id, instance_name')
       .eq('user_account_id', userAccountId)
       .order('instance_name');
+
+    // Фильтрация по аккаунту для multi-account режима
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+
+    const { data, error } = await query;
     
     if (error) {
       console.error('Supabase error:', error);

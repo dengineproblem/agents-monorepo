@@ -27,9 +27,9 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/generate-carousel-texts',
     async (request: FastifyRequest<{ Body: GenerateCarouselTextsRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, carousel_idea, cards_count } = request.body;
+        const { user_id, account_id, carousel_idea, cards_count } = request.body;
 
-        console.log('[Carousel Texts] Request:', { user_id, cards_count, idea_length: carousel_idea.length });
+        console.log('[Carousel Texts] Request:', { user_id, account_id, cards_count, idea_length: carousel_idea.length });
 
         // Валидация
         if (!user_id || !carousel_idea || !cards_count) {
@@ -46,11 +46,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Получаем prompt1 пользователя
+        // Получаем данные пользователя
         const supabase = getSupabaseClient();
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('prompt1')
+          .select('prompt1, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -62,7 +62,35 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
+        let userPrompt1 = user.prompt1 || '';
+        const isMultiAccountMode = user.multi_account_enabled === true;
+
+        if (isMultiAccountMode && account_id) {
+          const { data: adAccount, error: adError } = await supabase
+            .from('ad_accounts')
+            .select('prompt1')
+            .eq('id', account_id)
+            .eq('user_account_id', user_id)
+            .single();
+
+          if (adError || !adAccount) {
+            console.error('[Carousel Texts] Ad account not found:', adError);
+            return reply.status(404).send({
+              success: false,
+              error: 'Ad account not found or prompt1 not configured'
+            });
+          }
+
+          userPrompt1 = adAccount.prompt1 || '';
+        }
+
+        if (!userPrompt1) {
+          return reply.status(400).send({
+            success: false,
+            error: 'Промпт не настроен. Пожалуйста, настройте prompt1 в вашем профиле.'
+          });
+        }
 
         // Генерируем тексты
         const texts = await generateCarouselTexts(carousel_idea, cards_count, userPrompt1);
@@ -92,9 +120,9 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card-text',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardTextRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, carousel_id, card_index, existing_texts } = request.body;
+        const { user_id, account_id, carousel_id, card_index, existing_texts } = request.body;
 
-        console.log('[Carousel Card Text] Request:', { user_id, carousel_id, card_index });
+        console.log('[Carousel Card Text] Request:', { user_id, account_id, carousel_id, card_index });
 
         // Валидация
         if (!user_id || !carousel_id || card_index === undefined || !existing_texts) {
@@ -104,11 +132,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Получаем prompt1 пользователя
+        // Получаем данные пользователя
         const supabase = getSupabaseClient();
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('prompt1')
+          .select('prompt1, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -119,7 +147,26 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
+        let userPrompt1 = user.prompt1 || '';
+        const isMultiAccountMode = user.multi_account_enabled === true;
+
+        if (isMultiAccountMode && account_id) {
+          const { data: adAccount, error: adError } = await supabase
+            .from('ad_accounts')
+            .select('prompt1')
+            .eq('id', account_id)
+            .eq('user_account_id', user_id)
+            .single();
+
+          if (!adError && adAccount?.prompt1) {
+            userPrompt1 = adAccount.prompt1;
+          }
+        }
+
+        if (!userPrompt1) {
+          userPrompt1 = 'Информация о бизнесе не указана';
+        }
 
         // Перегенерируем текст карточки
         const text = await regenerateCarouselCardText(card_index, existing_texts, userPrompt1);
@@ -149,10 +196,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/generate-carousel',
     async (request: FastifyRequest<{ Body: GenerateCarouselRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, carousel_texts, visual_style, custom_prompts, reference_images, direction_id } = request.body;
+        const { user_id, account_id, carousel_texts, visual_style, custom_prompts, reference_images, direction_id } = request.body;
 
         console.log('[Generate Carousel] Request:', {
           user_id,
+          account_id,
           cards_count: carousel_texts.length,
           visual_style: visual_style || 'clean_minimal',
           direction_id
@@ -170,7 +218,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const supabase = getSupabaseClient();
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, prompt1, creative_generations_available')
+          .select('id, prompt1, creative_generations_available, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -182,16 +230,36 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         }
 
         const cardsCount = carousel_texts.length;
+        const isMultiAccountMode = user.multi_account_enabled === true;
 
         // Проверяем лимит генераций (карусель из N картинок = N генераций)
-        if (user.creative_generations_available < cardsCount) {
+        // Пропускаем проверку для мультиаккаунтного режима
+        if (!isMultiAccountMode && user.creative_generations_available < cardsCount) {
           return reply.status(403).send({
             success: false,
             error: `Not enough generations. Need ${cardsCount}, have ${user.creative_generations_available}`
           });
         }
 
-        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
+        let userPrompt1 = user.prompt1 || '';
+
+        if (isMultiAccountMode && account_id) {
+          const { data: adAccount, error: adError } = await supabase
+            .from('ad_accounts')
+            .select('prompt1')
+            .eq('id', account_id)
+            .eq('user_account_id', user_id)
+            .single();
+
+          if (!adError && adAccount?.prompt1) {
+            userPrompt1 = adAccount.prompt1;
+          }
+        }
+
+        if (!userPrompt1) {
+          userPrompt1 = 'Информация о бизнесе не указана';
+        }
 
         // Генерируем изображения для всех карточек
         const images = await generateCarouselImages(
@@ -263,23 +331,31 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           throw new Error(`Failed to save carousel: ${insertError.message}`);
         }
 
-        // Декрементируем счетчик генераций
-        const { error: updateError } = await supabase
-          .from('user_accounts')
-          .update({
-            creative_generations_available: user.creative_generations_available - cardsCount
-          })
-          .eq('id', user_id);
+        // Декрементируем счетчик генераций (только для не-мультиаккаунтного режима)
+        let generationsRemaining = user.creative_generations_available;
 
-        if (updateError) {
-          console.error('[Generate Carousel] Failed to decrement generations:', updateError);
+        if (!isMultiAccountMode) {
+          generationsRemaining = user.creative_generations_available - cardsCount;
+
+          const { error: updateError } = await supabase
+            .from('user_accounts')
+            .update({
+              creative_generations_available: generationsRemaining
+            })
+            .eq('id', user_id);
+
+          if (updateError) {
+            console.error('[Generate Carousel] Failed to decrement generations:', updateError);
+          }
+        } else {
+          console.log('[Generate Carousel] Multi-account mode - skipping generation counter decrement');
         }
 
         const response: GenerateCarouselResponse = {
           success: true,
           carousel_id: carouselRecord.id,
           carousel_data: uploadedCards,
-          generations_remaining: user.creative_generations_available - cardsCount
+          generations_remaining: generationsRemaining
         };
 
         console.log('[Generate Carousel] Success:', { carousel_id: carouselRecord.id });
@@ -303,10 +379,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, carousel_id, card_index, custom_prompt, reference_image, text } = request.body;
+        const { user_id, account_id, carousel_id, card_index, custom_prompt, reference_image, text } = request.body;
 
         console.log('[Regenerate Card] Request:', {
           user_id,
+          account_id,
           carousel_id,
           card_index,
           has_custom_prompt: !!custom_prompt,
@@ -327,7 +404,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const supabase = getSupabaseClient();
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, prompt1, creative_generations_available')
+          .select('id, prompt1, creative_generations_available, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -338,8 +415,10 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Проверяем лимит (1 генерация)
-        if (user.creative_generations_available < 1) {
+        const isMultiAccountMode = user.multi_account_enabled === true;
+
+        // Проверяем лимит (1 генерация) - пропускаем для мультиаккаунтного режима
+        if (!isMultiAccountMode && user.creative_generations_available < 1) {
           return reply.status(403).send({
             success: false,
             error: 'Not enough generations available'
@@ -371,7 +450,25 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        const userPrompt1 = user.prompt1 || 'Информация о бизнесе не указана';
+        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
+        let userPrompt1 = user.prompt1 || '';
+
+        if (isMultiAccountMode && account_id) {
+          const { data: adAccount, error: adError } = await supabase
+            .from('ad_accounts')
+            .select('prompt1')
+            .eq('id', account_id)
+            .eq('user_account_id', user_id)
+            .single();
+
+          if (!adError && adAccount?.prompt1) {
+            userPrompt1 = adAccount.prompt1;
+          }
+        }
+
+        if (!userPrompt1) {
+          userPrompt1 = 'Информация о бизнесе не указана';
+        }
 
         // Извлекаем существующие изображения для консистентности
         const existingImagesUrls = carouselData.map(card => card.image_url).filter(url => url) as string[];
@@ -446,22 +543,30 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           console.error('[Regenerate Card] Failed to update carousel:', updateCarouselError);
         }
 
-        // Декрементируем счетчик
-        const { error: updateCounterError } = await supabase
-          .from('user_accounts')
-          .update({
-            creative_generations_available: user.creative_generations_available - 1
-          })
-          .eq('id', user_id);
+        // Декрементируем счетчик (только для не-мультиаккаунтного режима)
+        let generationsRemaining = user.creative_generations_available;
 
-        if (updateCounterError) {
-          console.error('[Regenerate Card] Failed to decrement counter:', updateCounterError);
+        if (!isMultiAccountMode) {
+          generationsRemaining = user.creative_generations_available - 1;
+
+          const { error: updateCounterError } = await supabase
+            .from('user_accounts')
+            .update({
+              creative_generations_available: generationsRemaining
+            })
+            .eq('id', user_id);
+
+          if (updateCounterError) {
+            console.error('[Regenerate Card] Failed to decrement counter:', updateCounterError);
+          }
+        } else {
+          console.log('[Regenerate Card] Multi-account mode - skipping generation counter decrement');
         }
 
         const response: RegenerateCarouselCardResponse = {
           success: true,
           card_data: carouselData[card_index],
-          generations_remaining: user.creative_generations_available - 1
+          generations_remaining: generationsRemaining
         };
 
         return reply.send(response);

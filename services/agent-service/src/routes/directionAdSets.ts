@@ -16,9 +16,9 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
   
   /**
    * POST /api/directions/:directionId/link-adset
-   * 
+   *
    * Привязать существующий ad set к направлению
-   * 
+   *
    * Валидация:
    * - Ad set существует в Facebook
    * - Ad set принадлежит кампании направления
@@ -26,9 +26,10 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
    */
   app.post('/directions/:directionId/link-adset', async (request, reply) => {
     const { directionId } = request.params as { directionId: string };
-    const { fb_adset_id, user_account_id } = request.body as {
+    const { fb_adset_id, user_account_id, account_id } = request.body as {
       fb_adset_id: string;
       user_account_id: string;
+      account_id?: string; // UUID для мультиаккаунтности
     };
 
     try {
@@ -44,10 +45,10 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: 'Direction not found' });
       }
 
-      // 2. Получить access token
+      // 2. Получить access token (с поддержкой multi-account режима)
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('access_token')
+        .select('multi_account_enabled, access_token')
         .eq('id', user_account_id)
         .single();
 
@@ -55,8 +56,29 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: 'User account not found' });
       }
 
+      let accessToken: string | null = userAccount.access_token;
+
+      // Если multi-account режим и передан account_id - берём токен из ad_accounts
+      if (userAccount.multi_account_enabled && account_id) {
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('access_token')
+          .eq('id', account_id)
+          .eq('user_account_id', user_account_id)
+          .single();
+
+        if (adError || !adAccount) {
+          return reply.status(404).send({ error: 'Ad account not found' });
+        }
+        accessToken = adAccount.access_token;
+      }
+
+      if (!accessToken) {
+        return reply.status(400).send({ error: 'Access token not found' });
+      }
+
       // 3. Валидировать ad set через Facebook API
-      const fbAdSet = await graph('GET', fb_adset_id, userAccount.access_token, {
+      const fbAdSet = await graph('GET', fb_adset_id, accessToken, {
         fields: 'id,name,daily_budget,status,campaign_id'
       });
 
@@ -203,24 +225,48 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
 
   /**
    * POST /api/directions/:directionId/sync-adsets
-   * 
+   *
    * Синхронизировать данные ad sets с Facebook
    * (обновить название, бюджет, статус)
    */
   app.post('/directions/:directionId/sync-adsets', async (request, reply) => {
     const { directionId } = request.params as { directionId: string };
-    const { user_account_id } = request.body as { user_account_id: string };
+    const { user_account_id, account_id } = request.body as {
+      user_account_id: string;
+      account_id?: string; // UUID для мультиаккаунтности
+    };
 
     try {
-      // Получить access token
+      // Получить access token (с поддержкой multi-account режима)
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('access_token')
+        .select('multi_account_enabled, access_token')
         .eq('id', user_account_id)
         .single();
 
       if (userError || !userAccount) {
         return reply.status(404).send({ error: 'User account not found' });
+      }
+
+      let accessToken: string | null = userAccount.access_token;
+
+      // Если multi-account режим и передан account_id - берём токен из ad_accounts
+      if (userAccount.multi_account_enabled && account_id) {
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('access_token')
+          .eq('id', account_id)
+          .eq('user_account_id', user_account_id)
+          .single();
+
+        if (adError || !adAccount) {
+          return reply.status(404).send({ error: 'Ad account not found' });
+        }
+        accessToken = adAccount.access_token;
+      }
+
+      if (!accessToken) {
+        return reply.status(400).send({ error: 'Access token not found' });
       }
 
       // Получить все ad sets направления
@@ -240,7 +286,7 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
 
       for (const adset of adsets || []) {
         try {
-          const fbData = await graph('GET', adset.fb_adset_id, userAccount.access_token, {
+          const fbData = await graph('GET', adset.fb_adset_id, accessToken, {
             fields: 'name,daily_budget,status'
           });
 

@@ -83,8 +83,8 @@ const CreativeGeneration = () => {
   // State для выбора стиля креатива
   const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'>('modern_performance');
   
-  // Загрузка направлений
-  const { directions, loading: directionsLoading } = useDirections(userId);
+  // Загрузка направлений (с фильтрацией по аккаунту для multi-account режима)
+  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
 
   // Лимиты символов для каждого типа текста
   const CHARACTER_LIMITS = {
@@ -183,9 +183,42 @@ const CreativeGeneration = () => {
         console.error('❌ Критическая ошибка при инициализации данных пользователя:', err);
       }
     };
-    
+
     loadUserData();
   }, []);
+
+  // Загружаем prompt4 из ad_accounts при смене аккаунта (мультиаккаунтный режим)
+  useEffect(() => {
+    const loadAdAccountPrompt = async () => {
+      if (!currentAdAccountId || !userId) return;
+
+      try {
+        console.log('[CreativeGeneration] Загрузка prompt4 для ad_account:', currentAdAccountId);
+        const { data: adAccount, error } = await supabase
+          .from('ad_accounts')
+          .select('prompt4')
+          .eq('id', currentAdAccountId)
+          .single();
+
+        if (error) {
+          console.error('[CreativeGeneration] Ошибка загрузки prompt4 из ad_accounts:', error);
+          return;
+        }
+
+        if (adAccount?.prompt4) {
+          console.log('[CreativeGeneration] ✅ Загружен prompt4 из ad_accounts:', adAccount.prompt4.length, 'символов');
+          setUserPrompt(adAccount.prompt4);
+        } else {
+          console.warn('[CreativeGeneration] ⚠️ prompt4 не найден в ad_accounts');
+          // Не сбрасываем userPrompt - оставляем из user_accounts как fallback
+        }
+      } catch (err) {
+        console.error('[CreativeGeneration] Ошибка загрузки prompt4:', err);
+      }
+    };
+
+    loadAdAccountPrompt();
+  }, [currentAdAccountId, userId]);
 
   // API базовый URL для creative-generation-service
   // В dev используем локальный сервер, в production - прокси через nginx (через /api/creative)
@@ -397,8 +430,9 @@ const CreativeGeneration = () => {
   };
 
   const generateCreative = async (isEdit: boolean = false) => {
-    // Проверяем лимит генераций
-    if (creativeGenerationsAvailable <= 0) {
+    // Проверяем лимит генераций (пропускаем для мультиаккаунтного режима)
+    const isMultiAccountMode = !!currentAdAccountId;
+    if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
       toast.error('У вас закончились генерации креативов. Приобретите дополнительный пакет.');
       return;
     }
@@ -440,6 +474,7 @@ const CreativeGeneration = () => {
 
       const requestData = {
         user_id: userId,
+        account_id: currentAdAccountId || undefined,
         offer: texts.offer,
         bullets: texts.bullets,
         profits: texts.profits,
@@ -655,7 +690,7 @@ const CreativeGeneration = () => {
         },
         body: JSON.stringify({
           user_id: userId,
-          ad_account_id: currentAdAccountId || undefined,
+          account_id: currentAdAccountId || undefined,
           creative_id: generatedCreativeId,
           direction_id: selectedDirectionId
         }),
@@ -973,7 +1008,7 @@ const CreativeGeneration = () => {
             {/* Кнопка генерации креатива */}
             <Button
               onClick={() => generateCreative(false)}
-              disabled={loading.image || creativeGenerationsAvailable <= 0}
+              disabled={loading.image || (!currentAdAccountId && creativeGenerationsAvailable <= 0)}
               className="w-full bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
               size="lg"
             >

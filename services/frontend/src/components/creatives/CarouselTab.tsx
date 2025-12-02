@@ -192,6 +192,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     try {
       const response = await carouselApi.generateTexts({
         user_id: userId,
+        account_id: currentAdAccountId || undefined,
         carousel_idea: carouselIdea,
         cards_count: cardsCount
       });
@@ -233,6 +234,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
       const response = await carouselApi.regenerateCardText({
         user_id: userId,
+        account_id: currentAdAccountId || undefined,
         carousel_id: generatedCarouselId || 'temp',
         card_index: index,
         existing_texts: existingTexts
@@ -301,6 +303,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
       const response = await carouselApi.generateCarousel({
         user_id: userId,
+        account_id: currentAdAccountId || undefined,
         carousel_texts: texts,
         visual_style: visualStyle,
         custom_prompts: customPrompts,
@@ -389,6 +392,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
       const response = await carouselApi.generateCarousel({
         user_id: userId,
+        account_id: currentAdAccountId || undefined,
         carousel_texts: texts,
         visual_style: visualStyle,
         custom_prompts: customPrompts,
@@ -460,6 +464,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
       const response = await carouselApi.regenerateCard({
         user_id: userId,
+        account_id: currentAdAccountId || undefined,
         carousel_id: generatedCarouselId,
         card_index: cardIndex,
         custom_prompt: customPrompt,
