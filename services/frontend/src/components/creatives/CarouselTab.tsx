@@ -1001,7 +1001,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                 <Button
                   onClick={handleGenerateCarousel}
-                  disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
+                  disabled={isGeneratingCarousel || (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length)}
                   className="w-full"
                   size="lg"
                 >
@@ -1128,7 +1128,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     onClick={handleRegenerateAllCarousel}
                     variant="outline"
                     className="w-full"
-                    disabled={isGeneratingCarousel || creativeGenerationsAvailable < carouselCards.length}
+                    disabled={isGeneratingCarousel || (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length)}
                   >
                     {isGeneratingCarousel ? (
                       <>
