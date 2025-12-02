@@ -305,7 +305,49 @@ export function transformAdToCreativeData(ad: SearchApiAd): CompetitorCreativeDa
 // ========================================
 
 /**
+ * Выполняет один запрос к SearchAPI
+ */
+async function fetchFromSearchApi(
+  params: URLSearchParams,
+  searchType: string,
+  query: string
+): Promise<SearchApiAd[]> {
+  try {
+    const response = await fetch(`https://www.searchapi.io/api/v1/search?${params}`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      log.error({ status: response.status, error: errorText, query, searchType }, 'SearchAPI вернул ошибку');
+      return [];
+    }
+
+    const data: SearchApiResponse = await response.json();
+
+    // "no results" - не ошибка, просто пустой массив
+    const isNoResultsError = data.error === "Meta Ad Library didn't return any results.";
+    if (data.error && !isNoResultsError) {
+      log.error({ error: data.error, query, searchType }, 'SearchAPI вернул ошибку в ответе');
+      return [];
+    }
+
+    const ads = data.ads || [];
+    log.info({ adsCount: ads.length, searchType, query }, 'Получены креативы из SearchAPI');
+    return ads;
+  } catch (error: any) {
+    log.error({ err: error, query, searchType }, 'Ошибка при запросе к SearchAPI');
+    return [];
+  }
+}
+
+/**
  * Получить креативы конкурента из Meta Ads Library через SearchAPI
+ *
+ * ЛОГИКА: Всегда выполняем ОБА поиска (по page_id и по текстовому запросу),
+ * объединяем результаты, удаляем дубликаты и возвращаем лучшие 30 креативов.
+ *
  * @param pageIdOrName - page_id или название страницы для поиска
  * @param country - код страны (KZ, RU, ALL и т.д.)
  * @param options - дополнительные опции
@@ -324,138 +366,117 @@ export async function fetchCompetitorCreatives(
 
   // Для "всех стран" используем 'all' (lowercase), иначе код страны
   const countryParam = country === 'ALL' ? 'all' : country;
+  const finalLimit = options.limit || 30; // По умолчанию 30 лучших
 
-  // Если есть targetPageId - ищем напрямую по page_id (более надёжно)
-  // Иначе ищем по текстовому запросу
-  const params = new URLSearchParams({
+  // Базовые параметры
+  const baseParams = {
     engine: 'meta_ad_library',
     country: countryParam,
     ad_type: 'all',
     media_type: 'all',
     active_status: 'all', // Включаем неактивные креативы тоже
     api_key: apiKey,
-  });
+  };
 
-  // Используем page_id если он есть, иначе текстовый поиск
+  // ===========================================
+  // НОВАЯ ЛОГИКА: Всегда делаем ОБА запроса параллельно
+  // ===========================================
+  const searchPromises: Promise<SearchApiAd[]>[] = [];
+
+  // 1. Поиск по page_id (если есть)
   if (options.targetPageId) {
-    params.set('page_id', options.targetPageId);
-    log.info({ pageId: options.targetPageId, country }, 'Запрос креативов из SearchAPI по page_id');
-  } else {
-    params.set('q', pageIdOrName);
-    log.info({ query: pageIdOrName, country }, 'Запрос креативов из SearchAPI по текстовому запросу');
+    const pageIdParams = new URLSearchParams({ ...baseParams, page_id: options.targetPageId });
+    log.info({ pageId: options.targetPageId, country }, 'Запрос креативов по page_id');
+    searchPromises.push(fetchFromSearchApi(pageIdParams, 'page_id', options.targetPageId));
   }
 
-  try {
-    const response = await fetch(`https://www.searchapi.io/api/v1/search?${params}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
+  // 2. Поиск по текстовому запросу (всегда, если есть pageIdOrName)
+  if (pageIdOrName) {
+    const queryParams = new URLSearchParams({ ...baseParams, q: pageIdOrName });
+    log.info({ query: pageIdOrName, country }, 'Запрос креативов по текстовому запросу');
+    searchPromises.push(fetchFromSearchApi(queryParams, 'text_query', pageIdOrName));
+  }
+
+  if (searchPromises.length === 0) {
+    log.warn('Нет параметров для поиска (ни page_id, ни текстовый запрос)');
+    return [];
+  }
+
+  // Выполняем все запросы параллельно
+  const results = await Promise.all(searchPromises);
+
+  // Объединяем результаты
+  let allAds: SearchApiAd[] = [];
+  for (const ads of results) {
+    allAds = allAds.concat(ads);
+  }
+
+  log.info({
+    totalAdsBeforeDedup: allAds.length,
+    sources: results.map((r, i) => ({ index: i, count: r.length }))
+  }, 'Объединение результатов из всех источников');
+
+  // ===========================================
+  // Удаляем дубликаты по ad_archive_id
+  // ===========================================
+  const seenIds = new Set<string>();
+  const uniqueAds: SearchApiAd[] = [];
+
+  for (const ad of allAds) {
+    if (ad.ad_archive_id && !seenIds.has(ad.ad_archive_id)) {
+      seenIds.add(ad.ad_archive_id);
+      uniqueAds.push(ad);
+    }
+  }
+
+  log.info({
+    beforeDedup: allAds.length,
+    afterDedup: uniqueAds.length,
+    duplicatesRemoved: allAds.length - uniqueAds.length
+  }, 'Дедупликация по ad_archive_id');
+
+  let ads = uniqueAds;
+
+  // =====================================================
+  // ОПТИМИЗАЦИЯ: сортировка и отбор лучших
+  // Критерии: активные + самые долго работающие (по start_date)
+  // =====================================================
+  const PREFILTER_LIMIT = Math.max(50, finalLimit);
+
+  if (ads.length > PREFILTER_LIMIT) {
+    // Сначала активные, потом неактивные
+    // Внутри каждой группы - по start_date ASC (самые старые первые = долго работают)
+    ads.sort((a, b) => {
+      // Активные выше неактивных
+      if (a.is_active !== b.is_active) {
+        return a.is_active ? -1 : 1;
+      }
+      // По дате старта (старые первые)
+      const dateA = a.start_date ? new Date(a.start_date).getTime() : Date.now();
+      const dateB = b.start_date ? new Date(b.start_date).getTime() : Date.now();
+      return dateA - dateB;
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      log.error({ status: response.status, error: errorText, query: pageIdOrName }, 'SearchAPI вернул ошибку');
-      throw new Error(`SearchAPI error: ${response.status} - ${errorText}`);
-    }
+    const beforeCount = ads.length;
+    ads = ads.slice(0, PREFILTER_LIMIT);
 
-    const data: SearchApiResponse = await response.json();
-
-    // Обрабатываем ошибку "no results" особо - это не фатальная ошибка
-    const isNoResultsError = data.error === "Meta Ad Library didn't return any results.";
-
-    if (data.error && !isNoResultsError) {
-      log.error({ error: data.error, query: pageIdOrName }, 'SearchAPI вернул ошибку в ответе');
-      throw new Error(`SearchAPI error: ${data.error}`);
-    }
-
-    let ads = data.ads || [];
     log.info({
-      adsCount: ads.length,
-      searchedBy: options.targetPageId ? 'page_id' : 'query',
-      pageId: options.targetPageId,
-      query: options.targetPageId ? undefined : pageIdOrName
-    }, 'Получены креативы из SearchAPI');
-
-    // Если поиск по page_id не дал результатов - делаем fallback на текстовый поиск
-    if (ads.length === 0 && options.targetPageId && pageIdOrName) {
-      log.warn({
-        pageId: options.targetPageId,
-        fallbackQuery: pageIdOrName
-      }, 'Поиск по page_id не дал результатов, пробуем текстовый поиск');
-
-      const fallbackParams = new URLSearchParams({
-        engine: 'meta_ad_library',
-        q: pageIdOrName,
-        country: countryParam,
-        ad_type: 'all',
-        media_type: 'all',
-        active_status: 'all',
-        api_key: apiKey,
-      });
-
-      const fallbackResponse = await fetch(`https://www.searchapi.io/api/v1/search?${fallbackParams}`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' },
-      });
-
-      if (fallbackResponse.ok) {
-        const fallbackData: SearchApiResponse = await fallbackResponse.json();
-        if (!fallbackData.error && fallbackData.ads && fallbackData.ads.length > 0) {
-          ads = fallbackData.ads;
-          log.info({
-            adsCount: ads.length,
-            searchedBy: 'query_fallback',
-            query: pageIdOrName
-          }, 'Получены креативы через fallback текстовый поиск');
-        }
-      }
-    }
-
-    // =====================================================
-    // ОПТИМИЗАЦИЯ: предварительная фильтрация и сортировка
-    // Вместо скоринга всех 800+ креативов, отбираем 50 лучших кандидатов
-    // Критерии: активные + самые долго работающие (по start_date)
-    // =====================================================
-    const PREFILTER_LIMIT = 50;
-
-    if (ads.length > PREFILTER_LIMIT) {
-      // Сначала активные, потом неактивные
-      // Внутри каждой группы - по start_date ASC (самые старые первые = долго работают)
-      ads.sort((a, b) => {
-        // Активные выше неактивных
-        if (a.is_active !== b.is_active) {
-          return a.is_active ? -1 : 1;
-        }
-        // По дате старта (старые первые)
-        const dateA = a.start_date ? new Date(a.start_date).getTime() : Date.now();
-        const dateB = b.start_date ? new Date(b.start_date).getTime() : Date.now();
-        return dateA - dateB;
-      });
-
-      const beforeCount = ads.length;
-      ads = ads.slice(0, PREFILTER_LIMIT);
-
-      log.info({
-        beforePrefilter: beforeCount,
-        afterPrefilter: ads.length,
-        limit: PREFILTER_LIMIT
-      }, 'Применена предварительная фильтрация (активные + долго работающие)');
-    }
-
-    // Преобразуем в формат для БД
-    const creatives = ads.map(transformAdToCreativeData);
-
-    // Ограничиваем если нужно (дополнительно к PREFILTER_LIMIT)
-    if (options.limit && creatives.length > options.limit) {
-      return creatives.slice(0, options.limit);
-    }
-
-    return creatives;
-  } catch (error: any) {
-    log.error({ err: error, query: pageIdOrName }, 'Ошибка при запросе к SearchAPI');
-    throw error;
+      beforePrefilter: beforeCount,
+      afterPrefilter: ads.length,
+      limit: PREFILTER_LIMIT
+    }, 'Применена предварительная фильтрация (активные + долго работающие)');
   }
+
+  // Преобразуем в формат для БД
+  const creatives = ads.map(transformAdToCreativeData);
+
+  // Ограничиваем до финального лимита
+  if (creatives.length > finalLimit) {
+    log.info({ before: creatives.length, after: finalLimit }, 'Применён финальный лимит');
+    return creatives.slice(0, finalLimit);
+  }
+
+  return creatives;
 }
 
 /**
