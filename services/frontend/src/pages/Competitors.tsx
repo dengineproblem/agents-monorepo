@@ -21,7 +21,7 @@ import { CompetitorCreativesList } from '@/components/competitors/CompetitorCrea
 import type { Competitor, CompetitorCreative, CompetitorsPagination } from '@/types/competitor';
 import { useTranslation } from '@/i18n/LanguageContext';
 import { useAppContext } from '@/context/AppContext';
-import { AdAccountSwitcher } from '@/components/AdAccountSwitcher';
+import { AdAccountSwitcher } from '@/components/ad-accounts/AdAccountSwitcher';
 import {
   AlertDialog,
   AlertDialogAction,

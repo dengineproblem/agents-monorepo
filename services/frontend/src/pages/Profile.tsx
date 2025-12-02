@@ -25,7 +25,7 @@ import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
-import { useAppContext } from '@/contexts/AppContext';
+import { useAppContext } from '@/context/AppContext';
 
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex' | null;

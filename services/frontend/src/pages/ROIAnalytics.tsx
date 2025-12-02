@@ -5,7 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import { salesApi, ROIData, CampaignROI, Direction } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
-import { AdAccountSwitcher } from '@/components/AdAccountSwitcher';
+import { AdAccountSwitcher } from '@/components/ad-accounts/AdAccountSwitcher';
 import {
   TrendingUp,
   TrendingDown,

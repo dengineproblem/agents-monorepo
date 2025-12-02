@@ -84,8 +84,19 @@ export async function syncLeadsFromAmoCRM(
     // 2. Get all leads with phone numbers from database
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id')
-      .eq('user_account_id', userAccountId);
+      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type, account_id')
+      .eq('user_account_id', userAccountId) as { data: Array<{
+        id: any;
+        phone: any;
+        chat_id: any;
+        amocrm_lead_id: any;
+        current_status_id: any;
+        current_pipeline_id: any;
+        direction_id: any;
+        name: any;
+        source_type: any;
+        account_id: string | null;
+      }> | null, error: any };
 
     if (leadsError) {
       throw new Error(`Failed to fetch leads: ${leadsError.message}`);
@@ -563,7 +574,7 @@ export async function syncCreativeLeadsFromAmoCRM(
                   amocrm_pipeline_id: newPipelineId,
                   amocrm_status_id: newStatusId,
                   user_account_id: userAccountId,
-                  account_id: localLead.account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
+                  account_id: (localLead as any).account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
                   updated_at: new Date().toISOString()
                 };
 

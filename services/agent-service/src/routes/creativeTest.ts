@@ -122,7 +122,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         {
           ad_account_id: credentials.fbAdAccountId!,
           page_id: credentials.fbPageId!,
-          instagram_id: credentials.fbInstagramId,
+          instagram_id: credentials.fbInstagramId ?? undefined,
           whatsapp_phone_number: whatsapp_phone_number_for_test
         },
         credentials.fbAccessToken!
