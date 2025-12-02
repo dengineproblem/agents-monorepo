@@ -323,34 +323,65 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       const input: CreateDirectionInput = validationResult.data;
 
-      // Получаем user_account для доступа к Facebook API
-      const { data: userAccount, error: userAccountError } = await supabase
+      // Проверяем флаг multi_account_enabled у пользователя
+      const { data: userAccountCheck, error: userCheckError } = await supabase
         .from('user_accounts')
-        .select('ad_account_id, access_token, username')
+        .select('multi_account_enabled, ad_account_id, access_token, username')
         .eq('id', userAccountId)
         .single();
 
-      if (userAccountError || !userAccount) {
-        log.error({ 
-          userAccountId, 
-          error: userAccountError,
-          hasData: !!userAccount,
-          errorMessage: userAccountError?.message,
-          errorDetails: userAccountError?.details,
-          errorHint: userAccountError?.hint,
-          errorCode: userAccountError?.code
-        }, 'User account not found');
+      if (userCheckError || !userAccountCheck) {
+        log.error({ userAccountId, error: userCheckError }, 'User account not found');
         return reply.code(404).send({
           success: false,
           error: 'User account not found',
-          debug: {
-            errorMessage: userAccountError?.message,
-            errorCode: userAccountError?.code
-          }
         });
       }
 
-      const userAccountName = userAccount.username || undefined;
+      // Получаем данные для Facebook API в зависимости от режима
+      let fbAdAccountId: string | null = null;
+      let fbAccessToken: string | null = null;
+      let userAccountName: string | undefined;
+
+      if (userAccountCheck.multi_account_enabled) {
+        // Мультиаккаунтный режим: данные в ad_accounts
+        const accountIdToUse = input.accountId;
+
+        if (!accountIdToUse) {
+          return reply.code(400).send({
+            success: false,
+            error: 'accountId is required for multi-account mode',
+          });
+        }
+
+        const { data: adAccount, error: adAccountError } = await supabase
+          .from('ad_accounts')
+          .select('ad_account_id, access_token, name')
+          .eq('id', accountIdToUse)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (adAccountError || !adAccount) {
+          log.error({
+            userAccountId,
+            accountId: accountIdToUse,
+            error: adAccountError
+          }, 'Ad account not found');
+          return reply.code(404).send({
+            success: false,
+            error: 'Ad account not found',
+          });
+        }
+
+        fbAdAccountId = adAccount.ad_account_id;
+        fbAccessToken = adAccount.access_token;
+        userAccountName = adAccount.name || undefined;
+      } else {
+        // Legacy режим: данные в user_accounts
+        fbAdAccountId = userAccountCheck.ad_account_id;
+        fbAccessToken = userAccountCheck.access_token;
+        userAccountName = userAccountCheck.username || undefined;
+      }
 
       log.info({
         user_account_id: userAccountId,
@@ -415,12 +446,20 @@ export async function directionsRoutes(app: FastifyInstance) {
         }
       }
 
+      // Проверяем что есть данные для Facebook API
+      if (!fbAdAccountId || !fbAccessToken) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Facebook не подключен. Заполните данные рекламного кабинета.',
+        });
+      }
+
       // Создаём Facebook Campaign
       let fbCampaign;
       try {
         fbCampaign = await createFacebookCampaign(
-          userAccount.ad_account_id,
-          userAccount.access_token,
+          fbAdAccountId,
+          fbAccessToken,
           input.name,
           input.objective
         );
@@ -460,7 +499,7 @@ export async function directionsRoutes(app: FastifyInstance) {
         log.error({ err: directionError }, 'Error creating direction');
 
         try {
-          await archiveFacebookCampaign(fbCampaign.campaign_id, userAccount.access_token);
+          await archiveFacebookCampaign(fbCampaign.campaign_id, fbAccessToken);
         } catch (rollbackError: any) {
           log.error({ err: rollbackError, fbCampaignId: fbCampaign.campaign_id }, 'Failed to roll back direction after FB error');
         }

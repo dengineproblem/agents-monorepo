@@ -1977,6 +1977,7 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-01 | 2.1 | - | Миграция 067: ROI аналитика (leads, purchases, sales), конкуренты, WhatsApp, метрики |
 | 2025-12-01 | 2.2 | - | Имплементация account_id в webhooks, frontend, agent-brain (см. ниже) |
 | 2025-12-01 | 2.3 | - | Финальные исправления: directions, scoring.js, analyzerService.js (см. ниже) |
+| 2025-12-02 | 2.4 | - | Исправления: manual-connect webhook, Dashboard FB connection check (см. ниже) |
 
 ### Версия 2.2 — Детали имплементации
 
@@ -2120,3 +2121,188 @@ const { data: metricsHistory } = await metricsQuery;
 - ✅ Creative analysis
 - ✅ Scoring (agent-brain)
 - ✅ Analyzer service (agent-brain)
+
+### Версия 2.4 — Исправления manual-connect и Dashboard
+
+**Проблема 1: manual-connect webhook не сохраняет данные в ad_accounts**
+
+При ручном подключении Facebook через `/webhooks/facebook/manual-connect` данные сохранялись только в `user_accounts`, но не в `ad_accounts`. Это приводило к тому, что в мультиаккаунтном режиме Facebook считался неподключённым.
+
+**Решение:**
+
+| Файл | Изменения |
+|------|-----------|
+| `routes/facebookWebhooks.ts` | Endpoint `manual-connect`: добавлено обновление `ad_accounts` для мультиаккаунтного режима |
+
+**Код изменения:**
+
+```typescript
+// После успешного обновления user_accounts:
+
+// Для мультиаккаунтного режима: обновляем также ad_accounts
+const { data: defaultAdAccount } = await supabase
+  .from('ad_accounts')
+  .select('id')
+  .eq('user_account_id', user_id)
+  .eq('is_default', true)
+  .single();
+
+if (defaultAdAccount) {
+  const { error: adAccountError } = await supabase
+    .from('ad_accounts')
+    .update({
+      page_id: page_id,
+      ad_account_id: normalizedAdAccountId,  // ← ВАЖНО: колонка называется ad_account_id (без fb_ prefix)
+      instagram_id: instagram_id || null,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', defaultAdAccount.id);
+
+  if (adAccountError) {
+    fastify.log.warn({ error: adAccountError }, 'Failed to update ad_accounts');
+  } else {
+    fastify.log.info({ adAccountId: defaultAdAccount.id }, 'Ad account updated successfully');
+  }
+}
+```
+
+**Проблема 2: Dashboard показывает "Connect Facebook" когда FB уже подключён**
+
+Dashboard проверял наличие `access_token` и `ad_account_id` в localStorage (данные из `user_accounts`), но в мультиаккаунтном режиме эти данные находятся в `ad_accounts`.
+
+**Решение:**
+
+| Файл | Изменения |
+|------|-----------|
+| `pages/Dashboard.tsx` | Проверка FB connection с учётом `multiAccountEnabled` флага |
+| `types/adAccount.ts` | Добавлены поля `ad_account_id` и `access_token` в `AdAccountSummary` |
+| `context/AppContext.tsx` | Добавлен маппинг этих полей в `setAdAccounts` |
+
+**Код изменения в Dashboard.tsx:**
+
+```typescript
+// Проверка подключения Facebook с учётом мультиаккаунтного режима
+let isFbConnected = false;
+if (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0) {
+  // В мультиаккаунтном режиме проверяем данные в текущем ad_account
+  const currentAcc = contextAdAccounts.find((a: AdAccountSummary) => a.is_default) || contextAdAccounts[0];
+  isFbConnected = !!currentAcc?.access_token && currentAcc?.access_token !== ''
+                && !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
+} else {
+  // Legacy режим — проверяем в user_accounts (localStorage)
+  isFbConnected = !!u?.access_token && u?.access_token !== ''
+                && !!u?.ad_account_id && u?.ad_account_id !== '';
+}
+```
+
+**Код изменения в AdAccountSummary:**
+
+```typescript
+export interface AdAccountSummary {
+  id: string;
+  name: string;
+  username: string | null;
+  is_default: boolean;
+  is_active: boolean;
+  tarif: string | null;
+  tarif_expires: string | null;
+  connection_status: 'pending' | 'connected' | 'error';
+  // Facebook данные для проверки подключения
+  ad_account_id: string | null;   // ← ДОБАВЛЕНО
+  access_token: string | null;    // ← ДОБАВЛЕНО
+}
+```
+
+**Код изменения в AppContext.tsx:**
+
+```typescript
+setAdAccounts(response.ad_accounts.map(acc => ({
+  id: acc.id,
+  name: acc.name,
+  username: acc.username,
+  is_default: acc.is_default,
+  is_active: acc.is_active,
+  tarif: acc.tarif,
+  tarif_expires: acc.tarif_expires,
+  connection_status: acc.connection_status,
+  ad_account_id: acc.ad_account_id,     // ← ДОБАВЛЕНО
+  access_token: acc.access_token,       // ← ДОБАВЛЕНО
+})));
+```
+
+**Проблема 3: Directions не работают в мультиаккаунтном режиме**
+
+При создании направления (POST `/directions`) код читал Facebook credentials из `user_accounts`, а не из `ad_accounts`.
+
+**Решение:**
+
+| Файл | Изменения |
+|------|-----------|
+| `routes/directions.ts` | Добавлена проверка `multi_account_enabled` и чтение из правильной таблицы |
+
+**Паттерн изменения:**
+
+```typescript
+// Проверяем флаг multi_account_enabled у пользователя
+const { data: userAccountCheck } = await supabase
+  .from('user_accounts')
+  .select('multi_account_enabled, ad_account_id, access_token, username')
+  .eq('id', userAccountId)
+  .single();
+
+let fbAdAccountId: string | null = null;
+let fbAccessToken: string | null = null;
+
+if (userAccountCheck.multi_account_enabled) {
+  // Мультиаккаунтный режим: данные в ad_accounts
+  const accountIdToUse = input.accountId;
+  if (!accountIdToUse) {
+    return reply.code(400).send({
+      success: false,
+      error: 'accountId is required for multi-account mode',
+    });
+  }
+
+  const { data: adAccount } = await supabase
+    .from('ad_accounts')
+    .select('ad_account_id, access_token, name')
+    .eq('id', accountIdToUse)
+    .eq('user_account_id', userAccountId)
+    .single();
+
+  fbAdAccountId = adAccount.ad_account_id;
+  fbAccessToken = adAccount.access_token;
+} else {
+  // Legacy режим
+  fbAdAccountId = userAccountCheck.ad_account_id;
+  fbAccessToken = userAccountCheck.access_token;
+}
+
+// Валидация перед вызовом Facebook API
+if (!fbAdAccountId || !fbAccessToken) {
+  return reply.code(400).send({
+    success: false,
+    error: 'Facebook не подключен. Заполните данные рекламного кабинета.',
+  });
+}
+```
+
+**Важные заметки по именованию колонок в ad_accounts:**
+
+| Колонка в ad_accounts | Назначение | Примечание |
+|-----------------------|------------|------------|
+| `ad_account_id` | Facebook Ad Account ID | TEXT, формат: act_xxx |
+| `access_token` | Facebook User Access Token | TEXT |
+| `page_id` | Facebook Page ID | TEXT |
+| `instagram_id` | Instagram Business Account ID | TEXT |
+
+⚠️ **ВНИМАНИЕ:** В таблице `ad_accounts` колонки называются БЕЗ префикса `fb_`:
+- ✅ `ad_account_id` (правильно)
+- ❌ `fb_ad_account_id` (неправильно — такой колонки нет!)
+
+**Готовность к тестированию:** ✅
+
+- manual-connect обновляет обе таблицы
+- Dashboard корректно определяет FB connection status в мультиаккаунтном режиме
+- Directions создаются с правильными credentials
+- Legacy режим не затронут

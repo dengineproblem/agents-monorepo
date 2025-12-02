@@ -103,6 +103,28 @@ type CreateAdAccountInput = z.infer<typeof CreateAdAccountSchema>;
 type UpdateAdAccountInput = z.infer<typeof UpdateAdAccountSchema>;
 
 // ========================================
+// HELPERS
+// ========================================
+
+/**
+ * Маппинг данных из БД в формат frontend
+ * DB: ad_account_id, page_id, instagram_id, business_id
+ * Frontend: fb_ad_account_id, fb_page_id, fb_instagram_id, fb_business_id
+ */
+function mapDbToFrontend(dbRecord: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...dbRecord,
+    // Facebook: маппим поля БД -> fb_* формат
+    fb_ad_account_id: dbRecord.ad_account_id,
+    fb_page_id: dbRecord.page_id,
+    fb_instagram_id: dbRecord.instagram_id,
+    fb_instagram_username: dbRecord.instagram_username,
+    fb_access_token: dbRecord.access_token,
+    fb_business_id: dbRecord.business_id,
+  };
+}
+
+// ========================================
 // ROUTES
 // ========================================
 
@@ -150,7 +172,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       return reply.send({
         multi_account_enabled: true,
-        ad_accounts: adAccounts || [],
+        ad_accounts: (adAccounts || []).map(mapDbToFrontend),
       });
     } catch (error) {
       log.error({ error }, 'Error in ad-accounts route');
@@ -181,7 +203,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         return reply.status(404).send({ error: 'Ad account not found' });
       }
 
-      return reply.send(adAccount);
+      return reply.send(mapDbToFrontend(adAccount));
     } catch (error) {
       log.error({ error }, 'Error fetching ad account');
       return reply.status(500).send({ error: 'Internal server error' });
@@ -219,13 +241,51 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Маппинг полей frontend -> DB
+      // Frontend использует fb_* префиксы, в БД поля без префикса
+      const dbData: Record<string, unknown> = {
+        user_account_id: userAccountId,
+        name: adAccountData.name,
+        username: adAccountData.username,
+        is_default: adAccountData.is_default,
+        // Facebook: маппим fb_* -> поля БД
+        ad_account_id: adAccountData.fb_ad_account_id,
+        page_id: adAccountData.fb_page_id,
+        instagram_id: adAccountData.fb_instagram_id,
+        instagram_username: adAccountData.fb_instagram_username,
+        business_id: adAccountData.fb_business_id,
+        ig_seed_audience_id: adAccountData.ig_seed_audience_id,
+        // TikTok (поля совпадают)
+        tiktok_account_id: adAccountData.tiktok_account_id,
+        tiktok_business_id: adAccountData.tiktok_business_id,
+        // Prompts
+        prompt1: adAccountData.prompt1,
+        prompt2: adAccountData.prompt2,
+        prompt3: adAccountData.prompt3,
+        prompt4: adAccountData.prompt4,
+        // Telegram
+        telegram_id: adAccountData.telegram_id,
+        telegram_id_2: adAccountData.telegram_id_2,
+        telegram_id_3: adAccountData.telegram_id_3,
+        telegram_id_4: adAccountData.telegram_id_4,
+        // API Keys
+        openai_api_key: adAccountData.openai_api_key,
+        gemini_api_key: adAccountData.gemini_api_key,
+        // Tariff
+        tarif: adAccountData.tarif,
+        tarif_expires: adAccountData.tarif_expires,
+        tarif_renewal_cost: adAccountData.tarif_renewal_cost,
+      };
+
+      // Убираем undefined значения
+      Object.keys(dbData).forEach(key => {
+        if (dbData[key] === undefined) delete dbData[key];
+      });
+
       // Создаём аккаунт (триггер проверит лимит 5 аккаунтов)
       const { data: adAccount, error } = await supabase
         .from('ad_accounts')
-        .insert({
-          user_account_id: userAccountId,
-          ...adAccountData,
-        })
+        .insert(dbData)
         .select()
         .single();
 
@@ -238,7 +298,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       log.info({ adAccountId: adAccount.id }, 'Ad account created successfully');
-      return reply.status(201).send(adAccount);
+      return reply.status(201).send(mapDbToFrontend(adAccount));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
@@ -263,9 +323,57 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       log.info({ adAccountId, updates: Object.keys(validated) }, 'Updating ad account');
 
+      // Маппинг полей frontend -> DB
+      const dbData: Record<string, unknown> = {};
+
+      if (validated.name !== undefined) dbData.name = validated.name;
+      if (validated.username !== undefined) dbData.username = validated.username;
+      if (validated.is_default !== undefined) dbData.is_default = validated.is_default;
+      if (validated.is_active !== undefined) dbData.is_active = validated.is_active;
+
+      // Facebook: маппим fb_* -> поля БД
+      if (validated.fb_ad_account_id !== undefined) dbData.ad_account_id = validated.fb_ad_account_id;
+      if (validated.fb_page_id !== undefined) dbData.page_id = validated.fb_page_id;
+      if (validated.fb_instagram_id !== undefined) dbData.instagram_id = validated.fb_instagram_id;
+      if (validated.fb_instagram_username !== undefined) dbData.instagram_username = validated.fb_instagram_username;
+      if (validated.fb_business_id !== undefined) dbData.business_id = validated.fb_business_id;
+      if (validated.ig_seed_audience_id !== undefined) dbData.ig_seed_audience_id = validated.ig_seed_audience_id;
+
+      // TikTok
+      if (validated.tiktok_account_id !== undefined) dbData.tiktok_account_id = validated.tiktok_account_id;
+      if (validated.tiktok_business_id !== undefined) dbData.tiktok_business_id = validated.tiktok_business_id;
+
+      // Prompts
+      if (validated.prompt1 !== undefined) dbData.prompt1 = validated.prompt1;
+      if (validated.prompt2 !== undefined) dbData.prompt2 = validated.prompt2;
+      if (validated.prompt3 !== undefined) dbData.prompt3 = validated.prompt3;
+      if (validated.prompt4 !== undefined) dbData.prompt4 = validated.prompt4;
+
+      // Telegram
+      if (validated.telegram_id !== undefined) dbData.telegram_id = validated.telegram_id;
+      if (validated.telegram_id_2 !== undefined) dbData.telegram_id_2 = validated.telegram_id_2;
+      if (validated.telegram_id_3 !== undefined) dbData.telegram_id_3 = validated.telegram_id_3;
+      if (validated.telegram_id_4 !== undefined) dbData.telegram_id_4 = validated.telegram_id_4;
+
+      // API Keys
+      if (validated.openai_api_key !== undefined) dbData.openai_api_key = validated.openai_api_key;
+      if (validated.gemini_api_key !== undefined) dbData.gemini_api_key = validated.gemini_api_key;
+
+      // Custom audiences
+      if (validated.custom_audiences !== undefined) dbData.custom_audiences = validated.custom_audiences;
+
+      // Tariff
+      if (validated.tarif !== undefined) dbData.tarif = validated.tarif;
+      if (validated.tarif_expires !== undefined) dbData.tarif_expires = validated.tarif_expires;
+      if (validated.tarif_renewal_cost !== undefined) dbData.tarif_renewal_cost = validated.tarif_renewal_cost;
+
+      // Status
+      if (validated.connection_status !== undefined) dbData.connection_status = validated.connection_status;
+      if (validated.last_error !== undefined) dbData.last_error = validated.last_error;
+
       const { data: adAccount, error } = await supabase
         .from('ad_accounts')
-        .update(validated)
+        .update(dbData)
         .eq('id', adAccountId)
         .select()
         .single();
@@ -280,7 +388,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       log.info({ adAccountId }, 'Ad account updated successfully');
-      return reply.send(adAccount);
+      return reply.send(mapDbToFrontend(adAccount));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
@@ -352,7 +460,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       log.info({ adAccountId }, 'Ad account set as default');
-      return reply.send(adAccount);
+      return reply.send(mapDbToFrontend(adAccount));
     } catch (error) {
       log.error({ error }, 'Error setting default ad account');
       return reply.status(500).send({ error: 'Internal server error' });

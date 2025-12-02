@@ -40,7 +40,7 @@ interface WhatsAppInstance {
   user_accounts: {
     id: string;
     telegram_id: string | null;
-    name: string | null;
+    username: string | null;
   } | null;
 }
 
@@ -64,7 +64,7 @@ export function startWhatsAppMonitorCron(app: FastifyInstance) {
           phone_number,
           status,
           user_account_id,
-          user_accounts!inner(id, telegram_id, name)
+          user_accounts!inner(id, telegram_id, username)
         `)
         .eq('status', 'connected');
 

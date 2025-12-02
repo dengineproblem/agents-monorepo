@@ -18,6 +18,10 @@ import { createWriteStream, promises as fs } from 'fs';
 import { pipeline } from 'stream/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 const TOP_CREATIVES_LIMIT = 10;
 const MAX_CREATIVES_PER_COMPETITOR = 50;
@@ -1036,15 +1040,32 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
       log.info({ creativeId }, '[Extract Text] Начинаем извлечение текста');
 
-      // Получаем креатив
-      const { data: creative, error: creativeError } = await supabase
-        .from('competitor_creatives')
-        .select('id, media_type, media_urls, thumbnail_url')
-        .eq('id', creativeId)
-        .single();
+      // Получаем креатив с retry (Supabase иногда падает с fetch failed)
+      let creative: { id: string; media_type: string; media_urls: string[] | null; thumbnail_url: string | null } | null = null;
+      let creativeError: Error | null = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const { data, error } = await supabase
+          .from('competitor_creatives')
+          .select('id, media_type, media_urls, thumbnail_url')
+          .eq('id', creativeId)
+          .single();
+
+        if (!error && data) {
+          creative = data;
+          creativeError = null;
+          break;
+        }
+
+        creativeError = error;
+        if (attempt < 3) {
+          log.warn({ creativeId, attempt, error: error?.message }, '[Extract Text] Ошибка запроса к Supabase, повторяем...');
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+        }
+      }
 
       if (creativeError || !creative) {
-        log.error({ err: creativeError, creativeId }, '[Extract Text] Креатив не найден');
+        log.error({ err: creativeError, creativeId }, '[Extract Text] Креатив не найден после 3 попыток');
         return reply.status(404).send({ success: false, error: 'Креатив не найден' });
       }
 
@@ -1086,31 +1107,71 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
         let videoPath: string | null = null;
         try {
-          // Скачиваем видео во временный файл
+          // Скачиваем видео во временный файл с помощью yt-dlp (надёжнее чем fetch для Facebook CDN)
           videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
 
-          const videoResponse = await fetch(videoUrl);
-          if (!videoResponse.ok || !videoResponse.body) {
-            throw new Error(`Не удалось скачать видео: ${videoResponse.status}`);
-          }
+          // Скачиваем видео через yt-dlp или curl
+          log.info({ creativeId }, '[Extract Text] Скачиваем видео через yt-dlp');
 
-          // Создаём поток для записи на диск
-          const writeStream = createWriteStream(videoPath);
+          try {
+            // yt-dlp - скачиваем лучший формат (для прямых mp4 ссылок bestaudio не работает)
+            // --no-playlist - не скачивать плейлист
+            await execAsync(
+              `yt-dlp --no-warnings -q --no-playlist -o "${videoPath}" "${videoUrl}"`,
+              { timeout: 120000 }
+            );
 
-          // Node 18+ поддерживает ReadableStream.from()
-          const reader = videoResponse.body.getReader();
-          const nodeStream = new (await import('stream')).Readable({
-            async read() {
-              const { done, value } = await reader.read();
-              if (done) {
-                this.push(null);
-              } else {
-                this.push(Buffer.from(value));
-              }
+            // Проверяем что файл скачался
+            const stats = await fs.stat(videoPath);
+            if (stats.size === 0) {
+              throw new Error('yt-dlp скачал пустой файл');
             }
-          });
 
-          await pipeline(nodeStream, writeStream);
+            // Получаем длительность видео для логирования
+            let videoDuration = 'unknown';
+            try {
+              const { stdout } = await execAsync(
+                `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
+                { timeout: 10000 }
+              );
+              videoDuration = `${parseFloat(stdout.trim()).toFixed(1)}s`;
+            } catch {
+              // Игнорируем ошибку ffprobe
+            }
+
+            log.info({ creativeId, fileSize: stats.size, duration: videoDuration }, '[Extract Text] yt-dlp скачал видео успешно');
+          } catch (ytdlpError) {
+            log.warn({ creativeId, error: ytdlpError instanceof Error ? ytdlpError.message : String(ytdlpError) }, '[Extract Text] yt-dlp не сработал, пробуем curl');
+
+            // Fallback на curl если yt-dlp не сработал
+            try {
+              await execAsync(
+                `curl -sL -o "${videoPath}" --connect-timeout 30 --max-time 180 "${videoUrl}"`,
+                { timeout: 200000 }
+              );
+
+              const stats = await fs.stat(videoPath);
+              if (stats.size === 0) {
+                throw new Error('curl скачал пустой файл');
+              }
+
+              // Получаем длительность видео для логирования
+              let videoDuration = 'unknown';
+              try {
+                const { stdout } = await execAsync(
+                  `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
+                  { timeout: 10000 }
+                );
+                videoDuration = `${parseFloat(stdout.trim()).toFixed(1)}s`;
+              } catch {
+                // Игнорируем ошибку ffprobe
+              }
+
+              log.info({ creativeId, fileSize: stats.size, duration: videoDuration }, '[Extract Text] curl скачал видео успешно');
+            } catch (curlError) {
+              throw new Error(`Не удалось скачать видео: yt-dlp и curl не сработали`);
+            }
+          }
 
           log.info({ creativeId, videoPath }, '[Extract Text] Видео скачано, запускаем транскрибацию');
 

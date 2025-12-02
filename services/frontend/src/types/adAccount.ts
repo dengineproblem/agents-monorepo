@@ -83,6 +83,9 @@ export interface AdAccountSummary {
   tarif: string | null;
   tarif_expires: string | null;
   connection_status: 'pending' | 'connected' | 'error';
+  // Facebook данные для проверки подключения
+  ad_account_id: string | null;
+  access_token: string | null;
 }
 
 export interface CreateAdAccountPayload {

@@ -57,8 +57,9 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
-          // Проверяем наличие prompt1
-          if (!parsedUser.prompt1) {
+          // Проверяем наличие prompt1, но НЕ для мультиаккаунтного режима
+          // В мультиаккаунтном режиме онбординг запускается через Dashboard
+          if (!parsedUser.prompt1 && !parsedUser.multi_account_enabled) {
             setShowOnboarding(true);
           } else {
             setShowOnboarding(false);
@@ -84,8 +85,8 @@ const AppRoutes = () => {
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
-          // Проверяем prompt1 при изменении данных
-          if (!parsedUser.prompt1) {
+          // Проверяем prompt1 при изменении данных, но НЕ для мультиаккаунта
+          if (!parsedUser.prompt1 && !parsedUser.multi_account_enabled) {
             setShowOnboarding(true);
           } else {
             setShowOnboarding(false);
@@ -101,6 +102,15 @@ const AppRoutes = () => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
+  // Слушаем событие openOnboarding из Dashboard (для мультиаккаунтного режима)
+  useEffect(() => {
+    const handleOpenOnboarding = () => {
+      setShowOnboarding(true);
+    };
+    window.addEventListener('openOnboarding', handleOpenOnboarding);
+    return () => window.removeEventListener('openOnboarding', handleOpenOnboarding);
+  }, []);
+
   const handleOnboardingComplete = () => {
     // Обновляем user из localStorage после завершения онбординга
     const storedUser = localStorage.getItem('user');
@@ -109,6 +119,10 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         setUser(parsedUser);
         setShowOnboarding(false);
+
+        // Оповещаем AppContext о необходимости перезагрузить ad_accounts
+        // (для мультиаккаунтного режима — после создания первого аккаунта)
+        window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
 
         // После онбординга проверяем, подключен ли Facebook
         // Показываем модалку если нет access_token и статус не pending_review

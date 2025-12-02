@@ -200,6 +200,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     
     loadAiAutopilotState();
     loadAdAccounts();
+
+    // Слушаем событие перезагрузки аккаунтов (после онбординга в мультиаккаунтном режиме)
+    const handleReloadAdAccounts = () => {
+      loadAdAccounts();
+    };
+    window.addEventListener('reloadAdAccounts', handleReloadAdAccounts);
+    return () => window.removeEventListener('reloadAdAccounts', handleReloadAdAccounts);
   }, []);
 
   // Функция для переключения состояния AI автопилота
@@ -524,6 +531,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         tarif: acc.tarif,
         tarif_expires: acc.tarif_expires,
         connection_status: acc.connection_status,
+        ad_account_id: acc.ad_account_id,
+        access_token: acc.access_token,
       })));
 
       // Устанавливаем текущий аккаунт (только из активных)

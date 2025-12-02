@@ -28,6 +28,7 @@ export interface GeneratePromptResponse {
   prompt4?: string;
   message?: string;
   error?: string;
+  adAccountId?: string; // ID созданного ad_account в мультиаккаунтном режиме
 }
 
 export interface GetBriefingResponse {

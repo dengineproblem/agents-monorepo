@@ -20,7 +20,8 @@ const log = createLogger({ module: 'briefingRoutes' });
 async function syncCompetitorsFromBriefing(
   userId: string,
   instagramHandles: string[],
-  reqLog: typeof log
+  reqLog: typeof log,
+  accountId?: string | null  // UUID рекламного аккаунта для мультиаккаунтности
 ): Promise<void> {
   reqLog.info({ userId, handles: instagramHandles }, 'Начинаем синхронизацию конкурентов из брифа');
 
@@ -93,6 +94,7 @@ async function syncCompetitorsFromBriefing(
           .from('user_competitors')
           .insert({
             user_account_id: userId,
+            account_id: accountId || null,  // UUID для мультиаккаунтности
             competitor_id: competitorId,
             display_name: pageName,
           });
@@ -208,10 +210,10 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
       }, 'Получен запрос на генерацию промпта');
 
       try {
-        // 1. Проверяем существование пользователя
+        // 1. Проверяем существование пользователя и режим мультиаккаунтности
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, username')
+          .select('id, username, multi_account_enabled, ad_account_id, page_id, instagram_id, instagram_username, access_token, business_id')
           .eq('id', user_id)
           .single();
 
@@ -222,6 +224,8 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
             error: 'Пользователь не найден',
           });
         }
+
+        const isMultiAccountMode = user.multi_account_enabled === true;
 
         // 2. Генерируем prompt1 и prompt4 через OpenAI
         reqLog.info('Начинаем генерацию промптов через OpenAI');
@@ -244,9 +248,74 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        // 3. Сохраняем ответы брифа в user_briefing_responses
-        const briefingRecord = {
+        // 3. Сохраняем промпты и создаём ad_account (если нужно)
+        let createdAdAccountId: string | null = null;
+
+        if (isMultiAccountMode) {
+          // МУЛЬТИАККАУНТНЫЙ РЕЖИМ: создаём ad_account и сохраняем туда
+          reqLog.info({ user_id }, 'Мультиаккаунтный режим: создаём ad_account');
+
+          const adAccountData: Record<string, unknown> = {
+            user_account_id: user_id,
+            name: briefingData.business_name,
+            prompt1: generatedPrompt1,
+            prompt4: generatedPrompt4,
+            is_default: true, // Первый аккаунт = дефолтный
+            is_active: true,
+            connection_status: 'pending',
+            // Копируем FB credentials из user_accounts если есть
+            ad_account_id: user.ad_account_id || null,
+            page_id: user.page_id || null,
+            instagram_id: user.instagram_id || null,
+            instagram_username: user.instagram_username || briefingData.instagram_url || null,
+            access_token: user.access_token || null,
+            business_id: user.business_id || null,
+          };
+
+          const { data: newAdAccount, error: adAccountError } = await supabase
+            .from('ad_accounts')
+            .insert(adAccountData)
+            .select('id')
+            .single();
+
+          if (adAccountError) {
+            reqLog.error({ error: adAccountError, user_id }, 'Ошибка создания ad_account');
+            return reply.status(500).send({
+              success: false,
+              error: 'Ошибка при создании рекламного аккаунта',
+            });
+          }
+
+          createdAdAccountId = newAdAccount.id;
+          reqLog.info({ user_id, adAccountId: createdAdAccountId }, 'ad_account создан успешно');
+
+        } else {
+          // LEGACY РЕЖИМ: обновляем user_accounts как раньше
+          const { error: updateError } = await supabase
+            .from('user_accounts')
+            .update({
+              prompt1: generatedPrompt1,
+              prompt4: generatedPrompt4,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', user_id);
+
+          if (updateError) {
+            reqLog.error({
+              error: updateError,
+              user_id,
+            }, 'Ошибка при обновлении промптов в user_accounts');
+            return reply.status(500).send({
+              success: false,
+              error: 'Ошибка при сохранении промптов',
+            });
+          }
+        }
+
+        // 4. Сохраняем ответы брифа в user_briefing_responses (с account_id для мультиаккаунта)
+        const briefingRecord: Record<string, unknown> = {
           user_id,
+          account_id: createdAdAccountId, // UUID или null для legacy
           business_name: briefingData.business_name,
           business_niche: briefingData.business_niche,
           instagram_url: briefingData.instagram_url,
@@ -264,53 +333,41 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
           competitor_instagrams: briefingData.competitor_instagrams || [],
         };
 
-        const { error: briefingError } = await supabase
-          .from('user_briefing_responses')
-          .upsert(briefingRecord, {
-            onConflict: 'user_id',
-          });
+        // Для мультиаккаунтного режима вставляем новую запись, для legacy - upsert по user_id
+        if (isMultiAccountMode) {
+          const { error: briefingError } = await supabase
+            .from('user_briefing_responses')
+            .insert(briefingRecord);
 
-        if (briefingError) {
-          reqLog.error({
-            error: briefingError,
-            user_id,
-          }, 'Ошибка при сохранении ответов брифа');
-          // Не прерываем выполнение - промпт уже сгенерирован
+          if (briefingError) {
+            reqLog.error({ error: briefingError, user_id, account_id: createdAdAccountId }, 'Ошибка сохранения брифа для мультиаккаунта');
+          } else {
+            reqLog.info({ user_id, account_id: createdAdAccountId }, 'Бриф сохранён для мультиаккаунта');
+          }
         } else {
-          reqLog.info({ user_id }, 'Ответы брифа успешно сохранены');
+          const { error: briefingError } = await supabase
+            .from('user_briefing_responses')
+            .upsert(briefingRecord, { onConflict: 'user_id' });
+
+          if (briefingError) {
+            reqLog.error({ error: briefingError, user_id }, 'Ошибка при сохранении ответов брифа');
+          } else {
+            reqLog.info({ user_id }, 'Ответы брифа успешно сохранены');
+          }
         }
 
-        // 3.5 Синхронизируем конкурентов в раздел конкурентов (async, не блокируем)
+        // 5. Синхронизируем конкурентов в раздел конкурентов (async, не блокируем)
         if (briefingData.competitor_instagrams && briefingData.competitor_instagrams.length > 0) {
-          syncCompetitorsFromBriefing(user_id, briefingData.competitor_instagrams, reqLog)
+          syncCompetitorsFromBriefing(user_id, briefingData.competitor_instagrams, reqLog, createdAdAccountId)
             .catch(err => reqLog.warn({ err, user_id }, 'Ошибка синхронизации конкурентов из брифа'));
-        }
-
-        // 4. Обновляем prompt1 и prompt4 в user_accounts
-        const { error: updateError } = await supabase
-          .from('user_accounts')
-          .update({
-            prompt1: generatedPrompt1,
-            prompt4: generatedPrompt4,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user_id);
-
-        if (updateError) {
-          reqLog.error({
-            error: updateError,
-            user_id,
-          }, 'Ошибка при обновлении промптов в user_accounts');
-          return reply.status(500).send({
-            success: false,
-            error: 'Ошибка при сохранении промптов',
-          });
         }
 
         reqLog.info({
           user_id,
           prompt1_length: generatedPrompt1.length,
           prompt4_length: generatedPrompt4.length,
+          isMultiAccountMode,
+          createdAdAccountId,
         }, 'Промпты успешно сгенерированы и сохранены');
 
         return reply.send({
@@ -318,6 +375,7 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
           prompt1: generatedPrompt1,
           prompt4: generatedPrompt4,
           message: 'Промпты успешно созданы',
+          adAccountId: createdAdAccountId, // Возвращаем ID созданного аккаунта для мультиаккаунтного режима
         });
       } catch (error) {
         reqLog.error({

@@ -1,7 +1,8 @@
 FROM node:20-alpine
 
-# Установка FFmpeg для обработки видео
-RUN apk add --no-cache ffmpeg
+# Установка FFmpeg для обработки видео и yt-dlp для скачивания
+RUN apk add --no-cache ffmpeg python3 py3-pip curl \
+    && pip3 install --break-system-packages yt-dlp
 
 WORKDIR /app
 COPY package.json package-lock.json* ./

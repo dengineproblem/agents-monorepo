@@ -37,6 +37,8 @@ const Dashboard: React.FC = () => {
     tiktokConnected,
     checkTikTokConnected,
     dateRange,
+    multiAccountEnabled,
+    adAccounts: contextAdAccounts,
   } = useAppContext();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [webhookResult, setWebhookResult] = useState<string>('');
@@ -52,6 +54,22 @@ const Dashboard: React.FC = () => {
 
   // Проверка на блокировку кабинета (account_status === 3)
   const isPaymentFailed = accountStatus && Number(accountStatus.account_status) === 3;
+
+  // ВАЖНО: useMemo должен быть ДО всех условных return, иначе будет ошибка React Hooks
+  const formattedDateRange = useMemo(() => {
+    if (!dateRange?.since || !dateRange?.until) return null;
+    try {
+      const since = format(new Date(dateRange.since), 'dd.MM.yyyy');
+      const until = format(new Date(dateRange.until), 'dd.MM.yyyy');
+      if (since === until) {
+        return since;
+      }
+      return `${since} — ${until}`;
+    } catch (error) {
+      console.error('Не удалось форматировать период дат:', error);
+      return null;
+    }
+  }, [dateRange]);
 
   // Сохраняем/читаем скрытие баннера из localStorage
   useEffect(() => {
@@ -247,20 +265,42 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  const formattedDateRange = useMemo(() => {
-    if (!dateRange?.since || !dateRange?.until) return null;
-    try {
-      const since = format(new Date(dateRange.since), 'dd.MM.yyyy');
-      const until = format(new Date(dateRange.until), 'dd.MM.yyyy');
-      if (since === until) {
-        return since;
-      }
-      return `${since} — ${until}`;
-    } catch (error) {
-      console.error('Не удалось форматировать период дат:', error);
-      return null;
-    }
-  }, [dateRange]);
+  // Мультиаккаунтный режим без аккаунтов — показываем экран с кнопкой
+  if (multiAccountEnabled && contextAdAccounts.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Card className="shadow-sm w-full max-w-lg">
+          <CardContent className="p-8 flex flex-col gap-6 items-center text-center">
+            <div className="h-20 w-20 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg">
+              <svg className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold mb-2">Добро пожаловать!</h2>
+              <p className="text-muted-foreground">
+                Для начала работы добавьте ваш первый рекламный аккаунт.
+                Мы зададим несколько вопросов о вашем бизнесе.
+              </p>
+            </div>
+            <Button
+              size="lg"
+              className="gap-2 px-8"
+              onClick={() => {
+                // Открываем онбординг через глобальное событие
+                window.dispatchEvent(new CustomEvent('openOnboarding'));
+              }}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Добавить рекламный аккаунт
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
@@ -287,7 +327,17 @@ const Dashboard: React.FC = () => {
         {(() => {
           const stored = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
           const u = stored ? JSON.parse(stored) : null;
-          const isFbConnected = !!u?.access_token && u?.access_token !== '' && !!u?.ad_account_id && u?.ad_account_id !== '';
+
+          // Проверка подключения Facebook с учётом мультиаккаунтного режима
+          let isFbConnected = false;
+          if (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0) {
+            // В мультиаккаунтном режиме проверяем данные в текущем ad_account
+            const currentAcc = contextAdAccounts.find((a: any) => a.is_default) || contextAdAccounts[0];
+            isFbConnected = !!currentAcc?.access_token && currentAcc?.access_token !== '' && !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
+          } else {
+            // Legacy режим — проверяем в user_accounts
+            isFbConnected = !!u?.access_token && u?.access_token !== '' && !!u?.ad_account_id && u?.ad_account_id !== '';
+          }
           const isTtConnected = tiktokConnected || !!u?.tiktok_business_id;
 
           const openFacebookConnect = () => {
@@ -364,7 +414,7 @@ const Dashboard: React.FC = () => {
                         variant="outline"
                         size="sm"
                         onClick={openFacebookConnect}
-                        className="border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-700 hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300 shadow-sm flex-shrink-0 transition-all duration-200"
+                        className="border-blue-200 dark:border-blue-700 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 text-blue-700 dark:text-blue-300 hover:from-blue-100 hover:to-indigo-100 dark:hover:from-blue-800/40 dark:hover:to-indigo-800/40 hover:border-blue-300 dark:hover:border-blue-600 shadow-sm flex-shrink-0 transition-all duration-200"
                       >
                         {t('profile.connect')}
                       </Button>

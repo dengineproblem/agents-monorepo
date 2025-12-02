@@ -7,11 +7,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Building2, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Building2, CheckCircle, AlertCircle, Clock, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AdAccountSwitcherProps {
   className?: string;
+  showAddButton?: boolean;
 }
 
 const STATUS_ICONS = {
@@ -26,7 +28,7 @@ const STATUS_COLORS = {
   error: 'text-red-500',
 };
 
-export function AdAccountSwitcher({ className }: AdAccountSwitcherProps) {
+export function AdAccountSwitcher({ className, showAddButton = true }: AdAccountSwitcherProps) {
   const {
     multiAccountEnabled,
     adAccounts,
@@ -34,14 +36,26 @@ export function AdAccountSwitcher({ className }: AdAccountSwitcherProps) {
     setCurrentAdAccountId,
   } = useAppContext();
 
-  // Не показываем если мультиаккаунтность выключена или нет аккаунтов
-  if (!multiAccountEnabled || adAccounts.length === 0) {
+  // Открыть полный онбординг для создания нового аккаунта
+  const handleAddAccount = () => {
+    window.dispatchEvent(new CustomEvent('openOnboarding'));
+  };
+
+  // Не показываем если мультиаккаунтность выключена
+  if (!multiAccountEnabled) {
+    return null;
+  }
+
+  // Если нет аккаунтов - не показываем ничего в хедере
+  // Кнопка "Добавить аккаунт" находится на главном экране Dashboard
+  if (adAccounts.length === 0) {
     return null;
   }
 
   // Фильтруем только активные аккаунты для выбора
   const activeAccounts = adAccounts.filter(a => a.is_active);
   const currentAccount = adAccounts.find(a => a.id === currentAdAccountId);
+  const canAddMore = adAccounts.length < 5;
 
   // Если нет активных аккаунтов - показываем предупреждение
   if (activeAccounts.length === 0) {
@@ -49,6 +63,17 @@ export function AdAccountSwitcher({ className }: AdAccountSwitcherProps) {
       <div className={cn('flex items-center gap-2 text-muted-foreground', className)}>
         <Building2 className="h-4 w-4" />
         <span className="text-sm">Нет активных аккаунтов</span>
+        {showAddButton && canAddMore && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={handleAddAccount}
+            title="Добавить аккаунт"
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     );
   }
@@ -78,14 +103,14 @@ export function AdAccountSwitcher({ className }: AdAccountSwitcherProps) {
         </SelectTrigger>
         <SelectContent>
           {activeAccounts.map((account) => {
-            const StatusIcon = STATUS_ICONS[account.connection_status] || Clock;
+            const StatusIcon = STATUS_ICONS[account.connection_status as keyof typeof STATUS_ICONS] || Clock;
             return (
               <SelectItem key={account.id} value={account.id}>
                 <div className="flex items-center gap-2">
                   <StatusIcon
                     className={cn(
                       'h-4 w-4',
-                      STATUS_COLORS[account.connection_status] || 'text-gray-400'
+                      STATUS_COLORS[account.connection_status as keyof typeof STATUS_COLORS] || 'text-gray-400'
                     )}
                   />
                   <span className="truncate">{account.name}</span>
@@ -98,6 +123,19 @@ export function AdAccountSwitcher({ className }: AdAccountSwitcherProps) {
           })}
         </SelectContent>
       </Select>
+
+      {/* Кнопка добавления нового аккаунта — открывает полный онбординг */}
+      {showAddButton && canAddMore && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9"
+          onClick={handleAddAccount}
+          title="Добавить аккаунт"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      )}
     </div>
   );
 }

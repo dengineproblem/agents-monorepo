@@ -608,6 +608,33 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         });
       }
 
+      // Для мультиаккаунтного режима: обновляем также ad_accounts
+      // Находим default аккаунт пользователя и обновляем его Facebook данные
+      const { data: defaultAdAccount } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('user_account_id', user_id)
+        .eq('is_default', true)
+        .single();
+
+      if (defaultAdAccount) {
+        const { error: adAccountError } = await supabase
+          .from('ad_accounts')
+          .update({
+            page_id: page_id,
+            ad_account_id: normalizedAdAccountId,
+            instagram_id: instagram_id || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', defaultAdAccount.id);
+
+        if (adAccountError) {
+          log.warn({ error: adAccountError, ad_account_id: defaultAdAccount.id }, 'Failed to update ad_account with Facebook data');
+        } else {
+          log.info({ ad_account_id: defaultAdAccount.id, page_id, fb_ad_account_id: normalizedAdAccountId }, 'Updated ad_account with Facebook data');
+        }
+      }
+
       log.info({
         user_id,
         page_id,
