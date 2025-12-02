@@ -325,9 +325,10 @@ export async function fetchCompetitorCreatives(
   // Для "всех стран" используем 'all' (lowercase), иначе код страны
   const countryParam = country === 'ALL' ? 'all' : country;
 
+  // Если есть targetPageId - ищем напрямую по page_id (более надёжно)
+  // Иначе ищем по текстовому запросу
   const params = new URLSearchParams({
     engine: 'meta_ad_library',
-    q: pageIdOrName,
     country: countryParam,
     ad_type: 'all',
     media_type: 'all',
@@ -335,7 +336,14 @@ export async function fetchCompetitorCreatives(
     api_key: apiKey,
   });
 
-  log.info({ query: pageIdOrName, country, targetPageId: options.targetPageId }, 'Запрос креативов из SearchAPI');
+  // Используем page_id если он есть, иначе текстовый поиск
+  if (options.targetPageId) {
+    params.set('page_id', options.targetPageId);
+    log.info({ pageId: options.targetPageId, country }, 'Запрос креативов из SearchAPI по page_id');
+  } else {
+    params.set('q', pageIdOrName);
+    log.info({ query: pageIdOrName, country }, 'Запрос креативов из SearchAPI по текстовому запросу');
+  }
 
   try {
     const response = await fetch(`https://www.searchapi.io/api/v1/search?${params}`, {
@@ -353,23 +361,55 @@ export async function fetchCompetitorCreatives(
 
     const data: SearchApiResponse = await response.json();
 
-    if (data.error) {
+    // Обрабатываем ошибку "no results" особо - это не фатальная ошибка
+    const isNoResultsError = data.error === "Meta Ad Library didn't return any results.";
+
+    if (data.error && !isNoResultsError) {
       log.error({ error: data.error, query: pageIdOrName }, 'SearchAPI вернул ошибку в ответе');
       throw new Error(`SearchAPI error: ${data.error}`);
     }
 
     let ads = data.ads || [];
-    log.info({ query: pageIdOrName, adsCount: ads.length }, 'Получены креативы из SearchAPI');
+    log.info({
+      adsCount: ads.length,
+      searchedBy: options.targetPageId ? 'page_id' : 'query',
+      pageId: options.targetPageId,
+      query: options.targetPageId ? undefined : pageIdOrName
+    }, 'Получены креативы из SearchAPI');
 
-    // Если указан targetPageId, фильтруем только креативы этой страницы
-    if (options.targetPageId && ads.length > 0) {
-      const filtered = ads.filter(ad => ad.page_id === options.targetPageId);
-      log.info({
-        originalCount: ads.length,
-        filteredCount: filtered.length,
-        targetPageId: options.targetPageId
-      }, 'Отфильтрованы креативы по page_id');
-      ads = filtered;
+    // Если поиск по page_id не дал результатов - делаем fallback на текстовый поиск
+    if (ads.length === 0 && options.targetPageId && pageIdOrName) {
+      log.warn({
+        pageId: options.targetPageId,
+        fallbackQuery: pageIdOrName
+      }, 'Поиск по page_id не дал результатов, пробуем текстовый поиск');
+
+      const fallbackParams = new URLSearchParams({
+        engine: 'meta_ad_library',
+        q: pageIdOrName,
+        country: countryParam,
+        ad_type: 'all',
+        media_type: 'all',
+        active_status: 'all',
+        api_key: apiKey,
+      });
+
+      const fallbackResponse = await fetch(`https://www.searchapi.io/api/v1/search?${fallbackParams}`, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+      });
+
+      if (fallbackResponse.ok) {
+        const fallbackData: SearchApiResponse = await fallbackResponse.json();
+        if (!fallbackData.error && fallbackData.ads && fallbackData.ads.length > 0) {
+          ads = fallbackData.ads;
+          log.info({
+            adsCount: ads.length,
+            searchedBy: 'query_fallback',
+            query: pageIdOrName
+          }, 'Получены креативы через fallback текстовый поиск');
+        }
+      }
     }
 
     // =====================================================
