@@ -458,6 +458,7 @@ const EditableTitle: React.FC<EditableTitleProps> = ({ title, creativeId, onSave
 };
 
 const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativeIds, demoMode = false, mediaType, imageUrl, carouselData }) => {
+  const { currentAdAccountId } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<CreativeAnalytics | null>(null);
@@ -664,6 +665,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       const payload: Record<string, unknown> = {
         user_creative_id: creativeId,
         user_id: userId,
+        account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
       };
 
       // Если тест уже был завершен/отменен, отправляем force:true для перезапуска
@@ -727,7 +729,13 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         return;
       }
 
-      const response = await fetch(`${API_BASE_URL}/creative-test/${creativeId}?user_id=${userId}`, {
+      // Формируем URL с параметрами (добавляем account_id для мультиаккаунтности)
+      const params = new URLSearchParams({ user_id: userId });
+      if (currentAdAccountId) {
+        params.append('account_id', currentAdAccountId);
+      }
+
+      const response = await fetch(`${API_BASE_URL}/creative-test/${creativeId}?${params.toString()}`, {
         method: 'DELETE',
       });
 

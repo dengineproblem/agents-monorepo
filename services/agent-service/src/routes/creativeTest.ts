@@ -43,6 +43,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       try {
         credentials = await getCredentials(user_id, account_id);
       } catch (credError: any) {
+        app.log.error({ user_id, account_id, error: credError.message }, 'Failed to get credentials for creative test');
         return reply.status(400).send({
           success: false,
           error: credError.message,

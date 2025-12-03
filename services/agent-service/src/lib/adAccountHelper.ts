@@ -90,17 +90,17 @@ export async function getCredentials(
       tiktok_access_token,
       prompt1, prompt2, prompt3, prompt4,
       telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
-      openai_api_key, gemini_api_key,
+      openai_api_key,
       amocrm_subdomain, amocrm_access_token, amocrm_refresh_token,
       amocrm_token_expires_at, amocrm_client_id, amocrm_client_secret,
-      custom_audiences,
       tarif, tarif_expires
     `)
     .eq('id', userAccountId)
     .single();
 
   if (userError || !user) {
-    throw new Error(`User not found: ${userAccountId}`);
+    console.error('[getCredentials] Failed to fetch user:', { userAccountId, userError, user });
+    throw new Error(`User not found: ${userAccountId}. DB error: ${userError?.message || 'no data'}`);
   }
 
   // 2. Проверяем режим работы СТРОГО по флагу
@@ -195,7 +195,7 @@ export async function getCredentials(
     telegramId4: user.telegram_id_4,
 
     openaiApiKey: user.openai_api_key,
-    geminiApiKey: user.gemini_api_key,
+    geminiApiKey: null, // нет в user_accounts, только в ad_accounts
 
     amocrmSubdomain: user.amocrm_subdomain,
     amocrmAccessToken: user.amocrm_access_token,
@@ -204,7 +204,7 @@ export async function getCredentials(
     amocrmClientId: user.amocrm_client_id,
     amocrmClientSecret: user.amocrm_client_secret,
 
-    customAudiences: user.custom_audiences || [],
+    customAudiences: [], // нет в user_accounts, только в ad_accounts
 
     tarif: user.tarif,
     tarifExpires: user.tarif_expires,
