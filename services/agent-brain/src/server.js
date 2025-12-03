@@ -2101,11 +2101,12 @@ async function llmPlan(systemPrompt, userPayload) {
   };
 }
 
-// POST /api/brain/run  { idempotencyKey?, userAccountId, inputs?:{ dispatch?:boolean } }
+// POST /api/brain/run  { idempotencyKey?, userAccountId, accountId?, inputs?:{ dispatch?:boolean } }
+// accountId - UUID из ad_accounts.id для мультиаккаунтного режима (опционально, если не передан - определится через getAccountUUID)
 fastify.post('/api/brain/run', async (request, reply) => {
   const started = Date.now();
   try {
-    const { idempotencyKey, userAccountId, inputs } = request.body || {};
+    const { idempotencyKey, userAccountId, accountId, inputs } = request.body || {};
     if (!userAccountId) return reply.code(400).send({ error: 'userAccountId required' });
 
     const idem = idempotencyKey || genIdem();
@@ -2144,7 +2145,9 @@ fastify.post('/api/brain/run', async (request, reply) => {
     const ua = await getUserAccount(userAccountId);
 
     // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
-    const accountUUID = await getAccountUUID(userAccountId, ua);
+    // Если accountId передан явно (из processDailyBatch), используем его
+    // Иначе определяем через getAccountUUID() по ad_account_id из user_accounts
+    const accountUUID = accountId || await getAccountUUID(userAccountId, ua);
 
     // Логируем старт с username для Grafana
     fastify.log.info({
@@ -2153,7 +2156,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
       userId: userAccountId,
       username: ua.username,
       multiAccountEnabled: !!ua.multi_account_enabled,
-      accountUUID: accountUUID || null
+      accountUUID: accountUUID || null,
+      accountIdFromRequest: accountId || null
     });
     
     // ========================================
@@ -3203,21 +3207,22 @@ fastify.post('/api/brain/decide', async (request, reply) => {
 
 /**
  * Получить всех активных пользователей из Supabase
+ * Для мультиаккаунтного режима также загружаем multi_account_enabled и ad_account_id
  */
 async function getActiveUsers() {
   try {
     const data = await supabaseQuery('user_accounts',
       async () => await supabase
         .from('user_accounts')
-        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
         .eq('is_active', true)
         .eq('optimization', 'agent2')
         .eq('autopilot', true),
       { where: 'getActiveUsers' }
     );
-    
+
     fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'is_active=true AND optimization=agent2 AND autopilot=true' });
-    
+
     return data || [];
   } catch (err) {
     fastify.log.error({ where: 'getActiveUsers', err: String(err) });
@@ -3262,46 +3267,60 @@ async function sendTelegramReport(telegramId, botToken, reportText) {
 
 /**
  * Обработать одного пользователя: собрать данные, выполнить действия, отправить отчет
+ * Для мультиаккаунтного режима user.accountId содержит UUID из ad_accounts.id
  */
 async function processUser(user) {
   const startTime = Date.now();
-  fastify.log.info({ where: 'processUser', userId: user.id, username: user.username, status: 'started' });
-  
+  const accountId = user.accountId || null;  // UUID из ad_accounts.id или null для legacy
+
+  fastify.log.info({
+    where: 'processUser',
+    userId: user.id,
+    username: user.username,
+    accountId: accountId || 'legacy',
+    accountName: user.accountName || null,
+    status: 'started'
+  });
+
   try {
     // Вызываем основной эндпоинт /api/brain/run с dispatch=true
+    // Передаём accountId для мультиаккаунтного режима
     const response = await fetch('http://localhost:7080/api/brain/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         userAccountId: user.id,
+        accountId: accountId,  // UUID из ad_accounts.id для мультиаккаунтности
         inputs: { dispatch: true }
       })
     });
-    
+
     if (!response.ok) {
       throw new Error(`Brain run failed: ${response.status}`);
     }
-    
+
     const result = await response.json();
-    
+
     // Telegram уже отправлен внутри /api/brain/run, не дублируем отправку
     // (telegramSent уже есть в result)
-    
+
     const duration = Date.now() - startTime;
     fastify.log.info({
       where: 'processUser',
       userId: user.id,
       username: user.username,
+      accountId: accountId || 'legacy',
       status: 'completed',
       duration,
       actionsCount: result.actions?.length || 0,
       dispatched: result.dispatched,
       telegramSent: result.telegramSent || false
     });
-    
+
     return {
       userId: user.id,
       username: user.username,
+      accountId: accountId,
       success: true,
       actionsCount: result.actions?.length || 0,
       telegramSent: result.telegramSent || false,
@@ -3313,14 +3332,16 @@ async function processUser(user) {
       where: 'processUser',
       userId: user.id,
       username: user.username,
+      accountId: accountId || 'legacy',
       status: 'failed',
       duration,
       error: String(err?.message || err)
     });
-    
+
     return {
       userId: user.id,
       username: user.username,
+      accountId: accountId,
       success: false,
       error: String(err?.message || err),
       duration
@@ -3406,36 +3427,105 @@ async function processDailyBatch() {
   
   try {
     const users = await getActiveUsers();
-    
+
     if (users.length === 0) {
       fastify.log.info({ where: 'processDailyBatch', status: 'no_active_users' });
       return { success: true, usersProcessed: 0, results: [] };
     }
-    
+
     fastify.log.info({ where: 'processDailyBatch', usersCount: users.length });
-    
+
+    // ========================================
+    // Мультиаккаунтность: разворачиваем пользователей по ad_accounts
+    // Для multi_account_enabled=true создаём отдельную задачу для каждого ad_account
+    // ========================================
+    const expandedUsers = [];
+    for (const user of users) {
+      if (user.multi_account_enabled) {
+        // Загружаем все активные ad_accounts для этого пользователя
+        const { data: adAccounts, error: adAccountsError } = await supabase
+          .from('ad_accounts')
+          .select('id, ad_account_id, name')
+          .eq('user_account_id', user.id)
+          .eq('is_active', true);
+
+        if (adAccountsError) {
+          fastify.log.error({
+            where: 'processDailyBatch',
+            phase: 'load_ad_accounts',
+            userId: user.id,
+            error: String(adAccountsError)
+          });
+          // Пропускаем пользователя если не удалось загрузить аккаунты
+          continue;
+        }
+
+        if (!adAccounts || adAccounts.length === 0) {
+          fastify.log.warn({
+            where: 'processDailyBatch',
+            phase: 'no_ad_accounts',
+            userId: user.id,
+            username: user.username,
+            message: 'Multi-account user has no active ad_accounts'
+          });
+          continue;
+        }
+
+        // Создаём отдельную задачу для каждого ad_account
+        for (const adAccount of adAccounts) {
+          expandedUsers.push({
+            ...user,
+            accountId: adAccount.id,  // UUID из ad_accounts.id
+            accountName: adAccount.name || adAccount.ad_account_id
+          });
+        }
+
+        fastify.log.info({
+          where: 'processDailyBatch',
+          phase: 'expanded_multi_account',
+          userId: user.id,
+          username: user.username,
+          adAccountsCount: adAccounts.length
+        });
+      } else {
+        // Legacy режим: один пользователь = одна задача
+        expandedUsers.push({
+          ...user,
+          accountId: null,  // NULL для legacy режима
+          accountName: null
+        });
+      }
+    }
+
+    fastify.log.info({
+      where: 'processDailyBatch',
+      originalUsersCount: users.length,
+      expandedTasksCount: expandedUsers.length,
+      message: 'Users expanded by ad_accounts for multi-account mode'
+    });
+
     // Параллельная обработка с ограничением concurrency
-    const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5'); // 5 пользователей одновременно
+    const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5'); // 5 задач одновременно
     const results = [];
-    
+
     // Разбиваем на батчи по BATCH_CONCURRENCY
-    for (let i = 0; i < users.length; i += BATCH_CONCURRENCY) {
-      const batch = users.slice(i, i + BATCH_CONCURRENCY);
-      fastify.log.info({ 
-        where: 'processDailyBatch', 
+    for (let i = 0; i < expandedUsers.length; i += BATCH_CONCURRENCY) {
+      const batch = expandedUsers.slice(i, i + BATCH_CONCURRENCY);
+      fastify.log.info({
+        where: 'processDailyBatch',
         batchNumber: Math.floor(i / BATCH_CONCURRENCY) + 1,
         batchSize: batch.length,
-        totalBatches: Math.ceil(users.length / BATCH_CONCURRENCY)
+        totalBatches: Math.ceil(expandedUsers.length / BATCH_CONCURRENCY)
       });
-      
+
       // Обрабатываем батч параллельно
       const batchResults = await Promise.all(
         batch.map(user => processUser(user))
       );
       results.push(...batchResults);
-      
+
       // Небольшая пауза между батчами (не между пользователями!)
-      if (i + BATCH_CONCURRENCY < users.length) {
+      if (i + BATCH_CONCURRENCY < expandedUsers.length) {
         await new Promise(resolve => setTimeout(resolve, 2000)); // 2 секунды между батчами
       }
     }
@@ -3542,24 +3632,33 @@ fastify.options('/api/analyzer/analyze-creative', async (request, reply) => {
 
 /**
  * POST /api/analyzer/analyze-creative
- * 
+ *
  * Анализирует креатив на основе метрик из creative_metrics_history
+ * account_id - UUID из ad_accounts.id для мультиаккаунтного режима (опционально)
  */
 fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
   try {
-    const { creative_id, user_id } = request.body;
-    
+    const { creative_id, user_id, account_id } = request.body;
+
     if (!creative_id || !user_id) {
       return reply.code(400).send({ error: 'creative_id and user_id are required' });
     }
 
-    fastify.log.info({ where: 'analyzeCreative', creative_id, user_id, status: 'started' });
+    fastify.log.info({
+      where: 'analyzeCreative',
+      creative_id,
+      user_id,
+      account_id: account_id || 'legacy',
+      status: 'started'
+    });
 
     // Получаем метрики креатива из creative_metrics_history
+    // p_account_id используется для фильтрации в мультиаккаунтном режиме
     const { data: metricsData, error: metricsError } = await supabase
       .rpc('get_creative_aggregated_metrics', {
         p_user_creative_id: creative_id,
         p_user_account_id: user_id,
+        p_account_id: account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
         p_days_limit: 30
       });
 
@@ -3623,7 +3722,8 @@ fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
     }
 
     // account_id для мультиаккаунтности (UUID или null для legacy)
-    const accountId = creative.account_id || null;
+    // Приоритет: переданный в запросе > из креатива > null
+    const accountId = account_id || creative.account_id || null;
 
     // Получаем транскрибацию
     const { data: transcript } = await supabase

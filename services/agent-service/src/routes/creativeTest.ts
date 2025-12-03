@@ -279,15 +279,9 @@ export async function creativeTestRoutes(app: FastifyInstance) {
 
       if (shouldComplete) {
         app.log.info(`Test ${test_id} reached ${insights.impressions} impressions, pausing ad set/campaign and triggering analyzer`);
-        
-        // Проверяем режим пользователя
-        const { data: userAccountWithMode } = await supabase
-          .from('user_accounts')
-          .select('default_adset_mode')
-          .eq('id', test.user_id)
-          .single();
-        
-        const isUseExistingMode = userAccountWithMode?.default_adset_mode === 'use_existing';
+
+        // Используем default_adset_mode из уже полученных credentials (поддержка мультиаккаунтности)
+        const isUseExistingMode = credentials.defaultAdsetMode === 'use_existing';
         
         // ПАУЗИМ в зависимости от режима
         let pauseSuccess = false;
@@ -394,21 +388,15 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       }
 
       if (tests && tests.length > 0) {
-        // Получаем default_adset_mode из user_accounts
-        const { data: userAccount } = await supabase
-          .from('user_accounts')
-          .select('default_adset_mode')
-          .eq('id', String(user_id))
-          .single();
-
-        const isUseExistingMode = userAccount?.default_adset_mode === 'use_existing';
-
         for (const test of tests) {
-          // Получаем access_token через getCredentials (поддержка мультиаккаунта)
+          // Получаем credentials через getCredentials (поддержка мультиаккаунта)
+          // default_adset_mode берётся из credentials, не из отдельного запроса
           let accessToken: string | null = null;
+          let isUseExistingMode = false;
           try {
             const credentials = await getCredentials(test.user_id, test.account_id || undefined);
             accessToken = credentials.fbAccessToken;
+            isUseExistingMode = credentials.defaultAdsetMode === 'use_existing';
           } catch (credError: any) {
             app.log.warn({ user_id, account_id: test.account_id, error: credError.message }, 'Cannot get credentials for pausing creative test assets');
           }

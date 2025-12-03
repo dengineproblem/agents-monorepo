@@ -3,6 +3,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { fetchCreativeTestInsights } from '../workflows/creativeTest.js';
 import { fb } from '../adapters/facebook.js';
+import { getCredentials } from '../lib/adAccountHelper.js';
 import axios from 'axios';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
@@ -15,10 +16,10 @@ export function startCreativeTestCron(app: FastifyInstance) {
     try {
       app.log.info('[Cron] Checking running creative tests...');
       
-      // Получаем все running тесты
+      // Получаем все running тесты (включая account_id для мультиаккаунтности)
       const { data: runningTests, error } = await supabase
         .from('creative_tests')
-        .select('id, campaign_id, adset_id, ad_id, test_impressions_limit, user_id, objective')
+        .select('id, campaign_id, adset_id, ad_id, test_impressions_limit, user_id, objective, account_id')
         .eq('status', 'running');
       
       if (error) {
@@ -36,30 +37,45 @@ export function startCreativeTestCron(app: FastifyInstance) {
       // Проверяем каждый тест
       for (const test of runningTests) {
         try {
-          // Получаем access_token пользователя
-          const { data: userAccount, error: userError } = await supabase
-            .from('user_accounts')
-            .select('access_token')
-            .eq('id', test.user_id)
-            .single();
-          
-          if (userError || !userAccount) {
-            app.log.error(`[Cron] User not found for test ${test.id}`);
+          // Получаем credentials через getCredentials() для поддержки мультиаккаунтности
+          // Если test.account_id есть - используем ad_accounts, иначе - user_accounts (legacy)
+          let credentials;
+          try {
+            credentials = await getCredentials(test.user_id, test.account_id || undefined);
+          } catch (credError: any) {
+            app.log.error({
+              testId: test.id,
+              userId: test.user_id,
+              accountId: test.account_id,
+              error: credError.message
+            }, `[Cron] Failed to get credentials for test ${test.id}`);
             continue;
           }
-          
+
+          if (!credentials.fbAccessToken) {
+            app.log.error(`[Cron] No access_token found for test ${test.id}`);
+            continue;
+          }
+
+          const accessToken = credentials.fbAccessToken;
+
           // Проверяем что ad_id есть
           if (!test.ad_id) {
             app.log.error({ test }, `[Cron] Test ${test.id} has no ad_id!`);
             continue;
           }
-          
-          app.log.info(`[Cron] Fetching insights for ad_id: ${test.ad_id}, objective: ${test.objective || 'unknown'}`);
+
+          app.log.info({
+            testId: test.id,
+            adId: test.ad_id,
+            objective: test.objective || 'unknown',
+            accountId: test.account_id || 'legacy'
+          }, `[Cron] Fetching insights for ad_id: ${test.ad_id}`);
 
           // Получаем метрики из Facebook (передаем objective для правильного подсчета лидов)
           const insights = await fetchCreativeTestInsights(
             test.ad_id,
-            userAccount.access_token,
+            accessToken,
             test.objective
           );
           
@@ -84,7 +100,7 @@ export function startCreativeTestCron(app: FastifyInstance) {
                 throw new Error('Test has no campaign_id');
               }
 
-              const pauseResponse = await fb.pauseCampaign(test.campaign_id, userAccount.access_token);
+              const pauseResponse = await fb.pauseCampaign(test.campaign_id, accessToken);
 
               app.log.info({
                 pauseResponse,

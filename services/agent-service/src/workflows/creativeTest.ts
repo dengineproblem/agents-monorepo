@@ -353,6 +353,7 @@ export async function workflowStartCreativeTest(
     user_creative_id,
     direction_id: direction.id,
     user_id,
+    account_id: db_ad_account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
     adset_id,
     campaign_id,
     fb_creative_id,

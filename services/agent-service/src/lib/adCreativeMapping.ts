@@ -8,6 +8,7 @@ export interface SaveAdMappingParams {
   user_creative_id: string;
   direction_id?: string | null;
   user_id: string;
+  account_id?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
   adset_id?: string;
   campaign_id?: string;
   fb_creative_id?: string;
@@ -24,6 +25,7 @@ export async function saveAdCreativeMapping(params: SaveAdMappingParams): Promis
     user_creative_id,
     direction_id,
     user_id,
+    account_id,
     adset_id,
     campaign_id,
     fb_creative_id,
@@ -38,6 +40,7 @@ export async function saveAdCreativeMapping(params: SaveAdMappingParams): Promis
         user_creative_id,
         direction_id,
         user_id,
+        account_id: account_id || null,  // UUID для мультиаккаунтности, NULL для legacy
         adset_id,
         campaign_id,
         fb_creative_id,
@@ -78,6 +81,7 @@ export async function saveAdCreativeMappingBatch(mappings: SaveAdMappingParams[]
           user_creative_id: m.user_creative_id,
           direction_id: m.direction_id,
           user_id: m.user_id,
+          account_id: m.account_id || null,  // UUID для мультиаккаунтности
           adset_id: m.adset_id,
           campaign_id: m.campaign_id,
           fb_creative_id: m.fb_creative_id,
