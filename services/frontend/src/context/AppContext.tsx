@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Campaign, CampaignStat, DateRange, facebookApi } from '../services/facebookApi';
 import { tiktokApi } from '@/services/tiktokApi';
 import { format, subDays } from 'date-fns';
@@ -66,7 +66,17 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   // Multi-account state
   const [multiAccountEnabled, setMultiAccountEnabled] = useState<boolean>(false);
   const [adAccounts, setAdAccounts] = useState<AdAccountSummary[]>([]);
-  const [currentAdAccountId, setCurrentAdAccountId] = useState<string | null>(null);
+  const [currentAdAccountId, setCurrentAdAccountIdState] = useState<string | null>(null);
+
+  // Обёртка для setCurrentAdAccountId — сохраняет в localStorage
+  const setCurrentAdAccountId = useCallback((id: string | null) => {
+    setCurrentAdAccountIdState(id);
+    if (id) {
+      localStorage.setItem('currentAdAccountId', id);
+    } else {
+      localStorage.removeItem('currentAdAccountId');
+    }
+  }, []);
 
   // Устанавливаем значение по умолчанию для диапазона дат (только сегодня)
   const today = new Date();
@@ -300,11 +310,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       let hasFacebookData = false;
       if (storedMultiAccountEnabled && storedAdAccounts) {
-        // В мультиаккаунтном режиме проверяем данные в текущем ad_account из localStorage
+        // В мультиаккаунтном режиме проверяем данные в текущем выбранном ad_account
         const parsedAccounts = JSON.parse(storedAdAccounts);
-        const currentAcc = parsedAccounts.find((a: any) => a.is_default) || parsedAccounts[0];
-        hasFacebookData = !!currentAcc?.access_token && !!currentAcc?.ad_account_id;
-        console.log('[AppContext] Мультиаккаунт: hasFacebookData =', hasFacebookData, { access_token: !!currentAcc?.access_token, ad_account_id: currentAcc?.ad_account_id });
+        const storedCurrentAdAccountId = localStorage.getItem('currentAdAccountId');
+        const currentAcc = parsedAccounts.find((a: any) => a.id === storedCurrentAdAccountId) || parsedAccounts[0];
+        // Для manual-connect достаточно ad_account_id (access_token получается позже)
+        hasFacebookData = !!currentAcc?.ad_account_id;
+        console.log('[AppContext] Мультиаккаунт: hasFacebookData =', hasFacebookData, { ad_account_id: currentAcc?.ad_account_id, currentAdAccountId: storedCurrentAdAccountId });
       } else {
         // Legacy режим — проверяем в user_accounts
         hasFacebookData = !!(userData?.access_token && userData?.ad_account_id);
@@ -462,11 +474,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }
   };
 
-  // Обновляем данные при изменении диапазона дат или загрузке ad_accounts
+  // Обновляем данные при изменении диапазона дат, платформы или текущего аккаунта
   useEffect(() => {
-    console.log('Изменение параметров (даты/платформа/adAccounts), обновляем данные:', { dateRange, platform, adAccountsCount: adAccounts.length });
+    console.log('Изменение параметров (даты/платформа/currentAdAccountId), обновляем данные:', { dateRange, platform, currentAdAccountId });
     refreshData();
-  }, [dateRange, platform, adAccounts]);
+  }, [dateRange, platform, currentAdAccountId]);
 
   // Функция для проверки наличия business_id
   const checkBusinessId = async (): Promise<boolean> => {
@@ -540,7 +552,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         id: acc.id,
         name: acc.name,
         username: acc.username,
-        is_default: acc.is_default,
         is_active: acc.is_active,
         tarif: acc.tarif,
         tarif_expires: acc.tarif_expires,
@@ -561,21 +572,21 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         const activeAccounts = response.ad_accounts.filter(a => a.is_active);
 
         if (activeAccounts.length > 0) {
-          // Восстанавливаем из localStorage или берём дефолтный активный
+          // Восстанавливаем из localStorage или берём первый активный
           const savedAdAccountId = localStorage.getItem('currentAdAccountId');
           const validSavedId = activeAccounts.find(a => a.id === savedAdAccountId);
 
           if (validSavedId) {
-            setCurrentAdAccountId(savedAdAccountId);
+            setCurrentAdAccountIdState(savedAdAccountId);
           } else {
-            const defaultAccount = activeAccounts.find(a => a.is_default);
-            const accountToUse = defaultAccount || activeAccounts[0];
-            setCurrentAdAccountId(accountToUse.id);
+            // Берём первый активный аккаунт
+            const accountToUse = activeAccounts[0];
+            setCurrentAdAccountIdState(accountToUse.id);
             localStorage.setItem('currentAdAccountId', accountToUse.id);
           }
         } else {
           // Нет активных аккаунтов
-          setCurrentAdAccountId(null);
+          setCurrentAdAccountIdState(null);
           localStorage.removeItem('currentAdAccountId');
         }
       }

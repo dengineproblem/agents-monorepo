@@ -39,6 +39,7 @@ const Dashboard: React.FC = () => {
     dateRange,
     multiAccountEnabled,
     adAccounts: contextAdAccounts,
+    currentAdAccountId,
   } = useAppContext();
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [webhookResult, setWebhookResult] = useState<string>('');
@@ -331,9 +332,10 @@ const Dashboard: React.FC = () => {
           // Проверка подключения Facebook с учётом мультиаккаунтного режима
           let isFbConnected = false;
           if (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0) {
-            // В мультиаккаунтном режиме проверяем данные в текущем ad_account
-            const currentAcc = contextAdAccounts.find((a: any) => a.is_default) || contextAdAccounts[0];
-            isFbConnected = !!currentAcc?.access_token && currentAcc?.access_token !== '' && !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
+            // В мультиаккаунтном режиме проверяем данные в текущем выбранном ad_account
+            const currentAcc = contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0];
+            // Для manual-connect достаточно ad_account_id (access_token получается позже через Business Portfolio)
+            isFbConnected = !!currentAcc?.ad_account_id && currentAcc?.ad_account_id !== '';
           } else {
             // Legacy режим — проверяем в user_accounts
             isFbConnected = !!u?.access_token && u?.access_token !== '' && !!u?.ad_account_id && u?.ad_account_id !== '';

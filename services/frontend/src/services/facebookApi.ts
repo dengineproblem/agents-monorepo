@@ -61,9 +61,10 @@ const getCurrentUserConfig = async () => {
       const storedMultiAccountEnabled = localStorage.getItem('multiAccountEnabled');
 
       if (storedMultiAccountEnabled === 'true' && storedAdAccounts) {
-        // Мультиаккаунтный режим — берём данные из ad_accounts
+        // Мультиаккаунтный режим — берём данные из текущего выбранного аккаунта
         const adAccounts = JSON.parse(storedAdAccounts);
-        const currentAcc = adAccounts.find((a: any) => a.is_default) || adAccounts[0];
+        const currentAdAccountId = localStorage.getItem('currentAdAccountId');
+        const currentAcc = adAccounts.find((a: any) => a.id === currentAdAccountId) || adAccounts[0];
 
         if (currentAcc && currentAcc.ad_account_id && currentAcc.access_token) {
           console.log('[facebookApi] Мультиаккаунт: используем учетные данные:', {
@@ -1134,6 +1135,7 @@ export const facebookApi = {
     page_id: string;
     instagram_id?: string;
     ad_account_id: string;
+    account_id?: string; // UUID ad_accounts.id для мультиаккаунтного режима
   }): Promise<{ success: boolean; error?: string }> => {
     try {
       // Get user_id from localStorage
@@ -1147,8 +1149,13 @@ export const facebookApi = {
         return { success: false, error: 'ID пользователя не найден' };
       }
 
+      // Для мультиаккаунтного режима: получаем текущий account_id
+      const multiAccountEnabled = localStorage.getItem('multiAccountEnabled') === 'true';
+      const currentAdAccountId = data.account_id || localStorage.getItem('currentAdAccountId');
+
       console.log('[facebookApi] Submitting manual connection:', {
         user_id: userData.id,
+        account_id: multiAccountEnabled ? currentAdAccountId : null,
         page_id: data.page_id,
         instagram_id: data.instagram_id,
         ad_account_id: data.ad_account_id
@@ -1159,6 +1166,7 @@ export const facebookApi = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userData.id,
+          account_id: multiAccountEnabled ? currentAdAccountId : null, // UUID для мультиаккаунтности
           page_id: data.page_id,
           instagram_id: data.instagram_id || null,
           ad_account_id: data.ad_account_id
@@ -1176,6 +1184,26 @@ export const facebookApi = {
           : `act_${data.ad_account_id}`;
         userData.fb_connection_status = 'pending_review';
         localStorage.setItem('user', JSON.stringify(userData));
+
+        // Для мультиаккаунтного режима: обновляем adAccounts в localStorage
+        if (multiAccountEnabled && currentAdAccountId) {
+          const storedAdAccounts = localStorage.getItem('adAccounts');
+          if (storedAdAccounts) {
+            const adAccounts = JSON.parse(storedAdAccounts);
+            const updatedAccounts = adAccounts.map((acc: any) => {
+              if (acc.id === currentAdAccountId) {
+                return {
+                  ...acc,
+                  ad_account_id: data.ad_account_id.startsWith('act_')
+                    ? data.ad_account_id
+                    : `act_${data.ad_account_id}`,
+                };
+              }
+              return acc;
+            });
+            localStorage.setItem('adAccounts', JSON.stringify(updatedAccounts));
+          }
+        }
 
         console.log('[facebookApi] Manual connection submitted successfully');
       }

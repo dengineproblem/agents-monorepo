@@ -13,7 +13,6 @@ const CreateAdAccountSchema = z.object({
   userAccountId: z.string().uuid(),
   name: z.string().min(1).max(100),
   username: z.string().max(100).optional(),
-  is_default: z.boolean().optional(),
 
   // Facebook (user fills IDs, admin fills access_token later)
   fb_ad_account_id: z.string().optional(),
@@ -52,7 +51,6 @@ const CreateAdAccountSchema = z.object({
 const UpdateAdAccountSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   username: z.string().max(100).optional(),
-  is_default: z.boolean().optional(),
   is_active: z.boolean().optional(),
 
   // Facebook
@@ -247,7 +245,6 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         user_account_id: userAccountId,
         name: adAccountData.name,
         username: adAccountData.username,
-        is_default: adAccountData.is_default,
         // Facebook: маппим fb_* -> поля БД
         ad_account_id: adAccountData.fb_ad_account_id,
         page_id: adAccountData.fb_page_id,
@@ -328,7 +325,6 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       if (validated.name !== undefined) dbData.name = validated.name;
       if (validated.username !== undefined) dbData.username = validated.username;
-      if (validated.is_default !== undefined) dbData.is_default = validated.is_default;
       if (validated.is_active !== undefined) dbData.is_active = validated.is_active;
 
       // Facebook: маппим fb_* -> поля БД
@@ -429,43 +425,6 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     }
   });
 
-  /**
-   * POST /ad-accounts/:adAccountId/set-default
-   * Установить аккаунт как дефолтный
-   */
-  app.post('/ad-accounts/:adAccountId/set-default', async (
-    req: FastifyRequest<{ Params: { adAccountId: string } }>,
-    reply: FastifyReply
-  ) => {
-    const { adAccountId } = req.params;
-
-    log.info({ adAccountId }, 'Setting ad account as default');
-
-    try {
-      // Триггер автоматически сбросит is_default у других аккаунтов
-      const { data: adAccount, error } = await supabase
-        .from('ad_accounts')
-        .update({ is_default: true })
-        .eq('id', adAccountId)
-        .select()
-        .single();
-
-      if (error) {
-        log.error({ error }, 'Error setting default ad account');
-        return reply.status(500).send({ error: 'Failed to set default ad account' });
-      }
-
-      if (!adAccount) {
-        return reply.status(404).send({ error: 'Ad account not found' });
-      }
-
-      log.info({ adAccountId }, 'Ad account set as default');
-      return reply.send(mapDbToFrontend(adAccount));
-    } catch (error) {
-      log.error({ error }, 'Error setting default ad account');
-      return reply.status(500).send({ error: 'Internal server error' });
-    }
-  });
 }
 
 export default adAccountsRoutes;

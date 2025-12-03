@@ -114,9 +114,6 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
                     )}
                   />
                   <span className="truncate">{account.name}</span>
-                  {account.is_default && (
-                    <span className="text-xs text-muted-foreground">(по умолчанию)</span>
-                  )}
                 </div>
               </SelectItem>
             );

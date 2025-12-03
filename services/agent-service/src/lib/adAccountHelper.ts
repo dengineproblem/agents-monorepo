@@ -218,9 +218,10 @@ export async function getCredentials(
 }
 
 /**
- * Получает дефолтный рекламный аккаунт пользователя (для multi-account режима)
+ * Получает первый активный рекламный аккаунт пользователя (для multi-account режима)
+ * Используется как fallback когда account_id не передан
  */
-export async function getDefaultAdAccount(userAccountId: string): Promise<string | null> {
+export async function getFirstActiveAdAccount(userAccountId: string): Promise<string | null> {
   const { data: user } = await supabase
     .from('user_accounts')
     .select('multi_account_enabled')
@@ -235,7 +236,9 @@ export async function getDefaultAdAccount(userAccountId: string): Promise<string
     .from('ad_accounts')
     .select('id')
     .eq('user_account_id', userAccountId)
-    .eq('is_default', true)
+    .eq('is_active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
     .single();
 
   return adAccount?.id || null;
@@ -257,7 +260,7 @@ export async function getAdAccounts(userAccountId: string) {
 
   const { data: adAccounts } = await supabase
     .from('ad_accounts')
-    .select('id, name, username, is_default, is_active, tarif, tarif_expires, connection_status')
+    .select('id, name, username, is_active, tarif, tarif_expires, connection_status')
     .eq('user_account_id', userAccountId)
     .order('created_at', { ascending: true });
 

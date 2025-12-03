@@ -10,7 +10,6 @@ export interface AdAccount {
   user_account_id: string;
   name: string;
   username: string | null;
-  is_default: boolean;
   is_active: boolean;
 
   // Tariff
@@ -78,7 +77,6 @@ export interface AdAccountSummary {
   id: string;
   name: string;
   username: string | null;
-  is_default: boolean;
   is_active: boolean;
   tarif: string | null;
   tarif_expires: string | null;
@@ -92,7 +90,6 @@ export interface CreateAdAccountPayload {
   userAccountId: string;
   name: string;
   username?: string;
-  is_default?: boolean;
 
   // Facebook (user fills)
   fb_ad_account_id?: string;
@@ -137,7 +134,6 @@ export interface CreateAdAccountPayload {
 export interface UpdateAdAccountPayload {
   name?: string;
   username?: string;
-  is_default?: boolean;
   is_active?: boolean;
 
   // Facebook

@@ -544,8 +544,9 @@ export default async function facebookWebhooks(app: FastifyInstance) {
     try {
       log.info('Processing manual Facebook connection request');
 
-      const { user_id, page_id, instagram_id, ad_account_id } = req.body as {
+      const { user_id, account_id, page_id, instagram_id, ad_account_id } = req.body as {
         user_id?: string;
+        account_id?: string; // UUID ad_accounts.id для мультиаккаунтного режима
         page_id?: string;
         instagram_id?: string;
         ad_account_id?: string;
@@ -583,6 +584,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
       log.info({
         user_id,
+        account_id: account_id || null,
         page_id,
         instagram_id: instagram_id || null,
         ad_account_id: normalizedAdAccountId
@@ -608,16 +610,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         });
       }
 
-      // Для мультиаккаунтного режима: обновляем также ad_accounts
-      // Находим default аккаунт пользователя и обновляем его Facebook данные
-      const { data: defaultAdAccount } = await supabase
-        .from('ad_accounts')
-        .select('id')
-        .eq('user_account_id', user_id)
-        .eq('is_default', true)
-        .single();
-
-      if (defaultAdAccount) {
+      // Для мультиаккаунтного режима: обновляем конкретный ad_account по account_id
+      if (account_id) {
         const { error: adAccountError } = await supabase
           .from('ad_accounts')
           .update({
@@ -626,12 +620,13 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             instagram_id: instagram_id || null,
             updated_at: new Date().toISOString()
           })
-          .eq('id', defaultAdAccount.id);
+          .eq('id', account_id)
+          .eq('user_account_id', user_id); // Проверка принадлежности
 
         if (adAccountError) {
-          log.warn({ error: adAccountError, ad_account_id: defaultAdAccount.id }, 'Failed to update ad_account with Facebook data');
+          log.warn({ error: adAccountError, account_id }, 'Failed to update ad_account with Facebook data');
         } else {
-          log.info({ ad_account_id: defaultAdAccount.id, page_id, fb_ad_account_id: normalizedAdAccountId }, 'Updated ad_account with Facebook data');
+          log.info({ account_id, page_id, fb_ad_account_id: normalizedAdAccountId }, 'Updated ad_account with Facebook data');
         }
       }
 

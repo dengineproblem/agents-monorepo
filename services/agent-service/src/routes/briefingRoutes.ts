@@ -260,7 +260,6 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
             name: briefingData.business_name,
             prompt1: generatedPrompt1,
             prompt4: generatedPrompt4,
-            is_default: true, // Первый аккаунт = дефолтный
             is_active: true,
             connection_status: 'pending',
             // Копируем FB credentials из user_accounts если есть
