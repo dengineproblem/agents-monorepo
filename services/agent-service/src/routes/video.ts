@@ -399,16 +399,21 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       } catch (creativesError: any) {
         // При ошибке создания креативов помечаем креатив как failed
         app.log.error(`Failed to create creatives: ${creativesError.message}`);
-        
-        await supabase
+
+        const { error: failedUpdateError } = await supabase
           .from('user_creatives')
           .update({
             fb_video_id: fbVideo.id,
-            status: 'failed',
-            error_message: creativesError.message
+            status: 'failed'
           })
           .eq('id', creative.id);
-        
+
+        if (failedUpdateError) {
+          app.log.error(`Failed to mark creative as failed: ${failedUpdateError.message}`);
+        } else {
+          app.log.info(`Creative ${creative.id} marked as failed`);
+        }
+
         throw creativesError;
       }
 
