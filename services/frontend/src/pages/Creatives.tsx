@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { manualLaunchAds } from "@/services/manualLaunchApi";
 import { Switch } from "@/components/ui/switch";
@@ -467,6 +467,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   const [loadError, setLoadError] = useState<string | null>(null);
   const [testResultDialogOpen, setTestResultDialogOpen] = useState(false);
   const [testLaunchResult, setTestLaunchResult] = useState<TestLaunchResult | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
 
   const fetchData = useCallback(async () => {
     const transcriptPromise = creativesService.getCreativeText(creativeId, mediaType || 'video', carouselData).catch((error) => {
@@ -786,6 +787,36 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
     }
   };
 
+  // Ручная транскрибация видео
+  const handleTranscribe = async () => {
+    if (transcribing || mediaType !== 'video') return;
+
+    setTranscribing(true);
+    toast.info('Запускаем транскрибацию...', {
+      description: 'Это может занять 1-2 минуты',
+    });
+
+    try {
+      const result = await creativesService.reTranscribe(creativeId, 'ru');
+
+      if (result.success && result.text) {
+        setTranscript(result.text);
+        toast.success('Транскрипция готова!');
+      } else {
+        toast.error('Не удалось транскрибировать', {
+          description: result.error || 'Попробуйте позже',
+        });
+      }
+    } catch (error) {
+      console.error('Transcription error:', error);
+      toast.error('Ошибка транскрибации', {
+        description: 'Проверьте подключение и попробуйте снова',
+      });
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
   // Дубликаты useEffect удалены - основная логика загрузки выше
 
   if (loading) {
@@ -934,15 +965,39 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       {/* Транскрибация для video или текст для других типов */}
       <Card className="bg-muted/30">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            {mediaType === 'video' ? '📝 Транскрибация видео' : '📝 Текст креатива'}
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2">
+              {mediaType === 'video' ? '📝 Транскрибация видео' : '📝 Текст креатива'}
+            </CardTitle>
+            {/* Кнопка ручной транскрибации для видео */}
+            {mediaType === 'video' && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1"
+                onClick={handleTranscribe}
+                disabled={transcribing}
+              >
+                {transcribing ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Транскрибация...
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-3 w-3" />
+                    {transcript ? 'Перетранскрибировать' : 'Транскрибировать'}
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="text-sm whitespace-pre-wrap text-muted-foreground">
             {transcript ? transcript : (
               mediaType === 'video'
-                ? 'Транскрибация еще не готова. Она появится после обработки видео.'
+                ? 'Транскрибация еще не готова. Нажмите кнопку "Транскрибировать" выше.'
                 : 'Текст недоступен'
             )}
           </div>
@@ -952,8 +1007,8 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
         <Button
           size="sm"
-          variant="default"
-          className="gap-2 w-full sm:w-auto dark:bg-gray-700 dark:hover:bg-gray-800"
+          variant="outline"
+          className="gap-2 w-full sm:w-auto"
           onClick={handleQuickTest}
           disabled={quickTestLoading || (hasTest && analytics?.test?.status === "running")}
         >
@@ -1337,9 +1392,14 @@ const Creatives: React.FC = () => {
     }
   });
   
-  // Загрузка списка направлений
-  const { directions, loading: directionsLoading } = useDirections(userId);
+  // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
+  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
   
+  // Сбрасываем выбранное направление при смене аккаунта
+  useEffect(() => {
+    setSelectedDirectionId('');
+  }, [currentAdAccountId]);
+
   // Автоматически выбираем первое направление если ничего не выбрано
   useEffect(() => {
     if (!directionsLoading && directions.length > 0 && !selectedDirectionId) {

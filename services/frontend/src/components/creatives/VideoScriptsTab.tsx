@@ -4,10 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, Copy, Check, FileText, Pencil, X, Users } from 'lucide-react';
+import { Sparkles, Loader2, Copy, Check, FileText, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { textCreativesApi, TEXT_TYPES, TextCreativeType } from '@/services/textCreativesApi';
-import { CompetitorReferenceSelector, type CompetitorReference } from './CompetitorReferenceSelector';
+import { ReferenceSelector, type CreativeReference } from './ReferenceSelector';
 
 interface TextTabProps {
   userId: string | null;
@@ -39,27 +39,27 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
   const [editInstructions, setEditInstructions] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
-  // Competitor reference state (для типа 'reference')
-  const [competitorReference, setCompetitorReference] = useState<CompetitorReference | null>(null);
+  // Reference state (для типа 'reference') — поддерживает и конкурентов, и свои креативы
+  const [creativeReference, setCreativeReference] = useState<CreativeReference | null>(null);
 
   // Автозаполнение userPrompt при выборе референса
   useEffect(() => {
-    if (competitorReference && textType === 'reference') {
+    if (creativeReference && textType === 'reference') {
       // Приоритет: transcript > ocr_text > body_text
-      const referenceText = competitorReference.transcript
-        || competitorReference.ocr_text
-        || competitorReference.body_text
+      const referenceText = creativeReference.transcript
+        || creativeReference.ocr_text
+        || creativeReference.body_text
         || '';
       if (referenceText) {
         setUserPrompt(referenceText);
       }
     }
-  }, [competitorReference, textType]);
+  }, [creativeReference, textType]);
 
   // Сбрасываем референс при смене типа текста
   useEffect(() => {
     if (textType !== 'reference') {
-      setCompetitorReference(null);
+      setCreativeReference(null);
     }
   }, [textType]);
 
@@ -219,26 +219,26 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
               <p><strong>Пост в Threads</strong> — короткий провокационный пост для вовлечения в дискуссию.</p>
             )}
             {textType === 'reference' && (
-              <p><strong>Референс</strong> — адаптация текста конкурента под ваш бизнес. Сохраняет структуру и крючки, заменяет детали.</p>
+              <p><strong>Референс</strong> — адаптация текста креатива (своего или конкурента). Сохраняет структуру и крючки, заменяет детали.</p>
             )}
           </div>
 
-          {/* Селектор референса конкурента (только для типа 'reference') */}
+          {/* Селектор референса (только для типа 'reference') */}
           {textType === 'reference' && userId && (
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
-                <Users className="h-4 w-4" />
-                Выберите креатив конкурента
+                <FileText className="h-4 w-4" />
+                Выберите креатив как референс
               </Label>
-              <CompetitorReferenceSelector
+              <ReferenceSelector
                 userAccountId={userId}
-                selectedReference={competitorReference}
-                onSelect={setCompetitorReference}
+                selectedReference={creativeReference}
+                onSelect={setCreativeReference}
                 mediaTypeFilter="video"
                 accountId={accountId}
               />
               <p className="text-xs text-muted-foreground">
-                Выберите видео конкурента — его транскрипция автоматически подгрузится в поле задачи.
+                Выберите видео конкурента или свой креатив — его транскрипция автоматически подгрузится в поле задачи.
               </p>
             </div>
           )}
