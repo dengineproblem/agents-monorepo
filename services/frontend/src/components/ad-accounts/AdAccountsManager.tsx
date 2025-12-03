@@ -32,7 +32,6 @@ import { toast } from 'sonner';
 import {
   Plus,
   Trash2,
-  Star,
   CheckCircle,
   AlertCircle,
   Clock,
@@ -165,22 +164,6 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       }
     } catch (error) {
       toast.error('Ошибка удаления аккаунта');
-    }
-  };
-
-  const handleSetDefault = async (accountId: string) => {
-    try {
-      const result = await adAccountsApi.setDefault(accountId);
-
-      if (result.success) {
-        toast.success('Аккаунт установлен по умолчанию');
-        loadAccountsList();
-        loadAdAccounts();
-      } else {
-        toast.error(result.error || 'Ошибка');
-      }
-    } catch (error) {
-      toast.error('Ошибка установки аккаунта по умолчанию');
     }
   };
 
@@ -322,7 +305,15 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
         ) : (
           <div className="space-y-3">
             {accounts.map((account) => {
-              const status = STATUS_CONFIG[account.connection_status] || STATUS_CONFIG.pending;
+              // Автоматически вычисляем connection_status на основе полей
+              const hasAllFbFields = !!(
+                account.fb_page_id &&
+                account.fb_instagram_id &&
+                account.fb_access_token &&
+                account.fb_ad_account_id
+              );
+              const computedStatus = hasAllFbFields ? 'connected' : (account.connection_status || 'pending');
+              const status = STATUS_CONFIG[computedStatus] || STATUS_CONFIG.pending;
               const StatusIcon = status.icon;
 
               return (
@@ -340,9 +331,6 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className={cn("font-medium", !account.is_active && "line-through")}>{account.name}</span>
-                        {account.is_default && (
-                          <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />
-                        )}
                       </div>
                       {account.username && (
                         <div className="text-sm text-muted-foreground">@{account.username}</div>
@@ -359,16 +347,6 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
                       title={account.is_active ? 'Деактивировать аккаунт' : 'Активировать аккаунт'}
                     />
                     <div className="flex items-center gap-1">
-                      {!account.is_default && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleSetDefault(account.id)}
-                          title="Сделать по умолчанию"
-                        >
-                          <Star className="h-4 w-4" />
-                        </Button>
-                      )}
                       <Button
                         variant="ghost"
                         size="sm"

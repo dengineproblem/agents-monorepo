@@ -47,7 +47,7 @@ const tarifColor: Record<Exclude<Tarif, null>, string> = {
 const Profile: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const { currentAdAccountId } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled, adAccounts: contextAdAccounts } = useAppContext();
   const storedUser = typeof window !== 'undefined' ? localStorage.getItem('user') : null;
   const user = storedUser ? (() => { try { return JSON.parse(storedUser); } catch { return null; } })() : null;
   const isLoading = !storedUser;
@@ -876,6 +876,27 @@ const Profile: React.FC = () => {
     }
   };
 
+  // === Флаги подключений для ConnectionsGrid ===
+  // Для мультиаккаунтного режима проверяем текущий ad_account
+  const currentAdAccount = multiAccountEnabled && contextAdAccounts?.length > 0
+    ? contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0]
+    : null;
+
+  // Facebook: в мульти-режиме проверяем connection_status, иначе user_accounts
+  const isFbConnected = multiAccountEnabled
+    ? currentAdAccount?.connection_status === 'connected'
+    : Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '');
+
+  // Instagram: в мульти-режиме это часть FB подключения
+  const isIgConnected = multiAccountEnabled
+    ? currentAdAccount?.connection_status === 'connected'
+    : Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '');
+
+  // TikTok: пока только из user_accounts (TODO: добавить в ad_accounts)
+  const isTikTokConnected = Boolean(user?.tiktok_access_token && user?.tiktok_business_id);
+
+  // AmoCRM: проверяется отдельным запросом (amocrmConnected state)
+
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
       <Header onOpenDatePicker={() => {}} />
@@ -1068,14 +1089,13 @@ const Profile: React.FC = () => {
               {
                 id: 'facebook',
                 title: 'Facebook Ads',
-                connected: Boolean(user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== ''),
+                connected: isFbConnected,
                 onClick: () => {
-                  if (user?.access_token && user?.access_token !== '' && user?.ad_account_id && user?.ad_account_id !== '') {
+                  if (isFbConnected) {
                     if (confirm(t('profile.confirmDisconnectFacebook'))) {
-                      handleDisconnectInstagram(); // Reuse the same function as it clears access_token
+                      handleDisconnectInstagram();
                     }
                   } else {
-                    // Показываем модалку ручного подключения вместо OAuth
                     setFacebookManualModal(true);
                   }
                 },
@@ -1084,9 +1104,9 @@ const Profile: React.FC = () => {
               {
                 id: 'instagram',
                 title: 'Instagram',
-                connected: Boolean(user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== ''),
+                connected: isIgConnected,
                 onClick: () => {
-                  if (user?.access_token && user?.access_token !== '' && user?.page_id && user?.page_id !== '') {
+                  if (isIgConnected) {
                     handleDisconnectInstagram();
                   } else {
                     toast.info(t('profile.instagramConnectInfo'));
@@ -1094,24 +1114,24 @@ const Profile: React.FC = () => {
                 },
               },
               ...(FEATURES.SHOW_TIKTOK ? [{
-                id: 'tiktok',
+                id: 'tiktok' as const,
                 title: 'TikTok',
-                connected: Boolean(user?.tiktok_access_token && user?.tiktok_business_id),
+                connected: isTikTokConnected,
                 onClick: () => {
-                  if (user?.tiktok_access_token && user?.tiktok_business_id) {
+                  if (isTikTokConnected) {
                     handleDisconnectTikTok();
                   } else {
-                  const uid = user?.id || '';
-                  const statePayload = { user_id: uid, ts: Date.now() };
-                  let state = '';
-                  try {
-                    state = encodeURIComponent(btoa(JSON.stringify(statePayload)));
-                  } catch {
-                    state = encodeURIComponent(JSON.stringify(statePayload));
-                  }
-                  const redirect = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
-                  const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=7527489318093668353&state=${state}&redirect_uri=${redirect}`;
-                  window.open(authUrl, '_blank', 'noopener,noreferrer');
+                    const uid = user?.id || '';
+                    const statePayload = { user_id: uid, ts: Date.now() };
+                    let state = '';
+                    try {
+                      state = encodeURIComponent(btoa(JSON.stringify(statePayload)));
+                    } catch {
+                      state = encodeURIComponent(JSON.stringify(statePayload));
+                    }
+                    const redirect = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
+                    const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=7527489318093668353&state=${state}&redirect_uri=${redirect}`;
+                    window.open(authUrl, '_blank', 'noopener,noreferrer');
                   }
                 },
                 disabled: false,

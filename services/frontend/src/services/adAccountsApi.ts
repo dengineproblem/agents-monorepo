@@ -152,35 +152,4 @@ export const adAccountsApi = {
       return { success: false, error: 'Network error' };
     }
   },
-
-  /**
-   * Установить аккаунт как дефолтный
-   */
-  async setDefault(adAccountId: string): Promise<{
-    success: boolean;
-    adAccount?: AdAccount;
-    error?: string;
-  }> {
-    try {
-      console.log('[adAccountsApi.setDefault] Установка дефолтного:', adAccountId);
-
-      const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}/set-default`, {
-        method: 'POST',
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('[adAccountsApi.setDefault] Ошибка:', errorData);
-        return { success: false, error: errorData.error || `HTTP ${response.status}` };
-      }
-
-      const adAccount = await response.json();
-      console.log('[adAccountsApi.setDefault] Установлен:', adAccount.id);
-
-      return { success: true, adAccount };
-    } catch (error) {
-      console.error('[adAccountsApi.setDefault] Исключение:', error);
-      return { success: false, error: 'Network error' };
-    }
-  },
 };

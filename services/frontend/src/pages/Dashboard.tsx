@@ -310,8 +310,15 @@ const Dashboard: React.FC = () => {
       />
       
       <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full">
-        <PageHero 
-          title={userName || (userTarif === 'target' ? t('dashboard.targetologPanel') : t('dashboard.title'))}
+        <PageHero
+          title={(() => {
+            // В мультиаккаунтном режиме показываем имя текущего ad_account
+            if (multiAccountEnabled && contextAdAccounts && contextAdAccounts.length > 0) {
+              const currentAcc = contextAdAccounts.find((a: any) => a.id === currentAdAccountId) || contextAdAccounts[0];
+              return currentAcc?.name || userName || t('dashboard.title');
+            }
+            return userName || (userTarif === 'target' ? t('dashboard.targetologPanel') : t('dashboard.title'));
+          })()}
           subtitle={userTarif === 'target' ? t('dashboard.yourDirectionsAndPlans') : t('campaign.management')}
         />
 

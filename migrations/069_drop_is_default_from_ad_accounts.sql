@@ -4,7 +4,8 @@
 
 -- Drop the trigger first (if exists)
 DROP TRIGGER IF EXISTS ensure_single_default_ad_account ON ad_accounts;
-DROP FUNCTION IF EXISTS ensure_single_default_ad_account();
+DROP TRIGGER IF EXISTS trigger_single_default_ad_account ON ad_accounts;
+DROP FUNCTION IF EXISTS ensure_single_default_ad_account() CASCADE;
 
 -- Drop the partial unique index for is_default
 DROP INDEX IF EXISTS idx_ad_accounts_default;

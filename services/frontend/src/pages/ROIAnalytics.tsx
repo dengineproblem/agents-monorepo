@@ -5,7 +5,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import Header from '../components/Header';
 import { salesApi, ROIData, CampaignROI, Direction } from '../services/salesApi';
 import { useAppContext } from '@/context/AppContext';
-import { AdAccountSwitcher } from '@/components/ad-accounts/AdAccountSwitcher';
 import {
   TrendingUp,
   TrendingDown,
@@ -579,14 +578,8 @@ const ROIAnalytics: React.FC = () => {
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
         {/* Хедер с заголовком */}
         <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
-              <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
-            </div>
-            {/* Селектор аккаунта для мультиаккаунтности */}
-            <AdAccountSwitcher />
-          </div>
+          <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
+          <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
         </div>
         
         {/* Подраздел: Обзор */}

@@ -548,17 +548,28 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
       const response = await adAccountsApi.list(userData.id);
 
-      const mappedAccounts = response.ad_accounts.map(acc => ({
-        id: acc.id,
-        name: acc.name,
-        username: acc.username,
-        is_active: acc.is_active,
-        tarif: acc.tarif,
-        tarif_expires: acc.tarif_expires,
-        connection_status: acc.connection_status,
-        ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
-        access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
-      }));
+      const mappedAccounts = response.ad_accounts.map(acc => {
+        // Автоматически определяем connection_status на основе наличия всех обязательных полей
+        const hasAllFbFields = !!(
+          acc.fb_page_id &&
+          acc.fb_instagram_id &&
+          acc.fb_access_token &&
+          acc.fb_ad_account_id
+        );
+        const computedStatus = hasAllFbFields ? 'connected' : (acc.connection_status || 'pending');
+
+        return {
+          id: acc.id,
+          name: acc.name,
+          username: acc.username,
+          is_active: acc.is_active,
+          tarif: acc.tarif,
+          tarif_expires: acc.tarif_expires,
+          connection_status: computedStatus as 'pending' | 'connected' | 'error',
+          ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
+          access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
+        };
+      });
 
       setMultiAccountEnabled(response.multi_account_enabled);
       setAdAccounts(mappedAccounts);
