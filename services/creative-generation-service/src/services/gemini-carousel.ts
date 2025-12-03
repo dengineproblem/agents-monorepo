@@ -96,11 +96,11 @@ async function generateCarouselCard(
       });
     }
 
-    // Конфигурация для генерации в формате 4:5 для Instagram карусели
+    // Конфигурация для генерации в формате 1:1 для Instagram карусели
     const generationConfig = {
       responseModalities: ['IMAGE'],
       imageConfig: {
-        aspectRatio: '4:5',
+        aspectRatio: '1:1',
         imageSize: '2K'
       },
       temperature: 1.0,
@@ -308,7 +308,7 @@ export async function upscaleCarouselTo4K(
       const upscaledImage = await upscaleImageTo4K(
         images[i],
         prompts[i] || 'Premium минималистичный рекламный креатив',
-        '4:5' // Карусель всегда в формате 4:5
+        '1:1' // Карусель в формате 1:1
       );
 
       upscaledImages.push(upscaledImage);
