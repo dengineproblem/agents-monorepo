@@ -1561,6 +1561,7 @@ export async function runScoringAgent(userAccount, options = {}) {
     if (options.saveExecution !== false) {
       await supabase.from('scoring_executions').insert({
         user_account_id: userAccountId,
+        account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
         started_at: new Date(startTime).toISOString(),
         completed_at: new Date().toISOString(),
         duration_ms: duration,
@@ -1601,6 +1602,7 @@ export async function runScoringAgent(userAccount, options = {}) {
     
     await supabase.from('scoring_executions').insert({
       user_account_id: userAccountId,
+      account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
       started_at: new Date(startTime).toISOString(),
       completed_at: new Date().toISOString(),
       duration_ms: duration,
@@ -1610,7 +1612,7 @@ export async function runScoringAgent(userAccount, options = {}) {
       creatives_analyzed: 0,
       llm_model: process.env.BRAIN_MODEL || 'gpt-5'
     });
-    
+
     throw error;
   }
 }

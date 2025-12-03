@@ -111,3 +111,14 @@ SELECT * FROM get_creative_aggregated_metrics(
 - Если p_account_id = NULL, функция работает как раньше (legacy режим)
 - Если p_account_id передан, фильтрует метрики только по этому аккаунту
 */
+
+-- =====================================================
+-- ДОБАВЛЕНИЕ account_id В scoring_executions
+-- =====================================================
+
+-- Добавляем колонку account_id для мультиаккаунтности
+ALTER TABLE scoring_executions
+  ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES ad_accounts(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN scoring_executions.account_id IS
+  'UUID рекламного аккаунта для мультиаккаунтности. NULL для legacy режима.';
