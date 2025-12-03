@@ -389,6 +389,7 @@ export async function workflowCreateCampaignWithCreative(
       user_creative_id: ad.user_creative_id,
       direction_id: null, // В этом workflow нет direction
       user_id: context.user_account_id,
+      account_id: null, // Legacy workflow без мультиаккаунтности
       adset_id: String(adset_id),
       campaign_id: String(campaign_id),
       fb_creative_id: ad.fb_creative_id,

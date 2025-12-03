@@ -147,8 +147,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [placement, setPlacement] = useState<'instagram' | 'tiktok' | 'both'>('instagram');
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
   
-  // Загрузка списка направлений
-  const { directions, loading: directionsLoading } = useDirections(userData?.id || null);
+  // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
+  const { directions, loading: directionsLoading } = useDirections(userData?.id || null, currentAdAccountId);
   
   // Автоматически выбираем первое направление если ничего не выбрано
   useEffect(() => {
@@ -1193,6 +1193,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         },
         body: JSON.stringify({
           user_account_id: userId,
+          account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
           objective: 'whatsapp', // Указываем objective для AI-агента
           auto_activate: false, // Создаем в паузе для проверки
         }),

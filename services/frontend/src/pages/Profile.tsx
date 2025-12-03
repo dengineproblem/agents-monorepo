@@ -929,8 +929,8 @@ const Profile: React.FC = () => {
               onChangePassword={() => setPasswordModal(true)}
             />
 
-              {/* Ad Accounts Manager - для мультиаккаунтности */}
-              <AdAccountsManager />
+              {/* Ad Accounts Manager - только для мультиаккаунтности */}
+              {multiAccountEnabled && <AdAccountsManager />}
 
               {/* Telegram ID Card */}
               <Card>

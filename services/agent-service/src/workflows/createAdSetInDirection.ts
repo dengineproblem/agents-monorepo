@@ -658,6 +658,7 @@ export async function workflowCreateAdSetInDirection(
       user_creative_id: ad.user_creative_id,
       direction_id: direction_id,
       user_id: user_account_id,
+      account_id: direction.account_id || null, // UUID для мультиаккаунтности из direction
       adset_id: adset_id,
       campaign_id: direction.fb_campaign_id,
       fb_creative_id: ad.fb_creative_id,

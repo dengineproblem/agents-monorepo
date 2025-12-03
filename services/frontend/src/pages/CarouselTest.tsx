@@ -9,8 +9,9 @@ import { useAppContext } from '@/context/AppContext';
 const CarouselTest = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [creativeGenerationsAvailable, setCreativeGenerationsAvailable] = useState(0);
-  const { directions } = useDirections(userId);
   const { currentAdAccountId } = useAppContext();
+  // Загрузка направлений с фильтрацией по currentAdAccountId для мультиаккаунтности
+  const { directions } = useDirections(userId, currentAdAccountId);
 
   useEffect(() => {
     const fetchUser = async () => {

@@ -108,7 +108,7 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                 </div>
               </div>
               <Button
-                variant={it.connected ? "outline" : "default"}
+                variant="outline"
                 size="sm"
                 onClick={(e) => {
                   e.stopPropagation();

@@ -266,6 +266,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
             <DialogTrigger asChild>
               <Button
+                variant="outline"
                 size="sm"
                 disabled={accounts.length >= 5}
                 onClick={() => {

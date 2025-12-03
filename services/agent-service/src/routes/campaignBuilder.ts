@@ -278,6 +278,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               idempotencyKey: `ai-autolaunch-v2-${direction.id}-${Date.now()}`,
               account: {
                 userAccountId: user_account_id,
+                accessToken: credentials.fbAccessToken,
+                adAccountId: credentials.fbAdAccountId,
                 ...(credentials.whatsappPhoneNumber && { whatsappPhoneNumber: credentials.whatsappPhoneNumber }),
               },
               actions: [action],
@@ -293,7 +295,20 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             if (actionsResponse.statusCode === 202) {
               const executionResult = JSON.parse(actionsResponse.body);
 
-              results.push({
+              // Получаем результат выполнения action из БД
+              let actionResult: any = null;
+              if (executionResult.executionId && executionResult.executionId !== 'no-actions-needed') {
+                const { data: actionData } = await supabase
+                  .from('agent_actions')
+                  .select('result_json')
+                  .eq('execution_id', executionResult.executionId)
+                  .eq('action_idx', 0)
+                  .single();
+                actionResult = actionData?.result_json;
+              }
+
+              // Формируем результат с данными adsets для UI
+              const resultEntry: any = {
                 direction_id: direction.id,
                 direction_name: direction.name,
                 campaign_id: direction.fb_campaign_id,
@@ -304,12 +319,37 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 reasoning: action.reasoning,
                 execution_id: executionResult.executionId,
                 status: 'success',
-              });
+              };
+
+              // Добавляем данные из результата action для отображения в UI
+              if (actionResult) {
+                if (actionResult.adsets && Array.isArray(actionResult.adsets)) {
+                  // Direction.CreateMultipleAdSets - берём первый adset для отображения
+                  const firstAdset = actionResult.adsets[0];
+                  if (firstAdset) {
+                    resultEntry.adset_id = firstAdset.adset_id;
+                    resultEntry.adset_name = firstAdset.adset_name;
+                    resultEntry.ads_created = actionResult.total_ads || firstAdset.ads_created;
+                    resultEntry.ads = firstAdset.ads || [];
+                  }
+                  resultEntry.total_adsets = actionResult.total_adsets;
+                  resultEntry.all_adsets = actionResult.adsets;
+                } else if (actionResult.adset_id) {
+                  // Одиночный adset
+                  resultEntry.adset_id = actionResult.adset_id;
+                  resultEntry.adset_name = actionResult.adset_name;
+                  resultEntry.ads_created = actionResult.ads_created;
+                  resultEntry.ads = actionResult.ads || [];
+                }
+              }
+
+              results.push(resultEntry);
 
               llmSuccess = true;
               log.info({
                 directionId: direction.id,
-                executionId: executionResult.executionId
+                executionId: executionResult.executionId,
+                actionResult: actionResult ? 'loaded' : 'not found'
               }, 'LLM launch successful');
             } else {
               log.error({
@@ -1014,6 +1054,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 idempotencyKey: `ai-autolaunch-${direction.id}-${Date.now()}`,
                 account: {
                   userAccountId: user_account_id,
+                  accessToken: userAccount.access_token,
+                  adAccountId: userAccount.ad_account_id,
                   whatsappPhoneNumber: userAccount.whatsapp_phone_number,
                 },
                 actions: [action],
@@ -1092,8 +1134,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         // ===================================================
         log.info({ userAccountId: userAccount.id }, 'Executing action through actions system...');
 
-        const envelope = convertActionToEnvelope(action, user_account_id, objective, userAccount.whatsapp_phone_number);
-        
+        const envelope = convertActionToEnvelope(action, user_account_id, objective, userAccount.whatsapp_phone_number) as any;
+        // Добавляем accessToken и adAccountId для корректной работы actions API
+        envelope.account.accessToken = userAccount.access_token;
+        envelope.account.adAccountId = userAccount.ad_account_id;
+
         // Вызываем POST /agent/actions через внутренний механизм
         let executionResult;
         try {
