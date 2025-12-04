@@ -63,6 +63,18 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
     }
   }, [textType]);
 
+  // Сброс состояния при смене аккаунта
+  useEffect(() => {
+    if (!accountId) return;
+
+    console.log('[VideoScriptsTab] Смена аккаунта, сбрасываем состояние');
+    setUserPrompt('');
+    setGeneratedText('');
+    setCreativeReference(null);
+    setIsEditMode(false);
+    setEditInstructions('');
+  }, [accountId]);
+
   // Генерация текста
   const handleGenerate = async () => {
     if (!userId) {

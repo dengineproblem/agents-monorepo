@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -80,6 +80,28 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
   // State для выбора карточек для скачивания
   const [selectedCardsForDownload, setSelectedCardsForDownload] = useState<number[]>([]);
+
+  // Сброс состояния при смене аккаунта
+  useEffect(() => {
+    if (!currentAdAccountId) return;
+
+    console.log('[CarouselTab] Смена аккаунта, сбрасываем состояние');
+
+    // Сбрасываем все локальное состояние
+    setCarouselIdea('');
+    setCardsCount(3);
+    setCarouselCards([]);
+    setCurrentCardIndex(0);
+    setVisualStyle('clean_minimal');
+    setGeneratedCarouselId('');
+    setSelectedDirectionId('');
+    setCardRegenerationPrompts({});
+    setCardRegenerationImages({});
+    setGlobalPrompts([]);
+    setGlobalReferences([]);
+    setLoadedImages({});
+    setSelectedCardsForDownload([]);
+  }, [currentAdAccountId]);
 
   // Управление глобальными промптами
   const addGlobalPrompt = () => {
@@ -186,17 +208,18 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
   // Генерация текстов для карточек
   const handleGenerateTexts = async () => {
-    if (!userId || !carouselIdea) {
-      toast.error('Введите идею карусели');
+    if (!userId) {
+      toast.error('Необходимо авторизоваться');
       return;
     }
 
     setIsGeneratingTexts(true);
     try {
+      // Если идея пустая, отправляем пустую строку - модель сама придумает
       const response = await carouselApi.generateTexts({
         user_id: userId,
         account_id: currentAdAccountId || undefined,
-        carousel_idea: carouselIdea,
+        carousel_idea: carouselIdea || '',
         cards_count: cardsCount
       });
 
@@ -684,7 +707,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     try {
       const response = await carouselApi.createCreative({
         user_id: userId,
-        ad_account_id: currentAdAccountId || undefined,
+        account_id: currentAdAccountId || undefined,
         carousel_id: generatedCarouselId,
         direction_id: selectedDirectionId
       });
@@ -766,7 +789,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
           <div className="flex gap-2">
             <Button
               onClick={handleGenerateTexts}
-              disabled={!carouselIdea || isGeneratingTexts || carouselCards.length > 0}
+              disabled={isGeneratingTexts || carouselCards.length > 0}
               className="flex-1"
             >
               {isGeneratingTexts && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

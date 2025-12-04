@@ -84,7 +84,14 @@ export const useDirections = (userAccountId: string | null, accountId?: string |
     [loadDirections]
   );
 
-  // Загружаем направления при монтировании
+  // Сбрасываем направления при смене аккаунта (немедленно, до загрузки новых)
+  useEffect(() => {
+    // При смене accountId сначала очищаем список, потом загружаем новый
+    setDirections([]);
+    setLoading(true);
+  }, [accountId]);
+
+  // Загружаем направления при монтировании или смене зависимостей
   useEffect(() => {
     loadDirections();
   }, [loadDirections]);

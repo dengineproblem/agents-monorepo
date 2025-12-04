@@ -23,7 +23,7 @@ export async function generateCarouselTexts(
 ): Promise<string[]> {
   try {
     console.log(`[Carousel Text] Generating ${cardsCount} carousel card texts...`);
-    console.log('[Carousel Text] User idea length:', carouselIdea.length);
+    console.log('[Carousel Text] User idea length:', carouselIdea?.length || 0);
     console.log('[Carousel Text] PROMPT1 length:', userPrompt1.length);
 
     const openai = getOpenAIClient();
@@ -97,7 +97,12 @@ ${cardsCount >= 6 ? '1. Хук\n2-' + (cardsCount - 2) + '. Развитие и�
 Контекст бизнеса:
 ${userPrompt1}`;
 
-    const userMessage = `Идея карусели: ${carouselIdea}
+    // Если идея пустая - модель сама придумает на основе prompt1
+    const ideaText = carouselIdea?.trim()
+      ? `Идея карусели: ${carouselIdea}`
+      : 'Идея карусели: придумай креативный storytelling сам, основываясь на контексте бизнеса выше';
+
+    const userMessage = `${ideaText}
 
 Создай ${cardsCount} связанных текстов для карточек карусели в формате, разделенном |||`;
 

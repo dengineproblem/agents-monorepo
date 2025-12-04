@@ -149,7 +149,21 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
   const { directions, loading: directionsLoading } = useDirections(userData?.id || null, currentAdAccountId);
-  
+
+  // Сброс состояния при смене аккаунта
+  useEffect(() => {
+    if (!currentAdAccountId) return;
+
+    console.log('[VideoUpload] Смена аккаунта, сбрасываем состояние');
+    setSelectedDirectionId('');
+    setSelectedCreativeId('');
+    setSelectedCreativeIds([]);
+    setAvailableCreatives([]);
+    setExistingCreatives([]);
+    setSelectedFile(null);
+    setSelectedImage(null);
+  }, [currentAdAccountId]);
+
   // Автоматически выбираем первое направление если ничего не выбрано
   useEffect(() => {
     if (!directionsLoading && directions.length > 0 && !selectedDirectionId) {

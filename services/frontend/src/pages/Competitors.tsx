@@ -101,6 +101,16 @@ export default function Competitors() {
     }
   }, [userId, fetchCompetitors]);
 
+  // Сброс выбранного конкурента при смене аккаунта
+  useEffect(() => {
+    if (!currentAdAccountId) return;
+
+    console.log('[Competitors] Смена аккаунта, сбрасываем выбранного конкурента');
+    setSelectedCompetitorId(null);
+    setCreatives([]);
+    setPagination({ page: 1, limit: 20, total: 0, totalPages: 0 });
+  }, [currentAdAccountId]);
+
   // Fetch creatives
   const fetchCreatives = useCallback(async (page: number = 1) => {
     if (!userId) return;

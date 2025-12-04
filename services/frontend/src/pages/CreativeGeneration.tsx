@@ -191,6 +191,25 @@ const CreativeGeneration = () => {
     loadUserData();
   }, []);
 
+  // Сброс состояния при смене аккаунта
+  useEffect(() => {
+    if (!currentAdAccountId) return;
+
+    console.log('[CreativeGeneration] Смена аккаунта, сбрасываем состояние');
+
+    // Сбрасываем все локальное состояние
+    setTexts({ offer: '', bullets: '', profits: '' });
+    setGeneratedImage(null);
+    setGeneratedCreativeId('');
+    setSelectedDirectionId('');
+    setReferenceImages([]);
+    setReferenceImagePrompt('');
+    setCompetitorReference(null);
+    setIsEditMode(false);
+    setEditPrompt('');
+    setSelectedStyle('modern_performance');
+  }, [currentAdAccountId]);
+
   // Загружаем prompt4 из ad_accounts при смене аккаунта (мультиаккаунтный режим)
   useEffect(() => {
     const loadAdAccountPrompt = async () => {

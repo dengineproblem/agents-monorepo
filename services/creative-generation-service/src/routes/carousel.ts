@@ -29,13 +29,13 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
       try {
         const { user_id, account_id, carousel_idea, cards_count } = request.body;
 
-        console.log('[Carousel Texts] Request:', { user_id, account_id, cards_count, idea_length: carousel_idea.length });
+        console.log('[Carousel Texts] Request:', { user_id, account_id, cards_count, idea_length: carousel_idea?.length || 0 });
 
-        // Валидация
-        if (!user_id || !carousel_idea || !cards_count) {
+        // Валидация (carousel_idea может быть пустой - модель сама придумает)
+        if (!user_id || !cards_count) {
           return reply.status(400).send({
             success: false,
-            error: 'Missing required fields: user_id, carousel_idea, cards_count'
+            error: 'Missing required fields: user_id, cards_count'
           });
         }
 
