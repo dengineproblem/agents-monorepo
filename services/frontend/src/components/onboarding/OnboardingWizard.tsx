@@ -5,6 +5,8 @@
 import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Button } from '@/components/ui/button';
+import { X } from 'lucide-react';
 import { Step1BusinessInfo } from './Step1BusinessInfo';
 import { Step2OnlinePresence } from './Step2OnlinePresence';
 import { Step3TargetAudience } from './Step3TargetAudience';
@@ -19,9 +21,10 @@ export type OnboardingData = BriefingFormData;
 
 interface OnboardingWizardProps {
   onComplete: () => void;
+  onClose?: () => void; // Опциональный callback для закрытия (для мультиаккаунтного режима)
 }
 
-export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }) => {
+export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, onClose }) => {
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState<Partial<OnboardingData>>({});
 
@@ -120,9 +123,23 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
           <div className="mb-8">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-2xl font-bold">Настройка AI-таргетолог</h2>
-              <span className="text-sm text-muted-foreground">
-                Шаг {currentStep} из {TOTAL_STEPS}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  Шаг {currentStep} из {TOTAL_STEPS}
+                </span>
+                {/* Кнопка закрытия (только для мультиаккаунтного режима) */}
+                {onClose && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={onClose}
+                    title="Закрыть"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
             <Progress value={progress} className="h-2" />
           </div>

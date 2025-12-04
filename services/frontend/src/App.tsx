@@ -59,7 +59,10 @@ const AppRoutes = () => {
           setUser(parsedUser);
           // Проверяем наличие prompt1, но НЕ для мультиаккаунтного режима
           // В мультиаккаунтном режиме онбординг запускается через Dashboard
-          if (!parsedUser.prompt1 && !parsedUser.multi_account_enabled) {
+          // Проверяем multi_account_enabled и из user, и из отдельного localStorage ключа
+          const isMultiAccount = parsedUser.multi_account_enabled ||
+            localStorage.getItem('multiAccountEnabled') === 'true';
+          if (!parsedUser.prompt1 && !isMultiAccount) {
             setShowOnboarding(true);
           } else {
             setShowOnboarding(false);
@@ -86,7 +89,9 @@ const AppRoutes = () => {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
           // Проверяем prompt1 при изменении данных, но НЕ для мультиаккаунта
-          if (!parsedUser.prompt1 && !parsedUser.multi_account_enabled) {
+          const isMultiAccount = parsedUser.multi_account_enabled ||
+            localStorage.getItem('multiAccountEnabled') === 'true';
+          if (!parsedUser.prompt1 && !isMultiAccount) {
             setShowOnboarding(true);
           } else {
             setShowOnboarding(false);
@@ -164,7 +169,17 @@ const AppRoutes = () => {
       {user && !isPublicRoute ? (
         <>
           {/* Онбординг показывается поверх всего если prompt1 не заполнен */}
-          {showOnboarding && <OnboardingWizard onComplete={handleOnboardingComplete} />}
+          {showOnboarding && (
+            <OnboardingWizard
+              onComplete={handleOnboardingComplete}
+              onClose={
+                // Кнопка закрытия только для мультиаккаунтного режима
+                localStorage.getItem('multiAccountEnabled') === 'true'
+                  ? () => setShowOnboarding(false)
+                  : undefined
+              }
+            />
+          )}
 
           {/* Модалка ручного подключения Facebook показывается после онбординга */}
           <FacebookManualConnectModal
