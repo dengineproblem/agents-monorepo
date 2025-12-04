@@ -209,10 +209,16 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
   // Check if all fields are valid
   const canSave = selectedFields.every(isFieldRowValid);
 
-  // Get already selected field IDs (to disable in other selects)
-  const getSelectedFieldIds = (excludeIndex: number) => {
+  // Get already selected checkbox field IDs (to disable in other selects)
+  // Select/multiselect fields can be selected multiple times with different enum values
+  const getSelectedCheckboxFieldIds = (excludeIndex: number) => {
     return selectedFields
       .filter((_, i) => i !== excludeIndex)
+      .filter(sf => {
+        if (!sf.fieldId) return false;
+        const field = getFieldById(sf.fieldId);
+        return field?.field_type === 'checkbox'; // Only block checkboxes
+      })
       .map(sf => sf.fieldId)
       .filter(Boolean) as number[];
   };
@@ -261,7 +267,7 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
             <>
               {/* Field selectors */}
               {selectedFields.map((sf, index) => {
-                const selectedFieldIds = getSelectedFieldIds(index);
+                const selectedCheckboxIds = getSelectedCheckboxFieldIds(index);
                 const currentField = getFieldById(sf.fieldId);
 
                 return (
@@ -295,7 +301,8 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                           <span className="text-muted-foreground">Не выбрано</span>
                         </SelectItem>
                         {availableFields.map((field) => {
-                          const isDisabled = selectedFieldIds.includes(field.field_id);
+                          // Only disable checkbox fields that are already selected (they have no enum values)
+                          const isDisabled = field.field_type === 'checkbox' && selectedCheckboxIds.includes(field.field_id);
                           return (
                             <SelectItem
                               key={field.field_id}
