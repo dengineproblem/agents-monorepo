@@ -315,6 +315,19 @@ export interface QualificationFieldSetting {
   enumValue: string | null;
 }
 
+// New interface for multiple qualification fields
+export interface QualificationFieldConfig {
+  field_id: number;
+  field_name: string;
+  field_type: string;
+  enum_id?: number | null;
+  enum_value?: string | null;
+}
+
+export interface QualificationFieldsSettings {
+  fields: QualificationFieldConfig[];
+}
+
 export interface QualifiedLeadsByCreative {
   qualifiedByCreative: Record<string, number>;
   configured: boolean;
@@ -363,7 +376,7 @@ export async function getQualificationField(
 }
 
 /**
- * Save qualification field setting
+ * Save qualification field setting (legacy - single field)
  *
  * @param userAccountId - User account UUID
  * @param fieldId - Field ID (or null to disable)
@@ -395,6 +408,58 @@ export async function setQualificationField(
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.message || 'Failed to save qualification field');
+  }
+
+  return response.json();
+}
+
+/**
+ * Get qualification fields settings (up to 3 fields)
+ *
+ * @param userAccountId - User account UUID
+ * @returns Array of qualification field configs
+ */
+export async function getQualificationFields(
+  userAccountId: string
+): Promise<QualificationFieldsSettings> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/qualification-fields?userAccountId=${userAccountId}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch qualification fields');
+  }
+
+  return response.json();
+}
+
+/**
+ * Save qualification fields settings (up to 3 fields)
+ * Lead is qualified if ANY of the fields matches
+ *
+ * @param userAccountId - User account UUID
+ * @param fields - Array of field configs (max 3)
+ * @returns Success status
+ */
+export async function setQualificationFields(
+  userAccountId: string,
+  fields: QualificationFieldConfig[]
+): Promise<{ success: boolean }> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/qualification-fields?userAccountId=${userAccountId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fields }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to save qualification fields');
   }
 
   return response.json();

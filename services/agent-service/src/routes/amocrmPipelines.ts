@@ -1177,14 +1177,56 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /amocrm/qualification-field
-   * Get current qualification field setting for user account
+   * GET /amocrm/qualification-fields
+   * Get current qualification fields settings (up to 3 fields)
    *
    * Query params:
    *   - userAccountId: UUID of user account
    *
-   * Returns: { fieldId, fieldName, fieldType, enumId, enumValue }
+   * Returns: { fields: [{field_id, field_name, field_type, enum_id?, enum_value?}] }
    */
+  app.get('/amocrm/qualification-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+
+      const { data: account, error } = await supabase
+        .from('user_accounts')
+        .select('amocrm_qualification_fields')
+        .eq('id', userAccountId)
+        .maybeSingle();
+
+      if (error) {
+        app.log.error({ error }, 'Error fetching qualification fields setting');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      // Return array of fields (or empty array if not set)
+      const fields = account?.amocrm_qualification_fields || [];
+
+      return reply.send({ fields });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting qualification fields');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  // Keep old endpoint for backwards compatibility
   app.get('/amocrm/qualification-field', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = UserAccountIdSchema.safeParse(request.query);
@@ -1200,7 +1242,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
       const { data: account, error } = await supabase
         .from('user_accounts')
-        .select('amocrm_qualification_field_id, amocrm_qualification_field_name, amocrm_qualification_field_type, amocrm_qualification_enum_id, amocrm_qualification_enum_value')
+        .select('amocrm_qualification_fields')
         .eq('id', userAccountId)
         .maybeSingle();
 
@@ -1212,12 +1254,16 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
+      // Return first field for backwards compatibility
+      const fields = account?.amocrm_qualification_fields || [];
+      const firstField = fields[0] || null;
+
       return reply.send({
-        fieldId: account?.amocrm_qualification_field_id || null,
-        fieldName: account?.amocrm_qualification_field_name || null,
-        fieldType: account?.amocrm_qualification_field_type || null,
-        enumId: account?.amocrm_qualification_enum_id || null,
-        enumValue: account?.amocrm_qualification_enum_value || null
+        fieldId: firstField?.field_id || null,
+        fieldName: firstField?.field_name || null,
+        fieldType: firstField?.field_type || null,
+        enumId: firstField?.enum_id || null,
+        enumValue: firstField?.enum_value || null
       });
 
     } catch (error: any) {
@@ -1230,16 +1276,78 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
   });
 
   /**
-   * PATCH /amocrm/qualification-field
-   * Save qualification field setting for user account
+   * PATCH /amocrm/qualification-fields
+   * Save qualification fields settings (up to 3 fields)
    *
    * Query params:
    *   - userAccountId: UUID of user account
    *
-   * Body: { fieldId, fieldName, fieldType, enumId?, enumValue? }
+   * Body: { fields: [{field_id, field_name, field_type, enum_id?, enum_value?}] }
    *
    * Returns: { success: true }
    */
+  app.patch('/amocrm/qualification-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+      const { fields } = request.body as {
+        fields: Array<{
+          field_id: number;
+          field_name: string;
+          field_type: string;
+          enum_id?: number | null;
+          enum_value?: string | null;
+        }>;
+      };
+
+      // Validate max 3 fields
+      if (fields && fields.length > 3) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          message: 'Maximum 3 qualification fields allowed'
+        });
+      }
+
+      app.log.info({ userAccountId, fieldsCount: fields?.length || 0 }, 'Saving qualification fields setting');
+
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({
+          amocrm_qualification_fields: fields || [],
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userAccountId);
+
+      if (error) {
+        app.log.error({ error }, 'Error saving qualification fields setting');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      app.log.info({ userAccountId, fieldsCount: fields?.length || 0 }, 'Qualification fields setting saved');
+
+      return reply.send({ success: true });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error saving qualification fields');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  // Keep old endpoint for backwards compatibility
   app.patch('/amocrm/qualification-field', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const parsed = UserAccountIdSchema.safeParse(request.query);
@@ -1260,16 +1368,21 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         enumValue?: string | null;
       };
 
-      app.log.info({ userAccountId, fieldId, fieldName, fieldType, enumId, enumValue }, 'Saving qualification field setting');
+      app.log.info({ userAccountId, fieldId, fieldName, fieldType, enumId, enumValue }, 'Saving qualification field setting (legacy)');
+
+      // Convert single field to array format
+      const fields = fieldId ? [{
+        field_id: fieldId,
+        field_name: fieldName,
+        field_type: fieldType,
+        enum_id: enumId || null,
+        enum_value: enumValue || null
+      }] : [];
 
       const { error } = await supabase
         .from('user_accounts')
         .update({
-          amocrm_qualification_field_id: fieldId,
-          amocrm_qualification_field_name: fieldName,
-          amocrm_qualification_field_type: fieldType,
-          amocrm_qualification_enum_id: enumId || null,
-          amocrm_qualification_enum_value: enumValue || null,
+          amocrm_qualification_fields: fields,
           updated_at: new Date().toISOString()
         })
         .eq('id', userAccountId);
