@@ -577,11 +577,11 @@ export async function processLeadStatusChange(
     if (qualificationFieldId && userAccount?.amocrm_subdomain && userAccount?.amocrm_access_token) {
       // Use custom field for qualification - need to fetch lead details from AmoCRM
       try {
-        const { getLeadById } = await import('../adapters/amocrm.js');
+        const { getLead } = await import('../adapters/amocrm.js');
         const { getValidAmoCRMToken } = await import('../lib/amocrmTokens.js');
 
         const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
-        const amocrmLead = await getLeadById(amocrmLeadId, subdomain, accessToken);
+        const amocrmLead = await getLead(amocrmLeadId, subdomain, accessToken);
 
         if (amocrmLead?.custom_fields_values) {
           const customFieldValue = amocrmLead.custom_fields_values.find(
