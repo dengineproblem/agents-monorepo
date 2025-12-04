@@ -1130,38 +1130,41 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         contactFieldTypes: contactFields.map((f: any) => ({ id: f.id, name: f.name, type: f.type }))
       }, 'All custom fields from AmoCRM');
 
-      // Filter only checkbox fields from leads
-      const leadCheckboxFields = leadFields.filter(
-        (field: any) => field.type === 'checkbox'
-      ).map((field: any) => ({
-        field_id: field.id,
-        field_name: field.name,
-        field_type: field.type,
-        entity: 'lead'
-      }));
+      // Supported field types for qualification
+      const supportedTypes = ['checkbox', 'select', 'multiselect'];
 
-      // Filter only checkbox fields from contacts
-      const contactCheckboxFields = contactFields.filter(
-        (field: any) => field.type === 'checkbox'
-      ).map((field: any) => ({
+      // Helper to map field with enums (for select/multiselect)
+      const mapField = (field: any, entity: string, suffix: string = '') => ({
         field_id: field.id,
-        field_name: `${field.name} (контакт)`,
+        field_name: suffix ? `${field.name} (${suffix})` : field.name,
         field_type: field.type,
-        entity: 'contact'
-      }));
+        entity,
+        // Include enum values for select/multiselect fields
+        enums: field.enums?.map((e: any) => ({ id: e.id, value: e.value })) || null
+      });
 
-      // Combine all checkbox fields
-      const allCheckboxFields = [...leadCheckboxFields, ...contactCheckboxFields];
+      // Filter supported fields from leads
+      const leadQualificationFields = leadFields
+        .filter((field: any) => supportedTypes.includes(field.type))
+        .map((field: any) => mapField(field, 'lead'));
+
+      // Filter supported fields from contacts
+      const contactQualificationFields = contactFields
+        .filter((field: any) => supportedTypes.includes(field.type))
+        .map((field: any) => mapField(field, 'contact', 'контакт'));
+
+      // Combine all fields
+      const allFields = [...leadQualificationFields, ...contactQualificationFields];
 
       app.log.info({
         userAccountId,
-        leadCheckboxCount: leadCheckboxFields.length,
-        contactCheckboxCount: contactCheckboxFields.length,
-        totalCheckboxCount: allCheckboxFields.length
-      }, 'Checkbox fields filtered');
+        leadFieldsCount: leadQualificationFields.length,
+        contactFieldsCount: contactQualificationFields.length,
+        totalFieldsCount: allFields.length
+      }, 'Qualification fields filtered');
 
       return reply.send({
-        fields: allCheckboxFields
+        fields: allFields
       });
 
     } catch (error: any) {
@@ -1180,7 +1183,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    * Query params:
    *   - userAccountId: UUID of user account
    *
-   * Returns: { fieldId: number | null, fieldName: string | null }
+   * Returns: { fieldId, fieldName, fieldType, enumId, enumValue }
    */
   app.get('/amocrm/qualification-field', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -1197,7 +1200,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
       const { data: account, error } = await supabase
         .from('user_accounts')
-        .select('amocrm_qualification_field_id, amocrm_qualification_field_name')
+        .select('amocrm_qualification_field_id, amocrm_qualification_field_name, amocrm_qualification_field_type, amocrm_qualification_enum_id, amocrm_qualification_enum_value')
         .eq('id', userAccountId)
         .maybeSingle();
 
@@ -1211,7 +1214,10 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
       return reply.send({
         fieldId: account?.amocrm_qualification_field_id || null,
-        fieldName: account?.amocrm_qualification_field_name || null
+        fieldName: account?.amocrm_qualification_field_name || null,
+        fieldType: account?.amocrm_qualification_field_type || null,
+        enumId: account?.amocrm_qualification_enum_id || null,
+        enumValue: account?.amocrm_qualification_enum_value || null
       });
 
     } catch (error: any) {
@@ -1230,7 +1236,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    * Query params:
    *   - userAccountId: UUID of user account
    *
-   * Body: { fieldId: number | null, fieldName: string | null }
+   * Body: { fieldId, fieldName, fieldType, enumId?, enumValue? }
    *
    * Returns: { success: true }
    */
@@ -1246,15 +1252,24 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       }
 
       const { userAccountId } = parsed.data;
-      const { fieldId, fieldName } = request.body as { fieldId: number | null; fieldName: string | null };
+      const { fieldId, fieldName, fieldType, enumId, enumValue } = request.body as {
+        fieldId: number | null;
+        fieldName: string | null;
+        fieldType: string | null;
+        enumId?: number | null;
+        enumValue?: string | null;
+      };
 
-      app.log.info({ userAccountId, fieldId, fieldName }, 'Saving qualification field setting');
+      app.log.info({ userAccountId, fieldId, fieldName, fieldType, enumId, enumValue }, 'Saving qualification field setting');
 
       const { error } = await supabase
         .from('user_accounts')
         .update({
           amocrm_qualification_field_id: fieldId,
           amocrm_qualification_field_name: fieldName,
+          amocrm_qualification_field_type: fieldType,
+          amocrm_qualification_enum_id: enumId || null,
+          amocrm_qualification_enum_value: enumValue || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', userAccountId);
@@ -1267,7 +1282,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      app.log.info({ userAccountId, fieldId }, 'Qualification field setting saved');
+      app.log.info({ userAccountId, fieldId, fieldType, enumId }, 'Qualification field setting saved');
 
       return reply.send({ success: true });
 

@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Check, X, CheckSquare, AlertCircle, Loader2 } from 'lucide-react';
+import { Check, X, CheckSquare, AlertCircle, Loader2, List } from 'lucide-react';
 import {
   getLeadCustomFields,
   getQualificationField,
@@ -38,7 +38,9 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
 }) => {
   const [fields, setFields] = useState<CustomField[]>([]);
   const [selectedFieldId, setSelectedFieldId] = useState<number | null>(null);
+  const [selectedEnumId, setSelectedEnumId] = useState<number | null>(null);
   const [currentFieldName, setCurrentFieldName] = useState<string | null>(null);
+  const [currentEnumValue, setCurrentEnumValue] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,13 +66,26 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
 
       setFields(fieldsResponse.fields || []);
       setSelectedFieldId(settingResponse.fieldId);
+      setSelectedEnumId(settingResponse.enumId || null);
       setCurrentFieldName(settingResponse.fieldName);
+      setCurrentEnumValue(settingResponse.enumValue || null);
     } catch (err: any) {
       console.error('Failed to load qualification field data:', err);
       setError(err.message || 'Не удалось загрузить данные');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFieldChange = (value: string) => {
+    const fieldId = value === 'none' ? null : parseInt(value);
+    setSelectedFieldId(fieldId);
+    // Reset enum selection when field changes
+    setSelectedEnumId(null);
+  };
+
+  const handleEnumChange = (value: string) => {
+    setSelectedEnumId(value === 'none' ? null : parseInt(value));
   };
 
   const handleSave = async () => {
@@ -81,15 +96,38 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
 
       const selectedField = fields.find(f => f.field_id === selectedFieldId);
       const fieldName = selectedField?.field_name || null;
+      const fieldType = selectedField?.field_type || null;
 
-      await setQualificationField(userAccountId, selectedFieldId, fieldName);
+      // Get enum value name for select/multiselect
+      let enumValue: string | null = null;
+      if (selectedField && selectedField.enums && selectedEnumId) {
+        const selectedEnum = selectedField.enums.find(e => e.id === selectedEnumId);
+        enumValue = selectedEnum?.value || null;
+      }
+
+      await setQualificationField(
+        userAccountId,
+        selectedFieldId,
+        fieldName,
+        fieldType,
+        selectedEnumId,
+        enumValue
+      );
 
       setCurrentFieldName(fieldName);
-      setSuccessMessage(
-        selectedFieldId
-          ? `Поле "${fieldName}" установлено для определения квалификации`
-          : 'Квалификация по кастомному полю отключена'
-      );
+      setCurrentEnumValue(enumValue);
+
+      if (selectedFieldId) {
+        if (fieldType === 'checkbox') {
+          setSuccessMessage(`Поле "${fieldName}" установлено для определения квалификации`);
+        } else if (enumValue) {
+          setSuccessMessage(`Поле "${fieldName}" со значением "${enumValue}" установлено для квалификации`);
+        } else {
+          setSuccessMessage(`Поле "${fieldName}" установлено, но не выбрано значение`);
+        }
+      } else {
+        setSuccessMessage('Квалификация по кастомному полю отключена');
+      }
 
       if (onSave) {
         onSave();
@@ -111,13 +149,33 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
     onClose();
   };
 
-  const handleClear = async () => {
-    setSelectedFieldId(null);
+  const selectedField = selectedFieldId
+    ? fields.find(f => f.field_id === selectedFieldId)
+    : null;
+
+  const isSelectType = selectedField?.field_type === 'select' || selectedField?.field_type === 'multiselect';
+  const needsEnumSelection = isSelectType && selectedField?.enums && selectedField.enums.length > 0;
+
+  // Check if save is valid
+  const canSave = !selectedFieldId || // Disabling is always valid
+    selectedField?.field_type === 'checkbox' || // Checkbox doesn't need enum
+    (isSelectType && selectedEnumId); // Select/multiselect needs enum
+
+  const getFieldIcon = (fieldType: string) => {
+    if (fieldType === 'checkbox') {
+      return <CheckSquare className="h-4 w-4 text-green-600" />;
+    }
+    return <List className="h-4 w-4 text-blue-600" />;
   };
 
-  const selectedFieldName = selectedFieldId
-    ? fields.find(f => f.field_id === selectedFieldId)?.field_name
-    : null;
+  const getFieldTypeLabel = (fieldType: string) => {
+    switch (fieldType) {
+      case 'checkbox': return 'Флаг';
+      case 'select': return 'Список';
+      case 'multiselect': return 'Мультисписок';
+      default: return fieldType;
+    }
+  };
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -128,8 +186,8 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
             Настройка квалификации лидов
           </DialogTitle>
           <DialogDescription>
-            Выберите поле в карточке лида AmoCRM (тип: Флаг), которое определяет
-            квалификацию. Если флаг установлен, лид считается квалифицированным.
+            Выберите поле в карточке AmoCRM, которое определяет квалификацию.
+            Поддерживаются типы: Флаг, Список, Мультисписок.
           </DialogDescription>
         </DialogHeader>
 
@@ -149,7 +207,10 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                   <Check className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
                   <div className="text-sm">
                     <p className="text-blue-800 font-medium">Текущее поле:</p>
-                    <p className="text-blue-700">{currentFieldName}</p>
+                    <p className="text-blue-700">
+                      {currentFieldName}
+                      {currentEnumValue && <span className="text-blue-500"> → {currentEnumValue}</span>}
+                    </p>
                   </div>
                 </div>
               )}
@@ -159,13 +220,11 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                 <label className="text-sm font-medium">Поле квалификации</label>
                 <Select
                   value={selectedFieldId?.toString() || 'none'}
-                  onValueChange={(value) =>
-                    setSelectedFieldId(value === 'none' ? null : parseInt(value))
-                  }
+                  onValueChange={handleFieldChange}
                   disabled={fields.length === 0}
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder={fields.length === 0 ? 'Нет полей типа чекбокс' : 'Выберите поле'} />
+                    <SelectValue placeholder={fields.length === 0 ? 'Нет подходящих полей' : 'Выберите поле'} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">
@@ -174,8 +233,11 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                     {fields.map((field) => (
                       <SelectItem key={field.field_id} value={field.field_id.toString()}>
                         <div className="flex items-center gap-2">
-                          <CheckSquare className="h-4 w-4 text-green-600" />
+                          {getFieldIcon(field.field_type)}
                           <span>{field.field_name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            ({getFieldTypeLabel(field.field_type)})
+                          </span>
                         </div>
                       </SelectItem>
                     ))}
@@ -184,23 +246,61 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
 
                 {fields.length === 0 && !loading && (
                   <p className="text-xs text-amber-600">
-                    В AmoCRM не найдено полей типа «Флаг» в карточке лида.
-                    Создайте поле типа «Флаг» в настройках AmoCRM.
+                    В AmoCRM не найдено подходящих полей (Флаг, Список, Мультисписок).
+                    Создайте нужное поле в настройках AmoCRM.
                   </p>
                 )}
               </div>
 
+              {/* Enum selector for select/multiselect fields */}
+              {needsEnumSelection && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Значение квалификации</label>
+                  <Select
+                    value={selectedEnumId?.toString() || 'none'}
+                    onValueChange={handleEnumChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Выберите значение" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        <span className="text-muted-foreground">Не выбрано</span>
+                      </SelectItem>
+                      {selectedField?.enums?.map((enumItem) => (
+                        <SelectItem key={enumItem.id} value={enumItem.id.toString()}>
+                          {enumItem.value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Лиды с этим значением будут считаться квалифицированными
+                  </p>
+                </div>
+              )}
+
               {/* Selected field info */}
-              {selectedFieldId && selectedFieldName && (
+              {selectedFieldId && selectedField && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
                   <div className="flex items-start gap-2">
                     <Check className="h-4 w-4 text-green-600 flex-shrink-0 mt-0.5" />
                     <div className="text-sm">
                       <p className="text-green-800 font-medium">Выбранное поле:</p>
-                      <p className="text-green-700">{selectedFieldName}</p>
-                      <p className="text-green-600 text-xs mt-1">
-                        Лиды с установленным флагом будут считаться квалифицированными
-                      </p>
+                      <p className="text-green-700">{selectedField.field_name}</p>
+                      {selectedField.field_type === 'checkbox' ? (
+                        <p className="text-green-600 text-xs mt-1">
+                          Лиды с установленным флагом будут считаться квалифицированными
+                        </p>
+                      ) : selectedEnumId && selectedField.enums ? (
+                        <p className="text-green-600 text-xs mt-1">
+                          Значение: {selectedField.enums.find(e => e.id === selectedEnumId)?.value}
+                        </p>
+                      ) : (
+                        <p className="text-amber-600 text-xs mt-1">
+                          Выберите значение, которое означает квалификацию
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -240,7 +340,7 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
           <Button variant="outline" onClick={handleSkip} disabled={saving}>
             Пропустить
           </Button>
-          <Button onClick={handleSave} disabled={saving || loading}>
+          <Button onClick={handleSave} disabled={saving || loading || !canSave}>
             {saving ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />

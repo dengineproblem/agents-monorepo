@@ -294,15 +294,25 @@ export async function recalculateKeyStageStats(
 
 // ==================== Qualification Field API ====================
 
+export interface CustomFieldEnum {
+  id: number;
+  value: string;
+}
+
 export interface CustomField {
   field_id: number;
   field_name: string;
   field_type: string;
+  entity: string;
+  enums: CustomFieldEnum[] | null;
 }
 
 export interface QualificationFieldSetting {
   fieldId: number | null;
   fieldName: string | null;
+  fieldType: string | null;
+  enumId: number | null;
+  enumValue: string | null;
 }
 
 export interface QualifiedLeadsByCreative {
@@ -358,12 +368,18 @@ export async function getQualificationField(
  * @param userAccountId - User account UUID
  * @param fieldId - Field ID (or null to disable)
  * @param fieldName - Field name (or null)
+ * @param fieldType - Field type (checkbox, select, multiselect)
+ * @param enumId - For select/multiselect: enum ID that means qualified
+ * @param enumValue - For select/multiselect: enum value name
  * @returns Success status
  */
 export async function setQualificationField(
   userAccountId: string,
   fieldId: number | null,
-  fieldName: string | null
+  fieldName: string | null,
+  fieldType?: string | null,
+  enumId?: number | null,
+  enumValue?: string | null
 ): Promise<{ success: boolean }> {
   const response = await fetch(
     `${API_BASE_URL}/amocrm/qualification-field?userAccountId=${userAccountId}`,
@@ -372,7 +388,7 @@ export async function setQualificationField(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ fieldId, fieldName }),
+      body: JSON.stringify({ fieldId, fieldName, fieldType, enumId, enumValue }),
     }
   );
 
