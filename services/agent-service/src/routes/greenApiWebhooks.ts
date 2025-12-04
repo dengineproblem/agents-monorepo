@@ -136,6 +136,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     adMetadata.sourceId,
     adMetadata.sourceUrl,
     whatsappNumberData.userAccountId,
+    whatsappNumberData.accountId || null,  // UUID для мультиаккаунтности
     app
   );
 

@@ -1080,7 +1080,7 @@ const Profile: React.FC = () => {
               {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} accountId={currentAdAccountId} />}
 
               {/* WhatsApp Connection Card */}
-              {FEATURES.SHOW_WHATSAPP && <WhatsAppConnectionCard userAccountId={user?.id || null} />}
+              {FEATURES.SHOW_WHATSAPP && <WhatsAppConnectionCard userAccountId={user?.id || null} accountId={currentAdAccountId} />}
             </>
           )}
 

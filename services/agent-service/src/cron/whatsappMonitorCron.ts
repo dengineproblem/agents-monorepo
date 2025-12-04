@@ -64,6 +64,7 @@ export function startWhatsAppMonitorCron(app: FastifyInstance) {
           phone_number,
           status,
           user_account_id,
+          account_id,
           user_accounts!inner(id, telegram_id, username)
         `)
         .eq('status', 'connected');
@@ -90,7 +91,8 @@ export function startWhatsAppMonitorCron(app: FastifyInstance) {
             app.log.warn({
               instanceName: inst.instance_name,
               phone: inst.phone_number,
-              userId: inst.user_account_id
+              userId: inst.user_account_id,
+              accountId: inst.account_id  // UUID для мультиаккаунтности
             }, '[WhatsApp Monitor] Instance disconnected!');
 
             // 3. Обновляем статус в whatsapp_instances

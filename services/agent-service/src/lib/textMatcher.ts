@@ -79,15 +79,21 @@ export function calculateSimilarity(text1: string, text2: string): number {
 /**
  * Ищет направление по совпадению сообщения с client_question
  * Возвращает направление с наибольшим совпадением >= порога
+ *
+ * @param messageText - Текст сообщения для сравнения
+ * @param userAccountId - UUID пользователя
+ * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (NULL для legacy)
+ * @param threshold - Минимальный порог совпадения (0-1)
  */
 export async function matchMessageToDirection(
   messageText: string,
   userAccountId: string,
+  accountId: string | null,
   threshold: number = 0.7
 ): Promise<MatchResult> {
   try {
     // Получаем все активные направления пользователя с настройками
-    const { data: directions, error } = await supabase
+    let query = supabase
       .from('account_directions')
       .select(`
         id,
@@ -98,6 +104,15 @@ export async function matchMessageToDirection(
       .eq('user_account_id', userAccountId)
       .eq('is_active', true)
       .eq('objective', 'whatsapp');
+
+    // Фильтр по account_id для мультиаккаунтности (NULL для legacy)
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data: directions, error } = await query;
 
     if (error) {
       log.error({ error, userAccountId }, 'Failed to fetch directions');
@@ -148,6 +163,7 @@ export async function matchMessageToDirection(
     if (bestMatch.matched) {
       log.info({
         userAccountId,
+        accountId,
         directionId: bestMatch.directionId,
         directionName: bestMatch.directionName,
         similarity: bestMatch.similarity

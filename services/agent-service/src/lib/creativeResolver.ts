@@ -29,6 +29,7 @@ import { FastifyInstance } from 'fastify';
  * @param sourceId - Facebook Ad ID (from webhook metadata or UTM parameters)
  * @param sourceUrl - Optional creative URL for fallback matching (mainly for WhatsApp)
  * @param userAccountId - User account UUID for scoping the lookup
+ * @param accountId - UUID из ad_accounts.id для мультиаккаунтности (NULL для legacy)
  * @param app - Fastify instance for logging
  * 
  * @returns Object containing:
@@ -58,15 +59,16 @@ export async function resolveCreativeAndDirection(
   sourceId: string,
   sourceUrl: string | null,
   userAccountId: string,
+  accountId: string | null,  // UUID из ad_accounts.id для мультиаккаунтности (NULL для legacy)
   app: FastifyInstance
-): Promise<{ 
-  creativeId: string | null; 
+): Promise<{
+  creativeId: string | null;
   directionId: string | null;
   whatsappPhoneNumberId: string | null;
 }> {
 
   // PRIMARY LOOKUP: Find in ad_creative_mapping by ad_id
-  const { data: adMapping, error: mappingError } = await supabase
+  let mappingQuery = supabase
     .from('ad_creative_mapping')
     .select(`
       user_creative_id,
@@ -74,8 +76,16 @@ export async function resolveCreativeAndDirection(
       account_directions(whatsapp_phone_number_id)
     `)
     .eq('ad_id', sourceId)
-    .eq('user_id', userAccountId)
-    .maybeSingle();
+    .eq('user_id', userAccountId);
+
+  // Фильтр по account_id для мультиаккаунтности (NULL для legacy)
+  if (accountId) {
+    mappingQuery = mappingQuery.eq('account_id', accountId);
+  } else {
+    mappingQuery = mappingQuery.is('account_id', null);
+  }
+
+  const { data: adMapping, error: mappingError } = await mappingQuery.maybeSingle();
 
   if (mappingError) {
     app.log.error({ error: mappingError.message, sourceId }, 'Error looking up ad_creative_mapping');
@@ -100,16 +110,24 @@ export async function resolveCreativeAndDirection(
 
   // FALLBACK LOOKUP: Find by creative URL matching
   if (sourceUrl) {
-    const { data: creativeByUrl, error: urlError } = await supabase
+    let urlQuery = supabase
       .from('user_creatives')
       .select(`
-        id, 
+        id,
         direction_id,
         account_directions(whatsapp_phone_number_id)
       `)
       .eq('user_id', userAccountId)
-      .ilike('title', `%${sourceUrl}%`)
-      .maybeSingle();
+      .ilike('title', `%${sourceUrl}%`);
+
+    // Фильтр по account_id для мультиаккаунтности
+    if (accountId) {
+      urlQuery = urlQuery.eq('account_id', accountId);
+    } else {
+      urlQuery = urlQuery.is('account_id', null);
+    }
+
+    const { data: creativeByUrl, error: urlError } = await urlQuery.maybeSingle();
 
     if (urlError) {
       app.log.error({ error: urlError.message, sourceUrl }, 'Error looking up user_creatives by URL');

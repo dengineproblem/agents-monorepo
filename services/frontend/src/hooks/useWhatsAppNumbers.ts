@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { whatsappApi, WhatsAppNumber } from '@/services/whatsappApi';
 
-export const useWhatsAppNumbers = (userAccountId: string | null) => {
+export const useWhatsAppNumbers = (userAccountId: string | null, accountId?: string) => {
   const [numbers, setNumbers] = useState<WhatsAppNumber[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +15,7 @@ export const useWhatsAppNumbers = (userAccountId: string | null) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await whatsappApi.getNumbers(userAccountId);
+      const data = await whatsappApi.getNumbers(userAccountId, accountId);
       setNumbers(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load numbers');
@@ -23,7 +23,7 @@ export const useWhatsAppNumbers = (userAccountId: string | null) => {
     } finally {
       setLoading(false);
     }
-  }, [userAccountId]);
+  }, [userAccountId, accountId]);
 
   useEffect(() => {
     loadNumbers();

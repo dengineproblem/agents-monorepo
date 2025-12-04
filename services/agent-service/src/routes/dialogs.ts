@@ -7,6 +7,7 @@ import { analyzeDialogs } from '../scripts/analyzeDialogs.js';
 const AnalyzeDialogsSchema = z.object({
   instanceName: z.string().min(1),
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   minIncoming: z.number().int().min(1).optional().default(3),
   maxDialogs: z.number().int().min(1).optional(),
   maxContacts: z.number().int().min(1).optional(),
@@ -14,6 +15,7 @@ const AnalyzeDialogsSchema = z.object({
 
 const GetAnalysisSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   instanceName: z.string().optional(),
   interestLevel: z.enum(['hot', 'warm', 'cold']).optional(),
   minScore: z.number().int().min(0).max(100).optional(),
@@ -23,6 +25,7 @@ const GetAnalysisSchema = z.object({
 
 const ExportCsvSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   instanceName: z.string().optional(),
   interestLevel: z.enum(['hot', 'warm', 'cold']).optional(),
 });
@@ -36,9 +39,9 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.post('/dialogs/analyze', async (request, reply) => {
     try {
       const body = AnalyzeDialogsSchema.parse(request.body);
-      const { instanceName, userAccountId, minIncoming, maxDialogs, maxContacts } = body;
+      const { instanceName, userAccountId, accountId, minIncoming, maxDialogs, maxContacts } = body;
 
-      app.log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
+      app.log.info({ instanceName, userAccountId, accountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
       // Verify that instance belongs to user
       const { data: instance, error: instanceError } = await supabase
@@ -58,6 +61,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
       const stats = await analyzeDialogs({
         instanceName,
         userAccountId,
+        accountId,  // UUID для мультиаккаунтности
         minIncoming,
         maxDialogs,
         maxContacts,
@@ -92,7 +96,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.get('/dialogs/analysis', async (request, reply) => {
     try {
       const query = GetAnalysisSchema.parse(request.query);
-      const { userAccountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
+      const { userAccountId, accountId, instanceName, interestLevel, minScore, funnelStage, qualificationComplete } = query;
 
       let dbQuery = supabase
         .from('dialog_analysis')
@@ -100,6 +104,11 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .eq('user_account_id', userAccountId)
         .order('score', { ascending: false })
         .order('last_message', { ascending: false });
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        dbQuery = dbQuery.eq('account_id', accountId);
+      }
 
       if (instanceName) {
         dbQuery = dbQuery.eq('instance_name', instanceName);
@@ -155,13 +164,18 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.get('/dialogs/export-csv', async (request, reply) => {
     try {
       const query = ExportCsvSchema.parse(request.query);
-      const { userAccountId, instanceName, interestLevel } = query;
+      const { userAccountId, accountId, instanceName, interestLevel } = query;
 
       let dbQuery = supabase
         .from('dialog_analysis')
         .select('contact_phone, contact_name, interest_level, score, business_type, funnel_stage, instagram_url, ad_budget, qualification_complete, is_owner, has_sales_dept, uses_ads_now, objection, next_message, incoming_count, outgoing_count, last_message')
         .eq('user_account_id', userAccountId)
         .order('score', { ascending: false });
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        dbQuery = dbQuery.eq('account_id', accountId);
+      }
 
       if (instanceName) {
         dbQuery = dbQuery.eq('instance_name', instanceName);
@@ -248,8 +262,9 @@ export async function dialogsRoutes(app: FastifyInstance) {
    */
   app.get('/dialogs/stats', async (request, reply) => {
     try {
-      const { userAccountId, instanceName } = request.query as { 
-        userAccountId?: string; 
+      const { userAccountId, accountId, instanceName } = request.query as {
+        userAccountId?: string;
+        accountId?: string;  // UUID для мультиаккаунтности
         instanceName?: string;
       };
 
@@ -261,6 +276,11 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .from('dialog_analysis')
         .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
         .eq('user_account_id', userAccountId);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        dbQuery = dbQuery.eq('account_id', accountId);
+      }
 
       if (instanceName) {
         dbQuery = dbQuery.eq('instance_name', instanceName);
@@ -320,6 +340,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
         isMedical: z.boolean().optional(),
         funnelStage: z.enum(['new_lead', 'not_qualified', 'qualified', 'consultation_booked', 'consultation_completed', 'deal_closed', 'deal_lost']),
         userAccountId: z.string().uuid(),
+        accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
         instanceName: z.string().min(1),
         notes: z.string().optional(),
       });
@@ -349,6 +370,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
           is_medical: body.isMedical || false,
           funnel_stage: body.funnelStage,
           user_account_id: body.userAccountId,
+          account_id: body.accountId || null,  // UUID для мультиаккаунтности
           instance_name: body.instanceName,
           interest_level: 'cold',
           score: 5,
@@ -394,6 +416,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
       
       const UpdateLeadSchema = z.object({
         userAccountId: z.string().uuid(),
+        accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
         contactName: z.string().optional(),
         businessType: z.string().optional(),
         isMedical: z.boolean().optional(),
@@ -413,6 +436,7 @@ export async function dialogsRoutes(app: FastifyInstance) {
       });
 
       const body = UpdateLeadSchema.parse(request.body);
+      const { accountId } = body;
 
       // Build update object
       const updateData: any = {
@@ -436,11 +460,18 @@ export async function dialogsRoutes(app: FastifyInstance) {
       if (body.notes !== undefined) updateData.notes = body.notes;
       if (body.score !== undefined) updateData.score = body.score;
 
-      const { data, error } = await supabase
+      let updateQuery = supabase
         .from('dialog_analysis')
         .update(updateData)
         .eq('id', id)
-        .eq('user_account_id', body.userAccountId)
+        .eq('user_account_id', body.userAccountId);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        updateQuery = updateQuery.eq('account_id', accountId);
+      }
+
+      const { data, error } = await updateQuery
         .select()
         .single();
 
@@ -478,17 +509,27 @@ export async function dialogsRoutes(app: FastifyInstance) {
   app.delete('/dialogs/analysis/:id', async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
-      const { userAccountId } = request.query as { userAccountId?: string };
+      const { userAccountId, accountId } = request.query as {
+        userAccountId?: string;
+        accountId?: string;  // UUID для мультиаккаунтности
+      };
 
       if (!userAccountId) {
         return reply.status(400).send({ error: 'userAccountId is required' });
       }
 
-      const { error } = await supabase
+      let deleteQuery = supabase
         .from('dialog_analysis')
         .delete()
         .eq('id', id)
         .eq('user_account_id', userAccountId);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        deleteQuery = deleteQuery.eq('account_id', accountId);
+      }
+
+      const { error } = await deleteQuery;
 
       if (error) {
         throw error;

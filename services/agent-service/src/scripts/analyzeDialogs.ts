@@ -365,28 +365,30 @@ async function analyzeDialog(contact: Contact): Promise<AnalysisResult> {
 async function saveNewLead(
   instanceName: string,
   userAccountId: string,
-  contact: Contact
+  contact: Contact,
+  accountId?: string  // UUID для мультиаккаунтности
 ) {
   const { error } = await supabase
     .from('dialog_analysis')
     .upsert({
       instance_name: instanceName,
       user_account_id: userAccountId,
+      account_id: accountId || null,  // UUID для мультиаккаунтности
       contact_phone: contact.phone,
       contact_name: contact.name,
       incoming_count: contact.incoming_count,
       outgoing_count: contact.outgoing_count,
       first_message: contact.first_message.toISOString(),
       last_message: contact.last_message.toISOString(),
-      
+
       // Set as new lead
       funnel_stage: 'new_lead',
       next_message: 'Новый лид, требуется первый контакт',
       score: 0,
-      
+
       // Store full conversation
       messages: contact.messages,
-      
+
       analyzed_at: new Date().toISOString(),
     }, {
       onConflict: 'instance_name,contact_phone'
@@ -397,7 +399,7 @@ async function saveNewLead(
     throw error;
   }
 
-  log.info({ phone: contact.phone }, 'New lead saved');
+  log.info({ phone: contact.phone, accountId }, 'New lead saved');
 }
 
 /**
@@ -407,20 +409,22 @@ async function saveAnalysisResult(
   instanceName: string,
   userAccountId: string,
   contact: Contact,
-  analysis: AnalysisResult
+  analysis: AnalysisResult,
+  accountId?: string  // UUID для мультиаккаунтности
 ) {
   const { error } = await supabase
     .from('dialog_analysis')
     .upsert({
       instance_name: instanceName,
       user_account_id: userAccountId,
+      account_id: accountId || null,  // UUID для мультиаккаунтности
       contact_phone: contact.phone,
       contact_name: contact.name,
       incoming_count: contact.incoming_count,
       outgoing_count: contact.outgoing_count,
       first_message: contact.first_message.toISOString(),
       last_message: contact.last_message.toISOString(),
-      
+
       // Analysis results
       business_type: analysis.business_type,
       is_medical: analysis.is_medical,
@@ -440,10 +444,10 @@ async function saveAnalysisResult(
       action: analysis.action,
       score: analysis.score,
       reasoning: analysis.reasoning,
-      
+
       // Store full conversation
       messages: contact.messages,
-      
+
       analyzed_at: new Date().toISOString(),
     }, {
       onConflict: 'instance_name,contact_phone'
@@ -454,7 +458,7 @@ async function saveAnalysisResult(
     throw error;
   }
 
-  log.info({ phone: contact.phone, funnel_stage: analysis.funnel_stage }, 'Analysis saved');
+  log.info({ phone: contact.phone, funnel_stage: analysis.funnel_stage, accountId }, 'Analysis saved');
 }
 
 /**
@@ -463,13 +467,14 @@ async function saveAnalysisResult(
 export async function analyzeDialogs(params: {
   instanceName: string;
   userAccountId: string;
+  accountId?: string;  // UUID для мультиаккаунтности
   minIncoming?: number;
   maxDialogs?: number;
   maxContacts?: number;
 }) {
-  const { instanceName, userAccountId, minIncoming = 3, maxDialogs, maxContacts } = params;
+  const { instanceName, userAccountId, accountId, minIncoming = 3, maxDialogs, maxContacts } = params;
 
-  log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
+  log.info({ instanceName, userAccountId, accountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
   try {
     // 1. Get messages from Evolution PostgreSQL (limited to top N most active contacts)
@@ -502,7 +507,7 @@ export async function analyzeDialogs(params: {
     // 4. Save new leads without LLM analysis
     for (const contact of newLeads) {
       try {
-        await saveNewLead(instanceName, userAccountId, contact);
+        await saveNewLead(instanceName, userAccountId, contact, accountId);
       } catch (error: any) {
         log.error({ error: error.message, phone: contact.phone }, 'Failed to save new lead');
       }
@@ -535,8 +540,8 @@ export async function analyzeDialogs(params: {
           analysis.funnel_stage = 'qualified';
           log.info({ phone: contact.phone }, 'Auto-upgraded to qualified stage');
         }
-        
-        await saveAnalysisResult(instanceName, userAccountId, contact, analysis);
+
+        await saveAnalysisResult(instanceName, userAccountId, contact, analysis, accountId);
         
         stats.analyzed++;
         if (analysis.interest_level === 'hot') stats.hot++;

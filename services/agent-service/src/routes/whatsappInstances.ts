@@ -106,13 +106,20 @@ export default async function whatsappInstances(app: FastifyInstance) {
    */
   app.get('/whatsapp/instances/:instanceName/status', async (request, reply) => {
     const { instanceName } = request.params as any;
+    const { userAccountId } = request.query as { userAccountId?: string };
 
     try {
-      const { data: instance, error } = await supabase
+      let query = supabase
         .from('whatsapp_instances')
         .select('*')
-        .eq('instance_name', instanceName)
-        .single();
+        .eq('instance_name', instanceName);
+
+      // Проверка владельца (если передан userAccountId)
+      if (userAccountId) {
+        query = query.eq('user_account_id', userAccountId);
+      }
+
+      const { data: instance, error } = await query.single();
 
       if (error) {
         return reply.status(404).send({ error: 'Instance not found' });
@@ -171,9 +178,10 @@ export default async function whatsappInstances(app: FastifyInstance) {
    */
   app.delete('/whatsapp/instances/:instanceName', async (request, reply) => {
     const { instanceName } = request.params as any;
+    const { userAccountId } = request.query as { userAccountId?: string };
 
     try {
-      app.log.info({ instanceName }, 'Disconnecting WhatsApp instance');
+      app.log.info({ instanceName, userAccountId }, 'Disconnecting WhatsApp instance');
 
       // Вызвать Evolution API для отключения
       try {
@@ -185,8 +193,8 @@ export default async function whatsappInstances(app: FastifyInstance) {
         app.log.warn({ error: evolutionError }, 'Evolution API logout failed, continuing with DB cleanup');
       }
 
-      // Обновить статус в базе
-      const { error } = await supabase
+      // Обновить статус в базе (с проверкой владельца если передан)
+      let updateQuery = supabase
         .from('whatsapp_instances')
         .update({
           status: 'disconnected',
@@ -194,6 +202,13 @@ export default async function whatsappInstances(app: FastifyInstance) {
           updated_at: new Date().toISOString()
         })
         .eq('instance_name', instanceName);
+
+      // Проверка владельца
+      if (userAccountId) {
+        updateQuery = updateQuery.eq('user_account_id', userAccountId);
+      }
+
+      const { error } = await updateQuery;
 
       if (error) {
         app.log.error({ error }, 'Failed to update instance status');
@@ -212,6 +227,7 @@ export default async function whatsappInstances(app: FastifyInstance) {
    */
   app.post('/whatsapp/instances/:instanceName/refresh-qr', async (request, reply) => {
     const { instanceName } = request.params as any;
+    const { userAccountId } = request.query as { userAccountId?: string };
 
     try {
       // Call Evolution API to get new QR code
@@ -227,8 +243,8 @@ export default async function whatsappInstances(app: FastifyInstance) {
 
       const evolutionData = await evolutionResponse.json();
 
-      // Update QR code in database
-      const { error } = await supabase
+      // Update QR code in database (с проверкой владельца если передан)
+      let updateQuery = supabase
         .from('whatsapp_instances')
         .update({
           qr_code: evolutionData.qrcode?.base64 || evolutionData.qrcode?.code,
@@ -236,6 +252,13 @@ export default async function whatsappInstances(app: FastifyInstance) {
           updated_at: new Date().toISOString()
         })
         .eq('instance_name', instanceName);
+
+      // Проверка владельца
+      if (userAccountId) {
+        updateQuery = updateQuery.eq('user_account_id', userAccountId);
+      }
+
+      const { error } = await updateQuery;
 
       if (error) {
         app.log.error({ error }, 'Failed to update QR code');

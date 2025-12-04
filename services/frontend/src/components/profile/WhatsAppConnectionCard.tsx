@@ -5,16 +5,19 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Smartphone, MessageSquare, Loader2, Plus, X, PhoneOff } from 'lucide-react';
 import { useWhatsAppNumbers } from '@/hooks/useWhatsAppNumbers';
+import { whatsappApi } from '@/services/whatsappApi';
 import { WhatsAppQRDialog } from './WhatsAppQRDialog';
 
 interface WhatsAppConnectionCardProps {
   userAccountId: string | null;
+  accountId?: string;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
 export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
   userAccountId,
+  accountId,
 }) => {
-  const { numbers, loading, error, refresh } = useWhatsAppNumbers(userAccountId);
+  const { numbers, loading, error, refresh } = useWhatsAppNumbers(userAccountId, accountId);
 
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<{
@@ -173,6 +176,7 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
           userAccountId={userAccountId}
           phoneNumberId={selectedNumber.id}
           phoneNumber={selectedNumber.phone_number}
+          accountId={accountId}
           onConnected={handleConnected}
         />
       )}

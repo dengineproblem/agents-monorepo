@@ -116,12 +116,19 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           }
         }
 
-        await supabase
+        let deleteQuery = supabase
           .from('creative_tests')
           .delete()
           .eq('user_creative_id', user_creative_id)
           .eq('user_id', user_id)
           .in('status', ['completed', 'cancelled', 'failed', 'running']);
+
+        // Фильтр по account_id для мультиаккаунтности
+        if (account_id) {
+          deleteQuery = deleteQuery.eq('account_id', account_id);
+        }
+
+        await deleteQuery;
       }
 
       // Запускаем тест
@@ -149,18 +156,33 @@ export async function creativeTestRoutes(app: FastifyInstance) {
 
   /**
    * GET /creative-test/results/:user_creative_id
-   * 
+   *
    * Получает результаты теста креатива
    */
   app.get('/creative-test/results/:user_creative_id', async (req, reply) => {
     try {
       const { user_creative_id } = req.params as { user_creative_id: string };
+      const { user_id, account_id } = req.query as { user_id?: string; account_id?: string };
 
-      const { data: test, error } = await supabase
+      if (!user_id) {
+        return reply.status(400).send({
+          success: false,
+          error: 'user_id query parameter is required'
+        });
+      }
+
+      let query = supabase
         .from('creative_tests')
         .select('*')
         .eq('user_creative_id', user_creative_id)
-        .single();
+        .eq('user_id', user_id);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (account_id) {
+        query = query.eq('account_id', account_id);
+      }
+
+      const { data: test, error } = await query.maybeSingle();
 
       if (error || !test) {
         return reply.status(404).send({
@@ -173,7 +195,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         success: true,
         test
       });
-      
+
     } catch (error: any) {
       app.log.error('Get test results error:', error);
       return reply.status(500).send({
@@ -369,7 +391,7 @@ export async function creativeTestRoutes(app: FastifyInstance) {
   app.delete('/creative-test/:user_creative_id', async (req, reply) => {
     try {
       const { user_creative_id } = req.params as { user_creative_id: string };
-      const user_id = (req.query as any)?.user_id;
+      const { user_id, account_id } = req.query as { user_id?: string; account_id?: string };
 
       if (!user_id) {
         return reply.status(400).send({
@@ -378,11 +400,18 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         });
       }
 
-      const { data: tests, error } = await supabase
+      let selectQuery = supabase
         .from('creative_tests')
         .select('*')
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', String(user_id));
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (account_id) {
+        selectQuery = selectQuery.eq('account_id', account_id);
+      }
+
+      const { data: tests, error } = await selectQuery;
 
       if (error) {
         throw error;
@@ -466,11 +495,18 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           }
         }
 
-      await supabase
+      let finalDeleteQuery = supabase
         .from('creative_tests')
         .delete()
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', String(user_id));
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (account_id) {
+        finalDeleteQuery = finalDeleteQuery.eq('account_id', account_id);
+      }
+
+      await finalDeleteQuery;
 
       return reply.send({ success: true });
     } catch (error: any) {

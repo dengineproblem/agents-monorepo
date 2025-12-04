@@ -26,10 +26,12 @@ export const whatsappApi = {
   /**
    * Получить список WhatsApp номеров пользователя
    */
-  async getNumbers(userAccountId: string): Promise<WhatsAppNumber[]> {
-    const response = await fetch(
-      `${API_BASE_URL}/whatsapp-numbers?userAccountId=${userAccountId}`
-    );
+  async getNumbers(userAccountId: string, accountId?: string): Promise<WhatsAppNumber[]> {
+    let url = `${API_BASE_URL}/whatsapp-numbers?userAccountId=${userAccountId}`;
+    if (accountId) {
+      url += `&accountId=${accountId}`;
+    }
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error('Failed to fetch WhatsApp numbers');
     }
@@ -42,12 +44,13 @@ export const whatsappApi = {
    */
   async createInstance(
     userAccountId: string,
-    phoneNumberId: string
+    phoneNumberId: string,
+    accountId?: string  // UUID из ad_accounts.id для мультиаккаунтности
   ): Promise<WhatsAppInstanceResponse> {
     const response = await fetch(`${API_BASE_URL}/whatsapp/instances/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userAccountId, phoneNumberId }),
+      body: JSON.stringify({ userAccountId, phoneNumberId, accountId }),
     });
     if (!response.ok) {
       throw new Error('Failed to create WhatsApp instance');

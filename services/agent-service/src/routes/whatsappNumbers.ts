@@ -9,6 +9,7 @@ const PhoneNumberSchema = z.string().regex(/^\+[1-9][0-9]{7,14}$/, {
 
 const CreateWhatsAppNumberSchema = z.object({
   userAccountId: z.string().uuid(),
+  accountId: z.string().uuid().optional(),  // UUID для мультиаккаунтности
   phone_number: PhoneNumberSchema,
   label: z.string().max(100).optional(),
   is_default: z.boolean().default(false),
@@ -24,23 +25,30 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
   
   // GET /whatsapp-numbers - получить список номеров пользователя
   app.get('/whatsapp-numbers', async (request, reply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
-    
+    const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
+
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
     }
-    
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('whatsapp_phone_numbers')
         .select('*')
         .eq('user_account_id', userAccountId)
         .eq('is_active', true)
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true });
-      
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      
+
       return reply.send({ numbers: data || [] });
     } catch (error: any) {
       app.log.error('Error fetching WhatsApp numbers:', error);
@@ -70,6 +78,7 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
         .from('whatsapp_phone_numbers')
         .insert({
           user_account_id: body.userAccountId,
+          account_id: body.accountId || null,  // UUID для мультиаккаунтности
           phone_number: body.phone_number,
           label: body.label || null,
           is_default: body.is_default,
@@ -93,23 +102,29 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
   // PUT /whatsapp-numbers/:id - обновить номер
   app.put('/whatsapp-numbers/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
-    
+    const { userAccountId } = request.query as { userAccountId?: string };
+
+    if (!userAccountId) {
+      return reply.status(400).send({ error: 'userAccountId is required' });
+    }
+
     try {
       const body = UpdateWhatsAppNumberSchema.parse(request.body);
-      
+
       const { data, error } = await supabase
         .from('whatsapp_phone_numbers')
         .update(body)
         .eq('id', id)
+        .eq('user_account_id', userAccountId)  // Проверка владельца
         .select()
         .single();
-      
+
       if (error) throw error;
-      
+
       if (!data) {
         return reply.status(404).send({ error: 'Number not found' });
       }
-      
+
       return reply.send({ number: data });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
@@ -162,37 +177,43 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
   
   // GET /whatsapp-numbers/default - получить дефолтный номер пользователя
   app.get('/whatsapp-numbers/default', async (request, reply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
-    
+    const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
+
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
     }
-    
+
     try {
       // 1. Пробуем найти дефолтный в новой таблице
-      const { data: defaultNumber } = await supabase
+      let query = supabase
         .from('whatsapp_phone_numbers')
         .select('phone_number')
         .eq('user_account_id', userAccountId)
         .eq('is_default', true)
-        .eq('is_active', true)
-        .maybeSingle();
-      
+        .eq('is_active', true);
+
+      // Фильтр по account_id для мультиаккаунтности
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
+
+      const { data: defaultNumber } = await query.maybeSingle();
+
       if (defaultNumber) {
         return reply.send({ phone_number: defaultNumber.phone_number, source: 'whatsapp_phone_numbers' });
       }
-      
+
       // 2. Fallback на старый номер из user_accounts
       const { data: userAccount } = await supabase
         .from('user_accounts')
         .select('whatsapp_phone_number')
         .eq('id', userAccountId)
         .maybeSingle();
-      
+
       if (userAccount?.whatsapp_phone_number) {
         return reply.send({ phone_number: userAccount.whatsapp_phone_number, source: 'user_accounts' });
       }
-      
+
       // 3. Нет номера
       return reply.send({ phone_number: null, source: null });
     } catch (error: any) {

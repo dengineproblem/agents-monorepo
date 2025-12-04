@@ -270,6 +270,7 @@ export default async function leadsRoutes(app: FastifyInstance) {
           sourceId,
           null, // sourceUrl not needed for Tilda
           leadData.userAccountId,
+          leadData.accountId || null,  // UUID для мультиаккаунтности
           app
         );
         

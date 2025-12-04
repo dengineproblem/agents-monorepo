@@ -217,11 +217,12 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   }
 
   // Resolve creative, direction AND whatsapp_phone_number_id BEFORE processing lead
-  const { creativeId, directionId, whatsappPhoneNumberId: directionWhatsappId } = 
+  const { creativeId, directionId, whatsappPhoneNumberId: directionWhatsappId } =
     await resolveCreativeAndDirection(
       finalSourceId,
       sourceUrl || mediaUrl,
       instanceData.user_account_id,
+      instanceData.account_id || null,  // UUID для мультиаккаунтности
       app
     );
 
@@ -354,6 +355,7 @@ async function processAdLead(params: {
   // НОВОЕ: Создать/обновить запись в dialog_analysis для чат-бота
   await upsertDialogAnalysis({
     userAccountId,
+    accountId,
     instanceName,
     contactPhone: clientPhone,
     messageText,
@@ -369,12 +371,13 @@ async function processAdLead(params: {
  */
 async function upsertDialogAnalysis(params: {
   userAccountId: string;
+  accountId?: string | null;  // UUID для мультиаккаунтности
   instanceName: string;
   contactPhone: string;
   messageText: string;
   timestamp: Date;
 }, app: FastifyInstance) {
-  const { userAccountId, instanceName, contactPhone, messageText, timestamp } = params;
+  const { userAccountId, accountId, instanceName, contactPhone, messageText, timestamp } = params;
 
   // Проверить существование записи
   const { data: existing } = await supabase
@@ -399,6 +402,7 @@ async function upsertDialogAnalysis(params: {
       .from('dialog_analysis')
       .insert({
         user_account_id: userAccountId,
+        account_id: accountId || null,  // UUID для мультиаккаунтности
         instance_name: instanceName,
         contact_phone: contactPhone,
         last_message: messageText,
@@ -556,6 +560,7 @@ async function handleSmartMatching(
   const matchResult = await matchMessageToDirection(
     messageText,
     instanceData.user_account_id,
+    instanceData.account_id || null,  // UUID для мультиаккаунтности
     0.7 // Порог 70%
   );
 
@@ -706,6 +711,7 @@ async function createLeadWithoutCreative(params: {
   // Создать запись в dialog_analysis для чат-бота
   await upsertDialogAnalysis({
     userAccountId,
+    accountId,
     instanceName,
     contactPhone: clientPhone,
     messageText,

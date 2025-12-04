@@ -16,6 +16,7 @@ interface WhatsAppQRDialogProps {
   userAccountId: string;
   phoneNumberId: string;
   phoneNumber: string;
+  accountId?: string;  // UUID из ad_accounts.id для мультиаккаунтности
   onConnected: () => void;
 }
 
@@ -25,6 +26,7 @@ export const WhatsAppQRDialog: React.FC<WhatsAppQRDialogProps> = ({
   userAccountId,
   phoneNumberId,
   phoneNumber,
+  accountId,
   onConnected,
 }) => {
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export const WhatsAppQRDialog: React.FC<WhatsAppQRDialogProps> = ({
       setStatus('loading');
       setError(null);
 
-      const result = await whatsappApi.createInstance(userAccountId, phoneNumberId);
+      const result = await whatsappApi.createInstance(userAccountId, phoneNumberId, accountId);
 
       if (result.qrcode.count === 0) {
         setError('QR-код не сгенерирован. Попробуйте еще раз.');
