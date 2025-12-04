@@ -1,6 +1,6 @@
 import { toastT } from '@/utils/toastUtils';
 import React from 'react';
-import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Upload, User, CheckCircle, Users2 } from 'lucide-react';
+import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Upload, User, CheckCircle, Users2, HelpCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
@@ -343,6 +343,17 @@ const Header: React.FC<HeaderProps> = ({
               </TooltipTrigger>
               <TooltipContent>
                 <p>{appReviewText('Refresh', 'Обновить')}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={() => navigate('/knowledge-base')}>
+                  <HelpCircle className="h-5 w-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{appReviewText('Help', 'База знаний')}</p>
               </TooltipContent>
             </Tooltip>
 

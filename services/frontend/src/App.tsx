@@ -27,6 +27,7 @@ import Terms from './pages/Terms';
 import OAuthCallback from './pages/OAuthCallback';
 import CarouselTest from './pages/CarouselTest';
 import Competitors from './pages/Competitors';
+import KnowledgeBase from './pages/KnowledgeBase';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
@@ -217,6 +218,9 @@ const AppRoutes = () => {
                       {FEATURES.SHOW_COMPETITORS && <Route path="/competitors" element={<Competitors />} />}
                       <Route path="/profile" element={<Profile />} />
                       {FEATURES.SHOW_DIRECTIONS && <Route path="/ad-settings" element={<AdSettings />} />}
+                      <Route path="/knowledge-base" element={<KnowledgeBase />} />
+                      <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
+                      <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>

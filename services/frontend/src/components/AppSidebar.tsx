@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe, Users2 } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe, Users2, BookOpen } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -52,6 +52,12 @@ const menuItems = [
     path: '/profile',
     label: 'menu.profile',
     icon: User,
+    show: true,
+  },
+  {
+    path: '/knowledge-base',
+    label: 'База знаний',
+    icon: BookOpen,
     show: true,
   },
 ];
