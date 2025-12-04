@@ -75,33 +75,61 @@ export interface CompetitorCreativeData {
 export function extractInstagramHandle(url: string): string | null {
   if (!url) return null;
 
-  // Паттерны для Instagram
-  const patterns = [
-    // instagram.com/username
+  const trimmed = url.trim();
+
+  // Паттерны для Instagram URL
+  const urlPatterns = [
+    // instagram.com/username или instagram.com/username/
     /instagram\.com\/([a-z0-9._]+)\/?$/i,
-    // instagram.com/username/
-    /instagram\.com\/([a-z0-9._]+)\/$/i,
-    // @username (просто хендл)
-    /^@([a-z0-9._]+)$/i,
   ];
 
-  for (const pattern of patterns) {
-    const match = url.trim().match(pattern);
+  for (const pattern of urlPatterns) {
+    const match = trimmed.match(pattern);
     if (match && match[1]) {
       return match[1];
     }
+  }
+
+  // @username формат — убираем @
+  if (trimmed.startsWith('@')) {
+    const handle = trimmed.slice(1);
+    if (/^[a-z0-9._]+$/i.test(handle)) {
+      return handle;
+    }
+  }
+
+  // Просто username (буквы, цифры, точки, подчёркивания)
+  if (/^[a-z0-9._]+$/i.test(trimmed) && trimmed.length >= 2) {
+    return trimmed;
   }
 
   return null;
 }
 
 /**
- * Проверяет, является ли URL ссылкой на Instagram
+ * Проверяет, является ли ввод Instagram (URL, @handle или username)
+ * Возвращает true если это НЕ Facebook URL
  */
 export function isInstagramUrl(url: string): boolean {
   if (!url) return false;
   const normalized = url.trim().toLowerCase();
-  return normalized.includes('instagram.com') || normalized.startsWith('@');
+
+  // Точно Facebook — не Instagram
+  if (normalized.includes('facebook.com') || normalized.includes('fb.com')) {
+    return false;
+  }
+
+  // Instagram URL
+  if (normalized.includes('instagram.com')) {
+    return true;
+  }
+
+  // @username или просто username — считаем Instagram
+  if (normalized.startsWith('@') || /^[a-z0-9._]+$/i.test(normalized)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -364,8 +392,8 @@ export async function fetchCompetitorCreatives(
     throw new Error('SEARCHAPI_KEY не настроен. Добавьте его в .env');
   }
 
-  // Для "всех стран" используем 'all' (lowercase), иначе код страны
-  const countryParam = country === 'ALL' ? 'all' : country;
+  // Для "всех стран" используем 'ALL' (uppercase, как требует SearchAPI), иначе код страны
+  const countryParam = country === 'ALL' ? 'ALL' : country;
   const finalLimit = options.limit || 30; // По умолчанию 30 лучших
 
   // Базовые параметры

@@ -152,4 +152,56 @@ export const adAccountsApi = {
       return { success: false, error: 'Network error' };
     }
   },
+
+  /**
+   * Обновить аватар страницы для одного аккаунта
+   */
+  async refreshPicture(adAccountId: string): Promise<{ success: boolean; page_picture_url?: string; error?: string }> {
+    try {
+      console.log('[adAccountsApi.refreshPicture] Обновление аватара:', adAccountId);
+
+      const response = await fetch(`${API_BASE_URL}/ad-accounts/${adAccountId}/refresh-picture`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[adAccountsApi.refreshPicture] Ошибка:', errorData);
+        return { success: false, error: errorData.error || `HTTP ${response.status}` };
+      }
+
+      const data = await response.json();
+      console.log('[adAccountsApi.refreshPicture] Результат:', data);
+      return { success: true, page_picture_url: data.page_picture_url };
+    } catch (error) {
+      console.error('[adAccountsApi.refreshPicture] Исключение:', error);
+      return { success: false, error: 'Network error' };
+    }
+  },
+
+  /**
+   * Обновить аватары для всех аккаунтов пользователя
+   */
+  async refreshAllPictures(userAccountId: string): Promise<{ success: boolean; results?: Array<{ id: string; success: boolean; page_picture_url?: string }> }> {
+    try {
+      console.log('[adAccountsApi.refreshAllPictures] Обновление всех аватаров для:', userAccountId);
+
+      const response = await fetch(`${API_BASE_URL}/ad-accounts/${userAccountId}/refresh-all-pictures`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[adAccountsApi.refreshAllPictures] Ошибка:', errorData);
+        return { success: false };
+      }
+
+      const data = await response.json();
+      console.log('[adAccountsApi.refreshAllPictures] Результат:', data);
+      return { success: true, results: data.results };
+    } catch (error) {
+      console.error('[adAccountsApi.refreshAllPictures] Исключение:', error);
+      return { success: false };
+    }
+  },
 };

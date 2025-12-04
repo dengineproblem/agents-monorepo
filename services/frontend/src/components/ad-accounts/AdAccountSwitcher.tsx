@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { Building2, CheckCircle, AlertCircle, Clock, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -80,7 +81,6 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
 
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <Building2 className="h-4 w-4 text-muted-foreground" />
       <Select
         value={currentAdAccountId || undefined}
         onValueChange={(value) => setCurrentAdAccountId(value)}
@@ -89,6 +89,14 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
           <SelectValue placeholder="Выберите аккаунт">
             {currentAccount && (
               <div className="flex items-center gap-2">
+                <Avatar className="h-5 w-5">
+                  {currentAccount.page_picture_url ? (
+                    <AvatarImage src={currentAccount.page_picture_url} alt={currentAccount.name} />
+                  ) : null}
+                  <AvatarFallback className="text-[10px] bg-muted">
+                    {currentAccount.name?.charAt(0)?.toUpperCase() || 'A'}
+                  </AvatarFallback>
+                </Avatar>
                 <span className="truncate">{currentAccount.name}</span>
                 {currentAccount.connection_status && (
                   <span className={cn('h-2 w-2 rounded-full', {
@@ -107,13 +115,22 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
             return (
               <SelectItem key={account.id} value={account.id}>
                 <div className="flex items-center gap-2">
+                  {/* Аватар в выпадающем списке */}
+                  <Avatar className="h-5 w-5">
+                    {account.page_picture_url ? (
+                      <AvatarImage src={account.page_picture_url} alt={account.name} />
+                    ) : null}
+                    <AvatarFallback className="text-[10px] bg-muted">
+                      {account.name?.charAt(0)?.toUpperCase() || 'A'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">{account.name}</span>
                   <StatusIcon
                     className={cn(
-                      'h-4 w-4',
+                      'h-3 w-3 ml-auto',
                       STATUS_COLORS[account.connection_status as keyof typeof STATUS_COLORS] || 'text-gray-400'
                     )}
                   />
-                  <span className="truncate">{account.name}</span>
                 </div>
               </SelectItem>
             );

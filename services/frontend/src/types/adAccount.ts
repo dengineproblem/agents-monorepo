@@ -26,6 +26,9 @@ export interface AdAccount {
   fb_business_id: string | null;
   ig_seed_audience_id: string | null;
 
+  // Аватар Facebook страницы
+  page_picture_url: string | null;
+
   // TikTok credentials
   tiktok_account_id: string | null;
   tiktok_business_id: string | null;
@@ -84,6 +87,8 @@ export interface AdAccountSummary {
   // Facebook данные для проверки подключения (маппятся из fb_*)
   ad_account_id: string | null;   // из fb_ad_account_id
   access_token: string | null;    // из fb_access_token
+  // Аватар Facebook страницы
+  page_picture_url: string | null;
 }
 
 export interface CreateAdAccountPayload {

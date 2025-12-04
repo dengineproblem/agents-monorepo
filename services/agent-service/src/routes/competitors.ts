@@ -35,19 +35,32 @@ const log = createLogger({ module: 'competitorsRoutes' });
 const AddCompetitorSchema = z.object({
   userAccountId: z.string().uuid(),
   accountId: z.string().uuid().optional(), // UUID рекламного аккаунта для мультиаккаунтности
-  // Принимаем Facebook URL, Instagram URL или @handle
+  // Принимаем Facebook URL, Instagram URL, @handle или просто username
   socialUrl: z.string().min(1).refine(
     url => {
       const normalized = url.trim().toLowerCase();
-      return normalized.includes('facebook.com') ||
-             normalized.includes('fb.com') ||
-             normalized.includes('instagram.com') ||
-             normalized.startsWith('@');
+      // Facebook URLs
+      if (normalized.includes('facebook.com') || normalized.includes('fb.com')) {
+        return true;
+      }
+      // Instagram URLs
+      if (normalized.includes('instagram.com')) {
+        return true;
+      }
+      // @username формат
+      if (normalized.startsWith('@')) {
+        return true;
+      }
+      // Просто username (буквы, цифры, точки, подчёркивания — как в Instagram)
+      if (/^[a-z0-9._]+$/i.test(normalized) && normalized.length >= 2) {
+        return true;
+      }
+      return false;
     },
-    'Введите ссылку на Facebook, Instagram или @username'
+    'Введите ссылку на Facebook, Instagram или username'
   ),
   name: z.string().min(1).max(200),
-  countryCode: z.string().length(2).default('KZ'),
+  countryCode: z.string().min(2).max(3).default('KZ'), // 2 символа для стран (KZ, RU) или 3 для ALL
 });
 
 const GetCompetitorsQuerySchema = z.object({

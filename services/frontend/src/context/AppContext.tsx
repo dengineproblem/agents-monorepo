@@ -568,6 +568,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           connection_status: computedStatus as 'pending' | 'connected' | 'error',
           ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
           access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
+          page_picture_url: acc.page_picture_url,  // Аватар страницы
         };
       });
 
@@ -606,6 +607,38 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         multiAccountEnabled: response.multi_account_enabled,
         count: response.ad_accounts.length,
       });
+
+      // Автоматически обновляем аватары для аккаунтов без page_picture_url
+      // (если есть page_id и access_token)
+      if (response.multi_account_enabled) {
+        const accountsNeedingPicture = response.ad_accounts.filter(
+          acc => !acc.page_picture_url && acc.fb_page_id && acc.fb_access_token
+        );
+
+        if (accountsNeedingPicture.length > 0) {
+          console.log('[AppContext] Обновляем аватары для', accountsNeedingPicture.length, 'аккаунтов');
+
+          // Запускаем обновление в фоне, не блокируя UI
+          adAccountsApi.refreshAllPictures(userData.id).then(result => {
+            if (result.success && result.results) {
+              // Обновляем локальное состояние с новыми URL аватаров
+              const updatedResults = result.results.filter(r => r.success && r.page_picture_url);
+              if (updatedResults.length > 0) {
+                setAdAccounts(prev => prev.map(acc => {
+                  const updated = updatedResults.find(r => r.id === acc.id);
+                  if (updated) {
+                    return { ...acc, page_picture_url: updated.page_picture_url || null };
+                  }
+                  return acc;
+                }));
+                console.log('[AppContext] Обновлены аватары для', updatedResults.length, 'аккаунтов');
+              }
+            }
+          }).catch(err => {
+            console.warn('[AppContext] Не удалось обновить аватары:', err);
+          });
+        }
+      }
     } catch (error) {
       console.error('[AppContext] Ошибка загрузки рекламных аккаунтов:', error);
     }

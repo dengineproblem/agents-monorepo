@@ -101,6 +101,31 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
 }
 
 /**
+ * Получить URL аватара Facebook страницы
+ * @param pageId - ID страницы Facebook
+ * @param accessToken - Access token с доступом к странице
+ * @returns URL аватара или null
+ */
+export async function getPagePictureUrl(pageId: string, accessToken: string): Promise<string | null> {
+  try {
+    // Graph API возвращает redirect на картинку, нам нужен URL
+    const result = await graph('GET', `${pageId}/picture`, accessToken, {
+      redirect: 'false',
+      type: 'small', // small (50x50), normal (100x100), large (200x200)
+    });
+
+    if (result?.data?.url) {
+      return result.data.url;
+    }
+
+    return null;
+  } catch (error: any) {
+    log.warn({ err: error, pageId }, 'Failed to get page picture URL');
+    return null;
+  }
+}
+
+/**
  * Загрузка видео в Facebook Ad Account с поддержкой больших файлов (>100 МБ)
  * Использует chunked upload через graph-video.facebook.com
  */

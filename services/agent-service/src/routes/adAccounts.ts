@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { getPagePictureUrl } from '../adapters/facebook.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -119,6 +120,8 @@ function mapDbToFrontend(dbRecord: Record<string, unknown>): Record<string, unkn
     fb_instagram_username: dbRecord.instagram_username,
     fb_access_token: dbRecord.access_token,
     fb_business_id: dbRecord.business_id,
+    // Аватар страницы
+    page_picture_url: dbRecord.page_picture_url,
   };
 }
 
@@ -421,6 +424,114 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       return reply.status(204).send();
     } catch (error) {
       log.error({ error }, 'Error deleting ad account');
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /ad-accounts/:adAccountId/refresh-picture
+   * Обновить аватар страницы Facebook
+   */
+  app.post('/ad-accounts/:adAccountId/refresh-picture', async (
+    req: FastifyRequest<{ Params: { adAccountId: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { adAccountId } = req.params;
+
+    log.info({ adAccountId }, 'Refreshing page picture');
+
+    try {
+      // Получаем аккаунт с токеном и page_id
+      const { data: adAccount, error: fetchError } = await supabase
+        .from('ad_accounts')
+        .select('page_id, access_token')
+        .eq('id', adAccountId)
+        .single();
+
+      if (fetchError || !adAccount) {
+        return reply.status(404).send({ error: 'Ad account not found' });
+      }
+
+      if (!adAccount.page_id || !adAccount.access_token) {
+        return reply.status(400).send({ error: 'Page ID or access token not configured' });
+      }
+
+      // Получаем URL аватара через Graph API
+      const pictureUrl = await getPagePictureUrl(adAccount.page_id, adAccount.access_token);
+
+      if (!pictureUrl) {
+        return reply.status(400).send({ error: 'Could not get page picture' });
+      }
+
+      // Сохраняем URL в БД
+      const { error: updateError } = await supabase
+        .from('ad_accounts')
+        .update({ page_picture_url: pictureUrl })
+        .eq('id', adAccountId);
+
+      if (updateError) {
+        log.error({ error: updateError }, 'Error updating page picture');
+        return reply.status(500).send({ error: 'Failed to update page picture' });
+      }
+
+      log.info({ adAccountId, pictureUrl }, 'Page picture updated');
+      return reply.send({ success: true, page_picture_url: pictureUrl });
+    } catch (error) {
+      log.error({ error }, 'Error refreshing page picture');
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * POST /ad-accounts/refresh-all-pictures
+   * Обновить аватары для всех аккаунтов пользователя
+   */
+  app.post('/ad-accounts/:userAccountId/refresh-all-pictures', async (
+    req: FastifyRequest<{ Params: { userAccountId: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { userAccountId } = req.params;
+
+    log.info({ userAccountId }, 'Refreshing all page pictures');
+
+    try {
+      // Получаем все аккаунты с токеном и page_id
+      const { data: adAccounts, error: fetchError } = await supabase
+        .from('ad_accounts')
+        .select('id, page_id, access_token')
+        .eq('user_account_id', userAccountId)
+        .not('page_id', 'is', null)
+        .not('access_token', 'is', null);
+
+      if (fetchError) {
+        return reply.status(500).send({ error: 'Failed to fetch ad accounts' });
+      }
+
+      const results: Array<{ id: string; success: boolean; page_picture_url?: string }> = [];
+
+      for (const account of adAccounts || []) {
+        try {
+          const pictureUrl = await getPagePictureUrl(account.page_id, account.access_token);
+
+          if (pictureUrl) {
+            await supabase
+              .from('ad_accounts')
+              .update({ page_picture_url: pictureUrl })
+              .eq('id', account.id);
+
+            results.push({ id: account.id, success: true, page_picture_url: pictureUrl });
+          } else {
+            results.push({ id: account.id, success: false });
+          }
+        } catch (err) {
+          results.push({ id: account.id, success: false });
+        }
+      }
+
+      log.info({ userAccountId, updated: results.filter(r => r.success).length }, 'Page pictures refreshed');
+      return reply.send({ success: true, results });
+    } catch (error) {
+      log.error({ error }, 'Error refreshing page pictures');
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
