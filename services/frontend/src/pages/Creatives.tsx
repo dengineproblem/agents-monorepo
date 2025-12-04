@@ -459,6 +459,7 @@ const EditableTitle: React.FC<EditableTitleProps> = ({ title, creativeId, onSave
 
 const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativeIds, demoMode = false, mediaType, imageUrl, carouselData }) => {
   const { currentAdAccountId } = useAppContext();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<CreativeAnalytics | null>(null);
@@ -469,8 +470,10 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   const [testResultDialogOpen, setTestResultDialogOpen] = useState(false);
   const [testLaunchResult, setTestLaunchResult] = useState<TestLaunchResult | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+  // Локальное состояние для отслеживания запущенного теста (не зависит от analytics API)
+  const [localTestRunning, setLocalTestRunning] = useState(false);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceRefresh: boolean = false) => {
     const transcriptPromise = creativesService.getCreativeText(creativeId, mediaType || 'video', carouselData).catch((error) => {
       console.error("creative text load error", error);
       return { text: null };
@@ -478,31 +481,31 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
     const analyticsPromise = (async () => {
       try {
-        console.log(`[CreativeAnalytics] Загружаем аналитику для креатива: ${creativeId}`);
-        
+        console.log(`[CreativeAnalytics] Загружаем аналитику для креатива: ${creativeId}, force: ${forceRefresh}`);
+
         // Получаем userId
         const storedUser = localStorage.getItem('user');
         if (!storedUser) {
           console.error('[CreativeAnalytics] Пользователь не авторизован');
           return null;
         }
-        
+
         const userData = JSON.parse(storedUser);
         const userId = userData.id;
-        
+
         if (!userId) {
           console.error('[CreativeAnalytics] ID пользователя не найден');
           return null;
         }
-        
-        const data = await getCreativeAnalytics(creativeId, userId);
+
+        const data = await getCreativeAnalytics(creativeId, userId, forceRefresh);
         console.log('[CreativeAnalytics] Получена аналитика:', {
           data_source: data.data_source,
           has_test: data.test !== null,
           has_production: data.production !== null,
           has_analysis: data.analysis !== null
         });
-        
+
         return data;
       } catch (error) {
         console.error("[CreativeAnalytics] Ошибка при загрузке аналитики:", error);
@@ -691,10 +694,40 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         setTestLaunchResult(data as TestLaunchResult);
         setTestResultDialogOpen(true);
 
-        // Перезагружаем аналитику
-        const freshData = await fetchData();
-        setTranscript(freshData.transcript);
-        setAnalytics(freshData.analytics);
+        // Устанавливаем локальное состояние - тест запущен
+        setLocalTestRunning(true);
+
+        // Оптимистичное обновление analytics (для совместимости)
+        setAnalytics(prev => ({
+          ...prev,
+          creative: prev?.creative || { id: creativeId, title: '', status: '', direction_id: null, direction_name: null },
+          data_source: 'test',
+          test: {
+            exists: true,
+            status: 'running',
+            completed_at: '',
+            metrics: {
+              impressions: 0, reach: 0, ctr: 0, leads: 0, cpm_cents: null, cpl_cents: null,
+              video_views: 0, video_views_25_percent: 0, video_views_50_percent: 0,
+              video_views_75_percent: 0, video_views_95_percent: 0
+            },
+            llm_analysis: { score: 0, verdict: '', reasoning: '' }
+          },
+          production: prev?.production || null,
+          analysis: prev?.analysis || null,
+          from_cache: false
+        }));
+
+        // Пробуем обновить аналитику, но игнорируем ошибки (локальное состояние уже установлено)
+        try {
+          const freshData = await fetchData(true);
+          setTranscript(freshData.transcript);
+          if (freshData.analytics) {
+            setAnalytics(freshData.analytics);
+          }
+        } catch (e) {
+          console.warn('[CreativeDetails] Не удалось обновить аналитику после запуска теста:', e);
+        }
       } else {
         toast.error('Не удалось запустить тест');
       }
@@ -711,7 +744,8 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       toast.info('Демо-режим не поддерживается');
       return;
     }
-    if (!analytics?.test?.exists) return;
+    // Проверяем локальное состояние ИЛИ analytics
+    if (!localTestRunning && !analytics?.test?.exists) return;
 
     setStopTestLoading(true);
     try {
@@ -748,10 +782,30 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
       toast.success('Тест остановлен');
 
-      // Перезагружаем аналитику
-      const freshData = await fetchData();
-      setTranscript(freshData.transcript);
-      setAnalytics(freshData.analytics);
+      // Сбрасываем локальное состояние
+      setLocalTestRunning(false);
+
+      // Оптимистичное обновление analytics
+      setAnalytics(prev => prev ? {
+        ...prev,
+        data_source: 'none',
+        test: prev.test ? {
+          ...prev.test,
+          exists: false,
+          status: 'cancelled'
+        } : null
+      } : null);
+
+      // Пробуем обновить аналитику, но игнорируем ошибки
+      try {
+        const freshData = await fetchData(true);
+        setTranscript(freshData.transcript);
+        if (freshData.analytics) {
+          setAnalytics(freshData.analytics);
+        }
+      } catch (e) {
+        console.warn('[CreativeDetails] Не удалось обновить аналитику после остановки теста:', e);
+      }
     } catch (error) {
       console.error('Ошибка остановки теста:', error);
       toast.error('Ошибка при остановке теста');
@@ -833,7 +887,10 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
   // Определяем источник данных и метрики
   const dataSource = analytics?.data_source || 'none';
-  const hasTest = analytics?.test?.exists || false;
+  // hasTest учитывает локальное состояние (для случаев когда analytics API недоступен)
+  const hasTest = localTestRunning || analytics?.test?.exists || false;
+  // testIsRunning - локальное состояние ИЛИ статус из analytics
+  const testIsRunning = localTestRunning || analytics?.test?.status === 'running';
   const hasProduction = analytics?.production?.in_use || false;
   const metrics = analytics?.production?.metrics || analytics?.test?.metrics;
   const analysis = analytics?.analysis;
@@ -897,6 +954,16 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
   const transcriptSuggestions = analysis && Array.isArray(analysis.transcript_suggestions)
     ? analysis.transcript_suggestions
     : [];
+
+  // Использовать текст креатива как референс для генерации сценария
+  const handleUseAsReference = () => {
+    if (!transcript) {
+      toast.error('Сначала дождитесь загрузки текста креатива');
+      return;
+    }
+    const encodedText = encodeURIComponent(transcript);
+    navigate(`/creatives?tab=video-scripts&textType=reference&prompt=${encodedText}`);
+  };
 
   return (
     <div className="space-y-4">
@@ -1018,14 +1085,14 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
           variant="outline"
           className="gap-2 w-full sm:w-auto"
           onClick={handleQuickTest}
-          disabled={quickTestLoading || (hasTest && analytics?.test?.status === "running")}
+          disabled={quickTestLoading || (hasTest && testIsRunning)}
         >
           {quickTestLoading ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
               Запуск...
             </>
-          ) : (hasTest && analytics?.test?.status === "running") ? (
+          ) : (hasTest && testIsRunning) ? (
             <>
               <TrendingUp className="h-4 w-4" />
               Тест запущен
@@ -1040,7 +1107,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         {hasTest && (
           <Button
             size="sm"
-            variant={analytics?.test?.status === 'running' ? 'destructive' : 'outline'}
+            variant={testIsRunning ? 'destructive' : 'outline'}
             className="w-full sm:w-auto"
             onClick={handleStopTest}
             disabled={stopTestLoading}
@@ -1050,7 +1117,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Остановка...
               </>
-            ) : analytics?.test?.status === 'running' ? (
+            ) : testIsRunning ? (
               'Остановить тест'
             ) : (
               'Сбросить тест'
@@ -1075,6 +1142,17 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
               Обновить
             </>
           )}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="w-full sm:w-auto gap-2"
+          onClick={handleUseAsReference}
+          disabled={!transcript}
+          title={!transcript ? 'Дождитесь загрузки текста' : 'Переписать сценарий на основе этого текста'}
+        >
+          <Pencil className="h-4 w-4" />
+          Переписать сценарий
         </Button>
       </div>
 
