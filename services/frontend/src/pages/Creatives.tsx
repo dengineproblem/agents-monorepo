@@ -1128,7 +1128,7 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         )}
         <Button
           size="sm"
-          variant="ghost"
+          variant="outline"
           className="w-full sm:w-auto gap-2"
           onClick={handleRefresh}
           disabled={refreshLoading}
