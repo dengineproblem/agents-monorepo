@@ -373,10 +373,13 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
               </div>
             )}
 
-            {/* Текст результата */}
-            <div className="whitespace-pre-wrap bg-muted p-4 rounded-lg text-sm leading-relaxed">
-              {generatedText}
-            </div>
+            {/* Текст результата - редактируемый */}
+            <Textarea
+              value={generatedText}
+              onChange={(e) => setGeneratedText(e.target.value)}
+              className="min-h-[200px] text-sm leading-relaxed resize-none"
+              placeholder="Сгенерированный текст..."
+            />
           </CardContent>
         </Card>
       )}

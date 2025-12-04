@@ -31,6 +31,10 @@ export const translations = {
       consultations: 'Consultations',
       videos: 'Upload Creatives',
       competitors: 'Competitors',
+      // Short labels for mobile nav
+      roiShort: 'ROI',
+      creativesShort: 'Generation',
+      videosShort: 'Upload',
     },
     sidebar: {
       navigation: 'Navigation'
@@ -336,6 +340,10 @@ export const translations = {
       consultations: 'Консультации',
       videos: 'Загрузка креативов',
       competitors: 'Конкуренты',
+      // Short labels for mobile nav
+      roiShort: 'ROI',
+      creativesShort: 'Генерация',
+      videosShort: 'Загрузка',
     },
     sidebar: {
       navigation: 'Навигация'

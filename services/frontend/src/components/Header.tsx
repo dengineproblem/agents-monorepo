@@ -1,6 +1,6 @@
 import { toastT } from '@/utils/toastUtils';
 import React from 'react';
-import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Upload, User, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Calendar, LogOut, Sun, Moon, RefreshCw, DollarSign, LayoutDashboard, TrendingUp, Target, Upload, User, CheckCircle, Users2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
@@ -239,9 +239,10 @@ const Header: React.FC<HeaderProps> = ({
 
   const allMobileNavItems = [
     { path: '/', icon: LayoutDashboard, label: t('menu.dashboard'), visible: true },
-    { path: '/roi', icon: TrendingUp, label: t('menu.roi'), visible: FEATURES.SHOW_ROI_ANALYTICS },
-    { path: '/creatives', icon: Target, label: t('menu.creatives'), visible: FEATURES.SHOW_CREATIVES },
-    { path: '/videos', icon: Upload, label: t('menu.videos'), visible: FEATURES.SHOW_VIDEOS },
+    { path: '/roi', icon: TrendingUp, label: t('menu.roiShort'), visible: FEATURES.SHOW_ROI_ANALYTICS },
+    { path: '/creatives', icon: Target, label: t('menu.creativesShort'), visible: FEATURES.SHOW_CREATIVES },
+    { path: '/videos', icon: Upload, label: t('menu.videosShort'), visible: FEATURES.SHOW_VIDEOS },
+    { path: '/competitors', icon: Users2, label: t('menu.competitors'), visible: FEATURES.SHOW_COMPETITORS },
     { path: '/profile', icon: User, label: t('menu.profile'), visible: true },
   ];
 

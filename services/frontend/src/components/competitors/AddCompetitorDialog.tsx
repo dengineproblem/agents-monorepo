@@ -94,7 +94,7 @@ export function AddCompetitorDialog({ userAccountId, onAdded }: AddCompetitorDia
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
+        <Button variant="outline">
           <Plus className="w-4 h-4 mr-2" />
           {t('competitors.add')}
         </Button>
