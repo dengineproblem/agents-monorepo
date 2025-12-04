@@ -606,7 +606,7 @@ async function handleSmartMatching(
   const timestamp = new Date(message.messageTimestamp * 1000 || Date.now());
 
   // Создать лида БЕЗ креатива, но С направлением
-  await createLeadWithoutCreative({
+  const { isNew } = await createLeadWithoutCreative({
     userAccountId: instanceData.user_account_id,
     accountId: instanceData.account_id || null,  // UUID для мультиаккаунтности
     whatsappPhoneNumberId: whatsappNumber?.id,
@@ -620,12 +620,15 @@ async function handleSmartMatching(
     timestamp
   }, app);
 
-  // Отправить уведомление в Telegram о необходимости ручного сопоставления
-  await notifyManualMatchRequired(instanceData.user_account_id, clientPhone, matchResult, app);
+  // Отправить уведомление в Telegram только для НОВЫХ лидов
+  if (isNew) {
+    await notifyManualMatchRequired(instanceData.user_account_id, clientPhone, matchResult, app);
+  }
 }
 
 /**
  * Создать лида без креатива (требует ручного сопоставления)
+ * @returns { isNew: boolean } - true если создан новый лид, false если обновлён существующий
  */
 async function createLeadWithoutCreative(params: {
   userAccountId: string;
@@ -639,7 +642,7 @@ async function createLeadWithoutCreative(params: {
   similarity: number;
   messageText: string;
   timestamp: Date;
-}, app: FastifyInstance) {
+}, app: FastifyInstance): Promise<{ isNew: boolean }> {
   const {
     userAccountId,
     accountId,
@@ -680,32 +683,44 @@ async function createLeadWithoutCreative(params: {
     } else {
       app.log.info({ leadId: existingLead.id, similarity }, 'Updated existing lead (needs manual match)');
     }
-  } else {
-    // Создать новый лид
-    const { data: newLead, error } = await supabase
-      .from('leads')
-      .insert({
-        user_account_id: userAccountId,
-        account_id: accountId || null,  // UUID для мультиаккаунтности
-        business_id: instancePhone,
-        chat_id: clientPhone,
-        conversion_source: 'Evolution_API_SmartMatch',
-        direction_id: directionId,
-        whatsapp_phone_number_id: whatsappPhoneNumberId,
-        funnel_stage: 'new_lead',
-        status: 'active',
-        needs_manual_match: true,
-        created_at: timestamp,
-        updated_at: timestamp
-      })
-      .select()
-      .single();
 
-    if (error) {
-      app.log.error({ error, clientPhone }, 'Failed to create lead from smart match');
-    } else {
-      app.log.info({ leadId: newLead?.id, similarity }, 'Created new lead from smart match (needs manual creative)');
-    }
+    // Создать запись в dialog_analysis для чат-бота
+    await upsertDialogAnalysis({
+      userAccountId,
+      accountId,
+      instanceName,
+      contactPhone: clientPhone,
+      messageText,
+      timestamp
+    }, app);
+
+    return { isNew: false };
+  }
+
+  // Создать новый лид
+  const { data: newLead, error } = await supabase
+    .from('leads')
+    .insert({
+      user_account_id: userAccountId,
+      account_id: accountId || null,  // UUID для мультиаккаунтности
+      business_id: instancePhone,
+      chat_id: clientPhone,
+      conversion_source: 'Evolution_API_SmartMatch',
+      direction_id: directionId,
+      whatsapp_phone_number_id: whatsappPhoneNumberId,
+      funnel_stage: 'new_lead',
+      status: 'active',
+      needs_manual_match: true,
+      created_at: timestamp,
+      updated_at: timestamp
+    })
+    .select()
+    .single();
+
+  if (error) {
+    app.log.error({ error, clientPhone }, 'Failed to create lead from smart match');
+  } else {
+    app.log.info({ leadId: newLead?.id, similarity }, 'Created new lead from smart match (needs manual creative)');
   }
 
   // Создать запись в dialog_analysis для чат-бота
@@ -717,6 +732,8 @@ async function createLeadWithoutCreative(params: {
     messageText,
     timestamp
   }, app);
+
+  return { isNew: true };
 }
 
 /**
