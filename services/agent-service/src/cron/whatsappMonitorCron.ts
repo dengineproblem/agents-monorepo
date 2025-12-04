@@ -8,8 +8,9 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 
 /**
  * Проверяет статус WhatsApp инстанса через Evolution API
+ * Возвращает: 'connected' | 'disconnected' | 'error' (ошибка проверки, не disconnected)
  */
-async function checkInstanceStatus(instanceName: string): Promise<boolean> {
+async function checkInstanceStatus(instanceName: string): Promise<'connected' | 'disconnected' | 'error'> {
   try {
     const url = `${EVOLUTION_API_URL}/instance/connectionState/${instanceName}`;
 
@@ -17,18 +18,49 @@ async function checkInstanceStatus(instanceName: string): Promise<boolean> {
       method: 'GET',
       headers: {
         'apikey': EVOLUTION_API_KEY
-      }
+      },
+      signal: AbortSignal.timeout(10000) // 10 секунд таймаут
     });
 
     if (!response.ok) {
-      return false;
+      // HTTP ошибка — может быть временная проблема с API
+      return 'error';
     }
 
     const data = await response.json() as any;
-    return data.state === 'open';
+    return data.state === 'open' ? 'connected' : 'disconnected';
   } catch (error: any) {
-    return false;
+    // Сетевая ошибка или таймаут — не считаем disconnected
+    return 'error';
   }
+}
+
+/**
+ * Проверяет статус с повторными попытками
+ * Возвращает true только если инстанс реально disconnected (подтверждено несколько раз)
+ */
+async function isReallyDisconnected(instanceName: string, retries: number = 3, delayMs: number = 2000): Promise<boolean> {
+  let disconnectCount = 0;
+
+  for (let i = 0; i < retries; i++) {
+    const status = await checkInstanceStatus(instanceName);
+
+    if (status === 'connected') {
+      return false; // Подключен — точно не disconnected
+    }
+
+    if (status === 'disconnected') {
+      disconnectCount++;
+    }
+    // Если 'error' — не считаем ни как connected, ни как disconnected
+
+    if (i < retries - 1) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // Считаем disconnected только если получили явный disconnected хотя бы 2 раза
+  return disconnectCount >= 2;
 }
 
 interface WhatsAppInstance {
@@ -85,15 +117,15 @@ export function startWhatsAppMonitorCron(app: FastifyInstance) {
       for (const instance of instances) {
         const inst = instance as any;
         try {
-          const isConnected = await checkInstanceStatus(inst.instance_name);
+          const isDisconnected = await isReallyDisconnected(inst.instance_name);
 
-          if (!isConnected) {
+          if (isDisconnected) {
             app.log.warn({
               instanceName: inst.instance_name,
               phone: inst.phone_number,
               userId: inst.user_account_id,
-              accountId: inst.account_id  // UUID для мультиаккаунтности
-            }, '[WhatsApp Monitor] Instance disconnected!');
+              accountId: inst.account_id
+            }, '[WhatsApp Monitor] Instance confirmed disconnected (verified with retries)');
 
             // 3. Обновляем статус в whatsapp_instances
             await supabase

@@ -8,8 +8,8 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 // Схемы валидации
 const CreateInstanceSchema = z.object({
   userAccountId: z.string().uuid(),
-  accountId: z.string().uuid().optional(), // UUID рекламного аккаунта для мультиаккаунтности
-  phoneNumberId: z.string().uuid().optional(),
+  accountId: z.string().uuid().nullish(), // UUID рекламного аккаунта для мультиаккаунтности (null или undefined OK)
+  phoneNumberId: z.string().uuid().nullish(),
 });
 
 export default async function whatsappInstances(app: FastifyInstance) {
