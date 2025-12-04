@@ -63,23 +63,25 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
       setLoading(true);
       setError(null);
 
-      // Load both custom fields and current settings in parallel
-      const [fieldsResponse, settingsResponse] = await Promise.all([
-        getLeadCustomFields(userAccountId),
-        getQualificationFields(userAccountId),
-      ]);
-
+      // Load custom fields first (required)
+      const fieldsResponse = await getLeadCustomFields(userAccountId);
       setAvailableFields(fieldsResponse.fields || []);
 
-      // Convert saved settings to selected fields format
-      if (settingsResponse.fields && settingsResponse.fields.length > 0) {
-        setSelectedFields(
-          settingsResponse.fields.map(f => ({
-            fieldId: f.field_id,
-            enumId: f.enum_id || null,
-          }))
-        );
-      } else {
+      // Try to load saved settings (may fail if migration not applied)
+      try {
+        const settingsResponse = await getQualificationFields(userAccountId);
+        if (settingsResponse.fields && settingsResponse.fields.length > 0) {
+          setSelectedFields(
+            settingsResponse.fields.map(f => ({
+              fieldId: f.field_id,
+              enumId: f.enum_id || null,
+            }))
+          );
+        } else {
+          setSelectedFields([{ fieldId: null, enumId: null }]);
+        }
+      } catch (settingsErr: any) {
+        console.warn('Could not load saved settings (migration may not be applied):', settingsErr.message);
         setSelectedFields([{ fieldId: null, enumId: null }]);
       }
     } catch (err: any) {
@@ -263,7 +265,7 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                 const currentField = getFieldById(sf.fieldId);
 
                 return (
-                  <div key={index} className="space-y-2 p-3 border rounded-lg bg-gray-50">
+                  <div key={index} className="space-y-2 p-3 border rounded-lg bg-gray-50 dark:bg-gray-800 dark:border-gray-700">
                     <div className="flex items-center justify-between">
                       <label className="text-sm font-medium">
                         Поле {index + 1}
@@ -285,7 +287,7 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                       onValueChange={(value) => handleFieldChange(index, value)}
                       disabled={availableFields.length === 0}
                     >
-                      <SelectTrigger className="w-full bg-white">
+                      <SelectTrigger className="w-full bg-white dark:bg-gray-900 dark:border-gray-600">
                         <SelectValue placeholder="Выберите поле" />
                       </SelectTrigger>
                       <SelectContent>
@@ -323,7 +325,7 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
                           value={sf.enumId?.toString() || 'none'}
                           onValueChange={(value) => handleEnumChange(index, value)}
                         >
-                          <SelectTrigger className="w-full bg-white mt-1">
+                          <SelectTrigger className="w-full bg-white dark:bg-gray-900 dark:border-gray-600 mt-1">
                             <SelectValue placeholder="Выберите значение" />
                           </SelectTrigger>
                           <SelectContent>
@@ -386,14 +388,14 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
 
               {/* Summary */}
               {activeFieldsCount > 0 && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg p-3">
                   <div className="flex items-start gap-2">
-                    <Check className="h-4 w-4 text-green-600 flex-shrink-0 mt-0.5" />
+                    <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
                     <div className="text-sm">
-                      <p className="text-green-800 font-medium">
+                      <p className="text-green-800 dark:text-green-300 font-medium">
                         {activeFieldsCount === 1 ? 'Выбрано 1 поле' : `Выбрано ${activeFieldsCount} поля`}
                       </p>
-                      <p className="text-green-600 text-xs mt-1">
+                      <p className="text-green-600 dark:text-green-400 text-xs mt-1">
                         Лид квалифицирован, если хотя бы одно условие выполнено
                       </p>
                     </div>
@@ -402,10 +404,10 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
               )}
 
               {/* Info about CPQL */}
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
                 <div className="flex items-start gap-2">
-                  <AlertCircle className="h-4 w-4 text-gray-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-gray-600">
+                  <AlertCircle className="h-4 w-4 text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-gray-600 dark:text-gray-300">
                     CPQL (стоимость квалифицированного лида) будет рассчитываться на основе
                     выбранных полей вместо данных WhatsApp.
                   </p>
@@ -416,17 +418,17 @@ export const AmoCRMQualificationFieldModal: React.FC<AmoCRMQualificationFieldMod
 
           {/* Error message */}
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
-              <X className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-800">{error}</p>
+            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg p-3 flex items-start gap-2">
+              <X className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-800 dark:text-red-300">{error}</p>
             </div>
           )}
 
           {/* Success message */}
           {successMessage && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-2">
-              <Check className="h-4 w-4 text-green-600 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-green-800">{successMessage}</p>
+            <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg p-3 flex items-start gap-2">
+              <Check className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-green-800 dark:text-green-300">{successMessage}</p>
             </div>
           )}
         </div>
