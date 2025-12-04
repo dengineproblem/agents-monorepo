@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { formatCurrency, formatPercent, formatPercentWhole, formatNumber, formatCurrencyKZT } from '../utils/formatters';
 import { CircleDollarSign, Target, MousePointerClick, BarChart3, TrendingUp, Percent } from 'lucide-react';
@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
 import { useTranslation } from '../i18n/LanguageContext';
+import { getQualifiedLeadsTotal } from '@/services/amocrmApi';
 
 interface SummaryStatsProps {
   showTitle?: boolean;
@@ -13,8 +14,45 @@ interface SummaryStatsProps {
 
 const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   const { t } = useTranslation();
-  const { campaignStats, loading, error, platform } = useAppContext();
-  
+  const { campaignStats, loading, error, platform, dateRange } = useAppContext();
+
+  // State for AmoCRM qualified leads
+  const [amocrmQualifiedLeads, setAmocrmQualifiedLeads] = useState<number | null>(null);
+  const [amocrmConfigured, setAmocrmConfigured] = useState(false);
+
+  // Load AmoCRM qualified leads data when date range changes
+  useEffect(() => {
+    const loadAmocrmQualifiedLeads = async () => {
+      const storedUser = localStorage.getItem('user');
+      if (!storedUser) return;
+
+      try {
+        const userData = JSON.parse(storedUser);
+        if (!userData.id) return;
+
+        const result = await getQualifiedLeadsTotal(
+          userData.id,
+          dateRange.since,
+          dateRange.until
+        );
+
+        setAmocrmConfigured(result.configured);
+        setAmocrmQualifiedLeads(result.totalQualifiedLeads);
+
+        if (result.configured) {
+          console.log('[SummaryStats] Using AmoCRM qualified leads:', result.totalQualifiedLeads);
+        }
+      } catch (err) {
+        console.error('[SummaryStats] Failed to load AmoCRM qualified leads:', err);
+        // Fall back to Facebook data on error
+        setAmocrmConfigured(false);
+        setAmocrmQualifiedLeads(null);
+      }
+    };
+
+    loadAmocrmQualifiedLeads();
+  }, [dateRange]);
+
   const stats = useMemo(() => {
     if (campaignStats.length === 0) {
       return {
@@ -50,11 +88,20 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
     const totalSpend = campaignStats.reduce((sum, stat) => sum + stat.spend, 0);
     const totalLeads = campaignStats.reduce((sum, stat) => sum + (stat.leads || 0), 0);
     const totalMessagingLeads = campaignStats.reduce((sum, stat) => sum + (stat.messagingLeads || 0), 0);
-    const totalQualityLeads = campaignStats.reduce((sum, stat) => sum + (stat.qualityLeads || 0), 0);
+
+    // Use AmoCRM qualified leads if configured, otherwise fall back to Facebook data
+    const facebookQualityLeads = campaignStats.reduce((sum, stat) => sum + (stat.qualityLeads || 0), 0);
+    const totalQualityLeads = amocrmConfigured && amocrmQualifiedLeads !== null
+      ? amocrmQualifiedLeads
+      : facebookQualityLeads;
+
     const totalImpressions = campaignStats.reduce((sum, stat) => sum + stat.impressions, 0);
-    
+
     const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
-    const qualityRate = totalMessagingLeads > 0 ? (totalQualityLeads / totalMessagingLeads) * 100 : 0;
+    // Quality rate: for AmoCRM, calculate against total leads; for Facebook, calculate against messaging leads
+    const qualityRate = amocrmConfigured && amocrmQualifiedLeads !== null
+      ? (totalLeads > 0 ? (totalQualityLeads / totalLeads) * 100 : 0)
+      : (totalMessagingLeads > 0 ? (totalQualityLeads / totalMessagingLeads) * 100 : 0);
     const avgCpql = totalQualityLeads > 0 ? totalSpend / totalQualityLeads : 0;
     
     const isZeroData = hasRealData && totalSpend === 0 && totalLeads === 0 && totalImpressions === 0;
@@ -72,9 +119,10 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
       avgCpql,
       totalImpressions,
       isMockData: false,
-      isZeroData
+      isZeroData,
+      useAmocrmData: amocrmConfigured && amocrmQualifiedLeads !== null
     };
-  }, [campaignStats]);
+  }, [campaignStats, amocrmConfigured, amocrmQualifiedLeads]);
 
   // Для Target тарифа - с Card оберткой, для остальных - просто grid
   if (showTitle) {

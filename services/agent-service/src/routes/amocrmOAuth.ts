@@ -364,8 +364,8 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
             <h1>AmoCRM подключен!</h1>
             <p>Ваш аккаунт AmoCRM (${subdomain}.amocrm.ru) успешно подключен к системе.</p>
             
-            <a href="https://app.performanteaiagency.com/profile" class="btn">Вернуться в профиль</a>
-            
+            <a href="https://app.performanteaiagency.com/profile?amocrm_setup=true" class="btn">Вернуться в профиль</a>
+
             <div class="redirect-text">Автоматический переход через 3 секунды...</div>
           </div>
           <script>
@@ -376,7 +376,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
                   type: 'amocrm_connected',
                   subdomain: '${subdomain}'
                 }, '*');
-                
+
                 // Close popup after short delay if successfully messaged
                 setTimeout(() => window.close(), 2000);
               }
@@ -384,9 +384,9 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
               console.error('Error posting message:', e);
             }
 
-            // Always redirect to profile as fallback or main flow
+            // Always redirect to profile with setup flag as fallback or main flow
             setTimeout(() => {
-              window.location.href = 'https://app.performanteaiagency.com/profile';
+              window.location.href = 'https://app.performanteaiagency.com/profile?amocrm_setup=true';
             }, 3000);
           </script>
         </body>

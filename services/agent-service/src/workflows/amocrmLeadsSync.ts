@@ -81,6 +81,18 @@ export async function syncLeadsFromAmoCRM(
     // 1. Get valid AmoCRM token
     const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
 
+    // 1.5 Check if custom qualification field is configured
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('amocrm_qualification_field_id')
+      .eq('id', userAccountId)
+      .maybeSingle();
+
+    const qualificationFieldId = userAccount?.amocrm_qualification_field_id || null;
+    if (qualificationFieldId) {
+      log.info({ userAccountId, qualificationFieldId }, 'Custom qualification field configured');
+    }
+
     // 2. Get all leads with phone numbers from database
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
@@ -209,7 +221,21 @@ export async function syncLeadsFromAmoCRM(
           current.count++;
           pipelineStats.set(newPipelineId, current);
         }
-        const isQualified = qualificationMap.get(newStatusId!) || false;
+
+        // Determine qualification based on custom field or pipeline stage
+        let isQualified = false;
+
+        if (qualificationFieldId) {
+          // Use custom field for qualification
+          const customFieldValue = amocrmLeadFromContact.custom_fields_values?.find(
+            (field: any) => field.field_id === qualificationFieldId
+          );
+          // Checkbox fields have values like [{ value: true/false }]
+          isQualified = customFieldValue?.values?.[0]?.value === true;
+        } else {
+          // Fallback to pipeline stage qualification
+          isQualified = qualificationMap.get(newStatusId!) || false;
+        }
 
         // Only update if something changed
         const needsUpdate = 

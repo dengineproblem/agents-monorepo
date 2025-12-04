@@ -19,6 +19,7 @@ import DirectionsCard from '@/components/profile/DirectionsCard';
 import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionCard';
 import { TildaConnectionCard, TildaInstructionsDialog } from '@/components/profile/TildaConnectionCard';
 // TEMPORARILY HIDDEN: import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
+import { AmoCRMQualificationFieldModal } from '@/components/amocrm/AmoCRMQualificationFieldModal';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { appReviewText } from '../utils/appReviewText';
@@ -157,6 +158,8 @@ const Profile: React.FC = () => {
   const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
   const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
   const [amocrmKeyStagesModal, setAmocrmKeyStagesModal] = useState(false);
+  const [amocrmQualificationModal, setAmocrmQualificationModal] = useState(false);
+  const [amocrmQualificationFieldName, setAmocrmQualificationFieldName] = useState<string | null>(null);
 
   // Facebook Manual Connect Modal
   const [facebookManualModal, setFacebookManualModal] = useState(false);
@@ -312,19 +315,19 @@ const Profile: React.FC = () => {
   useEffect(() => {
     const loadAmoCRMStatus = async () => {
       if (!user?.id) return;
-      
+
       try {
         const response = await fetch(`${API_BASE_URL}/amocrm/status?userAccountId=${user.id}`);
         if (!response.ok) {
           console.error('Failed to load AmoCRM status');
           return;
         }
-        
+
         const data = await response.json();
         console.log('AmoCRM status loaded:', data);
         setAmocrmConnected(data.connected);
         setAmocrmSubdomain(data.subdomain || '');
-        
+
         if (data.connected) {
           // Check webhook status
           try {
@@ -337,14 +340,41 @@ const Profile: React.FC = () => {
           } catch (error) {
             console.error('Failed to check webhook status:', error);
           }
+
+          // Load qualification field setting
+          try {
+            const qualRes = await fetch(`${API_BASE_URL}/amocrm/qualification-field?userAccountId=${user.id}`);
+            if (qualRes.ok) {
+              const qualData = await qualRes.json();
+              console.log('Qualification field loaded:', qualData);
+              setAmocrmQualificationFieldName(qualData.fieldName || null);
+            }
+          } catch (error) {
+            console.error('Failed to load qualification field:', error);
+          }
         }
       } catch (error) {
         console.error('Failed to load AmoCRM status:', error);
       }
     };
-    
+
     loadAmoCRMStatus();
   }, [user?.id]);
+
+  // Handle AmoCRM OAuth callback - open qualification modal after connection
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const amocrmSetup = params.get('amocrm_setup');
+
+    if (amocrmSetup === 'true') {
+      // Clear URL params
+      window.history.replaceState({}, document.title, '/profile');
+      // Open qualification modal after short delay to let AmoCRM status load
+      setTimeout(() => {
+        setAmocrmQualificationModal(true);
+      }, 500);
+    }
+  }, []);
 
   const tarifBadge = useMemo(() => {
     if (!tarif) return null;
@@ -1683,6 +1713,25 @@ const Profile: React.FC = () => {
               </Button>
               */}
 
+              {/* Qualification Field Configuration */}
+              <div className="space-y-2">
+                <Button
+                  onClick={() => {
+                    setAmocrmModal(false);
+                    setAmocrmQualificationModal(true);
+                  }}
+                  variant="default"
+                  className="w-full"
+                >
+                  Настроить квалификацию
+                </Button>
+                {amocrmQualificationFieldName && (
+                  <p className="text-xs text-muted-foreground text-center">
+                    Текущее поле: {amocrmQualificationFieldName}
+                  </p>
+                )}
+              </div>
+
               <Button
                 onClick={handleAmoCRMSync}
                 variant="outline"
@@ -1736,6 +1785,22 @@ const Profile: React.FC = () => {
           onOpenChange={setTildaInstructionsModal}
           userAccountId={user?.id || null}
         />
+
+        {/* AmoCRM Qualification Field Modal */}
+        {user?.id && (
+          <AmoCRMQualificationFieldModal
+            isOpen={amocrmQualificationModal}
+            onClose={() => setAmocrmQualificationModal(false)}
+            userAccountId={user.id}
+            onSave={() => {
+              // Reload qualification field name after save
+              fetch(`${API_BASE_URL}/amocrm/qualification-field?userAccountId=${user.id}`)
+                .then(res => res.json())
+                .then(data => setAmocrmQualificationFieldName(data.fieldName || null))
+                .catch(err => console.error('Failed to reload qualification field:', err));
+            }}
+          />
+        )}
       </div>
     </div>
   );

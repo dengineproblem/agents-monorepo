@@ -465,6 +465,26 @@ export async function getLeadCustomFields(
 }
 
 /**
+ * Get all custom fields for contacts
+ *
+ * @param subdomain - AmoCRM subdomain
+ * @param accessToken - Access token
+ * @returns Custom fields array
+ */
+export async function getContactCustomFields(
+  subdomain: string,
+  accessToken: string
+): Promise<any[]> {
+  const response = await amocrmRequest<{ _embedded: { custom_fields: any[] } }>({
+    subdomain,
+    accessToken,
+    endpoint: 'contacts/custom_fields'
+  });
+
+  return response._embedded?.custom_fields || [];
+}
+
+/**
  * Get account info (for testing connection)
  *
  * @param subdomain - AmoCRM subdomain

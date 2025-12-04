@@ -10,7 +10,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { getValidAmoCRMToken } from '../lib/amocrmTokens.js';
-import { getPipelines } from '../adapters/amocrm.js';
+import { getPipelines, getLeadCustomFields, getContactCustomFields } from '../adapters/amocrm.js';
 
 const UserAccountIdSchema = z.object({
   userAccountId: z.string().uuid()
@@ -1081,6 +1081,368 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error recalculating key stage stats');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /amocrm/lead-custom-fields
+   * Get all checkbox/boolean custom fields from AmoCRM for lead qualification setup
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *
+   * Returns: { fields: [{ field_id, field_name, field_type }] }
+   */
+  app.get('/amocrm/lead-custom-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+
+      app.log.info({ userAccountId }, 'Fetching custom fields from AmoCRM (leads + contacts)');
+
+      // Get valid token
+      const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+
+      // Fetch custom fields from both leads and contacts
+      const [leadFields, contactFields] = await Promise.all([
+        getLeadCustomFields(subdomain, accessToken),
+        getContactCustomFields(subdomain, accessToken)
+      ]);
+
+      // Log all fields for debugging
+      app.log.info({
+        userAccountId,
+        leadFieldsCount: leadFields.length,
+        contactFieldsCount: contactFields.length,
+        leadFieldTypes: leadFields.map((f: any) => ({ id: f.id, name: f.name, type: f.type })),
+        contactFieldTypes: contactFields.map((f: any) => ({ id: f.id, name: f.name, type: f.type }))
+      }, 'All custom fields from AmoCRM');
+
+      // Filter only checkbox fields from leads
+      const leadCheckboxFields = leadFields.filter(
+        (field: any) => field.type === 'checkbox'
+      ).map((field: any) => ({
+        field_id: field.id,
+        field_name: field.name,
+        field_type: field.type,
+        entity: 'lead'
+      }));
+
+      // Filter only checkbox fields from contacts
+      const contactCheckboxFields = contactFields.filter(
+        (field: any) => field.type === 'checkbox'
+      ).map((field: any) => ({
+        field_id: field.id,
+        field_name: `${field.name} (контакт)`,
+        field_type: field.type,
+        entity: 'contact'
+      }));
+
+      // Combine all checkbox fields
+      const allCheckboxFields = [...leadCheckboxFields, ...contactCheckboxFields];
+
+      app.log.info({
+        userAccountId,
+        leadCheckboxCount: leadCheckboxFields.length,
+        contactCheckboxCount: contactCheckboxFields.length,
+        totalCheckboxCount: allCheckboxFields.length
+      }, 'Checkbox fields filtered');
+
+      return reply.send({
+        fields: allCheckboxFields
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching custom fields');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /amocrm/qualification-field
+   * Get current qualification field setting for user account
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *
+   * Returns: { fieldId: number | null, fieldName: string | null }
+   */
+  app.get('/amocrm/qualification-field', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+
+      const { data: account, error } = await supabase
+        .from('user_accounts')
+        .select('amocrm_qualification_field_id, amocrm_qualification_field_name')
+        .eq('id', userAccountId)
+        .maybeSingle();
+
+      if (error) {
+        app.log.error({ error }, 'Error fetching qualification field setting');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      return reply.send({
+        fieldId: account?.amocrm_qualification_field_id || null,
+        fieldName: account?.amocrm_qualification_field_name || null
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting qualification field');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /amocrm/qualification-field
+   * Save qualification field setting for user account
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *
+   * Body: { fieldId: number | null, fieldName: string | null }
+   *
+   * Returns: { success: true }
+   */
+  app.patch('/amocrm/qualification-field', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+      const { fieldId, fieldName } = request.body as { fieldId: number | null; fieldName: string | null };
+
+      app.log.info({ userAccountId, fieldId, fieldName }, 'Saving qualification field setting');
+
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({
+          amocrm_qualification_field_id: fieldId,
+          amocrm_qualification_field_name: fieldName,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userAccountId);
+
+      if (error) {
+        app.log.error({ error }, 'Error saving qualification field setting');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      app.log.info({ userAccountId, fieldId }, 'Qualification field setting saved');
+
+      return reply.send({ success: true });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error saving qualification field');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /amocrm/qualified-leads-by-creative
+   * Get count of qualified leads grouped by creative_id
+   * Used for calculating CPQL based on AmoCRM qualification field
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *   - dateFrom: (optional) ISO date string
+   *   - dateTo: (optional) ISO date string
+   *
+   * Returns: { qualifiedByCreative: { [creative_id]: number } }
+   */
+  app.get('/amocrm/qualified-leads-by-creative', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, dateFrom, dateTo } = request.query as {
+        userAccountId: string;
+        dateFrom?: string;
+        dateTo?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          message: 'userAccountId is required'
+        });
+      }
+
+      // Check if qualification field is configured
+      const { data: account } = await supabase
+        .from('user_accounts')
+        .select('amocrm_qualification_field_id')
+        .eq('id', userAccountId)
+        .maybeSingle();
+
+      if (!account?.amocrm_qualification_field_id) {
+        // No qualification field configured, return empty
+        return reply.send({
+          qualifiedByCreative: {},
+          configured: false
+        });
+      }
+
+      // Build query for qualified leads
+      let query = supabase
+        .from('leads')
+        .select('creative_id')
+        .eq('user_account_id', userAccountId)
+        .eq('is_qualified', true)
+        .not('creative_id', 'is', null);
+
+      if (dateFrom) {
+        query = query.gte('created_at', dateFrom);
+      }
+      if (dateTo) {
+        query = query.lte('created_at', dateTo);
+      }
+
+      const { data: leads, error } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Error fetching qualified leads');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      // Group by creative_id and count
+      const qualifiedByCreative: Record<string, number> = {};
+
+      leads?.forEach(lead => {
+        if (lead.creative_id) {
+          qualifiedByCreative[lead.creative_id] = (qualifiedByCreative[lead.creative_id] || 0) + 1;
+        }
+      });
+
+      return reply.send({
+        qualifiedByCreative,
+        configured: true
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting qualified leads by creative');
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /amocrm/qualified-leads-total
+   * Get total count of qualified leads for the period
+   * Used for calculating overall CPQL based on AmoCRM qualification field
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *   - dateFrom: (optional) ISO date string (YYYY-MM-DD)
+   *   - dateTo: (optional) ISO date string (YYYY-MM-DD)
+   *
+   * Returns: { totalQualifiedLeads: number, configured: boolean }
+   */
+  app.get('/amocrm/qualified-leads-total', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { userAccountId, dateFrom, dateTo } = request.query as {
+        userAccountId: string;
+        dateFrom?: string;
+        dateTo?: string;
+      };
+
+      if (!userAccountId) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          message: 'userAccountId is required'
+        });
+      }
+
+      // Check if qualification field is configured
+      const { data: account } = await supabase
+        .from('user_accounts')
+        .select('amocrm_qualification_field_id')
+        .eq('id', userAccountId)
+        .maybeSingle();
+
+      if (!account?.amocrm_qualification_field_id) {
+        // No qualification field configured, return null to indicate fallback to Facebook data
+        return reply.send({
+          totalQualifiedLeads: null,
+          configured: false
+        });
+      }
+
+      // Build query for qualified leads
+      let query = supabase
+        .from('leads')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_account_id', userAccountId)
+        .eq('is_qualified', true);
+
+      if (dateFrom) {
+        query = query.gte('created_at', dateFrom + 'T00:00:00.000Z');
+      }
+      if (dateTo) {
+        query = query.lte('created_at', dateTo + 'T23:59:59.999Z');
+      }
+
+      const { count, error } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Error fetching qualified leads total');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      return reply.send({
+        totalQualifiedLeads: count || 0,
+        configured: true
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting qualified leads total');
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message

@@ -292,3 +292,179 @@ export async function recalculateKeyStageStats(
   return response.json();
 }
 
+// ==================== Qualification Field API ====================
+
+export interface CustomField {
+  field_id: number;
+  field_name: string;
+  field_type: string;
+}
+
+export interface QualificationFieldSetting {
+  fieldId: number | null;
+  fieldName: string | null;
+}
+
+export interface QualifiedLeadsByCreative {
+  qualifiedByCreative: Record<string, number>;
+  configured: boolean;
+}
+
+/**
+ * Get all checkbox custom fields from AmoCRM (for qualification field selection)
+ *
+ * @param userAccountId - User account UUID
+ * @returns Array of checkbox custom fields
+ */
+export async function getLeadCustomFields(
+  userAccountId: string
+): Promise<{ fields: CustomField[] }> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/lead-custom-fields?userAccountId=${userAccountId}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch custom fields');
+  }
+
+  return response.json();
+}
+
+/**
+ * Get current qualification field setting
+ *
+ * @param userAccountId - User account UUID
+ * @returns Current qualification field setting
+ */
+export async function getQualificationField(
+  userAccountId: string
+): Promise<QualificationFieldSetting> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/qualification-field?userAccountId=${userAccountId}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch qualification field');
+  }
+
+  return response.json();
+}
+
+/**
+ * Save qualification field setting
+ *
+ * @param userAccountId - User account UUID
+ * @param fieldId - Field ID (or null to disable)
+ * @param fieldName - Field name (or null)
+ * @returns Success status
+ */
+export async function setQualificationField(
+  userAccountId: string,
+  fieldId: number | null,
+  fieldName: string | null
+): Promise<{ success: boolean }> {
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/qualification-field?userAccountId=${userAccountId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fieldId, fieldName }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to save qualification field');
+  }
+
+  return response.json();
+}
+
+/**
+ * Get qualified leads count by creative ID
+ * Used for calculating CPQL based on AmoCRM custom field qualification
+ *
+ * @param userAccountId - User account UUID
+ * @param dateFrom - Optional start date (ISO format)
+ * @param dateTo - Optional end date (ISO format)
+ * @returns Qualified leads count by creative
+ */
+export async function getQualifiedLeadsByCreative(
+  userAccountId: string,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<QualifiedLeadsByCreative> {
+  const queryParams = new URLSearchParams({
+    userAccountId,
+  });
+
+  if (dateFrom) {
+    queryParams.append('dateFrom', dateFrom);
+  }
+
+  if (dateTo) {
+    queryParams.append('dateTo', dateTo);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/qualified-leads-by-creative?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch qualified leads by creative');
+  }
+
+  return response.json();
+}
+
+/**
+ * Response type for total qualified leads
+ */
+export interface QualifiedLeadsTotal {
+  totalQualifiedLeads: number | null;
+  configured: boolean;
+}
+
+/**
+ * Get total count of qualified leads for the period
+ * Used for calculating overall CPQL based on AmoCRM custom field qualification
+ *
+ * @param userAccountId - User account UUID
+ * @param dateFrom - Optional start date (ISO format YYYY-MM-DD)
+ * @param dateTo - Optional end date (ISO format YYYY-MM-DD)
+ * @returns Total qualified leads count and configuration status
+ */
+export async function getQualifiedLeadsTotal(
+  userAccountId: string,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<QualifiedLeadsTotal> {
+  const queryParams = new URLSearchParams({
+    userAccountId,
+  });
+
+  if (dateFrom) {
+    queryParams.append('dateFrom', dateFrom);
+  }
+
+  if (dateTo) {
+    queryParams.append('dateTo', dateTo);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/qualified-leads-total?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch qualified leads total');
+  }
+
+  return response.json();
+}
+

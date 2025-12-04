@@ -563,16 +563,70 @@ export async function processLeadStatusChange(
       return;
     }
 
-    // 2. Check if new status is qualified
-    const { data: stageData } = await supabase
-      .from('amocrm_pipeline_stages')
-      .select('is_qualified_stage')
-      .eq('user_account_id', userAccountId)
-      .eq('pipeline_id', newPipelineId)
-      .eq('status_id', newStatusId)
+    // 2. Determine qualification based on custom field or pipeline stage
+    // First check if custom qualification field is configured
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('amocrm_qualification_field_id, amocrm_subdomain, amocrm_access_token')
+      .eq('id', userAccountId)
       .maybeSingle();
 
-    const isQualified = stageData?.is_qualified_stage || false;
+    const qualificationFieldId = userAccount?.amocrm_qualification_field_id || null;
+    let isQualified = false;
+
+    if (qualificationFieldId && userAccount?.amocrm_subdomain && userAccount?.amocrm_access_token) {
+      // Use custom field for qualification - need to fetch lead details from AmoCRM
+      try {
+        const { getLeadById } = await import('../adapters/amocrm.js');
+        const { getValidAmoCRMToken } = await import('../lib/amocrmTokens.js');
+
+        const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+        const amocrmLead = await getLeadById(amocrmLeadId, subdomain, accessToken);
+
+        if (amocrmLead?.custom_fields_values) {
+          const customFieldValue = amocrmLead.custom_fields_values.find(
+            (field: any) => field.field_id === qualificationFieldId
+          );
+          // Checkbox fields have values like [{ value: true/false }]
+          isQualified = customFieldValue?.values?.[0]?.value === true;
+
+          app.log.info({
+            amocrmLeadId,
+            qualificationFieldId,
+            fieldValue: customFieldValue?.values?.[0]?.value,
+            isQualified
+          }, 'Qualification determined by custom field');
+        }
+      } catch (error: any) {
+        app.log.warn({
+          error: error.message,
+          amocrmLeadId,
+          qualificationFieldId
+        }, 'Failed to fetch lead custom fields, falling back to stage qualification');
+
+        // Fallback to pipeline stage qualification
+        const { data: stageData } = await supabase
+          .from('amocrm_pipeline_stages')
+          .select('is_qualified_stage')
+          .eq('user_account_id', userAccountId)
+          .eq('pipeline_id', newPipelineId)
+          .eq('status_id', newStatusId)
+          .maybeSingle();
+
+        isQualified = stageData?.is_qualified_stage || false;
+      }
+    } else {
+      // Use pipeline stage for qualification
+      const { data: stageData } = await supabase
+        .from('amocrm_pipeline_stages')
+        .select('is_qualified_stage')
+        .eq('user_account_id', userAccountId)
+        .eq('pipeline_id', newPipelineId)
+        .eq('status_id', newStatusId)
+        .maybeSingle();
+
+      isQualified = stageData?.is_qualified_stage || false;
+    }
 
     // 3. Update lead's current status and qualification
     const { error: updateError } = await supabase
