@@ -65,7 +65,8 @@ export interface RegenerateCarouselCardRequest {
   carousel_id: string;
   card_index: number;
   custom_prompt?: string;
-  reference_image?: string;
+  reference_image?: string; // Для обратной совместимости (первый референс)
+  reference_images?: string[]; // До 2 референсов
   text: string;
 }
 

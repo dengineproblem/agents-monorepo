@@ -52,7 +52,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   // State для перегенерации отдельной карточки
   const [regeneratingCardIndex, setRegeneratingCardIndex] = useState<number | null>(null);
   const [cardRegenerationPrompts, setCardRegenerationPrompts] = useState<{[key: number]: string}>({});
-  const [cardRegenerationImages, setCardRegenerationImages] = useState<{[key: number]: string}>({});
+  // Теперь поддерживаем до 2 референсов на карточку
+  const [cardRegenerationImages, setCardRegenerationImages] = useState<{[key: number]: string[]}>({});
 
   // State для множественных промптов и референсов
   interface GlobalPrompt {
@@ -456,14 +457,16 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setRegeneratingCardIndex(cardIndex);
     try {
       const customPrompt = cardRegenerationPrompts[cardIndex] || undefined;
-      const referenceImage = cardRegenerationImages[cardIndex] || undefined;
+      const referenceImages = cardRegenerationImages[cardIndex] || [];
+      // Для обратной совместимости с API передаём первый референс как reference_image
+      // и массив как reference_images
+      const referenceImage = referenceImages.length > 0 ? referenceImages[0] : undefined;
 
       console.log('[CarouselTab] Regenerating card:', {
         cardIndex,
         hasCustomPrompt: !!customPrompt,
         customPromptLength: customPrompt?.length || 0,
-        hasReferenceImage: !!referenceImage,
-        referenceImageLength: referenceImage?.length || 0
+        referenceImagesCount: referenceImages.length
       });
 
       const response = await carouselApi.regenerateCard({
@@ -473,6 +476,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         card_index: cardIndex,
         custom_prompt: customPrompt,
         reference_image: referenceImage,
+        reference_images: referenceImages.length > 0 ? referenceImages : undefined,
         text: carouselCards[cardIndex].text
       });
 
@@ -487,7 +491,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
           setCreativeGenerationsAvailable(response.generations_remaining);
         }
 
-        // Очищаем промпт и изображение после успешной регенерации
+        // Очищаем промпт и изображения после успешной регенерации
         const newPrompts = {...cardRegenerationPrompts};
         delete newPrompts[cardIndex];
         setCardRegenerationPrompts(newPrompts);
@@ -508,10 +512,16 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     }
   };
 
-  // Upload референсного изображения для перегенерации
+  // Upload референсного изображения для перегенерации (до 2 референсов)
   const handleCardRegenerationImageUpload = (cardIndex: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const currentImages = cardRegenerationImages[cardIndex] || [];
+    if (currentImages.length >= 2) {
+      toast.error('Максимум 2 референса на карточку');
+      return;
+    }
 
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -520,11 +530,65 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
       setCardRegenerationImages({
         ...cardRegenerationImages,
-        [cardIndex]: base64Data
+        [cardIndex]: [...currentImages, base64Data]
       });
-      toast.success('Референсное изображение загружено');
+      toast.success(`Референс ${currentImages.length + 1} загружен`);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Удаление референса по индексу
+  const removeCardRegenerationImage = (cardIndex: number, imageIndex: number) => {
+    const currentImages = cardRegenerationImages[cardIndex] || [];
+    const newImages = currentImages.filter((_, i) => i !== imageIndex);
+
+    if (newImages.length === 0) {
+      const newState = { ...cardRegenerationImages };
+      delete newState[cardIndex];
+      setCardRegenerationImages(newState);
+    } else {
+      setCardRegenerationImages({
+        ...cardRegenerationImages,
+        [cardIndex]: newImages
+      });
+    }
+  };
+
+  // Добавление соседней карточки карусели как референса
+  const addCarouselCardAsReference = async (cardIndex: number, sourceCardIndex: number) => {
+    const currentImages = cardRegenerationImages[cardIndex] || [];
+    if (currentImages.length >= 2) {
+      toast.error('Максимум 2 референса на карточку');
+      return;
+    }
+
+    const sourceCard = carouselCards[sourceCardIndex];
+    if (!sourceCard?.image_url) {
+      toast.error('У этой карточки нет изображения');
+      return;
+    }
+
+    try {
+      // Загружаем изображение и конвертируем в base64
+      const response = await fetch(sourceCard.image_url);
+      const blob = await response.blob();
+      const reader = new FileReader();
+
+      reader.onloadend = () => {
+        const base64 = reader.result as string;
+        const base64Data = base64.split(',')[1];
+
+        setCardRegenerationImages({
+          ...cardRegenerationImages,
+          [cardIndex]: [...currentImages, base64Data]
+        });
+        toast.success(`Карточка ${sourceCardIndex + 1} добавлена как референс`);
+      };
+      reader.readAsDataURL(blob);
+    } catch (error) {
+      console.error('Error adding carousel card as reference:', error);
+      toast.error('Ошибка загрузки изображения');
+    }
   };
 
   // Скачивание картинок (всех или выбранных) - без апскейла, используем 2K
@@ -747,11 +811,11 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                 <ChevronLeft className="h-4 w-4" />
               </Button>
 
-              {/* Карточка 4:5 */}
+              {/* Карточка 1:1 */}
               <div className="w-full max-w-md">
                 <div className="space-y-3">
-                  {/* Карточка, имитирующая пост 4:5 */}
-                  <div className="relative aspect-[4/5] bg-gradient-to-br from-muted/80 to-muted border border-border rounded-lg overflow-hidden">
+                  {/* Карточка 1:1 (квадрат) */}
+                  <div className="relative aspect-square bg-gradient-to-br from-muted/80 to-muted border border-border rounded-lg overflow-hidden">
                     {/* Если есть изображение - показываем его */}
                     {hasGeneratedImages && carouselCards[currentCardIndex].image_url ? (
                       <>
@@ -1044,30 +1108,71 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     </div>
 
                     <div>
-                      <Label className="text-xs text-muted-foreground">Референсное изображение</Label>
-                      <div className="mt-1 flex items-center gap-2">
-                        {cardRegenerationImages[currentCardIndex] ? (
-                          <>
-                            <img
-                              src={`data:image/jpeg;base64,${cardRegenerationImages[currentCardIndex]}`}
-                              alt="Референс"
-                              className="w-10 h-10 object-cover rounded border"
-                            />
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                const newImages = {...cardRegenerationImages};
-                                delete newImages[currentCardIndex];
-                                setCardRegenerationImages(newImages);
-                              }}
-                              disabled={regeneratingCardIndex === currentCardIndex}
-                              className="h-8 px-2"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </>
-                        ) : (
+                      <Label className="text-xs text-muted-foreground">Референсные изображения (до 2)</Label>
+                      <div className="mt-1 space-y-3">
+                        {/* Отображение загруженных референсов */}
+                        {(cardRegenerationImages[currentCardIndex] || []).length > 0 && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {(cardRegenerationImages[currentCardIndex] || []).map((img, imgIndex) => (
+                              <div key={imgIndex} className="relative">
+                                <img
+                                  src={`data:image/jpeg;base64,${img}`}
+                                  alt={`Референс ${imgIndex + 1}`}
+                                  className="w-12 h-12 object-cover rounded border"
+                                />
+                                <Button
+                                  size="icon"
+                                  variant="destructive"
+                                  onClick={() => removeCardRegenerationImage(currentCardIndex, imgIndex)}
+                                  disabled={regeneratingCardIndex === currentCardIndex}
+                                  className="absolute -top-1 -right-1 h-5 w-5 rounded-full"
+                                >
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Выбор карточек из карусели как референсы (стиль как у скачивания) */}
+                        {carouselCards.filter((c, i) => i !== currentCardIndex && c.image_url).length > 0 && (
+                          <div className="space-y-2">
+                            <span className="text-xs text-muted-foreground">Выбрать из карусели:</span>
+                            <div className="flex flex-wrap gap-2">
+                              {carouselCards.map((card, cardIdx) => {
+                                if (cardIdx === currentCardIndex || !card.image_url) return null;
+                                const currentImages = cardRegenerationImages[currentCardIndex] || [];
+                                const isDisabled = regeneratingCardIndex === currentCardIndex || currentImages.length >= 2;
+                                return (
+                                  <label
+                                    key={cardIdx}
+                                    className={`flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors ${
+                                      isDisabled
+                                        ? 'opacity-50 cursor-not-allowed bg-background border border-border'
+                                        : 'bg-background border border-border hover:border-primary/30'
+                                    }`}
+                                  >
+                                    <button
+                                      onClick={() => !isDisabled && addCarouselCardAsReference(currentCardIndex, cardIdx)}
+                                      disabled={isDisabled}
+                                      className="flex items-center gap-1.5"
+                                    >
+                                      <img
+                                        src={card.image_url}
+                                        alt={`Карточка ${cardIdx + 1}`}
+                                        className="w-6 h-6 object-cover rounded"
+                                      />
+                                      <span className="text-xs font-medium">{cardIdx + 1}</span>
+                                    </button>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Загрузить свой файл */}
+                        {(cardRegenerationImages[currentCardIndex] || []).length < 2 && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -1082,7 +1187,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                             className="w-full text-muted-foreground hover:text-foreground"
                           >
                             <Plus className="h-4 w-4 mr-2" />
-                            Выбрать файл
+                            Загрузить свой файл
                           </Button>
                         )}
                       </div>

@@ -65,9 +65,8 @@ const CreativeGeneration = () => {
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
   const [isCreatingCreative, setIsCreatingCreative] = useState(false);
 
-  // State для референсного изображения
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
-  const [referenceImageFile, setReferenceImageFile] = useState<File | null>(null);
+  // State для референсных изображений (до 2)
+  const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [referenceImagePrompt, setReferenceImagePrompt] = useState<string>('');
 
   // State для референса конкурента
@@ -102,11 +101,13 @@ const CreativeGeneration = () => {
       if (generatedImage && generatedImage.startsWith('blob:')) {
         URL.revokeObjectURL(generatedImage);
       }
-      if (referenceImage && referenceImage.startsWith('blob:')) {
-        URL.revokeObjectURL(referenceImage);
-      }
+      referenceImages.forEach(img => {
+        if (img.startsWith('blob:')) {
+          URL.revokeObjectURL(img);
+        }
+      });
     };
-  }, [generatedImage, referenceImage]);
+  }, [generatedImage, referenceImages]);
 
   // Закрытие полноэкранного просмотра по Escape
   useEffect(() => {
@@ -393,10 +394,15 @@ const CreativeGeneration = () => {
     }
   };
 
-  // Обработка загрузки референсного изображения
+  // Обработка загрузки референсного изображения (до 2)
   const handleReferenceImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (referenceImages.length >= 2) {
+      toast.error('Максимум 2 референса');
+      return;
+    }
 
     // Проверка типа файла
     if (!file.type.startsWith('image/')) {
@@ -410,26 +416,26 @@ const CreativeGeneration = () => {
       return;
     }
 
-    setReferenceImageFile(file);
-    
     // Создаем preview URL
     const reader = new FileReader();
     reader.onload = (e) => {
-      setReferenceImage(e.target?.result as string);
+      const result = e.target?.result as string;
+      setReferenceImages(prev => [...prev, result]);
+      toast.success(`Референс ${referenceImages.length + 1} загружен`);
     };
     reader.readAsDataURL(file);
-    
-    toast.success('Референсное изображение загружено');
   };
 
-  // Удаление референсного изображения
-  const removeReferenceImage = () => {
-    if (referenceImage && referenceImage.startsWith('blob:')) {
-      URL.revokeObjectURL(referenceImage);
+  // Удаление референсного изображения по индексу
+  const removeReferenceImage = (index: number) => {
+    const img = referenceImages[index];
+    if (img && img.startsWith('blob:')) {
+      URL.revokeObjectURL(img);
     }
-    setReferenceImage(null);
-    setReferenceImageFile(null);
-    setReferenceImagePrompt('');
+    setReferenceImages(prev => prev.filter((_, i) => i !== index));
+    if (referenceImages.length === 1) {
+      setReferenceImagePrompt('');
+    }
   };
 
   const generateCreative = async (isEdit: boolean = false) => {
@@ -440,10 +446,11 @@ const CreativeGeneration = () => {
     }
 
     setLoading(prev => ({ ...prev, image: true }));
-    
+
     try {
       let referenceImageBase64: string | undefined;
-      
+      let referenceImagesBase64: string[] = [];
+
       // Если редактируем - используем сгенерированное изображение как референс
       if (isEdit && generatedImage) {
         const response = await fetch(generatedImage);
@@ -456,11 +463,12 @@ const CreativeGeneration = () => {
           };
           reader.readAsDataURL(blob);
         });
-      } 
-      // Если есть референсное изображение - используем его
-      else if (referenceImage) {
-        const base64 = referenceImage.split(',')[1];
-        referenceImageBase64 = base64;
+        referenceImagesBase64 = [referenceImageBase64];
+      }
+      // Если есть референсные изображения - используем их
+      else if (referenceImages.length > 0) {
+        referenceImagesBase64 = referenceImages.map(img => img.split(',')[1]);
+        referenceImageBase64 = referenceImagesBase64[0]; // Первый для обратной совместимости
       }
 
       // Добавляем референс конкурента, если выбран
@@ -482,7 +490,8 @@ const CreativeGeneration = () => {
         profits: texts.profits,
         direction_id: selectedDirectionId || undefined,
         style_id: selectedStyle,
-        reference_image: referenceImageBase64,
+        reference_image: referenceImageBase64, // Для обратной совместимости
+        reference_images: referenceImagesBase64.length > 0 ? referenceImagesBase64 : undefined,
         reference_image_type: referenceImageBase64 ? 'base64' : undefined,
         // При редактировании используем editPrompt, иначе referenceImagePrompt
         reference_image_prompt: isEdit ? editPrompt : (referenceImagePrompt || undefined),
@@ -492,6 +501,7 @@ const CreativeGeneration = () => {
       console.log(`Отправляем запрос на генерацию креатива через Gemini API (isEdit: ${isEdit}):`, {
         ...requestData,
         reference_image: referenceImageBase64 ? '[base64 data]' : undefined,
+        reference_images_count: referenceImagesBase64.length,
         reference_image_prompt_length: requestData.reference_image_prompt?.length || 0,
         has_competitor_reference: !!competitorReference
       });
@@ -888,24 +898,50 @@ const CreativeGeneration = () => {
               </Card>
             )}
 
-            {/* Референсное изображение */}
+            {/* Референсные изображения */}
             <Card className="shadow-sm">
               <CardHeader>
-                <CardTitle className="text-lg">Референсное изображение (опционально)</CardTitle>
+                <CardTitle className="text-lg">Референсные изображения (до 2)</CardTitle>
                 <CardDescription>
-                  Загрузите изображение для сохранения стиля, цветовой палитры или композиции
+                  Загрузите изображения для сохранения стиля, цветовой палитры или композиции
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {!referenceImage ? (
-                  <div className="space-y-4">
+                <div className="space-y-4">
+                  {/* Загруженные референсы */}
+                  {referenceImages.length > 0 && (
+                    <div className="flex gap-4 flex-wrap">
+                      {referenceImages.map((img, index) => (
+                        <div key={index} className="relative rounded-lg overflow-hidden bg-muted/30 p-2">
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            className="absolute top-1 right-1 z-10 h-6 w-6"
+                            onClick={() => removeReferenceImage(index)}
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                          <img
+                            src={img}
+                            alt={`Референс ${index + 1}`}
+                            className="w-32 h-32 object-cover rounded-lg"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Кнопка добавления (если меньше 2) */}
+                  {referenceImages.length < 2 && (
                     <div className="border-2 border-dashed border-muted rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer">
                       <Label htmlFor="reference-upload" className="cursor-pointer block">
                         <div className="flex flex-col items-center gap-2">
                           <div className="p-3 rounded-full bg-muted">
                             <Upload className="h-6 w-6 text-muted-foreground" />
                           </div>
-                          <div className="text-sm font-medium">Нажмите для загрузки</div>
+                          <div className="text-sm font-medium">
+                            {referenceImages.length === 0 ? 'Нажмите для загрузки' : 'Добавить ещё референс'}
+                          </div>
                           <div className="text-xs text-muted-foreground">
                             PNG, JPG, WebP до 10MB
                           </div>
@@ -919,55 +955,44 @@ const CreativeGeneration = () => {
                         onChange={handleReferenceImageUpload}
                       />
                     </div>
+                  )}
+
+                  {referenceImages.length === 0 && (
                     <div className="flex items-start gap-2 p-3 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
                       <div className="text-xs text-blue-800 dark:text-blue-200">
-                        <strong>Совет:</strong> Используйте референс для брендинга, стилизации или композиции
+                        <strong>Совет:</strong> Используйте референсы для брендинга, стилизации или композиции
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="relative rounded-lg overflow-hidden bg-muted/30 p-4">
-                      <Button
-                        variant="destructive"
-                        size="icon"
-                        className="absolute top-2 right-2 z-10"
-                        onClick={removeReferenceImage}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                      <img
-                        src={referenceImage}
-                        alt="Референсное изображение"
-                        className="max-w-full max-h-[300px] h-auto mx-auto rounded-lg"
-                      />
-                    </div>
-                    
-                    {/* Мини-промпт для референсного изображения */}
-                    <div className="space-y-2">
-                      <Label htmlFor="reference-prompt">
-                        Описание референса (опционально)
-                      </Label>
-                      <Textarea
-                        id="reference-prompt"
-                        value={referenceImagePrompt}
-                        onChange={(e) => setReferenceImagePrompt(e.target.value)}
-                        placeholder="Например: Используй эту цветовую палитру и стиль типографики..."
-                        className="min-h-[80px] resize-none"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        💡 Опишите, какие элементы референса важны: стиль, цвета, композицию, типографику и т.д.
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center gap-2 p-3 bg-green-50/50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
-                      <Badge variant="secondary">✓ Референс загружен</Badge>
-                      <span className="text-xs text-green-800 dark:text-green-200">
-                        Gemini использует этот стиль при генерации
-                      </span>
-                    </div>
-                  </div>
-                )}
+                  )}
+
+                  {/* Мини-промпт для референсных изображений */}
+                  {referenceImages.length > 0 && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="reference-prompt">
+                          Описание референсов (опционально)
+                        </Label>
+                        <Textarea
+                          id="reference-prompt"
+                          value={referenceImagePrompt}
+                          onChange={(e) => setReferenceImagePrompt(e.target.value)}
+                          placeholder="Например: Используй эту цветовую палитру и стиль типографики..."
+                          className="min-h-[80px] resize-none"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Опишите, какие элементы референсов важны: стиль, цвета, композицию, типографику и т.д.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-3 bg-green-50/50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+                        <Badge variant="secondary">✓ {referenceImages.length} референс{referenceImages.length === 1 ? '' : 'а'} загружено</Badge>
+                        <span className="text-xs text-green-800 dark:text-green-200">
+                          Gemini использует {referenceImages.length === 1 ? 'этот стиль' : 'эти стили'} при генерации
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
