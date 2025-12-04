@@ -10,9 +10,11 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { manualLaunchAds } from "@/services/manualLaunchApi";
+import { manualLaunchAds, ManualLaunchResponse } from "@/services/manualLaunchApi";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -1358,6 +1360,15 @@ const Creatives: React.FC = () => {
   const [selectedCreativeIds, setSelectedCreativeIds] = useState<Set<string>>(new Set());
   const [isLaunching, setIsLaunching] = useState(false);
 
+  // Состояния для Manual Launch модалки
+  const [manualLaunchDialogOpen, setManualLaunchDialogOpen] = useState(false);
+  const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(10);
+  const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('now');
+  const [launchResult, setLaunchResult] = useState<ManualLaunchResponse | null>(null);
+  const [resultDialogOpen, setResultDialogOpen] = useState(false);
+  const [launchedBudget, setLaunchedBudget] = useState<number>(10);
+  const [launchDirectionId, setLaunchDirectionId] = useState<string>('');
+
   // Фильтрация креативов по типу медиа
   const filteredItems = useMemo(() => {
     if (mediaTypeFilter === 'all') return items;
@@ -1414,8 +1425,8 @@ const Creatives: React.FC = () => {
     }
   };
 
-  // Создать adset с выбранными креативами
-  const handleCreateAdset = async () => {
+  // Открыть модалку для запуска с выбранными креативами
+  const handleCreateAdset = () => {
     if (selectedCreativeIds.size === 0) {
       toast.error('Выберите хотя бы один креатив');
       return;
@@ -1438,31 +1449,65 @@ const Creatives: React.FC = () => {
       return;
     }
 
+    // Сохраняем направление и открываем модалку
+    setLaunchDirectionId(firstCreative.direction_id);
+    setManualLaunchDialogOpen(true);
+  };
+
+  // Фактический запуск рекламы
+  const handleManualLaunch = async () => {
+    if (selectedCreativeIds.size === 0) {
+      toast.error('Выберите хотя бы один креатив');
+      return;
+    }
+
+    if (!launchDirectionId) {
+      toast.error('Не выбрано направление');
+      return;
+    }
+
+    if (manualLaunchBudget < 10) {
+      toast.error('Минимальный бюджет - $10');
+      return;
+    }
+
     setIsLaunching(true);
     try {
       // Получаем user_account_id из направления
-      const direction = directions.find(d => d.id === firstCreative.direction_id);
+      const direction = directions.find(d => d.id === launchDirectionId);
       if (!direction?.user_account_id) {
         toast.error('Направление не связано с рекламным аккаунтом');
         return;
       }
 
+      // Сохраняем бюджет для показа в результате
+      setLaunchedBudget(manualLaunchBudget);
+
       const result = await manualLaunchAds({
         user_account_id: direction.user_account_id,
-        account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
-        direction_id: firstCreative.direction_id,
+        account_id: currentAdAccountId || undefined,
+        direction_id: launchDirectionId,
         creative_ids: Array.from(selectedCreativeIds),
+        start_mode: manualStartMode,
+        daily_budget_cents: Math.round(manualLaunchBudget * 100),
       });
 
       if (result.success) {
-        toast.success(`Создано объявлений: ${result.ads_created || 0}`);
+        setLaunchResult(result);
+        setManualLaunchDialogOpen(false);
+        setResultDialogOpen(true);
+        toast.success(result.message || 'Реклама успешно запущена!');
+
+        // Сброс
         setSelectedCreativeIds(new Set());
+        setManualLaunchBudget(10);
+        setManualStartMode('now');
       } else {
         toast.error(result.error || 'Ошибка создания adset');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Ошибка создания adset:', error);
-      toast.error('Не удалось создать adset');
+      toast.error(error.message || 'Не удалось создать adset');
     } finally {
       setIsLaunching(false);
     }
@@ -1995,6 +2040,213 @@ const Creatives: React.FC = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* Модальное окно для Manual Launch */}
+        <Dialog open={manualLaunchDialogOpen} onOpenChange={setManualLaunchDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Запуск рекламы</DialogTitle>
+              <DialogDescription>
+                Настройте параметры запуска для выбранных креативов
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-6 py-4">
+              {/* Информация о выбранных креативах */}
+              <div className="space-y-2">
+                <Label>Выбранные креативы ({selectedCreativeIds.size})</Label>
+                <div className="space-y-2 max-h-[150px] overflow-y-auto border rounded-lg p-3">
+                  {Array.from(selectedCreativeIds).map((id) => {
+                    const creative = items.find(it => it.id === id);
+                    return creative ? (
+                      <div
+                        key={id}
+                        className="flex items-center gap-3 p-2 bg-muted/30 rounded"
+                      >
+                        <div className="shrink-0 w-8 h-8 rounded overflow-hidden bg-muted flex items-center justify-center">
+                          {creative.media_type === 'video' ? (
+                            <Video className="h-4 w-4 text-muted-foreground" />
+                          ) : creative.media_type === 'carousel' ? (
+                            <Images className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <Image className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{creative.title}</div>
+                        </div>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+
+              {/* Направление */}
+              <div className="space-y-2">
+                <Label>Направление</Label>
+                <div className="p-3 bg-muted/30 rounded-lg text-sm">
+                  {directions.find(d => d.id === launchDirectionId)?.name || 'Не выбрано'}
+                  {directions.find(d => d.id === launchDirectionId)?.objective && (
+                    <span className="text-muted-foreground ml-2">
+                      ({OBJECTIVE_LABELS[directions.find(d => d.id === launchDirectionId)!.objective]})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Дневной бюджет */}
+              <div className="space-y-2">
+                <Label htmlFor="manual-budget">Дневной бюджет (USD)</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">$</span>
+                  <input
+                    id="manual-budget"
+                    type="number"
+                    min="10"
+                    step="1"
+                    value={manualLaunchBudget}
+                    onChange={(e) => setManualLaunchBudget(Number(e.target.value))}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isLaunching}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Минимальный бюджет: $10 в день
+                </p>
+              </div>
+
+              {/* Время запуска */}
+              <div className="space-y-2">
+                <Label>Время запуска</Label>
+                <RadioGroup
+                  value={manualStartMode}
+                  onValueChange={(v: 'now' | 'midnight_almaty') => setManualStartMode(v)}
+                  className="grid grid-cols-1 gap-2"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="midnight_almaty" id="start-midnight" />
+                    <Label htmlFor="start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="now" id="start-now" />
+                    <Label htmlFor="start-now" className="cursor-pointer">Сейчас</Label>
+                  </div>
+                </RadioGroup>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setManualLaunchDialogOpen(false);
+                  setManualLaunchBudget(10);
+                  setManualStartMode('now');
+                }}
+                disabled={isLaunching}
+              >
+                Отмена
+              </Button>
+              <Button
+                onClick={handleManualLaunch}
+                disabled={isLaunching || selectedCreativeIds.size === 0}
+                variant="default"
+                className="dark:bg-gray-700 dark:hover:bg-gray-800"
+              >
+                {isLaunching ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Запуск...
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="h-4 w-4 mr-2" />
+                    Запустить
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Модальное окно с результатом запуска */}
+        <Dialog open={resultDialogOpen} onOpenChange={setResultDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Реклама запущена!</DialogTitle>
+              <DialogDescription>
+                {launchResult?.message || 'Реклама успешно запущена'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {launchResult && (
+                <>
+                  {/* Информация о направлении */}
+                  <div className="space-y-2">
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Направление:</span>{' '}
+                      <span className="font-medium">{launchResult.direction_name}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                      <span className="font-mono text-xs">{launchResult.campaign_id}</span>
+                    </div>
+                  </div>
+
+                  {/* Информация об Ad Set */}
+                  <div className="p-4 bg-muted/30 rounded-lg space-y-2">
+                    <div className="text-sm font-medium">Ad Set</div>
+                    <div className="text-sm text-muted-foreground">{launchResult.adset_name}</div>
+                    <div className="text-xs text-muted-foreground font-mono">
+                      ID: {launchResult.adset_id}
+                    </div>
+                    <div className="text-sm pt-2 border-t border-border/50">
+                      <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                      <span className="font-medium">${launchedBudget}</span>
+                    </div>
+                  </div>
+
+                  {/* Список созданных объявлений */}
+                  {launchResult.ads && launchResult.ads.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">
+                        Создано объявлений: {launchResult.ads_created}
+                      </div>
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {launchResult.ads.map((ad, index) => (
+                          <div
+                            key={ad.ad_id}
+                            className="p-3 border rounded-lg text-sm space-y-1"
+                          >
+                            <div className="font-medium">
+                              {index + 1}. {ad.name}
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              ID: {ad.ad_id}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setResultDialogOpen(false);
+                  setLaunchResult(null);
+                }}
+              >
+                Закрыть
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
