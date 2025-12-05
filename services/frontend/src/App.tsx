@@ -58,14 +58,23 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
-          // Проверяем наличие prompt1, но НЕ для мультиаккаунтного режима
-          // В мультиаккаунтном режиме онбординг запускается через Dashboard
-          // Проверяем multi_account_enabled и из user, и из отдельного localStorage ключа
+
+          // Проверяем мультиаккаунтный режим из localStorage
+          // Если уже известно что мультиаккаунт - сразу отключаем онбординг
           const isMultiAccount = parsedUser.multi_account_enabled ||
             localStorage.getItem('multiAccountEnabled') === 'true';
-          if (!parsedUser.prompt1 && !isMultiAccount) {
-            setShowOnboarding(true);
+
+          if (isMultiAccount) {
+            // Мультиаккаунт - НЕ показываем автоматический онбординг
+            setShowOnboarding(false);
+          } else if (localStorage.getItem('multiAccountEnabled') === 'false') {
+            // Точно НЕ мультиаккаунт - проверяем prompt1
+            if (!parsedUser.prompt1) {
+              setShowOnboarding(true);
+            }
           } else {
+            // Ещё не знаем (первая загрузка) - ждём AppContext
+            // НЕ показываем онбординг пока не убедимся
             setShowOnboarding(false);
           }
         } else {
@@ -82,6 +91,38 @@ const AppRoutes = () => {
     setLoading(false);
   }, [location.pathname]);
 
+  // Слушаем событие когда AppContext загрузил данные о мультиаккаунтности
+  useEffect(() => {
+    const checkMultiAccountStatus = () => {
+      const storedUser = localStorage.getItem('user');
+      const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
+
+      if (isMultiAccount) {
+        // Мультиаккаунт - закрываем онбординг если открыт
+        setShowOnboarding(false);
+      } else if (localStorage.getItem('multiAccountEnabled') === 'false' && storedUser) {
+        // Точно НЕ мультиаккаунт - проверяем prompt1
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          if (!parsedUser.prompt1) {
+            setShowOnboarding(true);
+          }
+        } catch {}
+      }
+    };
+
+    // Слушаем событие от AppContext
+    window.addEventListener('multiAccountLoaded', checkMultiAccountStatus);
+
+    // Также проверяем с задержкой на случай если событие уже произошло
+    const timeoutId = setTimeout(checkMultiAccountStatus, 500);
+
+    return () => {
+      window.removeEventListener('multiAccountLoaded', checkMultiAccountStatus);
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
   useEffect(() => {
     const handleStorageChange = () => {
       const storedUser = localStorage.getItem('user');
@@ -89,10 +130,12 @@ const AppRoutes = () => {
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
-          // Проверяем prompt1 при изменении данных, но НЕ для мультиаккаунта
+          // В мультиаккаунтном режиме НЕ показываем автоматический онбординг
           const isMultiAccount = parsedUser.multi_account_enabled ||
             localStorage.getItem('multiAccountEnabled') === 'true';
-          if (!parsedUser.prompt1 && !isMultiAccount) {
+          if (isMultiAccount) {
+            setShowOnboarding(false);
+          } else if (!parsedUser.prompt1) {
             setShowOnboarding(true);
           } else {
             setShowOnboarding(false);

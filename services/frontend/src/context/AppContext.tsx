@@ -579,6 +579,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       localStorage.setItem('multiAccountEnabled', String(response.multi_account_enabled));
       localStorage.setItem('adAccounts', JSON.stringify(mappedAccounts));
 
+      // Оповещаем App.tsx что данные о мультиаккаунтности загружены
+      window.dispatchEvent(new CustomEvent('multiAccountLoaded'));
+
       // Устанавливаем текущий аккаунт (только из активных)
       if (response.multi_account_enabled && response.ad_accounts.length > 0) {
         const activeAccounts = response.ad_accounts.filter(a => a.is_active);
