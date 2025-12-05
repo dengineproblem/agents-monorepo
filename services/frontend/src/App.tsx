@@ -49,6 +49,9 @@ const AppRoutes = () => {
   const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
+  const [isMultiAccountMode, setIsMultiAccountMode] = useState<boolean>(
+    localStorage.getItem('multiAccountEnabled') === 'true'
+  );
 
   useEffect(() => {
     // Проверяем наличие пользовательских данных в localStorage
@@ -97,6 +100,9 @@ const AppRoutes = () => {
       const storedUser = localStorage.getItem('user');
       const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
 
+      // Обновляем state для корректного рендера кнопки закрытия
+      setIsMultiAccountMode(isMultiAccount);
+
       if (isMultiAccount) {
         // Мультиаккаунт - закрываем онбординг если открыт
         setShowOnboarding(false);
@@ -133,6 +139,7 @@ const AppRoutes = () => {
           // В мультиаккаунтном режиме НЕ показываем автоматический онбординг
           const isMultiAccount = parsedUser.multi_account_enabled ||
             localStorage.getItem('multiAccountEnabled') === 'true';
+          setIsMultiAccountMode(isMultiAccount);
           if (isMultiAccount) {
             setShowOnboarding(false);
           } else if (!parsedUser.prompt1) {
@@ -154,6 +161,8 @@ const AppRoutes = () => {
   // Слушаем событие openOnboarding из Dashboard (для мультиаккаунтного режима)
   useEffect(() => {
     const handleOpenOnboarding = () => {
+      // Событие openOnboarding приходит только из мультиаккаунтного режима
+      setIsMultiAccountMode(true);
       setShowOnboarding(true);
     };
     window.addEventListener('openOnboarding', handleOpenOnboarding);
@@ -218,7 +227,7 @@ const AppRoutes = () => {
               onComplete={handleOnboardingComplete}
               onClose={
                 // Кнопка закрытия только для мультиаккаунтного режима
-                localStorage.getItem('multiAccountEnabled') === 'true'
+                isMultiAccountMode
                   ? () => setShowOnboarding(false)
                   : undefined
               }
