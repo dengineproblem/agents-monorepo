@@ -623,3 +623,88 @@ export async function searchPageByInstagram(
     return searchPageByName(cleanHandle, country);
   }
 }
+
+/**
+ * Получить свежий URL для конкретного креатива через SearchAPI
+ * Используется когда URL истёк (Facebook CDN URLs expire after a few hours)
+ *
+ * @param fbAdArchiveId - ID креатива в Facebook Ad Library
+ * @param competitorName - Название конкурента для поиска
+ * @param countryCode - Код страны
+ * @param pageId - Facebook page_id (опционально, для более точного поиска)
+ * @returns Свежие media_urls или null если креатив не найден
+ */
+export async function refreshCreativeMediaUrl(
+  fbAdArchiveId: string,
+  competitorName: string,
+  countryCode: string = 'ALL',
+  pageId?: string
+): Promise<{ media_urls: string[]; thumbnail_url: string | null } | null> {
+  const apiKey = process.env.SEARCHAPI_KEY;
+
+  if (!apiKey) {
+    log.error('SEARCHAPI_KEY не настроен');
+    return null;
+  }
+
+  log.info({ fbAdArchiveId, competitorName, countryCode, pageId }, '[refreshCreativeMediaUrl] Запрашиваем свежий URL');
+
+  try {
+    // Формируем параметры запроса
+    const baseParams: Record<string, string> = {
+      engine: 'meta_ad_library',
+      country: countryCode === 'ALL' ? 'ALL' : countryCode,
+      ad_type: 'all',
+      media_type: 'all',
+      active_status: 'all',
+      api_key: apiKey,
+    };
+
+    const searchPromises: Promise<SearchApiAd[]>[] = [];
+
+    // 1. Поиск по page_id если есть
+    if (pageId) {
+      const pageIdParams = new URLSearchParams({ ...baseParams, page_id: pageId });
+      searchPromises.push(fetchFromSearchApi(pageIdParams, 'page_id_refresh', pageId));
+    }
+
+    // 2. Поиск по названию конкурента
+    const queryParams = new URLSearchParams({ ...baseParams, q: competitorName });
+    searchPromises.push(fetchFromSearchApi(queryParams, 'name_refresh', competitorName));
+
+    // Выполняем все запросы параллельно
+    const results = await Promise.all(searchPromises);
+
+    // Объединяем результаты
+    let allAds: SearchApiAd[] = [];
+    for (const ads of results) {
+      allAds = allAds.concat(ads);
+    }
+
+    // Ищем креатив по fb_ad_archive_id
+    const targetAd = allAds.find(ad => ad.ad_archive_id === fbAdArchiveId);
+
+    if (!targetAd) {
+      log.warn({ fbAdArchiveId, totalAds: allAds.length }, '[refreshCreativeMediaUrl] Креатив не найден в результатах');
+      return null;
+    }
+
+    // Извлекаем свежие URL
+    const creativeData = transformAdToCreativeData(targetAd);
+
+    log.info({
+      fbAdArchiveId,
+      newMediaUrls: creativeData.media_urls.length,
+      newThumbnail: !!creativeData.thumbnail_url
+    }, '[refreshCreativeMediaUrl] Получены свежие URL');
+
+    return {
+      media_urls: creativeData.media_urls,
+      thumbnail_url: creativeData.thumbnail_url,
+    };
+
+  } catch (error: any) {
+    log.error({ err: error, fbAdArchiveId }, '[refreshCreativeMediaUrl] Ошибка при обновлении URL');
+    return null;
+  }
+}

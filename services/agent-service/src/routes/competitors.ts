@@ -10,6 +10,7 @@ import {
   searchPageByName,
   searchPageByInstagram,
   transformAdToCreativeData,
+  refreshCreativeMediaUrl,
   type CompetitorCreativeData,
 } from '../lib/searchApi.js';
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
@@ -1049,6 +1050,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
    * Для image: OCR через Gemini
    * Для video: Транскрибация через существующий сервис
    *
+   * Автоматически обновляет URL если он истёк (Facebook CDN URLs expire)
+   *
    * Body:
    * - creativeId: UUID креатива
    */
@@ -1062,19 +1065,41 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
       log.info({ creativeId }, '[Extract Text] Начинаем извлечение текста');
 
-      // Получаем креатив с retry (Supabase иногда падает с fetch failed)
-      let creative: { id: string; media_type: string; media_urls: string[] | null; thumbnail_url: string | null } | null = null;
+      // Получаем креатив с данными конкурента для возможного refresh
+      interface CreativeWithCompetitor {
+        id: string;
+        media_type: string;
+        media_urls: string[] | null;
+        thumbnail_url: string | null;
+        fb_ad_archive_id: string;
+        competitor_id: string;
+        competitor: {
+          name: string;
+          country_code: string;
+          fb_page_id: string;
+        } | null;
+      }
+
+      let creative: CreativeWithCompetitor | null = null;
       let creativeError: Error | null = null;
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         const { data, error } = await supabase
           .from('competitor_creatives')
-          .select('id, media_type, media_urls, thumbnail_url')
+          .select(`
+            id, media_type, media_urls, thumbnail_url, fb_ad_archive_id, competitor_id,
+            competitor:competitors (name, country_code, fb_page_id)
+          `)
           .eq('id', creativeId)
           .single();
 
         if (!error && data) {
-          creative = data;
+          // Supabase возвращает массив для связей, берём первый элемент
+          const competitorData = Array.isArray(data.competitor) ? data.competitor[0] : data.competitor;
+          creative = {
+            ...data,
+            competitor: competitorData || null,
+          } as CreativeWithCompetitor;
           creativeError = null;
           break;
         }
@@ -1092,7 +1117,7 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       }
 
       let extractedText = '';
-      const mediaUrl = creative.thumbnail_url || creative.media_urls?.[0];
+      let mediaUrl = creative.thumbnail_url || creative.media_urls?.[0];
 
       if (!mediaUrl) {
         return reply.status(400).send({ success: false, error: 'Нет медиа URL для анализа' });
@@ -1120,82 +1145,129 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
       } else if (creative.media_type === 'video') {
         // Транскрибация видео через Whisper
-        const videoUrl = creative.media_urls?.[0];
+        let videoUrl = creative.media_urls?.[0];
         if (!videoUrl) {
           return reply.status(400).send({ success: false, error: 'Нет URL видео для транскрибации' });
         }
 
         log.info({ creativeId, videoUrl }, '[Extract Text] Скачиваем видео для транскрибации');
 
-        let videoPath: string | null = null;
-        try {
-          // Скачиваем видео во временный файл с помощью yt-dlp (надёжнее чем fetch для Facebook CDN)
-          videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
+        // Флаг для retry с новым URL
+        let urlRefreshed = false;
 
-          // Скачиваем видео через yt-dlp или curl
-          log.info({ creativeId }, '[Extract Text] Скачиваем видео через yt-dlp');
-
+        // Функция скачивания видео с автоматическим refresh URL при истечении
+        const downloadVideo = async (url: string, outputPath: string): Promise<void> => {
+          // Пробуем yt-dlp
           try {
-            // yt-dlp - скачиваем лучший формат (для прямых mp4 ссылок bestaudio не работает)
-            // --no-playlist - не скачивать плейлист
             await execAsync(
-              `yt-dlp --no-warnings -q --no-playlist -o "${videoPath}" "${videoUrl}"`,
+              `yt-dlp --no-warnings -q --no-playlist -o "${outputPath}" "${url}"`,
               { timeout: 120000 }
             );
 
-            // Проверяем что файл скачался
-            const stats = await fs.stat(videoPath);
+            const stats = await fs.stat(outputPath);
             if (stats.size === 0) {
               throw new Error('yt-dlp скачал пустой файл');
             }
 
-            // Получаем длительность видео для логирования
-            let videoDuration = 'unknown';
-            try {
-              const { stdout } = await execAsync(
-                `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
-                { timeout: 10000 }
-              );
-              videoDuration = `${parseFloat(stdout.trim()).toFixed(1)}s`;
-            } catch {
-              // Игнорируем ошибку ffprobe
-            }
-
-            log.info({ creativeId, fileSize: stats.size, duration: videoDuration }, '[Extract Text] yt-dlp скачал видео успешно');
+            log.info({ creativeId, fileSize: stats.size }, '[Extract Text] yt-dlp скачал видео успешно');
+            return;
           } catch (ytdlpError) {
             log.warn({ creativeId, error: ytdlpError instanceof Error ? ytdlpError.message : String(ytdlpError) }, '[Extract Text] yt-dlp не сработал, пробуем curl');
+          }
 
-            // Fallback на curl если yt-dlp не сработал
-            try {
-              await execAsync(
-                `curl -sL -o "${videoPath}" --connect-timeout 30 --max-time 180 "${videoUrl}"`,
-                { timeout: 200000 }
-              );
+          // Fallback на curl
+          await execAsync(
+            `curl -sL -o "${outputPath}" --connect-timeout 30 --max-time 180 "${url}"`,
+            { timeout: 200000 }
+          );
 
-              const stats = await fs.stat(videoPath);
-              if (stats.size === 0) {
-                throw new Error('curl скачал пустой файл');
-              }
+          const stats = await fs.stat(outputPath);
+          if (stats.size === 0) {
+            throw new Error('curl скачал пустой файл');
+          }
 
-              // Получаем длительность видео для логирования
-              let videoDuration = 'unknown';
-              try {
-                const { stdout } = await execAsync(
-                  `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
-                  { timeout: 10000 }
-                );
-                videoDuration = `${parseFloat(stdout.trim()).toFixed(1)}s`;
-              } catch {
-                // Игнорируем ошибку ffprobe
-              }
-
-              log.info({ creativeId, fileSize: stats.size, duration: videoDuration }, '[Extract Text] curl скачал видео успешно');
-            } catch (curlError) {
-              throw new Error(`Не удалось скачать видео: yt-dlp и curl не сработали`);
+          // Проверяем что файл — это реальное видео, а не HTML-страница ошибки
+          if (stats.size < 10000) {
+            const content = await fs.readFile(outputPath, 'utf-8').catch(() => '');
+            if (content.includes('<!DOCTYPE') || content.includes('<html') || content.includes('Error') || content.includes('Forbidden')) {
+              log.warn({ creativeId, fileSize: stats.size }, '[Extract Text] curl скачал HTML вместо видео — URL истёк');
+              throw new Error('URL_EXPIRED');
             }
           }
 
-          log.info({ creativeId, videoPath }, '[Extract Text] Видео скачано, запускаем транскрибацию');
+          log.info({ creativeId, fileSize: stats.size }, '[Extract Text] curl скачал видео успешно');
+        };
+
+        let videoPath: string | null = null;
+        try {
+          videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
+
+          try {
+            await downloadVideo(videoUrl, videoPath);
+          } catch (downloadError) {
+            const errorMsg = downloadError instanceof Error ? downloadError.message : String(downloadError);
+
+            // Если URL истёк, пробуем обновить через SearchAPI
+            if (errorMsg === 'URL_EXPIRED' && creative.competitor && !urlRefreshed) {
+              log.info({ creativeId, fbAdArchiveId: creative.fb_ad_archive_id }, '[Extract Text] URL истёк, пробуем обновить через SearchAPI');
+
+              const freshUrls = await refreshCreativeMediaUrl(
+                creative.fb_ad_archive_id,
+                creative.competitor.name,
+                creative.competitor.country_code,
+                creative.competitor.fb_page_id
+              );
+
+              if (freshUrls && freshUrls.media_urls.length > 0) {
+                // Обновляем URL в БД
+                await supabase
+                  .from('competitor_creatives')
+                  .update({
+                    media_urls: freshUrls.media_urls,
+                    thumbnail_url: freshUrls.thumbnail_url,
+                  })
+                  .eq('id', creativeId);
+
+                // Используем новый URL
+                videoUrl = freshUrls.media_urls[0];
+                urlRefreshed = true;
+
+                log.info({ creativeId, newVideoUrl: videoUrl }, '[Extract Text] URL обновлён, повторяем скачивание');
+
+                // Удаляем старый файл если есть
+                try {
+                  await fs.unlink(videoPath);
+                } catch {}
+
+                // Новый путь для нового скачивания
+                videoPath = path.join('/var/tmp', `competitor_video_${randomUUID()}.mp4`);
+
+                // Повторяем скачивание с новым URL
+                await downloadVideo(videoUrl, videoPath);
+              } else {
+                log.error({ creativeId }, '[Extract Text] Не удалось получить свежий URL через SearchAPI');
+                throw new Error('URL видео истёк и не удалось получить свежий. Попробуйте обновить конкурента.');
+              }
+            } else {
+              throw new Error(errorMsg === 'URL_EXPIRED'
+                ? 'URL видео истёк. Обновите данные конкурента.'
+                : 'Не удалось скачать видео');
+            }
+          }
+
+          // Получаем длительность видео для логирования
+          let videoDuration = 'unknown';
+          try {
+            const { stdout } = await execAsync(
+              `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
+              { timeout: 10000 }
+            );
+            videoDuration = `${parseFloat(stdout.trim()).toFixed(1)}s`;
+          } catch {
+            // Игнорируем ошибку ffprobe
+          }
+
+          log.info({ creativeId, videoPath, duration: videoDuration, urlRefreshed }, '[Extract Text] Видео скачано, запускаем транскрибацию');
 
           // Транскрибируем через Whisper
           const transcription = await processVideoTranscription(videoPath, 'ru');
