@@ -47,7 +47,8 @@ const AppRoutes = () => {
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  // ОТКЛЮЧЕНО: онбординг полностью выключен
+  const showOnboarding = false;
   const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
 
   useEffect(() => {
@@ -73,34 +74,6 @@ const AppRoutes = () => {
     setLoading(false);
   }, [location.pathname]);
 
-  // Слушаем событие когда AppContext загрузил данные о мультиаккаунтности
-  useEffect(() => {
-    const checkMultiAccountStatus = () => {
-      const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
-      const storedUser = localStorage.getItem('user');
-
-      // Онбординг ТОЛЬКО если:
-      // 1. multiAccountEnabled явно установлен в 'false'
-      // 2. У пользователя нет prompt1
-      if (localStorage.getItem('multiAccountEnabled') === 'false' && storedUser) {
-        try {
-          const parsedUser = JSON.parse(storedUser);
-          if (!parsedUser.prompt1) {
-            setShowOnboarding(true);
-          }
-        } catch {}
-      } else if (isMultiAccount) {
-        // Мультиаккаунт — закрываем если вдруг открыт
-        setShowOnboarding(false);
-      }
-    };
-
-    window.addEventListener('multiAccountLoaded', checkMultiAccountStatus);
-
-    return () => {
-      window.removeEventListener('multiAccountLoaded', checkMultiAccountStatus);
-    };
-  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -120,32 +93,8 @@ const AppRoutes = () => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const handleOnboardingComplete = () => {
-    // Обновляем user из localStorage после завершения онбординга
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        setUser(parsedUser);
-        setShowOnboarding(false);
-
-        // Оповещаем AppContext о необходимости перезагрузить ad_accounts
-        // (для мультиаккаунтного режима — после создания первого аккаунта)
-        window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
-
-        // После онбординга проверяем, подключен ли Facebook
-        // Показываем модалку если нет access_token и статус не pending_review
-        const hasFacebookConnection = parsedUser.access_token && parsedUser.access_token !== '';
-        const isPendingReview = parsedUser.fb_connection_status === 'pending_review';
-
-        if (!hasFacebookConnection && !isPendingReview) {
-          setShowFacebookManualModal(true);
-        }
-      } catch (error) {
-        console.error('Ошибка при обновлении user после онбординга:', error);
-      }
-    }
-  };
+  // ОТКЛЮЧЕНО: онбординг полностью выключен
+  const handleOnboardingComplete = () => {};
 
   const handleFacebookModalComplete = () => {
     setShowFacebookManualModal(false);
