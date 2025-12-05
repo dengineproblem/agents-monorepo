@@ -39,6 +39,7 @@ const CreativeGeneration = () => {
   const tabFromUrl = searchParams.get('tab');
   const promptFromUrl = searchParams.get('prompt');
   const textTypeFromUrl = searchParams.get('textType');
+  const competitorCreativeIdFromUrl = searchParams.get('competitorCreativeId');
 
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'images');
 
@@ -1254,6 +1255,7 @@ const CreativeGeneration = () => {
                 userId={userId}
                 initialPrompt={promptFromUrl || undefined}
                 initialTextType={textTypeFromUrl as any || undefined}
+                initialCompetitorCreativeId={competitorCreativeIdFromUrl || undefined}
                 accountId={currentAdAccountId}
               />
             </TabsContent>

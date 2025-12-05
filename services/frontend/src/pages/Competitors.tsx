@@ -274,6 +274,7 @@ export default function Competitors() {
             {/* Кнопка добавления */}
             <AddCompetitorDialog
               userAccountId={userId}
+              accountId={currentAdAccountId || undefined}
               onAdded={handleCompetitorAdded}
             />
 

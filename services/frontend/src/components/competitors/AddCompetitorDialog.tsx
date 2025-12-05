@@ -27,6 +27,7 @@ import { useTranslation } from '@/i18n/LanguageContext';
 
 interface AddCompetitorDialogProps {
   userAccountId: string;
+  accountId?: string;  // UUID рекламного аккаунта для мультиаккаунтности
   onAdded: (competitor: Competitor) => void;
 }
 
@@ -39,7 +40,7 @@ const COUNTRIES = [
   { code: 'ALL', label: 'Все страны' },
 ];
 
-export function AddCompetitorDialog({ userAccountId, onAdded }: AddCompetitorDialogProps) {
+export function AddCompetitorDialog({ userAccountId, accountId, onAdded }: AddCompetitorDialogProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -68,6 +69,7 @@ export function AddCompetitorDialog({ userAccountId, onAdded }: AddCompetitorDia
     try {
       const result = await competitorsApi.add({
         userAccountId,
+        accountId,  // UUID рекламного аккаунта для мультиаккаунтности
         socialUrl: socialUrl.trim(),
         name: name.trim(),
         countryCode,

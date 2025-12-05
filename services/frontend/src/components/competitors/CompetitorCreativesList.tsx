@@ -88,7 +88,7 @@ export function CompetitorCreativesList({
 }: CompetitorCreativesListProps) {
   const navigate = useNavigate();
 
-  // Переход на страницу генерации текстов с текстом
+  // Переход на страницу генерации текстов с текстом и ID креатива
   const handleRewriteScript = (creative: CompetitorCreative) => {
     const text = getAnalysisText(creative);
     if (!text) {
@@ -97,7 +97,8 @@ export function CompetitorCreativesList({
     }
 
     const encodedText = encodeURIComponent(text);
-    navigate(`/creatives?tab=video-scripts&textType=reference&prompt=${encodedText}`);
+    // Передаём creativeId чтобы автоматически выбрать этот креатив как референс
+    navigate(`/creatives?tab=video-scripts&textType=reference&prompt=${encodedText}&competitorCreativeId=${creative.id}`);
   };
 
   // Открыть оригинал в новой вкладке

@@ -13,10 +13,11 @@ interface TextTabProps {
   userId: string | null;
   initialPrompt?: string;
   initialTextType?: TextCreativeType;
+  initialCompetitorCreativeId?: string;  // ID креатива конкурента для автовыбора референса
   accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }
 
-export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt, initialTextType, accountId }) => {
+export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt, initialTextType, initialCompetitorCreativeId, accountId }) => {
   // State
   const [textType, setTextType] = useState<TextCreativeType>(initialTextType || 'storytelling');
   const [userPrompt, setUserPrompt] = useState(initialPrompt || '');
@@ -39,13 +40,12 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
   const [editInstructions, setEditInstructions] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
-  // Reference state (для типа 'reference') — поддерживает и конкурентов, и свои креативы
+  // Reference state (для типа 'reference')
   const [creativeReference, setCreativeReference] = useState<CreativeReference | null>(null);
 
   // Автозаполнение userPrompt при выборе референса
   useEffect(() => {
     if (creativeReference && textType === 'reference') {
-      // Приоритет: transcript > ocr_text > body_text
       const referenceText = creativeReference.transcript
         || creativeReference.ocr_text
         || creativeReference.body_text
@@ -63,17 +63,19 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
     }
   }, [textType]);
 
-  // Сброс состояния при смене аккаунта
+  // Сброс состояния при смене аккаунта (но не сбрасываем если есть initialPrompt из URL)
   useEffect(() => {
     if (!accountId) return;
 
     console.log('[VideoScriptsTab] Смена аккаунта, сбрасываем состояние');
-    setUserPrompt('');
+    // Не сбрасываем userPrompt если пришёл initialPrompt из URL (переход со страницы конкурентов)
+    if (!initialPrompt) {
+      setUserPrompt('');
+    }
     setGeneratedText('');
-    setCreativeReference(null);
     setIsEditMode(false);
     setEditInstructions('');
-  }, [accountId]);
+  }, [accountId, initialPrompt]);
 
   // Генерация текста
   const handleGenerate = async () => {
@@ -235,24 +237,15 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
             )}
           </div>
 
-          {/* Селектор референса (только для типа 'reference') */}
+          {/* Селектор референса (только для типа 'reference') — без заголовка */}
           {textType === 'reference' && userId && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Выберите креатив как референс
-              </Label>
-              <ReferenceSelector
-                userAccountId={userId}
-                selectedReference={creativeReference}
-                onSelect={setCreativeReference}
-                mediaTypeFilter="video"
-                accountId={accountId}
-              />
-              <p className="text-xs text-muted-foreground">
-                Выберите видео конкурента или свой креатив — его транскрипция автоматически подгрузится в поле задачи.
-              </p>
-            </div>
+            <ReferenceSelector
+              userAccountId={userId}
+              selectedReference={creativeReference}
+              onSelect={setCreativeReference}
+              mediaTypeFilter="video"
+              accountId={accountId}
+            />
           )}
 
           {/* Поле для задачи */}
