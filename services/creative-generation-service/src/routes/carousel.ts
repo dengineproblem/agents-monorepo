@@ -379,7 +379,15 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_id, card_index, custom_prompt, reference_image, text } = request.body;
+        const { user_id, account_id, carousel_id, card_index, custom_prompt, reference_image, reference_images, text } = request.body;
+
+        // Собираем все референсы в один массив (reference_images приоритетнее)
+        let contentReferenceImages: string[] | undefined;
+        if (reference_images && reference_images.length > 0) {
+          contentReferenceImages = reference_images;
+        } else if (reference_image) {
+          contentReferenceImages = [reference_image];
+        }
 
         console.log('[Regenerate Card] Request:', {
           user_id,
@@ -388,8 +396,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           card_index,
           has_custom_prompt: !!custom_prompt,
           custom_prompt_length: custom_prompt?.length || 0,
-          has_reference_image: !!reference_image,
-          reference_image_length: reference_image?.length || 0
+          reference_images_count: contentReferenceImages?.length || 0
         });
 
         // Валидация
@@ -495,7 +502,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           userPrompt1,
           visualStyle,
           custom_prompt,
-          reference_image
+          contentReferenceImages
         );
 
         // Загружаем новое изображение в Storage

@@ -118,7 +118,8 @@ export interface RegenerateCarouselCardRequest {
   carousel_id: string;
   card_index: number;
   custom_prompt?: string;
-  reference_image?: string; // base64
+  reference_image?: string; // base64 — для обратной совместимости (первый референс)
+  reference_images?: string[]; // base64 — до 2 референсов
   text: string; // Текст для этой карточки
 }
 

@@ -25,7 +25,7 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param visualStyle - Визуальный стиль карусели
  * @param customPrompt - Дополнительный промпт от пользователя (опционально)
  * @param styleReferenceImage - Референс для консистентности стиля (предыдущая карточка)
- * @param contentReferenceImage - Референс контента от пользователя (товар, персонаж и т.п.)
+ * @param contentReferenceImages - Референсы контента от пользователя (товар, персонаж и т.п.) — до 2 штук
  * @param currentCardImage - Текущее изображение карточки (для перегенерации — редактируем эту картинку)
  * @returns Base64 изображение
  */
@@ -37,13 +37,13 @@ async function generateCarouselCard(
   visualStyle: CarouselVisualStyle,
   customPrompt?: string,
   styleReferenceImage?: string,
-  contentReferenceImage?: string,
+  contentReferenceImages?: string[],
   currentCardImage?: string
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Generating card ${cardIndex + 1}/${totalCards}...`);
     console.log('[Gemini Carousel] Has style reference:', !!styleReferenceImage);
-    console.log('[Gemini Carousel] Has content reference:', !!contentReferenceImage);
+    console.log('[Gemini Carousel] Content references count:', contentReferenceImages?.length || 0);
     console.log('[Gemini Carousel] Has current card (edit mode):', !!currentCardImage);
 
     // Генерируем промпт через LLM-агент
@@ -84,19 +84,25 @@ async function generateCarouselCard(
       });
     }
 
-    // Добавляем референс контента (товар/персонаж от пользователя)
+    // Добавляем референсы контента (товар/персонаж от пользователя) — до 2 штук
     // Это то, что пользователь хочет ВИДЕТЬ на карточке
-    if (contentReferenceImage) {
-      console.log('[Gemini Carousel] Adding CONTENT reference (user product/asset)...');
-      contentParts.push({
-        text: '\n\n[РЕФЕРЕНС КОНТЕНТА - ВАЖНО!]\nЭто изображение показывает товар/объект/персонажа, который ОБЯЗАТЕЛЬНО должен быть размещён на карточке. Используй ИМЕННО этот объект как главный элемент изображения. Сохрани его внешний вид, форму и детали.'
-      });
-      contentParts.push({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: contentReferenceImage
-        }
-      });
+    if (contentReferenceImages && contentReferenceImages.length > 0) {
+      console.log(`[Gemini Carousel] Adding ${contentReferenceImages.length} CONTENT reference(s)...`);
+
+      for (let i = 0; i < contentReferenceImages.length; i++) {
+        const refImage = contentReferenceImages[i];
+        const refNumber = contentReferenceImages.length > 1 ? ` #${i + 1}` : '';
+
+        contentParts.push({
+          text: `\n\n[РЕФЕРЕНС КОНТЕНТА${refNumber} - ВАЖНО!]\nЭто изображение показывает товар/объект/персонажа, который ОБЯЗАТЕЛЬНО должен быть размещён на карточке. Используй ИМЕННО этот объект как главный элемент изображения. Сохрани его внешний вид, форму и детали.`
+        });
+        contentParts.push({
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: refImage
+          }
+        });
+      }
     }
 
     // Добавляем референс стиля (другая карточка карусели) — для консистентности дизайна
@@ -200,7 +206,9 @@ export async function generateCarouselImages(
       const customPrompt = customPrompts?.[i] || undefined;
 
       // Референс КОНТЕНТА от пользователя (товар, персонаж и т.п.) — только для этой карточки
-      const contentReference = referenceImages?.[i] || undefined;
+      // При первичной генерации передаём один референс как массив
+      const contentRef = referenceImages?.[i];
+      const contentReferenceArray = contentRef ? [contentRef] : undefined;
 
       // Референс СТИЛЯ (предыдущая сгенерированная карточка) — для консистентности дизайна
       let styleReference: string | undefined;
@@ -220,7 +228,7 @@ export async function generateCarouselImages(
         visualStyle,
         customPrompt,
         styleReference,
-        contentReference
+        contentReferenceArray
       );
 
       generatedImages.push(image);
@@ -252,7 +260,7 @@ export async function generateCarouselImages(
  * @param userPrompt1 - PROMPT1 пользователя
  * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompt - Дополнительный промпт от пользователя
- * @param contentReferenceImage - Референс контента от пользователя (товар, персонаж и т.п.)
+ * @param contentReferenceImages - Референсы контента от пользователя (до 2 штук)
  * @returns Base64 изображение
  */
 export async function regenerateCarouselCard(
@@ -262,11 +270,11 @@ export async function regenerateCarouselCard(
   userPrompt1: string,
   visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompt?: string,
-  contentReferenceImage?: string
+  contentReferenceImages?: string[]
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Regenerating card ${cardIndex + 1}...`);
-    console.log('[Gemini Carousel] Has content reference from user:', !!contentReferenceImage);
+    console.log('[Gemini Carousel] Content references from user:', contentReferenceImages?.length || 0);
 
     const totalCards = existingImages.length;
 
@@ -297,7 +305,7 @@ export async function regenerateCarouselCard(
       visualStyle,
       customPrompt,
       styleReference,
-      contentReferenceImage,
+      contentReferenceImages,
       currentCardImage  // Передаём текущую карточку для редактирования
     );
 
