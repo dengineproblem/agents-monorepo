@@ -26,6 +26,7 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param customPrompt - Дополнительный промпт от пользователя (опционально)
  * @param styleReferenceImage - Референс для консистентности стиля (предыдущая карточка)
  * @param contentReferenceImage - Референс контента от пользователя (товар, персонаж и т.п.)
+ * @param currentCardImage - Текущее изображение карточки (для перегенерации — редактируем эту картинку)
  * @returns Base64 изображение
  */
 async function generateCarouselCard(
@@ -36,12 +37,14 @@ async function generateCarouselCard(
   visualStyle: CarouselVisualStyle,
   customPrompt?: string,
   styleReferenceImage?: string,
-  contentReferenceImage?: string
+  contentReferenceImage?: string,
+  currentCardImage?: string
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Generating card ${cardIndex + 1}/${totalCards}...`);
     console.log('[Gemini Carousel] Has style reference:', !!styleReferenceImage);
     console.log('[Gemini Carousel] Has content reference:', !!contentReferenceImage);
+    console.log('[Gemini Carousel] Has current card (edit mode):', !!currentCardImage);
 
     // Генерируем промпт через LLM-агент
     const prompt = await generateCarouselCardPrompt(
@@ -66,7 +69,22 @@ async function generateCarouselCard(
     // Добавляем основной промпт
     contentParts.push({ text: prompt });
 
-    // Добавляем референс контента (товар/персонаж от пользователя) — ПЕРВЫМ
+    // РЕЖИМ РЕДАКТИРОВАНИЯ: если передана текущая карточка — это изображение для редактирования
+    // Оно идёт ПЕРВЫМ, чтобы Gemini понял что именно его нужно модифицировать
+    if (currentCardImage) {
+      console.log('[Gemini Carousel] Adding CURRENT CARD for editing...');
+      contentParts.push({
+        text: '\n\n[ИЗОБРАЖЕНИЕ ДЛЯ РЕДАКТИРОВАНИЯ - ГЛАВНОЕ!]\nЭто текущая карточка, которую нужно УЛУЧШИТЬ и ПЕРЕГЕНЕРИРОВАТЬ. Создай НОВУЮ версию этого изображения, сохраняя общую концепцию и композицию, но с улучшениями. Если есть дополнительные инструкции от пользователя — примени их к ЭТОМУ изображению.'
+      });
+      contentParts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: currentCardImage
+        }
+      });
+    }
+
+    // Добавляем референс контента (товар/персонаж от пользователя)
     // Это то, что пользователь хочет ВИДЕТЬ на карточке
     if (contentReferenceImage) {
       console.log('[Gemini Carousel] Adding CONTENT reference (user product/asset)...');
@@ -81,12 +99,12 @@ async function generateCarouselCard(
       });
     }
 
-    // Добавляем референс стиля (предыдущая карточка) — ВТОРЫМ
-    // Это для консистентности дизайна
+    // Добавляем референс стиля (другая карточка карусели) — для консистентности дизайна
+    // НЕ путать с currentCardImage — это ДРУГАЯ карточка для заимствования стиля
     if (styleReferenceImage) {
-      console.log('[Gemini Carousel] Adding STYLE reference (previous card)...');
+      console.log('[Gemini Carousel] Adding STYLE reference (another card for consistency)...');
       contentParts.push({
-        text: '\n\n[РЕФЕРЕНС СТИЛЯ]\nЭто предыдущая карточка карусели. Используй её только для консистентности СТИЛЯ: той же палитры, типографики, композиции, расположения текста. НЕ копируй содержимое — создай НОВЫЙ кадр с ДРУГИМ ракурсом/действием, но в том же визуальном стиле.'
+        text: '\n\n[РЕФЕРЕНС СТИЛЯ - ДРУГАЯ КАРТОЧКА]\nЭто ДРУГАЯ карточка из этой же карусели. Используй её только для консистентности СТИЛЯ: той же палитры, типографики, композиции, расположения текста. НЕ копируй её содержимое — она нужна только для единого визуального стиля карусели.'
       });
       contentParts.push({
         inlineData: {
@@ -252,18 +270,23 @@ export async function regenerateCarouselCard(
 
     const totalCards = existingImages.length;
 
-    // Референс СТИЛЯ — берём из существующих карточек для консистентности
-    // Но ТОЛЬКО если это не первая карточка (для первой нет смысла брать референс стиля)
+    // ТЕКУЩАЯ КАРТОЧКА — это изображение которое редактируем
+    const currentCardImage = existingImages[cardIndex];
+    console.log('[Gemini Carousel] Has current card to edit:', !!currentCardImage);
+
+    // Референс СТИЛЯ — берём ДРУГУЮ карточку для консистентности
+    // Важно: НЕ берём ту же карточку что редактируем!
     let styleReference: string | undefined;
-    if (cardIndex === 0) {
-      // Первая карточка: не используем референс стиля — она сама задаёт стиль
-      styleReference = undefined;
+    if (cardIndex === 0 && existingImages.length >= 2) {
+      // Первая карточка: используем вторую как референс стиля
+      styleReference = existingImages[1];
     } else if (cardIndex === 1 && existingImages.length >= 1) {
       // Вторая карточка: используем первую как референс стиля
       styleReference = existingImages[0];
-    } else if (cardIndex >= 2 && existingImages.length >= 2) {
-      // Третья и далее: используем вторую карточку как референс стиля
-      styleReference = existingImages[1];
+    } else if (cardIndex >= 2 && existingImages.length >= 1) {
+      // Третья и далее: используем первую карточку как референс стиля
+      // (не вторую, т.к. вторая может быть той что редактируем)
+      styleReference = existingImages[0];
     }
 
     const image = await generateCarouselCard(
@@ -274,7 +297,8 @@ export async function regenerateCarouselCard(
       visualStyle,
       customPrompt,
       styleReference,
-      contentReferenceImage
+      contentReferenceImage,
+      currentCardImage  // Передаём текущую карточку для редактирования
     );
 
     console.log(`[Gemini Carousel] Card ${cardIndex + 1} regenerated successfully`);
