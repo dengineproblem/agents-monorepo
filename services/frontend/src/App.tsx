@@ -58,14 +58,7 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
-
-          // Онбординг ТОЛЬКО для НЕ-мультиаккаунта и только если нет prompt1
-          const isMultiAccount = parsedUser.multi_account_enabled ||
-            localStorage.getItem('multiAccountEnabled') === 'true';
-
-          if (!isMultiAccount && !parsedUser.prompt1) {
-            setShowOnboarding(true);
-          }
+          // НЕ показываем онбординг при загрузке — ждём AppContext
         } else {
           localStorage.removeItem('user');
           setUser(null);
@@ -84,16 +77,25 @@ const AppRoutes = () => {
   useEffect(() => {
     const checkMultiAccountStatus = () => {
       const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
+      const storedUser = localStorage.getItem('user');
 
-      // Мультиаккаунт - ВСЕГДА закрываем онбординг
-      if (isMultiAccount) {
+      // Онбординг ТОЛЬКО если:
+      // 1. multiAccountEnabled явно установлен в 'false'
+      // 2. У пользователя нет prompt1
+      if (localStorage.getItem('multiAccountEnabled') === 'false' && storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          if (!parsedUser.prompt1) {
+            setShowOnboarding(true);
+          }
+        } catch {}
+      } else if (isMultiAccount) {
+        // Мультиаккаунт — закрываем если вдруг открыт
         setShowOnboarding(false);
       }
     };
 
     window.addEventListener('multiAccountLoaded', checkMultiAccountStatus);
-    // Проверяем сразу при монтировании
-    checkMultiAccountStatus();
 
     return () => {
       window.removeEventListener('multiAccountLoaded', checkMultiAccountStatus);
@@ -107,12 +109,6 @@ const AppRoutes = () => {
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
-          // Мультиаккаунт - НИКОГДА не показываем онбординг автоматически
-          const isMultiAccount = parsedUser.multi_account_enabled ||
-            localStorage.getItem('multiAccountEnabled') === 'true';
-          if (isMultiAccount) {
-            setShowOnboarding(false);
-          }
         } catch (error) {
           setUser(null);
         }
