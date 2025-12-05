@@ -428,7 +428,7 @@ class SalesApiService {
       // ШАГ 3: Загружаем лиды для расчёта выручки (связь с purchases)
       let leadsQuery = (supabase as any)
         .from('leads')
-        .select('id, chat_id, creative_id, direction_id')
+        .select('id, chat_id, creative_id, direction_id, is_qualified')
         .eq('user_account_id', userAccountId)
         .in('creative_id', creativeIds);
 
@@ -496,17 +496,22 @@ class SalesApiService {
         p.amount += Number(purchase.amount) || 0;
       }
 
-      // Группируем лиды по креативам для расчёта выручки и конверсий
-      const revenueByCreative = new Map<string, { revenue: number; conversions: number; leadsCount: number }>();
+      // Группируем лиды по креативам для расчёта выручки, конверсий и квалификации
+      const revenueByCreative = new Map<string, { revenue: number; conversions: number; leadsCount: number; qualifiedCount: number }>();
       for (const lead of leadsData || []) {
         const creativeId = lead.creative_id;
         if (!creativeId) continue;
 
         if (!revenueByCreative.has(creativeId)) {
-          revenueByCreative.set(creativeId, { revenue: 0, conversions: 0, leadsCount: 0 });
+          revenueByCreative.set(creativeId, { revenue: 0, conversions: 0, leadsCount: 0, qualifiedCount: 0 });
         }
         const rev = revenueByCreative.get(creativeId)!;
         rev.leadsCount++;
+
+        // Считаем квалифицированных
+        if (lead.is_qualified === true) {
+          rev.qualifiedCount++;
+        }
 
         const purchaseData = purchasesByPhone.get(lead.chat_id);
         if (purchaseData) {
@@ -525,10 +530,15 @@ class SalesApiService {
       for (const creative of creatives) {
         const creativeId = creative.id;
         const metrics = metricsMap.get(creativeId) || { impressions: 0, reach: 0, clicks: 0, leads: 0, spend: 0 };
-        const revenueData = revenueByCreative.get(creativeId) || { revenue: 0, conversions: 0, leadsCount: 0 };
+        const revenueData = revenueByCreative.get(creativeId) || { revenue: 0, conversions: 0, leadsCount: 0, qualifiedCount: 0 };
 
         // Лиды берём из creative_metrics_history (метрики FB), не из таблицы leads
         const leads = metrics.leads;
+
+        // Данные о квалификации из локальной таблицы leads
+        const qualifiedCount = revenueData.qualifiedCount;
+        // % квал считаем от количества лидов из FB метрик, а не от локальных лидов
+        const qualificationRate = leads > 0 ? (qualifiedCount / leads) * 100 : 0;
         const spend = Math.round(metrics.spend * usdToKztRate); // spend в USD -> KZT
         const revenue = revenueData.revenue;
         const conversions = revenueData.conversions;
@@ -558,6 +568,12 @@ class SalesApiService {
           roi,
           leads,
           conversions,
+          // Данные о квалификации лидов (% от FB leads, не от локальных)
+          qualification: leads > 0 ? {
+            qualified: qualifiedCount,
+            total: leads,
+            rate: qualificationRate
+          } : undefined,
           // Новые поля для типа медиа и миниатюр
           media_type: creative.media_type || null,
           image_url: creative.image_url || null,

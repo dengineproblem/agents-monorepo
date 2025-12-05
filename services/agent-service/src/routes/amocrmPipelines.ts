@@ -1435,15 +1435,16 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Check if qualification field is configured
+      // Check if qualification fields are configured (new array format)
       const { data: account } = await supabase
         .from('user_accounts')
-        .select('amocrm_qualification_field_id')
+        .select('amocrm_qualification_fields')
         .eq('id', userAccountId)
         .maybeSingle();
 
-      if (!account?.amocrm_qualification_field_id) {
-        // No qualification field configured, return empty
+      const qualificationFields = account?.amocrm_qualification_fields || [];
+      if (!qualificationFields.length) {
+        // No qualification fields configured, return empty
         return reply.send({
           qualifiedByCreative: {},
           configured: false
@@ -1525,15 +1526,16 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Check if qualification field is configured
+      // Check if qualification fields are configured (new array format)
       const { data: account } = await supabase
         .from('user_accounts')
-        .select('amocrm_qualification_field_id')
+        .select('amocrm_qualification_fields')
         .eq('id', userAccountId)
         .maybeSingle();
 
-      if (!account?.amocrm_qualification_field_id) {
-        // No qualification field configured, return null to indicate fallback to Facebook data
+      const qualificationFields = account?.amocrm_qualification_fields || [];
+      if (!qualificationFields.length) {
+        // No qualification fields configured, return null to indicate fallback to Facebook data
         return reply.send({
           totalQualifiedLeads: null,
           configured: false

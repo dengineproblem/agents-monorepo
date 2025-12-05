@@ -22,6 +22,77 @@ import {
 } from '../adapters/amocrm.js';
 
 /**
+ * Qualification field configuration from user_accounts.amocrm_qualification_fields
+ */
+interface QualificationFieldConfig {
+  field_id: number;
+  field_name: string;
+  field_type: 'checkbox' | 'select' | 'multiselect';
+  enum_id?: number | null;
+  enum_value?: string | null;
+}
+
+/**
+ * Check if lead is qualified based on custom fields configuration
+ * Lead is qualified if ANY of the configured fields matches
+ * Supports both lead (deal) fields and contact fields
+ */
+function checkQualification(
+  amocrmLead: any,
+  qualificationFields: QualificationFieldConfig[]
+): boolean {
+  if (!qualificationFields || qualificationFields.length === 0) {
+    return false;
+  }
+
+  // Collect all custom fields from lead AND contacts
+  const allCustomFields: any[] = [];
+
+  // Add lead's custom fields
+  if (amocrmLead?.custom_fields_values && Array.isArray(amocrmLead.custom_fields_values)) {
+    allCustomFields.push(...amocrmLead.custom_fields_values);
+  }
+
+  // Add contact's custom fields (contacts are in _embedded.contacts)
+  const contacts = amocrmLead?._embedded?.contacts || [];
+  for (const contact of contacts) {
+    if (contact?.custom_fields_values && Array.isArray(contact.custom_fields_values)) {
+      allCustomFields.push(...contact.custom_fields_values);
+    }
+  }
+
+  if (allCustomFields.length === 0) {
+    return false;
+  }
+
+  for (const config of qualificationFields) {
+    const fieldValue = allCustomFields.find(
+      (field: any) => field.field_id === config.field_id
+    );
+
+    if (!fieldValue || !fieldValue.values || fieldValue.values.length === 0) {
+      continue;
+    }
+
+    const value = fieldValue.values[0];
+
+    if (config.field_type === 'select' || config.field_type === 'multiselect') {
+      // For select/multiselect: check if enum_id matches
+      if (config.enum_id && value.enum_id === config.enum_id) {
+        return true;
+      }
+    } else {
+      // For checkbox (or null/undefined field_type for backward compatibility): check if value is true
+      if (value.value === true) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Normalize phone number to standard format
  * Removes all non-digit characters except leading +
  *
@@ -563,45 +634,67 @@ export async function processLeadStatusChange(
       return;
     }
 
-    // 2. Determine qualification based on custom field or pipeline stage
-    // First check if custom qualification field is configured
+    // 2. Determine qualification based on custom fields or pipeline stage
+    // First check if custom qualification fields are configured (new array format)
     const { data: userAccount } = await supabase
       .from('user_accounts')
-      .select('amocrm_qualification_field_id, amocrm_subdomain, amocrm_access_token')
+      .select('amocrm_qualification_fields')
       .eq('id', userAccountId)
       .maybeSingle();
 
-    const qualificationFieldId = userAccount?.amocrm_qualification_field_id || null;
+    const qualificationFields: QualificationFieldConfig[] = userAccount?.amocrm_qualification_fields || [];
     let isQualified = false;
 
-    if (qualificationFieldId && userAccount?.amocrm_subdomain && userAccount?.amocrm_access_token) {
-      // Use custom field for qualification - need to fetch lead details from AmoCRM
+    if (qualificationFields.length > 0) {
+      // Use custom fields for qualification - need to fetch lead details from AmoCRM
+      // Supports both lead fields AND contact fields
       try {
-        const { getLead } = await import('../adapters/amocrm.js');
+        const { getLead, getContact } = await import('../adapters/amocrm.js');
         const { getValidAmoCRMToken } = await import('../lib/amocrmTokens.js');
 
         const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
         const amocrmLead = await getLead(amocrmLeadId, subdomain, accessToken);
 
-        if (amocrmLead?.custom_fields_values) {
-          const customFieldValue = amocrmLead.custom_fields_values.find(
-            (field: any) => field.field_id === qualificationFieldId
-          );
-          // Checkbox fields have values like [{ value: true/false }]
-          isQualified = customFieldValue?.values?.[0]?.value === true;
+        // Fetch full contact data if lead has linked contacts
+        const linkedContacts = amocrmLead?._embedded?.contacts || [];
+        const contactsWithFields: any[] = [];
 
-          app.log.info({
-            amocrmLeadId,
-            qualificationFieldId,
-            fieldValue: customFieldValue?.values?.[0]?.value,
-            isQualified
-          }, 'Qualification determined by custom field');
+        if (linkedContacts.length > 0) {
+          for (const contactRef of linkedContacts) {
+            if (!contactRef?.id) continue;
+            try {
+              const fullContact = await getContact(contactRef.id, subdomain, accessToken);
+              if (fullContact?.custom_fields_values) {
+                contactsWithFields.push(fullContact);
+              }
+            } catch (e) {
+              // Skip if contact fetch fails
+            }
+          }
         }
+
+        // Create enriched lead object with full contact data
+        const enrichedLead = {
+          ...amocrmLead,
+          _embedded: {
+            ...amocrmLead?._embedded,
+            contacts: contactsWithFields
+          }
+        };
+
+        isQualified = checkQualification(enrichedLead, qualificationFields);
+
+        app.log.info({
+          amocrmLeadId,
+          qualificationFieldsCount: qualificationFields.length,
+          contactsCount: contactsWithFields.length,
+          isQualified
+        }, 'Qualification determined by custom fields');
       } catch (error: any) {
         app.log.warn({
           error: error.message,
           amocrmLeadId,
-          qualificationFieldId
+          qualificationFieldsCount: qualificationFields.length
         }, 'Failed to fetch lead custom fields, falling back to stage qualification');
 
         // Fallback to pipeline stage qualification

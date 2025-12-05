@@ -126,6 +126,9 @@ const ROIAnalytics: React.FC = () => {
   const [creativeAnalysis, setCreativeAnalysis] = useState<any>(null);
   const [creativeTranscript, setCreativeTranscript] = useState<string | null>(null);
 
+  // Refresh/sync state
+  const [isSyncing, setIsSyncing] = useState(false);
+
   /* TEMPORARILY HIDDEN: Key Stages Qualification Stats
   // Qualification stats state - now supports up to 3 key stages
   const [qualificationStats, setQualificationStats] = useState<{
@@ -192,7 +195,7 @@ const ROIAnalytics: React.FC = () => {
       { header: 'Затраты', accessor: (c) => formatAmountForExport(c.spend) },
       { header: 'ROI %', accessor: (c) => c.roi.toFixed(1) },
       { header: 'Лиды', accessor: (c) => c.leads },
-      { header: 'Конверсии', accessor: (c) => c.conversions },
+      { header: '% квал', accessor: (c) => c.qualification?.rate !== undefined ? c.qualification.rate.toFixed(1) : '' },
       { header: 'Конверсия %', accessor: (c) => c.leads > 0 ? ((c.conversions / c.leads) * 100).toFixed(1) : '0' },
     ], 'creatives');
   };
@@ -290,6 +293,42 @@ const ROIAnalytics: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Ошибка загрузки данных');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Обновление таблицы + фоновая синхронизация AmoCRM для всех креативов
+  const handleRefresh = async () => {
+    // 1. Сначала обновляем таблицу
+    await loadROIData();
+
+    // 2. Запускаем синхронизацию AmoCRM фоном (если есть подключение)
+    if (!userAccountId || !roiData?.campaigns?.length) return;
+
+    setIsSyncing(true);
+    try {
+      // Получаем все уникальные creative_id из текущих данных
+      const creativeIds = roiData.campaigns.map(c => c.id);
+
+      // Синхронизируем каждый креатив фоном (параллельно, но с ограничением)
+      const syncPromises = creativeIds.map(async (creativeId) => {
+        try {
+          await fetch(`${API_BASE_URL}/amocrm/sync-creative-leads?userAccountId=${userAccountId}&creativeId=${creativeId}`, {
+            method: 'POST'
+          });
+        } catch (e) {
+          // Игнорируем ошибки отдельных креативов
+          console.warn(`Ошибка синхронизации креатива ${creativeId}:`, e);
+        }
+      });
+
+      await Promise.all(syncPromises);
+
+      // 3. После синхронизации обновляем таблицу ещё раз чтобы показать новые данные
+      await loadROIData();
+    } catch (err) {
+      console.error('Ошибка синхронизации AmoCRM:', err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -805,18 +844,30 @@ const ROIAnalytics: React.FC = () => {
               </DropdownMenu>
             </div>
 
-            {/* Кнопка экспорта */}
-            {roiData?.campaigns && roiData.campaigns.length > 0 && (
+            {/* Кнопки обновления и экспорта - справа */}
+            <div className="flex items-center gap-2 ml-auto">
               <Button
                 variant="outline"
                 size="sm"
                 className="h-8 text-xs flex-shrink-0"
-                onClick={handleExportCreatives}
+                onClick={handleRefresh}
+                disabled={loading || isSyncing}
               >
-                <Download className="h-3.5 w-3.5 mr-1.5" />
-                Экспорт
+                <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isSyncing && "animate-spin")} />
+                {isSyncing ? 'Синхронизация...' : 'Обновить'}
               </Button>
-            )}
+              {roiData?.campaigns && roiData.campaigns.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs flex-shrink-0"
+                  onClick={handleExportCreatives}
+                >
+                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                  Экспорт
+                </Button>
+              )}
+            </div>
           </div>
 
           {roiData?.campaigns && roiData.campaigns.length > 0 ? (
@@ -835,7 +886,8 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Затраты</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">ROI</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Лиды</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Конверсии</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">CPL</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">% квал</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Конверсия %</th>
                             {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
@@ -908,7 +960,16 @@ const ROIAnalytics: React.FC = () => {
                                   {formatNumber(campaign.leads)}
                                 </td>
                                 <td className="py-2 px-3 text-left text-sm">
-                                  {formatNumber(campaign.conversions)}
+                                  {campaign.leads > 0
+                                    ? formatUSD(campaign.spend / 530 / campaign.leads)
+                                    : '—'
+                                  }
+                                </td>
+                                <td className="py-2 px-3 text-left text-sm">
+                                  {campaign.qualification?.rate !== undefined
+                                    ? `${campaign.qualification.rate.toFixed(1)}%`
+                                    : '—'
+                                  }
                                 </td>
                                 <td className="py-2 px-3 text-left text-sm">
                                   {campaign.leads > 0 ?
@@ -964,7 +1025,7 @@ const ROIAnalytics: React.FC = () => {
                               </tr>
                               {expandedCreativeId === campaign.id && (
                                 <tr className="border-b">
-                                  <td colSpan={11} className="p-4 bg-muted/20">
+                                  <td colSpan={12} className="p-4 bg-muted/20">
                                     {loadingMetrics ? (
                                       <div className="text-center py-4">
                                         <RefreshCw className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
@@ -1337,6 +1398,24 @@ const ROIAnalytics: React.FC = () => {
                           <span className="text-muted-foreground">Лиды:</span>
                           <span className="font-medium">
                             {formatNumber(campaign.leads)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">CPL:</span>
+                          <span className="font-medium">
+                            {campaign.leads > 0
+                              ? formatUSD(campaign.spend / 530 / campaign.leads)
+                              : '—'
+                            }
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">% квал:</span>
+                          <span className="font-medium">
+                            {campaign.qualification?.rate !== undefined
+                              ? `${campaign.qualification.rate.toFixed(1)}%`
+                              : '—'
+                            }
                           </span>
                         </div>
                         <div className="flex justify-between text-xs">

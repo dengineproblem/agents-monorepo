@@ -37,6 +37,82 @@ function normalizePhone(phone: string | null): string | null {
 // This is much more efficient than downloading ALL leads/contacts from AmoCRM
 
 /**
+ * Qualification field configuration from user_accounts.amocrm_qualification_fields
+ */
+interface QualificationFieldConfig {
+  field_id: number;
+  field_name: string;
+  field_type: 'checkbox' | 'select' | 'multiselect';
+  enum_id?: number | null;
+  enum_value?: string | null;
+}
+
+/**
+ * Check if lead is qualified based on custom fields configuration
+ * Lead is qualified if ANY of the configured fields matches
+ * Supports both lead (deal) fields and contact fields
+ *
+ * @param amocrmLead - Full AmoCRM lead object (includes _embedded.contacts)
+ * @param qualificationFields - array of qualification field configs
+ * @returns true if lead is qualified
+ */
+function checkQualification(
+  amocrmLead: any,
+  qualificationFields: QualificationFieldConfig[]
+): boolean {
+  if (!qualificationFields || qualificationFields.length === 0) {
+    return false;
+  }
+
+  // Collect all custom fields from lead AND contacts
+  const allCustomFields: any[] = [];
+
+  // Add lead's custom fields
+  if (amocrmLead?.custom_fields_values && Array.isArray(amocrmLead.custom_fields_values)) {
+    allCustomFields.push(...amocrmLead.custom_fields_values);
+  }
+
+  // Add contact's custom fields (contacts are in _embedded.contacts)
+  const contacts = amocrmLead?._embedded?.contacts || [];
+  for (const contact of contacts) {
+    if (contact?.custom_fields_values && Array.isArray(contact.custom_fields_values)) {
+      allCustomFields.push(...contact.custom_fields_values);
+    }
+  }
+
+  if (allCustomFields.length === 0) {
+    return false;
+  }
+
+  // Lead is qualified if ANY of the fields matches
+  for (const config of qualificationFields) {
+    const fieldValue = allCustomFields.find(
+      (field: any) => field.field_id === config.field_id
+    );
+
+    if (!fieldValue || !fieldValue.values || fieldValue.values.length === 0) {
+      continue;
+    }
+
+    const value = fieldValue.values[0];
+
+    if (config.field_type === 'select' || config.field_type === 'multiselect') {
+      // For select/multiselect: check if enum_id matches
+      if (config.enum_id && value.enum_id === config.enum_id) {
+        return true;
+      }
+    } else {
+      // For checkbox (or null/undefined field_type for backward compatibility): check if value is true
+      if (value.value === true) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Sync result statistics
  */
 export interface SyncLeadsResult {
@@ -81,22 +157,26 @@ export async function syncLeadsFromAmoCRM(
     // 1. Get valid AmoCRM token
     const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
 
-    // 1.5 Check if custom qualification field is configured
+    // 1.5 Check if custom qualification fields are configured (supports up to 3 fields)
     const { data: userAccount } = await supabase
       .from('user_accounts')
-      .select('amocrm_qualification_field_id')
+      .select('amocrm_qualification_fields')
       .eq('id', userAccountId)
       .maybeSingle();
 
-    const qualificationFieldId = userAccount?.amocrm_qualification_field_id || null;
-    if (qualificationFieldId) {
-      log.info({ userAccountId, qualificationFieldId }, 'Custom qualification field configured');
+    const qualificationFields: QualificationFieldConfig[] = userAccount?.amocrm_qualification_fields || [];
+    if (qualificationFields.length > 0) {
+      log.info({
+        userAccountId,
+        qualificationFieldsCount: qualificationFields.length,
+        fields: qualificationFields.map(f => ({ id: f.field_id, type: f.field_type, enumId: f.enum_id }))
+      }, 'Custom qualification fields configured');
     }
 
     // 2. Get all leads with phone numbers from database
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type, account_id')
+      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type, account_id, is_qualified')
       .eq('user_account_id', userAccountId) as { data: Array<{
         id: any;
         phone: any;
@@ -108,6 +188,7 @@ export async function syncLeadsFromAmoCRM(
         name: any;
         source_type: any;
         account_id: string | null;
+        is_qualified: boolean | null;
       }> | null, error: any };
 
     if (leadsError) {
@@ -222,26 +303,52 @@ export async function syncLeadsFromAmoCRM(
           pipelineStats.set(newPipelineId, current);
         }
 
-        // Determine qualification based on custom field or pipeline stage
+        // Determine qualification based on custom fields or pipeline stage
         let isQualified = false;
 
-        if (qualificationFieldId) {
-          // Use custom field for qualification
-          const customFieldValue = amocrmLeadFromContact.custom_fields_values?.find(
-            (field: any) => field.field_id === qualificationFieldId
-          );
-          // Checkbox fields have values like [{ value: true/false }]
-          isQualified = customFieldValue?.values?.[0]?.value === true;
+        if (qualificationFields.length > 0) {
+          // Use custom fields for qualification (supports checkbox, select, multiselect)
+          // Supports both lead fields AND contact fields
+
+          // Fetch full contact data if lead has linked contacts
+          const linkedContacts = amocrmLeadFromContact._embedded?.contacts || [];
+          const contactsWithFields: any[] = [];
+
+          if (linkedContacts.length > 0) {
+            const { getContact } = await import('../adapters/amocrm.js');
+            for (const contactRef of linkedContacts) {
+              try {
+                const fullContact = await getContact(contactRef.id, subdomain, accessToken);
+                if (fullContact?.custom_fields_values) {
+                  contactsWithFields.push(fullContact);
+                }
+              } catch (e) {
+                // Skip if contact fetch fails
+              }
+            }
+          }
+
+          // Create enriched lead object with full contact data
+          const enrichedLead = {
+            ...amocrmLeadFromContact,
+            _embedded: {
+              ...amocrmLeadFromContact._embedded,
+              contacts: contactsWithFields
+            }
+          };
+
+          isQualified = checkQualification(enrichedLead, qualificationFields);
         } else {
           // Fallback to pipeline stage qualification
           isQualified = qualificationMap.get(newStatusId!) || false;
         }
 
-        // Only update if something changed
-        const needsUpdate = 
+        // Only update if something changed (include is_qualified to catch contact field changes)
+        const needsUpdate =
           localLead.current_status_id !== newStatusId ||
           localLead.current_pipeline_id !== newPipelineId ||
-          localLead.amocrm_lead_id !== newAmoCRMLeadId;
+          localLead.amocrm_lead_id !== newAmoCRMLeadId ||
+          localLead.is_qualified !== isQualified;
 
         if (!needsUpdate) {
           continue;
@@ -466,7 +573,7 @@ export async function syncCreativeLeadsFromAmoCRM(
     // 2. Get leads for this specific creative only
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type')
+      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type, is_qualified')
       .eq('user_account_id', userAccountId)
       .eq('creative_id', creativeId);
 
@@ -482,7 +589,16 @@ export async function syncCreativeLeadsFromAmoCRM(
     result.total = leads.length;
     log.info({ userAccountId, creativeId, totalLeads: leads.length }, 'Found leads to sync for creative');
 
-    // 3. Get qualification map
+    // 3. Get qualification fields configuration
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('amocrm_qualification_fields')
+      .eq('id', userAccountId)
+      .maybeSingle();
+
+    const qualificationFields: QualificationFieldConfig[] = userAccount?.amocrm_qualification_fields || [];
+
+    // 3.1 Get pipeline stages as fallback if no custom fields configured
     const { data: pipelineStages, error: stagesError } = await supabase
       .from('amocrm_pipeline_stages')
       .select('status_id, is_qualified_stage')
@@ -569,7 +685,55 @@ export async function syncCreativeLeadsFromAmoCRM(
             const newAmoCRMLeadId = amocrmLeadFromContact.id;
             const newStatusId = amocrmLeadFromContact.status_id;
             const newPipelineId = amocrmLeadFromContact.pipeline_id;
-            const isQualified = qualificationMap.get(newStatusId!) || false;
+
+            // Determine qualification based on custom fields or pipeline stage
+            let isQualified = false;
+            if (qualificationFields.length > 0) {
+              // Use custom fields for qualification (supports checkbox, select, multiselect)
+              // Supports both lead fields AND contact fields
+
+              // Fetch full contact data if lead has linked contacts
+              // (AmoCRM returns only contact IDs with leads, not full custom_fields_values)
+              const linkedContacts = amocrmLeadFromContact._embedded?.contacts || [];
+              const contactsWithFields: any[] = [];
+
+              if (linkedContacts.length > 0) {
+                const { getContact } = await import('../adapters/amocrm.js');
+                for (const contactRef of linkedContacts) {
+                  try {
+                    const fullContact = await getContact(contactRef.id, subdomain, accessToken);
+                    if (fullContact?.custom_fields_values) {
+                      contactsWithFields.push(fullContact);
+                    }
+                  } catch (e) {
+                    // Skip if contact fetch fails
+                  }
+                }
+              }
+
+              // Create enriched lead object with full contact data
+              const enrichedLead = {
+                ...amocrmLeadFromContact,
+                _embedded: {
+                  ...amocrmLeadFromContact._embedded,
+                  contacts: contactsWithFields
+                }
+              };
+
+              isQualified = checkQualification(enrichedLead, qualificationFields);
+
+              log.info({
+                leadId: localLead.id,
+                amocrmLeadId: newAmoCRMLeadId,
+                isQualified,
+                qualificationFieldsCount: qualificationFields.length,
+                leadCustomFieldsCount: amocrmLeadFromContact.custom_fields_values?.length || 0,
+                contactsCount: contactsWithFields.length
+              }, 'Qualification check result');
+            } else {
+              // Fallback to pipeline stage qualification
+              isQualified = qualificationMap.get(newStatusId!) || false;
+            }
 
             // Always sync sales data if we have the lead from AmoCRM
             if (newAmoCRMLeadId) {
@@ -637,11 +801,12 @@ export async function syncCreativeLeadsFromAmoCRM(
               }
             }
 
-            // Check if update needed
-            const needsUpdate = 
+            // Check if update needed (include is_qualified to catch contact field changes)
+            const needsUpdate =
               localLead.current_status_id !== newStatusId ||
               localLead.current_pipeline_id !== newPipelineId ||
-              localLead.amocrm_lead_id !== newAmoCRMLeadId;
+              localLead.amocrm_lead_id !== newAmoCRMLeadId ||
+              localLead.is_qualified !== isQualified;
 
             if (!needsUpdate) {
               return;
