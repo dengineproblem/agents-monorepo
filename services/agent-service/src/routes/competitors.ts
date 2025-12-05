@@ -1186,11 +1186,21 @@ export default async function competitorsRoutes(app: FastifyInstance) {
             throw new Error('curl скачал пустой файл');
           }
 
-          // Проверяем что файл — это реальное видео, а не HTML-страница ошибки
-          if (stats.size < 10000) {
+          // Проверяем что файл — это реальное видео, а не ошибка/HTML
+          // Видео файлы обычно > 100KB, маленькие файлы — это ошибки
+          if (stats.size < 50000) {
             const content = await fs.readFile(outputPath, 'utf-8').catch(() => '');
-            if (content.includes('<!DOCTYPE') || content.includes('<html') || content.includes('Error') || content.includes('Forbidden')) {
-              log.warn({ creativeId, fileSize: stats.size }, '[Extract Text] curl скачал HTML вместо видео — URL истёк');
+            // Проверяем на HTML, текстовые ошибки CDN, или слишком короткий контент
+            const isError = content.includes('<!DOCTYPE')
+              || content.includes('<html')
+              || content.includes('Error')
+              || content.includes('Forbidden')
+              || content.includes('Bad URL')
+              || content.includes('expired')
+              || stats.size < 1000; // Любой файл < 1KB — точно не видео
+
+            if (isError) {
+              log.warn({ creativeId, fileSize: stats.size, content: content.slice(0, 100) }, '[Extract Text] curl скачал ошибку вместо видео — URL истёк');
               throw new Error('URL_EXPIRED');
             }
           }
