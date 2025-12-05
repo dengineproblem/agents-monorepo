@@ -46,12 +46,9 @@ const AppRoutes = () => {
   const noSidebarRoutes = ['/whatsapp-analysis'];
 
   const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true); // Всегда загружаем пользователя
+  const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
-  const [isMultiAccountMode, setIsMultiAccountMode] = useState<boolean>(
-    localStorage.getItem('multiAccountEnabled') === 'true'
-  );
 
   useEffect(() => {
     // Проверяем наличие пользовательских данных в localStorage
@@ -62,23 +59,12 @@ const AppRoutes = () => {
         if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
 
-          // Проверяем мультиаккаунтный режим из localStorage
-          // Если уже известно что мультиаккаунт - сразу отключаем онбординг
+          // Онбординг ТОЛЬКО для НЕ-мультиаккаунта и только если нет prompt1
           const isMultiAccount = parsedUser.multi_account_enabled ||
             localStorage.getItem('multiAccountEnabled') === 'true';
 
-          if (isMultiAccount) {
-            // Мультиаккаунт - НЕ показываем автоматический онбординг
-            setShowOnboarding(false);
-          } else if (localStorage.getItem('multiAccountEnabled') === 'false') {
-            // Точно НЕ мультиаккаунт - проверяем prompt1
-            if (!parsedUser.prompt1) {
-              setShowOnboarding(true);
-            }
-          } else {
-            // Ещё не знаем (первая загрузка) - ждём AppContext
-            // НЕ показываем онбординг пока не убедимся
-            setShowOnboarding(false);
+          if (!isMultiAccount && !parsedUser.prompt1) {
+            setShowOnboarding(true);
           }
         } else {
           localStorage.removeItem('user');
@@ -97,35 +83,20 @@ const AppRoutes = () => {
   // Слушаем событие когда AppContext загрузил данные о мультиаккаунтности
   useEffect(() => {
     const checkMultiAccountStatus = () => {
-      const storedUser = localStorage.getItem('user');
       const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
 
-      // Обновляем state для корректного рендера кнопки закрытия
-      setIsMultiAccountMode(isMultiAccount);
-
+      // Мультиаккаунт - ВСЕГДА закрываем онбординг
       if (isMultiAccount) {
-        // Мультиаккаунт - закрываем онбординг если открыт
         setShowOnboarding(false);
-      } else if (localStorage.getItem('multiAccountEnabled') === 'false' && storedUser) {
-        // Точно НЕ мультиаккаунт - проверяем prompt1
-        try {
-          const parsedUser = JSON.parse(storedUser);
-          if (!parsedUser.prompt1) {
-            setShowOnboarding(true);
-          }
-        } catch {}
       }
     };
 
-    // Слушаем событие от AppContext
     window.addEventListener('multiAccountLoaded', checkMultiAccountStatus);
-
-    // Также проверяем с задержкой на случай если событие уже произошло
-    const timeoutId = setTimeout(checkMultiAccountStatus, 500);
+    // Проверяем сразу при монтировании
+    checkMultiAccountStatus();
 
     return () => {
       window.removeEventListener('multiAccountLoaded', checkMultiAccountStatus);
-      clearTimeout(timeoutId);
     };
   }, []);
 
@@ -136,15 +107,10 @@ const AppRoutes = () => {
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
-          // В мультиаккаунтном режиме НЕ показываем автоматический онбординг
+          // Мультиаккаунт - НИКОГДА не показываем онбординг автоматически
           const isMultiAccount = parsedUser.multi_account_enabled ||
             localStorage.getItem('multiAccountEnabled') === 'true';
-          setIsMultiAccountMode(isMultiAccount);
           if (isMultiAccount) {
-            setShowOnboarding(false);
-          } else if (!parsedUser.prompt1) {
-            setShowOnboarding(true);
-          } else {
             setShowOnboarding(false);
           }
         } catch (error) {
@@ -156,17 +122,6 @@ const AppRoutes = () => {
     };
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
-  // Слушаем событие openOnboarding из Dashboard (для мультиаккаунтного режима)
-  useEffect(() => {
-    const handleOpenOnboarding = () => {
-      // Событие openOnboarding приходит только из мультиаккаунтного режима
-      setIsMultiAccountMode(true);
-      setShowOnboarding(true);
-    };
-    window.addEventListener('openOnboarding', handleOpenOnboarding);
-    return () => window.removeEventListener('openOnboarding', handleOpenOnboarding);
   }, []);
 
   const handleOnboardingComplete = () => {
@@ -221,16 +176,10 @@ const AppRoutes = () => {
     <>
       {user && !isPublicRoute ? (
         <>
-          {/* Онбординг показывается поверх всего если prompt1 не заполнен */}
+          {/* Онбординг показывается ТОЛЬКО для НЕ-мультиаккаунта если prompt1 не заполнен */}
           {showOnboarding && (
             <OnboardingWizard
               onComplete={handleOnboardingComplete}
-              onClose={
-                // Кнопка закрытия только для мультиаккаунтного режима
-                isMultiAccountMode
-                  ? () => setShowOnboarding(false)
-                  : undefined
-              }
             />
           )}
 
