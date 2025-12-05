@@ -35,6 +35,8 @@ import {
   FileText,
   Mic,
   AlertCircle,
+  Eye,
+  ScanText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { competitorsApi } from '@/services/competitorsApi';
@@ -108,6 +110,10 @@ export function ReferenceSelector({
 
   // Transcription state
   const [transcribingId, setTranscribingId] = useState<string | null>(null);
+
+  // Video preview state
+  const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // Common filter
   const [mediaFilter, setMediaFilter] = useState<'all' | 'video' | 'image' | 'carousel'>(
@@ -295,6 +301,64 @@ export function ReferenceSelector({
       });
     } finally {
       setTranscribingId(null);
+    }
+  };
+
+  // Транскрибация креатива конкурента
+  const handleTranscribeCompetitor = async (e: React.MouseEvent, creative: CompetitorCreative) => {
+    e.stopPropagation(); // Не выбирать креатив при клике на кнопку
+
+    if (transcribingId) return; // Уже идёт транскрибация
+
+    setTranscribingId(creative.id);
+    toast.info('Запускаем транскрибацию...', {
+      description: creative.media_type === 'video' ? 'Это может занять 1-2 минуты' : 'Извлекаем текст с изображения',
+    });
+
+    try {
+      const result = await competitorsApi.extractText(creative.id);
+
+      if (result.success && result.text) {
+        // Обновляем креатив в локальном состоянии
+        setCompetitorCreatives(prev => prev.map(c => {
+          if (c.id !== creative.id) return c;
+          return {
+            ...c,
+            analysis: [{
+              transcript: result.media_type === 'video' ? result.text : undefined,
+              ocr_text: result.media_type !== 'video' ? result.text : undefined,
+              processing_status: 'completed' as const,
+            }],
+          };
+        }));
+
+        toast.success(result.media_type === 'video' ? 'Транскрипция готова!' : 'Текст извлечён!', {
+          description: 'Теперь можно выбрать этот креатив как референс',
+        });
+      } else {
+        toast.error('Не удалось извлечь текст', {
+          description: result.error || 'Попробуйте позже',
+        });
+      }
+    } catch (error) {
+      console.error('Transcription error:', error);
+      toast.error('Ошибка транскрибации', {
+        description: 'Проверьте подключение и попробуйте снова',
+      });
+    } finally {
+      setTranscribingId(null);
+    }
+  };
+
+  // Просмотр видео конкурента
+  const handlePreviewVideo = (e: React.MouseEvent, creative: CompetitorCreative) => {
+    e.stopPropagation();
+    const videoUrl = creative.media_urls?.[0];
+    if (videoUrl) {
+      setPreviewVideoUrl(videoUrl);
+      setIsPreviewOpen(true);
+    } else {
+      toast.error('Видео недоступно');
     }
   };
 
@@ -490,15 +554,21 @@ export function ReferenceSelector({
                       const creativeAnalysis = Array.isArray(creative.analysis) ? creative.analysis[0] : creative.analysis;
                       const hasText = creativeAnalysis?.transcript || creativeAnalysis?.ocr_text;
 
+                      // Блокируем выбор видео без транскрипции
+                      const isDisabled = creative.media_type === 'video' && !hasText;
+
                       return (
                         <div
                           key={creative.id}
                           className={cn(
-                            'flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all',
-                            'hover:bg-accent/50',
+                            'flex items-center gap-3 p-2 rounded-lg border transition-all',
+                            isDisabled
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'cursor-pointer hover:bg-accent/50',
                             isSelected && 'ring-2 ring-primary bg-primary/5'
                           )}
-                          onClick={() => handleSelectCompetitor(creative)}
+                          onClick={() => !isDisabled && handleSelectCompetitor(creative)}
+                          title={isDisabled ? 'Сначала транскрибируйте видео' : undefined}
                         >
                           {/* Миниатюра */}
                           <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center relative">
@@ -545,15 +615,46 @@ export function ReferenceSelector({
                             </p>
                           </div>
 
-                          {/* Индикатор текста */}
-                          <div className="shrink-0 w-16">
+                          {/* Действия: просмотр видео, текст/транскрибация */}
+                          <div className="shrink-0 flex items-center gap-1">
+                            {/* Кнопка просмотра видео */}
+                            {creative.media_type === 'video' && creative.media_urls?.[0] && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={(e) => handlePreviewVideo(e, creative)}
+                                title="Смотреть видео"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                            )}
+
+                            {/* Индикатор текста или кнопка транскрибации */}
                             {hasText ? (
                               <Badge variant="secondary" className="text-xs">
                                 <FileText className="w-3 h-3 mr-1" />
                                 Текст
                               </Badge>
                             ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs gap-1"
+                                onClick={(e) => handleTranscribeCompetitor(e, creative)}
+                                disabled={transcribingId === creative.id}
+                                title={creative.media_type === 'video' ? 'Транскрибировать' : 'Извлечь текст'}
+                              >
+                                {transcribingId === creative.id ? (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  </>
+                                ) : (
+                                  <>
+                                    <ScanText className="w-3 h-3" />
+                                  </>
+                                )}
+                              </Button>
                             )}
                           </div>
 
@@ -597,15 +698,21 @@ export function ReferenceSelector({
                       const isSelected = selectedReference?.creativeId === creative.id;
                       const hasText = !!ownTexts[creative.id];
 
+                      // Блокируем выбор видео без транскрипции
+                      const isDisabled = mediaType === 'video' && !hasText;
+
                       return (
                         <div
                           key={creative.id}
                           className={cn(
-                            'flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-all',
-                            'hover:bg-accent/50',
+                            'flex items-center gap-3 p-2 rounded-lg border transition-all',
+                            isDisabled
+                              ? 'opacity-60 cursor-not-allowed'
+                              : 'cursor-pointer hover:bg-accent/50',
                             isSelected && 'ring-2 ring-primary bg-primary/5'
                           )}
-                          onClick={() => handleSelectOwn(creative)}
+                          onClick={() => !isDisabled && handleSelectOwn(creative)}
+                          title={isDisabled ? 'Сначала транскрибируйте видео' : undefined}
                         >
                           {/* Миниатюра */}
                           <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center relative">
@@ -694,6 +801,30 @@ export function ReferenceSelector({
               </ScrollArea>
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно просмотра видео */}
+      <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] p-0">
+          <DialogHeader className="p-4 pb-0">
+            <DialogTitle className="flex items-center gap-2">
+              <PlayCircle className="w-5 h-5" />
+              Просмотр видео
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4 pt-2">
+            {previewVideoUrl && (
+              <video
+                src={previewVideoUrl}
+                controls
+                autoPlay
+                className="w-full max-h-[70vh] rounded-lg bg-black"
+              >
+                Ваш браузер не поддерживает видео
+              </video>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
