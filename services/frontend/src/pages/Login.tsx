@@ -130,9 +130,12 @@ const Login = () => {
       // Сохраняем данные в localStorage
       localStorage.setItem('user', JSON.stringify(sessionUser));
       console.log('Данные пользователя сохранены в localStorage');
-      
+
       toastT.success('loggedIn');
-      
+
+      // Триггерим загрузку данных мультиаккаунта в AppContext
+      window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
+
       // Перенаправляем на главную страницу
       console.log('Перенаправляем на главную страницу...');
       setTimeout(() => navigate('/', { replace: true }), 100);
