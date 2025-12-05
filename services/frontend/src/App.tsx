@@ -47,8 +47,7 @@ const AppRoutes = () => {
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  // ОТКЛЮЧЕНО: онбординг полностью выключен
-  const showOnboarding = false;
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
 
   useEffect(() => {
@@ -59,7 +58,7 @@ const AppRoutes = () => {
         const parsedUser = JSON.parse(storedUser);
         if (parsedUser && parsedUser.username) {
           setUser(parsedUser);
-          // НЕ показываем онбординг при загрузке — ждём AppContext
+          // НЕ показываем онбординг при загрузке — ждём multiAccountLoaded
         } else {
           localStorage.removeItem('user');
           setUser(null);
@@ -74,6 +73,30 @@ const AppRoutes = () => {
     setLoading(false);
   }, [location.pathname]);
 
+  // Слушаем событие multiAccountLoaded от AppContext
+  useEffect(() => {
+    const handleMultiAccountLoaded = () => {
+      const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
+
+      // Онбординг ТОЛЬКО для НЕ-мультиаккаунта без prompt1
+      if (isMultiAccount) {
+        setShowOnboarding(false);
+      } else {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            const parsedUser = JSON.parse(storedUser);
+            if (!parsedUser.prompt1) {
+              setShowOnboarding(true);
+            }
+          } catch {}
+        }
+      }
+    };
+
+    window.addEventListener('multiAccountLoaded', handleMultiAccountLoaded);
+    return () => window.removeEventListener('multiAccountLoaded', handleMultiAccountLoaded);
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -93,8 +116,27 @@ const AppRoutes = () => {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // ОТКЛЮЧЕНО: онбординг полностью выключен
-  const handleOnboardingComplete = () => {};
+  const handleOnboardingComplete = () => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+        setShowOnboarding(false);
+
+        window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
+
+        const hasFacebookConnection = parsedUser.access_token && parsedUser.access_token !== '';
+        const isPendingReview = parsedUser.fb_connection_status === 'pending_review';
+
+        if (!hasFacebookConnection && !isPendingReview) {
+          setShowFacebookManualModal(true);
+        }
+      } catch (error) {
+        console.error('Ошибка при обновлении user после онбординга:', error);
+      }
+    }
+  };
 
   const handleFacebookModalComplete = () => {
     setShowFacebookManualModal(false);
