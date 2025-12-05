@@ -244,11 +244,14 @@ export async function workflowCreateAdSetInDirection(
     // Преобразуем настройки из БД в формат Facebook API
     targeting = convertToFacebookTargeting(defaultSettings);
   } else {
-    // Fallback на базовый таргетинг
+    // Fallback на базовый таргетинг (с Advantage+ Audience)
     targeting = {
       geo_locations: { countries: ['RU'] },
       age_min: 18,
-      age_max: 65
+      age_max: 65,
+      targeting_automation: {
+        advantage_audience: 1
+      }
     };
   }
 

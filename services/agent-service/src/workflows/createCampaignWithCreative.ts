@@ -425,5 +425,8 @@ function getDefaultTargeting() {
     publisher_platforms: ['facebook', 'instagram'],
     facebook_positions: ['feed', 'right_hand_column', 'instant_article', 'instream_video', 'marketplace'],
     instagram_positions: ['stream', 'story', 'explore', 'reels'],
+    targeting_automation: {
+      advantage_audience: 1
+    }
   };
 }

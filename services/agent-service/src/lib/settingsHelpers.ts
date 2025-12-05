@@ -53,16 +53,11 @@ export function buildTargeting(settings: any, objective: CampaignObjective) {
     throw new Error('Settings object is required to build targeting');
   }
 
+  // Для Advantage+ Audience age_max должен быть минимум 65
   const targeting: any = {
     age_min: settings.age_min || 18,
-    age_max: settings.age_max || 65,
+    age_max: 65,
   };
-
-  // Для WhatsApp кампаний фиксируем age_max: 65 для совместимости с Advantage audience
-  if (objective === 'whatsapp') {
-    targeting.age_min = 18;
-    targeting.age_max = 65;
-  }
 
   // Пол
   if (settings.gender && settings.gender !== 'all') {
@@ -110,12 +105,11 @@ export function buildTargeting(settings: any, objective: CampaignObjective) {
     throw new Error('No cities/countries configured in targeting settings. Please add at least one location.');
   }
 
-  // Для WhatsApp кампаний добавляем targeting_automation (Advantage audience включена)
-  if (objective === 'whatsapp') {
-    targeting.targeting_automation = {
-      advantage_audience: 1  // 0 = отключено, 1 = включено
-    };
-  }
+  // Facebook требует targeting_automation для всех типов кампаний (постепенный rollout с конца 2024)
+  // advantage_audience: 1 = включено (Advantage+ Audience)
+  targeting.targeting_automation = {
+    advantage_audience: 1
+  };
 
   log.info({
     objective,

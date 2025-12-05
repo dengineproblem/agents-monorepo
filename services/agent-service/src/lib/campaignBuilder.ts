@@ -1896,7 +1896,7 @@ export async function createAdSetInCampaign(params: {
     body.promoted_object = promoted_object;
   }
 
-  // Логируем финальные параметры для отладки WhatsApp
+  // Логируем финальные параметры для отладки
   log.info({
     campaignId,
     name,
@@ -1904,7 +1904,9 @@ export async function createAdSetInCampaign(params: {
     destination_type: body.destination_type,
     promoted_object: body.promoted_object,
     has_whatsapp_number: !!body.promoted_object?.whatsapp_phone_number,
-    page_id: body.promoted_object?.page_id
+    page_id: body.promoted_object?.page_id,
+    targeting_automation: targeting?.targeting_automation,
+    has_targeting_automation: !!targeting?.targeting_automation
   }, 'Final ad set parameters before Facebook API call');
 
   let response = await fetch(
