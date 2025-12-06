@@ -540,40 +540,30 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         });
       }
 
-      // 2. Проверяем, существует ли уже такой конкурент глобально
-      let competitorId: string;
-      const { data: existingCompetitor } = await supabase
+      // 2. Upsert конкурента (создать или обновить по fb_page_id)
+      const { data: upsertedCompetitor, error: upsertError } = await supabase
         .from('competitors')
+        .upsert({
+          fb_page_id: pageId,
+          fb_page_url: input.socialUrl,
+          name: pageName || input.name,
+          avatar_url: avatarUrl,
+          country_code: input.countryCode,
+          status: 'pending',
+        }, {
+          onConflict: 'fb_page_id',
+          ignoreDuplicates: false,
+        })
         .select('id')
-        .eq('fb_page_id', pageId)
         .single();
 
-      if (existingCompetitor) {
-        competitorId = existingCompetitor.id;
-        log.info({ competitorId, pageId }, 'Конкурент уже существует в глобальной таблице');
-      } else {
-        // Создаем нового конкурента
-        const { data: newCompetitor, error: createError } = await supabase
-          .from('competitors')
-          .insert({
-            fb_page_id: pageId,
-            fb_page_url: input.socialUrl,
-            name: input.name,
-            avatar_url: avatarUrl,
-            country_code: input.countryCode,
-            status: 'pending',
-          })
-          .select('id')
-          .single();
-
-        if (createError) {
-          log.error({ err: createError, pageId }, 'Ошибка создания конкурента');
-          return reply.status(500).send({ success: false, error: createError.message });
-        }
-
-        competitorId = newCompetitor.id;
-        log.info({ competitorId, pageId }, 'Создан новый конкурент');
+      if (upsertError) {
+        log.error({ err: upsertError, pageId }, 'Ошибка upsert конкурента');
+        return reply.status(500).send({ success: false, error: upsertError.message });
       }
+
+      const competitorId = upsertedCompetitor.id;
+      log.info({ competitorId, pageId, pageName }, 'Конкурент создан/обновлён');
 
       // 3. Проверяем, не связан ли уже этот конкурент с пользователем
       // В мультиаккаунтном режиме проверяем user_account_id + competitor_id + account_id
@@ -699,19 +689,45 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       const { userCompetitorId } = request.params as { userCompetitorId: string };
       const query = DeleteCompetitorSchema.parse(request.query);
 
-      // Мягкое удаление - просто деактивируем связь
+      // Сначала пробуем найти по user_competitor_id (правильный способ)
+      let { data: existingLink, error: findError } = await supabase
+        .from('user_competitors')
+        .select('id')
+        .eq('id', userCompetitorId)
+        .eq('user_account_id', query.userAccountId)
+        .single();
+
+      // Если не нашли - возможно передан competitor_id (legacy/баг на фронте)
+      if (!existingLink) {
+        const { data: linkByCompetitorId } = await supabase
+          .from('user_competitors')
+          .select('id')
+          .eq('competitor_id', userCompetitorId)
+          .eq('user_account_id', query.userAccountId)
+          .single();
+
+        if (linkByCompetitorId) {
+          existingLink = linkByCompetitorId;
+          log.warn({ userCompetitorId, actualId: linkByCompetitorId.id }, 'DELETE вызван с competitor_id вместо user_competitor_id');
+        }
+      }
+
+      if (!existingLink) {
+        return reply.status(404).send({ success: false, error: 'Конкурент не найден' });
+      }
+
+      // Мягкое удаление - деактивируем связь
       const { error } = await supabase
         .from('user_competitors')
         .update({ is_active: false })
-        .eq('id', userCompetitorId)
-        .eq('user_account_id', query.userAccountId);
+        .eq('id', existingLink.id);
 
       if (error) {
-        log.error({ err: error, userCompetitorId }, 'Ошибка удаления связи с конкурентом');
+        log.error({ err: error, userCompetitorId: existingLink.id }, 'Ошибка удаления связи с конкурентом');
         return reply.status(500).send({ success: false, error: error.message });
       }
 
-      log.info({ userCompetitorId, userAccountId: query.userAccountId }, 'Связь с конкурентом удалена');
+      log.info({ userCompetitorId: existingLink.id, userAccountId: query.userAccountId }, 'Связь с конкурентом удалена');
       return reply.send({ success: true });
     } catch (error: any) {
       if (error instanceof z.ZodError) {

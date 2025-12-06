@@ -363,6 +363,22 @@ async function fetchFromSearchApi(
 
     const ads = data.ads || [];
     log.info({ adsCount: ads.length, searchType, query }, 'Получены креативы из SearchAPI');
+
+    // Логируем структуру первого объявления для отладки
+    if (ads.length > 0) {
+      const firstAd = ads[0];
+      log.info({
+        ad_archive_id: firstAd.ad_archive_id,
+        page_id: firstAd.page_id,
+        page_name: firstAd.page_name,
+        // Ищем поля связанные с Instagram
+        ig_username: (firstAd as any).ig_username,
+        instagram_handle: (firstAd as any).instagram_handle,
+        publisher_platform: firstAd.publisher_platform,
+        allKeys: Object.keys(firstAd),
+      }, 'Структура первого объявления');
+    }
+
     return ads;
   } catch (error: any) {
     log.error({ err: error, query, searchType }, 'Ошибка при запросе к SearchAPI');
@@ -608,14 +624,42 @@ export async function searchPageByInstagram(
     const data = await response.json();
     const pageResults = data.page_results || [];
 
-    log.info({ igHandle: cleanHandle, resultsCount: pageResults.length }, 'Результаты поиска по Instagram');
+    // Логируем полную структуру первого результата для отладки
+    if (pageResults.length > 0) {
+      log.info({ firstResult: JSON.stringify(pageResults[0]) }, 'Структура первого результата SearchAPI');
+    }
 
-    return pageResults.map((page: any) => ({
+    log.info({
+      igHandle: cleanHandle,
+      resultsCount: pageResults.length,
+      results: pageResults.slice(0, 5).map((p: any) => ({
+        page_id: p.page_id,
+        name: p.name,
+        ig_username: p.ig_username,
+        page_alias: p.page_alias,
+      }))
+    }, 'Результаты поиска по Instagram');
+
+    const mappedResults = pageResults.map((page: any) => ({
       page_id: page.page_id,
-      page_name: page.page_name,
-      avatar_url: page.page_profile_picture_url,
-      instagram_handle: page.instagram_handle,
+      page_name: page.name,
+      avatar_url: page.image_uri,
+      instagram_handle: page.ig_username || page.page_alias,
     }));
+
+    // Приоритизируем ТОЧНОЕ совпадение по ig_username (с учётом точек!)
+    const exactMatchByHandle = mappedResults.find((p: any) =>
+      p.instagram_handle && p.instagram_handle.toLowerCase() === cleanHandle.toLowerCase()
+    );
+
+    if (exactMatchByHandle) {
+      log.info({ igHandle: cleanHandle, matchedPage: exactMatchByHandle.page_name, matchedIg: exactMatchByHandle.instagram_handle }, 'Найдено точное совпадение по Instagram handle');
+      return [exactMatchByHandle, ...mappedResults.filter((p: any) => p.page_id !== exactMatchByHandle.page_id)];
+    }
+
+    // Если точного совпадения нет — возвращаем пустой массив, чтобы не добавлять неправильного конкурента
+    log.warn({ igHandle: cleanHandle, availableHandles: mappedResults.map((p: any) => p.instagram_handle) }, 'Точное совпадение не найдено');
+    return [];
   } catch (error: any) {
     log.error({ err: error, igHandle }, 'Ошибка при поиске страницы по Instagram');
     // Fallback: пробуем обычный поиск
