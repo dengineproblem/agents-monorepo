@@ -271,6 +271,28 @@ function extractActionValue(actions, actionType) {
 }
 
 /**
+ * Fetch adsets config (id, name, budgets, status) для переиспользования в brain_run
+ * Это избегает повторного запроса и rate limit
+ */
+async function fetchAdsetsConfig(adAccountId, accessToken) {
+  const normalizedId = normalizeAdAccountId(adAccountId);
+  const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${normalizedId}/adsets`);
+  url.searchParams.set('fields', 'id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status');
+  url.searchParams.set('limit', '500');
+  url.searchParams.set('access_token', accessToken);
+
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    const err = await res.text();
+    // Не бросаем ошибку, возвращаем объект с ошибкой (как в server.js)
+    return { error: `FB adsets config failed: ${res.status} ${err}` };
+  }
+
+  const json = await res.json();
+  return json; // Возвращаем весь объект { data: [...], paging: {...} }
+}
+
+/**
  * Fetch adsets insights с breakdown по дням за N дней (для трендов)
  */
 async function fetchAdsetsDaily(adAccountId, accessToken, days = 14) {
@@ -1221,11 +1243,13 @@ export async function runScoringAgent(userAccount, options = {}) {
     logger.info({ where: 'scoring_agent', phase: 'fetching_adsets' });
 
     // Fetch данные: daily breakdown (для трендов) + агрегированные actions + diagnostics + objectives
-    const [dailyData, actionsData, diagnostics, campaignObjectives] = await Promise.all([
+    // + adsets config (для переиспользования в brain_run, чтобы избежать rate limit)
+    const [dailyData, actionsData, diagnostics, campaignObjectives, adsetsConfig] = await Promise.all([
       fetchAdsetsDaily(ad_account_id, access_token, 14),
       fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),
       fetchAdsetDiagnostics(ad_account_id, access_token),
-      getAdsetsObjectives(supabase, userAccountId)
+      getAdsetsObjectives(supabase, userAccountId),
+      fetchAdsetsConfig(ad_account_id, access_token)
     ]);
 
     // Группируем по adset_id и вычисляем метрики для разных периодов
@@ -1539,7 +1563,8 @@ export async function runScoringAgent(userAccount, options = {}) {
     const scoringRawData = {
       adsets: adsetsWithTrends,
       ready_creatives: creativesWithData,  // Только креативы с метриками
-      unused_creatives: unusedCreatives  // Включает креативы без метрик (first_run: true)
+      unused_creatives: unusedCreatives,  // Включает креативы без метрик (first_run: true)
+      adsets_config: adsetsConfig  // Конфигурация adsets для brain_run (избегаем повторный запрос и rate limit)
     };
     
     logger.info({ 

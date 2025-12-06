@@ -2217,10 +2217,23 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // ========================================
     // 2. Сбор данных из Facebook API
     // ========================================
+    // Используем adsets_config из scoring если доступен (избегаем повторный запрос и rate limit)
+    const adsetsFromScoring = scoringOutput?.adsets_config;
     const [accountStatus, adsets] = await Promise.all([
       fetchAccountStatus(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) })),
-      fetchAdsets(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) }))
+      adsetsFromScoring
+        ? Promise.resolve(adsetsFromScoring)  // Переиспользуем из scoring
+        : fetchAdsets(ua.ad_account_id, ua.access_token).catch(e=>({ error:String(e) }))
     ]);
+
+    if (adsetsFromScoring) {
+      fastify.log.info({
+        where: 'brain_run',
+        phase: 'adsets_reused_from_scoring',
+        userId: userAccountId,
+        adsetsCount: adsetsFromScoring?.data?.length || 0
+      });
+    }
 
     // ========================================
     // ПРОВЕРКА 1: Статус рекламного кабинета
