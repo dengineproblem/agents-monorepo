@@ -166,6 +166,7 @@ const Profile: React.FC = () => {
 
   // Tilda Instructions Modal
   const [tildaInstructionsModal, setTildaInstructionsModal] = useState(false);
+  const [tildaConnected, setTildaConnected] = useState(false);
 
   // Handle Facebook OAuth callback
   useEffect(() => {
@@ -254,7 +255,7 @@ const Profile: React.FC = () => {
         // Загружаем актуальные данные из Supabase
         const { data, error } = await (supabase
           .from('user_accounts')
-          .select('tarif, tarif_expires, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, ig_seed_audience_id')
+          .select('tarif, tarif_expires, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, access_token, page_id, tiktok_access_token, tiktok_business_id, plan_daily_budget_cents, default_cpl_target_cents, openai_api_key, ig_seed_audience_id, tilda_utm_field')
           .eq('id', user.id)
           .single() as any);
 
@@ -287,6 +288,7 @@ const Profile: React.FC = () => {
           setPlannedCplCents(data.default_cpl_target_cents ?? null);
           setOpenaiApiKey(data.openai_api_key || '');
           setAudienceId(data.ig_seed_audience_id || '');
+          setTildaConnected(Boolean(data.tilda_utm_field));
 
           // Обновляем localStorage актуальными данными
           const updatedUser = { ...user, ...data };
@@ -925,6 +927,11 @@ const Profile: React.FC = () => {
   // TikTok: пока только из user_accounts (TODO: добавить в ad_accounts)
   const isTikTokConnected = Boolean(user?.tiktok_access_token && user?.tiktok_business_id);
 
+  // Tilda: проверяем наличие tilda_utm_field (всегда есть дефолт, считаем подключённым)
+  const isTildaConnected = multiAccountEnabled
+    ? Boolean(currentAdAccount?.tilda_utm_field)
+    : tildaConnected;
+
   // AmoCRM: проверяется отдельным запросом (amocrmConnected state)
 
   return (
@@ -1176,7 +1183,7 @@ const Profile: React.FC = () => {
               ...(FEATURES.SHOW_DIRECTIONS ? [{
                 id: 'tilda' as const,
                 title: 'Tilda (сайт)',
-                connected: false,
+                connected: isTildaConnected,
                 onClick: () => setTildaInstructionsModal(true),
               }] : []),
             ]}
@@ -1784,6 +1791,7 @@ const Profile: React.FC = () => {
           open={tildaInstructionsModal}
           onOpenChange={setTildaInstructionsModal}
           userAccountId={user?.id || null}
+          onSettingsSaved={() => setTildaConnected(true)}
         />
 
         {/* AmoCRM Qualification Field Modal */}

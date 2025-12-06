@@ -221,47 +221,91 @@ export default async function leadsRoutes(app: FastifyInstance) {
         userAccountId: leadData.userAccountId,
         name: leadData.name,
         phone: leadData.phone,
+        utm_source: leadData.utm_source,
         utm_medium: leadData.utm_medium,
         utm_campaign: leadData.utm_campaign,
         ad_id: leadData.ad_id,
         utm_content: leadData.utm_content
       }, 'Received lead from website');
 
-      // Фильтрация: пропускаем только лидов с utm_medium = ad_id (числовой ID рекламы Facebook)
-      // Наши лиды имеют числовой ad_id в utm_medium, остальные (organic, cpc, etc.) игнорируем
-      const isNumericAdId = leadData.utm_medium && /^\d+$/.test(leadData.utm_medium);
+      // 2. Load user account and tilda_utm_field setting
+      // Check multi-account mode: if accountId is provided, load from ad_accounts
+      let tildaUtmField: 'utm_source' | 'utm_medium' | 'utm_campaign' = 'utm_medium'; // default
+
+      if (leadData.accountId) {
+        // Multi-account mode: load from ad_accounts
+        const { data: adAccount, error: adError } = await supabase
+          .from('ad_accounts')
+          .select('id, tilda_utm_field')
+          .eq('id', leadData.accountId)
+          .single();
+
+        if (adError || !adAccount) {
+          app.log.warn({ accountId: leadData.accountId }, 'Ad account not found, using default tilda_utm_field');
+        } else if (adAccount.tilda_utm_field) {
+          tildaUtmField = adAccount.tilda_utm_field as typeof tildaUtmField;
+        }
+
+        // Also verify user account exists
+        const { data: userAccount, error: userError } = await supabase
+          .from('user_accounts')
+          .select('id')
+          .eq('id', leadData.userAccountId)
+          .single();
+
+        if (userError || !userAccount) {
+          return reply.code(404).send({
+            error: 'user_account_not_found',
+            message: 'User account not found'
+          });
+        }
+      } else {
+        // Legacy mode: load from user_accounts
+        const { data: userAccount, error: userError } = await supabase
+          .from('user_accounts')
+          .select('id, tilda_utm_field')
+          .eq('id', leadData.userAccountId)
+          .single();
+
+        if (userError || !userAccount) {
+          return reply.code(404).send({
+            error: 'user_account_not_found',
+            message: 'User account not found'
+          });
+        }
+
+        if (userAccount.tilda_utm_field) {
+          tildaUtmField = userAccount.tilda_utm_field as typeof tildaUtmField;
+        }
+      }
+
+      app.log.info({ tildaUtmField }, 'Using tilda_utm_field setting');
+
+      // 3. Get ad_id value from the configured UTM field
+      const utmFieldValue = leadData[tildaUtmField] || null;
+
+      // Фильтрация: пропускаем только лидов с числовым ad_id в настроенном UTM-поле
+      // Наши лиды имеют числовой ad_id, остальные (organic, cpc, etc.) игнорируем
+      const isNumericAdId = utmFieldValue && /^\d+$/.test(utmFieldValue);
       if (!isNumericAdId) {
         app.log.info({
           name: leadData.name,
           phone: leadData.phone,
-          utm_medium: leadData.utm_medium
-        }, 'Skipping lead: utm_medium is not a numeric ad_id (not our lead)');
+          tildaUtmField,
+          utmFieldValue
+        }, `Skipping lead: ${tildaUtmField} is not a numeric ad_id (not our lead)`);
 
         return reply.send({
           success: true,
-          message: 'Lead skipped: not from our ads (utm_medium is not ad_id)'
+          message: `Lead skipped: not from our ads (${tildaUtmField} is not ad_id)`
         });
       }
 
-      // 2. Verify user account exists
-      const { data: userAccount, error: userError } = await supabase
-        .from('user_accounts')
-        .select('id')
-        .eq('id', leadData.userAccountId)
-        .single();
+      // 4. Extract ad_id from multiple sources (priority order)
+      // ad_id (direct) > configured UTM field > utm_term > utm_content
+      const sourceId = leadData.ad_id || utmFieldValue || leadData.utm_term || leadData.utm_content || null;
 
-      if (userError || !userAccount) {
-        return reply.code(404).send({
-          error: 'user_account_not_found',
-          message: 'User account not found'
-        });
-      }
-
-      // 3. Extract ad_id from multiple sources (priority order)
-      // ad_id (direct) > utm_medium > utm_term > utm_content
-      const sourceId = leadData.ad_id || leadData.utm_medium || leadData.utm_term || leadData.utm_content || null;
-
-      // 4. Resolve creative_id and direction_id from ad_id
+      // 5. Resolve creative_id and direction_id from ad_id
       let creativeId: string | null = null;
       let directionId: string | null = null;
 
