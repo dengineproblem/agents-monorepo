@@ -16,6 +16,7 @@ import Profile from "./pages/Profile";
 import Signup from "./pages/Signup";
 import { useEffect, useState } from "react";
 import { useTelegramWebApp } from "./hooks/useTelegramWebApp";
+import { usePageTracking } from "./hooks/usePageTracking";
 import { ThemeProvider } from "next-themes";
 import ROIAnalytics from './pages/ROIAnalytics';
 import CreativeGeneration from './pages/CreativeGeneration';
@@ -28,6 +29,7 @@ import OAuthCallback from './pages/OAuthCallback';
 import CarouselTest from './pages/CarouselTest';
 import Competitors from './pages/Competitors';
 import KnowledgeBase from './pages/KnowledgeBase';
+import AdminAnalytics from './pages/AdminAnalytics';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
@@ -41,6 +43,9 @@ const AppRoutes = () => {
   const location = useLocation();
   const isPublic = PUBLIC_PATHS.includes(location.pathname);
   const { t } = useTranslation();
+
+  // Автоматический трекинг page views
+  usePageTracking();
 
   // Routes that don't need sidebar (e.g., WhatsApp CRM)
   const noSidebarRoutes = ['/whatsapp-analysis'];
@@ -209,6 +214,7 @@ const AppRoutes = () => {
                       <Route path="/knowledge-base" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
+                      <Route path="/admin/analytics" element={<AdminAnalytics />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>

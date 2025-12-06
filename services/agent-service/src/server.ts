@@ -31,9 +31,11 @@ import { carouselCreativeRoutes } from './routes/carouselCreative.js';
 import { autopilotRoutes } from './routes/autopilot.js';
 import competitorsRoutes from './routes/competitors.js';
 import adAccountsRoutes from './routes/adAccounts.js';
+import analyticsRoutes from './routes/analytics.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
+import { startUserScoringCron } from './cron/userScoringCron.js';
 import { logger as baseLogger } from './lib/logger.js';
 
 // Load env from Docker path or local path
@@ -93,6 +95,7 @@ app.register(carouselCreativeRoutes);
 app.register(autopilotRoutes);
 app.register(competitorsRoutes);
 app.register(adAccountsRoutes);
+app.register(analyticsRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
@@ -102,6 +105,9 @@ startWhatsAppMonitorCron(app as any);
 
 // Запускаем cron для сбора креативов конкурентов (раз в неделю)
 startCompetitorCrawlerCron(app as any);
+
+// Запускаем cron для ежедневного скоринга пользователей (в 03:00)
+startUserScoringCron(app as any);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

@@ -34,6 +34,7 @@ import {
   hasAvailableAdSets
 } from '../lib/directionAdSets.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
+import { eventLogger } from '../lib/eventLogger.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -345,6 +346,20 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
               results.push(resultEntry);
 
+              // Log business event for analytics
+              await eventLogger.logBusinessEvent(
+                user_account_id,
+                'creative_launched',
+                {
+                  directionId: direction.id,
+                  directionName: direction.name,
+                  executionId: executionResult.executionId,
+                  creativesCount: action.params.user_creative_ids?.length,
+                  mode: 'llm'
+                },
+                account_id
+              );
+
               llmSuccess = true;
               log.info({
                 directionId: direction.id,
@@ -513,6 +528,20 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             });
 
             log.info({ directionId: direction.id, adsetId, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
+
+            // Log business event for analytics
+            await eventLogger.logBusinessEvent(
+              user_account_id,
+              'creative_launched',
+              {
+                directionId: direction.id,
+                directionName: direction.name,
+                adsetId,
+                adsCount: ads.length,
+                mode: 'deterministic'
+              },
+              account_id
+            );
 
             // Инкрементировать счетчик для use_existing режима
             if (credentials.defaultAdsetMode === 'use_existing') {
@@ -825,6 +854,20 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
 
         log.info({ adsCount: ads.length }, 'Manual launch ads created');
+
+        // Log business event for analytics
+        await eventLogger.logBusinessEvent(
+          user_account_id,
+          'creative_launched',
+          {
+            directionId: direction.id,
+            directionName: direction.name,
+            adsetId,
+            adsCount: ads.length,
+            mode: 'manual'
+          },
+          account_id
+        );
 
         // Инкрементировать счетчик для use_existing режима
         if (credentials.defaultAdsetMode === 'use_existing') {

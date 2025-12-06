@@ -13,6 +13,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
+import { eventLogger } from '../lib/eventLogger.js';
 
 /**
  * Schema for creating a lead from website
@@ -375,14 +376,27 @@ export default async function leadsRoutes(app: FastifyInstance) {
 
       const leadId = lead.id;
 
-      app.log.info({ 
-        leadId, 
-        name: leadData.name, 
+      app.log.info({
+        leadId,
+        name: leadData.name,
         phone: leadData.phone,
         sourceId,
         creativeId,
-        directionId 
+        directionId
       }, 'Lead created in database');
+
+      // Log business event for analytics
+      await eventLogger.logBusinessEvent(
+        leadData.userAccountId,
+        'lead_received',
+        {
+          leadId,
+          source: leadData.utm_source,
+          directionId,
+          creativeId
+        },
+        leadData.accountId
+      );
 
       // 7. Respond to webhook
       // NOTE: AmoCRM sync is DISABLED. Leads are NOT automatically sent to AmoCRM.
