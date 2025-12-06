@@ -274,7 +274,7 @@ function extractActionValue(actions, actionType) {
  * Fetch adsets config (id, name, budgets, status) для переиспользования в brain_run
  * Это избегает повторного запроса и rate limit
  */
-async function fetchAdsetsConfig(adAccountId, accessToken) {
+async function fetchAdsetsConfig(adAccountId, accessToken, logger) {
   const normalizedId = normalizeAdAccountId(adAccountId);
   const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${normalizedId}/adsets`);
   url.searchParams.set('fields', 'id,name,campaign_id,daily_budget,lifetime_budget,status,effective_status');
@@ -284,11 +284,13 @@ async function fetchAdsetsConfig(adAccountId, accessToken) {
   const res = await fetch(url.toString());
   if (!res.ok) {
     const err = await res.text();
+    logger?.warn({ where: 'fetchAdsetsConfig', error: `FB adsets config failed: ${res.status}`, body: err?.substring(0, 500) });
     // Не бросаем ошибку, возвращаем объект с ошибкой (как в server.js)
     return { error: `FB adsets config failed: ${res.status} ${err}` };
   }
 
   const json = await res.json();
+  logger?.info({ where: 'fetchAdsetsConfig', adsetsCount: json?.data?.length || 0 });
   return json; // Возвращаем весь объект { data: [...], paging: {...} }
 }
 
@@ -1242,14 +1244,16 @@ export async function runScoringAgent(userAccount, options = {}) {
     
     logger.info({ where: 'scoring_agent', phase: 'fetching_adsets' });
 
+    // Сначала получаем adsets config (для переиспользования в brain_run) - делаем ПЕРВЫМ запросом
+    // чтобы избежать rate limit от параллельных запросов
+    const adsetsConfig = await fetchAdsetsConfig(ad_account_id, access_token, logger);
+
     // Fetch данные: daily breakdown (для трендов) + агрегированные actions + diagnostics + objectives
-    // + adsets config (для переиспользования в brain_run, чтобы избежать rate limit)
-    const [dailyData, actionsData, diagnostics, campaignObjectives, adsetsConfig] = await Promise.all([
+    const [dailyData, actionsData, diagnostics, campaignObjectives] = await Promise.all([
       fetchAdsetsDaily(ad_account_id, access_token, 14),
       fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),
       fetchAdsetDiagnostics(ad_account_id, access_token),
-      getAdsetsObjectives(supabase, userAccountId),
-      fetchAdsetsConfig(ad_account_id, access_token)
+      getAdsetsObjectives(supabase, userAccountId)
     ]);
 
     // Группируем по adset_id и вычисляем метрики для разных периодов
