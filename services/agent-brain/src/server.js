@@ -2142,12 +2142,56 @@ fastify.post('/api/brain/run', async (request, reply) => {
       });
     }
 
-    const ua = await getUserAccount(userAccountId);
+    let ua = await getUserAccount(userAccountId);
 
     // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
     // Если accountId передан явно (из processDailyBatch), используем его
     // Иначе определяем через getAccountUUID() по ad_account_id из user_accounts
     const accountUUID = accountId || await getAccountUUID(userAccountId, ua);
+
+    // ========================================
+    // МУЛЬТИАККАУНТНОСТЬ: загружаем credentials из ad_accounts
+    // ========================================
+    if (ua.multi_account_enabled && accountUUID) {
+      const { data: adAccount, error: adAccountError } = await supabase
+        .from('ad_accounts')
+        .select('access_token, ad_account_id, page_id, whatsapp_phone_number')
+        .eq('id', accountUUID)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (adAccountError || !adAccount) {
+        fastify.log.error({
+          where: 'brain_run',
+          phase: 'load_ad_account_credentials',
+          userId: userAccountId,
+          accountUUID,
+          error: adAccountError?.message || 'ad_account not found'
+        });
+        return reply.code(400).send({
+          error: 'Failed to load ad account credentials',
+          details: adAccountError?.message
+        });
+      }
+
+      // Заменяем credentials из user_accounts на credentials из ad_accounts
+      ua = {
+        ...ua,
+        access_token: adAccount.access_token,
+        ad_account_id: adAccount.ad_account_id,
+        page_id: adAccount.page_id,
+        whatsapp_phone_number: adAccount.whatsapp_phone_number
+      };
+
+      fastify.log.info({
+        where: 'brain_run',
+        phase: 'credentials_loaded_from_ad_account',
+        userId: userAccountId,
+        accountUUID,
+        hasAccessToken: !!adAccount.access_token,
+        adAccountId: adAccount.ad_account_id
+      });
+    }
 
     // Логируем старт с username для Grafana
     fastify.log.info({
