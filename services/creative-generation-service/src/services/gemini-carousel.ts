@@ -27,6 +27,7 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param styleReferenceImage - Референс для консистентности стиля (предыдущая карточка)
  * @param contentReferenceImages - Референсы контента от пользователя (товар, персонаж и т.п.) — до 2 штук
  * @param currentCardImage - Текущее изображение карточки (для перегенерации — редактируем эту картинку)
+ * @param stylePrompt - Промпт для freestyle стиля (пользователь сам задаёт визуальный стиль)
  * @returns Base64 изображение
  */
 async function generateCarouselCard(
@@ -38,7 +39,8 @@ async function generateCarouselCard(
   customPrompt?: string,
   styleReferenceImage?: string,
   contentReferenceImages?: string[],
-  currentCardImage?: string
+  currentCardImage?: string,
+  stylePrompt?: string
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Generating card ${cardIndex + 1}/${totalCards}...`);
@@ -53,7 +55,8 @@ async function generateCarouselCard(
       cardIndex,
       totalCards,
       visualStyle,
-      customPrompt
+      customPrompt,
+      stylePrompt  // Для freestyle стиля
     );
 
     console.log('[Gemini Carousel] Generated prompt length:', prompt.length);
@@ -182,6 +185,7 @@ async function generateCarouselCard(
  * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompts - Опциональные кастомные промпты для каждой карточки
  * @param referenceImages - Опциональные референсные изображения КОНТЕНТА для каждой карточки (base64)
+ * @param stylePrompt - Промпт для freestyle стиля (пользователь сам задаёт визуальный стиль)
  * @returns Массив base64 изображений
  */
 export async function generateCarouselImages(
@@ -189,7 +193,8 @@ export async function generateCarouselImages(
   userPrompt1: string,
   visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompts?: (string | null)[],
-  referenceImages?: (string | null)[]
+  referenceImages?: (string | null)[],
+  stylePrompt?: string
 ): Promise<string[]> {
   try {
     console.log('[Gemini Carousel] Starting carousel generation...');
@@ -228,7 +233,9 @@ export async function generateCarouselImages(
         visualStyle,
         customPrompt,
         styleReference,
-        contentReferenceArray
+        contentReferenceArray,
+        undefined,  // currentCardImage — не используется при первичной генерации
+        stylePrompt  // Для freestyle стиля
       );
 
       generatedImages.push(image);
@@ -261,6 +268,7 @@ export async function generateCarouselImages(
  * @param visualStyle - Визуальный стиль карусели (по умолчанию 'clean_minimal')
  * @param customPrompt - Дополнительный промпт от пользователя
  * @param contentReferenceImages - Референсы контента от пользователя (до 2 штук)
+ * @param stylePrompt - Промпт для freestyle стиля (пользователь сам задаёт визуальный стиль)
  * @returns Base64 изображение
  */
 export async function regenerateCarouselCard(
@@ -270,7 +278,8 @@ export async function regenerateCarouselCard(
   userPrompt1: string,
   visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompt?: string,
-  contentReferenceImages?: string[]
+  contentReferenceImages?: string[],
+  stylePrompt?: string
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Regenerating card ${cardIndex + 1}...`);
@@ -306,7 +315,8 @@ export async function regenerateCarouselCard(
       customPrompt,
       styleReference,
       contentReferenceImages,
-      currentCardImage  // Передаём текущую карточку для редактирования
+      currentCardImage,  // Передаём текущую карточку для редактирования
+      stylePrompt  // Для freestyle стиля
     );
 
     console.log(`[Gemini Carousel] Card ${cardIndex + 1} regenerated successfully`);

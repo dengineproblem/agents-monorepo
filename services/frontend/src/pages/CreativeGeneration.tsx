@@ -84,8 +84,9 @@ const CreativeGeneration = () => {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
 
   // State для выбора стиля креатива
-  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'>('modern_performance');
-  
+  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle'>('modern_performance');
+  const [stylePrompt, setStylePrompt] = useState<string>('');  // Промпт для freestyle стиля
+
   // Загрузка направлений (с фильтрацией по аккаунту для multi-account режима)
   const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
 
@@ -209,6 +210,7 @@ const CreativeGeneration = () => {
     setIsEditMode(false);
     setEditPrompt('');
     setSelectedStyle('modern_performance');
+    setStylePrompt('');
   }, [currentAdAccountId]);
 
   // Загружаем prompt4 из ad_accounts при смене аккаунта (мультиаккаунтный режим)
@@ -510,6 +512,7 @@ const CreativeGeneration = () => {
         profits: texts.profits,
         direction_id: selectedDirectionId || undefined,
         style_id: selectedStyle,
+        style_prompt: selectedStyle === 'freestyle' ? (stylePrompt || undefined) : undefined, // Для freestyle стиля
         reference_image: referenceImageBase64, // Для обратной совместимости
         reference_images: referenceImagesBase64.length > 0 ? referenceImagesBase64 : undefined,
         reference_image_type: referenceImageBase64 ? 'base64' : undefined,
@@ -1035,6 +1038,7 @@ const CreativeGeneration = () => {
                     <SelectItem value="visual_hook">Визуальный зацеп</SelectItem>
                     <SelectItem value="premium_minimal">Премиум минимализм</SelectItem>
                     <SelectItem value="product_hero">Товар в главной роли</SelectItem>
+                    <SelectItem value="freestyle">Свободный стиль</SelectItem>
                   </SelectContent>
                 </Select>
 
@@ -1050,7 +1054,26 @@ const CreativeGeneration = () => {
                     'Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха'}
                   {selectedStyle === 'product_hero' &&
                     'Товар в центре внимания: профессиональная товарная реклама с продуктом в главной роли'}
+                  {selectedStyle === 'freestyle' &&
+                    'Полная свобода — задайте стиль самостоятельно через промпт'}
                 </div>
+
+                {/* Поле для ввода промпта стиля (только для freestyle) */}
+                {selectedStyle === 'freestyle' && (
+                  <div className="space-y-2 pt-3 border-t">
+                    <Label htmlFor="style-prompt">Промпт стиля</Label>
+                    <Textarea
+                      id="style-prompt"
+                      placeholder="Опишите желаемый визуальный стиль: цвета, атмосферу, тип изображения (фото, иллюстрация, 3D), композицию..."
+                      value={stylePrompt}
+                      onChange={(e) => setStylePrompt(e.target.value)}
+                      className="min-h-[100px] resize-y"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Опишите стиль максимально подробно: тип визуала, цветовая палитра, настроение, композиция
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

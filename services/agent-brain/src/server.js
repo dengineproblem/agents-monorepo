@@ -2147,7 +2147,36 @@ fastify.post('/api/brain/run', async (request, reply) => {
     // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
     // Если accountId передан явно (из processDailyBatch), используем его
     // Иначе определяем через getAccountUUID() по ad_account_id из user_accounts
-    const accountUUID = accountId || await getAccountUUID(userAccountId, ua);
+    let accountUUID = accountId || await getAccountUUID(userAccountId, ua);
+
+    // Если multi_account_enabled, но accountUUID не определён — берём дефолтный аккаунт
+    if (ua.multi_account_enabled && !accountUUID) {
+      const { data: defaultAccounts, error: defaultError } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1);
+
+      fastify.log.info({
+        where: 'brain_run',
+        phase: 'lookup_default_ad_account',
+        userId: userAccountId,
+        found: defaultAccounts?.length || 0,
+        error: defaultError?.message || null
+      });
+
+      if (defaultAccounts && defaultAccounts.length > 0) {
+        accountUUID = defaultAccounts[0].id;
+        fastify.log.info({
+          where: 'brain_run',
+          phase: 'using_default_ad_account',
+          userId: userAccountId,
+          accountUUID
+        });
+      }
+    }
 
     // ========================================
     // МУЛЬТИАККАУНТНОСТЬ: загружаем credentials из ad_accounts

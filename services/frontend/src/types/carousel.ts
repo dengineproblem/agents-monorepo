@@ -4,7 +4,8 @@ export type CarouselVisualStyle =
   | 'clean_minimal'
   | 'story_illustration'
   | 'photo_ugc'
-  | 'asset_focus';
+  | 'asset_focus'
+  | 'freestyle';
 
 export interface CarouselCard {
   order: number;
@@ -46,6 +47,7 @@ export interface GenerateCarouselRequest {
   account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
   carousel_texts: string[];
   visual_style?: CarouselVisualStyle;
+  style_prompt?: string; // Промпт для freestyle стиля
   custom_prompts?: (string | null)[];
   reference_images?: (string | null)[];
   direction_id?: string;
@@ -65,6 +67,7 @@ export interface RegenerateCarouselCardRequest {
   carousel_id: string;
   card_index: number;
   custom_prompt?: string;
+  style_prompt?: string; // Промпт для freestyle стиля
   reference_image?: string; // Для обратной совместимости (первый референс)
   reference_images?: string[]; // До 2 референсов
   text: string;

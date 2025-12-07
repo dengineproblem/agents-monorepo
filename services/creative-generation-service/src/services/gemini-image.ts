@@ -24,6 +24,7 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param referenceImage - Референсное изображение (base64 или URL)
  * @param referenceImageType - Тип изображения ('base64' или 'url')
  * @param referenceImagePrompt - Описание того, как использовать референсное изображение
+ * @param stylePrompt - Промпт для freestyle стиля (пользователь сам задаёт визуальный стиль)
  * @returns Base64 изображение
  */
 export async function generateCreativeImage(
@@ -31,10 +32,11 @@ export async function generateCreativeImage(
   bullets: string,
   profits: string,
   userPrompt4: string,
-  styleId: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero',
+  styleId: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle',
   referenceImage?: string,
   referenceImageType?: 'base64' | 'url',
-  referenceImagePrompt?: string
+  referenceImagePrompt?: string,
+  stylePrompt?: string
 ): Promise<string> {
   try {
     const hasReferenceImage = !!referenceImage;
@@ -42,18 +44,58 @@ export async function generateCreativeImage(
     console.log('[Gemini] Generating image prompt via LLM agent...');
     console.log('[Gemini] Style:', styleId);
     console.log('[Gemini] PROMPT4 length:', userPrompt4.length);
+    if (stylePrompt) {
+      console.log('[Gemini] Style prompt (freestyle):', stylePrompt.substring(0, 100) + '...');
+    }
 
-    // Генерируем промпт через LLM-агент
-    const prompt = await generateImagePrompt(
-      userPrompt4,
-      styleId,
-      offer,
-      bullets,
-      profits
-    );
+    let prompt: string;
+
+    // Для freestyle используем stylePrompt напрямую, для остальных — генерируем через LLM
+    if (styleId === 'freestyle' && stylePrompt) {
+      // Формируем базовый промпт с техническими требованиями + стиль от пользователя
+      const textParts: string[] = [];
+      if (offer && offer.trim()) {
+        textParts.push(`Заголовок: "${offer}"`);
+      }
+      if (bullets && bullets.trim()) {
+        textParts.push(`Буллеты: "${bullets}"`);
+      }
+      if (profits && profits.trim()) {
+        textParts.push(`Выгода: "${profits}"`);
+      }
+
+      const textsBlock = textParts.length > 0
+        ? `\n\nТЕКСТ НА ИЗОБРАЖЕНИИ:\n${textParts.join('\n')}`
+        : '';
+
+      prompt = `Создай рекламный креатив для Instagram.
+
+ФОРМАТ: вертикальный 4:5 (1080×1350), фон на весь кадр без рамок.
+
+СТИЛЬ (от пользователя):
+${stylePrompt}
+${textsBlock}
+
+ТЕХНИЧЕСКИЕ ТРЕБОВАНИЯ:
+- Текст размещается в центральной части (20-80% по вертикали)
+- Текст должен быть крупным, контрастным и читаемым
+- Единый фон на всё изображение без видимых границ
+- Одна цельная сцена на весь кадр`;
+
+      console.log('[Gemini] Using freestyle mode with custom style prompt');
+    } else {
+      // Генерируем промпт через LLM-агент для стандартных стилей
+      prompt = await generateImagePrompt(
+        userPrompt4,
+        styleId,
+        offer,
+        bullets,
+        profits
+      );
+    }
 
     // Если есть reference_image_prompt, добавляем его к промпту
-    const finalPrompt = referenceImagePrompt 
+    const finalPrompt = referenceImagePrompt
       ? `${prompt}\n\nДОПОЛНИТЕЛЬНО: ${referenceImagePrompt}`
       : prompt;
 

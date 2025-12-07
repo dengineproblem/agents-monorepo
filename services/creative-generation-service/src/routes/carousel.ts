@@ -196,7 +196,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/generate-carousel',
     async (request: FastifyRequest<{ Body: GenerateCarouselRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_texts, visual_style, custom_prompts, reference_images, direction_id } = request.body;
+        const { user_id, account_id, carousel_texts, visual_style, style_prompt, custom_prompts, reference_images, direction_id } = request.body;
 
         console.log('[Generate Carousel] Request:', {
           user_id,
@@ -267,7 +267,8 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           userPrompt1,
           visual_style || 'clean_minimal',
           custom_prompts,
-          reference_images
+          reference_images,
+          style_prompt  // Для freestyle стиля
         );
 
         // Загружаем изображения в Supabase Storage
@@ -379,7 +380,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_id, card_index, custom_prompt, reference_image, reference_images, text } = request.body;
+        const { user_id, account_id, carousel_id, card_index, custom_prompt, style_prompt, reference_image, reference_images, text } = request.body;
 
         // Собираем все референсы в один массив (reference_images приоритетнее)
         let contentReferenceImages: string[] | undefined;
@@ -502,7 +503,8 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           userPrompt1,
           visualStyle,
           custom_prompt,
-          contentReferenceImages
+          contentReferenceImages,
+          style_prompt  // Для freestyle стиля
         );
 
         // Загружаем новое изображение в Storage

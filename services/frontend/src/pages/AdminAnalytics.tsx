@@ -276,7 +276,7 @@ const AdminAnalytics: React.FC = () => {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <div className="container py-8">
+      <div className="container py-8 pt-20">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>

@@ -22,6 +22,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       cta,
       direction_id,
       style_id,
+      style_prompt,  // Промпт для freestyle стиля
       reference_image,
       reference_image_type,
       reference_image_prompt
@@ -98,7 +99,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         selectedStyle,
         reference_image,
         reference_image_type,
-        reference_image_prompt
+        reference_image_prompt,
+        style_prompt  // Для freestyle стиля
       );
 
       app.log.info(`[Generate Creative] Image generated, base64 length: ${base64Image.length}`);

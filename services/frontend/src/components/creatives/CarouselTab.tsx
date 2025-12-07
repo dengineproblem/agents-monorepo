@@ -42,6 +42,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
   // State для шага 3: Генерация изображений
   const [visualStyle, setVisualStyle] = useState<CarouselVisualStyle>('clean_minimal');
+  const [stylePrompt, setStylePrompt] = useState('');  // Промпт для freestyle стиля
   const [isGeneratingCarousel, setIsGeneratingCarousel] = useState(false);
   const [generatedCarouselId, setGeneratedCarouselId] = useState('');
 
@@ -93,6 +94,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setCarouselCards([]);
     setCurrentCardIndex(0);
     setVisualStyle('clean_minimal');
+    setStylePrompt('');
     setGeneratedCarouselId('');
     setSelectedDirectionId('');
     setCardRegenerationPrompts({});
@@ -333,6 +335,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         account_id: currentAdAccountId || undefined,
         carousel_texts: texts,
         visual_style: visualStyle,
+        style_prompt: visualStyle === 'freestyle' ? (stylePrompt || undefined) : undefined,
         custom_prompts: customPrompts,
         reference_images: referenceImages,
         direction_id: selectedDirectionId || undefined
@@ -423,6 +426,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         account_id: currentAdAccountId || undefined,
         carousel_texts: texts,
         visual_style: visualStyle,
+        style_prompt: visualStyle === 'freestyle' ? (stylePrompt || undefined) : undefined,
         custom_prompts: customPrompts,
         reference_images: referenceImages,
         direction_id: selectedDirectionId || undefined
@@ -498,6 +502,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         carousel_id: generatedCarouselId,
         card_index: cardIndex,
         custom_prompt: customPrompt,
+        style_prompt: visualStyle === 'freestyle' ? (stylePrompt || undefined) : undefined,
         reference_image: referenceImage,
         reference_images: referenceImages.length > 0 ? referenceImages : undefined,
         text: carouselCards[cardIndex].text
@@ -963,6 +968,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                       <SelectItem value="story_illustration">Визуальный сторителлинг</SelectItem>
                       <SelectItem value="photo_ugc">Живые фото (UGC)</SelectItem>
                       <SelectItem value="asset_focus">Фокус на товаре/скриншоте</SelectItem>
+                      <SelectItem value="freestyle">Свободный стиль</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
@@ -970,7 +976,25 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     {visualStyle === 'story_illustration' && 'Иллюстративный стиль для визуального рассказа истории'}
                     {visualStyle === 'photo_ugc' && 'Реалистичные фото людей и сцен из жизни бизнеса'}
                     {visualStyle === 'asset_focus' && 'Фокус на загруженном изображении товара или скриншоте'}
+                    {visualStyle === 'freestyle' && 'Полная свобода — задайте стиль самостоятельно через промпт'}
                   </p>
+
+                  {/* Поле для ввода промпта стиля (только для freestyle) */}
+                  {visualStyle === 'freestyle' && (
+                    <div className="space-y-2 pt-3 border-t">
+                      <Label htmlFor="carousel-style-prompt">Промпт стиля</Label>
+                      <Textarea
+                        id="carousel-style-prompt"
+                        placeholder="Опишите желаемый визуальный стиль: цвета, атмосферу, тип изображения (фото, иллюстрация, 3D), композицию..."
+                        value={stylePrompt}
+                        onChange={(e) => setStylePrompt(e.target.value)}
+                        className="min-h-[100px] resize-y"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Опишите стиль максимально подробно: тип визуала, цветовая палитра, настроение, композиция
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Промпты для карточек */}
@@ -1248,6 +1272,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                         <SelectItem value="story_illustration">Визуальный сторителлинг</SelectItem>
                         <SelectItem value="photo_ugc">Живые фото (UGC)</SelectItem>
                         <SelectItem value="asset_focus">Фокус на товаре/скриншоте</SelectItem>
+                        <SelectItem value="freestyle">Свободный стиль</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

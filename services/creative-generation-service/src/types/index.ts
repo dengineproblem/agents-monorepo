@@ -26,7 +26,8 @@ export interface GenerateCreativeRequest {
   profits: string;
   cta?: string; // deprecated - CTA не рисуется на изображении, FB добавляет кнопку автоматически
   direction_id?: string;
-  style_id?: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero'; // Стиль креатива
+  style_id?: 'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle'; // Стиль креатива
+  style_prompt?: string; // Промпт для freestyle стиля — пользователь сам задаёт визуальный стиль
   // Новое поле для референсного изображения
   reference_image?: string;
   reference_image_type?: 'base64' | 'url';
@@ -56,7 +57,8 @@ export type CarouselVisualStyle =
   | 'clean_minimal'
   | 'story_illustration'
   | 'photo_ugc'
-  | 'asset_focus';
+  | 'asset_focus'
+  | 'freestyle';
 
 export interface CarouselCard {
   order: number;
@@ -99,6 +101,7 @@ export interface GenerateCarouselRequest {
   account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
   carousel_texts: string[]; // Массив текстов для карточек
   visual_style?: CarouselVisualStyle; // Визуальный стиль карусели (по умолчанию 'clean_minimal')
+  style_prompt?: string; // Промпт для freestyle стиля — пользователь сам задаёт визуальный стиль
   custom_prompts?: (string | null)[]; // Опциональные промпты для каждой карточки
   reference_images?: (string | null)[]; // Опциональные референсные изображения (base64)
   direction_id?: string;
@@ -118,6 +121,7 @@ export interface RegenerateCarouselCardRequest {
   carousel_id: string;
   card_index: number;
   custom_prompt?: string;
+  style_prompt?: string; // Промпт для freestyle стиля
   reference_image?: string; // base64 — для обратной совместимости (первый референс)
   reference_images?: string[]; // base64 — до 2 референсов
   text: string; // Текст для этой карточки
