@@ -1945,6 +1945,142 @@ async function sendToMonitoringBot(userAccount, reportText, dispatchFailed = fal
   return anySuccess;
 }
 
+/**
+ * Расшифровка ошибки на человеческий язык
+ */
+function explainError(errorMessage) {
+  const explanations = {
+    'Invalid OAuth access token': {
+      emoji: '🔑',
+      title: 'Невалидный токен Facebook',
+      explanation: 'Токен доступа к Facebook API истёк или был отозван',
+      solution: 'Пользователю нужно переподключить Facebook аккаунт в настройках'
+    },
+    'rate limit': {
+      emoji: '⏱️',
+      title: 'Превышен лимит запросов',
+      explanation: 'Facebook временно заблокировал запросы из-за слишком частых обращений',
+      solution: 'Подождать 15-30 минут, лимит восстановится автоматически'
+    },
+    'error_subcode: 1870188': {
+      emoji: '⚙️',
+      title: 'Ошибка параметров объявления',
+      explanation: 'Facebook отклонил создание adset из-за неверных параметров promoted_object',
+      solution: 'Проверить настройки направления и привязку WhatsApp/страницы'
+    },
+    'permission': {
+      emoji: '🚫',
+      title: 'Нет доступа',
+      explanation: 'Недостаточно прав для выполнения операции в рекламном кабинете',
+      solution: 'Проверить роль пользователя в Business Manager'
+    },
+    'telegram': {
+      emoji: '📱',
+      title: 'Ошибка отправки в Telegram',
+      explanation: 'Не удалось отправить отчёт пользователю в Telegram',
+      solution: 'Проверить telegram_id пользователя и доступность бота'
+    },
+    'account_disabled': {
+      emoji: '⛔',
+      title: 'Аккаунт отключён',
+      explanation: 'Рекламный кабинет заблокирован или отключён Facebook',
+      solution: 'Пользователю нужно разблокировать аккаунт через Facebook'
+    },
+    'no_active_users': {
+      emoji: '👥',
+      title: 'Нет активных пользователей',
+      explanation: 'Не найдено пользователей для обработки',
+      solution: 'Проверить настройки autopilot и optimization у пользователей'
+    },
+    'supabase': {
+      emoji: '🗄️',
+      title: 'Ошибка базы данных',
+      explanation: 'Проблема при обращении к Supabase',
+      solution: 'Проверить доступность Supabase и корректность credentials'
+    }
+  };
+
+  for (const [pattern, info] of Object.entries(explanations)) {
+    if (errorMessage.toLowerCase().includes(pattern.toLowerCase())) {
+      return info;
+    }
+  }
+
+  return {
+    emoji: '❓',
+    title: 'Неизвестная ошибка',
+    explanation: errorMessage.slice(0, 200),
+    solution: 'Требуется ручной анализ логов'
+  };
+}
+
+/**
+ * Генерация отчёта по утреннему batch
+ */
+async function generateBatchReport() {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data: batchResult, error } = await supabase
+    .from('batch_execution_results')
+    .select('*')
+    .eq('execution_date', today)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error || !batchResult) {
+    fastify.log.warn({
+      where: 'generateBatchReport',
+      error: error?.message || 'no_data',
+      date: today
+    });
+
+    return {
+      success: false,
+      report: `⚠️ Отчёт по утреннему batch за ${today}\n\nДанные о выполнении batch не найдены. Возможно, batch ещё не запускался или произошла ошибка.`
+    };
+  }
+
+  const results = Array.isArray(batchResult.results)
+    ? batchResult.results
+    : (typeof batchResult.results === 'string' ? JSON.parse(batchResult.results) : []);
+
+  const failures = results.filter(r => !r.success);
+  const durationMin = Math.round((batchResult.total_duration_ms || 0) / 60000);
+
+  let report = `📊 Отчёт по утреннему batch за ${today}\n`;
+  report += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+  report += `✅ Успешно: ${batchResult.success_count}\n`;
+  report += `❌ С ошибками: ${batchResult.failure_count}\n`;
+  report += `📈 Всего обработано: ${batchResult.total_users}\n`;
+  report += `⏱️ Время выполнения: ${durationMin} мин\n\n`;
+
+  if (failures.length === 0) {
+    report += `🎉 Все пользователи обработаны успешно!`;
+  } else {
+    report += `⚠️ Пользователи с ошибками:\n`;
+    report += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+    for (const fail of failures) {
+      const explained = explainError(fail.error || 'Unknown error');
+      report += `👤 ${fail.username || 'Unknown'}\n`;
+      report += `${explained.emoji} ${explained.title}\n`;
+      report += `📝 ${explained.explanation}\n`;
+      report += `💡 ${explained.solution}\n\n`;
+    }
+  }
+
+  fastify.log.info({
+    where: 'generateBatchReport',
+    date: today,
+    totalUsers: batchResult.total_users,
+    successCount: batchResult.success_count,
+    failureCount: batchResult.failure_count
+  });
+
+  return { success: true, report };
+}
+
 function finalizeReportText(raw, { adAccountId, dateStr }) {
   let text = String(raw || '').trim();
   const startIdx = text.indexOf('📅 Дата отчета:');
@@ -3628,7 +3764,35 @@ async function processDailyBatch() {
       failureCount,
       totalDuration: batchDuration
     });
-    
+
+    // Сохраняем результаты batch в БД для отчёта мониторинга
+    if (supabase) {
+      try {
+        await supabase.from('batch_execution_results').insert({
+          execution_date: new Date().toISOString().split('T')[0],
+          started_at: new Date(batchStartTime).toISOString(),
+          completed_at: new Date().toISOString(),
+          total_users: expandedUsers.length,
+          success_count: successCount,
+          failure_count: failureCount,
+          total_duration_ms: batchDuration,
+          results: results,
+          instance_id: instanceId
+        });
+
+        fastify.log.info({
+          where: 'processDailyBatch',
+          phase: 'results_saved_to_db'
+        });
+      } catch (saveErr) {
+        fastify.log.error({
+          where: 'processDailyBatch',
+          phase: 'results_save_failed',
+          error: String(saveErr)
+        });
+      }
+    }
+
     return {
       success: true,
       usersProcessed: users.length,
@@ -3705,6 +3869,26 @@ fastify.post('/api/brain/cron/run-batch', async (request, reply) => {
   } catch (err) {
     fastify.log.error(err);
     return reply.code(500).send({ error: 'batch_failed', details: String(err?.message || err) });
+  }
+});
+
+// Эндпоинт для генерации и отправки отчёта по batch (для тестирования)
+fastify.get('/api/brain/cron/batch-report', async (request, reply) => {
+  try {
+    const { send } = request.query; // ?send=true для отправки в Telegram
+    const { success, report } = await generateBatchReport();
+
+    if (send === 'true' && MONITORING_BOT_TOKEN && MONITORING_CHAT_IDS?.length > 0) {
+      for (const chatId of MONITORING_CHAT_IDS) {
+        await sendTelegram(chatId, report, MONITORING_BOT_TOKEN);
+      }
+      return reply.send({ success, report, sent: true, chatIds: MONITORING_CHAT_IDS });
+    }
+
+    return reply.send({ success, report, sent: false });
+  } catch (err) {
+    fastify.log.error(err);
+    return reply.code(500).send({ error: 'report_failed', details: String(err?.message || err) });
   }
 });
 
@@ -3917,9 +4101,59 @@ if (CRON_ENABLED) {
     scheduled: true,
     timezone: "Asia/Almaty" // Можно сделать динамическим если нужно
   });
-  
+
   fastify.log.info({ where: 'cron', schedule: CRON_SCHEDULE, timezone: 'Asia/Almaty', status: 'scheduled' });
-  
+
+  // Cron: Отчёт по утреннему batch в 9:00 по Алматы (через час после batch)
+  const REPORT_CRON_SCHEDULE = '0 9 * * *';
+
+  cron.schedule(REPORT_CRON_SCHEDULE, async () => {
+    fastify.log.info({
+      where: 'batch_report_cron',
+      schedule: REPORT_CRON_SCHEDULE,
+      status: 'triggered'
+    });
+
+    try {
+      const { success, report } = await generateBatchReport();
+
+      // Отправляем в ту же группу, что и monitoring
+      if (MONITORING_BOT_TOKEN && MONITORING_CHAT_IDS?.length > 0) {
+        for (const chatId of MONITORING_CHAT_IDS) {
+          await sendTelegram(chatId, report, MONITORING_BOT_TOKEN);
+        }
+
+        fastify.log.info({
+          where: 'batch_report_cron',
+          status: 'sent',
+          chatIds: MONITORING_CHAT_IDS,
+          reportSuccess: success
+        });
+      } else {
+        fastify.log.warn({
+          where: 'batch_report_cron',
+          error: 'monitoring_not_configured'
+        });
+      }
+    } catch (err) {
+      fastify.log.error({
+        where: 'batch_report_cron',
+        status: 'failed',
+        error: String(err)
+      });
+    }
+  }, {
+    scheduled: true,
+    timezone: "Asia/Almaty"
+  });
+
+  fastify.log.info({
+    where: 'batch_report_cron',
+    schedule: REPORT_CRON_SCHEDULE,
+    timezone: 'Asia/Almaty',
+    status: 'scheduled'
+  });
+
   // Start AmoCRM leads sync cron (every hour)
   startAmoCRMLeadsSyncCron();
 } else {
