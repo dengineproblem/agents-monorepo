@@ -3873,16 +3873,18 @@ fastify.post('/api/brain/cron/run-batch', async (request, reply) => {
 });
 
 // Эндпоинт для генерации и отправки отчёта по batch (для тестирования)
+// Группа онбординга (куда приходят уведомления о новых клиентах)
+const ONBOARDING_CHAT_ID = '-5079020326';
+
 fastify.get('/api/brain/cron/batch-report', async (request, reply) => {
   try {
     const { send } = request.query; // ?send=true для отправки в Telegram
     const { success, report } = await generateBatchReport();
+    const botToken = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
 
-    if (send === 'true' && MONITORING_BOT_TOKEN && MONITORING_CHAT_IDS?.length > 0) {
-      for (const chatId of MONITORING_CHAT_IDS) {
-        await sendTelegram(chatId, report, MONITORING_BOT_TOKEN);
-      }
-      return reply.send({ success, report, sent: true, chatIds: MONITORING_CHAT_IDS });
+    if (send === 'true' && botToken) {
+      await sendTelegram(ONBOARDING_CHAT_ID, report, botToken);
+      return reply.send({ success, report, sent: true, chatId: ONBOARDING_CHAT_ID });
     }
 
     return reply.send({ success, report, sent: false });
@@ -4106,6 +4108,7 @@ if (CRON_ENABLED) {
 
   // Cron: Отчёт по утреннему batch в 9:00 по Алматы (через час после batch)
   const REPORT_CRON_SCHEDULE = '0 9 * * *';
+  const BATCH_REPORT_BOT_TOKEN = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
 
   cron.schedule(REPORT_CRON_SCHEDULE, async () => {
     fastify.log.info({
@@ -4117,22 +4120,20 @@ if (CRON_ENABLED) {
     try {
       const { success, report } = await generateBatchReport();
 
-      // Отправляем в ту же группу, что и monitoring
-      if (MONITORING_BOT_TOKEN && MONITORING_CHAT_IDS?.length > 0) {
-        for (const chatId of MONITORING_CHAT_IDS) {
-          await sendTelegram(chatId, report, MONITORING_BOT_TOKEN);
-        }
+      // Отправляем в группу онбординга
+      if (BATCH_REPORT_BOT_TOKEN) {
+        await sendTelegram(ONBOARDING_CHAT_ID, report, BATCH_REPORT_BOT_TOKEN);
 
         fastify.log.info({
           where: 'batch_report_cron',
           status: 'sent',
-          chatIds: MONITORING_CHAT_IDS,
+          chatId: ONBOARDING_CHAT_ID,
           reportSuccess: success
         });
       } else {
         fastify.log.warn({
           where: 'batch_report_cron',
-          error: 'monitoring_not_configured'
+          error: 'LOG_ALERT_TELEGRAM_BOT_TOKEN not configured'
         });
       }
     } catch (err) {
