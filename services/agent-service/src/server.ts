@@ -35,10 +35,20 @@ import analyticsRoutes from './routes/analytics.js';
 import onboardingRoutes from './routes/onboarding.js';
 import notificationsRoutes from './routes/notifications.js';
 import impersonationRoutes from './routes/impersonation.js';
+import telegramWebhook from './routes/telegramWebhook.js';
+import adminChatRoutes from './routes/adminChat.js';
+import adminStatsRoutes from './routes/adminStats.js';
+import adminUsersRoutes from './routes/adminUsers.js';
+import adminAdsRoutes from './routes/adminAds.js';
+import adminLeadsRoutes from './routes/adminLeads.js';
+import adminErrorsRoutes from './routes/adminErrors.js';
+import adminNotificationsRoutes from './routes/adminNotifications.js';
+import adminSettingsRoutes from './routes/adminSettings.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
 import { startUserScoringCron } from './cron/userScoringCron.js';
+import { startEngagementNotificationCron } from './cron/engagementNotificationCron.js';
 import { logger as baseLogger } from './lib/logger.js';
 
 // Load env from Docker path or local path
@@ -102,6 +112,15 @@ app.register(analyticsRoutes);
 app.register(onboardingRoutes);
 app.register(notificationsRoutes);
 app.register(impersonationRoutes);
+app.register(telegramWebhook);
+app.register(adminChatRoutes);
+app.register(adminStatsRoutes);
+app.register(adminUsersRoutes);
+app.register(adminAdsRoutes);
+app.register(adminLeadsRoutes);
+app.register(adminErrorsRoutes);
+app.register(adminNotificationsRoutes);
+app.register(adminSettingsRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
@@ -114,6 +133,9 @@ startCompetitorCrawlerCron(app as any);
 
 // Запускаем cron для ежедневного скоринга пользователей (в 03:00)
 startUserScoringCron(app as any);
+
+// Запускаем cron для engagement уведомлений (в 10:00 по Алматы)
+startEngagementNotificationCron(app as any);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

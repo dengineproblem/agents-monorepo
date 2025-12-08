@@ -31,6 +31,17 @@ import Competitors from './pages/Competitors';
 import KnowledgeBase from './pages/KnowledgeBase';
 import AdminAnalytics from './pages/AdminAnalytics';
 import AdminOnboarding from './pages/AdminOnboarding';
+import AdminRoute from './components/AdminRoute';
+import { AdminLayout } from './components/admin';
+import {
+  AdminDashboard,
+  AdminChats,
+  AdminUsers,
+  AdminAds,
+  AdminLeads,
+  AdminErrors,
+  AdminSettings,
+} from './pages/admin';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
@@ -48,8 +59,11 @@ const AppRoutes = () => {
   // Автоматический трекинг page views
   usePageTracking();
 
-  // Routes that don't need sidebar (e.g., WhatsApp CRM)
+  // Routes that don't need sidebar (e.g., WhatsApp CRM, Admin panel)
   const noSidebarRoutes = ['/whatsapp-analysis'];
+
+  // Check if current path is admin route
+  const isAdminRoute = location.pathname.startsWith('/admin');
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -185,7 +199,23 @@ const AppRoutes = () => {
             showSkipButton={true}
           />
         
-          {isNoSidebarRoute ? (
+          {isAdminRoute ? (
+            // Admin Panel with its own layout
+            <Routes>
+              <Route path="/admin" element={<AdminRoute><AdminLayout /></AdminRoute>}>
+                <Route index element={<AdminDashboard />} />
+                <Route path="chats" element={<AdminChats />} />
+                <Route path="chats/:userId" element={<AdminChats />} />
+                <Route path="users" element={<AdminUsers />} />
+                <Route path="onboarding" element={<AdminOnboarding />} />
+                <Route path="ads" element={<AdminAds />} />
+                <Route path="leads" element={<AdminLeads />} />
+                <Route path="errors" element={<AdminErrors />} />
+                <Route path="settings" element={<AdminSettings />} />
+                <Route path="analytics" element={<AdminAnalytics />} />
+              </Route>
+            </Routes>
+          ) : isNoSidebarRoute ? (
             // Routes without sidebar (e.g., WhatsApp CRM)
             <div className="min-h-screen w-full">
               <Routes>
@@ -194,7 +224,7 @@ const AppRoutes = () => {
               </Routes>
             </div>
           ) : (
-            // Routes with sidebar
+            // Routes with sidebar (user app)
             <div className="min-h-screen w-full max-w-full overflow-x-hidden">
               <SidebarProvider>
                 <div className="w-full max-w-full">
@@ -215,8 +245,6 @@ const AppRoutes = () => {
                       <Route path="/knowledge-base" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
-                      <Route path="/admin/analytics" element={<AdminAnalytics />} />
-                      <Route path="/admin/onboarding" element={<AdminOnboarding />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>
