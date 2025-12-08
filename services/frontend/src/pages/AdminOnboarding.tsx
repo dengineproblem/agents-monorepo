@@ -126,16 +126,16 @@ const STAGE_ICONS: Record<string, React.ReactNode> = {
 };
 
 const STAGE_COLORS: Record<string, string> = {
-  registered: 'bg-gray-100 border-gray-300',
-  fb_pending: 'bg-yellow-50 border-yellow-300',
-  fb_connected: 'bg-blue-50 border-blue-300',
-  direction_created: 'bg-purple-50 border-purple-300',
-  creative_created: 'bg-pink-50 border-pink-300',
-  ads_launched: 'bg-orange-50 border-orange-300',
-  first_report: 'bg-teal-50 border-teal-300',
-  roi_configured: 'bg-indigo-50 border-indigo-300',
-  active: 'bg-green-50 border-green-300',
-  inactive: 'bg-red-50 border-red-300',
+  registered: 'bg-secondary border-border',
+  fb_pending: 'bg-yellow-500/10 border-yellow-500/30',
+  fb_connected: 'bg-blue-500/10 border-blue-500/30',
+  direction_created: 'bg-purple-500/10 border-purple-500/30',
+  creative_created: 'bg-pink-500/10 border-pink-500/30',
+  ads_launched: 'bg-orange-500/10 border-orange-500/30',
+  first_report: 'bg-teal-500/10 border-teal-500/30',
+  roi_configured: 'bg-indigo-500/10 border-indigo-500/30',
+  active: 'bg-green-500/10 border-green-500/30',
+  inactive: 'bg-red-500/10 border-red-500/30',
 };
 
 // =====================================================
@@ -154,7 +154,7 @@ const UserCard: React.FC<{
 
   return (
     <div
-      className="p-3 bg-white rounded-lg shadow-sm border cursor-pointer hover:shadow-md transition-shadow"
+      className="p-3 bg-card text-card-foreground rounded-lg shadow-sm border cursor-pointer hover:shadow-md transition-shadow"
       onClick={onSelect}
     >
       <div className="flex items-start justify-between">
@@ -168,7 +168,7 @@ const UserCard: React.FC<{
           <Button
             size="sm"
             variant="outline"
-            className="ml-2 h-7 text-xs bg-green-50 hover:bg-green-100 border-green-300"
+            className="ml-2 h-7 text-xs bg-green-500/10 hover:bg-green-500/20 border-green-500/30 text-green-600"
             onClick={(e) => {
               e.stopPropagation();
               onApprove();
@@ -206,7 +206,7 @@ const KanbanColumn: React.FC<{
   onApprove: (userId: string) => void;
 }> = ({ stage, users, count, onUserSelect, onApprove }) => {
   return (
-    <div className={cn('flex flex-col min-w-[200px] max-w-[250px] rounded-lg border-2', STAGE_COLORS[stage.id] || 'bg-gray-50 border-gray-200')}>
+    <div className={cn('flex flex-col min-w-[200px] max-w-[250px] rounded-lg border-2', STAGE_COLORS[stage.id] || 'bg-secondary border-border')}>
       <div className="p-3 border-b flex items-center justify-between">
         <div className="flex items-center gap-2">
           {STAGE_ICONS[stage.id]}
