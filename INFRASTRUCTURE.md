@@ -117,6 +117,45 @@ docker logs agents-monorepo-agent-service-1 | grep "fromDB"
 
 ---
 
+## 📊 USER ANALYTICS SYSTEM (Аналитика пользователей)
+
+**Статус:** ✅ Активна (с 8 декабря 2025)
+**Документация:** [USER_ANALYTICS_SYSTEM.md](./USER_ANALYTICS_SYSTEM.md)
+
+### **Возможности:**
+
+- ✅ Автоматический трекинг page views и кликов
+- ✅ Управление сессиями пользователей
+- ✅ Batch-отправка событий (каждые 5 сек или 20 событий)
+- ✅ Ежедневный расчёт engagement score (0-100)
+- ✅ Логирование бизнес-событий (creative_launched, lead_received)
+- ✅ Admin UI для просмотра аналитики (`/admin/analytics`)
+- ✅ Real-time мониторинг активных сессий
+
+### **Ключевые компоненты:**
+
+| Компонент | Файл | Назначение |
+|-----------|------|------------|
+| Frontend Service | `lib/analytics.ts` | Сбор и батчинг событий |
+| Page Tracking | `hooks/usePageTracking.ts` | Автотрекинг page views |
+| Click Tracking | `hooks/useTrackClick.ts` | Хук для кликов |
+| API Routes | `routes/analytics.ts` | Backend API |
+| Event Logger | `lib/eventLogger.ts` | Логирование бизнес-событий |
+| Scoring Cron | `cron/userScoringCron.ts` | Ежедневный расчёт скоринга |
+| Admin UI | `pages/AdminAnalytics.tsx` | Страница аналитики |
+
+### **Таблицы БД:**
+
+- `user_events` — все события пользователей
+- `user_sessions` — сессии с метриками
+- `user_engagement_scores` — скоринг вовлечённости
+
+### **Миграция:**
+
+- `078_user_analytics.sql` - Создание таблиц аналитики
+
+---
+
 ## 🔍 COMPETITOR TRACKING SYSTEM (Анализ конкурентов)
 
 **Статус:** ✅ Активна (с 1 декабря 2025)
@@ -444,28 +483,31 @@ WHERE user_account_id = 'user-uuid';
 
 ### **Таблица портов:**
 
-| Контейнер | Внутренний порт | Внешний порт (хост) | Назначение |
+| Контейнер (docker ps) | Внутренний порт | Внешний порт (хост) | Назначение |
 |-----------|-----------------|---------------------|------------|
-| `nginx` | 80, 443 | **80, 443** | Главный веб-сервер, SSL терминация |
-| `frontend` (production) | 80 | 3001 | Production версия React приложения |
-| `frontend-appreview` | 80 | 3002 | App Review версия React приложения |
-| `agent-service` | 8082 | 8082 | Backend API (Facebook, workflows) |
-| `creative-analyzer` | 7081 | 7081 | LLM анализатор креативов |
-| `agent-brain` | 7080 | 7080 | Scoring agent (cron jobs) |
-| `loki` | 3100 | 3100 | Логирование (Grafana Loki) |
-| `grafana` | 3000 | 3000 | Мониторинг и визуализация логов |
-| `n8n` | 5678 | 5678 | Workflow automation (отдельный docker-compose) |
-| `postgres` | 5432 | - | БД для n8n (не публичный) |
+| `agents-monorepo-nginx-1` | 80, 443 | **80, 443** | Главный веб-сервер, SSL терминация |
+| `agents-monorepo-frontend-1` | 80 | 3001 | Production версия React приложения |
+| `agents-monorepo-frontend-appreview-1` | 80 | 3002 | App Review версия React приложения |
+| `agents-monorepo-agent-service-1` | 8082 | 8082 | Backend API (Facebook, workflows) |
+| `agents-monorepo-creative-analyzer-1` | 7081 | 7081 | LLM анализатор креативов |
+| `agents-monorepo-agent-brain-1` | 7080 | 7080 | Scoring agent (cron jobs) |
+| `agents-monorepo-creative-generation-service-1` | 7082 | 7082 | Генерация креативов (Gemini) |
+| `agents-monorepo-loki-1` | 3100 | 3100 | Логирование (Grafana Loki) |
+| `agents-monorepo-grafana-1` | 3000 | 3000 | Мониторинг и визуализация логов |
+| `agents-monorepo-promtail-1` | 9080 | - | Сборщик логов для Loki |
+| `root-n8n-1` | 5678 | 5678 | Workflow automation (отдельный docker-compose) |
+| `root-postgres-1` | 5432 | - | БД для n8n (не публичный) |
+| `root-redis-1` | 6379 | - | Redis для n8n |
 | `evolution-api` | 8080 | 8080 | WhatsApp Business API (Evolution API) |
 | `evolution-postgres` | 5432 | 5433 | БД для Evolution API |
 | `evolution-redis` | 6379 | 6380 | Cache для Evolution API |
 | `tiktok-proxy` (на хосте) | 4001 | 4001 | TikTok Marketing API proxy (legacy, не в Docker) |
 | `SSH tunnel` (локальная разработка) | 5434 | 5434 | Туннель к production evolution-postgres для CRM |
-| `crm-backend` | 8084 | 8084 | Backend анализа WhatsApp диалогов |
-| `crm-frontend` | 80 | 3003 | Frontend CRM (nginx в контейнере) |
-| `chatbot-service` | 8083 | 8083 | Чатбот автоматизация |
-| `chatbot-worker` | - | - | Worker для reactivation campaigns |
-| `redis-chatbot` | 6379 | 6381 | Cache для chatbot |
+| `agents-monorepo-crm-backend-1` | 8084 | 8084 | Backend анализа WhatsApp диалогов |
+| `agents-monorepo-crm-frontend-1` | 80 | 3003 | Frontend CRM (nginx в контейнере) |
+| `agents-monorepo-chatbot-service-1` | 8083 | 8083 | Чатбот автоматизация |
+| `agents-monorepo-chatbot-worker-1` | - | - | Worker для reactivation campaigns |
+| `agents-monorepo-redis-chatbot-1` | 6379 | 6381 | Cache для chatbot |
 
 **Локальная разработка (без Docker):**
 - crm-backend: 8084 (то же)
@@ -1435,6 +1477,16 @@ docker-compose restart grafana
 ---
 
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
+
+**8 декабря 2025:**
+- ✅ **НОВАЯ СИСТЕМА:** User Analytics System для отслеживания активности пользователей
+- ✅ Создана миграция `078_user_analytics.sql` (таблицы: user_events, user_sessions, user_engagement_scores)
+- ✅ Frontend: analytics.ts (сервис), usePageTracking (автотрекинг), useTrackClick (хук кликов)
+- ✅ Backend: routes/analytics.ts (API), lib/eventLogger.ts (логирование бизнес-событий)
+- ✅ Cron: userScoringCron.ts — ежедневный расчёт engagement score в 03:00
+- ✅ Admin UI: страница /admin/analytics для просмотра аналитики
+- ✅ Интеграция бизнес-событий: creative_launched в campaignBuilder.ts, lead_received в leads.ts
+- ✅ Документация: USER_ANALYTICS_SYSTEM.md
 
 **20 ноября 2025:**
 - ✅ **ФИКС:** Исправлена синхронизация продаж из AmoCRM
