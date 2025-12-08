@@ -1700,16 +1700,17 @@ function validateAndNormalizeActions(actions) {
   return cleaned;
 }
 
-async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumber) {
+async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumber, accountId) {
   const res = await fetch(AGENT_URL, {
     method: 'POST',
     headers: { 'content-type':'application/json' },
     body: JSON.stringify({
       idempotencyKey: idem,
       source: 'brain',
-      account: { 
+      account: {
         userAccountId,
-        ...(whatsappPhoneNumber && { whatsappPhoneNumber })
+        ...(whatsappPhoneNumber && { whatsappPhoneNumber }),
+        ...(accountId && { accountId })  // UUID из ad_accounts для мультиаккаунтов
       },
       actions
     })
@@ -2257,7 +2258,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
       const actions = validateAndNormalizeActions(actionsDraft);
       let agentResponse = null;
       if (inputs?.dispatch) {
-        agentResponse = await sendActionsBatch(idem, userAccountId, actions, null);
+        agentResponse = await sendActionsBatch(idem, userAccountId, actions, null, null);
       }
       const date = new Date().toISOString().slice(0,10);
       const reportText = buildReport({
@@ -3209,7 +3210,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
           idem
         });
 
-        agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number);
+        agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number, accountUUID);
 
         fastify.log.info({
           where: 'actions_dispatched',

@@ -175,13 +175,37 @@ export async function actionsRoutes(app: FastifyInstance) {
 type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean };
 type ResolveErr = { ok: false; message: string };
 
-async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string }): Promise<ResolveOk | ResolveErr> {
+async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string; accountId?: string }): Promise<ResolveOk | ResolveErr> {
   if (account.accessToken && account.accessToken.length >= 10) {
     return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId, whatsappPhoneNumber: account.whatsappPhoneNumber };
   }
   if (!account.userAccountId) {
     return { ok: false, message: 'Provide accessToken or userAccountId' };
   }
+
+  // Если передан accountId (UUID из ad_accounts) — загружаем credentials из ad_accounts
+  // Это нужно для мультиаккаунтного режима
+  if (account.accountId) {
+    const { data: adAccount, error: adError } = await supabase
+      .from('ad_accounts')
+      .select('access_token, ad_account_id, page_id, whatsapp_phone_number')
+      .eq('id', account.accountId)
+      .eq('user_account_id', account.userAccountId)
+      .maybeSingle();
+
+    if (adError) return { ok: false, message: `Supabase error (ad_accounts): ${String(adError.message || adError)}` };
+    if (!adAccount || !adAccount.access_token) return { ok: false, message: 'Access token not found in ad_accounts for provided accountId' };
+
+    return {
+      ok: true,
+      accessToken: adAccount.access_token as string,
+      adAccountId: (adAccount as any).ad_account_id || account.adAccountId,
+      pageId: (adAccount as any).page_id || undefined,
+      whatsappPhoneNumber: account.whatsappPhoneNumber || (adAccount as any).whatsapp_phone_number || undefined
+    };
+  }
+
+  // Fallback: загружаем из user_accounts (для обычных пользователей)
   const { data, error } = await supabase
     .from('user_accounts')
     .select('access_token, ad_account_id, page_id, instagram_id, whatsapp_phone_number')
