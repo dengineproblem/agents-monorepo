@@ -6,6 +6,7 @@ import { workflowStartCreativeTest, fetchCreativeTestInsights } from '../workflo
 import { graph } from '../adapters/facebook.js';
 import { getWhatsAppPhoneNumber } from '../lib/settingsHelpers.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
+import { onCreativeTestLaunched } from '../lib/onboardingHelper.js';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
@@ -142,6 +143,11 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         },
         credentials.fbAccessToken!
       );
+
+      // Добавляем тег онбординга
+      onCreativeTestLaunched(user_id).catch(err => {
+        app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag');
+      });
 
       return reply.send(result);
       

@@ -35,6 +35,7 @@ import {
 } from '../lib/directionAdSets.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { eventLogger } from '../lib/eventLogger.js';
+import { onAdsLaunched } from '../lib/onboardingHelper.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -360,6 +361,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 account_id
               );
 
+              // Обновляем этап онбординга
+              onAdsLaunched(user_account_id).catch(err => {
+                log.warn({ err, userId: user_account_id }, 'Failed to update onboarding stage');
+              });
+
               llmSuccess = true;
               log.info({
                 directionId: direction.id,
@@ -542,6 +548,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               },
               account_id
             );
+
+            // Обновляем этап онбординга
+            onAdsLaunched(user_account_id).catch(err => {
+              log.warn({ err, userId: user_account_id }, 'Failed to update onboarding stage');
+            });
 
             // Инкрементировать счетчик для use_existing режима
             if (credentials.defaultAdsetMode === 'use_existing') {
@@ -868,6 +879,11 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           },
           account_id
         );
+
+        // Обновляем этап онбординга
+        onAdsLaunched(user_account_id).catch(err => {
+          log.warn({ err, userId: user_account_id }, 'Failed to update onboarding stage');
+        });
 
         // Инкрементировать счетчик для use_existing режима
         if (credentials.defaultAdsetMode === 'use_existing') {

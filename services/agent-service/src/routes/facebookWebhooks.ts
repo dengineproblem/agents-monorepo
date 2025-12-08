@@ -591,6 +591,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       }, 'Saving manual Facebook connection');
 
       // Update user_accounts with provided IDs and set status to pending_review
+      // Also update onboarding_stage to 'fb_pending'
       const { error: updateError } = await supabase
         .from('user_accounts')
         .update({
@@ -598,6 +599,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           instagram_id: instagram_id || null,
           ad_account_id: normalizedAdAccountId,
           fb_connection_status: 'pending_review',
+          onboarding_stage: 'fb_pending',
           updated_at: new Date().toISOString()
         })
         .eq('id', user_id);

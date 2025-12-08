@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
+import { onDirectionCreated } from '../lib/onboardingHelper.js';
 
 const log = createLogger({ module: 'directionsRoutes' });
 
@@ -547,6 +548,11 @@ export async function directionsRoutes(app: FastifyInstance) {
           log.info('Default settings created successfully');
         }
       }
+
+      // Обновляем этап онбординга
+      onDirectionCreated(input.userAccountId).catch(err => {
+        log.warn({ err, userId: input.userAccountId }, 'Failed to update onboarding stage');
+      });
 
       return reply.code(201).send({
         success: true,

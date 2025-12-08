@@ -321,7 +321,7 @@ const AdminAnalytics: React.FC = () => {
               title="Средний скор"
               value={summary.averageScores.overall}
               icon={<TrendingUp className="h-6 w-6" />}
-              subtitle="Overall Score"
+              subtitle="Общий балл"
             />
           </div>
         )}
@@ -384,10 +384,10 @@ const AdminAnalytics: React.FC = () => {
                           </div>
 
                           <div className="flex items-center gap-6">
-                            <ScoreBadge score={user.engagement_score || 0} label="Engagement" />
-                            <ScoreBadge score={user.activity_score || 0} label="Activity" />
-                            <ScoreBadge score={user.health_score || 0} label="Health" />
-                            <ScoreBadge score={user.overall_score || 0} label="Overall" />
+                            <ScoreBadge score={user.engagement_score || 0} label="Вовлечённость" />
+                            <ScoreBadge score={user.activity_score || 0} label="Активность" />
+                            <ScoreBadge score={user.health_score || 0} label="Здоровье" />
+                            <ScoreBadge score={user.overall_score || 0} label="Общий" />
                             {expandedUser === user.user_account_id ? (
                               <ChevronUp className="h-5 w-5 text-muted-foreground" />
                             ) : (
@@ -403,24 +403,24 @@ const AdminAnalytics: React.FC = () => {
                               <div className="text-center p-3 bg-muted rounded-lg">
                                 <Eye className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
                                 <p className="text-xl font-bold">{user.total_page_views || 0}</p>
-                                <p className="text-xs text-muted-foreground">Page Views</p>
+                                <p className="text-xs text-muted-foreground">Просмотров</p>
                               </div>
                               <div className="text-center p-3 bg-muted rounded-lg">
                                 <MousePointerClick className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
                                 <p className="text-xl font-bold">{user.total_clicks || 0}</p>
-                                <p className="text-xs text-muted-foreground">Clicks</p>
+                                <p className="text-xs text-muted-foreground">Кликов</p>
                               </div>
                               <div className="text-center p-3 bg-muted rounded-lg">
                                 <Clock className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
                                 <p className="text-xl font-bold">
                                   {Math.round((user.total_time_seconds || 0) / 60)}м
                                 </p>
-                                <p className="text-xs text-muted-foreground">Time</p>
+                                <p className="text-xs text-muted-foreground">Время</p>
                               </div>
                               <div className="text-center p-3 bg-muted rounded-lg">
                                 <Activity className="h-5 w-5 mx-auto mb-1 text-muted-foreground" />
                                 <p className="text-xl font-bold">{user.total_sessions || 0}</p>
-                                <p className="text-xs text-muted-foreground">Sessions</p>
+                                <p className="text-xs text-muted-foreground">Сессий</p>
                               </div>
                             </div>
 
@@ -428,15 +428,15 @@ const AdminAnalytics: React.FC = () => {
                             <div className="grid grid-cols-3 gap-4 mb-4">
                               <div className="text-center p-2 border rounded">
                                 <p className="text-lg font-semibold">{user.campaigns_created || 0}</p>
-                                <p className="text-xs text-muted-foreground">Campaigns</p>
+                                <p className="text-xs text-muted-foreground">Кампаний</p>
                               </div>
                               <div className="text-center p-2 border rounded">
                                 <p className="text-lg font-semibold">{user.creatives_launched || 0}</p>
-                                <p className="text-xs text-muted-foreground">Creatives</p>
+                                <p className="text-xs text-muted-foreground">Креативов</p>
                               </div>
                               <div className="text-center p-2 border rounded">
                                 <p className="text-lg font-semibold">{user.leads_received || 0}</p>
-                                <p className="text-xs text-muted-foreground">Leads</p>
+                                <p className="text-xs text-muted-foreground">Лидов</p>
                               </div>
                             </div>
 
@@ -508,8 +508,8 @@ const AdminAnalytics: React.FC = () => {
                         <TableHead>Пользователь</TableHead>
                         <TableHead>Устройство</TableHead>
                         <TableHead>Страница входа</TableHead>
-                        <TableHead className="text-center">Page Views</TableHead>
-                        <TableHead className="text-center">Clicks</TableHead>
+                        <TableHead className="text-center">Просмотры</TableHead>
+                        <TableHead className="text-center">Клики</TableHead>
                         <TableHead>Активность</TableHead>
                       </TableRow>
                     </TableHeader>

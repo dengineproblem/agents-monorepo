@@ -17,6 +17,7 @@
 7. [Admin UI](#admin-ui)
 8. [Бизнес-события](#бизнес-события)
 9. [Мониторинг и отладка](#мониторинг-и-отладка)
+10. [Система онбординга](#система-онбординга)
 
 ---
 
@@ -517,6 +518,191 @@ sessionStorage.getItem('analytics_session_id');
 
 ---
 
+## 🎯 СИСТЕМА ОНБОРДИНГА
+
+> Система отслеживания прогресса пользователей через этапы онбординга и теги активности.
+
+### Цель
+
+Снижение оттока пользователей за счёт:
+- Отслеживания прогресса каждого пользователя
+- Автоматического обновления этапов при действиях
+- Уведомлений (in-app + Telegram)
+- Визуального Kanban-дашборда для админов
+
+### Миграция: `080_onboarding_system.sql`
+
+### Этапы онбординга (onboarding_stage)
+
+| Этап | Описание | Условие перехода |
+|------|----------|------------------|
+| `registered` | Только зарегистрировался | Создание аккаунта |
+| `fb_pending` | Ожидание подключения FB | Инициировал OAuth |
+| `fb_connected` | Facebook подключен | Успешный OAuth callback |
+| `direction_created` | Создано направление | POST /directions |
+| `creative_created` | Создан креатив | POST /creatives или генерация |
+| `ads_launched` | Запущена реклама | Первый запуск рекламы |
+| `first_report` | Получен первый отчёт | Первый отчёт от Facebook |
+| `roi_configured` | Настроена ROI аналитика | Настройка tracking |
+| `active` | Активный пользователь | Регулярное использование |
+| `inactive` | Неактивен | Отсутствие активности >30 дней |
+
+**Логика переходов:** Этапы могут только прогрессировать вперёд (нельзя откатиться с `ads_launched` на `creative_created`), кроме `active`/`inactive`.
+
+### Теги онбординга (onboarding_tags)
+
+Дополнительные метки о действиях пользователя:
+
+| Тег | Описание | Условие добавления |
+|-----|----------|-------------------|
+| `tiktok_connected` | Подключил TikTok | OAuth TikTok |
+| `generated_image` | Генерировал изображение | POST /generate/image |
+| `generated_carousel` | Генерировал карусель | POST /generate/carousel |
+| `generated_text` | Генерировал текст | POST /generate/text |
+| `added_competitors` | Добавил конкурентов | POST /competitors |
+| `added_audience` | Добавил аудиторию | POST /audiences |
+| `used_creative_test` | Запускал быстрый тест | POST /creative-test |
+| `used_llm_analysis` | Использовал LLM анализ | Анализ креатива через AI |
+
+### Схема БД
+
+```sql
+-- Поля в user_accounts:
+ALTER TABLE user_accounts ADD COLUMN
+  onboarding_stage TEXT DEFAULT 'registered',
+  onboarding_tags JSONB DEFAULT '[]',
+  is_tech_admin BOOLEAN DEFAULT FALSE;
+
+-- История изменений этапов:
+CREATE TABLE onboarding_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_account_id UUID NOT NULL REFERENCES user_accounts(id),
+  stage_from TEXT,
+  stage_to TEXT NOT NULL,
+  changed_by UUID REFERENCES user_accounts(id),
+  change_reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- In-app уведомления:
+CREATE TABLE user_notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_account_id UUID NOT NULL REFERENCES user_accounts(id),
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT FALSE,
+  telegram_sent BOOLEAN DEFAULT FALSE,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Токены импрессонации:
+CREATE TABLE impersonation_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_id UUID NOT NULL REFERENCES user_accounts(id),
+  target_user_id UUID NOT NULL REFERENCES user_accounts(id),
+  token TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Backend: lib/onboardingHelper.ts
+
+Автоматическое обновление этапов и тегов:
+
+```typescript
+import {
+  onDirectionCreated,
+  onCreativeCreated,
+  onAdsLaunched,
+  onCreativeGenerated,
+  onCreativeTestLaunched,
+  onLLMAnalysisUsed
+} from '../lib/onboardingHelper.js';
+
+// При создании направления
+await onDirectionCreated(userId);
+
+// При генерации креатива
+await onCreativeGenerated(userId, 'image'); // или 'carousel', 'text'
+
+// При запуске быстрого теста
+await onCreativeTestLaunched(userId);
+
+// При LLM анализе креатива
+await onLLMAnalysisUsed(userId);
+```
+
+### Backend: routes/notifications.ts
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/notifications` | Список уведомлений (limit, offset, unreadOnly) |
+| GET | `/notifications/unread-count` | Количество непрочитанных |
+| PATCH | `/notifications/:id/read` | Отметить как прочитанное |
+| POST | `/notifications/mark-all-read` | Прочитать все |
+| DELETE | `/notifications/:id` | Удалить уведомление |
+
+**Заголовок:** `x-user-id` — UUID пользователя
+
+### Backend: routes/onboarding.ts
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/onboarding/users` | Kanban-данные по этапам |
+| PATCH | `/onboarding/users/:id/stage` | Изменить этап (админ) |
+| GET | `/onboarding/users/:id/history` | История изменений этапа |
+
+### Backend: routes/impersonation.ts
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/impersonation/start` | Создать токен (2 часа) |
+| POST | `/impersonation/end` | Завершить сессию |
+| GET | `/impersonation/validate` | Проверить токен |
+
+**Логика:**
+- Только пользователи с `is_tech_admin = true` могут имперсонировать
+- Токен действует 2 часа
+- При имперсонации видны все данные целевого пользователя
+
+### Frontend: NotificationBell.tsx
+
+Компонент колокольчика в Header:
+- Badge с количеством непрочитанных (9+)
+- Popover со списком уведомлений
+- Polling каждые 30 секунд
+- Действия: прочитать, удалить, прочитать все
+
+### Frontend: AdminOnboarding.tsx
+
+Страница `/admin/onboarding` — Kanban-доска:
+- Колонки по этапам
+- Карточки пользователей с тегами
+- Drag-and-drop для перемещения между этапами
+- Фильтрация по этапам
+- История изменений каждого пользователя
+
+### Интеграция в существующий код
+
+**routes/creativeTest.ts:**
+```typescript
+// После успешного запуска теста
+onCreativeTestLaunched(user_id).catch(err => {
+  app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag');
+});
+```
+
+**agent-brain/analyzerService.js:**
+```javascript
+// После сохранения LLM анализа в БД
+// Автоматически добавляет тег 'used_llm_analysis'
+```
+
+---
+
 ## 📝 ИСТОРИЯ ИЗМЕНЕНИЙ
 
 **8 декабря 2025:**
@@ -527,6 +713,12 @@ sessionStorage.getItem('analytics_session_id');
 - ✅ Cron: userScoringCron.ts (ежедневный расчёт скоринга)
 - ✅ Admin UI: страница /admin/analytics
 - ✅ Интеграция бизнес-событий: creative_launched, lead_received
+- ✅ **Система онбординга:** этапы, теги, уведомления
+- ✅ Миграция 080_onboarding_system.sql
+- ✅ Backend: routes/onboarding.ts, notifications.ts, impersonation.ts
+- ✅ Backend: lib/onboardingHelper.ts (автообновление этапов)
+- ✅ Frontend: NotificationBell.tsx, AdminOnboarding.tsx
+- ✅ Интеграция: onCreativeTestLaunched, onLLMAnalysisUsed
 
 ---
 

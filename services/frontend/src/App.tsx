@@ -30,6 +30,7 @@ import CarouselTest from './pages/CarouselTest';
 import Competitors from './pages/Competitors';
 import KnowledgeBase from './pages/KnowledgeBase';
 import AdminAnalytics from './pages/AdminAnalytics';
+import AdminOnboarding from './pages/AdminOnboarding';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
@@ -215,6 +216,7 @@ const AppRoutes = () => {
                       <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
                       <Route path="/admin/analytics" element={<AdminAnalytics />} />
+                      <Route path="/admin/onboarding" element={<AdminOnboarding />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>

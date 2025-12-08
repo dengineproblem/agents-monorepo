@@ -15,6 +15,7 @@ import {
 } from '../lib/searchApi.js';
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
 import { processVideoTranscription } from '../lib/transcription.js';
+import { onCompetitorsAdded } from '../lib/onboardingHelper.js';
 import { createWriteStream, promises as fs } from 'fs';
 import { pipeline } from 'stream/promises';
 import path from 'path';
@@ -664,6 +665,11 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         .select('*')
         .eq('id', competitorId)
         .single();
+
+      // Обновляем тег онбординга
+      onCompetitorsAdded(input.userAccountId).catch(err => {
+        log.warn({ err, userId: input.userAccountId }, 'Failed to add onboarding tag');
+      });
 
       return reply.status(201).send({
         success: true,

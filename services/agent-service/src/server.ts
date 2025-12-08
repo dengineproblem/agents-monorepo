@@ -32,6 +32,9 @@ import { autopilotRoutes } from './routes/autopilot.js';
 import competitorsRoutes from './routes/competitors.js';
 import adAccountsRoutes from './routes/adAccounts.js';
 import analyticsRoutes from './routes/analytics.js';
+import onboardingRoutes from './routes/onboarding.js';
+import notificationsRoutes from './routes/notifications.js';
+import impersonationRoutes from './routes/impersonation.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
@@ -96,6 +99,9 @@ app.register(autopilotRoutes);
 app.register(competitorsRoutes);
 app.register(adAccountsRoutes);
 app.register(analyticsRoutes);
+app.register(onboardingRoutes);
+app.register(notificationsRoutes);
+app.register(impersonationRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);

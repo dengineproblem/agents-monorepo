@@ -17,6 +17,7 @@ import { FEATURES } from '../config/appReview';
 import { supabase } from '../integrations/supabase/client';
 import { appReviewText } from '@/utils/appReviewText';
 import { AdAccountSwitcher } from './ad-accounts/AdAccountSwitcher';
+import NotificationBell from './NotificationBell';
 
 interface HeaderProps { 
   onOpenDatePicker: () => void;
@@ -287,6 +288,9 @@ const Header: React.FC<HeaderProps> = ({
         
         <TooltipProvider>
           <div className="flex items-center gap-1">
+            {/* Notification Bell */}
+            <NotificationBell />
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon" onClick={handleValidateFacebook}>

@@ -11,6 +11,7 @@ import {
   createInstagramImageCreative,
   createWebsiteLeadsImageCreative
 } from '../adapters/facebook.js';
+import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 
 const ProcessImageSchema = z.object({
   user_id: z.string().uuid(),
@@ -317,6 +318,14 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         }
 
         app.log.info('Image processing completed successfully');
+
+        // Обновляем этап онбординга
+        onCreativeCreated(body.user_id).catch(err => {
+          app.log.warn({ err, userId: body.user_id }, 'Failed to update onboarding stage');
+        });
+        onCreativeGenerated(body.user_id, 'image').catch(err => {
+          app.log.warn({ err, userId: body.user_id }, 'Failed to add onboarding tag');
+        });
 
         return reply.send({
           success: true,
@@ -631,6 +640,14 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         userCreativeId: userCreative?.id,
         objective
       }, 'Image creative process completed');
+
+      // Обновляем этап онбординга
+      onCreativeCreated(user_id).catch(err => {
+        app.log.warn({ err, userId: user_id }, 'Failed to update onboarding stage');
+      });
+      onCreativeGenerated(user_id, 'image').catch(err => {
+        app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag');
+      });
 
       return reply.send({
         success: true,

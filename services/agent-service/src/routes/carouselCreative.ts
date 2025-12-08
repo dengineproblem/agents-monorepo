@@ -7,6 +7,7 @@ import {
   createInstagramCarouselCreative,
   createWebsiteLeadsCarouselCreative
 } from '../adapters/facebook.js';
+import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 
 const CreateCarouselCreativeSchema = z.object({
   user_id: z.string().uuid(),
@@ -310,6 +311,14 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         userCreativeId: userCreative?.id,
         objective
       }, 'Carousel creative process completed');
+
+      // Обновляем этап онбординга
+      onCreativeCreated(user_id).catch(err => {
+        app.log.warn({ err, userId: user_id }, 'Failed to update onboarding stage');
+      });
+      onCreativeGenerated(user_id, 'carousel').catch(err => {
+        app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag');
+      });
 
       return reply.send({
         success: true,
