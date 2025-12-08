@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import Header from '../components/Header';
+import UserChatModal from '@/components/UserChatModal';
 import { API_BASE_URL } from '@/config/api';
 import {
   Select,
@@ -61,6 +62,7 @@ import {
   X,
   ArrowUpDown,
   Building2,
+  MessageSquare,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -329,6 +331,9 @@ const AdminOnboarding: React.FC = () => {
   // Approve confirmation
   const [approveUserId, setApproveUserId] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+
+  // Chat modal
+  const [chatUser, setChatUser] = useState<{ id: string; username: string } | null>(null);
 
   // Fetch kanban data
   const fetchKanbanData = useCallback(async () => {
@@ -850,6 +855,13 @@ const AdminOnboarding: React.FC = () => {
                       Подтвердить FB
                     </Button>
                   )}
+                  <Button
+                    variant="outline"
+                    onClick={() => setChatUser({ id: userDetail.user.id, username: userDetail.user.username })}
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Написать
+                  </Button>
                   <Button variant="outline" onClick={() => handleImpersonate(userDetail.user.id)}>
                     <LogIn className="h-4 w-4 mr-2" />
                     Войти как пользователь
@@ -884,6 +896,16 @@ const AdminOnboarding: React.FC = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* User Chat Modal */}
+        {chatUser && (
+          <UserChatModal
+            userId={chatUser.id}
+            username={chatUser.username}
+            isOpen={!!chatUser}
+            onClose={() => setChatUser(null)}
+          />
+        )}
       </main>
     </div>
   );

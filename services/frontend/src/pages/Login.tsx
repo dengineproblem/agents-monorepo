@@ -115,7 +115,8 @@ const Login = () => {
         ad_account_id: user.ad_account_id || '',
         page_id: user.page_id || '',
         access_token: user.access_token || '',
-        prompt1: user.prompt1 || null
+        prompt1: user.prompt1 || null,
+        is_tech_admin: user.is_tech_admin || false
       };
       
       // Подробно логируем данные, сохраняемые в localStorage
