@@ -1979,6 +1979,8 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-01 | 2.3 | - | Финальные исправления: directions, scoring.js, analyzerService.js (см. ниже) |
 | 2025-12-02 | 2.4 | - | Исправления: manual-connect webhook, Dashboard FB connection check (см. ниже) |
 | 2025-12-02 | 2.5 | - | Creative Generation Service: prompt1/prompt4 из ad_accounts, пропуск лимитов генераций |
+| 2025-12-08 | 2.6 | - | Исправление dispatch actions: sendActionsBatch + resolveAccessToken поддержка ad_accounts |
+| 2025-12-08 | 2.7 | - | Batch Monitoring Report: cron 9:00, explainError(), Telegram отчёт |
 
 ### Версия 2.2 — Детали имплементации
 
@@ -2424,3 +2426,175 @@ const generateCreative = async () => {
 - Лимиты генераций не блокируют multi-account пользователей
 - UI кнопки активны в multi-account режиме
 - Legacy режим работает как раньше
+
+### Версия 2.6 — Исправление dispatch actions для мультиаккаунтов
+
+**Проблема: `missing_token` при dispatch actions для мультиаккаунтных пользователей**
+
+Утренний batch выполнялся успешно (загрузка credentials из `ad_accounts` была исправлена в brain_run), но при dispatch actions через `sendActionsBatch` происходила ошибка `missing_token`. Причина: executor (`resolveAccessToken`) искал токен только в `user_accounts`, игнорируя `ad_accounts`.
+
+**Затронутые пользователи:** YMAgency и другие с `multi_account_enabled = true`
+
+**Решение:**
+
+| Файл | Изменения |
+|------|-----------|
+| `services/agent-brain/src/server.js` | Функция `sendActionsBatch` принимает 5-й параметр `accountId` и передаёт его в `account` объект |
+| `services/agent-service/src/actions/schema.ts` | Добавлено поле `accountId: z.string().uuid().optional()` в `AccountSchema` |
+| `services/agent-service/src/routes/actions.ts` | Функция `resolveAccessToken` проверяет `accountId` и загружает токен из `ad_accounts` |
+
+**Изменение в sendActionsBatch (server.js:1703):**
+
+```javascript
+// До исправления
+async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumber) {
+  // ...
+  account: {
+    userAccountId,
+    ...(whatsappPhoneNumber && { whatsappPhoneNumber })
+  },
+}
+
+// После исправления
+async function sendActionsBatch(idem, userAccountId, actions, whatsappPhoneNumber, accountId) {
+  // ...
+  account: {
+    userAccountId,
+    ...(whatsappPhoneNumber && { whatsappPhoneNumber }),
+    ...(accountId && { accountId })  // UUID из ad_accounts для мультиаккаунтов
+  },
+}
+```
+
+**Изменение в resolveAccessToken (actions.ts:178-225):**
+
+```typescript
+async function resolveAccessToken(account: {
+  userAccountId?: string;
+  accessToken?: string;
+  adAccountId?: string;
+  whatsappPhoneNumber?: string;
+  accountId?: string  // ← ДОБАВЛЕНО
+}): Promise<ResolveOk | ResolveErr> {
+
+  // Если передан accountId (UUID из ad_accounts) — загружаем credentials из ad_accounts
+  if (account.accountId) {
+    const { data: adAccount, error: adError } = await supabase
+      .from('ad_accounts')
+      .select('access_token, ad_account_id, page_id, whatsapp_phone_number')
+      .eq('id', account.accountId)
+      .eq('user_account_id', account.userAccountId)  // ← Проверка принадлежности!
+      .maybeSingle();
+
+    if (adError) return { ok: false, message: `Supabase error (ad_accounts): ...` };
+    if (!adAccount || !adAccount.access_token) return { ok: false, message: 'Access token not found in ad_accounts' };
+
+    return {
+      ok: true,
+      accessToken: adAccount.access_token,
+      adAccountId: adAccount.ad_account_id || account.adAccountId,
+      pageId: adAccount.page_id || undefined,
+      whatsappPhoneNumber: account.whatsappPhoneNumber || adAccount.whatsapp_phone_number || undefined
+    };
+  }
+
+  // Fallback: загружаем из user_accounts (legacy режим)
+  // ... существующий код
+}
+```
+
+**Вызов sendActionsBatch с accountUUID (server.js:3213):**
+
+```javascript
+// До исправления
+agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number);
+
+// После исправления
+agentResponse = await sendActionsBatch(idem, userAccountId, actions, ua?.whatsapp_phone_number, accountUUID);
+```
+
+**Полный flow для мультиаккаунтного пользователя:**
+
+```
+1. Cron 8:00 → processDailyBatch()
+   ↓
+2. processUser(userId, accountUUID)  // accountUUID уже определён
+   ↓
+3. POST /api/brain/run { userAccountId, accountId }
+   ↓
+4. brain_run загружает credentials из ad_accounts (работало)
+   ↓
+5. sendActionsBatch(idem, userAccountId, actions, whatsapp, accountUUID)
+   ↓
+6. POST /agent/actions { account: { userAccountId, accountId } }
+   ↓
+7. resolveAccessToken({ userAccountId, accountId })
+   ↓
+8. SELECT * FROM ad_accounts WHERE id = accountId  ← ТЕПЕРЬ РАБОТАЕТ!
+   ↓
+9. Токен найден, действия выполняются
+```
+
+**Готовность к тестированию:** ✅
+
+- Мультиаккаунтные пользователи получают токен из `ad_accounts`
+- Legacy пользователи продолжают работать через `user_accounts`
+- Проверка принадлежности аккаунта к пользователю сохранена
+
+### Версия 2.7 — Batch Monitoring Report
+
+**Новая фича: Ежедневный отчёт по утреннему batch в Telegram**
+
+Cron job в 9:00 по Алматы собирает результаты batch, переводит ошибки на человеческий язык и отправляет отчёт в Telegram группу онбординга.
+
+**Файлы:**
+
+| Файл | Описание |
+|------|----------|
+| `migrations/079_batch_execution_results.sql` | Таблица для хранения результатов batch |
+| `services/agent-brain/src/server.js` | Функции `explainError()`, `generateBatchReport()`, cron job, endpoint `/api/brain/cron/batch-report` |
+
+**Таблица batch_execution_results:**
+
+```sql
+CREATE TABLE batch_execution_results (
+  id UUID PRIMARY KEY,
+  execution_date DATE NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  total_users INTEGER NOT NULL DEFAULT 0,
+  success_count INTEGER NOT NULL DEFAULT 0,
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  total_duration_ms INTEGER,
+  results JSONB NOT NULL DEFAULT '[]',  -- Детали по каждому юзеру
+  instance_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+**Пример отчёта:**
+
+```
+📊 Отчёт по утреннему batch за 2025-12-08
+━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Успешно: 20
+❌ С ошибками: 3
+📈 Всего обработано: 23
+⏱️ Время выполнения: 15 мин
+
+⚠️ Пользователи с ошибками:
+━━━━━━━━━━━━━━━━━━━━━━
+
+👤 YMAgency
+🔑 Невалидный токен Facebook
+📝 Токен доступа к Facebook API истёк или был отозван
+💡 Пользователю нужно переподключить Facebook аккаунт в настройках
+
+👤 NNN_Deteiling
+⚙️ Ошибка параметров объявления
+📝 Facebook отклонил создание adset из-за неверных параметров promoted_object
+💡 Проверить настройки направления и привязку WhatsApp/страницы
+```
+
+**Тестирование:** `POST /api/brain/cron/batch-report`
