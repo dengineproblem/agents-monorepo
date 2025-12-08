@@ -404,22 +404,47 @@ fastify.post('/analyze-test', async (request, reply) => {
         });
 
       if (analysisInsertError) {
-        fastify.log.warn({ 
+        fastify.log.warn({
           test_id,
           creative_id: test.user_creative_id,
-          error: analysisInsertError.message 
+          error: analysisInsertError.message
         }, 'Failed to save analysis to creative_analysis table');
       } else {
-        fastify.log.info({ 
+        fastify.log.info({
           test_id,
           creative_id: test.user_creative_id,
           source: 'test'
         }, 'Saved analysis to creative_analysis table');
+
+        // Добавляем тег онбординга used_llm_analysis
+        try {
+          const { data: userAccount } = await supabase
+            .from('user_accounts')
+            .select('onboarding_tags, is_tech_admin')
+            .eq('id', test.user_id)
+            .single();
+
+          if (userAccount && !userAccount.is_tech_admin) {
+            const currentTags = userAccount.onboarding_tags || [];
+            if (!currentTags.includes('used_llm_analysis')) {
+              await supabase
+                .from('user_accounts')
+                .update({
+                  onboarding_tags: [...currentTags, 'used_llm_analysis'],
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', test.user_id);
+              fastify.log.info({ userId: test.user_id }, 'Added used_llm_analysis onboarding tag');
+            }
+          }
+        } catch (tagErr) {
+          fastify.log.warn({ userId: test.user_id, error: tagErr.message }, 'Failed to add onboarding tag');
+        }
       }
     } catch (err) {
-      fastify.log.warn({ 
+      fastify.log.warn({
         test_id,
-        error: err.message 
+        error: err.message
       }, 'Error saving analysis to creative_analysis, continuing...');
     }
 
@@ -709,6 +734,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
           direction_id: creative.direction_id,
           direction_name: creative.account_directions?.name || null
         },
+        data_source: 'none',
         test: {
           exists: false,
           message: 'Креатив не тестировался'
@@ -727,6 +753,7 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
           direction_id: creative.direction_id,
           direction_name: creative.account_directions?.name || null
         },
+        data_source: 'test',
         test: {
           exists: true,
           status: 'running',
@@ -888,7 +915,10 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         direction_id: creative.direction_id,
         direction_name: creative.account_directions?.name || null
       },
-      
+
+      // data_source указывает фронтенду откуда данные (test или none)
+      data_source: 'test',
+
       test: {
         exists: true,
         test_id: test.id,
