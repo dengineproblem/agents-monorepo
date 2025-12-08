@@ -60,6 +60,9 @@ async function generateCarouselCard(
     );
 
     console.log('[Gemini Carousel] Generated prompt length:', prompt.length);
+    console.log('[Gemini Carousel] ===== FULL PROMPT FOR GEMINI =====');
+    console.log(prompt);
+    console.log('[Gemini Carousel] ===== END PROMPT =====');
 
     const client = getGeminiClient();
     const model = client.getGenerativeModel({
@@ -136,6 +139,15 @@ async function generateCarouselCard(
     };
 
     console.log('[Gemini Carousel] Calling Gemini API...');
+    console.log('[Gemini Carousel] ===== ALL TEXT PARTS SENT TO GEMINI =====');
+    contentParts.forEach((part, idx) => {
+      if (part.text) {
+        console.log(`[Part ${idx}] TEXT:`, part.text);
+      } else if (part.inlineData) {
+        console.log(`[Part ${idx}] IMAGE: ${part.inlineData.mimeType}, data length: ${part.inlineData.data?.length || 0}`);
+      }
+    });
+    console.log('[Gemini Carousel] ===== END ALL PARTS =====');
 
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: contentParts }],
