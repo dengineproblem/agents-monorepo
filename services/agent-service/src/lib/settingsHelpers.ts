@@ -53,9 +53,9 @@ export function buildTargeting(settings: any, objective: CampaignObjective) {
     throw new Error('Settings object is required to build targeting');
   }
 
-  // Для Advantage+ Audience age_max должен быть минимум 65
+  // Для Advantage+ Audience age_min/age_max игнорируются - хардкодим стандартные
   const targeting: any = {
-    age_min: settings.age_min || 18,
+    age_min: 18,
     age_max: 65,
   };
 
