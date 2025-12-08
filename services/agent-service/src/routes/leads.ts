@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { eventLogger } from '../lib/eventLogger.js';
+import { onROIConfigured } from '../lib/onboardingHelper.js';
 
 /**
  * Schema for creating a lead from website
@@ -397,6 +398,11 @@ export default async function leadsRoutes(app: FastifyInstance) {
         },
         leadData.accountId
       );
+
+      // Обновляем этап онбординга: первый лид с Tilda
+      onROIConfigured(leadData.userAccountId).catch(err => {
+        app.log.warn({ err, userId: leadData.userAccountId }, 'Failed to update onboarding stage for Tilda lead');
+      });
 
       // 7. Respond to webhook
       // NOTE: AmoCRM sync is DISABLED. Leads are NOT automatically sent to AmoCRM.

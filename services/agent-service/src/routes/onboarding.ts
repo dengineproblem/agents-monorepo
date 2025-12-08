@@ -199,7 +199,8 @@ export default async function onboardingRoutes(app: FastifyInstance) {
           is_active,
           telegram_id,
           created_at,
-          updated_at
+          updated_at,
+          multi_account_enabled
         `)
         .eq('is_tech_admin', false)
         .order('created_at', { ascending: false });
@@ -209,8 +210,52 @@ export default async function onboardingRoutes(app: FastifyInstance) {
         return reply.code(500).send({ error: error.message });
       }
 
+      // Получаем последнюю сессию для каждого пользователя
+      const userIds = users?.map(u => u.id) || [];
+      const { data: sessions } = await supabase
+        .from('user_sessions')
+        .select('user_account_id, started_at')
+        .in('user_account_id', userIds)
+        .order('started_at', { ascending: false });
+
+      // Создаём map user_id -> last_session_at
+      const lastSessionMap: Record<string, string> = {};
+      sessions?.forEach(s => {
+        if (!lastSessionMap[s.user_account_id]) {
+          lastSessionMap[s.user_account_id] = s.started_at;
+        }
+      });
+
+      // Получаем ad_accounts для всех пользователей
+      const { data: adAccounts } = await supabase
+        .from('ad_accounts')
+        .select('user_account_id, id, name, is_active, connection_status')
+        .in('user_account_id', userIds);
+
+      // Создаём map user_id -> ad_account info
+      const adAccountMap: Record<string, {
+        count: number;
+        activeCount: number;
+      }> = {};
+
+      adAccounts?.forEach(acc => {
+        if (!adAccountMap[acc.user_account_id]) {
+          adAccountMap[acc.user_account_id] = { count: 0, activeCount: 0 };
+        }
+        adAccountMap[acc.user_account_id].count++;
+        if (acc.is_active) adAccountMap[acc.user_account_id].activeCount++;
+      });
+
+      // Добавляем last_session_at и ad_account info к каждому пользователю
+      const usersWithSession = users?.map(u => ({
+        ...u,
+        last_session_at: lastSessionMap[u.id] || null,
+        ad_account_count: adAccountMap[u.id]?.count || 0,
+        active_ad_account_count: adAccountMap[u.id]?.activeCount || 0
+      }));
+
       // Группируем по этапам
-      const kanban: Record<OnboardingStage, typeof users> = {
+      const kanban: Record<OnboardingStage, typeof usersWithSession> = {
         registered: [],
         fb_pending: [],
         fb_connected: [],
@@ -223,7 +268,7 @@ export default async function onboardingRoutes(app: FastifyInstance) {
         inactive: []
       };
 
-      users?.forEach(user => {
+      usersWithSession?.forEach(user => {
         const stage = (user.onboarding_stage as OnboardingStage) || 'registered';
         if (kanban[stage]) {
           kanban[stage].push(user);
@@ -306,12 +351,20 @@ export default async function onboardingRoutes(app: FastifyInstance) {
         .order('created_at', { ascending: false })
         .limit(10);
 
+      // Получаем ad_accounts пользователя
+      const { data: adAccounts } = await supabase
+        .from('ad_accounts')
+        .select('id, name, is_active, connection_status, ad_account_id, created_at')
+        .eq('user_account_id', id)
+        .order('created_at', { ascending: false });
+
       return reply.send({
         user,
         history: history || [],
         recentEvents: recentEvents || [],
         stageLabels: STAGE_LABELS,
-        tagLabels: TAG_LABELS
+        tagLabels: TAG_LABELS,
+        adAccounts: adAccounts || []
       });
     } catch (err) {
       logger.error({ error: String(err), userId: id }, 'Exception in /onboarding/user/:id');

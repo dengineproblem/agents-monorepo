@@ -14,6 +14,7 @@ import {
   createInstagramCreative,
   createWebsiteLeadsCreative
 } from '../adapters/facebook.js';
+import { onCreativeCreated } from '../lib/onboardingHelper.js';
 
 const ProcessVideoSchema = z.object({
   user_id: z.string().uuid(),
@@ -416,6 +417,11 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
         throw creativesError;
       }
+
+      // Обновляем этап онбординга
+      onCreativeCreated(body.user_id).catch(err => {
+        app.log.warn({ err, userId: body.user_id }, 'Failed to update onboarding stage');
+      });
 
       return reply.send({
         success: true,

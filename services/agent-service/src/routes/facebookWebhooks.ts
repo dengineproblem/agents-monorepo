@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
+import { updateOnboardingStage } from '../lib/onboardingHelper.js';
 
 const log = createLogger({ module: 'facebookWebhooks' });
 
@@ -261,6 +262,11 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         saved_ad_account_id: ad_account_id,
         saved_instagram_id: instagram_id
       }, 'Successfully saved Facebook selection to database');
+
+      // Обновляем этап онбординга: Facebook подключается (ожидает подтверждения)
+      updateOnboardingStage(existingUser.id, 'fb_pending', 'Facebook данные сохранены, ожидает подтверждения').catch(err => {
+        log.warn({ err, userId: existingUser.id }, 'Failed to update onboarding stage for fb_pending');
+      });
 
       return res.send({
         success: true

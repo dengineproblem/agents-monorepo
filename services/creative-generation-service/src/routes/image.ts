@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { generateCreativeImage, upscaleImageTo4K, expandTo9x16, extractTextFromImage } from '../services/gemini-image';
 import { supabase, logSupabaseError } from '../db/supabase';
 import { GenerateCreativeRequest, GenerateCreativeResponse } from '../types';
+import { addOnboardingTag } from '../lib/onboardingTags';
 
 export const imageRoutes: FastifyPluginAsync = async (app) => {
   
@@ -165,6 +166,11 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       }
 
       app.log.info(`[Generate Creative] Generated creative record created: ${creative.id}`);
+
+      // Добавляем тег онбординга: сгенерировал изображение
+      addOnboardingTag(user_id, 'generated_image').catch(err => {
+        app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag generated_image');
+      });
 
       // ====== ШАГ 5: Уменьшаем счетчик генераций (только для не-мультиаккаунтного режима) ======
       let newGenerationsCount = user.creative_generations_available;

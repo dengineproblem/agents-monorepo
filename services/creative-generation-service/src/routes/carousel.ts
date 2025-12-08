@@ -16,6 +16,7 @@ import { generateCarouselTexts, regenerateCarouselCardText } from '../services/c
 import { generateCarouselImages, regenerateCarouselCard, upscaleCarouselTo4K } from '../services/gemini-carousel';
 import { generateCarouselCardPrompt } from '../services/carouselPromptGenerator';
 import { getSupabaseClient } from '../db/supabase';
+import { addOnboardingTag } from '../lib/onboardingTags';
 
 export default async function carouselRoutes(fastify: FastifyInstance) {
 
@@ -360,6 +361,12 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         };
 
         console.log('[Generate Carousel] Success:', { carousel_id: carouselRecord.id });
+
+        // Добавляем тег онбординга: сгенерировал карусель
+        addOnboardingTag(user_id, 'generated_carousel').catch(err => {
+          console.warn('[Generate Carousel] Failed to add onboarding tag:', err);
+        });
+
         return reply.send(response);
 
       } catch (error: any) {

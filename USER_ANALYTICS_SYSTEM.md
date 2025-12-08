@@ -534,20 +534,22 @@ sessionStorage.getItem('analytics_session_id');
 
 ### Этапы онбординга (onboarding_stage)
 
-| Этап | Описание | Условие перехода |
-|------|----------|------------------|
-| `registered` | Только зарегистрировался | Создание аккаунта |
-| `fb_pending` | Ожидание подключения FB | Инициировал OAuth |
-| `fb_connected` | Facebook подключен | Успешный OAuth callback |
-| `direction_created` | Создано направление | POST /directions |
-| `creative_created` | Создан креатив | POST /creatives или генерация |
-| `ads_launched` | Запущена реклама | Первый запуск рекламы |
-| `first_report` | Получен первый отчёт | Первый отчёт от Facebook |
-| `roi_configured` | Настроена ROI аналитика | Настройка tracking |
-| `active` | Активный пользователь | Регулярное использование |
-| `inactive` | Неактивен | Отсутствие активности >30 дней |
+| Этап | Описание | Условие перехода | Автоматически? |
+|------|----------|------------------|----------------|
+| `registered` | Только зарегистрировался | Создание аккаунта | ✅ По умолчанию |
+| `fb_pending` | Ожидание подключения FB | Инициировал OAuth | ⚠️ Не реализовано |
+| `fb_connected` | Facebook подключен | Админ подтвердил подключение | ✅ Ручное через UI |
+| `direction_created` | Создано направление | POST /directions | ✅ `onDirectionCreated()` |
+| `creative_created` | Создан креатив | POST /creatives или генерация | ✅ `onCreativeCreated()` |
+| `ads_launched` | Запущена реклама | Первый запуск рекламы | ✅ `onAdsLaunched()` |
+| `first_report` | Получен первый отчёт | Первый отчёт от Facebook | ⚠️ Не реализовано |
+| `roi_configured` | WhatsApp или Tilda подключены | WhatsApp instance создан ИЛИ лид с Tilda | ✅ `onROIConfigured()` |
+| `active` | Активный пользователь | Ручной перевод | ✅ Ручное через UI |
+| `inactive` | Неактивен | `user_accounts.is_active = false` | ✅ Триггер в БД |
 
 **Логика переходов:** Этапы могут только прогрессировать вперёд (нельзя откатиться с `ads_launched` на `creative_created`), кроме `active`/`inactive`.
+
+**Триггер синхронизации inactive:** При изменении `is_active` на `false` автоматически устанавливается `onboarding_stage = 'inactive'`. При возврате `is_active = true` восстанавливается предыдущий этап.
 
 ### Теги онбординга (onboarding_tags)
 
@@ -681,6 +683,7 @@ await onLLMAnalysisUsed(userId);
 Страница `/admin/onboarding` — Kanban-доска:
 - Колонки по этапам
 - Карточки пользователей с тегами
+- **"X дн. назад"** — показывает дату последней сессии (`last_session_at`), а не регистрации
 - Drag-and-drop для перемещения между этапами
 - Фильтрация по этапам
 - История изменений каждого пользователя
@@ -719,6 +722,16 @@ onCreativeTestLaunched(user_id).catch(err => {
 - ✅ Backend: lib/onboardingHelper.ts (автообновление этапов)
 - ✅ Frontend: NotificationBell.tsx, AdminOnboarding.tsx
 - ✅ Интеграция: onCreativeTestLaunched, onLLMAnalysisUsed
+- ✅ **Доработки онбординга:**
+  - ✅ "X дн. назад" теперь показывает последнюю сессию, а не регистрацию
+  - ✅ `roi_configured` автоматически при создании WhatsApp instance
+  - ✅ `roi_configured` автоматически при получении лида с Tilda
+  - ✅ Миграция 081: триггер синхронизации `inactive` с `is_active`
+- ✅ **Полная интеграция онбординга:**
+  - ✅ `fb_pending` при сохранении Facebook selection (facebookWebhooks.ts)
+  - ✅ `generated_image/carousel/text` теги в creative-generation-service
+  - ✅ `onCreativeCreated` в video.ts
+  - ✅ `added_audience` при настройке таргетинга (defaultSettings.ts)
 
 ---
 

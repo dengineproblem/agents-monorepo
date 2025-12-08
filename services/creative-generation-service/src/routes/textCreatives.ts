@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { generateText } from '../services/openai';
 import { buildTextCreativePrompt, buildEditTextPrompt, TextCreativeType, TEXT_TYPE_LABELS } from '../services/textPrompts';
 import { supabase } from '../db/supabase';
+import { addOnboardingTag } from '../lib/onboardingTags';
 
 interface GenerateTextCreativeRequest {
   user_id: string;
@@ -177,6 +178,11 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         }
 
         app.log.info(`[Generate Text Creative] Successfully generated ${TEXT_TYPE_LABELS[text_type]}`);
+
+        // Добавляем тег онбординга: сгенерировал текст
+        addOnboardingTag(user_id, 'generated_text').catch(err => {
+          app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag generated_text');
+        });
 
         return {
           success: true,

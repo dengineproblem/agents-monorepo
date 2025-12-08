@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
+import { onROIConfigured } from '../lib/onboardingHelper.js';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -86,6 +87,11 @@ export default async function whatsappInstances(app: FastifyInstance) {
       }
 
       app.log.info({ instanceId: instance.id, instanceName }, 'WhatsApp instance created');
+
+      // Обновляем этап онбординга: WhatsApp instance создан
+      onROIConfigured(userAccountId).catch(err => {
+        app.log.warn({ err, userId: userAccountId }, 'Failed to update onboarding stage for WhatsApp instance');
+      });
 
       return reply.send({
         success: true,

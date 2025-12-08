@@ -285,13 +285,6 @@ export async function onCompetitorsAdded(userId: string): Promise<void> {
 }
 
 /**
- * Добавляет тег при добавлении аудитории
- */
-export async function onAudienceAdded(userId: string): Promise<void> {
-  await addOnboardingTag(userId, 'added_audience');
-}
-
-/**
  * Добавляет тег при запуске быстрого теста креатива
  */
 export async function onCreativeTestLaunched(userId: string): Promise<void> {

@@ -32,6 +32,13 @@ import {
 import Header from '../components/Header';
 import { API_BASE_URL } from '@/config/api';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   Users,
   CheckCircle,
   Clock,
@@ -50,6 +57,10 @@ import {
   Tag,
   History,
   Activity,
+  Filter,
+  X,
+  ArrowUpDown,
+  Building2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format, formatDistanceToNow } from 'date-fns';
@@ -69,6 +80,10 @@ interface OnboardingUser {
   telegram_id: string | null;
   created_at: string;
   updated_at: string;
+  last_session_at: string | null;
+  // Multi-account fields
+  ad_account_count?: number;
+  active_ad_account_count?: number;
 }
 
 interface OnboardingStage {
@@ -80,6 +95,15 @@ interface KanbanData {
   kanban: Record<string, OnboardingUser[]>;
   counts: Record<string, number>;
   stages: OnboardingStage[];
+}
+
+interface AdAccountInfo {
+  id: string;
+  name: string | null;
+  is_active: boolean;
+  connection_status: string;
+  ad_account_id: string | null;
+  created_at: string;
 }
 
 interface UserDetailData {
@@ -106,6 +130,7 @@ interface UserDetailData {
   }>;
   stageLabels: Record<string, string>;
   tagLabels: Record<string, string>;
+  adAccounts: AdAccountInfo[];
 }
 
 // =====================================================
@@ -138,6 +163,19 @@ const STAGE_COLORS: Record<string, string> = {
   inactive: 'bg-red-500/10 border-red-500/30',
 };
 
+const TAG_LABELS: Record<string, string> = {
+  tiktok_connected: 'TikTok',
+  generated_image: 'Изображение',
+  generated_carousel: 'Карусель',
+  generated_text: 'Текст',
+  added_competitors: 'Конкуренты',
+  added_custom_audience: 'Custom Audience',
+  launched_creative_test: 'Тест креатива',
+  used_llm_analysis: 'LLM анализ',
+};
+
+type SortOption = 'created_desc' | 'created_asc' | 'activity_desc' | 'activity_asc' | 'name_asc' | 'name_desc';
+
 // =====================================================
 // Helper Components
 // =====================================================
@@ -148,9 +186,12 @@ const UserCard: React.FC<{
   onSelect: () => void;
   onApprove?: () => void;
 }> = ({ user, stage, onSelect, onApprove }) => {
-  const daysSinceCreation = Math.floor(
-    (Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60 * 24)
+  // Используем last_session_at если есть, иначе created_at
+  const lastActivityDate = user.last_session_at || user.created_at;
+  const daysSinceActivity = Math.floor(
+    (Date.now() - new Date(lastActivityDate).getTime()) / (1000 * 60 * 60 * 24)
   );
+  const isNeverActive = !user.last_session_at;
 
   return (
     <div
@@ -161,7 +202,11 @@ const UserCard: React.FC<{
         <div className="flex-1 min-w-0">
           <p className="font-medium text-sm truncate">{user.username}</p>
           <p className="text-xs text-muted-foreground">
-            {daysSinceCreation === 0 ? 'Сегодня' : `${daysSinceCreation} дн. назад`}
+            {isNeverActive
+              ? 'Нет сессий'
+              : daysSinceActivity === 0
+                ? 'Сегодня'
+                : `${daysSinceActivity} дн. назад`}
           </p>
         </div>
         {stage === 'fb_pending' && onApprove && (
@@ -189,9 +234,25 @@ const UserCard: React.FC<{
               {tag === 'generated_carousel' && 'Car'}
               {tag === 'generated_text' && 'Txt'}
               {tag === 'added_competitors' && 'Comp'}
-              {tag === 'added_audience' && 'Aud'}
+              {tag === 'added_custom_audience' && 'Aud'}
+              {tag === 'launched_creative_test' && 'Test'}
+              {tag === 'used_llm_analysis' && 'LLM'}
             </Badge>
           ))}
+          {user.onboarding_tags.length > 3 && (
+            <Badge variant="outline" className="text-xs px-1.5 py-0">
+              +{user.onboarding_tags.length - 3}
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {user.ad_account_count && user.ad_account_count > 0 && (
+        <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
+          <Building2 className="h-3 w-3" />
+          <span>
+            {user.active_ad_account_count}/{user.ad_account_count} акк.
+          </span>
         </div>
       )}
     </div>
@@ -240,12 +301,25 @@ const KanbanColumn: React.FC<{
 // Main Component
 // =====================================================
 
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'created_desc', label: 'Новые сначала' },
+  { value: 'created_asc', label: 'Старые сначала' },
+  { value: 'activity_desc', label: 'Активные сначала' },
+  { value: 'activity_asc', label: 'Неактивные сначала' },
+  { value: 'name_asc', label: 'По имени А-Я' },
+  { value: 'name_desc', label: 'По имени Я-А' },
+];
+
 const AdminOnboarding: React.FC = () => {
   const { toast } = useToast();
   const [kanbanData, setKanbanData] = useState<KanbanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Filters & sorting
+  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [sortOption, setSortOption] = useState<SortOption>('created_desc');
 
   // User detail modal
   const [selectedUser, setSelectedUser] = useState<OnboardingUser | null>(null);
@@ -384,12 +458,64 @@ const AdminOnboarding: React.FC = () => {
     setRefreshing(false);
   };
 
-  // Filter users by search
+  // Filter and sort users
   const filterUsers = (users: OnboardingUser[]) => {
-    if (!searchQuery) return users;
-    return users.filter((u) =>
-      u.username.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    let filtered = [...users];
+
+    // Search filter (by name or telegram_id)
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (u) =>
+          u.username.toLowerCase().includes(query) ||
+          (u.telegram_id && u.telegram_id.toLowerCase().includes(query))
+      );
+    }
+
+    // Tag filter
+    if (tagFilter && tagFilter !== 'all') {
+      filtered = filtered.filter(
+        (u) => u.onboarding_tags && u.onboarding_tags.includes(tagFilter)
+      );
+    }
+
+    // Sorting
+    filtered.sort((a, b) => {
+      switch (sortOption) {
+        case 'created_desc':
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        case 'created_asc':
+          return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        case 'activity_desc': {
+          const aTime = a.last_session_at ? new Date(a.last_session_at).getTime() : 0;
+          const bTime = b.last_session_at ? new Date(b.last_session_at).getTime() : 0;
+          return bTime - aTime;
+        }
+        case 'activity_asc': {
+          const aTime = a.last_session_at ? new Date(a.last_session_at).getTime() : 0;
+          const bTime = b.last_session_at ? new Date(b.last_session_at).getTime() : 0;
+          return aTime - bTime;
+        }
+        case 'name_asc':
+          return a.username.localeCompare(b.username, 'ru');
+        case 'name_desc':
+          return b.username.localeCompare(a.username, 'ru');
+        default:
+          return 0;
+      }
+    });
+
+    return filtered;
+  };
+
+  // Check if any filter is active
+  const hasActiveFilters = searchQuery || tagFilter !== 'all' || sortOption !== 'created_desc';
+
+  // Reset all filters
+  const resetFilters = () => {
+    setSearchQuery('');
+    setTagFilter('all');
+    setSortOption('created_desc');
   };
 
   if (loading) {
@@ -408,26 +534,68 @@ const AdminOnboarding: React.FC = () => {
       <Header />
       <main className="flex-1 p-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold">Онбординг</h1>
             <p className="text-muted-foreground">Отслеживание этапов пользователей</p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Поиск по имени..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 w-64"
-              />
-            </div>
-            <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
-              <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} />
-              Обновить
-            </Button>
+          <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} />
+            Обновить
+          </Button>
+        </div>
+
+        {/* Filter Panel */}
+        <div className="flex flex-wrap items-center gap-3 mb-6 p-3 bg-muted/50 rounded-lg border">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px] max-w-[300px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Поиск по имени, telegram..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
           </div>
+
+          {/* Tag Filter */}
+          <Select value={tagFilter} onValueChange={setTagFilter}>
+            <SelectTrigger className="w-[180px]">
+              <Filter className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Фильтр по тегу" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все теги</SelectItem>
+              {Object.entries(TAG_LABELS).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Sort */}
+          <Select value={sortOption} onValueChange={(v) => setSortOption(v as SortOption)}>
+            <SelectTrigger className="w-[180px]">
+              <ArrowUpDown className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Сортировка" />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Reset Filters */}
+          {hasActiveFilters && (
+            <Button variant="ghost" size="sm" onClick={resetFilters} className="text-muted-foreground">
+              <X className="h-4 w-4 mr-1" />
+              Сбросить
+            </Button>
+          )}
         </div>
 
         {/* Stats */}
@@ -566,6 +734,38 @@ const AdminOnboarding: React.FC = () => {
                         <Badge key={tag} variant="outline">
                           {userDetail.tagLabels[tag] || tag}
                         </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Ad Accounts */}
+                {userDetail.adAccounts && userDetail.adAccounts.length > 0 && (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-2 flex items-center gap-1">
+                      <Building2 className="h-4 w-4" /> Рекламные аккаунты ({userDetail.adAccounts.length})
+                    </p>
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {userDetail.adAccounts.map((acc) => (
+                        <div key={acc.id} className="flex items-center justify-between bg-muted rounded p-2 text-sm">
+                          <span>{acc.name || 'Без названия'}</span>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={acc.is_active ? 'default' : 'secondary'}>
+                              {acc.is_active ? 'Активен' : 'Неактивен'}
+                            </Badge>
+                            <Badge
+                              variant={
+                                acc.connection_status === 'connected'
+                                  ? 'default'
+                                  : acc.connection_status === 'error'
+                                    ? 'destructive'
+                                    : 'secondary'
+                              }
+                            >
+                              {acc.connection_status}
+                            </Badge>
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </div>
