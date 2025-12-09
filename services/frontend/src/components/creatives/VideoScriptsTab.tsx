@@ -287,92 +287,72 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
       {/* Результат */}
       {generatedText && (
         <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Результат</CardTitle>
-              <div className="flex items-center gap-2">
+          <CardHeader className="pb-2">
+            <CardTitle>Результат</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Текст результата с кнопками действий */}
+            <div className="relative">
+              <Textarea
+                value={generatedText}
+                onChange={(e) => setGeneratedText(e.target.value)}
+                className="min-h-[200px] text-sm leading-relaxed resize-none pr-12"
+                placeholder="Сгенерированный текст..."
+              />
+              {/* Иконки действий в правом верхнем углу textarea */}
+              <div className="absolute top-2 right-2 flex flex-col gap-1">
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 bg-background/80 hover:bg-background shadow-sm"
+                  onClick={handleCopy}
+                  title={isCopied ? "Скопировано!" : "Копировать"}
+                >
+                  {isCopied ? (
+                    <Check className="h-4 w-4 text-green-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={`h-8 w-8 bg-background/80 hover:bg-background shadow-sm ${isEditMode ? 'text-primary' : ''}`}
                   onClick={() => {
                     setIsEditMode(!isEditMode);
                     setEditInstructions('');
                   }}
-                  className="flex items-center gap-2"
+                  title={isEditMode ? "Отменить редактирование" : "Редактировать с AI"}
                 >
-                  {isEditMode ? (
-                    <>
-                      <X className="h-4 w-4" />
-                      Отмена
-                    </>
-                  ) : (
-                    <>
-                      <Pencil className="h-4 w-4" />
-                      Редактировать
-                    </>
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopy}
-                  className="flex items-center gap-2"
-                >
-                  {isCopied ? (
-                    <>
-                      <Check className="h-4 w-4" />
-                      Скопировано
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-4 w-4" />
-                      Копировать
-                    </>
-                  )}
+                  {isEditMode ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Форма редактирования */}
+
+            {/* Форма редактирования с AI */}
             {isEditMode && (
-              <div className="space-y-3 p-4 border rounded-lg bg-muted/30">
-                <Label>Что нужно изменить?</Label>
+              <div className="flex gap-2">
                 <Textarea
                   value={editInstructions}
                   onChange={(e) => setEditInstructions(e.target.value)}
-                  placeholder="Например: Сделай хук более провокационным, добавь конкретную цену..."
-                  rows={2}
-                  className="resize-none"
+                  placeholder="Что изменить? Например: сделай хук короче..."
+                  rows={1}
+                  className="resize-none flex-1"
                 />
                 <Button
                   onClick={handleEdit}
                   disabled={isEditing || !editInstructions.trim()}
-                  className="w-full"
                   size="sm"
+                  className="shrink-0"
                 >
                   {isEditing ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Редактирование...
-                    </>
+                    <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <>
-                      <Pencil className="mr-2 h-4 w-4" />
-                      Применить изменения
-                    </>
+                    "Применить"
                   )}
                 </Button>
               </div>
             )}
-
-            {/* Текст результата - редактируемый */}
-            <Textarea
-              value={generatedText}
-              onChange={(e) => setGeneratedText(e.target.value)}
-              className="min-h-[200px] text-sm leading-relaxed resize-none"
-              placeholder="Сгенерированный текст..."
-            />
           </CardContent>
         </Card>
       )}
