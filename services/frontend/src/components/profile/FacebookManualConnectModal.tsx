@@ -312,15 +312,16 @@ export function FacebookManualConnectModal({
             </div>
           </DialogFooter>
 
-          {/* Fullscreen preview ВНУТРИ DialogContent */}
+          {/* Fullscreen preview ВНУТРИ DialogContent но с портальным позиционированием */}
           {previewSrc && (
             <div
-              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90"
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95"
+              style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
               onClick={() => setPreviewSrc(null)}
             >
               <button
                 type="button"
-                className="absolute right-4 top-4 rounded-full bg-black/60 p-2 hover:bg-black/80 transition-colors"
+                className="absolute right-4 top-4 rounded-full bg-white/20 p-3 hover:bg-white/30 transition-colors"
                 onClick={(e) => {
                   e.stopPropagation();
                   setPreviewSrc(null);
@@ -331,10 +332,10 @@ export function FacebookManualConnectModal({
               <img
                 src={previewSrc}
                 alt="Увеличенный скриншот"
-                className="max-h-[90vh] max-w-[95vw] object-contain rounded-lg"
+                className="max-h-[95vh] max-w-[95vw] object-contain"
                 onClick={(e) => e.stopPropagation()}
               />
-              <p className="absolute bottom-4 text-white/70 text-sm">
+              <p className="absolute bottom-6 left-0 right-0 text-center text-white/70 text-sm">
                 Нажмите в любом месте чтобы закрыть
               </p>
             </div>
@@ -486,15 +487,16 @@ export function FacebookManualConnectModal({
           </Button>
         </DialogFooter>
 
-        {/* Fullscreen preview ВНУТРИ DialogContent */}
+        {/* Fullscreen preview ВНУТРИ DialogContent но с портальным позиционированием */}
         {previewSrc && (
           <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90"
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
             onClick={() => setPreviewSrc(null)}
           >
             <button
               type="button"
-              className="absolute right-4 top-4 rounded-full bg-black/60 p-2 hover:bg-black/80 transition-colors"
+              className="absolute right-4 top-4 rounded-full bg-white/20 p-3 hover:bg-white/30 transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
                 setPreviewSrc(null);
@@ -505,10 +507,10 @@ export function FacebookManualConnectModal({
             <img
               src={previewSrc}
               alt="Увеличенный скриншот"
-              className="max-h-[90vh] max-w-[95vw] object-contain rounded-lg"
+              className="max-h-[95vh] max-w-[95vw] object-contain"
               onClick={(e) => e.stopPropagation()}
             />
-            <p className="absolute bottom-4 text-white/70 text-sm">
+            <p className="absolute bottom-6 left-0 right-0 text-center text-white/70 text-sm">
               Нажмите в любом месте чтобы закрыть
             </p>
           </div>
