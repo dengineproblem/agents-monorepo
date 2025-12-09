@@ -286,11 +286,11 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const handleGenerateCarousel = async () => {
     if (!userId) return;
 
-    // В мультиаккаунтном режиме генерации безлимитные
-    if (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length) {
-      toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
-      return;
-    }
+    // TEMPORARILY DISABLED: Проверка лимита генераций
+    // if (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length) {
+    //   toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
+    //   return;
+    // }
 
     setIsGeneratingCarousel(true);
 
@@ -377,11 +377,11 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const handleRegenerateAllCarousel = async () => {
     if (!userId) return;
 
-    // В мультиаккаунтном режиме генерации безлимитные
-    if (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length) {
-      toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
-      return;
-    }
+    // TEMPORARILY DISABLED: Проверка лимита генераций
+    // if (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length) {
+    //   toast.error(`Недостаточно генераций. Нужно ${carouselCards.length}, доступно ${creativeGenerationsAvailable}`);
+    //   return;
+    // }
 
     setIsGeneratingCarousel(true);
 
@@ -945,7 +945,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
               /* Показываем кнопку генерации, если картинок ещё нет */
               <div className="max-w-md mx-auto space-y-4 pt-4 border-t border-border">
                 <div className="flex items-center gap-4 justify-center">
-                  {!isMultiAccountMode && (
+                  {/* TEMPORARILY HIDDEN: Счетчик генераций */}
+                  {/* {!isMultiAccountMode && (
                     <>
                       <Badge variant="secondary">
                         Стоимость: {carouselCards.length} {carouselCards.length === 1 ? 'генерация' : carouselCards.length < 5 ? 'генерации' : 'генераций'}
@@ -954,7 +955,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                         Доступно: {creativeGenerationsAvailable}
                       </Badge>
                     </>
-                  )}
+                  )} */}
                 </div>
 
                 <div className="space-y-2">
@@ -1112,7 +1113,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                 <Button
                   onClick={handleGenerateCarousel}
-                  disabled={isGeneratingCarousel || (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length)}
+                  disabled={isGeneratingCarousel}
                   className="w-full"
                   size="lg"
                 >
@@ -1281,7 +1282,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     onClick={handleRegenerateAllCarousel}
                     variant="outline"
                     className="w-full"
-                    disabled={isGeneratingCarousel || (!isMultiAccountMode && creativeGenerationsAvailable < carouselCards.length)}
+                    disabled={isGeneratingCarousel}
                   >
                     {isGeneratingCarousel ? (
                       <>

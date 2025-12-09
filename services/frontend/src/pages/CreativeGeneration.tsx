@@ -461,11 +461,11 @@ const CreativeGeneration = () => {
   };
 
   const generateCreative = async (isEdit: boolean = false) => {
-    // Проверяем лимит генераций (пропускаем для мультиаккаунтного режима)
-    if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
-      toast.error('У вас закончились генерации креативов. Приобретите дополнительный пакет.');
-      return;
-    }
+    // TEMPORARILY DISABLED: Проверяем лимит генераций
+    // if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
+    //   toast.error('У вас закончились генерации креативов. Приобретите дополнительный пакет.');
+    //   return;
+    // }
 
     setLoading(prev => ({ ...prev, image: true }));
 
@@ -806,8 +806,8 @@ const CreativeGeneration = () => {
             </Card>
           )}
           
-          {/* Уведомление о количестве оставшихся генераций (скрыто в мультиаккаунтном режиме) */}
-          {!isMultiAccountMode && (
+          {/* TEMPORARILY HIDDEN: Уведомление о количестве оставшихся генераций */}
+          {/* {!isMultiAccountMode && (
             <Card className="mb-6 shadow-sm">
               <CardContent className="p-4">
                 <div className="flex items-center gap-3">
@@ -831,7 +831,7 @@ const CreativeGeneration = () => {
                 </div>
               </CardContent>
             </Card>
-          )}
+          )} */}
           
           <div className="grid gap-6">
             {/* Секции для каждого типа текста */}
@@ -1080,7 +1080,7 @@ const CreativeGeneration = () => {
             {/* Кнопка генерации креатива */}
             <Button
               onClick={() => generateCreative(false)}
-              disabled={loading.image || (!isMultiAccountMode && creativeGenerationsAvailable <= 0)}
+              disabled={loading.image}
               className="w-full bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
               size="lg"
             >
