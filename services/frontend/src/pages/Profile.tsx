@@ -67,6 +67,9 @@ const Profile: React.FC = () => {
   const [tarifExpires, setTarifExpires] = useState<string | null>(null);
   const [passwordModal, setPasswordModal] = useState(false);
   const [telegramIdModal, setTelegramIdModal] = useState(false);
+  const [usernameModal, setUsernameModal] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [isSavingUsername, setIsSavingUsername] = useState(false);
   
   // Facebook selection modal
   const [facebookSelectionModal, setFacebookSelectionModal] = useState(false);
@@ -527,6 +530,39 @@ const Profile: React.FC = () => {
     }
   };
 
+  const handleUsernameSave = async () => {
+    if (!newUsername.trim()) {
+      toast.error(appReviewText('Enter a username', 'Введите имя пользователя'));
+      return;
+    }
+
+    setIsSavingUsername(true);
+
+    try {
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({ username: newUsername.trim() })
+        .eq('id', user?.id);
+
+      if (error) {
+        toast.error(appReviewText(`Failed to save username: ${error.message}`, 'Ошибка при сохранении имени: ' + error.message));
+        return;
+      }
+
+      const updatedUser = { ...user, username: newUsername.trim() };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+
+      toast.success(appReviewText('Username updated successfully', 'Имя успешно обновлено'));
+      setUsernameModal(false);
+      window.location.reload(); // Перезагружаем для обновления UI
+    } catch (error) {
+      console.error('Ошибка при сохранении имени:', error);
+      toast.error(appReviewText('An error occurred while saving', 'Произошла ошибка при сохранении'));
+    } finally {
+      setIsSavingUsername(false);
+    }
+  };
+
   const handleDisconnectInstagram = async () => {
     if (!confirm(appReviewText('Are you sure you want to disconnect Instagram?', 'Вы уверены, что хотите отключить Instagram?'))) {
       return;
@@ -964,6 +1000,10 @@ const Profile: React.FC = () => {
               tarif={tarif || undefined as any}
               expiry={formattedExpiry}
               onChangePassword={() => setPasswordModal(true)}
+              onChangeUsername={() => {
+                setNewUsername(user?.username || '');
+                setUsernameModal(true);
+              }}
             />
 
               {/* Ad Accounts Manager - только для мультиаккаунтности */}
@@ -1284,6 +1324,46 @@ const Profile: React.FC = () => {
                   disabled={isChangingPassword}
                 >
                   {isChangingPassword ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Диалог изменения имени пользователя */}
+        <Dialog open={usernameModal} onOpenChange={setUsernameModal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{appReviewText('Change Username', 'Изменить имя')}</DialogTitle>
+              <DialogDescription>
+                {appReviewText('Enter a new username.', 'Введите новое имя пользователя.')}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-username">{appReviewText('Username', 'Имя пользователя')}</Label>
+                <Input
+                  id="new-username"
+                  type="text"
+                  placeholder={appReviewText('Enter username', 'Введите имя')}
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  disabled={isSavingUsername}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setUsernameModal(false)}
+                  disabled={isSavingUsername}
+                >
+                  {t('action.cancel')}
+                </Button>
+                <Button
+                  onClick={handleUsernameSave}
+                  disabled={isSavingUsername}
+                >
+                  {isSavingUsername ? appReviewText('Saving...', 'Сохранение...') : t('action.save')}
                 </Button>
               </div>
             </div>

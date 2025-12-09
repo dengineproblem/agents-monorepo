@@ -13,6 +13,7 @@ export interface TariffInfoCardProps {
   tarif?: Tarif; // может быть не указан
   expiry?: string | null; // формат уже подготовлен
   onChangePassword: () => void;
+  onChangeUsername?: () => void;
   className?: string;
 }
 
@@ -40,6 +41,7 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
   tarif,
   expiry,
   onChangePassword,
+  onChangeUsername,
   className,
 }) => {
   const { t } = useTranslation();
@@ -81,7 +83,12 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
               {t('profile.validUntil')} <b>{expiry || t('profile.notSpecified')}</b>
             </div>
           </div>
-          <div className="flex md:justify-end items-start">
+          <div className="flex md:justify-end items-start gap-2 flex-wrap">
+            {onChangeUsername && (
+              <Button onClick={onChangeUsername} variant="outline" className="gap-2">
+                <User className="h-4 w-4" /> {t('profile.changeUsername')}
+              </Button>
+            )}
             <Button onClick={onChangePassword} variant="outline" className="gap-2">
               <Lock className="h-4 w-4" /> {t('profile.changePassword')}
             </Button>
