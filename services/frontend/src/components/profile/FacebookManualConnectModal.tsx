@@ -41,8 +41,8 @@ const FullscreenImageOverlay = ({
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
-  // Обработка клика - закрываем только fullscreen, не даём пробрасываться к Dialog
-  const handleOverlayClick = (e: React.MouseEvent) => {
+  // Закрытие по клику/тапу на overlay (не на картинку)
+  const handleClose = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const target = e.target as HTMLElement;
@@ -51,22 +51,21 @@ const FullscreenImageOverlay = ({
     onCloseRef.current();
   };
 
-  // Блокируем pointerdown чтобы Radix Dialog не перехватывал
-  const handlePointerDown = (e: React.PointerEvent) => {
-    e.stopPropagation();
-  };
-
   return createPortal(
     <div
       id="fullscreen-image-overlay"
       className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center cursor-pointer"
-      onClick={handleOverlayClick}
-      onPointerDown={handlePointerDown}
+      onClick={handleClose}
+      onTouchEnd={handleClose}
     >
       <button
         type="button"
         className="absolute top-4 right-4 text-white hover:bg-white/20 rounded-md p-2 z-10"
         onClick={(e) => {
+          e.stopPropagation();
+          onCloseRef.current();
+        }}
+        onTouchEnd={(e) => {
           e.stopPropagation();
           onCloseRef.current();
         }}
@@ -78,6 +77,7 @@ const FullscreenImageOverlay = ({
         alt="Скриншот"
         className="max-w-[95vw] max-h-[95vh] object-contain cursor-default"
         onClick={(e) => e.stopPropagation()}
+        onTouchEnd={(e) => e.stopPropagation()}
       />
       <p className="absolute bottom-4 text-white/70 text-sm pointer-events-none">
         Нажмите в любом месте или Escape чтобы закрыть
