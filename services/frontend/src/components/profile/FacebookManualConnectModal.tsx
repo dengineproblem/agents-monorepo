@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { CheckCircle2, Copy, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react';
+import { CheckCircle2, Copy, ChevronRight, ChevronLeft, Loader2, X, ZoomIn } from 'lucide-react';
 import { facebookApi } from '@/services/facebookApi';
 import { toast } from 'sonner';
 
@@ -53,6 +53,8 @@ export function FacebookManualConnectModal({
     ad_account_id: '',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Fullscreen preview внутри DialogContent
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   const TOTAL_INSTRUCTION_STEPS = 6;
 
@@ -163,6 +165,7 @@ export function FacebookManualConnectModal({
     setInstructionStep(1);
     setFormData({ page_id: '', instagram_id: '', ad_account_id: '' });
     setErrors({});
+    setPreviewSrc(null);
   }, []);
 
   React.useEffect(() => {
@@ -240,9 +243,13 @@ export function FacebookManualConnectModal({
               </div>
             )}
 
-            {/* Screenshot - static, no zoom */}
-            <div className="border rounded-lg overflow-hidden bg-muted/30">
-              <div className="aspect-video flex items-center justify-center text-muted-foreground">
+            {/* Screenshot - clickable to zoom */}
+            <button
+              type="button"
+              className="w-full border rounded-lg overflow-hidden bg-muted/30 cursor-pointer group relative"
+              onClick={() => setPreviewSrc(currentInstruction.image)}
+            >
+              <div className="aspect-video flex items-center justify-center text-muted-foreground relative">
                 <img
                   src={currentInstruction.image}
                   alt={currentInstruction.title}
@@ -256,8 +263,15 @@ export function FacebookManualConnectModal({
                     `;
                   }}
                 />
+                {/* Zoom hint overlay */}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                  <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white px-3 py-2 rounded-lg flex items-center gap-2">
+                    <ZoomIn className="h-4 w-4" />
+                    <span className="text-sm">Увеличить</span>
+                  </div>
+                </div>
               </div>
-            </div>
+            </button>
           </div>
 
           <DialogFooter className="flex-col sm:flex-row gap-2 mt-4">
@@ -297,6 +311,34 @@ export function FacebookManualConnectModal({
               )}
             </div>
           </DialogFooter>
+
+          {/* Fullscreen preview ВНУТРИ DialogContent */}
+          {previewSrc && (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90"
+              onClick={() => setPreviewSrc(null)}
+            >
+              <button
+                type="button"
+                className="absolute right-4 top-4 rounded-full bg-black/60 p-2 hover:bg-black/80 transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreviewSrc(null);
+                }}
+              >
+                <X className="h-6 w-6 text-white" />
+              </button>
+              <img
+                src={previewSrc}
+                alt="Увеличенный скриншот"
+                className="max-h-[90vh] max-w-[95vw] object-contain rounded-lg"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <p className="absolute bottom-4 text-white/70 text-sm">
+                Нажмите в любом месте чтобы закрыть
+              </p>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     );
@@ -322,9 +364,13 @@ export function FacebookManualConnectModal({
             </p>
           </div>
 
-          {/* Screenshot - where to find IDs */}
-          <div className="border rounded-lg overflow-hidden bg-muted/30">
-            <div className="aspect-video flex items-center justify-center text-muted-foreground">
+          {/* Screenshot - clickable to zoom */}
+          <button
+            type="button"
+            className="w-full border rounded-lg overflow-hidden bg-muted/30 cursor-pointer group relative"
+            onClick={() => setPreviewSrc(INSTRUCTION_IMAGES.formHelper)}
+          >
+            <div className="aspect-video flex items-center justify-center text-muted-foreground relative">
               <img
                 src={INSTRUCTION_IMAGES.formHelper}
                 alt="Где найти ID объектов"
@@ -338,8 +384,15 @@ export function FacebookManualConnectModal({
                   `;
                 }}
               />
+              {/* Zoom hint overlay */}
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white px-3 py-2 rounded-lg flex items-center gap-2">
+                  <ZoomIn className="h-4 w-4" />
+                  <span className="text-sm">Увеличить</span>
+                </div>
+              </div>
             </div>
-          </div>
+          </button>
 
           {/* Form Fields */}
           <div className="space-y-3 sm:space-y-4">
@@ -432,6 +485,34 @@ export function FacebookManualConnectModal({
             )}
           </Button>
         </DialogFooter>
+
+        {/* Fullscreen preview ВНУТРИ DialogContent */}
+        {previewSrc && (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90"
+            onClick={() => setPreviewSrc(null)}
+          >
+            <button
+              type="button"
+              className="absolute right-4 top-4 rounded-full bg-black/60 p-2 hover:bg-black/80 transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                setPreviewSrc(null);
+              }}
+            >
+              <X className="h-6 w-6 text-white" />
+            </button>
+            <img
+              src={previewSrc}
+              alt="Увеличенный скриншот"
+              className="max-h-[90vh] max-w-[95vw] object-contain rounded-lg"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <p className="absolute bottom-4 text-white/70 text-sm">
+              Нажмите в любом месте чтобы закрыть
+            </p>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
