@@ -118,6 +118,16 @@ const AppRoutes = () => {
     return () => window.removeEventListener('multiAccountLoaded', handleMultiAccountLoaded);
   }, []);
 
+  // Слушаем событие openOnboarding для добавления нового аккаунта в мультиаккаунтном режиме
+  useEffect(() => {
+    const handleOpenOnboarding = () => {
+      setShowOnboarding(true);
+    };
+
+    window.addEventListener('openOnboarding', handleOpenOnboarding);
+    return () => window.removeEventListener('openOnboarding', handleOpenOnboarding);
+  }, []);
+
   useEffect(() => {
     const handleStorageChange = () => {
       const storedUser = localStorage.getItem('user');
@@ -146,11 +156,22 @@ const AppRoutes = () => {
 
         window.dispatchEvent(new CustomEvent('reloadAdAccounts'));
 
-        const hasFacebookConnection = parsedUser.access_token && parsedUser.access_token !== '';
-        const isPendingReview = parsedUser.fb_connection_status === 'pending_review';
+        const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
 
-        if (!hasFacebookConnection && !isPendingReview) {
-          setShowFacebookManualModal(true);
+        if (isMultiAccount) {
+          // В мультиаккаунтном режиме показываем модалку подключения Facebook
+          // с небольшой задержкой, чтобы дать время на загрузку нового аккаунта
+          setTimeout(() => {
+            setShowFacebookManualModal(true);
+          }, 500);
+        } else {
+          // Legacy режим: проверяем есть ли подключение в user
+          const hasFacebookConnection = parsedUser.access_token && parsedUser.access_token !== '';
+          const isPendingReview = parsedUser.fb_connection_status === 'pending_review';
+
+          if (!hasFacebookConnection && !isPendingReview) {
+            setShowFacebookManualModal(true);
+          }
         }
       } catch (error) {
         console.error('Ошибка при обновлении user после онбординга:', error);
@@ -183,10 +204,12 @@ const AppRoutes = () => {
     <>
       {user && !isPublicRoute ? (
         <>
-          {/* Онбординг показывается ТОЛЬКО для НЕ-мультиаккаунта если prompt1 не заполнен */}
+          {/* Онбординг показывается для НЕ-мультиаккаунта если prompt1 не заполнен,
+              или в мультиаккаунтном режиме при добавлении нового аккаунта */}
           {showOnboarding && (
             <OnboardingWizard
               onComplete={handleOnboardingComplete}
+              onClose={localStorage.getItem('multiAccountEnabled') === 'true' ? () => setShowOnboarding(false) : undefined}
             />
           )}
 
