@@ -125,7 +125,7 @@ export interface SyncLeadsResult {
 
 /**
  * Синхронизирует статусы лидов из AmoCRM для указанного пользователя
- * 
+ *
  * Логика:
  * 1. Получить все leads с amocrm_lead_id из базы данных
  * 2. Запросить актуальные данные лидов из AmoCRM (батчами по 250)
@@ -133,14 +133,18 @@ export interface SyncLeadsResult {
  *    - Получить status_id и pipeline_id
  *    - Проверить квалификацию через amocrm_pipeline_stages
  *    - Обновить current_status_id, current_pipeline_id, is_qualified в базе
- * 
+ *
+ * Supports both legacy mode (user_accounts) and multi-account mode (ad_accounts)
+ *
  * @param userAccountId - UUID пользователя
  * @param app - Fastify instance для логирования
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Результат синхронизации
  */
 export async function syncLeadsFromAmoCRM(
   userAccountId: string,
-  app: FastifyInstance
+  app: FastifyInstance,
+  accountId?: string | null
 ): Promise<SyncLeadsResult> {
   const log = app.log;
   const result: SyncLeadsResult = {
@@ -152,17 +156,32 @@ export async function syncLeadsFromAmoCRM(
   };
 
   try {
-    log.info({ userAccountId }, 'Starting AmoCRM leads sync');
+    log.info({ userAccountId, accountId }, 'Starting AmoCRM leads sync');
 
-    // 1. Get valid AmoCRM token
-    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+    // 1. Get valid AmoCRM token (supports both legacy and multi-account mode)
+    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId, accountId);
 
     // 1.5 Check if custom qualification fields are configured (supports up to 3 fields)
-    const { data: userAccount } = await supabase
-      .from('user_accounts')
-      .select('amocrm_qualification_fields')
-      .eq('id', userAccountId)
-      .maybeSingle();
+    // For multi-account mode, check ad_accounts first
+    let qualificationFieldsData: any = null;
+    if (accountId) {
+      const { data: adAccount } = await supabase
+        .from('ad_accounts')
+        .select('amocrm_qualification_fields')
+        .eq('id', accountId)
+        .maybeSingle();
+      qualificationFieldsData = adAccount;
+    }
+    // Fallback to user_accounts
+    if (!qualificationFieldsData) {
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('amocrm_qualification_fields')
+        .eq('id', userAccountId)
+        .maybeSingle();
+      qualificationFieldsData = userAccount;
+    }
+    const userAccount = qualificationFieldsData;
 
     const qualificationFields: QualificationFieldConfig[] = userAccount?.amocrm_qualification_fields || [];
     if (qualificationFields.length > 0) {
@@ -539,21 +558,25 @@ export async function syncLeadsFromAmoCRM(
 
 /**
  * Синхронизирует статусы лидов конкретного креатива из AmoCRM (с параллелизацией)
- * 
+ *
  * Оптимизированная версия для быстрой синхронизации лидов одного креатива:
  * - Фильтрует только лиды указанного креатива
  * - Использует параллельные запросы к AmoCRM (до 10 одновременно)
  * - Значительно быстрее, чем синхронизация всех лидов пользователя
- * 
+ *
+ * Supports both legacy mode (user_accounts) and multi-account mode (ad_accounts)
+ *
  * @param userAccountId - UUID пользователя
  * @param creativeId - UUID креатива
  * @param app - Fastify instance для логирования
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Результат синхронизации
  */
 export async function syncCreativeLeadsFromAmoCRM(
   userAccountId: string,
   creativeId: string,
-  app: FastifyInstance
+  app: FastifyInstance,
+  accountId?: string | null
 ): Promise<SyncLeadsResult> {
   const log = app.log;
   const result: SyncLeadsResult = {
@@ -565,15 +588,15 @@ export async function syncCreativeLeadsFromAmoCRM(
   };
 
   try {
-    log.info({ userAccountId, creativeId }, 'Starting AmoCRM creative leads sync');
+    log.info({ userAccountId, creativeId, accountId }, 'Starting AmoCRM creative leads sync');
 
-    // 1. Get valid AmoCRM token
-    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId);
+    // 1. Get valid AmoCRM token (supports both legacy and multi-account mode)
+    const { accessToken, subdomain } = await getValidAmoCRMToken(userAccountId, accountId);
 
     // 2. Get leads for this specific creative only
     const { data: leads, error: leadsError } = await supabase
       .from('leads')
-      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type, is_qualified')
+      .select('id, phone, chat_id, amocrm_lead_id, current_status_id, current_pipeline_id, direction_id, name, source_type, is_qualified, account_id')
       .eq('user_account_id', userAccountId)
       .eq('creative_id', creativeId);
 
@@ -590,13 +613,27 @@ export async function syncCreativeLeadsFromAmoCRM(
     log.info({ userAccountId, creativeId, totalLeads: leads.length }, 'Found leads to sync for creative');
 
     // 3. Get qualification fields configuration
-    const { data: userAccount } = await supabase
-      .from('user_accounts')
-      .select('amocrm_qualification_fields')
-      .eq('id', userAccountId)
-      .maybeSingle();
+    // For multi-account mode, check ad_accounts first
+    let qualificationFieldsData: any = null;
+    if (accountId) {
+      const { data: adAccount } = await supabase
+        .from('ad_accounts')
+        .select('amocrm_qualification_fields')
+        .eq('id', accountId)
+        .maybeSingle();
+      qualificationFieldsData = adAccount;
+    }
+    // Fallback to user_accounts
+    if (!qualificationFieldsData) {
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('amocrm_qualification_fields')
+        .eq('id', userAccountId)
+        .maybeSingle();
+      qualificationFieldsData = userAccount;
+    }
 
-    const qualificationFields: QualificationFieldConfig[] = userAccount?.amocrm_qualification_fields || [];
+    const qualificationFields: QualificationFieldConfig[] = qualificationFieldsData?.amocrm_qualification_fields || [];
 
     // 3.1 Get pipeline stages as fallback if no custom fields configured
     const { data: pipelineStages, error: stagesError } = await supabase

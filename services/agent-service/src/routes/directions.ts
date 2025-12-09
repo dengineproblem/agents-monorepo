@@ -595,7 +595,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Получаем текущее направление
       const { data: existingDirection, error: fetchError } = await supabase
         .from('account_directions')
-        .select('*, user_accounts!inner(access_token)')
+        .select('*, user_accounts!inner(access_token, multi_account_enabled)')
         .eq('id', id)
         .single();
 
@@ -604,6 +604,21 @@ export async function directionsRoutes(app: FastifyInstance) {
           success: false,
           error: 'Direction not found',
         });
+      }
+
+      // Получаем access_token в зависимости от режима
+      let accessToken: string | null = null;
+      if ((existingDirection.user_accounts as any).multi_account_enabled && existingDirection.account_id) {
+        // Мультиаккаунтный режим: токен в ad_accounts
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('access_token')
+          .eq('id', existingDirection.account_id)
+          .single();
+        accessToken = adAccount?.access_token || null;
+      } else {
+        // Legacy режим: токен в user_accounts
+        accessToken = (existingDirection.user_accounts as any).access_token;
       }
 
       // Обрабатываем WhatsApp номер если он передан
@@ -671,9 +686,12 @@ export async function directionsRoutes(app: FastifyInstance) {
             newStatus: newCampaignStatus
           }, 'Updating Facebook campaign status due to direction is_active change');
 
+          if (!accessToken) {
+            throw new Error('Access token not found');
+          }
           await updateFacebookCampaignStatus(
             existingDirection.fb_campaign_id,
-            (existingDirection.user_accounts as any).access_token,
+            accessToken,
             newCampaignStatus as 'ACTIVE' | 'PAUSED'
           );
 
@@ -750,7 +768,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Получаем направление с access_token
       const { data: direction, error: fetchError } = await supabase
         .from('account_directions')
-        .select('*, user_accounts!inner(access_token)')
+        .select('*, user_accounts!inner(access_token, multi_account_enabled)')
         .eq('id', id)
         .single();
 
@@ -761,12 +779,27 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Получаем access_token в зависимости от режима
+      let accessToken: string | null = null;
+      if ((direction.user_accounts as any).multi_account_enabled && direction.account_id) {
+        // Мультиаккаунтный режим: токен в ad_accounts
+        const { data: adAccount } = await supabase
+          .from('ad_accounts')
+          .select('access_token')
+          .eq('id', direction.account_id)
+          .single();
+        accessToken = adAccount?.access_token || null;
+      } else {
+        // Legacy режим: токен в user_accounts
+        accessToken = (direction.user_accounts as any).access_token;
+      }
+
       // Архивируем кампанию в Facebook
-      if (direction.fb_campaign_id) {
+      if (direction.fb_campaign_id && accessToken) {
         try {
           await archiveFacebookCampaign(
             direction.fb_campaign_id,
-            (direction.user_accounts as any).access_token
+            accessToken
           );
         } catch (fbError) {
           log.error({ err: fbError, campaignId: direction.fb_campaign_id }, 'Failed to archive Facebook campaign');

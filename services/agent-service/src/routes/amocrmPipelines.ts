@@ -358,7 +358,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    */
   app.post('/amocrm/sync-leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId } = request.query as { userAccountId?: string };
+      const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
 
       if (!userAccountId) {
         return reply.code(400).send({
@@ -366,13 +366,13 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      app.log.info({ userAccountId }, 'Manual AmoCRM leads sync triggered');
+      app.log.info({ userAccountId, accountId }, 'Manual AmoCRM leads sync triggered');
 
       // Import sync function dynamically to avoid circular dependencies
       const { syncLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
 
-      // Execute sync
-      const result = await syncLeadsFromAmoCRM(userAccountId, app);
+      // Execute sync (supports both legacy and multi-account mode)
+      const result = await syncLeadsFromAmoCRM(userAccountId, app, accountId || null);
 
       return reply.send(result);
 
@@ -397,7 +397,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    */
   app.post('/amocrm/sync-creative-leads', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId, creativeId } = request.query as { userAccountId?: string; creativeId?: string };
+      const { userAccountId, creativeId, accountId } = request.query as { userAccountId?: string; creativeId?: string; accountId?: string };
 
       if (!userAccountId) {
         return reply.code(400).send({
@@ -413,13 +413,13 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      app.log.info({ userAccountId, creativeId }, 'AmoCRM creative leads sync triggered');
+      app.log.info({ userAccountId, creativeId, accountId }, 'AmoCRM creative leads sync triggered');
 
       // Import sync function dynamically to avoid circular dependencies
       const { syncCreativeLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
 
-      // Execute sync
-      const result = await syncCreativeLeadsFromAmoCRM(userAccountId, creativeId, app);
+      // Execute sync (supports both legacy and multi-account mode)
+      const result = await syncCreativeLeadsFromAmoCRM(userAccountId, creativeId, app, accountId || null);
 
       return reply.send(result);
 
@@ -762,7 +762,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       // Verify direction exists
       const { data: direction, error: directionError } = await supabase
         .from('account_directions')
-        .select('id, user_account_id, name')
+        .select('id, user_account_id, name, account_id')
         .eq('id', directionId)
         .maybeSingle();
 
@@ -833,7 +833,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       const recalculateAsync = async () => {
         try {
           const { syncLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
-          await syncLeadsFromAmoCRM(direction.user_account_id, app);
+          await syncLeadsFromAmoCRM(direction.user_account_id, app, direction.account_id || null);
           app.log.info({ directionId }, 'Reached key stage recalculation completed');
         } catch (error: any) {
           app.log.error({ error: error.message, directionId }, 'Failed to recalculate reached key stage flags');
@@ -1050,9 +1050,10 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    */
   app.post('/amocrm/recalculate-key-stage', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId, directionId } = request.query as {
+      const { userAccountId, directionId, accountId } = request.query as {
         userAccountId: string;
-        directionId?: string
+        directionId?: string;
+        accountId?: string;
       };
 
       if (!userAccountId) {
@@ -1062,13 +1063,14 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      app.log.info({ userAccountId, directionId }, 'Triggering key stage recalculation');
+      app.log.info({ userAccountId, directionId, accountId }, 'Triggering key stage recalculation');
 
       // Import sync function
       const { syncLeadsFromAmoCRM } = await import('../workflows/amocrmLeadsSync.js');
 
       // Trigger sync (this will update current_status_id, current_pipeline_id for all leads)
-      const result = await syncLeadsFromAmoCRM(userAccountId, app);
+      // Supports both legacy and multi-account mode
+      const result = await syncLeadsFromAmoCRM(userAccountId, app, accountId || null);
 
       app.log.info({ result }, 'Key stage recalculation completed');
 

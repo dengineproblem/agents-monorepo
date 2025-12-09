@@ -26,14 +26,92 @@ interface UserAccountWithAmoCRM {
  * Get valid AmoCRM access token for user
  * Automatically refreshes token if expired
  *
+ * Supports both legacy mode (credentials in user_accounts) and
+ * multi-account mode (credentials in ad_accounts)
+ *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Valid access token and subdomain
  * @throws Error if user doesn't have AmoCRM connected or refresh fails
  */
 export async function getValidAmoCRMToken(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string | null
 ): Promise<{ accessToken: string; subdomain: string }> {
-  // Fetch user's AmoCRM credentials
+  // First check if multi-account mode is enabled
+  const { data: userAccountCheck } = await supabase
+    .from('user_accounts')
+    .select('multi_account_enabled')
+    .eq('id', userAccountId)
+    .single();
+
+  const isMultiAccountMode = userAccountCheck?.multi_account_enabled && accountId;
+
+  if (isMultiAccountMode) {
+    // Multi-account mode: get credentials from ad_accounts
+    const { data: adAccount, error: adError } = await supabase
+      .from('ad_accounts')
+      .select('id, amocrm_subdomain, amocrm_access_token, amocrm_refresh_token, amocrm_token_expires_at, amocrm_client_id, amocrm_client_secret')
+      .eq('id', accountId)
+      .eq('user_account_id', userAccountId)
+      .single();
+
+    if (adError || !adAccount) {
+      throw new Error(`Failed to fetch ad account: ${adError?.message || 'Not found'}`);
+    }
+
+    const account = adAccount as UserAccountWithAmoCRM;
+
+    // Check if AmoCRM is connected
+    if (!account.amocrm_subdomain || !account.amocrm_access_token || !account.amocrm_refresh_token) {
+      throw new Error('AmoCRM is not connected for this ad account');
+    }
+
+    const subdomain = account.amocrm_subdomain;
+    const expiresAt = account.amocrm_token_expires_at
+      ? new Date(account.amocrm_token_expires_at)
+      : new Date(0);
+
+    // Check if token is still valid (with 5 minute buffer)
+    const now = new Date();
+    const bufferTime = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+    if (expiresAt.getTime() > now.getTime() + bufferTime) {
+      // Token is still valid
+      return {
+        accessToken: account.amocrm_access_token,
+        subdomain
+      };
+    }
+
+    // Token expired or about to expire - refresh it
+    try {
+      const tokens = await refreshAccessToken(
+        account.amocrm_refresh_token,
+        subdomain,
+        account.amocrm_client_id || undefined,
+        account.amocrm_client_secret || undefined
+      );
+
+      // Save new tokens to ad_accounts
+      await saveAmoCRMTokensToAdAccount(
+        accountId!,
+        subdomain,
+        tokens,
+        account.amocrm_client_id || undefined,
+        account.amocrm_client_secret || undefined
+      );
+
+      return {
+        accessToken: tokens.access_token,
+        subdomain
+      };
+    } catch (error: any) {
+      throw new Error(`Failed to refresh AmoCRM token: ${error.message}`);
+    }
+  }
+
+  // Legacy mode: get credentials from user_accounts
   const { data: userAccount, error } = await supabase
     .from('user_accounts')
     .select('id, amocrm_subdomain, amocrm_access_token, amocrm_refresh_token, amocrm_token_expires_at, amocrm_client_id, amocrm_client_secret')
@@ -71,7 +149,7 @@ export async function getValidAmoCRMToken(
   // Token expired or about to expire - refresh it
   try {
     const tokens = await refreshAccessToken(
-      account.amocrm_refresh_token, 
+      account.amocrm_refresh_token,
       subdomain,
       account.amocrm_client_id || undefined,
       account.amocrm_client_secret || undefined
@@ -79,8 +157,8 @@ export async function getValidAmoCRMToken(
 
     // Save new tokens to database (preserve client credentials)
     await saveAmoCRMTokens(
-      userAccountId, 
-      subdomain, 
+      userAccountId,
+      subdomain,
       tokens,
       account.amocrm_client_id || undefined,
       account.amocrm_client_secret || undefined
@@ -96,7 +174,7 @@ export async function getValidAmoCRMToken(
 }
 
 /**
- * Save AmoCRM tokens to database
+ * Save AmoCRM tokens to database (user_accounts - legacy mode)
  *
  * @param userAccountId - User account UUID
  * @param subdomain - AmoCRM subdomain
@@ -133,6 +211,47 @@ export async function saveAmoCRMTokens(
 
   if (error) {
     throw new Error(`Failed to save AmoCRM tokens: ${error.message}`);
+  }
+}
+
+/**
+ * Save AmoCRM tokens to ad_accounts (multi-account mode)
+ *
+ * @param accountId - Ad account UUID
+ * @param subdomain - AmoCRM subdomain
+ * @param tokens - Token response from AmoCRM
+ * @param clientId - Optional client ID (for auto-created integrations)
+ * @param clientSecret - Optional client secret (for auto-created integrations)
+ */
+export async function saveAmoCRMTokensToAdAccount(
+  accountId: string,
+  subdomain: string,
+  tokens: AmoCRMTokenResponse,
+  clientId?: string,
+  clientSecret?: string
+): Promise<void> {
+  const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+
+  const updateData: any = {
+    amocrm_subdomain: subdomain,
+    amocrm_access_token: tokens.access_token,
+    amocrm_refresh_token: tokens.refresh_token,
+    amocrm_token_expires_at: expiresAt.toISOString()
+  };
+
+  // Save client credentials for auto-created integrations
+  if (clientId && clientSecret) {
+    updateData.amocrm_client_id = clientId;
+    updateData.amocrm_client_secret = clientSecret;
+  }
+
+  const { error } = await supabase
+    .from('ad_accounts')
+    .update(updateData)
+    .eq('id', accountId);
+
+  if (error) {
+    throw new Error(`Failed to save AmoCRM tokens to ad_accounts: ${error.message}`);
   }
 }
 
