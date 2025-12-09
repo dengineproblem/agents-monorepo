@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle, Upload, X, Edit, Download } from 'lucide-react';
+import { Sparkles, Image as ImageIcon, Loader2, Wand2, AlertTriangle, Upload, X, Edit, Download, Users, ImagePlus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Header from '@/components/Header';
@@ -86,6 +86,10 @@ const CreativeGeneration = () => {
   // State для выбора стиля креатива
   const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle'>('modern_performance');
   const [stylePrompt, setStylePrompt] = useState<string>('');  // Промпт для freestyle стиля
+
+  // State для collapsible секций референсов
+  const [showCompetitorRef, setShowCompetitorRef] = useState(false);
+  const [showImageRefs, setShowImageRefs] = useState(false);
 
   // Загрузка направлений (с фильтрацией по аккаунту для multi-account режима)
   const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
@@ -889,158 +893,55 @@ const CreativeGeneration = () => {
               </Card>
             ))}
 
-            {/* Референс конкурента */}
-            {userId && (
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <CardTitle className="text-lg">Референс конкурента (опционально)</CardTitle>
-                  <CardDescription>
-                    Используйте креатив конкурента как вдохновение для текстов и стиля
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <CompetitorReferenceSelector
-                    userAccountId={userId}
-                    selectedReference={competitorReference}
-                    onSelect={setCompetitorReference}
-                    mediaTypeFilter="image"
-                    accountId={currentAdAccountId}
-                  />
-                  {competitorReference && (competitorReference.body_text || competitorReference.headline) && (
-                    <div className="mt-3 p-3 bg-muted/50 rounded-lg">
-                      <p className="text-xs text-muted-foreground mb-2">Тексты из креатива конкурента:</p>
-                      {competitorReference.headline && (
-                        <p className="text-sm font-medium mb-1">{competitorReference.headline}</p>
-                      )}
-                      {competitorReference.body_text && (
-                        <p className="text-xs text-muted-foreground">{competitorReference.body_text}</p>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Референсные изображения */}
-            <Card className="shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-lg">Референсные изображения (до 2)</CardTitle>
-                <CardDescription>
-                  Загрузите изображения для сохранения стиля, цветовой палитры или композиции
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* Загруженные референсы */}
-                  {referenceImages.length > 0 && (
-                    <div className="flex gap-4 flex-wrap">
-                      {referenceImages.map((img, index) => (
-                        <div key={index} className="relative rounded-lg overflow-hidden bg-muted/30 p-2">
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            className="absolute top-1 right-1 z-10 h-6 w-6"
-                            onClick={() => removeReferenceImage(index)}
-                          >
-                            <X className="h-3 w-3" />
-                          </Button>
-                          <img
-                            src={img}
-                            alt={`Референс ${index + 1}`}
-                            className="w-32 h-32 object-cover rounded-lg"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Кнопка добавления (если меньше 2) */}
-                  {referenceImages.length < 2 && (
-                    <div className="border-2 border-dashed border-muted rounded-lg p-6 text-center hover:border-primary/50 transition-colors cursor-pointer">
-                      <Label htmlFor="reference-upload" className="cursor-pointer block">
-                        <div className="flex flex-col items-center gap-2">
-                          <div className="p-3 rounded-full bg-muted">
-                            <Upload className="h-6 w-6 text-muted-foreground" />
-                          </div>
-                          <div className="text-sm font-medium">
-                            {referenceImages.length === 0 ? 'Нажмите для загрузки' : 'Добавить ещё референс'}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            PNG, JPG, WebP до 10MB
-                          </div>
-                        </div>
-                      </Label>
-                      <Input
-                        id="reference-upload"
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleReferenceImageUpload}
-                      />
-                    </div>
-                  )}
-
-                  {referenceImages.length === 0 && (
-                    <div className="flex items-start gap-2 p-3 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
-                      <div className="text-xs text-blue-800 dark:text-blue-200">
-                        <strong>Совет:</strong> Используйте референсы для брендинга, стилизации или композиции
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Мини-промпт для референсных изображений */}
-                  {referenceImages.length > 0 && (
-                    <>
-                      <div className="space-y-2">
-                        <Label htmlFor="reference-prompt">
-                          Описание референсов (опционально)
-                        </Label>
-                        <Textarea
-                          id="reference-prompt"
-                          value={referenceImagePrompt}
-                          onChange={(e) => setReferenceImagePrompt(e.target.value)}
-                          placeholder="Например: Используй эту цветовую палитру и стиль типографики..."
-                          className="min-h-[80px] resize-none"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Опишите, какие элементы референсов важны: стиль, цвета, композицию, типографику и т.д.
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 p-3 bg-green-50/50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
-                        <Badge variant="secondary">✓ {referenceImages.length} референс{referenceImages.length === 1 ? '' : 'а'} загружено</Badge>
-                        <span className="text-xs text-green-800 dark:text-green-200">
-                          Gemini использует {referenceImages.length === 1 ? 'этот стиль' : 'эти стили'} при генерации
-                        </span>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Выбор стиля креатива */}
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Стиль креатива</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Select
-                  value={selectedStyle}
-                  onValueChange={(value: any) => setSelectedStyle(value)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Выберите стиль" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="modern_performance">Современная графика</SelectItem>
-                    <SelectItem value="live_ugc">Живой UGC-контент</SelectItem>
-                    <SelectItem value="visual_hook">Визуальный зацеп</SelectItem>
-                    <SelectItem value="premium_minimal">Премиум минимализм</SelectItem>
-                    <SelectItem value="product_hero">Товар в главной роли</SelectItem>
-                    <SelectItem value="freestyle">Свободный стиль</SelectItem>
-                  </SelectContent>
-                </Select>
+                {/* Селект стиля + кнопки референсов в одну строку */}
+                <div className="flex gap-2 items-center">
+                  <Select
+                    value={selectedStyle}
+                    onValueChange={(value: any) => setSelectedStyle(value)}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Выберите стиль" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="modern_performance">Современная графика</SelectItem>
+                      <SelectItem value="live_ugc">Живой UGC-контент</SelectItem>
+                      <SelectItem value="visual_hook">Визуальный зацеп</SelectItem>
+                      <SelectItem value="premium_minimal">Премиум минимализм</SelectItem>
+                      <SelectItem value="product_hero">Товар в главной роли</SelectItem>
+                      <SelectItem value="freestyle">Свободный стиль</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Кнопка референса конкурента */}
+                  {userId && (
+                    <Button
+                      variant={competitorReference ? "secondary" : "outline"}
+                      size="sm"
+                      onClick={() => setShowCompetitorRef(!showCompetitorRef)}
+                      className="shrink-0"
+                    >
+                      <Users className="h-4 w-4 mr-1" />
+                      {competitorReference ? "Референс ✓" : "Конкурент"}
+                    </Button>
+                  )}
+
+                  {/* Кнопка референсных изображений */}
+                  <Button
+                    variant={referenceImages.length > 0 ? "secondary" : "outline"}
+                    size="sm"
+                    onClick={() => setShowImageRefs(!showImageRefs)}
+                    className="shrink-0"
+                  >
+                    <ImagePlus className="h-4 w-4 mr-1" />
+                    {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
+                  </Button>
+                </div>
 
                 {/* Описание выбранного стиля */}
                 <div className="text-sm text-muted-foreground p-3 bg-muted/30 rounded-md">
@@ -1057,6 +958,80 @@ const CreativeGeneration = () => {
                   {selectedStyle === 'freestyle' &&
                     'Полная свобода — задайте стиль самостоятельно через промпт'}
                 </div>
+
+                {/* Раскрытый блок референса конкурента */}
+                {showCompetitorRef && userId && (
+                  <div className="p-3 border rounded-lg bg-muted/20 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Референс конкурента</span>
+                      <Button variant="ghost" size="sm" onClick={() => setShowCompetitorRef(false)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <CompetitorReferenceSelector
+                      userAccountId={userId}
+                      selectedReference={competitorReference}
+                      onSelect={setCompetitorReference}
+                      mediaTypeFilter="image"
+                      accountId={currentAdAccountId}
+                    />
+                    {competitorReference && (competitorReference.body_text || competitorReference.headline) && (
+                      <div className="p-2 bg-muted/50 rounded text-xs">
+                        {competitorReference.headline && <p className="font-medium">{competitorReference.headline}</p>}
+                        {competitorReference.body_text && <p className="text-muted-foreground">{competitorReference.body_text}</p>}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Раскрытый блок референсных изображений */}
+                {showImageRefs && (
+                  <div className="p-3 border rounded-lg bg-muted/20 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Референсные изображения (до 2)</span>
+                      <Button variant="ghost" size="sm" onClick={() => setShowImageRefs(false)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {referenceImages.length > 0 && (
+                      <div className="flex gap-3 flex-wrap">
+                        {referenceImages.map((img, index) => (
+                          <div key={index} className="relative rounded-lg overflow-hidden bg-muted/30 p-1">
+                            <Button
+                              variant="destructive"
+                              size="icon"
+                              className="absolute top-0 right-0 z-10 h-5 w-5"
+                              onClick={() => removeReferenceImage(index)}
+                            >
+                              <X className="h-3 w-3" />
+                            </Button>
+                            <img src={img} alt={`Референс ${index + 1}`} className="w-20 h-20 object-cover rounded" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {referenceImages.length < 2 && (
+                      <Label htmlFor="reference-upload" className="cursor-pointer block border-2 border-dashed border-muted rounded-lg p-3 text-center hover:border-primary/50 transition-colors">
+                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                          <Upload className="h-4 w-4" />
+                          {referenceImages.length === 0 ? 'Загрузить референс' : 'Добавить ещё'}
+                        </div>
+                        <Input id="reference-upload" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
+                      </Label>
+                    )}
+
+                    {referenceImages.length > 0 && (
+                      <Textarea
+                        value={referenceImagePrompt}
+                        onChange={(e) => setReferenceImagePrompt(e.target.value)}
+                        placeholder="Опишите что взять из референсов: стиль, цвета, композицию..."
+                        className="min-h-[50px] resize-none text-sm"
+                      />
+                    )}
+                  </div>
+                )}
 
                 {/* Поле для ввода промпта стиля (только для freestyle) */}
                 {selectedStyle === 'freestyle' && (
