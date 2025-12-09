@@ -51,15 +51,13 @@ import UserChatModal from '@/components/UserChatModal';
 interface User {
   id: string;
   username: string;
-  email?: string;
   telegram_id?: string;
   onboarding_stage: string;
   created_at: string;
   last_activity_at?: string;
-  campaigns_count: number;
+  directions_count: number;
   creatives_count: number;
   leads_count: number;
-  engagement_score: number;
 }
 
 const ONBOARDING_STAGES = [
@@ -215,23 +213,22 @@ const AdminUsers: React.FC = () => {
               <TableHead>Этап</TableHead>
               <TableHead>Регистрация</TableHead>
               <TableHead>Активность</TableHead>
-              <TableHead className="text-center">Кампании</TableHead>
+              <TableHead className="text-center">Направления</TableHead>
               <TableHead className="text-center">Креативы</TableHead>
               <TableHead className="text-center">Лиды</TableHead>
-              <TableHead className="text-center">Скор</TableHead>
               <TableHead className="w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8">
+                <TableCell colSpan={8} className="text-center py-8">
                   <RefreshCw className="h-5 w-5 animate-spin mx-auto text-muted-foreground" />
                 </TableCell>
               </TableRow>
             ) : users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                   Нет пользователей
                 </TableCell>
               </TableRow>
@@ -240,13 +237,13 @@ const AdminUsers: React.FC = () => {
                 <TableRow
                   key={user.id}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate(`/admin/users/${user.id}`)}
+                  onClick={() => navigate(`/admin/chats/${user.id}`)}
                 >
                   <TableCell>
                     <div>
                       <p className="font-medium">{user.username}</p>
                       <p className="text-xs text-muted-foreground">
-                        {user.telegram_id ? `@${user.telegram_id}` : user.email || 'Нет контакта'}
+                        {user.telegram_id ? `@${user.telegram_id}` : 'Нет контакта'}
                       </p>
                     </div>
                   </TableCell>
@@ -276,14 +273,9 @@ const AdminUsers: React.FC = () => {
                       <p className="text-sm text-muted-foreground">—</p>
                     )}
                   </TableCell>
-                  <TableCell className="text-center">{user.campaigns_count}</TableCell>
+                  <TableCell className="text-center">{user.directions_count}</TableCell>
                   <TableCell className="text-center">{user.creatives_count}</TableCell>
                   <TableCell className="text-center">{user.leads_count}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant={user.engagement_score >= 70 ? 'default' : 'secondary'}>
-                      {user.engagement_score}
-                    </Badge>
-                  </TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
@@ -295,11 +287,11 @@ const AdminUsers: React.FC = () => {
                         <DropdownMenuItem
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/admin/users/${user.id}`);
+                            navigate(`/admin/chats/${user.id}`);
                           }}
                         >
                           <Eye className="h-4 w-4 mr-2" />
-                          Просмотр
+                          Чаты
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={(e) => {

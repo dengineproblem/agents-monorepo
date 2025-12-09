@@ -49,21 +49,18 @@ export default async function adminLeadsRoutes(app: FastifyInstance) {
       const offset = (pageNum - 1) * limitNum;
       const periodDate = getPeriodDate(period);
 
-      // Build query
+      // Build query - без FK joins, чтобы избежать ошибок
+      // NOTE: таблица leads НЕ имеет campaign_id, только direction_id и creative_id
       let query = supabase
         .from('leads')
         .select(`
           id,
           name,
           phone,
-          campaign_id,
           creative_id,
           direction_id,
           user_account_id,
-          created_at,
-          user_accounts!leads_user_account_id_fkey(username),
-          campaigns!leads_campaign_id_fkey(name),
-          account_directions!leads_direction_id_fkey(name)
+          created_at
         `, { count: 'exact' })
         .order('created_at', { ascending: false });
 
@@ -75,34 +72,37 @@ export default async function adminLeadsRoutes(app: FastifyInstance) {
         query = query.eq('user_account_id', userId);
       }
 
-      // Get total count first
-      const countQuery = supabase
-        .from('leads')
-        .select('*', { count: 'exact', head: true });
-
-      if (periodDate) {
-        countQuery.gte('created_at', periodDate.toISOString());
-      }
-      if (userId) {
-        countQuery.eq('user_account_id', userId);
-      }
-
-      const { count: total } = await countQuery;
-
       // Get paginated data
-      const { data: leads, error } = await query
+      const { data: leads, error, count: total } = await query
         .range(offset, offset + limitNum - 1);
 
-      if (error) throw error;
+      if (error) throw new Error(error.message);
+
+      // Собираем уникальные ID для подгрузки связанных данных
+      const userIds = [...new Set(leads?.map(l => l.user_account_id).filter(Boolean) || [])];
+      const directionIds = [...new Set(leads?.map(l => l.direction_id).filter(Boolean) || [])];
+
+      // Загружаем связанные данные параллельно
+      const [usersResult, directionsResult] = await Promise.all([
+        userIds.length > 0
+          ? supabase.from('user_accounts').select('id, username').in('id', userIds)
+          : { data: [] },
+        directionIds.length > 0
+          ? supabase.from('account_directions').select('id, name').in('id', directionIds)
+          : { data: [] },
+      ]);
+
+      // Создаём lookup maps
+      const usersMap = Object.fromEntries(usersResult.data?.map(u => [u.id, u.username]) || []);
+      const directionsMap = Object.fromEntries(directionsResult.data?.map(d => [d.id, d.name]) || []);
 
       // Format leads
       const formattedLeads = (leads || []).map((lead: any) => ({
         id: lead.id,
-        user_username: lead.user_accounts?.username || 'Unknown',
+        user_username: usersMap[lead.user_account_id] || 'Unknown',
         lead_name: lead.name,
         phone: lead.phone,
-        campaign_name: lead.campaigns?.name,
-        direction_name: lead.account_directions?.name,
+        direction_name: directionsMap[lead.direction_id] || null,
         cost: 0, // TODO: calculate lead cost
         created_at: lead.created_at,
       }));
@@ -145,7 +145,7 @@ export default async function adminLeadsRoutes(app: FastifyInstance) {
         users: usersData || [],
       });
     } catch (err) {
-      log.error({ error: String(err) }, 'Error fetching leads');
+      log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching leads');
       return res.status(500).send({ error: 'Failed to fetch leads' });
     }
   });

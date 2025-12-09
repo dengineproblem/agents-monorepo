@@ -40,7 +40,7 @@ export default async function adminStatsRoutes(app: FastifyInstance) {
       const { count: activeUsers } = await supabase
         .from('user_sessions')
         .select('user_account_id', { count: 'exact', head: true })
-        .gte('last_activity_at', weekAgo.toISOString());
+        .gte('updated_at', weekAgo.toISOString());
 
       // Лиды за сегодня
       const { count: leadsToday } = await supabase
@@ -72,7 +72,7 @@ export default async function adminStatsRoutes(app: FastifyInstance) {
       const { count: onlineUsers } = await supabase
         .from('user_sessions')
         .select('*', { count: 'exact', head: true })
-        .gte('last_activity_at', fiveMinutesAgo.toISOString());
+        .gte('updated_at', fiveMinutesAgo.toISOString());
 
       // Воронка онбординга
       const { data: funnelData } = await supabase
@@ -106,16 +106,26 @@ export default async function adminStatsRoutes(app: FastifyInstance) {
           raw_error,
           severity,
           created_at,
-          user_account_id,
-          user_accounts!error_logs_user_account_id_fkey(username)
+          user_account_id
         `)
         .eq('is_resolved', false)
         .order('created_at', { ascending: false })
         .limit(5);
 
+      // Получаем usernames отдельно для ошибок
+      const errorUserIds = recentErrors?.map(e => e.user_account_id).filter(Boolean) || [];
+      let errorUsersMap: Record<string, string> = {};
+      if (errorUserIds.length > 0) {
+        const { data: errorUsers } = await supabase
+          .from('user_accounts')
+          .select('id, username')
+          .in('id', errorUserIds);
+        errorUsersMap = Object.fromEntries(errorUsers?.map(u => [u.id, u.username]) || []);
+      }
+
       const formattedErrors = recentErrors?.map((e: any) => ({
         ...e,
-        user_username: e.user_accounts?.username,
+        user_username: errorUsersMap[e.user_account_id] || null,
       })) || [];
 
       // Топ юзеров по лидам за 30 дней
@@ -171,7 +181,7 @@ export default async function adminStatsRoutes(app: FastifyInstance) {
         topUsers,
       });
     } catch (err) {
-      log.error({ error: String(err) }, 'Error fetching dashboard stats');
+      log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching dashboard stats');
       return res.status(500).send({ error: 'Failed to fetch dashboard stats' });
     }
   });

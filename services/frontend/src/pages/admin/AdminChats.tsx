@@ -61,7 +61,6 @@ const AdminChats: React.FC = () => {
   const [sending, setSending] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
 
   // Fetch users with messages
   const fetchUsers = useCallback(async () => {
@@ -130,53 +129,17 @@ const AdminChats: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // WebSocket connection for real-time updates
+  // Polling for real-time updates (every 10 seconds)
   useEffect(() => {
-    const wsUrl = API_BASE_URL.replace('http', 'ws').replace('/api', '');
-
-    const connectWebSocket = () => {
-      try {
-        wsRef.current = new WebSocket(`${wsUrl}/admin/chats/ws`);
-
-        wsRef.current.onopen = () => {
-          console.log('WebSocket connected');
-        };
-
-        wsRef.current.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'new_message') {
-            // Update messages if from current user
-            if (selectedUser && data.message.user_account_id === selectedUser.id) {
-              setMessages((prev) => [...prev, data.message]);
-            }
-
-            // Update users list
-            fetchUsers();
-          }
-        };
-
-        wsRef.current.onclose = () => {
-          console.log('WebSocket disconnected, reconnecting...');
-          setTimeout(connectWebSocket, 3000);
-        };
-
-        wsRef.current.onerror = (error) => {
-          console.error('WebSocket error:', error);
-        };
-      } catch (err) {
-        console.error('WebSocket connection error:', err);
+    const interval = setInterval(() => {
+      fetchUsers();
+      if (selectedUser) {
+        fetchMessages(selectedUser.id);
       }
-    };
+    }, 10000);
 
-    connectWebSocket();
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [selectedUser, fetchUsers]);
+    return () => clearInterval(interval);
+  }, [selectedUser, fetchUsers, fetchMessages]);
 
   // Send message
   const handleSendMessage = async () => {

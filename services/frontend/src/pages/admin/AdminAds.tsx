@@ -8,12 +8,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  BarChart3,
+  Users,
   Image,
   TrendingUp,
   TrendingDown,
   RefreshCw,
-  Filter,
   ArrowUpDown,
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -38,22 +37,22 @@ import {
 import { API_BASE_URL } from '@/config/api';
 import { cn } from '@/lib/utils';
 
-interface Campaign {
-  id: string;
-  name: string;
-  status: string;
-  user_username: string;
+interface UserRoiSummary {
+  user_id: string;
+  username: string;
   spend: number;
-  impressions: number;
-  clicks: number;
+  revenue: number;
   leads: number;
   cpl: number;
+  roi: number;
+  creatives_count: number;
 }
 
 interface Creative {
   id: string;
   name: string;
   user_username: string;
+  direction_name?: string;
   thumbnail_url?: string;
   spend: number;
   impressions: number;
@@ -61,6 +60,8 @@ interface Creative {
   ctr: number;
   leads: number;
   cpl: number;
+  planned_cpl: number;
+  cpl_deviation: number;
 }
 
 interface CplAnalysis {
@@ -84,7 +85,7 @@ const PERIODS = [
 
 const AdminAds: React.FC = () => {
   const [period, setPeriod] = useState('7d');
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [usersSummary, setUsersSummary] = useState<UserRoiSummary[]>([]);
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [cplAnalysis, setCplAnalysis] = useState<CplAnalysis[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,11 +94,11 @@ const AdminAds: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // Fetch campaigns
-      const campaignsRes = await fetch(`${API_BASE_URL}/admin/ads/campaigns?period=${period}`);
-      if (campaignsRes.ok) {
-        const data = await campaignsRes.json();
-        setCampaigns(data.campaigns || []);
+      // Fetch users ROI summary
+      const usersRes = await fetch(`${API_BASE_URL}/admin/ads/users-summary?period=${period}`);
+      if (usersRes.ok) {
+        const data = await usersRes.json();
+        setUsersSummary(data.users || []);
       }
 
       // Fetch creatives
@@ -128,21 +129,10 @@ const AdminAds: React.FC = () => {
     return `$${(cents / 100).toFixed(2)}`;
   };
 
-  const formatNumber = (num: number) => {
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-    return String(num);
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return 'bg-green-500';
-      case 'paused':
-        return 'bg-yellow-500';
-      default:
-        return 'bg-gray-500';
-    }
+  const formatKzt = (amount: number) => {
+    if (amount >= 1000000) return `${(amount / 1000000).toFixed(1)}M ₸`;
+    if (amount >= 1000) return `${(amount / 1000).toFixed(0)}K ₸`;
+    return `${amount.toLocaleString()} ₸`;
   };
 
   // Sort CPL analysis
@@ -187,13 +177,13 @@ const AdminAds: React.FC = () => {
             <TrendingUp className="h-4 w-4" />
             CPL Анализ
           </TabsTrigger>
-          <TabsTrigger value="campaigns" className="gap-2">
-            <BarChart3 className="h-4 w-4" />
-            Кампании
-          </TabsTrigger>
           <TabsTrigger value="creatives" className="gap-2">
             <Image className="h-4 w-4" />
             Креативы
+          </TabsTrigger>
+          <TabsTrigger value="roi" className="gap-2">
+            <Users className="h-4 w-4" />
+            ROI
           </TabsTrigger>
         </TabsList>
 
@@ -271,7 +261,7 @@ const AdminAds: React.FC = () => {
                               <TrendingUp className="h-3 w-3" />
                             )}
                             {item.deviation_percent > 0 ? '+' : ''}
-                            {item.deviation_percent.toFixed(1)}%
+                            {(item.deviation_percent ?? 0).toFixed(1)}%
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">{item.leads_count}</TableCell>
@@ -287,13 +277,13 @@ const AdminAds: React.FC = () => {
           </Card>
         </TabsContent>
 
-        {/* Campaigns Tab */}
-        <TabsContent value="campaigns" className="space-y-4">
+        {/* ROI Summary Tab */}
+        <TabsContent value="roi" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Все кампании</CardTitle>
+              <CardTitle>ROI по пользователям</CardTitle>
               <CardDescription>
-                {campaigns.length} кампаний за выбранный период
+                Сводка по рекламным расходам и доходам
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -301,50 +291,58 @@ const AdminAds: React.FC = () => {
                 <div className="flex items-center justify-center py-8">
                   <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
                 </div>
-              ) : campaigns.length === 0 ? (
-                <p className="text-center py-8 text-muted-foreground">Нет кампаний</p>
+              ) : usersSummary.length === 0 ? (
+                <p className="text-center py-8 text-muted-foreground">Нет данных</p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Кампания</TableHead>
                       <TableHead>Пользователь</TableHead>
-                      <TableHead>Статус</TableHead>
                       <TableHead className="text-right">Расход</TableHead>
-                      <TableHead className="text-right">Показы</TableHead>
-                      <TableHead className="text-right">Клики</TableHead>
+                      <TableHead className="text-right">Доход</TableHead>
                       <TableHead className="text-right">Лиды</TableHead>
                       <TableHead className="text-right">CPL</TableHead>
+                      <TableHead className="text-right">ROI</TableHead>
+                      <TableHead className="text-right">Креативов</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {campaigns.map((campaign) => (
-                      <TableRow key={campaign.id}>
-                        <TableCell className="font-medium max-w-[200px] truncate">
-                          {campaign.name}
+                    {usersSummary.map((user) => (
+                      <TableRow key={user.user_id}>
+                        <TableCell className="font-medium">
+                          {user.username}
                         </TableCell>
-                        <TableCell>{campaign.user_username}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="gap-1">
-                            <div
-                              className={`w-2 h-2 rounded-full ${getStatusColor(campaign.status)}`}
-                            />
-                            {campaign.status}
+                        <TableCell className="text-right">
+                          {formatCurrency(user.spend)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {formatKzt(user.revenue)}
+                        </TableCell>
+                        <TableCell className="text-right">{user.leads}</TableCell>
+                        <TableCell className="text-right">
+                          {user.cpl > 0 ? formatCurrency(user.cpl) : '—'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'gap-1',
+                              user.roi > 0
+                                ? 'text-green-600 border-green-600'
+                                : user.roi < -20
+                                ? 'text-red-600 border-red-600'
+                                : 'text-yellow-600 border-yellow-600'
+                            )}
+                          >
+                            {user.roi > 0 ? (
+                              <TrendingUp className="h-3 w-3" />
+                            ) : (
+                              <TrendingDown className="h-3 w-3" />
+                            )}
+                            {user.roi > 0 ? '+' : ''}{user.roi}%
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(campaign.spend)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatNumber(campaign.impressions)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatNumber(campaign.clicks)}
-                        </TableCell>
-                        <TableCell className="text-right">{campaign.leads}</TableCell>
-                        <TableCell className="text-right">
-                          {campaign.cpl > 0 ? formatCurrency(campaign.cpl) : '—'}
-                        </TableCell>
+                        <TableCell className="text-right">{user.creatives_count}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -375,12 +373,12 @@ const AdminAds: React.FC = () => {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Креатив</TableHead>
-                      <TableHead>Пользователь</TableHead>
+                      <TableHead>Направление</TableHead>
                       <TableHead className="text-right">Расход</TableHead>
-                      <TableHead className="text-right">Показы</TableHead>
-                      <TableHead className="text-right">CTR</TableHead>
                       <TableHead className="text-right">Лиды</TableHead>
                       <TableHead className="text-right">CPL</TableHead>
+                      <TableHead className="text-right">План CPL</TableHead>
+                      <TableHead className="text-right">Отклонение</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -399,35 +397,51 @@ const AdminAds: React.FC = () => {
                                 <Image className="h-4 w-4" />
                               </div>
                             )}
-                            <span className="font-medium max-w-[150px] truncate">
-                              {creative.name}
-                            </span>
+                            <div>
+                              <span className="font-medium max-w-[150px] truncate block">
+                                {creative.name}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {creative.user_username}
+                              </span>
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell>{creative.user_username}</TableCell>
+                        <TableCell>
+                          {creative.direction_name || '—'}
+                        </TableCell>
                         <TableCell className="text-right">
                           {formatCurrency(creative.spend)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatNumber(creative.impressions)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              creative.ctr >= 2
-                                ? 'text-green-600'
-                                : creative.ctr < 1
-                                ? 'text-red-600'
-                                : ''
-                            )}
-                          >
-                            {creative.ctr.toFixed(2)}%
-                          </Badge>
                         </TableCell>
                         <TableCell className="text-right">{creative.leads}</TableCell>
                         <TableCell className="text-right">
                           {creative.cpl > 0 ? formatCurrency(creative.cpl) : '—'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {creative.planned_cpl > 0 ? formatCurrency(creative.planned_cpl) : '—'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {creative.planned_cpl > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'gap-1',
+                                creative.cpl_deviation < 0
+                                  ? 'text-green-600 border-green-600'
+                                  : creative.cpl_deviation > 20
+                                  ? 'text-red-600 border-red-600'
+                                  : 'text-yellow-600 border-yellow-600'
+                              )}
+                            >
+                              {creative.cpl_deviation < 0 ? (
+                                <TrendingDown className="h-3 w-3" />
+                              ) : (
+                                <TrendingUp className="h-3 w-3" />
+                              )}
+                              {creative.cpl_deviation > 0 ? '+' : ''}
+                              {(creative.cpl_deviation ?? 0).toFixed(1)}%
+                            </Badge>
+                          ) : '—'}
                         </TableCell>
                       </TableRow>
                     ))}

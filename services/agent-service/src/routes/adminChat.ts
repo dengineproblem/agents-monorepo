@@ -204,6 +204,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
       const uniqueUsers = new Set(usersWithUnread?.map(m => m.user_account_id) || []);
 
       return res.send({
+        count: totalUnread || 0,  // Для совместимости с frontend
         totalUnread: totalUnread || 0,
         usersWithUnread: uniqueUsers.size
       });
@@ -243,7 +244,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
     try {
       const { limit = '20' } = req.query as { limit?: string };
 
-      // Получаем последние сообщения сгруппированные по пользователям
+      // Получаем последние сообщения (без FK join)
       const { data: chats, error } = await supabase
         .from('admin_user_chats')
         .select(`
@@ -251,8 +252,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
           message,
           direction,
           created_at,
-          read_at,
-          user_accounts!inner(id, username, telegram_id)
+          read_at
         `)
         .order('created_at', { ascending: false })
         .limit(100);
@@ -260,6 +260,17 @@ export default async function adminChatRoutes(app: FastifyInstance) {
       if (error) {
         log.error({ error: error.message }, 'Failed to fetch users with messages');
         return res.status(500).send({ error: 'Failed to fetch data' });
+      }
+
+      // Загружаем usernames отдельно
+      const userIds = [...new Set(chats?.map(c => c.user_account_id).filter(Boolean) || [])];
+      let usersData: Record<string, { username: string; telegram_id: string | null }> = {};
+      if (userIds.length > 0) {
+        const { data: users } = await supabase
+          .from('user_accounts')
+          .select('id, username, telegram_id')
+          .in('id', userIds);
+        usersData = Object.fromEntries(users?.map(u => [u.id, { username: u.username, telegram_id: u.telegram_id }]) || []);
       }
 
       // Группируем по пользователям и берём последнее сообщение
@@ -272,10 +283,11 @@ export default async function adminChatRoutes(app: FastifyInstance) {
             c => c.user_account_id === userId && c.direction === 'from_user' && !c.read_at
           ).length;
 
+          const userData = usersData[userId];
           userMap.set(userId, {
             userId,
-            username: (chat.user_accounts as any)?.username,
-            hasTelegram: !!(chat.user_accounts as any)?.telegram_id,
+            username: userData?.username || 'Unknown',
+            hasTelegram: !!userData?.telegram_id,
             lastMessage: chat.message,
             lastMessageDirection: chat.direction,
             lastMessageAt: chat.created_at,
@@ -290,7 +302,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
 
       return res.send({ users });
     } catch (err) {
-      log.error({ error: String(err) }, 'Error fetching users with messages');
+      log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching users with messages');
       return res.status(500).send({ error: 'Internal server error' });
     }
   });

@@ -71,7 +71,7 @@ const AdminLeads: React.FC = () => {
   const [stats, setStats] = useState<LeadsStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState('7d');
-  const [userFilter, setUserFilter] = useState('');
+  const [userFilter, setUserFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
@@ -88,7 +88,7 @@ const AdminLeads: React.FC = () => {
         limit: '20',
       });
 
-      if (userFilter) {
+      if (userFilter && userFilter !== 'all') {
         params.append('userId', userFilter);
       }
 
@@ -190,7 +190,7 @@ const AdminLeads: React.FC = () => {
             <SelectValue placeholder="Все пользователи" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">Все пользователи</SelectItem>
+            <SelectItem value="all">Все пользователи</SelectItem>
             {users.map((user) => (
               <SelectItem key={user.id} value={user.id}>
                 {user.username}
