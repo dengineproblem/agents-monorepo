@@ -88,9 +88,8 @@ const CreativeGeneration = () => {
   const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle'>('modern_performance');
   const [stylePrompt, setStylePrompt] = useState<string>('');  // Промпт для freestyle стиля
 
-  // State для collapsible секций референсов
+  // State для модалки референса конкурента
   const [showCompetitorRef, setShowCompetitorRef] = useState(false);
-  const [showImageRefs, setShowImageRefs] = useState(false);
 
   // Загрузка направлений (с фильтрацией по аккаунту для multi-account режима)
   const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
@@ -932,17 +931,57 @@ const CreativeGeneration = () => {
                     </Button>
                   )}
 
-                  {/* Кнопка референсных изображений */}
-                  <Button
-                    variant={referenceImages.length > 0 ? "secondary" : "outline"}
-                    size="sm"
-                    onClick={() => setShowImageRefs(!showImageRefs)}
-                    className="shrink-0"
-                  >
-                    <ImagePlus className="h-4 w-4 mr-1" />
-                    {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
-                  </Button>
+                  {/* Кнопка загрузки референсных изображений */}
+                  {referenceImages.length < 2 && (
+                    <Label htmlFor="reference-upload-inline" className="cursor-pointer shrink-0">
+                      <div className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 h-9 px-3 ${referenceImages.length > 0 ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80' : 'border border-input bg-background hover:bg-accent hover:text-accent-foreground'}`}>
+                        <ImagePlus className="h-4 w-4 mr-1" />
+                        {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
+                      </div>
+                      <Input id="reference-upload-inline" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
+                    </Label>
+                  )}
+                  {referenceImages.length >= 2 && (
+                    <Badge variant="secondary" className="shrink-0">Фото ({referenceImages.length})</Badge>
+                  )}
                 </div>
+
+                {/* Загруженные референсные изображения */}
+                {referenceImages.length > 0 && (
+                  <div className="flex gap-2 items-start flex-wrap">
+                    {referenceImages.map((img, index) => (
+                      <div key={index} className="relative rounded-lg overflow-hidden bg-muted/30">
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="absolute top-1 right-1 z-10 h-5 w-5"
+                          onClick={() => removeReferenceImage(index)}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                        <img src={img} alt={`Референс ${index + 1}`} className="w-16 h-16 object-cover rounded" />
+                      </div>
+                    ))}
+                    {referenceImages.length < 2 && (
+                      <Label htmlFor="reference-upload-add" className="cursor-pointer">
+                        <div className="w-16 h-16 border-2 border-dashed border-muted rounded-lg flex items-center justify-center hover:border-primary/50 transition-colors">
+                          <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <Input id="reference-upload-add" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
+                      </Label>
+                    )}
+                  </div>
+                )}
+
+                {/* Промпт для референсных изображений */}
+                {referenceImages.length > 0 && (
+                  <Textarea
+                    value={referenceImagePrompt}
+                    onChange={(e) => setReferenceImagePrompt(e.target.value)}
+                    placeholder="Опишите что взять из референсов: стиль, цвета, композицию..."
+                    className="min-h-[50px] resize-none text-sm"
+                  />
+                )}
 
                 {/* Описание выбранного стиля */}
                 <div className="text-sm text-muted-foreground p-3 bg-muted/30 rounded-md">
@@ -1223,74 +1262,6 @@ const CreativeGeneration = () => {
         />
       )}
 
-      {/* Модалка референсных изображений */}
-      <Dialog open={showImageRefs} onOpenChange={setShowImageRefs}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Референсные изображения</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Загрузите до 2 изображений для сохранения стиля, палитры или композиции
-            </p>
-
-            {referenceImages.length > 0 && (
-              <div className="flex gap-3 flex-wrap">
-                {referenceImages.map((img, index) => (
-                  <div key={index} className="relative rounded-lg overflow-hidden bg-muted/30 p-1">
-                    <Button
-                      variant="destructive"
-                      size="icon"
-                      className="absolute top-0 right-0 z-10 h-6 w-6"
-                      onClick={() => removeReferenceImage(index)}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                    <img src={img} alt={`Референс ${index + 1}`} className="w-24 h-24 object-cover rounded" />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {referenceImages.length < 2 && (
-              <Label htmlFor="reference-upload-modal" className="cursor-pointer block border-2 border-dashed border-muted rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
-                <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                  <Upload className="h-8 w-8" />
-                  <span className="text-sm font-medium">
-                    {referenceImages.length === 0 ? 'Нажмите для загрузки' : 'Добавить ещё референс'}
-                  </span>
-                  <span className="text-xs">PNG, JPG, WebP до 10MB</span>
-                </div>
-                <Input id="reference-upload-modal" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
-              </Label>
-            )}
-
-            {referenceImages.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="reference-prompt-modal" className="text-sm">Описание референсов (опционально)</Label>
-                <Textarea
-                  id="reference-prompt-modal"
-                  value={referenceImagePrompt}
-                  onChange={(e) => setReferenceImagePrompt(e.target.value)}
-                  placeholder="Опишите что взять из референсов: стиль, цвета, композицию..."
-                  className="min-h-[60px] resize-none"
-                />
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2">
-              {referenceImages.length > 0 && (
-                <Button variant="outline" size="sm" onClick={() => { setReferenceImages([]); setReferenceImagePrompt(''); }}>
-                  Очистить все
-                </Button>
-              )}
-              <Button size="sm" onClick={() => setShowImageRefs(false)}>
-                Готово
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
