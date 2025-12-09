@@ -233,14 +233,14 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const cardsCount = carousel_texts.length;
         const isMultiAccountMode = user.multi_account_enabled === true;
 
-        // Проверяем лимит генераций (карусель из N картинок = N генераций)
-        // Пропускаем проверку для мультиаккаунтного режима
-        if (!isMultiAccountMode && user.creative_generations_available < cardsCount) {
-          return reply.status(403).send({
-            success: false,
-            error: `Not enough generations. Need ${cardsCount}, have ${user.creative_generations_available}`
-          });
-        }
+        // ВРЕМЕННО: Лимит генераций отключён - безлимитные генерации для всех
+        // TODO: Вернуть проверку лимитов позже
+        // if (!isMultiAccountMode && user.creative_generations_available < cardsCount) {
+        //   return reply.status(403).send({
+        //     success: false,
+        //     error: `Not enough generations. Need ${cardsCount}, have ${user.creative_generations_available}`
+        //   });
+        // }
 
         // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
         let userPrompt1 = user.prompt1 || '';
@@ -432,13 +432,14 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
         const isMultiAccountMode = user.multi_account_enabled === true;
 
-        // Проверяем лимит (1 генерация) - пропускаем для мультиаккаунтного режима
-        if (!isMultiAccountMode && user.creative_generations_available < 1) {
-          return reply.status(403).send({
-            success: false,
-            error: 'Not enough generations available'
-          });
-        }
+        // ВРЕМЕННО: Лимит генераций отключён - безлимитные генерации для всех
+        // TODO: Вернуть проверку лимитов позже
+        // if (!isMultiAccountMode && user.creative_generations_available < 1) {
+        //   return reply.status(403).send({
+        //     success: false,
+        //     error: 'Not enough generations available'
+        //   });
+        // }
 
         // Получаем карусель из БД
         const { data: carousel, error: carouselError } = await getSupabaseClient()

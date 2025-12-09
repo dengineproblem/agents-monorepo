@@ -47,16 +47,18 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      // Проверка лимита (пропускаем для мультиаккаунтного режима)
+      // ВРЕМЕННО: Лимит генераций отключён - безлимитные генерации для всех
+      // TODO: Вернуть проверку лимитов позже
+      // const isMultiAccountMode = user.multi_account_enabled === true;
+      // if (!isMultiAccountMode && (!user.creative_generations_available || user.creative_generations_available <= 0)) {
+      //   app.log.warn(`[Generate Creative] No generations available for user: ${user_id}`);
+      //   return reply.status(403).send({
+      //     success: false,
+      //     error: 'No generations available',
+      //     generations_remaining: 0
+      //   });
+      // }
       const isMultiAccountMode = user.multi_account_enabled === true;
-      if (!isMultiAccountMode && (!user.creative_generations_available || user.creative_generations_available <= 0)) {
-        app.log.warn(`[Generate Creative] No generations available for user: ${user_id}`);
-        return reply.status(403).send({
-          success: false,
-          error: 'No generations available',
-          generations_remaining: 0
-        });
-      }
 
       app.log.info(`[Generate Creative] Generations available: ${user.creative_generations_available}`);
 
