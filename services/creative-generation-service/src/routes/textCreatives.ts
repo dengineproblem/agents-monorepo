@@ -50,12 +50,8 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        if (!user_prompt || user_prompt.trim().length === 0) {
-          return reply.status(400).send({
-            success: false,
-            error: 'user_prompt is required'
-          });
-        }
+        // user_prompt может быть пустым - генерация на основе контекста
+        const safeUserPrompt = user_prompt?.trim() || '';
 
         // 1. Получаем prompt1 из user_accounts
         app.log.info(`[Generate Text Creative] Fetching prompt1 for user: ${user_id}`);
@@ -128,7 +124,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         const fullPrompt = buildTextCreativePrompt(
           text_type,
           prompt1,
-          user_prompt,
+          safeUserPrompt,
           topTranscriptions,
           prevGens
         );
@@ -165,7 +161,7 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           .insert({
             user_id,
             text_type,
-            user_prompt,
+            user_prompt: safeUserPrompt,
             generated_text: trimmedText,
             context_transcript_ids: transcriptIds
           })
