@@ -56,6 +56,10 @@ interface CompetitorReferenceSelectorProps {
   mediaTypeFilter?: 'video' | 'image' | 'carousel' | 'all';
   className?: string;
   accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
+  // Для внешнего управления открытием (без триггера)
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;  // Скрыть встроенный триггер
 }
 
 const mediaTypeIcon = {
@@ -84,8 +88,15 @@ export function CompetitorReferenceSelector({
   mediaTypeFilter = 'all',
   className,
   accountId,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  hideTrigger = false,
 }: CompetitorReferenceSelectorProps) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+
+  // Поддержка controlled и uncontrolled режимов
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setIsOpen = controlledOnOpenChange || setInternalOpen;
   const [loading, setLoading] = useState(false);
   const [creatives, setCreatives] = useState<CompetitorCreative[]>([]);
   const [competitors, setCompetitors] = useState<Competitor[]>([]);
@@ -172,76 +183,78 @@ export function CompetitorReferenceSelector({
   return (
     <div className={className}>
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogTrigger asChild>
-          <div>
-            {selectedReference ? (
-              <Card className="p-3 cursor-pointer hover:bg-accent/50 transition-colors">
-                <div className="flex items-start gap-3">
-                  {/* Превью */}
-                  <div className="relative w-16 h-20 rounded overflow-hidden bg-muted flex-shrink-0">
-                    {selectedReference.thumbnail_url ? (
-                      <img
-                        src={selectedReference.thumbnail_url}
-                        alt="Референс"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        {React.createElement(mediaTypeIcon[selectedReference.media_type], {
-                          className: 'w-6 h-6 text-muted-foreground',
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Информация */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="secondary" className="text-xs">
-                        <Users className="w-3 h-3 mr-1" />
-                        {selectedReference.competitor_name || 'Конкурент'}
-                      </Badge>
-                      {selectedReference.score !== undefined && (
-                        <Badge
-                          variant="outline"
-                          className={cn('text-xs', scoreColorClasses[getScoreCategory(selectedReference.score).color])}
-                        >
-                          {getScoreCategory(selectedReference.score).emoji} {selectedReference.score}
-                        </Badge>
+        {!hideTrigger && (
+          <DialogTrigger asChild>
+            <div>
+              {selectedReference ? (
+                <Card className="p-3 cursor-pointer hover:bg-accent/50 transition-colors">
+                  <div className="flex items-start gap-3">
+                    {/* Превью */}
+                    <div className="relative w-16 h-20 rounded overflow-hidden bg-muted flex-shrink-0">
+                      {selectedReference.thumbnail_url ? (
+                        <img
+                          src={selectedReference.thumbnail_url}
+                          alt="Референс"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          {React.createElement(mediaTypeIcon[selectedReference.media_type], {
+                            className: 'w-6 h-6 text-muted-foreground',
+                          })}
+                        </div>
                       )}
                     </div>
-                    {selectedReference.body_text && (
-                      <p className="text-xs text-muted-foreground line-clamp-2">
-                        {selectedReference.body_text}
-                      </p>
-                    )}
-                    {(selectedReference.transcript || selectedReference.ocr_text) && (
-                      <div className="flex items-center gap-1 mt-1 text-xs text-primary">
-                        <FileText className="w-3 h-3" />
-                        <span>Есть текст креатива</span>
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Кнопка удаления */}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 flex-shrink-0"
-                    onClick={handleClear}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </Card>
-            ) : (
-              <Button variant="outline" className="w-full justify-start gap-2">
-                <Users className="w-4 h-4" />
-                <span>Выбрать референс конкурента</span>
-              </Button>
-            )}
-          </div>
-        </DialogTrigger>
+                    {/* Информация */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Badge variant="secondary" className="text-xs">
+                          <Users className="w-3 h-3 mr-1" />
+                          {selectedReference.competitor_name || 'Конкурент'}
+                        </Badge>
+                        {selectedReference.score !== undefined && (
+                          <Badge
+                            variant="outline"
+                            className={cn('text-xs', scoreColorClasses[getScoreCategory(selectedReference.score).color])}
+                          >
+                            {getScoreCategory(selectedReference.score).emoji} {selectedReference.score}
+                          </Badge>
+                        )}
+                      </div>
+                      {selectedReference.body_text && (
+                        <p className="text-xs text-muted-foreground line-clamp-2">
+                          {selectedReference.body_text}
+                        </p>
+                      )}
+                      {(selectedReference.transcript || selectedReference.ocr_text) && (
+                        <div className="flex items-center gap-1 mt-1 text-xs text-primary">
+                          <FileText className="w-3 h-3" />
+                          <span>Есть текст креатива</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Кнопка удаления */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 flex-shrink-0"
+                      onClick={handleClear}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </Card>
+              ) : (
+                <Button variant="outline" className="w-full justify-start gap-2">
+                  <Users className="w-4 h-4" />
+                  <span>Выбрать референс конкурента</span>
+                </Button>
+              )}
+            </div>
+          </DialogTrigger>
+        )}
 
         <DialogContent className="max-w-3xl max-h-[80vh]">
           <DialogHeader>
