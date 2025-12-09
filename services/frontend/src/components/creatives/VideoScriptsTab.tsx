@@ -339,7 +339,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
                   onChange={(e) => setEditInstructions(e.target.value)}
                   placeholder="Что изменить? Например: сделай хук короче..."
                   rows={1}
-                  className="resize-none flex-1"
+                  className="resize-none flex-1 border-2 border-primary/50 focus:border-primary"
                 />
                 <Button
                   onClick={handleEdit}
