@@ -23,61 +23,58 @@ const FullscreenImageOverlay = ({
   src: string;
   onClose: () => void;
 }) => {
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  const overlayRef = useRef<HTMLDivElement>(null);
 
-  // Обработка Escape - перехватываем до Dialog
+  // Обработка Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        e.stopImmediatePropagation();
-        onCloseRef.current();
+        onClose();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, []);
+  }, [onClose]);
 
-  // Закрытие по клику/тапу на overlay (не на картинку)
-  const handleClose = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const target = e.target as HTMLElement;
-    // Не закрываем если кликнули по картинке
-    if (target.tagName === 'IMG') return;
-    onCloseRef.current();
-  };
+  // Обработка кликов/тапов через native event listener
+  useEffect(() => {
+    const overlay = overlayRef.current;
+    if (!overlay) return;
+
+    const handlePointerUp = (e: PointerEvent) => {
+      const target = e.target as HTMLElement;
+      // Закрываем только если кликнули на overlay или кнопку закрытия
+      if (target === overlay || target.closest('[data-close-button]')) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+
+    overlay.addEventListener('pointerup', handlePointerUp);
+    return () => overlay.removeEventListener('pointerup', handlePointerUp);
+  }, [onClose]);
 
   return createPortal(
     <div
+      ref={overlayRef}
       id="fullscreen-image-overlay"
-      className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center cursor-pointer"
-      onClick={handleClose}
-      onTouchEnd={handleClose}
+      className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center"
     >
       <button
         type="button"
+        data-close-button
         className="absolute top-4 right-4 text-white hover:bg-white/20 rounded-md p-2 z-10"
-        onClick={(e) => {
-          e.stopPropagation();
-          onCloseRef.current();
-        }}
-        onTouchEnd={(e) => {
-          e.stopPropagation();
-          onCloseRef.current();
-        }}
       >
         <X className="h-6 w-6" />
       </button>
       <img
         src={src}
         alt="Скриншот"
-        className="max-w-[95vw] max-h-[95vh] object-contain cursor-default"
-        onClick={(e) => e.stopPropagation()}
-        onTouchEnd={(e) => e.stopPropagation()}
+        className="max-w-[95vw] max-h-[95vh] object-contain"
       />
       <p className="absolute bottom-4 text-white/70 text-sm pointer-events-none">
         Нажмите в любом месте или Escape чтобы закрыть
