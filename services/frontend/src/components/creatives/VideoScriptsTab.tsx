@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -42,6 +42,9 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
 
   // Reference state (для типа 'reference')
   const [creativeReference, setCreativeReference] = useState<CreativeReference | null>(null);
+
+  // Ref для автоскролла к результату
+  const resultRef = useRef<HTMLDivElement>(null);
 
   // Автозаполнение userPrompt при выборе референса
   useEffect(() => {
@@ -103,6 +106,10 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
       if (response.success && response.text) {
         setGeneratedText(response.text);
         toast.success('Текст сгенерирован!');
+        // Автоскролл к результату
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
       } else {
         toast.error(response.error || 'Не удалось сгенерировать текст');
       }
@@ -286,7 +293,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
 
       {/* Результат */}
       {generatedText && (
-        <Card>
+        <Card ref={resultRef}>
           <CardHeader className="pb-2">
             <CardTitle>Результат</CardTitle>
           </CardHeader>
