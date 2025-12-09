@@ -146,7 +146,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         
         const { data, error } = await supabase
           .from('user_accounts')
-          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_access_token, tiktok_account_id, tiktok_business_id')
+          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_access_token, tiktok_account_id, tiktok_business_id, prompt1')
           .eq('id', userData.id)
           .single();
           
@@ -173,8 +173,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             setOptimization((data as any).optimization);
             console.log('Загружен параметр optimization:', (data as any).optimization);
           }
-          // Синхронизация TikTok полей из Supabase в localStorage.user,
-          // чтобы tiktokApi мог их прочитать
+          // Синхронизация полей из Supabase в localStorage.user
+          // (TikTok, prompt1 и др.), чтобы они были актуальны
           try {
             const existingStored = localStorage.getItem('user');
             const storedJson = existingStored ? JSON.parse(existingStored) : {};
@@ -188,15 +188,19 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             if ((data as any).tiktok_account_id) {
               merged.tiktok_account_id = (data as any).tiktok_account_id;
             }
+            // Синхронизация prompt1 (для определения статуса онбординга)
+            if ((data as any).prompt1 !== undefined) {
+              merged.prompt1 = (data as any).prompt1;
+            }
             // сохраняем обратно только если что-то изменилось
             const needSave = JSON.stringify(storedJson) !== JSON.stringify(merged);
             if (needSave) {
               localStorage.setItem('user', JSON.stringify(merged));
-              console.log('Синхронизированы TikTok поля из Supabase в localStorage');
+              console.log('[AppContext] Синхронизированы поля из Supabase в localStorage (TikTok, prompt1)');
             }
             setTiktokConnected(!!merged.tiktok_business_id && !!merged.tiktok_access_token);
           } catch (e) {
-            console.warn('Не удалось синхронизировать TikTok поля в localStorage:', e);
+            console.warn('Не удалось синхронизировать поля в localStorage:', e);
             setTiktokConnected(!!(data as any).tiktok_business_id && !!(data as any).tiktok_access_token);
           }
         }

@@ -26,7 +26,7 @@ const FullscreenImageOverlay = ({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // Обработка Escape
+  // Обработка Escape - перехватываем до Dialog
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -41,35 +41,43 @@ const FullscreenImageOverlay = ({
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
-  // Используем нативный обработчик для клика
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // Не закрываем если кликнули по картинке
-      if (target.tagName === 'IMG') return;
-      onCloseRef.current();
-    };
+  // Обработка клика - закрываем только fullscreen, не даём пробрасываться к Dialog
+  const handleOverlayClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.target as HTMLElement;
+    // Не закрываем если кликнули по картинке
+    if (target.tagName === 'IMG') return;
+    onCloseRef.current();
+  };
 
-    // Добавляем обработчик на document чтобы поймать все клики
-    document.addEventListener('click', handleClick, true);
-    return () => document.removeEventListener('click', handleClick, true);
-  }, []);
+  // Блокируем pointerdown чтобы Radix Dialog не перехватывал
+  const handlePointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+  };
 
   return createPortal(
     <div
       id="fullscreen-image-overlay"
       className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center cursor-pointer"
+      onClick={handleOverlayClick}
+      onPointerDown={handlePointerDown}
     >
       <button
         type="button"
         className="absolute top-4 right-4 text-white hover:bg-white/20 rounded-md p-2 z-10"
+        onClick={(e) => {
+          e.stopPropagation();
+          onCloseRef.current();
+        }}
       >
         <X className="h-6 w-6" />
       </button>
       <img
         src={src}
         alt="Скриншот"
-        className="max-w-[95vw] max-h-[95vh] object-contain cursor-default pointer-events-none"
+        className="max-w-[95vw] max-h-[95vh] object-contain cursor-default"
+        onClick={(e) => e.stopPropagation()}
       />
       <p className="absolute bottom-4 text-white/70 text-sm pointer-events-none">
         Нажмите в любом месте или Escape чтобы закрыть
@@ -280,7 +288,20 @@ export function FacebookManualConnectModal({
         )}
 
         <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent
+            className="sm:max-w-2xl max-h-[90vh] overflow-y-auto w-[95vw] p-4 sm:p-6"
+            onPointerDownOutside={(e) => {
+              // Блокируем закрытие если fullscreen открыт
+              if (fullscreenImage) {
+                e.preventDefault();
+              }
+            }}
+            onInteractOutside={(e) => {
+              if (fullscreenImage) {
+                e.preventDefault();
+              }
+            }}
+          >
             <DialogHeader>
               <DialogTitle>Подключение Facebook Ads</DialogTitle>
               <DialogDescription>
@@ -309,15 +330,15 @@ export function FacebookManualConnectModal({
 
               {/* Partner ID Block (only on step 4) */}
               {currentInstruction.showPartnerId && (
-                <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+                <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 sm:p-4">
                   <p className="text-sm font-medium mb-2">ID компании-партнёра:</p>
-                  <div className="flex items-center gap-2 bg-background rounded border p-3">
-                    <code className="flex-1 text-lg font-mono font-bold">{PARTNER_ID}</code>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-background rounded border p-2 sm:p-3">
+                    <code className="flex-1 text-base sm:text-lg font-mono font-bold break-all text-center sm:text-left">{PARTNER_ID}</code>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={handleCopyPartnerId}
-                      className="shrink-0"
+                      className="shrink-0 w-full sm:w-auto"
                     >
                       <Copy className="h-4 w-4 mr-2" />
                       Копировать
@@ -412,7 +433,19 @@ export function FacebookManualConnectModal({
       )}
 
       <Dialog open={open} onOpenChange={handleDialogOpenChange}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="sm:max-w-lg max-h-[90vh] overflow-y-auto w-[95vw] p-4 sm:p-6"
+          onPointerDownOutside={(e) => {
+            if (fullscreenImage) {
+              e.preventDefault();
+            }
+          }}
+          onInteractOutside={(e) => {
+            if (fullscreenImage) {
+              e.preventDefault();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Подключение Facebook Ads</DialogTitle>
             <DialogDescription>
@@ -420,9 +453,9 @@ export function FacebookManualConnectModal({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="space-y-3 sm:space-y-4 py-2">
             {/* Info block */}
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4 text-sm">
+            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3 sm:p-4 text-sm">
               <p className="text-blue-800 dark:text-blue-200">
                 После того как вы предоставили партнёрский доступ, введите ID ваших объектов.
                 Их можно найти в настройках Business Portfolio рядом с названием каждого объекта.
@@ -459,95 +492,95 @@ export function FacebookManualConnectModal({
             </div>
 
             {/* Form Fields */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="page_id">
-                Facebook Page ID <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="page_id"
-                placeholder="Например: 123456789012345"
-                value={formData.page_id}
-                onChange={(e) => {
-                  setFormData({ ...formData, page_id: e.target.value });
-                  if (errors.page_id) setErrors({ ...errors, page_id: '' });
-                }}
-                className={errors.page_id ? 'border-red-500' : ''}
-              />
-              {errors.page_id && (
-                <p className="text-sm text-red-500">{errors.page_id}</p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                ID страницы Facebook, к которой вы предоставили доступ
-              </p>
-            </div>
+            <div className="space-y-3 sm:space-y-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="page_id" className="text-sm">
+                  Facebook Page ID <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="page_id"
+                  placeholder="123456789012345"
+                  value={formData.page_id}
+                  onChange={(e) => {
+                    setFormData({ ...formData, page_id: e.target.value });
+                    if (errors.page_id) setErrors({ ...errors, page_id: '' });
+                  }}
+                  className={errors.page_id ? 'border-red-500' : ''}
+                />
+                {errors.page_id && (
+                  <p className="text-sm text-red-500">{errors.page_id}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  ID страницы Facebook, к которой вы предоставили доступ
+                </p>
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="ad_account_id">
-                Ad Account ID <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="ad_account_id"
-                placeholder="Например: act_123456789012345"
-                value={formData.ad_account_id}
-                onChange={(e) => {
-                  setFormData({ ...formData, ad_account_id: e.target.value });
-                  if (errors.ad_account_id) setErrors({ ...errors, ad_account_id: '' });
-                }}
-                className={errors.ad_account_id ? 'border-red-500' : ''}
-              />
-              {errors.ad_account_id && (
-                <p className="text-sm text-red-500">{errors.ad_account_id}</p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                ID рекламного кабинета (префикс act_ добавится автоматически если не указан)
-              </p>
-            </div>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="ad_account_id" className="text-sm">
+                  Ad Account ID <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="ad_account_id"
+                  placeholder="act_123456789012345"
+                  value={formData.ad_account_id}
+                  onChange={(e) => {
+                    setFormData({ ...formData, ad_account_id: e.target.value });
+                    if (errors.ad_account_id) setErrors({ ...errors, ad_account_id: '' });
+                  }}
+                  className={errors.ad_account_id ? 'border-red-500' : ''}
+                />
+                {errors.ad_account_id && (
+                  <p className="text-sm text-red-500">{errors.ad_account_id}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  ID рекламного кабинета (префикс act_ добавится автоматически если не указан)
+                </p>
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="instagram_id">
-                Instagram Account ID <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="instagram_id"
-                placeholder="Например: 123456789012345"
-                value={formData.instagram_id}
-                onChange={(e) => {
-                  setFormData({ ...formData, instagram_id: e.target.value });
-                  if (errors.instagram_id) setErrors({ ...errors, instagram_id: '' });
-                }}
-                className={errors.instagram_id ? 'border-red-500' : ''}
-              />
-              {errors.instagram_id && (
-                <p className="text-sm text-red-500">{errors.instagram_id}</p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                ID аккаунта Instagram из раздела "Аккаунты Instagram"
-              </p>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="instagram_id" className="text-sm">
+                  Instagram Account ID <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="instagram_id"
+                  placeholder="123456789012345"
+                  value={formData.instagram_id}
+                  onChange={(e) => {
+                    setFormData({ ...formData, instagram_id: e.target.value });
+                    if (errors.instagram_id) setErrors({ ...errors, instagram_id: '' });
+                  }}
+                  className={errors.instagram_id ? 'border-red-500' : ''}
+                />
+                {errors.instagram_id && (
+                  <p className="text-sm text-red-500">{errors.instagram_id}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  ID аккаунта Instagram из раздела "Аккаунты Instagram"
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setPart('instruction')}
-            className="sm:mr-auto"
-          >
-            <ChevronLeft className="h-4 w-4 mr-1" />
-            Вернуться к инструкции
-          </Button>
+          <DialogFooter className="flex-col sm:flex-row gap-2 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setPart('instruction')}
+              className="sm:mr-auto w-full sm:w-auto order-2 sm:order-1"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Вернуться к инструкции
+            </Button>
 
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Отправка...
-              </>
-            ) : (
-              'Отправить на проверку'
-            )}
-          </Button>
+            <Button onClick={handleSubmit} disabled={loading} className="w-full sm:w-auto order-1 sm:order-2">
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Отправка...
+                </>
+              ) : (
+                'Отправить на проверку'
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
