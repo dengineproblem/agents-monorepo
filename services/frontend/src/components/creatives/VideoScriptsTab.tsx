@@ -87,11 +87,6 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
       return;
     }
 
-    if (!userPrompt.trim()) {
-      toast.error('Опишите, о чём должен быть текст');
-      return;
-    }
-
     setIsGenerating(true);
     setGeneratedText('');
     setIsEditMode(false);
@@ -273,7 +268,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
           {/* Кнопка генерации */}
           <Button
             onClick={handleGenerate}
-            disabled={isGenerating || !userPrompt.trim() || !userId}
+            disabled={isGenerating || !userId}
             className="w-full"
           >
             {isGenerating ? (
