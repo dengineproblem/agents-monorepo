@@ -426,6 +426,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             .insert([
               {
                 user_account_id: userAccountId,
+                account_id: input.accountId || null, // UUID для мультиаккаунтности
                 phone_number: phoneNumber,
                 is_active: true,
                 is_default: false,
@@ -635,6 +636,7 @@ export async function directionsRoutes(app: FastifyInstance) {
               .insert([
                 {
                   user_account_id: userAccountId,
+                  account_id: existingDirection.account_id || null, // UUID для мультиаккаунтности
                   phone_number: phoneNumber,
                   is_active: true,
                   is_default: false,
