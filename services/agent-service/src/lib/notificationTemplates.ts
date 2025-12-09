@@ -15,49 +15,45 @@ import { NotificationTemplate, APP_BASE_URL } from './notificationService.js';
 
 export const INACTIVE_3D: NotificationTemplate = {
   type: 'inactive_3d',
-  title: 'Как дела с рекламой?',
-  message: 'Вы не заходили 3 дня. Проверьте статистику ваших кампаний.',
-  telegramMessage: `<b>Как дела с рекламой?</b>
+  title: 'Ваши деньги работают. А вы в курсе?',
+  message: '3 дня без вас — а реклама крутится. Зайдите посмотреть, что там.',
+  telegramMessage: `<b>Ваши деньги работают. А вы в курсе?</b>
 
-Вы не заходили 3 дня. Рекомендуем проверить статистику ваших кампаний.
+3 дня без вас — а реклама крутится. Зайдите посмотреть, что там.
 
-<a href="${APP_BASE_URL}">Открыть дашборд</a>`,
+<a href="${APP_BASE_URL}">Посмотреть</a>`,
   ctaUrl: APP_BASE_URL,
-  ctaLabel: 'Открыть дашборд',
+  ctaLabel: 'Посмотреть',
   cooldownDays: 3,
-  channels: ['in_app'] // Только in-app для 3 дней
+  channels: ['telegram', 'in_app']
 };
 
 export const INACTIVE_7D: NotificationTemplate = {
   type: 'inactive_7d',
-  title: 'Мы скучаем!',
-  message: 'Вы не заходили в систему уже 7 дней. Ваши рекламные кампании ждут оптимизации.',
-  telegramMessage: `<b>Давно не видели вас в системе</b>
+  title: '7 дней. Сколько лидов вы пропустили?',
+  message: 'Реклама работала всю неделю. Результаты ждут вас в личном кабинете.',
+  telegramMessage: `<b>7 дней. Сколько лидов вы пропустили?</b>
 
-Вы не заходили уже 7 дней.
+Реклама работала всю неделю. Результаты ждут вас в личном кабинете.
 
-За это время могли появиться новые лиды, а кампании требуют оптимизации.
-
-<a href="${APP_BASE_URL}">Посмотреть статистику</a>`,
+<a href="${APP_BASE_URL}">Посмотреть результаты</a>`,
   ctaUrl: APP_BASE_URL,
-  ctaLabel: 'Посмотреть статистику',
+  ctaLabel: 'Посмотреть результаты',
   cooldownDays: 7,
   channels: ['telegram', 'in_app']
 };
 
 export const INACTIVE_14D: NotificationTemplate = {
   type: 'inactive_14d',
-  title: 'Не упускайте клиентов',
-  message: 'Вы не заходили 14 дней. Каждый день без оптимизации — это потерянные лиды.',
-  telegramMessage: `<b>Не упускайте клиентов</b>
+  title: '2 недели тишины. Конкуренты не спят.',
+  message: 'Пока вас не было — данные копились. Зайдите, посмотрите цифры.',
+  telegramMessage: `<b>2 недели тишины. Конкуренты не спят.</b>
 
-Вы не заходили в систему 14 дней. Конкуренты не ждут.
+Пока вас не было — данные копились. Зайдите, посмотрите цифры.
 
-Проверьте статистику и оптимизируйте кампании.
-
-<a href="${APP_BASE_URL}">Открыть дашборд</a>`,
+<a href="${APP_BASE_URL}">Посмотреть цифры</a>`,
   ctaUrl: APP_BASE_URL,
-  ctaLabel: 'Открыть дашборд',
+  ctaLabel: 'Посмотреть цифры',
   cooldownDays: 14,
   channels: ['telegram', 'in_app']
 };
@@ -68,28 +64,41 @@ export const INACTIVE_14D: NotificationTemplate = {
 
 export const ONBOARDING_REGISTERED: NotificationTemplate = {
   type: 'onboarding_reminder',
-  title: 'Подключите Facebook',
-  message: 'Для запуска рекламы необходимо подключить Facebook аккаунт. Это займет пару минут.',
-  telegramMessage: `<b>Подключите Facebook</b>
+  title: 'Без Facebook — нет рекламы',
+  message: 'Первый шаг — подключить бизнес-аккаунт Facebook. Займёт пару минут.',
+  telegramMessage: `<b>Без Facebook — нет рекламы</b>
 
-Для запуска рекламы необходимо подключить бизнес-аккаунт Facebook. Это займет пару минут.
+Первый шаг — подключить бизнес-аккаунт Facebook. Займёт пару минут.
 
-<a href="${APP_BASE_URL}/profile">Подключить сейчас</a>`,
+<a href="${APP_BASE_URL}/profile">Подключить</a>`,
   ctaUrl: `${APP_BASE_URL}/profile`,
-  ctaLabel: 'Подключить сейчас',
+  ctaLabel: 'Подключить',
+  cooldownDays: 3,
+  channels: ['telegram', 'in_app']
+};
+
+export const ONBOARDING_FB_PENDING: NotificationTemplate = {
+  type: 'onboarding_fb_pending',
+  title: 'Facebook висит на полпути',
+  message: 'Подключение не завершено. Если что-то пошло не так — напишите, поможем.',
+  telegramMessage: `<b>Facebook висит на полпути</b>
+
+Подключение не завершено. Если что-то пошло не так — напишите, поможем.
+
+<a href="${APP_BASE_URL}/profile">Продолжить</a>`,
+  ctaUrl: `${APP_BASE_URL}/profile`,
+  ctaLabel: 'Продолжить',
   cooldownDays: 3,
   channels: ['telegram', 'in_app']
 };
 
 export const ONBOARDING_FB_CONNECTED: NotificationTemplate = {
   type: 'onboarding_reminder',
-  title: 'Создайте направление',
-  message: 'Facebook подключен. Следующий шаг — создать направление для настройки таргетинга.',
-  telegramMessage: `<b>Создайте направление</b>
+  title: 'Facebook есть. Куда лить трафик?',
+  message: 'Направление — это ваша аудитория и бюджет. Создайте его.',
+  telegramMessage: `<b>Facebook есть. Куда лить трафик?</b>
 
-Facebook успешно подключен.
-
-Следующий шаг — создать направление. Направление определяет целевую аудиторию и бюджет рекламы.
+Направление — это ваша аудитория и бюджет. Создайте его.
 
 <a href="${APP_BASE_URL}/ad-settings">Создать направление</a>`,
   ctaUrl: `${APP_BASE_URL}/ad-settings`,
@@ -100,15 +109,11 @@ Facebook успешно подключен.
 
 export const ONBOARDING_DIRECTION_CREATED: NotificationTemplate = {
   type: 'onboarding_reminder',
-  title: 'Добавьте креативы',
-  message: 'Направление создано. Теперь загрузите или сгенерируйте креативы для рекламы.',
-  telegramMessage: `<b>Добавьте креативы</b>
+  title: 'Направление готово. Где креативы?',
+  message: 'Без контента реклама не запустится. Загрузите или сгенерируйте креативы.',
+  telegramMessage: `<b>Направление готово. Где креативы?</b>
 
-Направление создано. Теперь нужны креативы.
-
-Варианты:
-- Загрузить свои видео/изображения
-- Сгенерировать с помощью AI
+Без контента реклама не запустится. Загрузите или сгенерируйте креативы.
 
 <a href="${APP_BASE_URL}/creatives">Добавить креативы</a>`,
   ctaUrl: `${APP_BASE_URL}/creatives`,
@@ -119,32 +124,26 @@ export const ONBOARDING_DIRECTION_CREATED: NotificationTemplate = {
 
 export const ONBOARDING_CREATIVE_CREATED: NotificationTemplate = {
   type: 'onboarding_reminder',
-  title: 'Запустите рекламу',
-  message: 'Креативы готовы. Осталось запустить рекламную кампанию.',
-  telegramMessage: `<b>Запустите рекламу</b>
+  title: 'Креативы пылятся. Запустите их.',
+  message: 'Всё готово, осталось нажать кнопку. Запустите рекламу.',
+  telegramMessage: `<b>Креативы пылятся. Запустите их.</b>
 
-Креативы готовы. Осталось запустить рекламу.
+Всё готово, осталось нажать кнопку. Запустите рекламу.
 
-Выберите креативы и нажмите "Запустить" — мы создадим кампанию автоматически.
-
-<a href="${APP_BASE_URL}/creatives">Запустить рекламу</a>`,
+<a href="${APP_BASE_URL}/creatives">Запустить</a>`,
   ctaUrl: `${APP_BASE_URL}/creatives`,
-  ctaLabel: 'Запустить рекламу',
+  ctaLabel: 'Запустить',
   cooldownDays: 3,
   channels: ['telegram', 'in_app']
 };
 
 export const ONBOARDING_ADS_LAUNCHED: NotificationTemplate = {
   type: 'onboarding_reminder',
-  title: 'Настройте ROI аналитику',
-  message: 'Реклама работает. Настройте ROI аналитику для отслеживания эффективности.',
-  telegramMessage: `<b>Настройте ROI аналитику</b>
+  title: 'Реклама крутится. А окупается?',
+  message: 'Без ROI аналитики — работаете вслепую. Настройте и видьте реальную отдачу.',
+  telegramMessage: `<b>Реклама крутится. А окупается?</b>
 
-Реклама работает.
-
-Чтобы видеть реальную отдачу от рекламы, настройте ROI аналитику:
-- Подключите WhatsApp для сбора лидов
-- Или настройте интеграцию с CRM
+Без ROI аналитики — работаете вслепую. Настройте и видьте реальную отдачу.
 
 <a href="${APP_BASE_URL}/roi">Настроить ROI</a>`,
   ctaUrl: `${APP_BASE_URL}/roi`,
@@ -159,30 +158,15 @@ export const ONBOARDING_ADS_LAUNCHED: NotificationTemplate = {
 
 export const ACHIEVEMENT_FIRST_LEAD: NotificationTemplate = {
   type: 'achievement_first_lead',
-  title: 'Первый лид получен!',
-  message: 'Поздравляем! Ваша реклама начала работать. Продолжайте тестировать креативы.',
-  telegramMessage: `<b>Первый лид получен!</b>
+  title: 'Первый лид в кармане!',
+  message: 'Реклама заработала. Теперь следите за статистикой и масштабируйте.',
+  telegramMessage: `<b>Первый лид в кармане!</b>
 
-Поздравляем! Ваша реклама начала работать. Продолжайте тестировать креативы для лучших результатов.
+Реклама заработала. Теперь следите за статистикой и масштабируйте.
 
-<a href="${APP_BASE_URL}/roi">Смотреть аналитику</a>`,
+<a href="${APP_BASE_URL}/roi">Смотреть статистику</a>`,
   ctaUrl: `${APP_BASE_URL}/roi`,
-  ctaLabel: 'Смотреть аналитику',
-  cooldownDays: 9999, // Только один раз
-  channels: ['telegram', 'in_app']
-};
-
-export const ACHIEVEMENT_5_CREATIVES: NotificationTemplate = {
-  type: 'achievement_5_creatives',
-  title: '5 креативов создано!',
-  message: 'Отличный старт. Тестирование разных вариантов помогает найти самый эффективный.',
-  telegramMessage: `<b>Уже 5 креативов!</b>
-
-Отличный старт. Тестирование разных вариантов помогает найти самый эффективный.
-
-<a href="${APP_BASE_URL}/creatives">Создать ещё</a>`,
-  ctaUrl: `${APP_BASE_URL}/creatives`,
-  ctaLabel: 'Создать ещё',
+  ctaLabel: 'Смотреть статистику',
   cooldownDays: 9999, // Только один раз
   channels: ['telegram', 'in_app']
 };
@@ -200,6 +184,40 @@ export const ACHIEVEMENT_PROFITABLE_WEEK: NotificationTemplate = {
   ctaLabel: 'Детальный отчёт',
   cooldownDays: 7, // Раз в неделю можно
   channels: ['telegram']
+};
+
+// =====================================================
+// Алерты по метрикам
+// =====================================================
+
+export const HIGH_CPL_ALERT: NotificationTemplate = {
+  type: 'high_cpl_alert',
+  title: 'CPL выше плана 3 дня. Креативы устали.',
+  message: 'Аудитория видела ваши объявления слишком много раз. Пора обновить креативы.',
+  telegramMessage: `<b>CPL выше плана 3 дня. Креативы устали.</b>
+
+Аудитория видела ваши объявления слишком много раз. Пора обновить креативы.
+
+<a href="${APP_BASE_URL}/creatives">Обновить креативы</a>`,
+  ctaUrl: `${APP_BASE_URL}/creatives`,
+  ctaLabel: 'Обновить креативы',
+  cooldownDays: 7, // Не чаще раза в неделю
+  channels: ['telegram', 'in_app']
+};
+
+// =====================================================
+// Еженедельный отчёт
+// =====================================================
+
+export const WEEKLY_REPORT: NotificationTemplate = {
+  type: 'weekly_report',
+  title: 'Еженедельный отчёт',
+  message: 'Ваш отчёт за неделю готов. Посмотрите результаты рекламных кампаний.',
+  telegramMessage: '', // Заполняется динамически в sendWeeklyReport
+  ctaUrl: `${APP_BASE_URL}/roi`,
+  ctaLabel: 'Подробная аналитика',
+  cooldownDays: 7,
+  channels: ['telegram', 'in_app']
 };
 
 // =====================================================
@@ -224,8 +242,9 @@ export type OnboardingStage =
 export function getOnboardingReminderTemplate(stage: OnboardingStage): NotificationTemplate | null {
   switch (stage) {
     case 'registered':
-    case 'fb_pending':
       return ONBOARDING_REGISTERED;
+    case 'fb_pending':
+      return ONBOARDING_FB_PENDING;
     case 'fb_connected':
       return ONBOARDING_FB_CONNECTED;
     case 'direction_created':
@@ -268,6 +287,7 @@ export const NOTIFICATION_TEMPLATES = {
 
   // Онбординг
   onboarding_registered: ONBOARDING_REGISTERED,
+  onboarding_fb_pending: ONBOARDING_FB_PENDING,
   onboarding_fb_connected: ONBOARDING_FB_CONNECTED,
   onboarding_direction_created: ONBOARDING_DIRECTION_CREATED,
   onboarding_creative_created: ONBOARDING_CREATIVE_CREATED,
@@ -275,6 +295,11 @@ export const NOTIFICATION_TEMPLATES = {
 
   // Достижения
   achievement_first_lead: ACHIEVEMENT_FIRST_LEAD,
-  achievement_5_creatives: ACHIEVEMENT_5_CREATIVES,
-  achievement_profitable_week: ACHIEVEMENT_PROFITABLE_WEEK
+  achievement_profitable_week: ACHIEVEMENT_PROFITABLE_WEEK,
+
+  // Алерты по метрикам
+  high_cpl_alert: HIGH_CPL_ALERT,
+
+  // Отчёты
+  weekly_report: WEEKLY_REPORT
 };
