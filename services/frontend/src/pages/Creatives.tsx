@@ -30,6 +30,8 @@ import { OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
 import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativeAnalyticsApi";
 import { TestStatusIndicator } from "@/components/TestStatusIndicator";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
+import { TooltipKeys } from "@/content/tooltips";
 
 // Утилита для получения thumbnail URL через Supabase Transform
 const getThumbnailUrl = (url: string | null | undefined, width = 200, height = 250): string | null => {
@@ -1082,30 +1084,33 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
       </Card>
 
       <div className="pt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-2 w-full sm:w-auto"
-          onClick={handleQuickTest}
-          disabled={quickTestLoading || (hasTest && testIsRunning)}
-        >
-          {quickTestLoading ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Запуск...
-            </>
-          ) : (hasTest && testIsRunning) ? (
-            <>
-              <TrendingUp className="h-4 w-4" />
-              Тест запущен
-            </>
-          ) : (
-            <>
-            <Sparkles className="h-4 w-4" />
-            Быстрый тест
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2 w-full sm:w-auto"
+            onClick={handleQuickTest}
+            disabled={quickTestLoading || (hasTest && testIsRunning)}
+          >
+            {quickTestLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Запуск...
+              </>
+            ) : (hasTest && testIsRunning) ? (
+              <>
+                <TrendingUp className="h-4 w-4" />
+                Тест запущен
+              </>
+            ) : (
+              <>
+              <Sparkles className="h-4 w-4" />
+              Быстрый тест
+              </>
+            )}
+          </Button>
+          <HelpTooltip tooltipKey={TooltipKeys.TEST_CAMPAIGN_WHAT} iconSize="sm" />
+        </div>
         {hasTest && (
           <Button
             size="sm"
@@ -1222,7 +1227,9 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
                   <span className={`rounded-full px-2 py-0.5 text-xs ${verdictMeta[analysis.verdict].className}`}>
                     {verdictMeta[analysis.verdict].emoji} {verdictMeta[analysis.verdict].label}
                   </span>
+                  <HelpTooltip tooltipKey={TooltipKeys.CREATIVE_LLM_VERDICT} iconSize="sm" />
                   <span className="text-muted-foreground">Оценка: {analysis.score}/100</span>
+                  <HelpTooltip tooltipKey={TooltipKeys.CREATIVE_LLM_SCORE} iconSize="sm" />
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
@@ -1715,7 +1722,10 @@ const Creatives: React.FC = () => {
               {/* Выбор направления */}
               {directions.length > 0 ? (
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Направление бизнеса</label>
+                  <div className="flex items-center gap-1">
+                    <label className="text-sm font-medium">Направление бизнеса</label>
+                    <HelpTooltip tooltipKey={TooltipKeys.UPLOAD_SELECT_DIRECTION} iconSize="sm" />
+                  </div>
                   <Select
                     value={selectedDirectionId}
                     onValueChange={setSelectedDirectionId}

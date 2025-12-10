@@ -689,6 +689,7 @@ const ROIAnalytics: React.FC = () => {
                   <DollarSign className="h-4 w-4 text-green-600 dark:text-green-500/70" />
                 </div>
                 <p className="text-xs text-muted-foreground leading-tight flex-1">Общая выручка</p>
+                <HelpTooltip tooltipKey={TooltipKeys.ROI_TOTAL_REVENUE} iconSize="sm" />
               </div>
               <p className="text-lg font-semibold text-green-600 dark:text-green-500/70">
                 {formatCurrency(roiData?.totalRevenue || 0)}
@@ -703,6 +704,7 @@ const ROIAnalytics: React.FC = () => {
                   <TrendingDown className="h-4 w-4 text-slate-600" />
                 </div>
                 <p className="text-xs text-muted-foreground leading-tight flex-1">Общие затраты</p>
+                <HelpTooltip tooltipKey={TooltipKeys.ROI_TOTAL_SPEND} iconSize="sm" />
               </div>
               <p className="text-lg font-semibold text-slate-600">
                 {formatCurrency(roiData?.totalSpend || 0)}
@@ -721,6 +723,7 @@ const ROIAnalytics: React.FC = () => {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground leading-tight flex-1">Общий ROI</p>
+                <HelpTooltip tooltipKey={TooltipKeys.ROI_TOTAL_PERCENT} iconSize="sm" />
               </div>
               <p className={`text-lg font-semibold ${roiData?.totalROI && roiData.totalROI > 0 ? 'text-green-600 dark:text-green-500/70' : 'text-red-600 dark:text-red-500/70'}`}>
                 {formatPercent(roiData?.totalROI || 0)}
@@ -798,7 +801,7 @@ const ROIAnalytics: React.FC = () => {
           {/* Фильтр по типу медиа - в стиле табов + кнопка экспорта */}
           <div className="mb-4 flex items-center justify-between gap-4">
             {/* Десктоп: табы */}
-            <div className="hidden md:block">
+            <div className="hidden md:flex items-center gap-2">
               <Tabs value={mediaTypeFilter} onValueChange={(v) => setMediaTypeFilter(v as typeof mediaTypeFilter)}>
                 <TabsList className="bg-muted">
                   <TabsTrigger value="all">Все типы</TabsTrigger>
@@ -816,6 +819,7 @@ const ROIAnalytics: React.FC = () => {
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
+              <HelpTooltip tooltipKey={TooltipKeys.ROI_MEDIA_TYPE_FILTER} iconSize="sm" />
             </div>
 
             {/* Мобилка: выпадающий список */}

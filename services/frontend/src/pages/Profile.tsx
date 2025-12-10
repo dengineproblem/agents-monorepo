@@ -22,6 +22,8 @@ import { TildaConnectionCard, TildaInstructionsDialog } from '@/components/profi
 import { AmoCRMQualificationFieldModal } from '@/components/amocrm/AmoCRMQualificationFieldModal';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
@@ -1015,6 +1017,7 @@ const Profile: React.FC = () => {
                   <CardTitle className="text-lg flex items-center gap-2">
                     <MessageCircle className="h-5 w-5" />
                     {t('profile.telegramReports')}
+                    <HelpTooltip tooltipKey={TooltipKeys.PROFILE_TELEGRAM_IDS} iconSize="sm" />
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1078,6 +1081,7 @@ const Profile: React.FC = () => {
                     <CardTitle className="text-lg flex items-center gap-2">
                       <Users className="h-5 w-5" />
                       Аудитория
+                      <HelpTooltip tooltipKey={TooltipKeys.PROFILE_AUDIENCE_ID} iconSize="sm" />
                     </CardTitle>
                   </CardHeader>
                   <CardContent>

@@ -925,30 +925,35 @@ const CreativeGeneration = () => {
 
                   {/* Кнопка референса конкурента */}
                   {userId && (
-                    <Button
-                      variant={competitorReference ? "secondary" : "outline"}
-                      size="sm"
-                      onClick={() => setShowCompetitorRef(!showCompetitorRef)}
-                      className="shrink-0"
-                    >
-                      <Users className="h-4 w-4 mr-1" />
-                      {competitorReference ? "Референс ✓" : "Конкурент"}
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant={competitorReference ? "secondary" : "outline"}
+                        size="sm"
+                        onClick={() => setShowCompetitorRef(!showCompetitorRef)}
+                      >
+                        <Users className="h-4 w-4 mr-1" />
+                        {competitorReference ? "Референс ✓" : "Конкурент"}
+                      </Button>
+                      <HelpTooltip tooltipKey={TooltipKeys.GEN_COMPETITOR_REFERENCE} iconSize="sm" />
+                    </div>
                   )}
 
                   {/* Кнопка загрузки референсных изображений */}
-                  {referenceImages.length < 2 && (
-                    <Label htmlFor="reference-upload-inline" className="cursor-pointer shrink-0">
-                      <div className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 h-9 px-3 ${referenceImages.length > 0 ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80' : 'border border-input bg-background hover:bg-accent hover:text-accent-foreground'}`}>
-                        <ImagePlus className="h-4 w-4 mr-1" />
-                        {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
-                      </div>
-                      <Input id="reference-upload-inline" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
-                    </Label>
-                  )}
-                  {referenceImages.length >= 2 && (
-                    <Badge variant="secondary" className="shrink-0">Фото ({referenceImages.length})</Badge>
-                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {referenceImages.length < 2 && (
+                      <Label htmlFor="reference-upload-inline" className="cursor-pointer">
+                        <div className={`inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 h-9 px-3 ${referenceImages.length > 0 ? 'bg-secondary text-secondary-foreground hover:bg-secondary/80' : 'border border-input bg-background hover:bg-accent hover:text-accent-foreground'}`}>
+                          <ImagePlus className="h-4 w-4 mr-1" />
+                          {referenceImages.length > 0 ? `Фото (${referenceImages.length})` : "Фото"}
+                        </div>
+                        <Input id="reference-upload-inline" type="file" accept="image/*" className="hidden" onChange={handleReferenceImageUpload} />
+                      </Label>
+                    )}
+                    {referenceImages.length >= 2 && (
+                      <Badge variant="secondary">Фото ({referenceImages.length})</Badge>
+                    )}
+                    <HelpTooltip tooltipKey={TooltipKeys.GEN_REFERENCE_LIMIT} iconSize="sm" />
+                  </div>
                 </div>
 
                 {/* Загруженные референсные изображения */}
@@ -1158,12 +1163,18 @@ const CreativeGeneration = () => {
             {generatedImage && (
                     <Card className="shadow-sm">
                       <CardHeader>
-                  <CardTitle>Создание креатива</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    Создание креатива
+                    <HelpTooltip tooltipKey={TooltipKeys.GEN_CREATE_IN_FACEBOOK} iconSize="sm" />
+                  </CardTitle>
                   <CardDescription>Выберите направление для сохранения креатива</CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
                       <div className="space-y-2">
-                    <Label>Направление</Label>
+                    <Label className="flex items-center gap-1">
+                      Направление
+                      <HelpTooltip tooltipKey={TooltipKeys.GEN_SELECT_DIRECTION} iconSize="sm" />
+                    </Label>
                     {directions.length > 0 ? (
                       <Select
                         value={selectedDirectionId}

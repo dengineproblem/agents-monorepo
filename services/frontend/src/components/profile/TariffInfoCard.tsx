@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { CalendarDays, Lock, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 type Tarif = 'ai_target' | 'target' | 'ai_manager' | 'complex';
 
@@ -77,6 +79,7 @@ const TariffInfoCard: React.FC<TariffInfoCardProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">{t('profile.tariff')}</span>
               {tarifBadge}
+              <HelpTooltip tooltipKey={TooltipKeys.PROFILE_TARIFF} iconSize="sm" />
             </div>
             <div className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4 text-muted-foreground" />

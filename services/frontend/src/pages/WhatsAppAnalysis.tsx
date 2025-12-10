@@ -28,6 +28,8 @@ import {
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DialogFilters } from '@/components/dialogs/DialogFilters';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 export default function WhatsAppAnalysis() {
   const { toast } = useToast();
@@ -201,10 +203,13 @@ export default function WhatsAppAnalysis() {
           description="Управление лидами из WhatsApp с AI-анализом"
         >
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setAddLeadModalOpen(true)} size="sm">
-              <Plus className="w-4 h-4 mr-2" />
-              Новый лид
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button onClick={() => setAddLeadModalOpen(true)} size="sm">
+                <Plus className="w-4 h-4 mr-2" />
+                Новый лид
+              </Button>
+              <HelpTooltip tooltipKey={TooltipKeys.WA_ADD_LEAD} iconSize="sm" />
+            </div>
             
             <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
               <PopoverTrigger asChild>
@@ -239,7 +244,10 @@ export default function WhatsAppAnalysis() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">HOT лиды</CardTitle>
+                <div className="flex items-center gap-1">
+                  <CardTitle className="text-sm font-medium">HOT лиды</CardTitle>
+                  <HelpTooltip tooltipKey={TooltipKeys.WA_FUNNEL_HOT} iconSize="sm" />
+                </div>
                 <Flame className="h-4 w-4 text-red-500" />
               </CardHeader>
               <CardContent>
@@ -252,7 +260,10 @@ export default function WhatsAppAnalysis() {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">WARM лиды</CardTitle>
+                <div className="flex items-center gap-1">
+                  <CardTitle className="text-sm font-medium">WARM лиды</CardTitle>
+                  <HelpTooltip tooltipKey={TooltipKeys.WA_FUNNEL_WARM} iconSize="sm" />
+                </div>
                 <TrendingUp className="h-4 w-4 text-orange-500" />
               </CardHeader>
               <CardContent>
@@ -265,7 +276,10 @@ export default function WhatsAppAnalysis() {
 
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">COLD лиды</CardTitle>
+                <div className="flex items-center gap-1">
+                  <CardTitle className="text-sm font-medium">COLD лиды</CardTitle>
+                  <HelpTooltip tooltipKey={TooltipKeys.WA_FUNNEL_COLD} iconSize="sm" />
+                </div>
                 <Snowflake className="h-4 w-4 text-blue-500" />
               </CardHeader>
               <CardContent>
@@ -293,17 +307,20 @@ export default function WhatsAppAnalysis() {
           {/* Tabs */}
           <Tabs value={activeView} onValueChange={(v) => setActiveView(v as any)} className="w-full">
             <TabsList className="mb-4">
-              <TabsTrigger value="kanban">
-                <LayoutGrid className="w-4 h-4 mr-2" />
+              <TabsTrigger value="kanban" className="gap-1">
+                <LayoutGrid className="w-4 h-4" />
                 Kanban
+                <HelpTooltip tooltipKey={TooltipKeys.WA_VIEW_KANBAN} iconSize="sm" />
               </TabsTrigger>
-              <TabsTrigger value="list">
-                <List className="w-4 h-4 mr-2" />
+              <TabsTrigger value="list" className="gap-1">
+                <List className="w-4 h-4" />
                 Список
+                <HelpTooltip tooltipKey={TooltipKeys.WA_VIEW_LIST} iconSize="sm" />
               </TabsTrigger>
-              <TabsTrigger value="table">
-                <TableIcon className="w-4 h-4 mr-2" />
+              <TabsTrigger value="table" className="gap-1">
+                <TableIcon className="w-4 h-4" />
                 Таблица
+                <HelpTooltip tooltipKey={TooltipKeys.WA_VIEW_TABLE} iconSize="sm" />
               </TabsTrigger>
             </TabsList>
 

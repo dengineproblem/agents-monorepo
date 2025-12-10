@@ -22,6 +22,8 @@ import type { Competitor, CompetitorCreative, CompetitorsPagination } from '@/ty
 import { useTranslation } from '@/i18n/LanguageContext';
 import { useAppContext } from '@/context/AppContext';
 import { AdAccountSwitcher } from '@/components/ad-accounts/AdAccountSwitcher';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -297,42 +299,49 @@ export default function Competitors() {
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Eye className="w-5 h-5" />
                     {t('competitors.creatives')}
+                    <HelpTooltip tooltipKey={TooltipKeys.COMPETITOR_TOP_10} iconSize="sm" />
                   </CardTitle>
 
                   <div className="flex items-center gap-2">
                     {/* Фильтр по типу медиа */}
-                    <Select
-                      value={mediaTypeFilter}
-                      onValueChange={(value) => setMediaTypeFilter(value as any)}
-                    >
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">{t('competitors.allTypes')}</SelectItem>
-                        <SelectItem value="video">{t('competitors.video')}</SelectItem>
-                        <SelectItem value="image">{t('competitors.image')}</SelectItem>
-                        <SelectItem value="carousel">{t('competitors.carousel')}</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="flex items-center gap-1">
+                      <Select
+                        value={mediaTypeFilter}
+                        onValueChange={(value) => setMediaTypeFilter(value as any)}
+                      >
+                        <SelectTrigger className="w-[140px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">{t('competitors.allTypes')}</SelectItem>
+                          <SelectItem value="video">{t('competitors.video')}</SelectItem>
+                          <SelectItem value="image">{t('competitors.image')}</SelectItem>
+                          <SelectItem value="carousel">{t('competitors.carousel')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <HelpTooltip tooltipKey={TooltipKeys.COMPETITOR_MEDIA_FILTER} iconSize="sm" />
+                    </div>
 
                     {/* Кнопка обновить все */}
                     {selectedCompetitorId && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const competitor = competitors.find((c) => c.id === selectedCompetitorId);
-                          if (competitor) handleRefresh(competitor);
-                        }}
-                        disabled={refreshingId !== null}
-                      >
-                        {refreshingId === selectedCompetitorId ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <RefreshCw className="w-4 h-4" />
-                        )}
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const competitor = competitors.find((c) => c.id === selectedCompetitorId);
+                            if (competitor) handleRefresh(competitor);
+                          }}
+                          disabled={refreshingId !== null}
+                        >
+                          {refreshingId === selectedCompetitorId ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="w-4 h-4" />
+                          )}
+                        </Button>
+                        <HelpTooltip tooltipKey={TooltipKeys.COMPETITOR_REFRESH} iconSize="sm" />
+                      </div>
                     )}
                   </div>
                 </div>

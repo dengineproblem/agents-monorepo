@@ -21,6 +21,8 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { FEATURES } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
+import { HelpTooltip } from '../components/ui/help-tooltip';
+import { TooltipKeys } from '../content/tooltips';
 
 const WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/token';
 
@@ -381,35 +383,41 @@ const Dashboard: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.platform')}</span>
                     <div className="flex gap-2">
-                      <Button
-                        variant={platform === 'instagram' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setPlatform('instagram')}
-                        className={cn(
-                          "gap-2 transition-all duration-200",
-                          platform === 'instagram' 
-                            ? "bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground" 
-                            : "border-purple-200 text-purple-600 hover:bg-purple-50 hover:border-purple-300 dark:border dark:text-foreground dark:hover:bg-accent"
-                        )}
-                      >
-                        <Instagram className="h-4 w-4" />
-                        Instagram
-                      </Button>
-                      {FEATURES.SHOW_TIKTOK && (
+                      <div className="flex items-center gap-1">
                         <Button
-                          variant={platform === 'tiktok' ? 'default' : 'outline'}
+                          variant={platform === 'instagram' ? 'default' : 'outline'}
                           size="sm"
-                          onClick={() => setPlatform('tiktok')}
+                          onClick={() => setPlatform('instagram')}
                           className={cn(
                             "gap-2 transition-all duration-200",
-                            platform === 'tiktok' 
-                              ? "bg-gradient-to-r from-black to-gray-900 hover:from-gray-900 hover:to-black text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground" 
-                              : "border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:border dark:text-foreground dark:hover:bg-accent"
+                            platform === 'instagram'
+                              ? "bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground"
+                              : "border-purple-200 text-purple-600 hover:bg-purple-50 hover:border-purple-300 dark:border dark:text-foreground dark:hover:bg-accent"
                           )}
                         >
-                          <TikTokIcon />
-                          TikTok
+                          <Instagram className="h-4 w-4" />
+                          Instagram
                         </Button>
+                        <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_INSTAGRAM} iconSize="sm" />
+                      </div>
+                      {FEATURES.SHOW_TIKTOK && (
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant={platform === 'tiktok' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setPlatform('tiktok')}
+                            className={cn(
+                              "gap-2 transition-all duration-200",
+                              platform === 'tiktok'
+                                ? "bg-gradient-to-r from-black to-gray-900 hover:from-gray-900 hover:to-black text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground"
+                                : "border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:border dark:text-foreground dark:hover:bg-accent"
+                            )}
+                          >
+                            <TikTokIcon />
+                            TikTok
+                          </Button>
+                          <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_TIKTOK} iconSize="sm" />
+                        </div>
                       )}
                     </div>
                   </div>
@@ -418,6 +426,7 @@ const Dashboard: React.FC = () => {
                       <div className="flex items-center gap-2 flex-1">
                         <AlertCircle className="h-4 w-4 flex-shrink-0" />
                         <span className="text-sm">{t('dashboard.connectFacebookDescription')}</span>
+                        <HelpTooltip tooltipKey={TooltipKeys.FACEBOOK_CONNECT_BANNER} iconSize="sm" />
                       </div>
                       <Button
                         variant="outline"
@@ -434,8 +443,9 @@ const Dashboard: React.FC = () => {
                       <div className="flex items-center gap-2 flex-1">
                         <AlertCircle className="h-4 w-4 flex-shrink-0" />
                         <span className="text-sm">Для просмотра статистики TikTok требуется подключение аккаунта.</span>
+                        <HelpTooltip tooltipKey={TooltipKeys.TIKTOK_CONNECT_BANNER} iconSize="sm" />
                       </div>
-                      <Button 
+                      <Button
                         variant="outline"
                         size="sm"
                         onClick={openTikTokAuth}
@@ -458,6 +468,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-sm font-medium text-red-900 dark:text-red-200">
                   {t('dashboard.paymentFailedMessage')}
                 </p>
+                <HelpTooltip tooltipKey={TooltipKeys.PAYMENT_FAILED_BANNER} iconSize="sm" />
               </div>
               <button
                 aria-label={t('action.close')}
