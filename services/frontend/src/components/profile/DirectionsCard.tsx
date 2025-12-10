@@ -14,6 +14,8 @@ import { DirectionAdSets } from '../DirectionAdSets';
 import { supabase } from '@/integrations/supabase/client';
 import type { Direction, CreateDefaultSettingsInput } from '@/types/direction';
 import { OBJECTIVE_LABELS } from '@/types/direction';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 interface DirectionsCardProps {
   userAccountId: string | null;
@@ -136,6 +138,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
           <CardTitle className="text-lg flex items-center gap-2">
             <Target className="h-5 w-5" />
             Направления бизнеса
+            <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_WHAT} iconSize="md" />
           </CardTitle>
         </CardHeader>
         <CardContent>

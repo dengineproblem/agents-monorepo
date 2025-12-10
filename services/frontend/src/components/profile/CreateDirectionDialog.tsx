@@ -20,6 +20,8 @@ import { OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 interface CreateDirectionDialogProps {
   open: boolean;
@@ -282,9 +284,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {/* Тип кампании */}
             <div className="space-y-2">
-              <Label>
-                Тип кампании <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label>
+                  Тип кампании <span className="text-red-500">*</span>
+                </Label>
+                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_OBJECTIVE} />
+              </div>
               <RadioGroup
                 value={objective}
                 onValueChange={(value) => setObjective(value as DirectionObjective)}
@@ -313,9 +318,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {/* Суточный бюджет */}
             <div className="space-y-2">
-              <Label htmlFor="daily-budget">
-                Суточный бюджет <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="daily-budget">
+                  Суточный бюджет <span className="text-red-500">*</span>
+                </Label>
+                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_BUDGET} />
+              </div>
               <div className="flex items-center gap-2">
                 <Input
                   id="daily-budget"
@@ -337,9 +345,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {/* Целевая стоимость заявки */}
             <div className="space-y-2">
-              <Label htmlFor="target-cpl">
-                Целевая стоимость заявки (CPL) <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="target-cpl">
+                  Целевая стоимость заявки (CPL) <span className="text-red-500">*</span>
+                </Label>
+                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_TARGET_CPL} />
+              </div>
               <div className="flex items-center gap-2">
                 <Input
                   id="target-cpl"
@@ -368,9 +379,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {/* География */}
             <div className="space-y-2">
-              <Label>
-                География <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label>
+                  География <span className="text-red-500">*</span>
+                </Label>
+                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
+              </div>
               <Popover 
                 open={cityPopoverOpen} 
                 onOpenChange={setCityPopoverOpen} 
@@ -446,9 +460,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {/* Возраст */}
             <div className="space-y-2">
-              <Label>
-                Возраст <span className="text-red-500">*</span>
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label>
+                  Возраст <span className="text-red-500">*</span>
+                </Label>
+                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
+              </div>
               <div className="flex items-center gap-2">
                 <Input
                   type="number"
@@ -475,7 +492,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
             {/* Пол */}
             <div className="space-y-2">
-              <Label>Пол</Label>
+              <div className="flex items-center gap-1.5">
+                <Label>Пол</Label>
+                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
+              </div>
               <RadioGroup
                 value={gender}
                 onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
@@ -609,7 +629,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="pixel-id">Pixel ID (опционально)</Label>
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="pixel-id">Pixel ID (опционально)</Label>
+                  <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_PIXEL_ID} />
+                </div>
                 <Select
                   value={pixelId || 'none'}
                   onValueChange={(value) => setPixelId(value === 'none' ? '' : value)}

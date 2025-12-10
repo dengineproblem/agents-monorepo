@@ -7,6 +7,8 @@ import { Badge } from './ui/badge';
 import { toast } from 'sonner';
 import { useTranslation } from '../i18n/LanguageContext';
 import { getQualifiedLeadsTotal } from '@/services/amocrmApi';
+import { HelpTooltip } from './ui/help-tooltip';
+import { TooltipKeys, type TooltipKey } from '@/content/tooltips';
 
 interface SummaryStatsProps {
   showTitle?: boolean;
@@ -136,37 +138,41 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-2">
-          <StatCard 
-            title={t('stats.totalSpend')} 
-            value={platform === 'tiktok' ? formatCurrencyKZT(stats.totalSpend) : formatCurrency(stats.totalSpend)} 
-            icon={<CircleDollarSign className="w-4 h-4 text-green-600 dark:text-green-500/70" />} 
+          <StatCard
+            title={t('stats.totalSpend')}
+            value={platform === 'tiktok' ? formatCurrencyKZT(stats.totalSpend) : formatCurrency(stats.totalSpend)}
+            icon={<CircleDollarSign className="w-4 h-4 text-green-600 dark:text-green-500/70" />}
             loading={loading}
             isMock={stats.isMockData}
             isZero={stats.isZeroData}
+            tooltipKey={TooltipKeys.DASHBOARD_SPEND}
           />
-          <StatCard 
-            title={platform === 'tiktok' ? 'Переходы в WhatsApp' : t('stats.totalLeads')} 
-            value={formatNumber(stats.totalLeads)} 
+          <StatCard
+            title={platform === 'tiktok' ? 'Переходы в WhatsApp' : t('stats.totalLeads')}
+            value={formatNumber(stats.totalLeads)}
             icon={<Target className="w-4 h-4 text-blue-600 dark:text-gray-500/70" />}
             loading={loading}
             isMock={stats.isMockData}
             isZero={stats.isZeroData}
+            tooltipKey={TooltipKeys.DASHBOARD_LEADS}
           />
-          <StatCard 
-            title={platform === 'tiktok' ? 'Средняя стоимость клика' : t('stats.avgCPL')} 
-            value={platform === 'tiktok' ? formatCurrencyKZT(stats.avgCpl) : formatCurrency(stats.avgCpl)} 
+          <StatCard
+            title={platform === 'tiktok' ? 'Средняя стоимость клика' : t('stats.avgCPL')}
+            value={platform === 'tiktok' ? formatCurrencyKZT(stats.avgCpl) : formatCurrency(stats.avgCpl)}
             icon={<MousePointerClick className="w-5 h-5 text-purple-600 dark:text-purple-500/70" />}
             loading={loading}
             isMock={stats.isMockData}
             isZero={stats.isZeroData}
+            tooltipKey={TooltipKeys.DASHBOARD_CPL}
           />
-          <StatCard 
-            title={t('stats.totalImpressions')} 
-            value={formatNumber(stats.totalImpressions)} 
+          <StatCard
+            title={t('stats.totalImpressions')}
+            value={formatNumber(stats.totalImpressions)}
             icon={<BarChart3 className="w-5 h-5 text-amber-600 dark:text-amber-500/70" />}
             loading={loading}
             isMock={stats.isMockData}
             isZero={stats.isZeroData}
+            tooltipKey={TooltipKeys.DASHBOARD_IMPRESSIONS}
           />
           </div>
         </CardContent>
@@ -177,57 +183,63 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   // Для обычных тарифов - просто grid без Card обертки
   return (
     <div className="grid grid-cols-2 gap-2 mb-4">
-      <StatCard 
-        title={t('stats.totalSpend')} 
-        value={platform === 'tiktok' ? formatCurrencyKZT(stats.totalSpend) : formatCurrency(stats.totalSpend)} 
-        icon={<CircleDollarSign className="w-4 h-4 text-green-600 dark:text-green-500/70" />} 
+      <StatCard
+        title={t('stats.totalSpend')}
+        value={platform === 'tiktok' ? formatCurrencyKZT(stats.totalSpend) : formatCurrency(stats.totalSpend)}
+        icon={<CircleDollarSign className="w-4 h-4 text-green-600 dark:text-green-500/70" />}
         loading={loading}
         isMock={stats.isMockData}
         isZero={stats.isZeroData}
+        tooltipKey={TooltipKeys.DASHBOARD_SPEND}
       />
-      <StatCard 
-        title={platform === 'tiktok' ? 'Переходы в WhatsApp' : t('stats.totalLeads')} 
-        value={formatNumber(stats.totalLeads)} 
+      <StatCard
+        title={platform === 'tiktok' ? 'Переходы в WhatsApp' : t('stats.totalLeads')}
+        value={formatNumber(stats.totalLeads)}
         icon={<Target className="w-4 h-4 text-blue-600 dark:text-blue-500/70" />}
         loading={loading}
         isMock={stats.isMockData}
         isZero={stats.isZeroData}
+        tooltipKey={TooltipKeys.DASHBOARD_LEADS}
       />
-      <StatCard 
-        title={platform === 'tiktok' ? 'Средняя стоимость перехода' : t('stats.avgCPL')} 
-        value={platform === 'tiktok' ? formatCurrencyKZT(stats.avgCpl) : formatCurrency(stats.avgCpl)} 
+      <StatCard
+        title={platform === 'tiktok' ? 'Средняя стоимость перехода' : t('stats.avgCPL')}
+        value={platform === 'tiktok' ? formatCurrencyKZT(stats.avgCpl) : formatCurrency(stats.avgCpl)}
         icon={<MousePointerClick className="w-4 h-4 text-purple-600 dark:text-purple-500/70" />}
         loading={loading}
         isMock={stats.isMockData}
         isZero={stats.isZeroData}
+        tooltipKey={TooltipKeys.DASHBOARD_CPL}
       />
       {platform !== 'tiktok' && (
         <>
-          <StatCard 
-            title={t('stats.qualityLeads')} 
-            value={formatPercentWhole(stats.qualityRate)} 
-            icon={<Percent className="w-4 h-4 text-orange-600 dark:text-orange-500/70" />} 
+          <StatCard
+            title={t('stats.qualityLeads')}
+            value={formatPercentWhole(stats.qualityRate)}
+            icon={<Percent className="w-4 h-4 text-orange-600 dark:text-orange-500/70" />}
             loading={loading}
             isMock={stats.isMockData}
             isZero={stats.isZeroData}
+            tooltipKey={TooltipKeys.ROI_QUALITY_LEADS}
           />
-          <StatCard 
-            title={t('stats.avgCPQL')} 
-            value={formatCurrency(stats.avgCpql)} 
-            icon={<Target className="w-4 h-4 text-emerald-600 dark:text-emerald-500/70" />} 
+          <StatCard
+            title={t('stats.avgCPQL')}
+            value={formatCurrency(stats.avgCpql)}
+            icon={<Target className="w-4 h-4 text-emerald-600 dark:text-emerald-500/70" />}
             loading={loading}
             isMock={stats.isMockData}
             isZero={stats.isZeroData}
+            tooltipKey={TooltipKeys.DASHBOARD_QCPL}
           />
         </>
       )}
-      <StatCard 
-        title={t('stats.totalImpressions')} 
-        value={formatNumber(stats.totalImpressions)} 
+      <StatCard
+        title={t('stats.totalImpressions')}
+        value={formatNumber(stats.totalImpressions)}
         icon={<BarChart3 className="w-4 h-4 text-amber-600 dark:text-amber-500/70" />}
         loading={loading}
         isMock={stats.isMockData}
         isZero={stats.isZeroData}
+        tooltipKey={TooltipKeys.DASHBOARD_IMPRESSIONS}
       />
     </div>
   );
@@ -240,9 +252,10 @@ interface StatCardProps {
   loading: boolean;
   isMock?: boolean;
   isZero?: boolean;
+  tooltipKey?: TooltipKey;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon, loading, isMock = false, isZero = false }) => {
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon, loading, isMock = false, isZero = false, tooltipKey }) => {
   return (
     <Card className="transition-all duration-200 hover:shadow-md shadow-sm">
       <CardContent className="p-3">
@@ -250,7 +263,10 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon, loading, isMock
           <div className="p-1.5 rounded-lg bg-muted flex-shrink-0">
             {icon}
           </div>
-          <p className="text-xs text-muted-foreground leading-tight flex-1">{title}</p>
+          <div className="flex items-center gap-1 flex-1 min-w-0">
+            <p className="text-xs text-muted-foreground leading-tight truncate">{title}</p>
+            {tooltipKey && <HelpTooltip tooltipKey={tooltipKey} />}
+          </div>
           {isMock && (
             <Badge variant="secondary" className="text-xs flex-shrink-0">
               тест

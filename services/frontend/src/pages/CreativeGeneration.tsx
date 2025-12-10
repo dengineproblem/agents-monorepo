@@ -21,6 +21,8 @@ import { creativesApi } from '@/services/creativesApi';
 import { CarouselTab } from '@/components/creatives/CarouselTab';
 import { VideoScriptsTab } from '@/components/creatives/VideoScriptsTab';
 import { CompetitorReferenceSelector, type CompetitorReference } from '@/components/creatives/CompetitorReferenceSelector';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 interface CreativeTexts {
   offer: string;
@@ -896,7 +898,10 @@ const CreativeGeneration = () => {
             {/* Выбор стиля креатива */}
             <Card className="shadow-sm">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Стиль креатива</CardTitle>
+                <CardTitle className="text-base flex items-center gap-2">
+                  Стиль креатива
+                  <HelpTooltip tooltipKey={TooltipKeys.CREATIVE_STYLE} />
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {/* Селект стиля + кнопки референсов в одну строку */}

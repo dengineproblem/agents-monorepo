@@ -30,6 +30,8 @@ import {
   Images,
   Download
 } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import { exportToCSV, formatAmountForExport } from '@/lib/exportUtils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -617,7 +619,10 @@ const ROIAnalytics: React.FC = () => {
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
         {/* Хедер с заголовком */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">ROI Аналитика</h1>
+            <HelpTooltip tooltipKey={TooltipKeys.ROI_OVERVIEW} iconSize="md" />
+          </div>
           <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
         </div>
         

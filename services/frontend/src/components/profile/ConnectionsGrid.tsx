@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Instagram, CheckCircle2, CircleDashed, Link, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from '../../i18n/LanguageContext';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys, type TooltipKey } from '@/content/tooltips';
 
 // TikTok icon SVG
 const TikTokIcon = () => (
@@ -28,6 +30,15 @@ export interface ConnectionItem {
   disabled?: boolean;
   badge?: string;
 }
+
+// Маппинг id подключения на tooltipKey
+const connectionTooltipKeys: Record<ConnectionItem['id'], TooltipKey | null> = {
+  facebook: TooltipKeys.PROFILE_FACEBOOK,
+  instagram: null, // Instagram подключается через Facebook
+  tiktok: TooltipKeys.PROFILE_TIKTOK,
+  amocrm: TooltipKeys.PROFILE_AMOCRM,
+  tilda: TooltipKeys.PROFILE_TILDA,
+};
 
 const brandBg: Record<ConnectionItem['id'], string> = {
   facebook: 'bg-gradient-to-br from-blue-500/10 to-indigo-500/10 text-blue-600',
@@ -86,7 +97,12 @@ const ConnectionsGrid: React.FC<ConnectionsGridProps> = ({ items }) => {
                   {brandIcon[it.id]}
                 </div>
                 <div>
-                  <div className="font-semibold text-base">{it.title}</div>
+                  <div className="font-semibold text-base flex items-center gap-1.5">
+                    {it.title}
+                    {connectionTooltipKeys[it.id] && (
+                      <HelpTooltip tooltipKey={connectionTooltipKeys[it.id]!} />
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
                     {it.connected ? (
                       <>
