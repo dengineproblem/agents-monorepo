@@ -172,6 +172,13 @@ export const KBArticle: React.FC<KBArticleProps> = ({
       const line = lines[i];
 
       // Заголовки
+      if (line.startsWith('#### ')) {
+        flushList();
+        flushInfoBlock();
+        flushWarningBlock();
+        elements.push(<h4 key={elements.length} className="text-base font-semibold mt-5 mb-2">{line.slice(5)}</h4>);
+        continue;
+      }
       if (line.startsWith('### ')) {
         flushList();
         flushInfoBlock();
@@ -224,6 +231,43 @@ export const KBArticle: React.FC<KBArticleProps> = ({
               <p className="text-sm text-center">{description}</p>
             </div>
           </Card>
+        );
+        continue;
+      }
+
+      // Image: ![alt](src)
+      const imageMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      if (imageMatch) {
+        flushList();
+        flushInfoBlock();
+        flushWarningBlock();
+        const [, alt, src] = imageMatch;
+        elements.push(
+          <div key={elements.length} className="my-4">
+            <img
+              src={src}
+              alt={alt}
+              className="rounded-lg border shadow-sm max-w-full"
+              onError={(e) => {
+                // Fallback to placeholder on error
+                const target = e.target as HTMLImageElement;
+                target.style.display = 'none';
+                target.parentElement!.innerHTML = `
+                  <div class="p-8 border-dashed border-2 bg-muted/30 rounded-lg">
+                    <div class="flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                      <svg class="h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21,15 16,10 5,21"></polyline>
+                      </svg>
+                      <p class="text-sm text-center">${alt || 'Изображение'}</p>
+                    </div>
+                  </div>
+                `;
+              }}
+            />
+            {alt && <p className="text-sm text-muted-foreground text-center mt-2">{alt}</p>}
+          </div>
         );
         continue;
       }
