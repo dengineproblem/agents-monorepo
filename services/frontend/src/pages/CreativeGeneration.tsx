@@ -846,6 +846,14 @@ const CreativeGeneration = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-lg">
                     {getTypeLabel(type)}
+                    <HelpTooltip
+                      tooltipKey={
+                        type === 'offer' ? TooltipKeys.CREATIVE_OFFER :
+                        type === 'bullets' ? TooltipKeys.CREATIVE_BULLETS :
+                        TooltipKeys.CREATIVE_BENEFIT
+                      }
+                      iconSize="sm"
+                    />
                   </CardTitle>
                   <CardDescription>
                     Введите текст вручную или сгенерируйте с помощью AI
@@ -876,20 +884,23 @@ const CreativeGeneration = () => {
                         </div>
                       )}
                     </div>
-                    <Button
-                      onClick={() => generateText(type)}
-                      disabled={loading[type] || !userPrompt || !userId}
-                      size="icon"
-                      variant="outline"
-                      className="shrink-0 h-10 w-10"
-                      title={!userPrompt ? 'Настройте prompt4 в профиле' : !userId ? 'Загрузка данных пользователя...' : 'Сгенерировать с помощью AI'}
-                    >
-                      {loading[type] ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      )}
-                    </Button>
+                    <div className="flex flex-col items-center gap-1">
+                      <Button
+                        onClick={() => generateText(type)}
+                        disabled={loading[type] || !userPrompt || !userId}
+                        size="icon"
+                        variant="outline"
+                        className="shrink-0 h-10 w-10"
+                        title={!userPrompt ? 'Настройте prompt4 в профиле' : !userId ? 'Загрузка данных пользователя...' : 'Сгенерировать с помощью AI'}
+                      >
+                        {loading[type] ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <HelpTooltip tooltipKey={TooltipKeys.GEN_TEXT_AI_BUTTON} iconSize="sm" />
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -1012,7 +1023,10 @@ const CreativeGeneration = () => {
                 {/* Поле для ввода промпта стиля (только для freestyle) */}
                 {selectedStyle === 'freestyle' && (
                   <div className="space-y-2 pt-3 border-t">
-                    <Label htmlFor="style-prompt">Промпт стиля</Label>
+                    <Label htmlFor="style-prompt" className="flex items-center gap-1">
+                      Промпт стиля
+                      <HelpTooltip tooltipKey={TooltipKeys.GEN_FREESTYLE_PROMPT} iconSize="sm" />
+                    </Label>
                     <Textarea
                       id="style-prompt"
                       placeholder="Опишите желаемый визуальный стиль: цвета, атмосферу, тип изображения (фото, иллюстрация, 3D), композицию..."
@@ -1113,7 +1127,10 @@ const CreativeGeneration = () => {
                         {isEditMode && (
                           <div className="space-y-4 p-4 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
                             <div className="space-y-2">
-                              <Label>Инструкции для редактирования</Label>
+                              <Label className="flex items-center gap-1">
+                                Инструкции для редактирования
+                                <HelpTooltip tooltipKey={TooltipKeys.GEN_EDIT_MODE} iconSize="sm" />
+                              </Label>
                               <Textarea
                                 value={editPrompt}
                                 onChange={(e) => setEditPrompt(e.target.value)}

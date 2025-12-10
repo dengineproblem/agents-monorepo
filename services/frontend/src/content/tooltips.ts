@@ -177,6 +177,48 @@ export const TooltipKeys = {
   CONSULT_CLIENT_PHONE: 'consult.clientPhone',
   CONSULT_SERVICE: 'consult.service',
   CONSULT_CREATE_SALE: 'consult.createSale',
+
+  // Карусели
+  CAROUSEL_IDEA: 'carousel.idea',
+  CAROUSEL_IDEA_INPUT: 'carousel.ideaInput',
+  CAROUSEL_CARDS_COUNT: 'carousel.cardsCount',
+  CAROUSEL_GENERATE_TEXTS: 'carousel.generateTexts',
+  CAROUSEL_VISUAL_STYLE: 'carousel.visualStyle',
+  CAROUSEL_STYLE_MINIMAL: 'carousel.styleMinimal',
+  CAROUSEL_STYLE_STORY: 'carousel.styleStory',
+  CAROUSEL_STYLE_UGC: 'carousel.styleUgc',
+  CAROUSEL_STYLE_ASSET: 'carousel.styleAsset',
+  CAROUSEL_STYLE_FREESTYLE: 'carousel.styleFreestyle',
+  CAROUSEL_CUSTOM_PROMPTS: 'carousel.customPrompts',
+  CAROUSEL_REFERENCES: 'carousel.references',
+  CAROUSEL_REGENERATE_CARD: 'carousel.regenerateCard',
+  CAROUSEL_DOWNLOAD: 'carousel.download',
+  CAROUSEL_CREATE_FB: 'carousel.createFb',
+  CAROUSEL_HOOK_BADGE: 'carousel.hookBadge',
+  CAROUSEL_CTA_BADGE: 'carousel.ctaBadge',
+
+  // Генерация текста
+  TEXT_GENERATION_OVERVIEW: 'text.overview',
+  TEXT_TYPE_SELECT: 'text.typeSelect',
+  TEXT_TYPE_STORYTELLING: 'text.typeStorytelling',
+  TEXT_TYPE_DIRECT_OFFER: 'text.typeDirectOffer',
+  TEXT_TYPE_EXPERT_VIDEO: 'text.typeExpertVideo',
+  TEXT_TYPE_TELEGRAM: 'text.typeTelegram',
+  TEXT_TYPE_THREADS: 'text.typeThreads',
+  TEXT_TYPE_REFERENCE: 'text.typeReference',
+  TEXT_USER_PROMPT: 'text.userPrompt',
+  TEXT_EDIT_WITH_AI: 'text.editWithAi',
+
+  // Дополнительные для генерации картинок
+  GEN_TEXT_AI_BUTTON: 'gen.textAiButton',
+  GEN_FREESTYLE_PROMPT: 'gen.freestylePrompt',
+  GEN_EDIT_MODE: 'gen.editMode',
+
+  // Загрузка креативов (дополнительные)
+  CREATIVES_PAGE_OVERVIEW: 'creatives.pageOverview',
+  UPLOAD_DROPZONE: 'upload.dropzone',
+  CREATIVE_ANALYTICS: 'creative.analytics',
+  CREATIVE_LAUNCH_AD: 'creative.launchAd',
 } as const;
 
 export type TooltipKey = typeof TooltipKeys[keyof typeof TooltipKeys];
@@ -846,6 +888,157 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
   [TooltipKeys.CONSULT_CREATE_SALE]: {
     title: 'Создать продажу',
     content: 'После успешной консультации создайте продажу для учёта в ROI аналитике.',
+  },
+
+  // ==========================================
+  // Карусели
+  // ==========================================
+  [TooltipKeys.CAROUSEL_IDEA]: {
+    title: 'Идея карусели',
+    content: 'Карусель — это серия связанных карточек с единой историей. AI создаёт storytelling из нескольких слайдов.',
+    learnMoreLink: '/knowledge-base/ad-launch/generate-creatives',
+  },
+  [TooltipKeys.CAROUSEL_IDEA_INPUT]: {
+    content: 'Опишите общую идею карусели. Можно оставить пустым — AI придумает сам на основе вашего бизнеса.',
+  },
+  [TooltipKeys.CAROUSEL_CARDS_COUNT]: {
+    title: 'Количество карточек',
+    content: 'Оптимально 3-5 карточек. Первая — хук, последняя — призыв к действию. Instagram показывает до 10.',
+  },
+  [TooltipKeys.CAROUSEL_GENERATE_TEXTS]: {
+    content: 'AI создаст связанные тексты для каждой карточки. Потом можно отредактировать вручную.',
+  },
+  [TooltipKeys.CAROUSEL_VISUAL_STYLE]: {
+    title: 'Визуальный стиль',
+    content: 'Единый стиль для всех карточек карусели. Создаёт целостное визуальное впечатление.',
+  },
+  [TooltipKeys.CAROUSEL_STYLE_MINIMAL]: {
+    title: 'Чистый минимализм',
+    content: 'Универсальный стиль с акцентом на тексте и современным фоном. Подходит для большинства ниш.',
+  },
+  [TooltipKeys.CAROUSEL_STYLE_STORY]: {
+    title: 'Визуальный сторителлинг',
+    content: 'Иллюстративный стиль для визуального рассказа истории. Каждая карточка — часть повествования.',
+  },
+  [TooltipKeys.CAROUSEL_STYLE_UGC]: {
+    title: 'Живые фото (UGC)',
+    content: 'Реалистичные фото людей и сцен из жизни. Высокое доверие аудитории.',
+  },
+  [TooltipKeys.CAROUSEL_STYLE_ASSET]: {
+    title: 'Фокус на товаре',
+    content: 'Стиль для e-commerce: качественные фото товара, цены, характеристики.',
+  },
+  [TooltipKeys.CAROUSEL_STYLE_FREESTYLE]: {
+    title: 'Свободный стиль',
+    content: 'Опишите желаемый стиль своими словами. AI постарается воспроизвести вашу идею.',
+  },
+  [TooltipKeys.CAROUSEL_CUSTOM_PROMPTS]: {
+    title: 'Промпты для карточек',
+    content: 'Добавьте дополнительные инструкции для конкретных карточек. Например: "добавь человека" или "используй синие тона".',
+  },
+  [TooltipKeys.CAROUSEL_REFERENCES]: {
+    title: 'Референсные изображения',
+    content: 'Загрузите изображения как референсы для стиля. Можно применить к одной или нескольким карточкам.',
+  },
+  [TooltipKeys.CAROUSEL_REGENERATE_CARD]: {
+    content: 'Перегенерировать только эту карточку с новым промптом или референсом, сохраняя остальные.',
+  },
+  [TooltipKeys.CAROUSEL_DOWNLOAD]: {
+    title: 'Скачать карусель',
+    content: 'Скачайте выбранные или все карточки как ZIP-архив с PNG-файлами в формате 1:1.',
+  },
+  [TooltipKeys.CAROUSEL_CREATE_FB]: {
+    title: 'Создать в Facebook',
+    content: 'Автоматически загружает карусель в Facebook Ads и создаёт объявление с настройками направления.',
+  },
+  [TooltipKeys.CAROUSEL_HOOK_BADGE]: {
+    title: 'Хук',
+    content: 'Первая карточка — самая важная. Должна зацепить внимание и заставить листать дальше.',
+  },
+  [TooltipKeys.CAROUSEL_CTA_BADGE]: {
+    title: 'CTA',
+    content: 'Последняя карточка — призыв к действию. Чёткая инструкция: "Напишите в WhatsApp", "Переходите по ссылке".',
+  },
+
+  // ==========================================
+  // Генерация текста
+  // ==========================================
+  [TooltipKeys.TEXT_GENERATION_OVERVIEW]: {
+    title: 'Генерация текста',
+    content: 'AI создаёт тексты для видео, постов и рекламы на основе контекста вашего бизнеса и лучших практик.',
+    learnMoreLink: '/knowledge-base/ad-launch/generate-creatives',
+  },
+  [TooltipKeys.TEXT_TYPE_SELECT]: {
+    title: 'Тип текста',
+    content: 'Выберите формат контента. Каждый тип имеет свою структуру и стиль подачи.',
+  },
+  [TooltipKeys.TEXT_TYPE_STORYTELLING]: {
+    title: 'Storytelling',
+    content: 'Эмоциональная история с личным опытом. Хук → развитие → кульминация → призыв. Для видео Reels/Stories.',
+  },
+  [TooltipKeys.TEXT_TYPE_DIRECT_OFFER]: {
+    title: 'Прямой оффер',
+    content: 'Короткое продающее сообщение: результат + время + безопасность + CTA. Для акций и ограниченных предложений.',
+  },
+  [TooltipKeys.TEXT_TYPE_EXPERT_VIDEO]: {
+    title: 'Экспертное видео',
+    content: 'Вирусный хук с экспертным раскрытием темы. Формат "Почему X происходит?" с решением.',
+  },
+  [TooltipKeys.TEXT_TYPE_TELEGRAM]: {
+    title: 'Пост в Telegram',
+    content: 'Информационно-познавательный контент без явной рекламы. Для экспертного канала.',
+  },
+  [TooltipKeys.TEXT_TYPE_THREADS]: {
+    title: 'Пост в Threads',
+    content: 'Короткий провокационный пост для вовлечения в дискуссию. До 500 символов.',
+  },
+  [TooltipKeys.TEXT_TYPE_REFERENCE]: {
+    title: 'Референс',
+    content: 'Адаптация текста креатива (своего или конкурента). Сохраняет структуру и крючки, заменяет детали на ваши.',
+  },
+  [TooltipKeys.TEXT_USER_PROMPT]: {
+    title: 'Ваша задача',
+    content: 'Опишите тему, акцент, ключевые моменты. AI использует контекст вашего бизнеса автоматически.',
+  },
+  [TooltipKeys.TEXT_EDIT_WITH_AI]: {
+    title: 'Редактирование с AI',
+    content: 'Опишите что изменить: "сделай короче", "добавь эмоций", "измени CTA". AI сохранит структуру.',
+  },
+
+  // ==========================================
+  // Дополнительные для генерации картинок
+  // ==========================================
+  [TooltipKeys.GEN_TEXT_AI_BUTTON]: {
+    content: 'Сгенерировать текст с помощью AI на основе контекста вашего бизнеса. Учитывает уже заполненные поля.',
+  },
+  [TooltipKeys.GEN_FREESTYLE_PROMPT]: {
+    title: 'Промпт стиля',
+    content: 'Опишите желаемый визуальный стиль: цветовую палитру, атмосферу, тип изображения, композицию.',
+  },
+  [TooltipKeys.GEN_EDIT_MODE]: {
+    title: 'Редактирование креатива',
+    content: 'Опишите что изменить в сгенерированном изображении. Текущее изображение используется как референс.',
+  },
+
+  // ==========================================
+  // Загрузка креативов (дополнительные)
+  // ==========================================
+  [TooltipKeys.CREATIVES_PAGE_OVERVIEW]: {
+    title: 'Управление креативами',
+    content: 'Здесь хранятся все ваши креативы: загруженные видео, сгенерированные картинки и карусели.',
+    learnMoreLink: '/knowledge-base/ad-launch/upload-creatives',
+  },
+  [TooltipKeys.UPLOAD_DROPZONE]: {
+    title: 'Загрузка файлов',
+    content: 'Перетащите файлы или нажмите для выбора. Видео: MP4, MOV до 512 МБ. Изображения: JPG, PNG до 10 МБ.',
+  },
+  [TooltipKeys.CREATIVE_ANALYTICS]: {
+    title: 'Аналитика креатива',
+    content: 'Статистика из Facebook Ads: показы, клики, лиды, расход. Обновляется каждый час.',
+  },
+  [TooltipKeys.CREATIVE_LAUNCH_AD]: {
+    title: 'Запустить рекламу',
+    content: 'Создаёт рекламную кампанию в Facebook с выбранным креативом и настройками направления.',
   },
 };
 

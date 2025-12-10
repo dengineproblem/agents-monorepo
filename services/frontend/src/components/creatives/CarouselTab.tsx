@@ -12,6 +12,8 @@ import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
 import type { CarouselCard, CarouselVisualStyle } from '@/types/carousel';
 import JSZip from 'jszip';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 interface CarouselTabProps {
   userId: string | null;
@@ -753,14 +755,20 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
       {/* Ввод идеи карусели */}
       <Card>
         <CardHeader>
-          <CardTitle>Идея карусели</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            Идея карусели
+            <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_IDEA} iconSize="sm" />
+          </CardTitle>
           <CardDescription>
             Введите общую идею, и AI создаст связанный storytelling из нескольких карточек
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label htmlFor="carousel-idea">Идея карусели</Label>
+            <Label htmlFor="carousel-idea" className="flex items-center gap-1">
+              Идея карусели
+              <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_IDEA_INPUT} iconSize="sm" />
+            </Label>
             <Textarea
               id="carousel-idea"
               value={carouselIdea}
@@ -772,7 +780,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
           </div>
 
           <div>
-            <Label htmlFor="cards-count">Количество карточек</Label>
+            <Label htmlFor="cards-count" className="flex items-center gap-1">
+              Количество карточек
+              <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_CARDS_COUNT} iconSize="sm" />
+            </Label>
             <Select
               value={cardsCount.toString()}
               onValueChange={(v) => setCardsCount(Number(v))}
@@ -886,9 +897,19 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     </div>
 
                     {/* Бейдж хук/CTA */}
-                    <div className="absolute top-3 right-3">
-                      {currentCardIndex === 0 && <Badge variant="default">Хук</Badge>}
-                      {currentCardIndex === carouselCards.length - 1 && <Badge variant="default">CTA</Badge>}
+                    <div className="absolute top-3 right-3 flex items-center gap-1">
+                      {currentCardIndex === 0 && (
+                        <>
+                          <Badge variant="default">Хук</Badge>
+                          <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_HOOK_BADGE} iconSize="sm" />
+                        </>
+                      )}
+                      {currentCardIndex === carouselCards.length - 1 && (
+                        <>
+                          <Badge variant="default">CTA</Badge>
+                          <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_CTA_BADGE} iconSize="sm" />
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -959,7 +980,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="visual-style">Визуальный стиль карусели</Label>
+                  <Label htmlFor="visual-style" className="flex items-center gap-1">
+                    Визуальный стиль карусели
+                    <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_VISUAL_STYLE} iconSize="sm" />
+                  </Label>
                   <Select value={visualStyle} onValueChange={(value) => setVisualStyle(value as CarouselVisualStyle)}>
                     <SelectTrigger id="visual-style">
                       <SelectValue />
@@ -1000,7 +1024,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                 {/* Промпты для карточек */}
                 <div className="space-y-2 pt-2 border-t border-border">
-                  <Label className="text-sm text-muted-foreground">Промпты (опционально)</Label>
+                  <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                    Промпты (опционально)
+                    <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_CUSTOM_PROMPTS} iconSize="sm" />
+                  </Label>
 
                   {globalPrompts.length > 0 && (
                     <div className="space-y-2">
@@ -1054,7 +1081,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                 {/* Референсные изображения */}
                 <div className="space-y-2 pt-2 border-t border-border">
-                  <Label className="text-sm text-muted-foreground">Референсы (опционально)</Label>
+                  <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                    Референсы (опционально)
+                    <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_REFERENCES} iconSize="sm" />
+                  </Label>
 
                   {globalReferences.length > 0 && (
                     <div className="space-y-2">
@@ -1136,7 +1166,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                 {/* Раздел: Перегенерировать карточку */}
                 <div className="space-y-3">
-                  <h4 className="text-sm font-medium text-muted-foreground">Перегенерировать карточку</h4>
+                  <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                    Перегенерировать карточку
+                    <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_REGENERATE_CARD} iconSize="sm" />
+                  </h4>
                   <div className="space-y-2">
                     <div>
                       <Label htmlFor={`regen-prompt-section-${currentCardIndex}`} className="text-xs text-muted-foreground">
@@ -1309,7 +1342,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                   {/* Скачивание */}
                   <div className="space-y-2 pt-2">
                     <div className="flex items-center justify-between">
-                      <Label className="text-xs text-muted-foreground">Скачать карточки</Label>
+                      <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                        Скачать карточки
+                        <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_DOWNLOAD} iconSize="sm" />
+                      </Label>
                       <div className="flex gap-2">
                         <Button
                           size="sm"
@@ -1380,7 +1416,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
 
                 {/* Раздел: Создание креатива */}
                 <div className="space-y-3 pt-4 border-t border-border">
-                  <h4 className="text-sm font-medium text-muted-foreground">Создание креатива</h4>
+                  <h4 className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                    Создание креатива
+                    <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_CREATE_FB} iconSize="sm" />
+                  </h4>
 
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Направление</Label>

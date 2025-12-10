@@ -8,6 +8,8 @@ import { Sparkles, Loader2, Copy, Check, FileText, Pencil, X } from 'lucide-reac
 import { toast } from 'sonner';
 import { textCreativesApi, TEXT_TYPES, TextCreativeType } from '@/services/textCreativesApi';
 import { ReferenceSelector, type CreativeReference } from './ReferenceSelector';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 interface TextTabProps {
   userId: string | null;
@@ -194,6 +196,7 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
             Генерация текста
+            <HelpTooltip tooltipKey={TooltipKeys.TEXT_GENERATION_OVERVIEW} iconSize="sm" />
           </CardTitle>
           <CardDescription>
             Создайте текст для видео, поста или рекламы на основе контекста вашего бизнеса
@@ -202,7 +205,10 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
         <CardContent className="space-y-4">
           {/* Выбор типа текста */}
           <div className="space-y-2">
-            <Label>Тип текста</Label>
+            <Label className="flex items-center gap-1">
+              Тип текста
+              <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_SELECT} iconSize="sm" />
+            </Label>
             <Select value={textType} onValueChange={(v) => setTextType(v as TextCreativeType)}>
               <SelectTrigger>
                 <SelectValue placeholder="Выберите тип текста" />
@@ -220,22 +226,40 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
           {/* Описание типа */}
           <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
             {textType === 'storytelling' && (
-              <p><strong>Storytelling</strong> — эмоциональная история с личным опытом, хуком и крюком для удержания внимания.</p>
+              <p className="flex items-start gap-2">
+                <span><strong>Storytelling</strong> — эмоциональная история с личным опытом, хуком и крюком для удержания внимания.</span>
+                <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_STORYTELLING} iconSize="sm" />
+              </p>
             )}
             {textType === 'direct_offer' && (
-              <p><strong>Прямой оффер</strong> — короткое продающее сообщение: результат + время + безопасность + CTA.</p>
+              <p className="flex items-start gap-2">
+                <span><strong>Прямой оффер</strong> — короткое продающее сообщение: результат + время + безопасность + CTA.</span>
+                <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_DIRECT_OFFER} iconSize="sm" />
+              </p>
             )}
             {textType === 'expert_video' && (
-              <p><strong>Видео экспертное</strong> — вирусный хук с экспертным раскрытием темы и решением.</p>
+              <p className="flex items-start gap-2">
+                <span><strong>Видео экспертное</strong> — вирусный хук с экспертным раскрытием темы и решением.</span>
+                <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_EXPERT_VIDEO} iconSize="sm" />
+              </p>
             )}
             {textType === 'telegram_post' && (
-              <p><strong>Пост в Telegram</strong> — информационно-познавательный контент без явной рекламы.</p>
+              <p className="flex items-start gap-2">
+                <span><strong>Пост в Telegram</strong> — информационно-познавательный контент без явной рекламы.</span>
+                <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_TELEGRAM} iconSize="sm" />
+              </p>
             )}
             {textType === 'threads_post' && (
-              <p><strong>Пост в Threads</strong> — короткий провокационный пост для вовлечения в дискуссию.</p>
+              <p className="flex items-start gap-2">
+                <span><strong>Пост в Threads</strong> — короткий провокационный пост для вовлечения в дискуссию.</span>
+                <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_THREADS} iconSize="sm" />
+              </p>
             )}
             {textType === 'reference' && (
-              <p><strong>Референс</strong> — адаптация текста креатива (своего или конкурента). Сохраняет структуру и крючки, заменяет детали.</p>
+              <p className="flex items-start gap-2">
+                <span><strong>Референс</strong> — адаптация текста креатива (своего или конкурента). Сохраняет структуру и крючки, заменяет детали.</span>
+                <HelpTooltip tooltipKey={TooltipKeys.TEXT_TYPE_REFERENCE} iconSize="sm" />
+              </p>
             )}
           </div>
 
@@ -252,7 +276,10 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
 
           {/* Поле для задачи */}
           <div className="space-y-2">
-            <Label>Ваша задача</Label>
+            <Label className="flex items-center gap-1">
+              Ваша задача
+              <HelpTooltip tooltipKey={TooltipKeys.TEXT_USER_PROMPT} iconSize="sm" />
+            </Label>
             <Textarea
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
@@ -316,18 +343,21 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
                     <Copy className="h-4 w-4" />
                   )}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={`h-8 w-8 bg-background/80 hover:bg-background shadow-sm ${isEditMode ? 'text-primary' : ''}`}
-                  onClick={() => {
-                    setIsEditMode(!isEditMode);
-                    setEditInstructions('');
-                  }}
-                  title={isEditMode ? "Отменить редактирование" : "Редактировать с AI"}
-                >
-                  {isEditMode ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`h-8 w-8 bg-background/80 hover:bg-background shadow-sm ${isEditMode ? 'text-primary' : ''}`}
+                    onClick={() => {
+                      setIsEditMode(!isEditMode);
+                      setEditInstructions('');
+                    }}
+                    title={isEditMode ? "Отменить редактирование" : "Редактировать с AI"}
+                  >
+                    {isEditMode ? <X className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                  </Button>
+                  <HelpTooltip tooltipKey={TooltipKeys.TEXT_EDIT_WITH_AI} iconSize="sm" />
+                </div>
               </div>
             </div>
 

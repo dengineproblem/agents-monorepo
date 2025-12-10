@@ -1697,14 +1697,18 @@ const Creatives: React.FC = () => {
     <div className="w-full max-w-full overflow-x-hidden">
       <Header onOpenDatePicker={() => {}} />
       <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
-        <PageHero 
+        <PageHero
           title="Видео"
           subtitle="Загружайте и управляйте вашими видео креативами"
+          tooltipKey={TooltipKeys.CREATIVES_PAGE_OVERVIEW}
         />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-1">
             <CardHeader>
-              <CardTitle>Очередь загрузок</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                Очередь загрузок
+                <HelpTooltip tooltipKey={TooltipKeys.UPLOAD_DROPZONE} iconSize="sm" />
+              </CardTitle>
               <CardDescription>Добавляйте видео — загрузим по очереди</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

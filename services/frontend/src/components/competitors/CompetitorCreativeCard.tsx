@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { PlayCircle, Image, Images, Eye, Sparkles, ChevronDown, ChevronUp, FileText, ScanText, Loader2 } from 'lucide-react';
+import { PlayCircle, Image, Images, Eye, Sparkles, ChevronDown, ChevronUp, FileText, ScanText, Loader2, HelpCircle } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import type { CompetitorCreative } from '@/types/competitor';
 import { getScoreCategory, isNewInTop10 } from '@/types/competitor';
@@ -122,16 +124,20 @@ export function CompetitorCreativeCard({
 
         {/* Score badge (верхний правый, под иконкой видео) */}
         {creative.score !== undefined && (
-          <div className={cn(
-            'absolute right-2',
-            creative.media_type === 'video' ? 'top-10' : 'top-2'
-          )}>
+          <div
+            className={cn(
+              'absolute right-2 flex items-center gap-0.5',
+              creative.media_type === 'video' ? 'top-10' : 'top-2'
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
             <Badge
               variant="outline"
               className={cn('text-xs font-bold', scoreColorClasses[scoreCategory.color])}
             >
               {scoreCategory.emoji} {creative.score}
             </Badge>
+            <HelpTooltip tooltipKey={TooltipKeys.COMPETITORS_SCORE} iconSize="sm" className="bg-background/80 rounded-full" />
           </div>
         )}
 
@@ -202,11 +208,11 @@ export function CompetitorCreativeCard({
             </Collapsible>
           </div>
         ) : onExtractText && (
-          <div onClick={handleTranscriptClick}>
+          <div onClick={handleTranscriptClick} className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
-              className="w-full h-7 text-xs"
+              className="flex-1 h-7 text-xs"
               onClick={() => onExtractText(creative.id)}
               disabled={isExtracting}
             >
@@ -222,6 +228,7 @@ export function CompetitorCreativeCard({
                 </>
               )}
             </Button>
+            <HelpTooltip tooltipKey={TooltipKeys.COMPETITOR_EXTRACT_TEXT} iconSize="sm" />
           </div>
         )}
       </div>

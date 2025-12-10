@@ -19,6 +19,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Plus, Loader2, AlertCircle } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { competitorsApi } from '@/services/competitorsApi';
 import { toast } from 'sonner';
@@ -130,7 +132,10 @@ export function AddCompetitorDialog({ userAccountId, accountId, onAdded }: AddCo
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="socialUrl">Instagram / Facebook</Label>
+              <Label htmlFor="socialUrl" className="flex items-center gap-1">
+                Instagram / Facebook
+                <HelpTooltip tooltipKey={TooltipKeys.COMPETITOR_URL_FORMAT} iconSize="sm" />
+              </Label>
               <Input
                 id="socialUrl"
                 placeholder="@username или instagram.com/username"
@@ -144,7 +149,10 @@ export function AddCompetitorDialog({ userAccountId, accountId, onAdded }: AddCo
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="country">{t('competitors.country')}</Label>
+              <Label htmlFor="country" className="flex items-center gap-1">
+                {t('competitors.country')}
+                <HelpTooltip tooltipKey={TooltipKeys.COMPETITOR_COUNTRY} iconSize="sm" />
+              </Label>
               <Select value={countryCode} onValueChange={setCountryCode} disabled={loading}>
                 <SelectTrigger>
                   <SelectValue />

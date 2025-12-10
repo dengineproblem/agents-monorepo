@@ -267,6 +267,7 @@ export default function Competitors() {
         title={t('competitors.title')}
         subtitle={t('competitors.subtitle')}
         rightContent={<AdAccountSwitcher />}
+        tooltipKey={TooltipKeys.COMPETITOR_ADD_HOW}
       />
 
       <div className="container mx-auto px-4 py-6">
