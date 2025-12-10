@@ -1005,19 +1005,27 @@ const CreativeGeneration = () => {
                 )}
 
                 {/* Описание выбранного стиля */}
-                <div className="text-sm text-muted-foreground p-3 bg-muted/30 rounded-md">
-                  {selectedStyle === 'modern_performance' &&
-                    'Чистый дизайн с UI-элементами, графикой роста и структурированными блоками'}
-                  {selectedStyle === 'live_ugc' &&
-                    'Реалистичные сцены с людьми в естественных ситуациях, как в настоящих сторис'}
-                  {selectedStyle === 'visual_hook' &&
-                    'Яркий контраст, мощные метафоры и эффектные визуальные образы'}
-                  {selectedStyle === 'premium_minimal' &&
-                    'Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха'}
-                  {selectedStyle === 'product_hero' &&
-                    'Товар в центре внимания: профессиональная товарная реклама с продуктом в главной роли'}
-                  {selectedStyle === 'freestyle' &&
-                    'Полная свобода — задайте стиль самостоятельно через промпт'}
+                <div className="text-sm text-muted-foreground p-3 bg-muted/30 rounded-md flex items-start gap-2">
+                  <span className="flex-1">
+                    {selectedStyle === 'modern_performance' &&
+                      'Чистый дизайн с UI-элементами, графикой роста и структурированными блоками'}
+                    {selectedStyle === 'live_ugc' &&
+                      'Реалистичные сцены с людьми в естественных ситуациях, как в настоящих сторис'}
+                    {selectedStyle === 'visual_hook' &&
+                      'Яркий контраст, мощные метафоры и эффектные визуальные образы'}
+                    {selectedStyle === 'premium_minimal' &&
+                      'Сдержанный дизайн с минимумом элементов, премиальные цвета и много воздуха'}
+                    {selectedStyle === 'product_hero' &&
+                      'Товар в центре внимания: профессиональная товарная реклама с продуктом в главной роли'}
+                    {selectedStyle === 'freestyle' &&
+                      'Полная свобода — задайте стиль самостоятельно через промпт'}
+                  </span>
+                  {selectedStyle === 'modern_performance' && <HelpTooltip tooltipKey={TooltipKeys.GEN_STYLE_MODERN} iconSize="sm" />}
+                  {selectedStyle === 'live_ugc' && <HelpTooltip tooltipKey={TooltipKeys.GEN_STYLE_UGC} iconSize="sm" />}
+                  {selectedStyle === 'visual_hook' && <HelpTooltip tooltipKey={TooltipKeys.GEN_STYLE_HOOK} iconSize="sm" />}
+                  {selectedStyle === 'premium_minimal' && <HelpTooltip tooltipKey={TooltipKeys.GEN_STYLE_MINIMAL} iconSize="sm" />}
+                  {selectedStyle === 'product_hero' && <HelpTooltip tooltipKey={TooltipKeys.GEN_STYLE_PRODUCT} iconSize="sm" />}
+                  {selectedStyle === 'freestyle' && <HelpTooltip tooltipKey={TooltipKeys.GEN_STYLE_FREESTYLE} iconSize="sm" />}
                 </div>
 
                 {/* Поле для ввода промпта стиля (только для freestyle) */}

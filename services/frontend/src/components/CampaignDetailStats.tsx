@@ -3,6 +3,8 @@ import { useAppContext } from '../context/AppContext';
 import { formatCurrency, formatPercent, formatNumber } from '../utils/formatters';
 import { CircleDollarSign, Target, MousePointerClick, Eye, Megaphone, BarChart3 } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { HelpTooltip } from './ui/help-tooltip';
+import { TooltipKeys, type TooltipKey } from '@/content/tooltips';
 
 interface CampaignDetailStatsProps {
   campaignId: string;
@@ -85,13 +87,14 @@ const CampaignDetailStats: React.FC<CampaignDetailStatsProps> = ({ campaignId })
         isMock={isMockData}
         isZero={stats.isZeroData}
       />
-      <StatCard 
-        title={t('stats.ctr')} 
-        value={formatPercent(stats.ctr)} 
+      <StatCard
+        title={t('stats.ctr')}
+        value={formatPercent(stats.ctr)}
         icon={<BarChart3 className="w-5 h-5 text-amber-600" />}
         loading={loading}
         isMock={isMockData}
         isZero={stats.isZeroData}
+        tooltipKey={TooltipKeys.DASHBOARD_CTR}
       />
       <StatCard 
         title={t('stats.impressions')} 
@@ -101,13 +104,14 @@ const CampaignDetailStats: React.FC<CampaignDetailStatsProps> = ({ campaignId })
         isMock={isMockData}
         isZero={stats.isZeroData}
       />
-      <StatCard 
-        title={t('stats.clicks')} 
-        value={formatNumber(stats.clicks)} 
+      <StatCard
+        title={t('stats.clicks')}
+        value={formatNumber(stats.clicks)}
         icon={<Megaphone className="w-5 h-5 text-orange-600" />}
         loading={loading}
         isMock={isMockData}
         isZero={stats.isZeroData}
+        tooltipKey={TooltipKeys.DASHBOARD_CLICKS}
       />
     </div>
   );
@@ -120,14 +124,16 @@ interface StatCardProps {
   loading: boolean;
   isMock?: boolean;
   isZero?: boolean;
+  tooltipKey?: TooltipKey;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon, loading, isMock = false, isZero = false }) => {
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon, loading, isMock = false, isZero = false, tooltipKey }) => {
   return (
     <div className="stat-card flex flex-col">
       <div className="flex items-center gap-2 mb-1">
         {icon}
         <span className="text-sm text-muted-foreground">{title}</span>
+        {tooltipKey && <HelpTooltip tooltipKey={tooltipKey} iconSize="sm" />}
         {isMock && (
           <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">
             тест

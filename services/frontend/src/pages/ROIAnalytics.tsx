@@ -1137,14 +1137,20 @@ const ROIAnalytics: React.FC = () => {
                                               </div>
                                               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <div className="rounded-lg border p-3 space-y-1">
-                                                  <div className="text-xs text-muted-foreground">25%</div>
+                                                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                                    25%
+                                                    <HelpTooltip tooltipKey={TooltipKeys.ROI_VIDEO_WATCH_25} iconSize="sm" />
+                                                  </div>
                                                   <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_25)}</div>
                                                   <div className="text-xs text-muted-foreground">
                                                     {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_25 / totalMetrics.video_views) * 100) : 0}% от просмотров
                                                   </div>
                                                 </div>
                                                 <div className="rounded-lg border p-3 space-y-1">
-                                                  <div className="text-xs text-muted-foreground">50%</div>
+                                                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                                    50%
+                                                    <HelpTooltip tooltipKey={TooltipKeys.ROI_VIDEO_WATCH_50} iconSize="sm" />
+                                                  </div>
                                                   <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_50)}</div>
                                                   <div className="text-xs text-muted-foreground">
                                                     {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_50 / totalMetrics.video_views) * 100) : 0}% от просмотров
@@ -1158,7 +1164,10 @@ const ROIAnalytics: React.FC = () => {
                                                   </div>
                                                 </div>
                                                 <div className="rounded-lg border p-3 space-y-1">
-                                                  <div className="text-xs text-muted-foreground">95%</div>
+                                                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                                                    95%
+                                                    <HelpTooltip tooltipKey={TooltipKeys.ROI_VIDEO_WATCH_95} iconSize="sm" />
+                                                  </div>
                                                   <div className="text-lg font-semibold">{formatNumber(totalMetrics.video_views_95)}</div>
                                                   <div className="text-xs text-muted-foreground">
                                                     {totalMetrics.video_views > 0 ? Math.round((totalMetrics.video_views_95 / totalMetrics.video_views) * 100) : 0}% от просмотров

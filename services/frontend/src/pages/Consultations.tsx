@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import DateRangePicker from '@/components/DateRangePicker';
 import {
   getConsultants,
@@ -417,17 +419,20 @@ const Consultations: React.FC = () => {
             </Button>
             
             <Dialog open={isNewConsultationOpen} onOpenChange={setIsNewConsultationOpen}>
-              <DialogTrigger asChild>
-                <Button 
-                  size="sm" 
-                  className="flex items-center gap-1 text-xs md:text-sm"
-                  onClick={handleOpenNewConsultationModal}
-                >
-                  <Plus className="w-3 h-3" />
-                  <span className="hidden sm:inline">Новая запись</span>
-                  <span className="sm:hidden">+</span>
-                </Button>
-              </DialogTrigger>
+              <div className="flex items-center gap-1">
+                <DialogTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="flex items-center gap-1 text-xs md:text-sm"
+                    onClick={handleOpenNewConsultationModal}
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span className="hidden sm:inline">Новая запись</span>
+                    <span className="sm:hidden">+</span>
+                  </Button>
+                </DialogTrigger>
+                <HelpTooltip tooltipKey={TooltipKeys.CONSULT_ADD} iconSize="sm" />
+              </div>
               <DialogContent className="max-w-[95vw] md:max-w-md max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Новая консультация</DialogTitle>
@@ -462,7 +467,10 @@ const Consultations: React.FC = () => {
                   </div>
 
                   <div>
-                    <Label htmlFor="client_phone">Телефон клиента</Label>
+                    <Label htmlFor="client_phone" className="flex items-center gap-1">
+                      Телефон клиента
+                      <HelpTooltip tooltipKey={TooltipKeys.CONSULT_CLIENT_PHONE} iconSize="sm" />
+                    </Label>
                     <Input
                       id="client_phone"
                       value={newConsultation.client_phone}
@@ -483,8 +491,11 @@ const Consultations: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <Label htmlFor="start_time">Время начала</Label>
-                      <Select value={newConsultation.start_time} onValueChange={(value) => 
+                      <Label htmlFor="start_time" className="flex items-center gap-1">
+                        Время начала
+                        <HelpTooltip tooltipKey={TooltipKeys.CONSULT_TIME_SLOT} iconSize="sm" />
+                      </Label>
+                      <Select value={newConsultation.start_time} onValueChange={(value) =>
                         setNewConsultation(prev => ({ ...prev, start_time: value }))
                       }>
                         <SelectTrigger>
@@ -852,7 +863,10 @@ const Consultations: React.FC = () => {
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label htmlFor="sale_service">Услуга</Label>
+                <Label htmlFor="sale_service" className="flex items-center gap-1">
+                  Услуга
+                  <HelpTooltip tooltipKey={TooltipKeys.CONSULT_SERVICE} iconSize="sm" />
+                </Label>
                 <Select value={saleForm.service_id} onValueChange={(value) => {
                   const service = availableServices.find(s => s.id === value);
                   setSaleForm(prev => ({ 
@@ -952,9 +966,12 @@ const Consultations: React.FC = () => {
               </div>
 
               <div className="flex gap-2 pt-4">
-                <Button onClick={handleCloseSale} className="flex-1">
-                  💰 Закрыть продажу
-                </Button>
+                <div className="flex items-center gap-1 flex-1">
+                  <Button onClick={handleCloseSale} className="flex-1">
+                    💰 Закрыть продажу
+                  </Button>
+                  <HelpTooltip tooltipKey={TooltipKeys.CONSULT_CREATE_SALE} iconSize="sm" />
+                </div>
                 <Button variant="outline" onClick={() => setIsSaleModalOpen(false)}>
                   Отмена
                 </Button>

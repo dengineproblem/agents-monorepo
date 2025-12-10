@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MessageCircle, Instagram, Globe, ChevronDown, Save, Loader2 } from 'lucide-react';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -248,7 +250,10 @@ const AdSettings: React.FC = () => {
               <CardContent className="space-y-4">
                 {/* Вопрос клиента */}
                 <div>
-                  <Label>Вопрос клиента (по умолчанию)</Label>
+                  <Label className="flex items-center gap-1">
+                    Вопрос клиента (по умолчанию)
+                    <HelpTooltip tooltipKey={TooltipKeys.AD_WHATSAPP_QUESTION} iconSize="sm" />
+                  </Label>
                   <Textarea
                     placeholder="Здравствуйте! Хочу узнать об этом подробнее."
                     value={currentSettings.clientQuestion}
@@ -273,7 +278,10 @@ const AdSettings: React.FC = () => {
               <CardContent className="space-y-4">
                 {/* Instagram URL */}
                 <div>
-                  <Label>URL профиля Instagram</Label>
+                  <Label className="flex items-center gap-1">
+                    URL профиля Instagram
+                    <HelpTooltip tooltipKey={TooltipKeys.AD_INSTAGRAM_URL_FORMAT} iconSize="sm" />
+                  </Label>
                   <Input
                     type="url"
                     placeholder="https://instagram.com/your_profile"
@@ -298,7 +306,10 @@ const AdSettings: React.FC = () => {
               <CardContent className="space-y-4">
                 {/* URL сайта */}
                 <div>
-                  <Label>URL сайта</Label>
+                  <Label className="flex items-center gap-1">
+                    URL сайта
+                    <HelpTooltip tooltipKey={TooltipKeys.AD_SITE_URL_FORMAT} iconSize="sm" />
+                  </Label>
                   <Input
                     type="url"
                     placeholder="https://your-site.com"
@@ -309,7 +320,10 @@ const AdSettings: React.FC = () => {
 
                 {/* Pixel ID */}
                 <div>
-                  <Label>ID пикселя Facebook</Label>
+                  <Label className="flex items-center gap-1">
+                    ID пикселя Facebook
+                    <HelpTooltip tooltipKey={TooltipKeys.AD_PIXEL_HOW_TO_GET} iconSize="sm" />
+                  </Label>
                   <Input
                     placeholder="Введите ID пикселя"
                     value={currentSettings.pixelId}
@@ -319,7 +333,10 @@ const AdSettings: React.FC = () => {
 
                 {/* UTM метки */}
                 <div>
-                  <Label>UTM метки</Label>
+                  <Label className="flex items-center gap-1">
+                    UTM метки
+                    <HelpTooltip tooltipKey={TooltipKeys.AD_UTM_TAGS} iconSize="sm" />
+                  </Label>
                   <Input
                     placeholder="utm_source=facebook&utm_medium=cpc"
                     value={currentSettings.utmTag}
@@ -365,7 +382,10 @@ const AdSettings: React.FC = () => {
         {/* Текст под видео */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <Label>Текст под видео</Label>
+            <Label className="flex items-center gap-1">
+              Текст под видео
+              <HelpTooltip tooltipKey={TooltipKeys.AD_TEXT_UNDER_VIDEO} iconSize="sm" />
+            </Label>
             <span className="text-xs text-muted-foreground">
               {currentSettings.description.length}/500
             </span>
@@ -381,7 +401,10 @@ const AdSettings: React.FC = () => {
 
         {/* География */}
         <div>
-          <Label>География</Label>
+          <Label className="flex items-center gap-1">
+            География
+            <HelpTooltip tooltipKey={TooltipKeys.AD_TARGETING_CITY} iconSize="sm" />
+          </Label>
           <Popover open={cityPopoverOpen} onOpenChange={setCityPopoverOpen}>
             <PopoverTrigger asChild>
               <Button variant="outline" className="w-full justify-between">
@@ -414,7 +437,10 @@ const AdSettings: React.FC = () => {
         {/* Возраст */}
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label>Возраст от</Label>
+            <Label className="flex items-center gap-1">
+              Возраст от
+              <HelpTooltip tooltipKey={TooltipKeys.AD_AGE_MIN} iconSize="sm" />
+            </Label>
             <Input
               type="number"
               min={18}
@@ -424,7 +450,10 @@ const AdSettings: React.FC = () => {
             />
           </div>
           <div>
-            <Label>Возраст до</Label>
+            <Label className="flex items-center gap-1">
+              Возраст до
+              <HelpTooltip tooltipKey={TooltipKeys.AD_AGE_MAX} iconSize="sm" />
+            </Label>
             <Input
               type="number"
               min={18}
@@ -437,7 +466,10 @@ const AdSettings: React.FC = () => {
 
         {/* Пол */}
         <div>
-          <Label>Пол</Label>
+          <Label className="flex items-center gap-1">
+            Пол
+            <HelpTooltip tooltipKey={TooltipKeys.AD_GENDER_ALL} iconSize="sm" />
+          </Label>
           <Select value={currentSettings.gender} onValueChange={(v) => updateSetting('gender', v)}>
             <SelectTrigger>
               <SelectValue />

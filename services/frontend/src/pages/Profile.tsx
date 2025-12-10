@@ -1267,7 +1267,10 @@ const Profile: React.FC = () => {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-password">{appReviewText('New password', 'Новый пароль')}</Label>
+                <Label htmlFor="new-password" className="flex items-center gap-1">
+                  {appReviewText('New password', 'Новый пароль')}
+                  <HelpTooltip tooltipKey={TooltipKeys.PROFILE_PASSWORD} iconSize="sm" />
+                </Label>
                 <div className="relative">
                   <Input
                     id="new-password"
@@ -1345,7 +1348,10 @@ const Profile: React.FC = () => {
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="new-username">{appReviewText('Username', 'Имя пользователя')}</Label>
+                <Label htmlFor="new-username" className="flex items-center gap-1">
+                  {appReviewText('Username', 'Имя пользователя')}
+                  <HelpTooltip tooltipKey={TooltipKeys.PROFILE_USERNAME} iconSize="sm" />
+                </Label>
                 <Input
                   id="new-username"
                   type="text"
@@ -1428,7 +1434,10 @@ const Profile: React.FC = () => {
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="max-budget">{appReviewText('Maximum budget (USD)', 'Максимальный бюджет (USD)')}</Label>
+                <Label htmlFor="max-budget" className="flex items-center gap-1">
+                  {appReviewText('Maximum budget (USD)', 'Максимальный бюджет (USD)')}
+                  <HelpTooltip tooltipKey={TooltipKeys.PROFILE_MAX_BUDGET} iconSize="sm" />
+                </Label>
                 <Input
                   id="max-budget"
                   type="text"
@@ -1471,7 +1480,10 @@ const Profile: React.FC = () => {
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="planned-cpl">{appReviewText('Planned cost per lead (USD)', 'Плановая стоимость заявки (USD)')}</Label>
+                <Label htmlFor="planned-cpl" className="flex items-center gap-1">
+                  {appReviewText('Planned cost per lead (USD)', 'Плановая стоимость заявки (USD)')}
+                  <HelpTooltip tooltipKey={TooltipKeys.PROFILE_PLANNED_CPL} iconSize="sm" />
+                </Label>
                 <Input
                   id="planned-cpl"
                   type="text"
@@ -1514,7 +1526,10 @@ const Profile: React.FC = () => {
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="openai-key">{appReviewText('API key', 'API ключ')}</Label>
+                <Label htmlFor="openai-key" className="flex items-center gap-1">
+                  {appReviewText('API key', 'API ключ')}
+                  <HelpTooltip tooltipKey={TooltipKeys.PROFILE_OPENAI_KEY} iconSize="sm" />
+                </Label>
                 <div className="relative">
                   <Input
                     id="openai-key"

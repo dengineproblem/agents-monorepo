@@ -23,6 +23,8 @@ import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { API_BASE_URL } from '@/config/api';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { TooltipKeys } from '@/content/tooltips';
 
 interface BrainExecution {
   id: string;
@@ -139,8 +141,9 @@ export function AutopilotSection({
                 <Bot className="h-5 w-5 text-white dark:text-gray-300" />
               </div>
               <div>
-                <CardTitle className="text-lg">
+                <CardTitle className="text-lg flex items-center gap-1">
                   AI автопилот
+                  <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_STATUS} iconSize="sm" />
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Автоматическое управление кампаниями
@@ -162,6 +165,7 @@ export function AutopilotSection({
                 onCheckedChange={toggleAiAutopilot}
                 disabled={aiAutopilotLoading}
               />
+              <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_TOGGLE} iconSize="sm" />
             </div>
           </div>
         </CardHeader>
@@ -191,26 +195,32 @@ export function AutopilotSection({
                     </div>
                     <div className="flex items-center gap-1">
                       {exec.report_text && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => openReport(exec)}
-                        >
-                          <FileText className="h-3.5 w-3.5 mr-1" />
-                          Отчёт
-                        </Button>
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => openReport(exec)}
+                          >
+                            <FileText className="h-3.5 w-3.5 mr-1" />
+                            Отчёт
+                          </Button>
+                          <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_REPORT} iconSize="sm" />
+                        </div>
                       )}
                       {exec.actions_json && exec.actions_json.length > 0 && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                          onClick={() => openActions(exec)}
-                        >
-                          <Eye className="h-3.5 w-3.5 mr-1" />
-                          Действия ({exec.actions_json.length})
-                        </Button>
+                        <div className="flex items-center gap-0.5">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => openActions(exec)}
+                          >
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            Действия ({exec.actions_json.length})
+                          </Button>
+                          <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_ACTIONS} iconSize="sm" />
+                        </div>
                       )}
                     </div>
                   </div>
