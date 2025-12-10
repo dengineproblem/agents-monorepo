@@ -97,20 +97,32 @@ const AppRoutes = () => {
   useEffect(() => {
     const handleMultiAccountLoaded = () => {
       const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
+      const storedUser = localStorage.getItem('user');
+      console.log('[Onboarding Debug] multiAccountLoaded:', {
+        isMultiAccount,
+        multiAccountEnabledRaw: localStorage.getItem('multiAccountEnabled'),
+        hasUser: !!storedUser,
+        userPrompt1: storedUser ? JSON.parse(storedUser).prompt1 : null,
+      });
 
       // Онбординг ТОЛЬКО для НЕ-мультиаккаунта без prompt1
+      const wasDismissed = localStorage.getItem('onboardingDismissed') === 'true';
+
       if (isMultiAccount) {
+        console.log('[Onboarding Debug] Multi-account mode - NOT showing onboarding');
         setShowOnboarding(false);
-      } else {
-        const storedUser = localStorage.getItem('user');
+      } else if (!wasDismissed) {
         if (storedUser) {
           try {
             const parsedUser = JSON.parse(storedUser);
             if (!parsedUser.prompt1) {
+              console.log('[Onboarding Debug] Legacy mode, no prompt1 - SHOWING onboarding');
               setShowOnboarding(true);
             }
           } catch {}
         }
+      } else {
+        console.log('[Onboarding Debug] Onboarding was dismissed - NOT showing');
       }
     };
 
@@ -121,6 +133,9 @@ const AppRoutes = () => {
   // Слушаем событие openOnboarding для добавления нового аккаунта в мультиаккаунтном режиме
   useEffect(() => {
     const handleOpenOnboarding = () => {
+      console.log('[Onboarding Debug] openOnboarding event - SHOWING onboarding');
+      // Сбрасываем флаг, т.к. пользователь явно хочет добавить аккаунт
+      localStorage.removeItem('onboardingDismissed');
       setShowOnboarding(true);
     };
 
@@ -209,7 +224,10 @@ const AppRoutes = () => {
           {showOnboarding && (
             <OnboardingWizard
               onComplete={handleOnboardingComplete}
-              onClose={localStorage.getItem('multiAccountEnabled') === 'true' ? () => setShowOnboarding(false) : undefined}
+              onClose={() => {
+                setShowOnboarding(false);
+                localStorage.setItem('onboardingDismissed', 'true');
+              }}
             />
           )}
 

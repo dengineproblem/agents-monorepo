@@ -149,11 +149,17 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         .eq('id', userAccountId)
         .single();
 
+      log.info({ user, userError }, '[DEBUG] User data from Supabase');
+
       if (userError || !user) {
+        log.error({ userError }, '[DEBUG] User not found or error');
         return reply.status(404).send({ error: 'User not found' });
       }
 
+      log.info({ multi_account_enabled: user.multi_account_enabled, type: typeof user.multi_account_enabled }, '[DEBUG] multi_account_enabled value');
+
       if (!user.multi_account_enabled) {
+        log.info('[DEBUG] Returning multi_account_enabled: false');
         return reply.send({
           multi_account_enabled: false,
           ad_accounts: [],
