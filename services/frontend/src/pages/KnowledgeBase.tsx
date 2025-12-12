@@ -7,7 +7,8 @@ import { KBBreadcrumbs } from '../components/knowledge-base/KBBreadcrumbs';
 import { KBSearch } from '../components/knowledge-base/KBSearch';
 import { knowledgeBaseContent, type Chapter } from '../content/knowledge-base';
 import { Input } from '../components/ui/input';
-import { Search, BookOpen, Menu, ChevronRight } from 'lucide-react';
+import { Search, BookOpen, Menu, ChevronRight, GraduationCap } from 'lucide-react';
+import { forceStartTour } from '@/hooks/useOnboardingTour';
 import { Button } from '../components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '../components/ui/sheet';
 import { ScrollArea } from '../components/ui/scroll-area';
@@ -80,6 +81,15 @@ const KnowledgeBase: React.FC = () => {
           Добро пожаловать в базу знаний Performante.ai! Здесь вы найдете подробные инструкции
           по всем функциям платформы — от первых шагов до продвинутых возможностей.
         </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => forceStartTour()}
+          className="mt-4"
+        >
+          <GraduationCap className="h-4 w-4 mr-2" />
+          Пройти обучение заново
+        </Button>
       </div>
 
       {/* Поиск */}
