@@ -10,6 +10,7 @@ import cors from '@fastify/cors';
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { analyzeCreativeTest } from './creativeAnalyzer.js';
+import { logErrorToAdmin, logCreativeAnalysisError } from './lib/errorLogger.js';
 
 const fastify = Fastify({ logger: true });
 
@@ -549,6 +550,19 @@ fastify.post('/analyze-test', async (request, reply) => {
     
   } catch (error) {
     fastify.log.error({ where: 'analyzeTest', error: error.message });
+
+    // Логируем в централизованную систему ошибок
+    const { test_id } = request.body || {};
+    logErrorToAdmin({
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'analyze_test',
+      endpoint: '/api/analyzer/analyze-test',
+      request_data: { test_id },
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: error.message });
   }
 });
@@ -612,6 +626,17 @@ fastify.post('/analyze-batch', async (request, reply) => {
     
   } catch (error) {
     fastify.log.error('Batch analysis error:', error);
+
+    // Логируем в централизованную систему ошибок
+    logErrorToAdmin({
+      error_type: 'cron',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'analyze_batch',
+      endpoint: '/api/analyzer/analyze-batch',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: error.message });
   }
 });
@@ -965,6 +990,21 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
     
   } catch (error) {
     fastify.log.error({ error: error.message, stack: error.stack }, 'Creative analytics error');
+
+    // Логируем в централизованную систему ошибок
+    const { user_id } = request.query || {};
+    const { user_creative_id } = request.params || {};
+    logErrorToAdmin({
+      user_account_id: user_id,
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'creative_analytics',
+      endpoint: '/api/analyzer/creative-analytics',
+      request_data: { user_creative_id },
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: error.message });
   }
 });
@@ -1228,6 +1268,11 @@ fastify.post('/analyze-creative', async (request, reply) => {
     
   } catch (error) {
     fastify.log.error({ error: error.message, stack: error.stack }, 'Analyze creative error');
+
+    // Логируем в централизованную систему ошибок
+    const { creative_id, user_id } = request.body || {};
+    logCreativeAnalysisError(user_id, error, 'analyze_creative').catch(() => {});
+
     return reply.code(500).send({ error: error.message });
   }
 });

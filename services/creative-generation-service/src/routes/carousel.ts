@@ -17,6 +17,7 @@ import { generateCarouselImages, regenerateCarouselCard, upscaleCarouselTo4K } f
 import { generateCarouselCardPrompt } from '../services/carouselPromptGenerator';
 import { getSupabaseClient } from '../db/supabase';
 import { addOnboardingTag } from '../lib/onboardingTags';
+import { logCarouselGenerationError } from '../lib/errorLogger';
 
 export default async function carouselRoutes(fastify: FastifyInstance) {
 
@@ -105,6 +106,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
       } catch (error: any) {
         console.error('[Carousel Texts] Error:', error);
+
+        // Логируем в централизованную систему ошибок
+        const { user_id } = request.body;
+        logCarouselGenerationError(user_id, error, 'generate_carousel_texts').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to generate carousel texts'
@@ -181,6 +187,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
       } catch (error: any) {
         console.error('[Carousel Card Text] Error:', error);
+
+        // Логируем в централизованную систему ошибок
+        const { user_id } = request.body;
+        logCarouselGenerationError(user_id, error, 'regenerate_carousel_card_text').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to regenerate card text'
@@ -371,6 +382,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
       } catch (error: any) {
         console.error('[Generate Carousel] Error:', error);
+
+        // Логируем в централизованную систему ошибок
+        const { user_id } = request.body;
+        logCarouselGenerationError(user_id, error, 'generate_carousel').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to generate carousel'
@@ -590,6 +606,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
       } catch (error: any) {
         console.error('[Regenerate Card] Error:', error);
+
+        // Логируем в централизованную систему ошибок
+        const { user_id } = request.body;
+        logCarouselGenerationError(user_id, error, 'regenerate_carousel_card').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to regenerate card'
@@ -709,6 +730,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
 
       } catch (error: any) {
         console.error('[Upscale Carousel] Error:', error);
+
+        // Логируем в централизованную систему ошибок
+        const { user_id } = request.body;
+        logCarouselGenerationError(user_id, error, 'upscale_carousel_to_4k').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to upscale carousel'

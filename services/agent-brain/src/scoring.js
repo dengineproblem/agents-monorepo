@@ -13,6 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { logger } from './lib/logger.js';
+import { logScoringError } from './lib/errorLogger.js';
 
 const FB_API_VERSION = 'v23.0';
 
@@ -1618,7 +1619,7 @@ export async function runScoringAgent(userAccount, options = {}) {
     
   } catch (error) {
     const duration = Date.now() - startTime;
-    
+
     logger.error({
       where: 'scoring_agent',
       phase: 'error',
@@ -1628,7 +1629,15 @@ export async function runScoringAgent(userAccount, options = {}) {
       error: String(error),
       stack: error.stack
     });
-    
+
+    // Логируем ошибку в централизованную систему
+    logScoringError(userAccountId, error, {
+      username,
+      accountUUID,
+      duration,
+      phase: 'scoring_agent'
+    }).catch(() => {});
+
     await supabase.from('scoring_executions').insert({
       user_account_id: userAccountId,
       account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy

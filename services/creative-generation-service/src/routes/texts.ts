@@ -3,6 +3,7 @@ import { generateText } from '../services/openai';
 import { SYSTEM_PROMPTS } from '../services/prompts';
 import { supabase } from '../db/supabase';
 import { GenerateTextRequest, GenerateTextResponse } from '../types';
+import { logTextGenerationError } from '../lib/errorLogger';
 
 export const textsRoutes: FastifyPluginAsync = async (app) => {
   
@@ -71,6 +72,10 @@ ${existing_cta || ''} - текущие cta`;
       
     } catch (error: any) {
       app.log.error('[Generate Offer] Error:', error);
+
+      // Логируем в централизованную систему ошибок
+      logTextGenerationError(user_id, error, 'generate_offer').catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to generate offer'
@@ -134,6 +139,10 @@ ${existing_cta || ''} - текущие cta`;
       
     } catch (error: any) {
       app.log.error('[Generate Bullets] Error:', error);
+
+      // Логируем в централизованную систему ошибок
+      logTextGenerationError(user_id, error, 'generate_bullets').catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to generate bullets'
@@ -194,6 +203,10 @@ ${existing_cta || ''} - текущие cta`;
       
     } catch (error: any) {
       app.log.error('[Generate Profits] Error:', error);
+
+      // Логируем в централизованную систему ошибок
+      logTextGenerationError(user_id, error, 'generate_profits').catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to generate profits'
@@ -254,6 +267,10 @@ ${existing_benefits || ''} - текущие выгоды`;
       
     } catch (error: any) {
       app.log.error('[Generate CTA] Error:', error);
+
+      // Логируем в централизованную систему ошибок
+      logTextGenerationError(user_id, error, 'generate_cta').catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to generate CTA'

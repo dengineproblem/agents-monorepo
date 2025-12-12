@@ -3,6 +3,7 @@ import { generateText } from '../services/openai';
 import { buildTextCreativePrompt, buildEditTextPrompt, TextCreativeType, TEXT_TYPE_LABELS } from '../services/textPrompts';
 import { supabase } from '../db/supabase';
 import { addOnboardingTag } from '../lib/onboardingTags';
+import { logTextGenerationError } from '../lib/errorLogger';
 
 interface GenerateTextCreativeRequest {
   user_id: string;
@@ -188,6 +189,10 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
 
       } catch (error: any) {
         app.log.error(`[Generate Text Creative] Error:`, error);
+
+        // Логируем в централизованную систему ошибок
+        logTextGenerationError(user_id, error, 'generate_text_creative').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to generate text creative'
@@ -315,6 +320,10 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
 
       } catch (error: any) {
         app.log.error(`[Edit Text Creative] Error:`, error);
+
+        // Логируем в централизованную систему ошибок
+        logTextGenerationError(user_id, error, 'edit_text_creative').catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: error.message || 'Failed to edit text creative'

@@ -3,6 +3,7 @@ import { generateCreativeImage, upscaleImageTo4K, expandTo9x16, extractTextFromI
 import { supabase, logSupabaseError } from '../db/supabase';
 import { GenerateCreativeRequest, GenerateCreativeResponse } from '../types';
 import { addOnboardingTag } from '../lib/onboardingTags';
+import { logImageGenerationError } from '../lib/errorLogger';
 
 export const imageRoutes: FastifyPluginAsync = async (app) => {
   
@@ -210,10 +211,13 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
     } catch (error: any) {
       app.log.error('[Generate Creative] Error:', error);
-      
+
+      // Логируем в централизованную систему ошибок
+      logImageGenerationError(user_id, error, 'generate_creative_image').catch(() => {});
+
       // Определяем тип ошибки для более информативного сообщения
       let errorMessage = 'Failed to generate creative';
-      
+
       if (error.message?.includes('OpenAI')) {
         errorMessage = 'AI image generation failed. Please try again.';
       } else if (error.message?.includes('upload')) {
@@ -221,7 +225,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       } else if (error.message?.includes('storage')) {
         errorMessage = 'Storage service unavailable. Please try again later.';
       }
-      
+
       return reply.status(500).send({
         success: false,
         error: errorMessage,
@@ -356,6 +360,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
     } catch (error: any) {
       app.log.error('[Upscale to 4K] Error:', error);
+
+      // Логируем в централизованную систему ошибок
+      logImageGenerationError(user_id, error, 'upscale_to_4k').catch(() => {});
 
       return reply.status(500).send({
         success: false,

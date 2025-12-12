@@ -36,6 +36,7 @@ import {
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { eventLogger } from '../lib/eventLogger.js';
 import { onAdsLaunched } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -581,11 +582,24 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           } catch (error: any) {
             const resolution = error?.fb ? resolveFacebookError(error.fb) : undefined;
             log.error({ err: error, directionId: direction.id, directionName: direction.name, resolution }, 'Failed to create ad set for direction');
-            
+
+            // Логируем ошибку в централизованную систему
+            logErrorToAdmin({
+              user_account_id,
+              error_type: error?.fb ? 'facebook' : 'api',
+              error_code: error?.fb ? `${error.fb.code}:${error.fb.error_subcode || 0}` : undefined,
+              raw_error: error.message || String(error),
+              stack_trace: error.stack,
+              action: 'auto_launch_v2_deterministic',
+              endpoint: '/auto-launch-v2',
+              request_data: { direction_id: direction.id, direction_name: direction.name },
+              severity: error?.fb?.code === 190 ? 'critical' : 'warning',
+            }).catch(() => {});
+
             // Парсим ошибку Facebook API для более понятного сообщения
             let errorMessage = error.message;
             let errorDetails = null;
-            
+
             if (error.message && error.message.includes('locations that are currently restricted')) {
               errorMessage = 'Выбранные гео-локации заблокированы для вашего рекламного аккаунта';
               errorDetails = 'Проверьте настройки таргетинга в разделе "Настройки рекламы" для этого направления';
@@ -596,7 +610,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               errorMessage = 'Ошибка авторизации Facebook';
               errorDetails = 'Проверьте токен доступа в настройках аккаунта';
             }
-            
+
             results.push({
               direction_id: direction.id,
               direction_name: direction.name,
@@ -911,7 +925,21 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         });
       } catch (error: any) {
         log.error({ err: error, userAccountId: request.body?.user_account_id }, 'Manual launch failed');
-        
+
+        // Логируем ошибку в централизованную систему
+        const body = request.body as any;
+        logErrorToAdmin({
+          user_account_id: body?.user_account_id,
+          error_type: error?.fb ? 'facebook' : 'api',
+          error_code: error?.fb ? `${error.fb.code}:${error.fb.error_subcode || 0}` : undefined,
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'manual_launch',
+          endpoint: '/manual-launch',
+          request_data: { direction_id: body?.direction_id, creative_ids: body?.creative_ids },
+          severity: error?.fb?.code === 190 ? 'critical' : 'warning',
+        }).catch(() => {});
+
         // Парсим ошибку для понятного сообщения
         let errorMessage = error.message;
         if (error.message && error.message.includes('locations that are currently restricted')) {
@@ -919,7 +947,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         } else if (error.message && error.message.includes('Invalid parameter')) {
           errorMessage = 'Некорректные параметры таргетинга или настроек';
         }
-        
+
         return reply.status(500).send({
           success: false,
           error: errorMessage,

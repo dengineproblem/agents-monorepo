@@ -11,6 +11,7 @@ import { supabase, supabaseQuery } from './lib/supabaseClient.js';
 import { startAmoCRMLeadsSyncCron } from './amocrmLeadsSyncCron.js';
 import { analyzeCreativeTest } from './creativeAnalyzer.js';
 import { registerChatRoutes } from './chatAssistant/index.js';
+import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
@@ -2417,13 +2418,25 @@ fastify.post('/api/brain/run', async (request, reply) => {
           summary: scoringOutput?.summary 
         });
       } catch (err) {
-        fastify.log.warn({ 
-          where: 'brain_run', 
-          phase: 'scoring_failed', 
+        fastify.log.warn({
+          where: 'brain_run',
+          phase: 'scoring_failed',
           userId: userAccountId,
-          username: ua.username, 
-          error: String(err) 
+          username: ua.username,
+          error: String(err)
         });
+
+        // Логируем в централизованную систему ошибок
+        logErrorToAdmin({
+          user_account_id: userAccountId,
+          error_type: 'scoring',
+          raw_error: String(err?.message || err),
+          stack_trace: err?.stack,
+          action: 'brain_run_scoring',
+          endpoint: '/api/brain/run',
+          severity: 'warning'
+        }).catch(() => {});
+
         // Продолжаем работу без scoring данных
         scoringOutput = {
           summary: { high_risk_count: 0, medium_risk_count: 0, low_risk_count: 0, overall_trend: 'unknown', alert_level: 'none' },
@@ -3393,6 +3406,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
       stack: err?.stack
     });
     
+    // Логируем в централизованную систему ошибок
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'api',
+      raw_error: String(err?.message || err),
+      stack_trace: err?.stack,
+      action: 'brain_run',
+      endpoint: '/api/brain/run',
+      severity: 'critical'
+    }).catch(() => {});
+
     // Отправляем в мониторинговый бот
     if (uaForMonitoring) {
       try {
@@ -3415,7 +3439,7 @@ ${err?.stack || 'N/A'}`;
         });
       }
     }
-    
+
     return reply.code(500).send({ error:'brain_run_failed', details:String(err?.message || err) });
   }
 });
@@ -3431,6 +3455,19 @@ fastify.post('/api/brain/decide', async (request, reply) => {
     return reply.send({ planNote: plan.planNote, actions, dispatched:false });
   } catch (err) {
     request.log.error(err);
+
+    // Логируем в централизованную систему ошибок
+    const { userAccountId } = request.body || {};
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'api',
+      raw_error: String(err?.message || err),
+      stack_trace: err?.stack,
+      action: 'brain_decide',
+      endpoint: '/api/brain/decide',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error:'brain_decide_failed', details:String(err?.message || err) });
   }
 });
@@ -4099,6 +4136,19 @@ fastify.post('/api/analyzer/analyze-creative', async (request, reply) => {
     
   } catch (error) {
     fastify.log.error({ error: error.message, stack: error.stack }, 'Analyze creative error');
+
+    // Логируем в централизованную систему ошибок
+    const { user_id } = request.body || {};
+    logErrorToAdmin({
+      user_account_id: user_id,
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'analyze_creative',
+      endpoint: '/api/analyzer/analyze-creative',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: error.message });
   }
 });
