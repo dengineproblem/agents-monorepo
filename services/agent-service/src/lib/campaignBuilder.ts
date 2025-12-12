@@ -844,9 +844,10 @@ export async function pauseAdSetsForCampaign(
 export async function getAvailableCreatives(
   userAccountId: string,
   objective?: CampaignObjective,
-  directionId?: string
+  directionId?: string,
+  accountId?: string
 ): Promise<AvailableCreative[]> {
-  log.info({ userAccountId, directionId }, 'Fetching available creatives for direction');
+  log.info({ userAccountId, directionId, accountId }, 'Fetching available creatives for direction');
 
   let creatives: any[];
 
@@ -932,8 +933,11 @@ export async function getAvailableCreatives(
     log.info({ count: filteredCreatives.length, objective }, 'Filtered creatives for objective');
   }
 
-  // Получаем fb_creative_id для каждого креатива
-  const creativeIds = filteredCreatives.map((c) => {
+  // Получаем user_creative_id для запроса метрик через ad_creative_mapping
+  const userCreativeIds = filteredCreatives.map((c) => c.id);
+
+  // Получаем fb_creative_id для каждого креатива (для creative_scores)
+  const fbCreativeIds = filteredCreatives.map((c) => {
     switch (objective) {
       case 'whatsapp':
         return c.fb_creative_id_whatsapp;
@@ -952,18 +956,18 @@ export async function getAvailableCreatives(
     .select('*')
     .eq('user_account_id', userAccountId)
     .eq('level', 'creative')
-    .in('creative_id', creativeIds)
+    .in('creative_id', fbCreativeIds)
     .order('date', { ascending: false });
 
-  // 2. Получаем метрики ТОЛЬКО из БД (creative_metrics_history)
-  // Больше НЕ обращаемся к Facebook API - все данные должны быть в БД
-  const metricsMap = await getCreativeMetrics(userAccountId, creativeIds);
+  // 2. Получаем метрики через ad_creative_mapping (НОВАЯ ЛОГИКА!)
+  // user_creative_id → ad_creative_mapping → ad_id → creative_metrics_history
+  const metricsMap = await getCreativeMetrics(userAccountId, userCreativeIds, accountId);
 
-  log.info({ 
+  log.info({
     fromDB: metricsMap.size,
-    withoutMetrics: creativeIds.length - metricsMap.size,
-    total: creativeIds.length 
-  }, 'Metrics loaded from DB only');
+    withoutMetrics: userCreativeIds.length - metricsMap.size,
+    total: userCreativeIds.length
+  }, 'Metrics loaded from DB via ad_creative_mapping');
 
 
   // Объединяем креативы со скорами и метриками
@@ -982,7 +986,8 @@ export async function getAvailableCreatives(
     }
 
     const score = scores?.find((s) => s.creative_id === fbCreativeId);
-    const metrics = metricsMap.get(fbCreativeId!);
+    // Теперь метрики ищем по user_creative_id (creative.id), а не по fb_creative_id
+    const metrics = metricsMap.get(creative.id);
 
     return {
       user_creative_id: creative.id,
@@ -1086,10 +1091,16 @@ export async function getBudgetConstraints(
 /**
  * Preprocessing: сортирует и фильтрует креативы для LLM
  * Чтобы не передавать 50+ креативов со всеми метриками
+ *
+ * Приоритет:
+ * 1. Хорошие с метриками (CPL <= 130% от планового)
+ * 2. Новые без метрик (нужно тестировать)
+ * 3. Плохие с метриками (CPL > 130% от планового)
  */
 function preprocessCreativesForLLM(
   creatives: AvailableCreative[],
-  maxCreatives: number = 20
+  maxCreatives: number = 20,
+  targetCplCents?: number
 ): {
   filtered_creatives: AvailableCreative[];
   aggregated_metrics: {
@@ -1102,55 +1113,78 @@ function preprocessCreativesForLLM(
     worst_cpl_cents: number | null;
   };
 } {
-  log.info({ total: creatives.length, maxCreatives }, 'Preprocessing creatives for LLM');
+  log.info({ total: creatives.length, maxCreatives, targetCplCents }, 'Preprocessing creatives for LLM');
+
+  // Порог "хорошего" CPL = 130% от планового
+  const goodCplThreshold = targetCplCents ? targetCplCents * 1.3 : null;
 
   // Разделяем на креативы с и без performance данных
   const withPerformance = creatives.filter(c => c.performance !== null);
   const withoutPerformance = creatives.filter(c => c.performance === null);
 
-  log.info({ 
-    withPerformance: withPerformance.length, 
-    withoutPerformance: withoutPerformance.length 
-  }, 'Creatives split by performance data');
+  // Разделяем креативы с метриками на хорошие и плохие по CPL
+  let goodPerformance: AvailableCreative[] = [];
+  let poorPerformance: AvailableCreative[] = [];
 
-  // Сортируем креативы с performance по приоритету:
-  // 1. CPL (если есть) - меньше лучше
-  // 2. CTR - больше лучше
-  // 3. CPM - меньше лучше
-  withPerformance.sort((a, b) => {
+  if (goodCplThreshold) {
+    // Есть плановый CPL — разделяем по порогу 130%
+    goodPerformance = withPerformance.filter(c => {
+      const cpl = c.performance?.avg_cpl;
+      // Если нет CPL (нет лидов) — считаем нейтральным, идёт в хорошие
+      if (!cpl) return true;
+      return cpl <= goodCplThreshold;
+    });
+    poorPerformance = withPerformance.filter(c => {
+      const cpl = c.performance?.avg_cpl;
+      if (!cpl) return false;
+      return cpl > goodCplThreshold;
+    });
+  } else {
+    // Нет планового CPL — все с метриками считаем хорошими
+    goodPerformance = withPerformance;
+    poorPerformance = [];
+  }
+
+  log.info({
+    withPerformance: withPerformance.length,
+    goodPerformance: goodPerformance.length,
+    poorPerformance: poorPerformance.length,
+    withoutPerformance: withoutPerformance.length,
+    goodCplThreshold
+  }, 'Creatives split by performance and CPL threshold');
+
+  // Сортируем хорошие креативы по приоритету (лучший CPL первым)
+  goodPerformance.sort((a, b) => {
     const aCpl = a.performance?.avg_cpl;
     const bCpl = b.performance?.avg_cpl;
     const aCtr = a.performance?.avg_ctr || 0;
     const bCtr = b.performance?.avg_ctr || 0;
-    const aCpm = a.performance?.avg_cpm || 999999;
-    const bCpm = b.performance?.avg_cpm || 999999;
 
-    // Приоритет 1: CPL (если есть у обоих)
-    if (aCpl && bCpl) {
-      return aCpl - bCpl;
-    }
-    // Если только у одного есть CPL - он лучше
+    // Приоритет 1: CPL (меньше лучше)
+    if (aCpl && bCpl) return aCpl - bCpl;
     if (aCpl && !bCpl) return -1;
     if (!aCpl && bCpl) return 1;
 
-    // Приоритет 2: CTR (выше - лучше)
-    if (Math.abs(aCtr - bCtr) > 0.001) {
-      return bCtr - aCtr;
-    }
+    // Приоритет 2: CTR (больше лучше)
+    return bCtr - aCtr;
+  });
 
-    // Приоритет 3: CPM (ниже - лучше)
-    return aCpm - bCpm;
+  // Сортируем плохие (менее плохие первыми)
+  poorPerformance.sort((a, b) => {
+    const aCpl = a.performance?.avg_cpl || 999999;
+    const bCpl = b.performance?.avg_cpl || 999999;
+    return aCpl - bCpl;
   });
 
   // Вычисляем агрегированные метрики ДО фильтрации
   const cpls = withPerformance
     .map(c => c.performance?.avg_cpl)
     .filter((cpl): cpl is number => cpl !== null && cpl !== undefined);
-  
+
   const ctrs = withPerformance
     .map(c => c.performance?.avg_ctr)
     .filter((ctr): ctr is number => ctr !== null && ctr !== undefined);
-  
+
   const cpms = withPerformance
     .map(c => c.performance?.avg_cpm)
     .filter((cpm): cpm is number => cpm !== null && cpm !== undefined);
@@ -1167,75 +1201,148 @@ function preprocessCreativesForLLM(
 
   log.info({ aggregatedMetrics }, 'Aggregated metrics calculated');
 
-  // Формируем финальный список: топ креативов с performance + часть новых
-  const topPerforming = withPerformance.slice(0, Math.floor(maxCreatives * 0.7)); // 70% - лучшие по метрикам
-  const newCreatives = withoutPerformance.slice(0, Math.floor(maxCreatives * 0.3)); // 30% - новые для тестирования
+  // Формируем финальный список с приоритетом:
+  // 1. Хорошие с метриками (CPL <= 130% от планового)
+  // 2. Новые без метрик (нужно тестировать)
+  // 3. Плохие с метриками (CPL > 130% от планового)
 
-  const filteredCreatives = [...topPerforming, ...newCreatives];
+  const result: AvailableCreative[] = [];
+  let remainingSlots = maxCreatives;
 
-  log.info({ 
-    filtered: filteredCreatives.length,
-    topPerforming: topPerforming.length,
-    newCreatives: newCreatives.length
-  }, 'Creatives filtered for LLM');
+  // 1. Добавляем все хорошие
+  const goodToAdd = goodPerformance.slice(0, remainingSlots);
+  result.push(...goodToAdd);
+  remainingSlots -= goodToAdd.length;
+
+  // 2. Добавляем новые
+  if (remainingSlots > 0) {
+    const newToAdd = withoutPerformance.slice(0, remainingSlots);
+    result.push(...newToAdd);
+    remainingSlots -= newToAdd.length;
+  }
+
+  // 3. Добавляем плохие (если остались слоты)
+  if (remainingSlots > 0) {
+    const poorToAdd = poorPerformance.slice(0, remainingSlots);
+    result.push(...poorToAdd);
+  }
+
+  const newAdded = Math.min(withoutPerformance.length, maxCreatives - goodToAdd.length);
+  const poorAdded = result.length - goodToAdd.length - newAdded;
+
+  log.info({
+    filtered: result.length,
+    good: goodToAdd.length,
+    new: newAdded,
+    poor: poorAdded
+  }, 'Creatives filtered for LLM (priority: good → new → poor)');
 
   return {
-    filtered_creatives: filteredCreatives,
+    filtered_creatives: result,
     aggregated_metrics: aggregatedMetrics
   };
 }
 
 /**
- * Получить метрики креативов из creative_metrics_history
- * ОБНОВЛЕНО для унифицированной системы метрик
- * 
- * Читает метрики за сегодня или вчера (если сегодня еще нет)
- * Агрегирует метрики если у креатива несколько ads
+ * Получает метрики из БД для списка креативов через ad_creative_mapping
+ *
+ * НОВАЯ ЛОГИКА (как в ROI Analytics):
+ * 1. user_creative_id → ad_creative_mapping → ad_id
+ * 2. ad_id → creative_metrics_history → метрики
+ * 3. Агрегирует метрики всех ads для каждого креатива
+ *
+ * @param userAccountId - ID пользователя
+ * @param userCreativeIds - массив UUID креативов (user_creatives.id)
+ * @param accountId - ID рекламного аккаунта (для мультиаккаунтности)
+ * @returns Map<user_creative_id, metrics>
  */
 export async function getCreativeMetrics(
   userAccountId: string,
-  fbCreativeIds: string[]
+  userCreativeIds: string[],
+  accountId?: string
 ): Promise<Map<string, any>> {
-  if (fbCreativeIds.length === 0) return new Map();
-  
-  const today = new Date().toISOString().split('T')[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  
-  log.debug({ today, yesterday }, 'Fetching creative metrics from DB');
-  
-  // Пытаемся получить за сегодня
-  let { data: metrics } = await supabase
-    .from('creative_metrics_history')
-    .select('*')
-    .eq('user_account_id', userAccountId)
-    .in('creative_id', fbCreativeIds)
-    .eq('date', today);
-  
-  // Если за сегодня нет - берем за вчера
-  if (!metrics || metrics.length === 0) {
-    log.debug('No metrics for today, trying yesterday');
-    const result = await supabase
-      .from('creative_metrics_history')
-      .select('*')
-      .eq('user_account_id', userAccountId)
-      .in('creative_id', fbCreativeIds)
-      .eq('date', yesterday);
-    metrics = result.data;
-  }
-  
-  if (!metrics || metrics.length === 0) {
-    log.debug('No metrics found in DB');
+  if (userCreativeIds.length === 0) return new Map();
+
+  log.debug({
+    userCreativeIds: userCreativeIds.length,
+    accountId
+  }, 'Fetching creative metrics via ad_creative_mapping');
+
+  // Шаг 1: Получить все ad_id для креативов через ad_creative_mapping
+  const { data: mappings, error: mappingError } = await supabase
+    .from('ad_creative_mapping')
+    .select('user_creative_id, ad_id')
+    .in('user_creative_id', userCreativeIds);
+
+  if (mappingError) {
+    log.error({ err: mappingError }, 'Error fetching ad_creative_mapping');
     return new Map();
   }
-  
+
+  if (!mappings || mappings.length === 0) {
+    log.debug('No ad mappings found for creatives');
+    return new Map();
+  }
+
+  // Создаём связь ad_id → user_creative_id
+  const adToCreativeMap = new Map<string, string>();
+  for (const m of mappings) {
+    adToCreativeMap.set(m.ad_id, m.user_creative_id);
+  }
+
+  const adIds = mappings.map(m => m.ad_id);
+  log.debug({ adIds: adIds.length, mappings: mappings.length }, 'Found ad mappings');
+
+  // Шаг 2: Получить метрики за последние 7 дней (агрегируем для LLM)
+  const dateCutoff = new Date();
+  dateCutoff.setDate(dateCutoff.getDate() - 7);
+  const cutoffDate = dateCutoff.toISOString().split('T')[0];
+
+  let query = supabase
+    .from('creative_metrics_history')
+    .select('*')
+    .in('ad_id', adIds)
+    .eq('user_account_id', userAccountId)
+    .gte('date', cutoffDate);
+
+  // Фильтр по account_id для мультиаккаунтности
+  if (accountId) {
+    query = query.eq('account_id', accountId);
+  }
+
+  const { data: metrics, error: metricsError } = await query;
+
+  if (metricsError) {
+    log.error({ err: metricsError }, 'Error fetching metrics from creative_metrics_history');
+    return new Map();
+  }
+
+  if (!metrics || metrics.length === 0) {
+    log.debug('No metrics found in creative_metrics_history');
+    return new Map();
+  }
+
   log.debug({ count: metrics.length }, 'Found metrics in DB');
-  
-  // Агрегируем по creative_id (может быть несколько ads у одного креатива)
-  const aggregated = new Map();
-  
+
+  // Шаг 3: Агрегируем метрики по user_creative_id
+  const aggregated = new Map<string, {
+    impressions: number;
+    reach: number;
+    spend: number;
+    clicks: number;
+    link_clicks: number;
+    leads: number;
+    frequency: number;
+    count: number;
+    latestDate: string;
+  }>();
+
   for (const metric of metrics) {
-    if (!aggregated.has(metric.creative_id)) {
-      aggregated.set(metric.creative_id, {
+    const userCreativeId = adToCreativeMap.get(metric.ad_id);
+    if (!userCreativeId) continue;
+
+    if (!aggregated.has(userCreativeId)) {
+      aggregated.set(userCreativeId, {
         impressions: 0,
         reach: 0,
         spend: 0,
@@ -1243,30 +1350,34 @@ export async function getCreativeMetrics(
         link_clicks: 0,
         leads: 0,
         frequency: 0,
-        count: 0
+        count: 0,
+        latestDate: metric.date
       });
     }
-    
-    const agg = aggregated.get(metric.creative_id);
+
+    const agg = aggregated.get(userCreativeId)!;
     agg.impressions += metric.impressions || 0;
     agg.reach += metric.reach || 0;
-    agg.spend += metric.spend || 0;
+    agg.spend += metric.spend_cents || metric.spend || 0; // spend_cents или spend
     agg.clicks += metric.clicks || 0;
     agg.link_clicks += metric.link_clicks || 0;
     agg.leads += metric.leads || 0;
     agg.frequency += metric.frequency || 0;
     agg.count += 1;
+    if (metric.date > agg.latestDate) {
+      agg.latestDate = metric.date;
+    }
   }
-  
-  // Вычисляем средние метрики
+
+  // Шаг 4: Вычисляем средние метрики
   const metricsMap = new Map();
-  for (const [creativeId, agg] of aggregated) {
+  for (const [userCreativeId, agg] of aggregated) {
     const avgFrequency = agg.count > 0 ? agg.frequency / agg.count : 0;
     const ctr = agg.impressions > 0 ? (agg.clicks / agg.impressions) * 100 : 0;
     const cpm = agg.impressions > 0 ? (agg.spend / agg.impressions) * 1000 : 0;
     const cpl = agg.leads > 0 ? agg.spend / agg.leads : null;
-    
-    metricsMap.set(creativeId, {
+
+    metricsMap.set(userCreativeId, {
       impressions: agg.impressions,
       reach: agg.reach,
       spend: agg.spend,
@@ -1277,15 +1388,16 @@ export async function getCreativeMetrics(
       cpm: parseFloat(cpm.toFixed(2)),
       cpl: cpl ? parseFloat(cpl.toFixed(2)) : null,
       frequency: parseFloat(avgFrequency.toFixed(2)),
-      date: metrics[0].date
+      date: agg.latestDate
     });
   }
-  
-  log.info({ 
+
+  log.info({
     fromDB: metricsMap.size,
-    requested: fbCreativeIds.length 
-  }, 'Loaded metrics from DB');
-  
+    requested: userCreativeIds.length,
+    adMappings: mappings.length
+  }, 'Loaded metrics from DB via ad_creative_mapping');
+
   return metricsMap;
 }
 
@@ -1510,7 +1622,11 @@ export async function buildCampaignAction(input: CampaignBuilderInput): Promise<
   }, 'Building campaign action with metrics');
 
   // Preprocessing: фильтруем и сортируем креативы для LLM
-  const { filtered_creatives, aggregated_metrics } = preprocessCreativesForLLM(availableCreatives, 20);
+  // Увеличен лимит до 50 чтобы LLM мог распределить все креативы по адсетам
+  // Передаём плановый CPL для определения хороших/плохих креативов (порог 130%)
+  const maxCreativesForLLM = Math.min(50, availableCreatives.length);
+  const targetCplCents = budgetConstraints.default_cpl_target_cents;
+  const { filtered_creatives, aggregated_metrics } = preprocessCreativesForLLM(availableCreatives, maxCreativesForLLM, targetCplCents);
 
   log.info({
     original_count: availableCreatives.length,

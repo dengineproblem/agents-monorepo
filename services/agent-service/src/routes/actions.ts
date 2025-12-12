@@ -9,6 +9,7 @@ import { workflowCreateCampaignWithCreative } from '../workflows/createCampaignW
 import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 import { getAvailableAdSet, activateAdSet, incrementAdsCount, deactivateAdSetWithAds } from '../lib/directionAdSets.js';
+import { pauseAdSetsForCampaign } from '../lib/campaignBuilder.js';
 
 /**
  * Helper: конвертирует объекты в параметры для Facebook API
@@ -453,19 +454,38 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         }>;
         auto_activate?: boolean;
       };
-      
+
       if (!p.direction_id) throw new Error('Direction.CreateMultipleAdSets: direction_id required');
       if (!p.adsets || !Array.isArray(p.adsets) || p.adsets.length === 0) {
         throw new Error('Direction.CreateMultipleAdSets: adsets array required');
       }
-      
+
       // Обработать каждый adset - создать через API
       const results = [];
-      
+
       if (!ctx?.userAccountId || !ctx?.adAccountId) {
         throw new Error('Direction.CreateMultipleAdSets: missing user context');
       }
-      
+
+      // ШАГ 0: Отключить активные адсеты в кампании перед созданием новых
+      // Получаем direction чтобы узнать fb_campaign_id
+      const { data: direction } = await supabase
+        .from('account_directions')
+        .select('fb_campaign_id, name')
+        .eq('id', p.direction_id)
+        .single();
+
+      if (direction?.fb_campaign_id) {
+        console.log(`[Direction.CreateMultipleAdSets] Pausing active adsets in campaign ${direction.fb_campaign_id} before creating new ones`);
+        try {
+          const pausedCount = await pauseAdSetsForCampaign(direction.fb_campaign_id, token);
+          console.log(`[Direction.CreateMultipleAdSets] Paused ${pausedCount} active adsets`);
+        } catch (pauseError: any) {
+          console.warn(`[Direction.CreateMultipleAdSets] Failed to pause adsets: ${pauseError.message}`);
+          // Продолжаем создание - это не критическая ошибка
+        }
+      }
+
       for (const adsetConfig of p.adsets) {
         try {
           const result = await workflowCreateAdSetInDirection(
