@@ -1797,14 +1797,16 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           disabled={isUploading || directionsLoading}
                         >
                           <SelectTrigger className="w-full">
-                            <SelectValue placeholder={t('video.selectDirection')} />
+                            <SelectValue placeholder={t('video.selectDirection')} className="truncate" />
                           </SelectTrigger>
-                          <SelectContent>
+                          <SelectContent className="max-w-[calc(100vw-4rem)]">
                             {directions
                               .filter(d => !campaignGoal || d.objective === campaignGoal)
                               .map((direction) => (
                                 <SelectItem key={direction.id} value={direction.id}>
-                                  {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                                  <span className="block truncate max-w-[350px]" title={`${direction.name} (${OBJECTIVE_LABELS[direction.objective]})`}>
+                                    {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                                  </span>
                                 </SelectItem>
                               ))}
                           </SelectContent>
@@ -2841,10 +2843,10 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     setSelectedCreativeIds([]);
                   }}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите направление" />
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Выберите направление" className="truncate" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-w-[calc(100vw-4rem)]">
                     {directions.length === 0 ? (
                       <div className="p-2 text-sm text-muted-foreground">
                         Нет доступных направлений
@@ -2854,7 +2856,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         .filter((d) => d.is_active)
                         .map((direction) => (
                           <SelectItem key={direction.id} value={direction.id}>
-                            {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                            <span className="block truncate max-w-[350px]" title={`${direction.name} (${OBJECTIVE_LABELS[direction.objective]})`}>
+                              {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                            </span>
                           </SelectItem>
                         ))
                     )}
@@ -2953,9 +2957,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           />
                           <label
                             htmlFor={`creative-${creative.id}`}
-                            className="flex-1 cursor-pointer text-sm"
+                            className="flex-1 min-w-0 cursor-pointer text-sm"
                           >
-                            <div className="font-medium">{creative.title}</div>
+                            <div className="font-medium truncate" title={creative.title}>{creative.title}</div>
                             <div className="text-xs text-muted-foreground">
                               {new Date(creative.created_at).toLocaleDateString('ru-RU')}
                             </div>
@@ -3022,9 +3026,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 <>
                   {/* Информация о направлении */}
                   <div className="space-y-2">
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Направление:</span>{' '}
-                      <span className="font-medium">{launchResult.direction_name}</span>
+                    <div className="text-sm flex items-baseline gap-1 min-w-0">
+                      <span className="text-muted-foreground shrink-0">Направление:</span>{' '}
+                      <span className="font-medium truncate" title={launchResult.direction_name}>{launchResult.direction_name}</span>
                     </div>
                     <div className="text-sm">
                       <span className="text-muted-foreground">Campaign ID:</span>{' '}
@@ -3035,7 +3039,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   {/* Информация об Ad Set */}
                   <div className="p-4 bg-muted/30 rounded-lg space-y-2">
                     <div className="text-sm font-medium">Ad Set</div>
-                    <div className="text-sm text-muted-foreground">{launchResult.adset_name}</div>
+                    <div className="text-sm text-muted-foreground truncate" title={launchResult.adset_name}>{launchResult.adset_name}</div>
                     <div className="text-xs text-muted-foreground font-mono">
                       ID: {launchResult.adset_id}
                     </div>
@@ -3057,7 +3061,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                             key={ad.ad_id}
                             className="p-3 border rounded-lg text-sm space-y-1"
                           >
-                            <div className="font-medium">
+                            <div className="font-medium truncate" title={ad.name}>
                               {index + 1}. {ad.name}
                             </div>
                             <div className="text-xs text-muted-foreground font-mono">
@@ -3103,9 +3107,9 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     <>
                       {/* Информация о направлении */}
                       <div className="space-y-2">
-                        <div className="text-sm">
-                          <span className="text-muted-foreground">Направление:</span>{' '}
-                          <span className="font-medium">{result.direction_name}</span>
+                        <div className="text-sm flex items-baseline gap-1 min-w-0">
+                          <span className="text-muted-foreground shrink-0">Направление:</span>{' '}
+                          <span className="font-medium truncate" title={result.direction_name}>{result.direction_name}</span>
                         </div>
                         <div className="text-sm">
                           <span className="text-muted-foreground">Campaign ID:</span>{' '}
@@ -3123,8 +3127,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           <div className="space-y-2 max-h-[300px] overflow-y-auto">
                             {result.all_adsets.map((adset: any, adsetIndex: number) => (
                               <div key={adset.adset_id} className="p-4 bg-muted/30 rounded-lg space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <div className="text-sm font-medium">{adset.adset_name}</div>
+                                <div className="flex items-center justify-between gap-2 min-w-0">
+                                  <div className="text-sm font-medium truncate" title={adset.adset_name}>{adset.adset_name}</div>
                                   {adset.daily_budget_cents && (
                                     <div className="text-xs text-muted-foreground">
                                       ${(adset.daily_budget_cents / 100).toFixed(0)}/день
@@ -3147,7 +3151,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         // Одиночный адсет (fallback)
                         <div className="p-4 bg-muted/30 rounded-lg space-y-2 mt-3">
                           <div className="text-sm font-medium">Ad Set</div>
-                          <div className="text-sm text-muted-foreground">{result.adset_name}</div>
+                          <div className="text-sm text-muted-foreground truncate" title={result.adset_name}>{result.adset_name}</div>
                           <div className="text-xs text-muted-foreground font-mono">
                             ID: {result.adset_id}
                           </div>
@@ -3172,7 +3176,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                                 key={ad.ad_id}
                                 className="p-3 border rounded-lg text-sm space-y-1"
                               >
-                                <div className="font-medium">
+                                <div className="font-medium truncate" title={ad.name}>
                                   {adIndex + 1}. {ad.name}
                                 </div>
                                 <div className="text-xs text-muted-foreground font-mono">
@@ -3186,7 +3190,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     </>
                   ) : result.status === 'failed' ? (
                     <div className="p-4 bg-red-50 border border-red-200 rounded-lg dark:bg-red-950/30 dark:border-red-800">
-                      <div className="font-medium text-red-600 dark:text-red-400">{result.direction_name}</div>
+                      <div className="font-medium text-red-600 dark:text-red-400 truncate" title={result.direction_name}>{result.direction_name}</div>
                       <div className="text-sm text-red-600 dark:text-red-400 mt-1">{result.error}</div>
                       {result.error_details && (
                         <div className="text-xs text-muted-foreground mt-1">{result.error_details}</div>
@@ -3194,7 +3198,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                     </div>
                   ) : result.skipped ? (
                     <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg dark:bg-yellow-950/30 dark:border-yellow-800">
-                      <div className="font-medium">{result.direction_name}</div>
+                      <div className="font-medium truncate" title={result.direction_name}>{result.direction_name}</div>
                       <div className="text-sm text-muted-foreground mt-1">{result.reason}</div>
                     </div>
                   ) : null}

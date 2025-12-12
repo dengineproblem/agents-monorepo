@@ -239,7 +239,8 @@ const DirectionBadge: React.FC<DirectionBadgeProps> = ({
               />
               {/* Десктопная версия: полное название */}
               <Badge
-                className={`hidden sm:inline-flex ${getDirectionColor(currentDirection.id)} text-xs px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap`}
+                className={`hidden sm:inline-flex ${getDirectionColor(currentDirection.id)} text-xs px-2 py-0.5 cursor-pointer hover:opacity-80 transition-opacity max-w-[120px] truncate`}
+                title={currentDirection.name}
               >
                 {currentDirection.name}
               </Badge>
@@ -448,7 +449,7 @@ const EditableTitle: React.FC<EditableTitleProps> = ({ title, creativeId, onSave
 
   return (
     <div
-      className="font-medium text-left truncate max-w-[200px] sm:max-w-none cursor-pointer hover:underline group flex items-center gap-1"
+      className="font-medium text-left truncate max-w-[150px] sm:max-w-[250px] cursor-pointer hover:underline group flex items-center gap-1"
       title={`${title} (нажмите для редактирования)`}
       onClick={(e) => {
         e.stopPropagation();
@@ -1696,7 +1697,7 @@ const Creatives: React.FC = () => {
   return (
     <div className="w-full max-w-full overflow-x-hidden">
       <Header onOpenDatePicker={() => {}} />
-      <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
+      <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full" data-tour="videos-content">
         <PageHero
           title="Видео"
           subtitle="Загружайте и управляйте вашими видео креативами"
