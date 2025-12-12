@@ -1197,7 +1197,14 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         return;
       }
 
-      console.log('Запускаем рекламу для всех активных направлений:', { userId });
+      console.log('Запускаем рекламу для всех активных направлений:', { userId, currentAdAccountId });
+
+      // Проверяем что account_id есть (обязателен для мультиаккаунтности)
+      if (!currentAdAccountId) {
+        toast.error('Рекламный аккаунт не выбран. Выберите аккаунт в настройках.');
+        setLaunchLoading(false);
+        return;
+      }
 
       // Отправляем запрос на автолонч v2 (берет первые 5 креативов)
       const response = await fetch(`${API_BASE_URL}/campaign-builder/auto-launch-v2`, {
@@ -1207,7 +1214,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         },
         body: JSON.stringify({
           user_account_id: userId,
-          account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
+          account_id: currentAdAccountId, // UUID для мультиаккаунтности
           objective: 'whatsapp', // Указываем objective для AI-агента
           auto_activate: false, // Создаем в паузе для проверки
         }),
@@ -3106,23 +3113,55 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         </div>
                       </div>
 
-                      {/* Информация об Ad Set */}
-                      <div className="p-4 bg-muted/30 rounded-lg space-y-2 mt-3">
-                        <div className="text-sm font-medium">Ad Set</div>
-                        <div className="text-sm text-muted-foreground">{result.adset_name}</div>
-                        <div className="text-xs text-muted-foreground font-mono">
-                          ID: {result.adset_id}
-                        </div>
-                        {result.daily_budget_cents && (
-                          <div className="text-sm pt-2 border-t border-border/50">
-                            <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                            <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
+                      {/* Информация об Ad Sets */}
+                      {result.all_adsets && result.all_adsets.length > 0 ? (
+                        // Множественные адсеты
+                        <div className="space-y-3 mt-3">
+                          <div className="text-sm font-medium">
+                            Создано Ad Sets: {result.total_adsets || result.all_adsets.length}
                           </div>
-                        )}
-                      </div>
+                          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                            {result.all_adsets.map((adset: any, adsetIndex: number) => (
+                              <div key={adset.adset_id} className="p-4 bg-muted/30 rounded-lg space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="text-sm font-medium">{adset.adset_name}</div>
+                                  {adset.daily_budget_cents && (
+                                    <div className="text-xs text-muted-foreground">
+                                      ${(adset.daily_budget_cents / 100).toFixed(0)}/день
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs text-muted-foreground font-mono">
+                                  ID: {adset.adset_id}
+                                </div>
+                                {adset.ads && adset.ads.length > 0 && (
+                                  <div className="text-xs text-muted-foreground pt-1 border-t border-border/50">
+                                    Объявлений: {adset.ads_created || adset.ads.length}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        // Одиночный адсет (fallback)
+                        <div className="p-4 bg-muted/30 rounded-lg space-y-2 mt-3">
+                          <div className="text-sm font-medium">Ad Set</div>
+                          <div className="text-sm text-muted-foreground">{result.adset_name}</div>
+                          <div className="text-xs text-muted-foreground font-mono">
+                            ID: {result.adset_id}
+                          </div>
+                          {result.daily_budget_cents && (
+                            <div className="text-sm pt-2 border-t border-border/50">
+                              <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
+                              <span className="font-medium">${(result.daily_budget_cents / 100).toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                      {/* Список созданных объявлений */}
-                      {result.ads && result.ads.length > 0 && (
+                      {/* Список созданных объявлений (только для одиночного адсета) */}
+                      {!result.all_adsets && result.ads && result.ads.length > 0 && (
                         <div className="space-y-2 mt-3">
                           <div className="text-sm font-medium">
                             Создано объявлений: {result.ads_created}
