@@ -11,6 +11,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { fetchWebinarViewers, BizonViewer } from '../adapters/bizon.js';
 import { normalizePhoneNumber } from '../lib/phoneNormalization.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 /**
  * Bizon webhook payload structure
@@ -82,23 +83,42 @@ export default async function bizonWebhooks(app: FastifyInstance) {
         webinarDate,
         userAccountId
       }, app).catch(error => {
-        app.log.error({ 
-          error: error.message, 
+        app.log.error({
+          error: error.message,
           stack: error.stack,
           webinarId,
           userAccountId
         }, 'Error processing webinar attendance');
+
+        logErrorToAdmin({
+          user_account_id: userAccountId,
+          error_type: 'webhook',
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'process_webinar_attendance',
+          request_data: { webinarId },
+          severity: 'warning'
+        }).catch(() => {});
       });
 
     } catch (error: any) {
-      app.log.error({ 
-        error: error.message, 
-        stack: error.stack 
+      app.log.error({
+        error: error.message,
+        stack: error.stack
       }, 'Error handling Bizon webhook');
-      
-      return reply.status(500).send({ 
-        success: false, 
-        error: 'Internal server error' 
+
+      logErrorToAdmin({
+        error_type: 'webhook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'bizon_webhook_handler',
+        endpoint: '/webhooks/bizon',
+        severity: 'critical'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        success: false,
+        error: 'Internal server error'
       });
     }
   });
@@ -188,6 +208,16 @@ async function processWebinarAttendance(
           viewer: viewer.phone,
           webinarId
         }, 'Error processing viewer');
+
+        logErrorToAdmin({
+          user_account_id: userAccountId,
+          error_type: 'webhook',
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'process_webinar_viewer',
+          request_data: { webinarId, viewerPhone: viewer.phone },
+          severity: 'info'
+        }).catch(() => {});
       }
     }
 
@@ -205,6 +235,17 @@ async function processWebinarAttendance(
       stack: error.stack,
       webinarId
     }, 'Error in processWebinarAttendance');
+
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'webhook',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'process_webinar_attendance_main',
+      request_data: { webinarId },
+      severity: 'warning'
+    }).catch(() => {});
+
     throw error;
   }
 }

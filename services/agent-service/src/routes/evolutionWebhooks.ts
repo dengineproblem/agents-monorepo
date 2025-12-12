@@ -4,6 +4,7 @@ import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { matchMessageToDirection } from '../lib/textMatcher.js';
 import { sendTelegramNotification, formatManualMatchMessage } from '../lib/telegramNotifier.js';
 import { getLastMessageTime } from '../lib/evolutionDb.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 import axios from 'axios';
 
 // Период "тишины" в днях - если последнее сообщение было раньше, считаем текущее "первым"
@@ -64,6 +65,16 @@ export default async function evolutionWebhooks(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error: error.message, stack: error.stack }, 'Error processing Evolution webhook');
+
+      logErrorToAdmin({
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'evolution_webhook',
+        endpoint: '/webhooks/evolution',
+        severity: 'critical'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });

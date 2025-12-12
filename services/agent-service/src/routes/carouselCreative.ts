@@ -8,6 +8,7 @@ import {
   createWebsiteLeadsCarouselCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const CreateCarouselCreativeSchema = z.object({
   user_id: z.string().uuid(),
@@ -330,6 +331,18 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
 
     } catch (error: any) {
       app.log.error({ err: error, fb: error?.fb }, 'Error creating carousel creative');
+
+      const body = request.body as CreateCarouselCreativeBody;
+      logErrorToAdmin({
+        user_account_id: body?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'create_carousel_creative',
+        endpoint: '/create-carousel-creative',
+        request_data: { carousel_id: body?.carousel_id, direction_id: body?.direction_id, has_fb_error: !!error.fb },
+        severity: 'warning'
+      }).catch(() => {});
 
       if (error instanceof z.ZodError) {
         return reply.status(400).send({

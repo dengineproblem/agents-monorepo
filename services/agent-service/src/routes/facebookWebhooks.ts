@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { updateOnboardingStage } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'facebookWebhooks' });
 
@@ -179,10 +180,20 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         instagram_id: instagramId
       });
 
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error exchanging OAuth code');
-      return res.status(500).send({ 
-        error: 'Internal server error' 
+
+      logErrorToAdmin({
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'facebook_oauth_token_exchange',
+        endpoint: '/facebook/oauth/token',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return res.status(500).send({
+        error: 'Internal server error'
       });
     }
   });
@@ -272,10 +283,20 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         success: true
       });
 
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error saving Facebook selection');
-      return res.status(500).send({ 
-        error: 'Internal server error' 
+
+      logErrorToAdmin({
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'facebook_save_selection',
+        endpoint: '/facebook/save-selection',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return res.status(500).send({
+        error: 'Internal server error'
       });
     }
   });
@@ -531,8 +552,18 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         error: allPassed ? (directionsOk ? null : 'Some directions have validation errors') : 'Some checks failed',
         details: allPassed && directionsOk ? 'All validations passed' : 'Check individual statuses'
       });
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error validating Facebook connection');
+
+      logErrorToAdmin({
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'facebook_validate_connection',
+        endpoint: '/facebook/validate',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({
         success: false,
         error: 'Internal server error'
@@ -675,8 +706,18 @@ ${instagram_id ? `• Instagram ID: <code>${instagram_id}</code>` : '• Instagr
         message: 'Заявка отправлена на проверку'
       });
 
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error processing manual Facebook connection');
+
+      logErrorToAdmin({
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'facebook_manual_connect',
+        endpoint: '/facebook/manual-connect',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({
         success: false,
         error: 'Internal server error'
@@ -791,10 +832,20 @@ ${instagram_id ? `• Instagram ID: <code>${instagram_id}</code>` : '• Instagr
         confirmation_code: confirmationCode
       });
 
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error processing data deletion request');
-      return res.status(500).send({ 
-        error: 'Internal server error' 
+
+      logErrorToAdmin({
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'facebook_data_deletion',
+        endpoint: '/facebook/data-deletion',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return res.status(500).send({
+        error: 'Internal server error'
       });
     }
   });

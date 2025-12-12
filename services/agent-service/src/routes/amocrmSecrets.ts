@@ -9,6 +9,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { saveTempCredentials, extractUserAccountIdFromState } from '../lib/amocrmTempCredentials.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const SecretsSchema = z.object({
   client_id: z.string(),
@@ -81,6 +82,16 @@ export default async function amocrmSecretsRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error processing AmoCRM secrets');
+
+      logErrorToAdmin({
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'save_amocrm_secrets',
+        endpoint: '/amocrm/secrets',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message

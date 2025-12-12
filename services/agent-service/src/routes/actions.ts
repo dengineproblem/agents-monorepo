@@ -10,6 +10,7 @@ import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
 import { getAvailableAdSet, activateAdSet, incrementAdsCount, deactivateAdSetWithAds } from '../lib/directionAdSets.js';
 import { pauseAdSetsForCampaign } from '../lib/campaignBuilder.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 /**
  * Helper: конвертирует объекты в параметры для Facebook API
@@ -168,6 +169,18 @@ export async function actionsRoutes(app: FastifyInstance) {
       return reply.code(202).send({ executionId, executed: true });
     } catch (e: any) {
       req.log.error(e);
+
+      const account = (req.body as any)?.account;
+      logErrorToAdmin({
+        user_account_id: account?.userAccountId,
+        error_type: 'api',
+        raw_error: e.message || String(e),
+        stack_trace: e.stack,
+        action: 'execute_agent_actions',
+        endpoint: '/agent/actions',
+        severity: 'critical'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'internal', message: e?.message || String(e) });
     }
   });

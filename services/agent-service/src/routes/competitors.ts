@@ -16,6 +16,7 @@ import {
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
 import { processVideoTranscription } from '../lib/transcription.js';
 import { onCompetitorsAdded } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { createWriteStream, promises as fs } from 'fs';
 import { pipeline } from 'stream/promises';
 import path from 'path';
@@ -485,6 +486,17 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ success: false, error: error.errors[0].message });
       }
       log.error({ err: error }, 'Ошибка в GET /competitors');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'list_competitors',
+        endpoint: '/competitors',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -683,6 +695,17 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ success: false, error: error.errors[0].message });
       }
       log.error({ err: error }, 'Ошибка в POST /competitors');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'add_competitor',
+        endpoint: '/competitors',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -740,6 +763,17 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ success: false, error: error.errors[0].message });
       }
       log.error({ err: error }, 'Ошибка в DELETE /competitors/:id');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'delete_competitor',
+        endpoint: '/competitors/:userCompetitorId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -877,6 +911,16 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       }
     } catch (error: any) {
       log.error({ err: error }, 'Ошибка в POST /competitors/:id/refresh');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'refresh_competitor',
+        endpoint: '/competitors/:competitorId/refresh',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -943,6 +987,16 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ success: false, error: error.errors[0].message });
       }
       log.error({ err: error }, 'Ошибка в GET /competitors/:id/creatives');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_competitor_creatives',
+        endpoint: '/competitors/:competitorId/creatives',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -1062,6 +1116,17 @@ export default async function competitorsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ err: error }, 'Ошибка в GET /competitors/all-creatives');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_all_competitor_creatives',
+        endpoint: '/competitors/all-creatives',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
@@ -1346,6 +1411,16 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       log.error({ err: error }, 'Ошибка в POST /competitors/extract-text');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'extract_text_from_creative',
+        endpoint: '/competitors/extract-text',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ success: false, error: error.message });
     }
   });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { getPagePictureUrl } from '../adapters/facebook.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -181,8 +182,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         multi_account_enabled: true,
         ad_accounts: (adAccounts || []).map(mapDbToFrontend),
       });
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error in ad-accounts route');
+
+      logErrorToAdmin({
+        user_account_id: req.params.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'list_ad_accounts',
+        endpoint: '/ad-accounts/:userAccountId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -211,8 +223,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       return reply.send(mapDbToFrontend(adAccount));
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error fetching ad account');
+
+      logErrorToAdmin({
+        user_account_id: req.params.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_ad_account',
+        endpoint: '/ad-accounts/:userAccountId/:adAccountId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -305,11 +328,22 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       log.info({ adAccountId: adAccount.id }, 'Ad account created successfully');
       return reply.status(201).send(mapDbToFrontend(adAccount));
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
       }
       log.error({ error }, 'Error creating ad account');
+
+      logErrorToAdmin({
+        user_account_id: (req.body as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'create_ad_account',
+        endpoint: '/ad-accounts',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -394,11 +428,22 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       log.info({ adAccountId }, 'Ad account updated successfully');
       return reply.send(mapDbToFrontend(adAccount));
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof z.ZodError) {
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
       }
       log.error({ error }, 'Error updating ad account');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'update_ad_account',
+        endpoint: '/ad-accounts/:adAccountId',
+        request_data: { adAccountId },
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -428,8 +473,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       log.info({ adAccountId }, 'Ad account deleted successfully');
       return reply.status(204).send();
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error deleting ad account');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'delete_ad_account',
+        endpoint: '/ad-accounts/:adAccountId',
+        request_data: { adAccountId },
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -482,8 +538,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       log.info({ adAccountId, pictureUrl }, 'Page picture updated');
       return reply.send({ success: true, page_picture_url: pictureUrl });
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error refreshing page picture');
+
+      logErrorToAdmin({
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'refresh_page_picture',
+        endpoint: '/ad-accounts/:adAccountId/refresh-picture',
+        request_data: { adAccountId },
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -536,8 +603,19 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       log.info({ userAccountId, updated: results.filter(r => r.success).length }, 'Page pictures refreshed');
       return reply.send({ success: true, results });
-    } catch (error) {
+    } catch (error: any) {
       log.error({ error }, 'Error refreshing page pictures');
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'refresh_all_page_pictures',
+        endpoint: '/ad-accounts/:userAccountId/refresh-all-pictures',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });

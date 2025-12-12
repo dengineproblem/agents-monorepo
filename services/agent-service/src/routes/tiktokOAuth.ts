@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { createClient } from '@supabase/supabase-js';
 import { createLogger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'tiktokOAuth' });
 
@@ -328,9 +329,22 @@ export default async function tiktokOAuthRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       log.error({ error }, 'Error in TikTok OAuth flow');
-      return res.status(500).send({ 
+
+      const body = req.body as any;
+      const stateData = body?.state ? parseState(body.state) : null;
+      logErrorToAdmin({
+        user_account_id: stateData?.user_id || stateData?.uid,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'tiktok_oauth_exchange',
+        endpoint: '/tiktok/oauth/exchange',
+        severity: 'critical'
+      }).catch(() => {});
+
+      return res.status(500).send({
         success: false,
-        error: error.message || 'Internal server error' 
+        error: error.message || 'Internal server error'
       });
     }
   });

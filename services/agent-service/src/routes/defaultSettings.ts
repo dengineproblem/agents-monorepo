@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 // ========================================
 // VALIDATION SCHEMAS
@@ -91,6 +92,16 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ msg: 'Unexpected error in GET /api/default-settings', err });
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'get_default_settings',
+        endpoint: '/default-settings',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: err.message || 'Internal server error',
@@ -218,6 +229,16 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ msg: 'Unexpected error in POST /api/default-settings', err });
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'create_default_settings',
+        endpoint: '/default-settings',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: err.message || 'Internal server error',
@@ -286,6 +307,16 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ msg: 'Unexpected error in PATCH /api/default-settings/:id', err });
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'update_default_settings',
+        endpoint: '/default-settings/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: err.message || 'Internal server error',
@@ -328,6 +359,16 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
       });
     } catch (err: any) {
       app.log.error({ msg: 'Unexpected error in DELETE /api/default-settings/:id', err });
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'delete_default_settings',
+        endpoint: '/default-settings/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: err.message || 'Internal server error',

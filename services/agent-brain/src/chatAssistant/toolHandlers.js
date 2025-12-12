@@ -5,6 +5,7 @@
 
 import { supabase, supabaseQuery } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://localhost:8082';
@@ -638,6 +639,16 @@ export async function executeTool(toolName, params, context) {
     return result;
   } catch (error) {
     logger.error({ tool: toolName, error: error.message }, 'Tool execution failed');
+
+    logErrorToAdmin({
+      user_account_id: context?.userAccountId,
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: `chat_tool_${toolName}`,
+      severity: 'warning'
+    }).catch(() => {});
+
     return {
       success: false,
       error: error.message || 'Ошибка выполнения инструмента'

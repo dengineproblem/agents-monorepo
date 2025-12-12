@@ -5,6 +5,7 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
+import { logErrorToAdmin } from '../../lib/errorLogger.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -142,6 +143,14 @@ async function llmClassify(message, context) {
     }
   } catch (error) {
     logger.error({ error: error.message }, 'LLM classification failed');
+
+    logErrorToAdmin({
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'llm_classify_request',
+      severity: 'warning'
+    }).catch(() => {});
   }
 
   // Default fallback

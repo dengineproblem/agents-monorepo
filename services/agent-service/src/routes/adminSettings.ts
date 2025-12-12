@@ -9,6 +9,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminSettings' });
 
@@ -34,8 +35,18 @@ export default async function adminSettingsRoutes(app: FastifyInstance) {
   app.get('/admin/settings', async (req, res) => {
     try {
       return res.send(adminSettings);
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error fetching settings');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_settings',
+        endpoint: '/admin/settings',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch settings' });
     }
   });
@@ -58,8 +69,18 @@ export default async function adminSettingsRoutes(app: FastifyInstance) {
       log.info({ settings: adminSettings }, 'Settings updated');
 
       return res.send({ success: true, settings: adminSettings });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error updating settings');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_update_settings',
+        endpoint: '/admin/settings',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to update settings' });
     }
   });
@@ -100,8 +121,18 @@ export default async function adminSettingsRoutes(app: FastifyInstance) {
       ];
 
       return res.send({ crons });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error fetching cron status');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_cron_status',
+        endpoint: '/admin/cron/status',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch cron status' });
     }
   });

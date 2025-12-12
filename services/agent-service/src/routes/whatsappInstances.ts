@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
 import { onROIConfigured } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -103,6 +104,17 @@ export default async function whatsappInstances(app: FastifyInstance) {
         return reply.status(400).send({ error: error.errors[0].message });
       }
       app.log.error({ error: error.message }, 'Failed to create WhatsApp instance');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'create_whatsapp_instance',
+        endpoint: '/whatsapp/instances/create',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -137,6 +149,16 @@ export default async function whatsappInstances(app: FastifyInstance) {
       });
     } catch (error: any) {
       app.log.error({ error: error.message }, 'Failed to get instance status');
+
+      logErrorToAdmin({
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_whatsapp_instance_status',
+        endpoint: '/whatsapp/instances/:instanceName/status',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -175,6 +197,17 @@ export default async function whatsappInstances(app: FastifyInstance) {
       });
     } catch (error: any) {
       app.log.error({ error: error.message }, 'Failed to list instances');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'list_whatsapp_instances',
+        endpoint: '/whatsapp/instances',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -224,6 +257,17 @@ export default async function whatsappInstances(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error: error.message }, 'Failed to disconnect instance');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'disconnect_whatsapp_instance',
+        endpoint: '/whatsapp/instances/:instanceName',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -277,6 +321,17 @@ export default async function whatsappInstances(app: FastifyInstance) {
       });
     } catch (error: any) {
       app.log.error({ error: error.message }, 'Failed to refresh QR code');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'refresh_whatsapp_qr',
+        endpoint: '/whatsapp/instances/:instanceName/refresh-qr',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message });
     }
   });

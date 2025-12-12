@@ -12,6 +12,7 @@ import {
   createWebsiteLeadsImageCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const ProcessImageSchema = z.object({
   user_id: z.string().uuid(),
@@ -343,6 +344,17 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       } catch (processingError: any) {
         app.log.error({ err: processingError, fb: processingError?.fb }, 'Error during image processing');
 
+        logErrorToAdmin({
+          user_account_id: body.user_id,
+          error_type: 'api',
+          raw_error: processingError.message || String(processingError),
+          stack_trace: processingError.stack,
+          action: 'process_image_upload',
+          endpoint: '/process-image',
+          request_data: { direction_id: body.direction_id, has_fb_error: !!processingError.fb },
+          severity: 'warning'
+        }).catch(() => {});
+
         // Обновляем статус креатива на failed
         await supabase
           .from('user_creatives')
@@ -369,6 +381,16 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
     } catch (error: any) {
       app.log.error('Unhandled error in /process-image:', error);
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.user_id || (request.body as any)?.id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'process_image',
+        endpoint: '/process-image',
+        severity: 'warning'
+      }).catch(() => {});
 
       if (error instanceof z.ZodError) {
         return reply.status(400).send({
@@ -659,6 +681,18 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
     } catch (error: any) {
       app.log.error({ err: error, fb: error?.fb }, 'Error creating image creative');
+
+      const body = request.body as CreateImageCreativeBody;
+      logErrorToAdmin({
+        user_account_id: body?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'create_image_creative',
+        endpoint: '/create-image-creative',
+        request_data: { creative_id: body?.creative_id, direction_id: body?.direction_id, has_fb_error: !!error.fb },
+        severity: 'warning'
+      }).catch(() => {});
 
       if (error instanceof z.ZodError) {
         return reply.status(400).send({

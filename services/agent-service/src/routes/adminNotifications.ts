@@ -9,6 +9,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminNotifications' });
 
@@ -31,8 +32,18 @@ export default async function adminNotificationsRoutes(app: FastifyInstance) {
       if (error) throw error;
 
       return res.send({ notifications: notifications || [] });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error fetching notifications');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_list_notifications',
+        endpoint: '/admin/notifications',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch notifications' });
     }
   });
@@ -74,8 +85,18 @@ export default async function adminNotificationsRoutes(app: FastifyInstance) {
       if (error) throw error;
 
       return res.send({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error marking notification as read');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_mark_notification_read',
+        endpoint: '/admin/notifications/:id/read',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to mark as read' });
     }
   });
@@ -97,8 +118,18 @@ export default async function adminNotificationsRoutes(app: FastifyInstance) {
       if (error) throw error;
 
       return res.send({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error marking all as read');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_mark_all_notifications_read',
+        endpoint: '/admin/notifications/mark-all-read',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to mark all as read' });
     }
   });

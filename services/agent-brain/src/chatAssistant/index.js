@@ -19,6 +19,7 @@ import {
 import { Orchestrator } from './orchestrator/index.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5; // Prevent infinite loops
@@ -152,6 +153,17 @@ export async function processChat({ message, conversationId, mode = 'auto', user
 
   } catch (error) {
     logger.error({ error: error.message, userAccountId }, 'Chat processing failed');
+
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'chat_assistant_process',
+      endpoint: '/api/brain/chat',
+      severity: 'warning'
+    }).catch(() => {});
+
     throw error;
   }
 }
@@ -438,6 +450,17 @@ export function registerChatRoutes(fastify) {
       return reply.send(result);
     } catch (error) {
       fastify.log.error({ error: error.message }, 'Chat error');
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'chat_endpoint',
+        endpoint: '/api/brain/chat',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -459,6 +482,16 @@ export function registerChatRoutes(fastify) {
 
       return reply.send({ conversations });
     } catch (error) {
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_conversations',
+        endpoint: '/api/brain/conversations',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -483,6 +516,16 @@ export function registerChatRoutes(fastify) {
 
       return reply.send({ messages });
     } catch (error) {
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_conversation_messages',
+        endpoint: '/api/brain/conversations/:id/messages',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -500,6 +543,16 @@ export function registerChatRoutes(fastify) {
       await deleteConversation(id, userAccountId);
       return reply.send({ success: true });
     } catch (error) {
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'delete_conversation',
+        endpoint: '/api/brain/conversations/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: error.message });
     }
   });
@@ -535,6 +588,16 @@ export function registerChatRoutes(fastify) {
 
       return reply.send(result);
     } catch (error) {
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'execute_plan',
+        endpoint: '/api/brain/conversations/:id/execute',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: error.message });
     }
   });

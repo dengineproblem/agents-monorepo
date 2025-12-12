@@ -11,6 +11,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { getCampaignInsightsBatch } from '../lib/fbCampaignInsights.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminAds' });
 
@@ -118,8 +119,18 @@ export default async function adminAdsRoutes(app: FastifyInstance) {
       );
 
       return res.send({ directions: directionsWithMetrics });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching directions');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_directions',
+        endpoint: '/admin/ads/directions',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch directions' });
     }
   });
@@ -282,8 +293,18 @@ export default async function adminAdsRoutes(app: FastifyInstance) {
       log.info({ count: formattedCreatives.length, period }, 'Fetched creatives with metrics');
 
       return res.send({ creatives: formattedCreatives });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching creatives');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_creatives',
+        endpoint: '/admin/ads/creatives',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch creatives' });
     }
   });
@@ -398,8 +419,18 @@ export default async function adminAdsRoutes(app: FastifyInstance) {
       log.info({ count: usersSummary.length, period }, 'Fetched users ROI summary');
 
       return res.send({ users: usersSummary });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching users summary');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_users_summary',
+        endpoint: '/admin/ads/users-summary',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch users summary' });
     }
   });
@@ -495,8 +526,18 @@ export default async function adminAdsRoutes(app: FastifyInstance) {
       const filteredAnalysis = analysis.filter(a => a.fb_campaign_id && (a.leads_count > 0 || a.spend > 0));
 
       return res.send({ analysis: filteredAnalysis });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching CPL analysis');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_cpl_analysis',
+        endpoint: '/admin/ads/cpl-analysis',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch CPL analysis' });
     }
   });

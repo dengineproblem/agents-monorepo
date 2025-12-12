@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 // Схемы валидации
 const PhoneNumberSchema = z.string().regex(/^\+[1-9][0-9]{7,14}$/, {
@@ -52,10 +53,21 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       return reply.send({ numbers: data || [] });
     } catch (error: any) {
       app.log.error('Error fetching WhatsApp numbers:', error);
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'list_whatsapp_numbers',
+        endpoint: '/whatsapp-numbers',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to fetch numbers' });
     }
   });
-  
+
   // POST /whatsapp-numbers - добавить новый номер
   app.post('/whatsapp-numbers', async (request, reply) => {
     try {
@@ -95,10 +107,21 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: error.errors[0].message });
       }
       app.log.error('Error creating WhatsApp number:', error);
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'create_whatsapp_number',
+        endpoint: '/whatsapp-numbers',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to create number' });
     }
   });
-  
+
   // PUT /whatsapp-numbers/:id - обновить номер
   app.put('/whatsapp-numbers/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -131,10 +154,21 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: error.errors[0].message });
       }
       app.log.error('Error updating WhatsApp number:', error);
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'update_whatsapp_number',
+        endpoint: '/whatsapp-numbers/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to update number' });
     }
   });
-  
+
   // DELETE /whatsapp-numbers/:id - удалить номер
   app.delete('/whatsapp-numbers/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -171,10 +205,21 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error('Error deleting WhatsApp number:', error);
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'delete_whatsapp_number',
+        endpoint: '/whatsapp-numbers/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to delete number' });
     }
   });
-  
+
   // GET /whatsapp-numbers/default - получить дефолтный номер пользователя
   app.get('/whatsapp-numbers/default', async (request, reply) => {
     const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
@@ -218,6 +263,17 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
       return reply.send({ phone_number: null, source: null });
     } catch (error: any) {
       app.log.error('Error fetching default WhatsApp number:', error);
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_default_whatsapp_number',
+        endpoint: '/whatsapp-numbers/default',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to fetch default number' });
     }
   });

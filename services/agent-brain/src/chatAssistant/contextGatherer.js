@@ -5,6 +5,7 @@
 
 import { supabase, supabaseQuery } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 /**
  * Gather all context needed for the chat assistant
@@ -52,6 +53,16 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
 
   } catch (error) {
     logger.error({ error: error.message }, 'Failed to gather context');
+
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'gather_context',
+      severity: 'warning'
+    }).catch(() => {});
+
     return context;
   }
 }

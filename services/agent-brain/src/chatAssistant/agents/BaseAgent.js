@@ -5,6 +5,7 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
+import { logErrorToAdmin } from '../../lib/errorLogger.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
@@ -69,6 +70,15 @@ export class BaseAgent {
 
     } catch (error) {
       logger.error({ agent: this.name, error: error.message }, 'Agent processing failed');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: `agent_${this.name}_process`,
+        severity: 'warning'
+      }).catch(() => {});
+
       throw error;
     }
   }
@@ -190,6 +200,15 @@ export class BaseAgent {
       return await handler(args, context);
     } catch (error) {
       logger.error({ agent: this.name, tool: name, error: error.message }, 'Tool execution failed');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: `agent_${this.name}_tool_${name}`,
+        severity: 'warning'
+      }).catch(() => {});
+
       return {
         success: false,
         error: error.message

@@ -11,6 +11,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { graph } from '../adapters/facebook.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 export default async function directionAdSetsRoutes(app: FastifyInstance) {
   
@@ -128,7 +129,18 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
       return reply.send({ success: true, direction_adset: linkedAdSet });
     } catch (error: any) {
       app.log.error({ error, directionId, fb_adset_id }, 'Error linking ad set');
-      return reply.status(500).send({ 
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.user_account_id,
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'direction_link_adset',
+        endpoint: '/directions/:directionId/link-adset',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
         error: error.message || 'Failed to link ad set',
         details: error.response?.data || null
       });
@@ -173,6 +185,17 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
       return reply.send({ success: true, adsets: adsets || [] });
     } catch (error: any) {
       app.log.error({ error, directionId }, 'Error in get adsets endpoint');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.user_account_id,
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'direction_get_adsets',
+        endpoint: '/directions/:directionId/adsets',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to fetch ad sets' });
     }
   });
@@ -219,6 +242,17 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error, directionId, adsetId }, 'Error in delete adset endpoint');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.user_account_id,
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'direction_unlink_adset',
+        endpoint: '/directions/:directionId/adsets/:adsetId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to unlink ad set' });
     }
   });
@@ -326,6 +360,17 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       app.log.error({ error, directionId }, 'Error in sync adsets endpoint');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.user_account_id,
+        error_type: 'facebook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'direction_sync_adsets',
+        endpoint: '/directions/:directionId/sync-adsets',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: error.message || 'Failed to sync ad sets' });
     }
   });

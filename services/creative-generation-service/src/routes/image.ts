@@ -408,6 +408,9 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
     } catch (error: any) {
       app.log.error('[OCR] Error:', error);
 
+      // Логируем в централизованную систему ошибок
+      logImageGenerationError('unknown', error, 'ocr').catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: 'Failed to extract text from image',

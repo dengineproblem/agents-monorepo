@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'autopilotRoutes' });
 
@@ -57,6 +58,17 @@ export async function autopilotRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error fetching brain executions');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'autopilot_get_executions',
+        endpoint: '/autopilot/executions',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: error.message,
@@ -104,6 +116,16 @@ export async function autopilotRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error fetching campaign reports');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'autopilot_get_reports',
+        endpoint: '/autopilot/reports',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: error.message,
@@ -221,6 +243,17 @@ export async function autopilotRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error fetching autopilot status');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'autopilot_get_status',
+        endpoint: '/autopilot/status',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         success: false,
         error: error.message,

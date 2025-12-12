@@ -10,6 +10,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminUsers' });
 
@@ -121,8 +122,18 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
         page: pageNum,
         totalPages: Math.ceil((total || 0) / limitNum),
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching users');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_list_users',
+        endpoint: '/admin/users',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch users' });
     }
   });
@@ -146,8 +157,18 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
         .limit(parseInt(limit));
 
       return res.send({ users: users || [] });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error searching users');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_search_users',
+        endpoint: '/admin/users/search',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to search users' });
     }
   });
@@ -195,8 +216,18 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
         directions: directions || [],
         recentLeads: recentLeads || [],
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching user details');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_user_details',
+        endpoint: '/admin/users/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch user details' });
     }
   });

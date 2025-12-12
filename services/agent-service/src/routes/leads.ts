@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { eventLogger } from '../lib/eventLogger.js';
 import { onROIConfigured } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 /**
  * Schema for creating a lead from website
@@ -415,6 +416,18 @@ export default async function leadsRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error processing lead creation');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId || (request.body as any)?.user_account_id,
+        error_type: 'webhook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'create_lead_webhook',
+        endpoint: '/leads',
+        request_data: { name: (request.body as any)?.name, phone: (request.body as any)?.phone },
+        severity: 'critical'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -470,6 +483,16 @@ export default async function leadsRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching lead');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_lead_by_id',
+        endpoint: '/leads/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -535,6 +558,17 @@ export default async function leadsRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching leads');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'list_leads',
+        endpoint: '/leads',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message

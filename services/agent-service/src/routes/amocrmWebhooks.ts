@@ -9,6 +9,7 @@
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { processDealWebhook, processLeadStatusChange } from '../workflows/amocrmSync.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 /**
  * AmoCRM webhook payload structure
@@ -104,6 +105,16 @@ export default async function amocrmWebhooks(app: FastifyInstance) {
           userAccountId,
           accountId: payload.account_id
         }, 'Error processing AmoCRM webhook');
+
+        logErrorToAdmin({
+          user_account_id: userAccountId,
+          error_type: 'amocrm',
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'amocrm_webhook_processing',
+          endpoint: '/webhooks/amocrm',
+          severity: 'critical'
+        }).catch(() => {});
       });
 
     } catch (error: any) {
@@ -111,6 +122,15 @@ export default async function amocrmWebhooks(app: FastifyInstance) {
         error: error.message,
         stack: error.stack
       }, 'Error handling AmoCRM webhook');
+
+      logErrorToAdmin({
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'amocrm_webhook_handler',
+        endpoint: '/webhooks/amocrm',
+        severity: 'critical'
+      }).catch(() => {});
 
       return reply.status(500).send({
         success: false,
@@ -154,6 +174,16 @@ async function processAmoCRMWebhook(
             leadId: lead.id,
             userAccountId
           }, 'Failed to process individual lead');
+
+          logErrorToAdmin({
+            user_account_id: userAccountId,
+            error_type: 'amocrm',
+            raw_error: error.message || String(error),
+            stack_trace: error.stack,
+            action: 'process_deal_webhook',
+            request_data: { leadId: lead.id },
+            severity: 'warning'
+          }).catch(() => {});
           // Continue processing other leads even if one fails
         }
       }
@@ -175,6 +205,16 @@ async function processAmoCRMWebhook(
             leadId: lead.id,
             userAccountId
           }, 'Failed to process lead update');
+
+          logErrorToAdmin({
+            user_account_id: userAccountId,
+            error_type: 'amocrm',
+            raw_error: error.message || String(error),
+            stack_trace: error.stack,
+            action: 'process_lead_update',
+            request_data: { leadId: lead.id },
+            severity: 'warning'
+          }).catch(() => {});
         }
       }
     }
@@ -195,6 +235,16 @@ async function processAmoCRMWebhook(
             leadId: statusChange.id,
             userAccountId
           }, 'Failed to process lead status change');
+
+          logErrorToAdmin({
+            user_account_id: userAccountId,
+            error_type: 'amocrm',
+            raw_error: error.message || String(error),
+            stack_trace: error.stack,
+            action: 'process_lead_status_change',
+            request_data: { leadId: statusChange.id },
+            severity: 'warning'
+          }).catch(() => {});
         }
       }
     }
@@ -207,6 +257,16 @@ async function processAmoCRMWebhook(
       stack: error.stack,
       userAccountId
     }, 'Error in AmoCRM webhook processing');
+
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'amocrm',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'amocrm_webhook_async_processing',
+      severity: 'critical'
+    }).catch(() => {});
+
     throw error;
   }
 }

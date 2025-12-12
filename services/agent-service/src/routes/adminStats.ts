@@ -9,6 +9,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminStats' });
 
@@ -180,8 +181,18 @@ export default async function adminStatsRoutes(app: FastifyInstance) {
         recentErrors: formattedErrors,
         topUsers,
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching dashboard stats');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_dashboard_stats',
+        endpoint: '/admin/stats/dashboard',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch dashboard stats' });
     }
   });

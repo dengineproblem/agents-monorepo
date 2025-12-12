@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { getValidAmoCRMToken } from '../lib/amocrmTokens.js';
 import { getPipelines, getLeadCustomFields, getContactCustomFields } from '../adapters/amocrm.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const UserAccountIdSchema = z.object({
   userAccountId: z.string().uuid()
@@ -112,6 +113,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error syncing pipelines');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'sync_pipelines',
+        endpoint: '/amocrm/sync-pipelines',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -178,6 +190,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching pipelines');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_pipelines',
+        endpoint: '/amocrm/pipelines',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -258,6 +281,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error updating pipeline stage');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.user_account_id,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'update_pipeline_stage',
+        endpoint: '/amocrm/pipeline-stages/:stageId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -340,6 +374,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching qualification stats');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_qualification_stats',
+        endpoint: '/amocrm/qualification-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -378,6 +423,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error syncing leads from AmoCRM');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'sync_leads',
+        endpoint: '/amocrm/sync-leads',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -425,6 +481,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error syncing creative leads from AmoCRM');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'sync_creative_leads',
+        endpoint: '/amocrm/sync-creative-leads',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -566,6 +633,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching creative funnel stats');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_creative_funnel_stats',
+        endpoint: '/amocrm/creative-funnel-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -714,6 +792,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error in debug phone matching');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'debug_phone_matching',
+        endpoint: '/amocrm/debug-phone-matching',
+        severity: 'info'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -857,6 +946,16 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error setting key stages for direction');
+
+      logErrorToAdmin({
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'set_key_stages',
+        endpoint: '/amocrm/directions/:directionId/key-stages',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1030,6 +1129,16 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error getting key stage stats');
+
+      logErrorToAdmin({
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_key_stage_stats',
+        endpoint: '/amocrm/directions/:directionId/key-stage-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1083,6 +1192,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error recalculating key stage stats');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'recalculate_key_stage',
+        endpoint: '/amocrm/recalculate-key-stage',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1171,6 +1291,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error fetching custom fields');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_lead_custom_fields',
+        endpoint: '/amocrm/lead-custom-fields',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1221,6 +1352,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error getting qualification fields');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_qualification_fields',
+        endpoint: '/amocrm/qualification-fields',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1270,6 +1412,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error getting qualification field');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_qualification_field_legacy',
+        endpoint: '/amocrm/qualification-field',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1342,6 +1495,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error saving qualification fields');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'save_qualification_fields',
+        endpoint: '/amocrm/qualification-fields',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1403,6 +1567,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error saving qualification field');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'save_qualification_field_legacy',
+        endpoint: '/amocrm/qualification-field',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1494,6 +1669,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error getting qualified leads by creative');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_qualified_leads_by_creative',
+        endpoint: '/amocrm/qualified-leads-by-creative',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -1575,6 +1761,17 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error getting qualified leads total');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_qualified_leads_total',
+        endpoint: '/amocrm/qualified-leads-total',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message

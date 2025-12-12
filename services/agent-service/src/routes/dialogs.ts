@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { analyzeDialogs } from '../scripts/analyzeDialogs.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 // Validation schemas
 const AnalyzeDialogsSchema = z.object({
@@ -82,9 +83,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       }
       
       app.log.error({ error: error.message }, 'Dialog analysis failed');
-      return reply.status(500).send({ 
-        error: 'Analysis failed', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_analyze',
+        endpoint: '/dialogs/analyze',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Analysis failed',
+        message: error.message
       });
     }
   });
@@ -150,9 +162,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       }
       
       app.log.error({ error: error.message }, 'Failed to fetch analysis results');
-      return reply.status(500).send({ 
-        error: 'Failed to fetch results', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_get_analysis',
+        endpoint: '/dialogs/analysis',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Failed to fetch results',
+        message: error.message
       });
     }
   });
@@ -249,9 +272,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       }
       
       app.log.error({ error: error.message }, 'Failed to export CSV');
-      return reply.status(500).send({ 
-        error: 'Export failed', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_export_csv',
+        endpoint: '/dialogs/export-csv',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Export failed',
+        message: error.message
       });
     }
   });
@@ -320,9 +354,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       app.log.error({ error: error.message }, 'Failed to fetch stats');
-      return reply.status(500).send({ 
-        error: 'Failed to fetch stats', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_get_stats',
+        endpoint: '/dialogs/stats',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Failed to fetch stats',
+        message: error.message
       });
     }
   });
@@ -399,9 +444,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       }
       
       app.log.error({ error: error.message }, 'Failed to create lead');
-      return reply.status(500).send({ 
-        error: 'Failed to create lead', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_create_lead',
+        endpoint: '/dialogs/leads',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Failed to create lead',
+        message: error.message
       });
     }
   });
@@ -495,9 +551,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       }
       
       app.log.error({ error: error.message }, 'Failed to update lead');
-      return reply.status(500).send({ 
-        error: 'Failed to update lead', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_update_lead',
+        endpoint: '/dialogs/leads/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Failed to update lead',
+        message: error.message
       });
     }
   });
@@ -540,9 +607,20 @@ export async function dialogsRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error: error.message }, 'Failed to delete analysis');
-      return reply.status(500).send({ 
-        error: 'Delete failed', 
-        message: error.message 
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'dialogs_delete_analysis',
+        endpoint: '/dialogs/analysis/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({
+        error: 'Delete failed',
+        message: error.message
       });
     }
   });

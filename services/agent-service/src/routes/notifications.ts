@@ -10,6 +10,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const logger = createLogger({ module: 'notificationsRoutes' });
 
@@ -70,8 +71,19 @@ export default async function notificationsRoutes(app: FastifyInstance) {
         limit,
         offset
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId }, 'Exception in GET /notifications');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'notifications_list',
+        endpoint: '/notifications',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -101,8 +113,19 @@ export default async function notificationsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ unreadCount: count || 0 });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId }, 'Exception in GET /notifications/unread-count');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'notifications_unread_count',
+        endpoint: '/notifications/unread-count',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -133,8 +156,19 @@ export default async function notificationsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), id, userId }, 'Exception in PATCH /notifications/:id/read');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'notifications_mark_read',
+        endpoint: '/notifications/:id/read',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -174,8 +208,19 @@ export default async function notificationsRoutes(app: FastifyInstance) {
       logger.info({ userId, markedCount: count }, 'All notifications marked as read');
 
       return reply.send({ success: true, markedCount: count || 0 });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId }, 'Exception in POST /notifications/mark-all-read');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'notifications_mark_all_read',
+        endpoint: '/notifications/mark-all-read',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -206,8 +251,19 @@ export default async function notificationsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), id, userId }, 'Exception in DELETE /notifications/:id');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'notifications_delete',
+        endpoint: '/notifications/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });

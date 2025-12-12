@@ -11,6 +11,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 import crypto from 'crypto';
 
 const logger = createLogger({ module: 'impersonationRoutes' });
@@ -132,8 +133,18 @@ export default async function impersonationRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ users: data || [] });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err) }, 'Exception in GET /impersonate/users');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'impersonate_list_users',
+        endpoint: '/impersonate/users',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -217,8 +228,18 @@ export default async function impersonationRoutes(app: FastifyInstance) {
         expiresAt: expiresAt.toISOString(),
         user: targetUser
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), targetUserId }, 'Exception in POST /impersonate/:userId');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'impersonate_start_session',
+        endpoint: '/impersonate/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });

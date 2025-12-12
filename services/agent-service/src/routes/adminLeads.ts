@@ -9,6 +9,7 @@
 import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminLeads' });
 
@@ -144,8 +145,18 @@ export default async function adminLeadsRoutes(app: FastifyInstance) {
         },
         users: usersData || [],
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching leads');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_list_leads',
+        endpoint: '/admin/leads',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch leads' });
     }
   });

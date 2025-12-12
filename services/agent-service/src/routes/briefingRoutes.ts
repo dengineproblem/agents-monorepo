@@ -6,6 +6,7 @@ import { type FastifyRequest, FastifyPluginAsync } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { generatePrompt1, generatePrompt4, type BriefingData } from '../lib/openaiPromptGenerator.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 import {
   searchPageByInstagram,
   fetchCompetitorCreatives,
@@ -376,11 +377,22 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
           message: 'Промпты успешно созданы',
           adAccountId: createdAdAccountId, // Возвращаем ID созданного аккаунта для мультиаккаунтного режима
         });
-      } catch (error) {
+      } catch (error: any) {
         reqLog.error({
           error: error instanceof Error ? error.message : String(error),
           user_id,
         }, 'Неожиданная ошибка при обработке брифа');
+
+        logErrorToAdmin({
+          user_account_id: user_id,
+          error_type: 'api',
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'briefing_generate_prompt',
+          endpoint: '/briefing/generate-prompt',
+          severity: 'warning'
+        }).catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: 'Внутренняя ошибка сервера',
@@ -435,11 +447,22 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
           success: true,
           briefing: briefing || null,
         });
-      } catch (error) {
+      } catch (error: any) {
         reqLog.error({
           error: error instanceof Error ? error.message : String(error),
           user_id,
         }, 'Неожиданная ошибка при получении брифа');
+
+        logErrorToAdmin({
+          user_account_id: user_id,
+          error_type: 'api',
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'briefing_get',
+          endpoint: '/briefing/:user_id',
+          severity: 'warning'
+        }).catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: 'Внутренняя ошибка сервера',

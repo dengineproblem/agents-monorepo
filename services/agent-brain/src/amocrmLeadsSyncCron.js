@@ -14,6 +14,7 @@ import cron from 'node-cron';
 import fetch from 'node-fetch';
 import { logger } from './lib/logger.js';
 import { supabase } from './lib/supabaseClient.js';
+import { logErrorToAdmin } from './lib/errorLogger.js';
 
 const log = logger.child({ module: 'amocrmLeadsSyncCron' });
 
@@ -91,6 +92,16 @@ async function syncAllUsersLeads() {
           error: error.message,
           userAccountId: user.id
         }, 'Failed to sync leads for user');
+
+        logErrorToAdmin({
+          user_account_id: user.id,
+          error_type: 'cron',
+          raw_error: error.message || String(error),
+          stack_trace: error.stack,
+          action: 'amocrm_leads_sync_user',
+          severity: 'warning'
+        }).catch(() => {});
+
         errorCount++;
       }
     }
@@ -103,6 +114,14 @@ async function syncAllUsersLeads() {
 
   } catch (error) {
     log.error({ error: error.message }, 'AmoCRM leads sync cron failed');
+
+    logErrorToAdmin({
+      error_type: 'cron',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'amocrm_leads_sync_cron',
+      severity: 'critical'
+    }).catch(() => {});
   }
 }
 

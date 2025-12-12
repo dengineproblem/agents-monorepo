@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { normalizePhoneNumber } from '../lib/phoneNormalization.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 /**
  * GreenAPI Webhook Handler
@@ -51,6 +52,16 @@ export default async function greenApiWebhooks(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ error: error.message, stack: error.stack }, 'Error processing GreenAPI webhook');
+
+      logErrorToAdmin({
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'greenapi_webhook',
+        endpoint: '/webhooks/greenapi',
+        severity: 'critical'
+      }).catch(() => {});
+
       return reply.status(500).send({ error: 'Internal server error' });
     }
   });

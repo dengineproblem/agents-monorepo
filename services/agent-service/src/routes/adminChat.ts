@@ -13,6 +13,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { sendTelegramNotification } from '../lib/telegramNotifier.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminChat' });
 
@@ -75,8 +76,18 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         user: user || null,
         hasTelegram: !!user?.telegram_id
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error fetching chat messages');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_chat_messages',
+        endpoint: '/admin/chats/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -148,8 +159,18 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         success: true,
         message: chatMessage || { message, direction: 'to_user', created_at: new Date().toISOString() }
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error sending chat message');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_send_chat_message',
+        endpoint: '/admin/chats/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -175,8 +196,18 @@ export default async function adminChatRoutes(app: FastifyInstance) {
       }
 
       return res.send({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error marking messages as read');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_mark_chat_read',
+        endpoint: '/admin/chats/:userId/mark-read',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -208,8 +239,18 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         totalUnread: totalUnread || 0,
         usersWithUnread: uniqueUsers.size
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error getting unread count');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_unread_count',
+        endpoint: '/admin/chats/unread-count',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -230,8 +271,18 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         .is('read_at', null);
 
       return res.send({ unreadCount: count || 0 });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error getting user unread count');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_user_unread_count',
+        endpoint: '/admin/chats/unread/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Internal server error' });
     }
   });
@@ -301,8 +352,18 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         .slice(0, parseInt(limit));
 
       return res.send({ users });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error fetching users with messages');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_get_users_with_messages',
+        endpoint: '/admin/chats/users-with-messages',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Internal server error' });
     }
   });

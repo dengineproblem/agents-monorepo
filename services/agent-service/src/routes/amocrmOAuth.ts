@@ -19,6 +19,7 @@ import {
   deleteTempCredentials
 } from '../lib/amocrmTempCredentials.js';
 import { registerAmoCRMWebhook } from '../lib/amocrmWebhook.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const AMOCRM_CLIENT_ID = process.env.AMOCRM_CLIENT_ID;
 const AMOCRM_REDIRECT_URI = process.env.AMOCRM_REDIRECT_URI;
@@ -128,6 +129,16 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error initiating AmoCRM OAuth');
+
+      logErrorToAdmin({
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'amocrm_oauth_init',
+        endpoint: '/amocrm/auth',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -396,6 +407,15 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
     } catch (error: any) {
       app.log.error({ error }, 'Error in AmoCRM OAuth callback');
 
+      logErrorToAdmin({
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'amocrm_oauth_callback',
+        endpoint: '/amocrm/callback',
+        severity: 'critical'
+      }).catch(() => {});
+
       return reply.type('text/html').send(`
         <!DOCTYPE html>
         <html>
@@ -509,6 +529,17 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error checking AmoCRM status');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'amocrm_get_status',
+        endpoint: '/amocrm/status',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message
@@ -548,6 +579,17 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error({ error }, 'Error disconnecting AmoCRM');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'amocrm_disconnect',
+        endpoint: '/amocrm/disconnect',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({
         error: 'internal_error',
         message: error.message

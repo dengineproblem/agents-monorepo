@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { eventLogger, UserEvent } from '../lib/eventLogger.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const logger = createLogger({ module: 'analyticsRoutes' });
 
@@ -203,8 +204,18 @@ export default async function analyticsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ users: data || [] });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err) }, 'Exception in /analytics/users');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'get_analytics_users',
+        endpoint: '/analytics/users',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -270,8 +281,19 @@ export default async function analyticsRoutes(app: FastifyInstance) {
         pageViews,
         sessions: sessions || []
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId: id }, 'Exception in /analytics/user/:id');
+
+      logErrorToAdmin({
+        user_account_id: id,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'get_user_analytics',
+        endpoint: '/analytics/user/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -308,8 +330,18 @@ export default async function analyticsRoutes(app: FastifyInstance) {
       }
 
       return reply.send({ activeSessions: data || [] });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err) }, 'Exception in /analytics/realtime');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'get_realtime_analytics',
+        endpoint: '/analytics/realtime',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -372,8 +404,18 @@ export default async function analyticsRoutes(app: FastifyInstance) {
           overall: avgOverall
         }
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err) }, 'Exception in /analytics/summary');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'get_analytics_summary',
+        endpoint: '/analytics/summary',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });

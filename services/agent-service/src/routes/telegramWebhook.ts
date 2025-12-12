@@ -14,6 +14,7 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { notifyAdminGroup, APP_BASE_URL } from '../lib/notificationService.js';
 import { handleOnboardingMessage, type TelegramMessage as OnboardingMessage } from '../lib/telegramOnboarding/index.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'telegramWebhook' });
 
@@ -165,8 +166,18 @@ ${escapeHtml(messageText)}
       });
 
       return res.send({ ok: true });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error processing telegram webhook');
+
+      logErrorToAdmin({
+        error_type: 'webhook',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'telegram_webhook',
+        endpoint: '/telegram/webhook',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.send({ ok: true }); // Всегда отвечаем 200 чтобы Telegram не повторял
     }
   });
@@ -228,8 +239,18 @@ ${escapeHtml(messageText)}
         log.error({ result }, 'Failed to set Telegram webhook');
         return res.status(400).send({ success: false, error: result.description });
       }
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error setting up Telegram webhook');
+
+      logErrorToAdmin({
+        error_type: 'webhook',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'telegram_setup_webhook',
+        endpoint: '/telegram/setup-webhook',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
@@ -244,8 +265,18 @@ ${escapeHtml(messageText)}
       const result = await response.json();
 
       return res.send(result);
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error getting webhook info');
+
+      logErrorToAdmin({
+        error_type: 'webhook',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'telegram_get_webhook_info',
+        endpoint: '/telegram/webhook-info',
+        severity: 'info'
+      }).catch(() => {});
+
       return res.status(500).send({ success: false, error: 'Internal server error' });
     }
   });
@@ -265,8 +296,18 @@ ${escapeHtml(messageText)}
       } else {
         return res.status(400).send({ success: false, error: result.description });
       }
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error deleting webhook');
+
+      logErrorToAdmin({
+        error_type: 'webhook',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'telegram_delete_webhook',
+        endpoint: '/telegram/webhook',
+        severity: 'info'
+      }).catch(() => {});
+
       return res.status(500).send({ success: false, error: 'Internal server error' });
     }
   });

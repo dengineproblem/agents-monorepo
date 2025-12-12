@@ -7,6 +7,7 @@ import { graph } from '../adapters/facebook.js';
 import { getWhatsAppPhoneNumber } from '../lib/settingsHelpers.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { onCreativeTestLaunched } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
@@ -153,6 +154,19 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       
     } catch (error: any) {
       app.log.error({ message: error.message, stack: error.stack, fb: error.fb }, 'Creative test start error');
+
+      const body = req.body as any;
+      logErrorToAdmin({
+        user_account_id: body?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'start_creative_test',
+        endpoint: '/creative-test/start',
+        request_data: { user_creative_id: body?.user_creative_id, has_fb_error: !!error.fb },
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to start creative test'
@@ -204,6 +218,17 @@ export async function creativeTestRoutes(app: FastifyInstance) {
 
     } catch (error: any) {
       app.log.error('Get test results error:', error);
+
+      logErrorToAdmin({
+        user_account_id: (req.query as any)?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_creative_test_results',
+        endpoint: '/creative-test/results/:user_creative_id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to get test results'
@@ -236,6 +261,16 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       
     } catch (error: any) {
       app.log.error('Get running tests error:', error);
+
+      logErrorToAdmin({
+        error_type: 'cron',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_running_creative_tests',
+        endpoint: '/creative-test/status',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to get running tests'
@@ -382,6 +417,17 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       
     } catch (error: any) {
       app.log.error('Check test error:', error);
+
+      logErrorToAdmin({
+        error_type: 'cron',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'check_creative_test',
+        endpoint: '/creative-test/check/:test_id',
+        request_data: { test_id: (req.params as any)?.test_id },
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to check test'
@@ -517,6 +563,18 @@ export async function creativeTestRoutes(app: FastifyInstance) {
       return reply.send({ success: true });
     } catch (error: any) {
       app.log.error({ message: error.message, stack: error.stack }, 'Creative test reset error');
+
+      logErrorToAdmin({
+        user_account_id: (req.query as any)?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'reset_creative_test',
+        endpoint: '/creative-test/:user_creative_id',
+        request_data: { user_creative_id: (req.params as any)?.user_creative_id },
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.status(500).send({
         success: false,
         error: error.message || 'Failed to reset creative test'

@@ -10,6 +10,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import OpenAI from 'openai';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'adminErrors' });
 
@@ -161,8 +162,18 @@ export default async function adminErrorsRoutes(app: FastifyInstance) {
         page: pageNum,
         totalPages: Math.ceil((total || 0) / limitNum),
       });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error fetching errors');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_list_errors',
+        endpoint: '/admin/errors',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to fetch errors' });
     }
   });
@@ -206,8 +217,18 @@ export default async function adminErrorsRoutes(app: FastifyInstance) {
       if (error) throw error;
 
       return res.send({ success: true });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error resolving error');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_resolve_error',
+        endpoint: '/admin/errors/:id/resolve',
+        severity: 'warning'
+      }).catch(() => {});
+
       return res.status(500).send({ error: 'Failed to resolve error' });
     }
   });
@@ -279,8 +300,9 @@ export default async function adminErrorsRoutes(app: FastifyInstance) {
       log.info({ errorId: insertedError.id, type: error_type }, 'Error logged');
 
       return res.send({ success: true, error: insertedError });
-    } catch (err) {
+    } catch (err: any) {
       log.error({ error: String(err) }, 'Error logging error');
+      // Не логируем ошибку логирования во избежание рекурсии
       return res.status(500).send({ error: 'Failed to log error' });
     }
   });

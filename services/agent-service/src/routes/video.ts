@@ -15,6 +15,7 @@ import {
   createWebsiteLeadsCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated } from '../lib/onboardingHelper.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const ProcessVideoSchema = z.object({
   user_id: z.string().uuid(),
@@ -401,6 +402,17 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         // При ошибке создания креативов помечаем креатив как failed
         app.log.error(`Failed to create creatives: ${creativesError.message}`);
 
+        logErrorToAdmin({
+          user_account_id: body.user_id,
+          error_type: 'api',
+          raw_error: creativesError.message || String(creativesError),
+          stack_trace: creativesError.stack,
+          action: 'create_video_creatives',
+          endpoint: '/process-video',
+          request_data: { direction_id: body.direction_id, objective, creative_id: creative.id },
+          severity: 'warning'
+        }).catch(() => {});
+
         const { error: failedUpdateError } = await supabase
           .from('user_creatives')
           .update({
@@ -447,6 +459,17 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         fb_error: error.response?.data,
         status: error.response?.status
       }, 'Error processing video');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'process_video',
+        endpoint: '/process-video',
+        request_data: { has_fb_error: !!error.fb },
+        severity: 'warning'
+      }).catch(() => {});
 
       if (error.fb) {
         return reply.status(500).send({
@@ -609,6 +632,18 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         app.log.info({ videoPath, fileSize: stats.size }, 'Video downloaded successfully');
       } catch (downloadError: any) {
         app.log.error({ error: downloadError.message }, 'Failed to download video');
+
+        logErrorToAdmin({
+          user_account_id: body.user_id,
+          error_type: 'api',
+          raw_error: downloadError.message || String(downloadError),
+          stack_trace: downloadError.stack,
+          action: 're_transcribe_download',
+          endpoint: '/re-transcribe',
+          request_data: { creative_id: body.creative_id },
+          severity: 'warning'
+        }).catch(() => {});
+
         return reply.status(500).send({
           success: false,
           error: 'Failed to download video for re-transcription'
@@ -679,6 +714,17 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
 
     } catch (error: any) {
       app.log.error({ error: error.message, stack: error.stack }, 'Re-transcribe error');
+
+      logErrorToAdmin({
+        user_account_id: (request.body as any)?.user_id,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 're_transcribe',
+        endpoint: '/re-transcribe',
+        request_data: { creative_id: (request.body as any)?.creative_id },
+        severity: 'warning'
+      }).catch(() => {});
 
       if (error instanceof z.ZodError) {
         return reply.status(400).send({

@@ -10,6 +10,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { sendTelegramNotification } from '../lib/telegramNotifier.js';
 
 const logger = createLogger({ module: 'onboardingRoutes' });
@@ -289,8 +290,18 @@ export default async function onboardingRoutes(app: FastifyInstance) {
           label: STAGE_LABELS[s]
         }))
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err) }, 'Exception in /onboarding/kanban');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'onboarding_kanban',
+        endpoint: '/onboarding/kanban',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -366,8 +377,19 @@ export default async function onboardingRoutes(app: FastifyInstance) {
         tagLabels: TAG_LABELS,
         adAccounts: adAccounts || []
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId: id }, 'Exception in /onboarding/user/:id');
+
+      logErrorToAdmin({
+        user_account_id: id,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'onboarding_get_user',
+        endpoint: '/onboarding/user/:id',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -418,8 +440,19 @@ export default async function onboardingRoutes(app: FastifyInstance) {
       logger.info({ userId, stageFrom, stageTo: stage }, 'Onboarding stage updated');
 
       return reply.send({ success: true, stage });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId }, 'Exception in PATCH /onboarding/stage/:userId');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'onboarding_update_stage',
+        endpoint: '/onboarding/stage/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -497,8 +530,19 @@ export default async function onboardingRoutes(app: FastifyInstance) {
         stage: 'fb_connected',
         notificationSent: sendNotification
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId }, 'Exception in POST /onboarding/approve-fb/:userId');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'onboarding_approve_fb',
+        endpoint: '/onboarding/approve-fb/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -549,8 +593,19 @@ export default async function onboardingRoutes(app: FastifyInstance) {
       logger.info({ userId, tags }, 'Onboarding tags updated');
 
       return reply.send({ success: true, tags });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err), userId }, 'Exception in PATCH /onboarding/tags/:userId');
+
+      logErrorToAdmin({
+        user_account_id: userId,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'onboarding_update_tags',
+        endpoint: '/onboarding/tags/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
@@ -592,8 +647,18 @@ export default async function onboardingRoutes(app: FastifyInstance) {
         pendingFbApproval: pendingFb,
         activeLastWeek: activeLastWeek || 0
       });
-    } catch (err) {
+    } catch (err: any) {
       logger.error({ error: String(err) }, 'Exception in /onboarding/stats');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'onboarding_stats',
+        endpoint: '/onboarding/stats',
+        severity: 'warning'
+      }).catch(() => {});
+
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
