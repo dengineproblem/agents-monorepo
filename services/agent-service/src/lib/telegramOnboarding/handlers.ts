@@ -26,11 +26,19 @@ const log = createLogger({ module: 'telegramOnboardingHandlers' });
  * Проверяет, прошёл ли пользователь онбординг (есть prompt1)
  */
 async function hasCompletedOnboarding(telegramId: string): Promise<boolean> {
-  const { data: user } = await supabase
+  const { data: user, error } = await supabase
     .from('user_accounts')
     .select('id, prompt1')
     .eq('telegram_id', telegramId)
     .single();
+
+  log.info({
+    telegramId,
+    foundUser: !!user,
+    userId: user?.id,
+    hasPrompt1: !!(user?.prompt1),
+    error: error?.message
+  }, 'hasCompletedOnboarding check');
 
   // Пользователь существует И у него есть prompt1 - значит онбординг пройден
   return !!(user && user.prompt1);
@@ -83,8 +91,10 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
     // ===================================================
     const alreadyOnboarded = await hasCompletedOnboarding(telegramId);
 
+    log.info({ telegramId, alreadyOnboarded }, 'Checking onboarding status');
+
     if (alreadyOnboarded) {
-      log.debug({ telegramId }, 'User already completed onboarding, skipping');
+      log.info({ telegramId }, 'User already completed onboarding, skipping to regular chat');
       // Не обрабатываем - пусть сообщение уйдёт в обычный чат с поддержкой
       return { handled: false };
     }
