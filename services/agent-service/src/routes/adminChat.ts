@@ -285,19 +285,19 @@ export default async function adminChatRoutes(app: FastifyInstance) {
 
           const userData = usersData[userId];
           userMap.set(userId, {
-            userId,
+            id: userId,
             username: userData?.username || 'Unknown',
-            hasTelegram: !!userData?.telegram_id,
-            lastMessage: chat.message,
-            lastMessageDirection: chat.direction,
-            lastMessageAt: chat.created_at,
-            unreadCount
+            telegram_id: userData?.telegram_id || null,
+            last_message: chat.message,
+            last_message_time: chat.created_at,
+            unread_count: unreadCount,
+            is_online: false
           });
         }
       }
 
       const users = Array.from(userMap.values())
-        .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime())
+        .sort((a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime())
         .slice(0, parseInt(limit));
 
       return res.send({ users });
