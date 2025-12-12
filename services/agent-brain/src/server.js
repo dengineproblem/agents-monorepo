@@ -177,6 +177,16 @@ fastify.get('/api/brain/test-fb-adsets', async (request, reply) => {
       daily_budget_parsed: toInt(a.daily_budget)
     })) });
   } catch (e) {
+    logErrorToAdmin({
+      user_account_id: request.query.userAccountId,
+      error_type: 'facebook',
+      raw_error: e.message || String(e),
+      stack_trace: e.stack,
+      action: 'test_fb_adsets',
+      endpoint: '/api/brain/test-fb-adsets',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: String(e) });
   }
 });
@@ -204,6 +214,15 @@ fastify.get('/api/brain/llm-ping', async (request, reply) => {
     }
     return reply.send({ ok: true, model: MODEL, raw: txt });
   } catch (e) {
+    logErrorToAdmin({
+      error_type: 'api',
+      raw_error: e.message || String(e),
+      stack_trace: e.stack,
+      action: 'llm_ping',
+      endpoint: '/api/brain/llm-ping',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ ok: false, error: String(e), request: e?._requestBody, response: e?._responseText });
   }
 });
@@ -252,7 +271,18 @@ fastify.post('/api/brain/test-scoring', async (request, reply) => {
     
   } catch (e) {
     fastify.log.error({ where: 'test_scoring', error: String(e), stack: e.stack });
-    return reply.code(500).send({ 
+
+    logErrorToAdmin({
+      user_account_id: request.body?.userAccountId,
+      error_type: 'scoring',
+      raw_error: e.message || String(e),
+      stack_trace: e.stack,
+      action: 'test_scoring',
+      endpoint: '/api/brain/test-scoring',
+      severity: 'warning'
+    }).catch(() => {});
+
+    return reply.code(500).send({
       error: String(e),
       stack: e.stack
     });
@@ -361,6 +391,17 @@ fastify.post('/api/brain/test-merger', async (request, reply) => {
     
   } catch (e) {
     fastify.log.error({ where: 'test_merger', error: String(e), stack: e.stack });
+
+    logErrorToAdmin({
+      user_account_id: request.body?.userAccountId,
+      error_type: 'scoring',
+      raw_error: e.message || String(e),
+      stack_trace: e.stack,
+      action: 'test_merger',
+      endpoint: '/api/brain/test-merger',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({
       error: String(e),
       stack: e.stack
@@ -3906,6 +3947,16 @@ fastify.get('/api/brain/cron/check-users', async (request, reply) => {
     });
   } catch (err) {
     fastify.log.error(err);
+
+    logErrorToAdmin({
+      error_type: 'cron',
+      raw_error: err.message || String(err),
+      stack_trace: err.stack,
+      action: 'cron_check_users',
+      endpoint: '/api/brain/cron/check-users',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: 'check_failed', details: String(err?.message || err) });
   }
 });
@@ -3917,6 +3968,16 @@ fastify.post('/api/brain/cron/run-batch', async (request, reply) => {
     return reply.send(result);
   } catch (err) {
     fastify.log.error(err);
+
+    logErrorToAdmin({
+      error_type: 'cron',
+      raw_error: err.message || String(err),
+      stack_trace: err.stack,
+      action: 'cron_run_batch',
+      endpoint: '/api/brain/cron/run-batch',
+      severity: 'critical'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: 'batch_failed', details: String(err?.message || err) });
   }
 });
@@ -3939,6 +4000,16 @@ fastify.get('/api/brain/cron/batch-report', async (request, reply) => {
     return reply.send({ success, report, sent: false });
   } catch (err) {
     fastify.log.error(err);
+
+    logErrorToAdmin({
+      error_type: 'cron',
+      raw_error: err.message || String(err),
+      stack_trace: err.stack,
+      action: 'cron_batch_report',
+      endpoint: '/api/brain/cron/batch-report',
+      severity: 'warning'
+    }).catch(() => {});
+
     return reply.code(500).send({ error: 'report_failed', details: String(err?.message || err) });
   }
 });
