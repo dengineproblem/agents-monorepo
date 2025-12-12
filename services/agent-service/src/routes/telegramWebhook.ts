@@ -116,12 +116,14 @@ export default async function telegramWebhook(app: FastifyInstance) {
 
       const messageText = message.text;
 
-      // Ищем пользователя по telegram_id
-      const { data: user, error: userError } = await supabase
+      // Ищем пользователя по telegram_id (может быть несколько аккаунтов)
+      const { data: users, error: userError } = await supabase
         .from('user_accounts')
         .select('id, username')
-        .eq('telegram_id', telegramId)
-        .single();
+        .eq('telegram_id', telegramId);
+
+      // Берём первого найденного пользователя
+      const user = users?.[0];
 
       if (userError || !user) {
         // Пользователь не найден - возможно хочет зарегистрироваться

@@ -24,24 +24,26 @@ const log = createLogger({ module: 'telegramOnboardingHandlers' });
 
 /**
  * Проверяет, прошёл ли пользователь онбординг (есть prompt1)
+ * Если telegram_id привязан к нескольким аккаунтам - берём любой с prompt1
  */
 async function hasCompletedOnboarding(telegramId: string): Promise<boolean> {
-  const { data: user, error } = await supabase
+  const { data: users, error } = await supabase
     .from('user_accounts')
     .select('id, prompt1')
-    .eq('telegram_id', telegramId)
-    .single();
+    .eq('telegram_id', telegramId);
+
+  // Ищем хотя бы одного пользователя с prompt1
+  const userWithPrompt = users?.find(u => u.prompt1);
 
   log.info({
     telegramId,
-    foundUser: !!user,
-    userId: user?.id,
-    hasPrompt1: !!(user?.prompt1),
+    foundUsers: users?.length || 0,
+    hasUserWithPrompt1: !!userWithPrompt,
     error: error?.message
   }, 'hasCompletedOnboarding check');
 
-  // Пользователь существует И у него есть prompt1 - значит онбординг пройден
-  return !!(user && user.prompt1);
+  // Есть хотя бы один пользователь с prompt1 - значит онбординг пройден
+  return !!userWithPrompt;
 }
 
 // =====================================================
