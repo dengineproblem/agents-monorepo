@@ -19,7 +19,7 @@ export const tourSteps: TourStep[] = [
   {
     id: 'welcome',
     type: 'modal',
-    title: 'Добро пожаловать в Rendezvous!',
+    title: 'Добро пожаловать в Performante.ai!',
     content: 'Facebook подключён! Сейчас мы проведём вас по платформе и покажем, как запустить первую рекламу. Это займёт около минуты.',
   },
 

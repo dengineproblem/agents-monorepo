@@ -29,6 +29,7 @@ import OAuthCallback from './pages/OAuthCallback';
 import CarouselTest from './pages/CarouselTest';
 import Competitors from './pages/Competitors';
 import KnowledgeBase from './pages/KnowledgeBase';
+import Assistant from './pages/Assistant';
 import AdminAnalytics from './pages/AdminAnalytics';
 import AdminOnboarding from './pages/AdminOnboarding';
 import AdminRoute from './components/AdminRoute';
@@ -46,6 +47,8 @@ import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
 import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { FacebookManualConnectModal } from './components/profile/FacebookManualConnectModal';
+import { OnboardingTour } from './components/onboarding/OnboardingTour';
+import { useAppContext } from './context/AppContext';
 
 const queryClient = new QueryClient();
 
@@ -55,6 +58,7 @@ const AppRoutes = () => {
   const location = useLocation();
   const isPublic = PUBLIC_PATHS.includes(location.pathname);
   const { t } = useTranslation();
+  const { adAccounts, multiAccountEnabled } = useAppContext();
 
   // Автоматический трекинг page views
   usePageTracking();
@@ -69,6 +73,39 @@ const AppRoutes = () => {
   const [loading, setLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
+
+  // Определяем, подключён ли Facebook (одобрен тех.специалистом)
+  const isFbConnected = (() => {
+    let result = false;
+    if (multiAccountEnabled) {
+      // Мультиаккаунт: проверяем connection_status активного аккаунта
+      const currentAccount = adAccounts.find(acc => acc.is_active !== false);
+      result = currentAccount?.connection_status === 'connected';
+      console.log('[isFbConnected] MultiAccount mode:', {
+        adAccountsCount: adAccounts.length,
+        currentAccount: currentAccount?.id,
+        connectionStatus: currentAccount?.connection_status,
+        result,
+      });
+    } else {
+      // Legacy: проверяем access_token в user
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const parsed = JSON.parse(storedUser);
+          result = !!(parsed.access_token && parsed.ad_account_id);
+          console.log('[isFbConnected] Legacy mode:', {
+            hasAccessToken: !!parsed.access_token,
+            hasAdAccountId: !!parsed.ad_account_id,
+            result,
+          });
+        } catch {
+          result = false;
+        }
+      }
+    }
+    return result;
+  })();
 
   useEffect(() => {
     // Проверяем наличие пользовательских данных в localStorage
@@ -239,7 +276,10 @@ const AppRoutes = () => {
             onSkip={() => setShowFacebookManualModal(false)}
             showSkipButton={true}
           />
-        
+
+          {/* Онбординг-тур показывается после одобрения Facebook тех.специалистом */}
+          <OnboardingTour isFbConnected={isFbConnected} />
+
           {isAdminRoute ? (
             // Admin Panel with its own layout
             <Routes>
@@ -286,6 +326,7 @@ const AppRoutes = () => {
                       <Route path="/knowledge-base" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
+                      <Route path="/assistant" element={<Assistant />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>
