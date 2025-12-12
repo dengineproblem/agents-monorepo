@@ -230,7 +230,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           }, 'Processing direction');
 
           // Получаем креативы для этого направления (используем objective направления)
-          const creatives = await getAvailableCreatives(user_account_id, direction.objective, direction.id);
+          const creatives = await getAvailableCreatives(user_account_id, direction.objective, direction.id, account_id);
 
           if (creatives.length === 0) {
             log.warn({ directionId: direction.id, directionName: direction.name }, 'No creatives for direction');
@@ -1367,9 +1367,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get('/available-creatives', async (request, reply) => {
     const log = getWorkflowLogger(request as FastifyRequest, 'availableCreatives');
-    const { user_account_id, objective } = request.query as {
+    const { user_account_id, objective, account_id } = request.query as {
       user_account_id?: string;
       objective?: CampaignObjective;
+      account_id?: string;
     };
 
     if (!user_account_id) {
@@ -1381,7 +1382,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       const { getAvailableCreatives } = await import('../lib/campaignBuilder.js');
-      const creatives = await getAvailableCreatives(user_account_id, objective);
+      const creatives = await getAvailableCreatives(user_account_id, objective, undefined, account_id);
 
       return reply.send({
         success: true,

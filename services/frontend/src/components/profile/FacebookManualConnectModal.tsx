@@ -24,7 +24,7 @@ interface FacebookManualConnectModalProps {
   demoMode?: boolean;
 }
 
-const PARTNER_ID = '1003576504991471';
+const PARTNER_ID = '290181230529709';
 
 // Скриншоты для инструкции
 const INSTRUCTION_IMAGES = {

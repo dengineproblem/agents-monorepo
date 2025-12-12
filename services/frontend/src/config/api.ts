@@ -11,14 +11,23 @@ export const API_BASE_URL =
 // Analytics API (отдельный сервис на порту 7081)
 // Локально: http://localhost:7081
 // Продакшн: https://agents.performanteaiagency.com
-export const ANALYTICS_API_BASE_URL = 
+export const ANALYTICS_API_BASE_URL =
   import.meta.env.VITE_ANALYTICS_API_BASE_URL !== undefined
     ? import.meta.env.VITE_ANALYTICS_API_BASE_URL
     : (import.meta.env.DEV ? '' : 'https://agents.performanteaiagency.com');
+
+// Brain API (agent-brain сервис на порту 7080)
+// Локально: http://localhost:7080
+// Продакшн: https://agents.performanteaiagency.com (через nginx)
+export const BRAIN_API_BASE_URL =
+  import.meta.env.VITE_BRAIN_API_BASE_URL !== undefined
+    ? import.meta.env.VITE_BRAIN_API_BASE_URL
+    : (import.meta.env.DEV ? 'http://localhost:7080' : 'https://agents.performanteaiagency.com');
 
 // Для отладки
 if (import.meta.env.DEV) {
   console.log('[API Config] Base URL:', API_BASE_URL);
   console.log('[API Config] Analytics API URL:', ANALYTICS_API_BASE_URL);
+  console.log('[API Config] Brain API URL:', BRAIN_API_BASE_URL);
 }
 
