@@ -29,7 +29,6 @@ import OAuthCallback from './pages/OAuthCallback';
 import CarouselTest from './pages/CarouselTest';
 import Competitors from './pages/Competitors';
 import KnowledgeBase from './pages/KnowledgeBase';
-import Assistant from './pages/Assistant';
 import AdminAnalytics from './pages/AdminAnalytics';
 import AdminOnboarding from './pages/AdminOnboarding';
 import AdminRoute from './components/AdminRoute';
@@ -326,7 +325,6 @@ const AppRoutes = () => {
                       <Route path="/knowledge-base" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
-                      <Route path="/assistant" element={<Assistant />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>
