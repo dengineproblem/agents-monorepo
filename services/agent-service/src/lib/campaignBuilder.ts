@@ -775,12 +775,15 @@ export async function getActiveAdSets(
   log.info({ campaignId }, 'Fetching active ad sets for campaign');
 
   try {
-    const response = await fetch(
-      `https://graph.facebook.com/${FB_API_VERSION}/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`
-    );
+    const url = `https://graph.facebook.com/${FB_API_VERSION}/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`;
+    console.log(`[getActiveAdSets] campaignId=${campaignId}, tokenLength=${accessToken?.length}, FB_API_VERSION=${FB_API_VERSION}`);
+
+    const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`Facebook API error: ${response.status}`);
+      const errorBody = await response.text();
+      console.error(`[getActiveAdSets] Error ${response.status}:`, errorBody);
+      throw new Error(`Facebook API error: ${response.status} - ${errorBody}`);
     }
 
     const data = await response.json();
