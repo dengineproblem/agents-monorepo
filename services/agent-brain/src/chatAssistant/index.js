@@ -1,0 +1,550 @@
+/**
+ * Chat Assistant Module
+ * Main entry point with API endpoint for chat interactions
+ * Uses multi-agent architecture with Orchestrator
+ */
+
+import OpenAI from 'openai';
+import { buildSystemPrompt, buildUserPrompt } from './systemPrompt.js';
+import { getToolsForOpenAI, isToolDangerous } from './tools.js';
+import { executeTool } from './toolHandlers.js';
+import {
+  gatherContext,
+  getOrCreateConversation,
+  saveMessage,
+  updateConversationTitle,
+  getConversations,
+  deleteConversation
+} from './contextGatherer.js';
+import { Orchestrator } from './orchestrator/index.js';
+import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
+
+const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
+const MAX_TOOL_CALLS = 5; // Prevent infinite loops
+
+// Use multi-agent orchestrator
+const USE_ORCHESTRATOR = process.env.CHAT_USE_ORCHESTRATOR !== 'false';
+const orchestrator = new Orchestrator();
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
+
+/**
+ * Process a chat message and return response
+ * @param {Object} params
+ * @param {string} params.message - User message
+ * @param {string} params.conversationId - Existing conversation ID (optional)
+ * @param {string} params.mode - 'auto' | 'plan' | 'ask'
+ * @param {string} params.userAccountId - User account ID
+ * @param {string} params.adAccountId - Ad account ID (optional)
+ * @returns {Promise<Object>} Chat response
+ */
+export async function processChat({ message, conversationId, mode = 'auto', userAccountId, adAccountId }) {
+  const startTime = Date.now();
+
+  try {
+    // 1. Get access token for Facebook API
+    const accessToken = await getAccessToken(userAccountId, adAccountId);
+
+    // 2. Get or create conversation
+    const conversation = await getOrCreateConversation({
+      userAccountId,
+      adAccountId,
+      conversationId,
+      mode
+    });
+
+    // Update title if this is the first message
+    const isFirstMessage = !conversationId;
+    if (isFirstMessage) {
+      await updateConversationTitle(conversation.id, message);
+    }
+
+    // 3. Gather context
+    const context = await gatherContext({
+      userAccountId,
+      adAccountId,
+      conversationId: conversation.id
+    });
+
+    // 4. Save user message
+    await saveMessage({
+      conversationId: conversation.id,
+      role: 'user',
+      content: message
+    });
+
+    // 5. Build prompts
+    const systemPrompt = buildSystemPrompt(mode, context.businessProfile);
+    const userPrompt = buildUserPrompt(message, context);
+
+    // 6. Prepare conversation history for agents
+    const conversationHistory = [];
+    if (context.recentMessages?.length > 0) {
+      for (const msg of context.recentMessages.slice(-10)) { // Last 10 messages
+        if (msg.role === 'user' || msg.role === 'assistant') {
+          conversationHistory.push({ role: msg.role, content: msg.content });
+        }
+      }
+    }
+
+    // 7. Process via Orchestrator (multi-agent) or legacy LLM
+    const toolContext = { accessToken, userAccountId, adAccountId };
+    let response;
+
+    if (USE_ORCHESTRATOR) {
+      // NEW: Multi-agent orchestrator
+      response = await orchestrator.processRequest({
+        message: userPrompt,
+        context,
+        mode,
+        toolContext,
+        conversationHistory
+      });
+    } else {
+      // LEGACY: Direct LLM with all tools
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...conversationHistory,
+        { role: 'user', content: userPrompt }
+      ];
+      response = await callLLMWithTools(messages, toolContext, mode);
+    }
+
+    // 8. Parse and save assistant response
+    const parsedResponse = parseAssistantResponse(response.content);
+
+    await saveMessage({
+      conversationId: conversation.id,
+      role: 'assistant',
+      content: parsedResponse.response || response.content,
+      planJson: parsedResponse.plan,
+      actionsJson: response.executedActions,
+      toolCallsJson: response.toolCalls
+    });
+
+    // 9. Return result
+    const duration = Date.now() - startTime;
+    logger.info({
+      conversationId: conversation.id,
+      duration,
+      mode,
+      agent: response.agent,
+      delegatedTo: response.delegatedTo
+    }, 'Chat processed');
+
+    return {
+      conversationId: conversation.id,
+      response: parsedResponse.response || response.content,
+      plan: parsedResponse.plan,
+      data: parsedResponse.data,
+      needsClarification: parsedResponse.needs_clarification,
+      clarificationQuestion: parsedResponse.clarification_question,
+      executedActions: response.executedActions,
+      mode,
+      // Multi-agent metadata
+      agent: response.agent,
+      delegatedTo: response.delegatedTo,
+      classification: response.classification
+    };
+
+  } catch (error) {
+    logger.error({ error: error.message, userAccountId }, 'Chat processing failed');
+    throw error;
+  }
+}
+
+/**
+ * Call LLM with tools and handle tool calls
+ */
+async function callLLMWithTools(messages, toolContext, mode) {
+  const tools = getToolsForOpenAI();
+  const executedActions = [];
+  const allToolCalls = [];
+
+  let currentMessages = [...messages];
+  let iterations = 0;
+
+  while (iterations < MAX_TOOL_CALLS) {
+    iterations++;
+
+    const completion = await openai.chat.completions.create({
+      model: MODEL,
+      messages: currentMessages,
+      tools,
+      tool_choice: 'auto',
+      temperature: 0.7
+    });
+
+    const assistantMessage = completion.choices[0].message;
+
+    // If no tool calls, return the response
+    if (!assistantMessage.tool_calls?.length) {
+      return {
+        content: assistantMessage.content,
+        executedActions,
+        toolCalls: allToolCalls
+      };
+    }
+
+    // Process tool calls
+    currentMessages.push(assistantMessage);
+
+    for (const toolCall of assistantMessage.tool_calls) {
+      const toolName = toolCall.function.name;
+      const toolArgs = JSON.parse(toolCall.function.arguments);
+
+      allToolCalls.push({ name: toolName, args: toolArgs });
+
+      // Check if tool requires confirmation in current mode
+      const requiresApproval = shouldRequireApproval(toolName, mode);
+
+      if (requiresApproval) {
+        // Don't execute, return plan for approval
+        currentMessages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: JSON.stringify({
+            status: 'pending_approval',
+            message: 'This action requires approval before execution'
+          })
+        });
+        continue;
+      }
+
+      // Execute the tool
+      const result = await executeTool(toolName, toolArgs, toolContext);
+
+      executedActions.push({
+        tool: toolName,
+        args: toolArgs,
+        result: result.success ? 'success' : 'failed',
+        message: result.message || result.error
+      });
+
+      currentMessages.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify(result)
+      });
+    }
+  }
+
+  // If we hit max iterations, return last response
+  const lastCompletion = await openai.chat.completions.create({
+    model: MODEL,
+    messages: currentMessages,
+    temperature: 0.7
+  });
+
+  return {
+    content: lastCompletion.choices[0].message.content,
+    executedActions,
+    toolCalls: allToolCalls
+  };
+}
+
+/**
+ * Determine if a tool requires approval based on mode
+ */
+function shouldRequireApproval(toolName, mode) {
+  // In Plan mode, all write operations require approval
+  if (mode === 'plan') {
+    const writeTools = [
+      'pauseCampaign', 'resumeCampaign', 'pauseAdSet', 'resumeAdSet',
+      'updateBudget', 'updateLeadStage', 'generateCreative'
+    ];
+    return writeTools.includes(toolName);
+  }
+
+  // Dangerous tools always require approval
+  if (isToolDangerous(toolName)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Parse assistant response from JSON format
+ */
+function parseAssistantResponse(content) {
+  try {
+    // Try to extract JSON from the response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        thinking: parsed.thinking,
+        needs_clarification: parsed.needs_clarification || false,
+        clarification_question: parsed.clarification_question,
+        plan: parsed.plan,
+        response: parsed.response || content,
+        data: parsed.data
+      };
+    }
+  } catch (e) {
+    // If JSON parsing fails, return raw content
+  }
+
+  return {
+    response: content,
+    needs_clarification: false
+  };
+}
+
+/**
+ * Get Facebook access token for user
+ */
+async function getAccessToken(userAccountId, adAccountId) {
+  // First try to get from ad_accounts table
+  if (adAccountId) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('access_token')
+      .eq('id', adAccountId)
+      .single();
+
+    if (adAccount?.access_token) {
+      return adAccount.access_token;
+    }
+  }
+
+  // Fallback to user_accounts
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('access_token')
+    .eq('id', userAccountId)
+    .single();
+
+  if (!userAccount?.access_token) {
+    throw new Error('No Facebook access token found');
+  }
+
+  return userAccount.access_token;
+}
+
+/**
+ * Execute a planned action (after user approval)
+ */
+export async function executePlanAction({ conversationId, actionIndex, userAccountId, adAccountId }) {
+  // Get the message with the plan
+  const { data: messages } = await supabase
+    .from('ai_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'assistant')
+    .not('plan_json', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!messages?.length || !messages[0].plan_json) {
+    throw new Error('No pending plan found');
+  }
+
+  const plan = messages[0].plan_json;
+  const step = plan.steps?.[actionIndex];
+
+  if (!step) {
+    throw new Error('Action not found in plan');
+  }
+
+  // Execute the action
+  const accessToken = await getAccessToken(userAccountId, adAccountId);
+  const result = await executeTool(step.action, step.params, {
+    accessToken,
+    userAccountId,
+    adAccountId
+  });
+
+  // Save execution result
+  await saveMessage({
+    conversationId,
+    role: 'system',
+    content: result.success
+      ? `✅ Выполнено: ${step.description}`
+      : `❌ Ошибка: ${result.error}`,
+    actionsJson: [{ ...step, result }]
+  });
+
+  return result;
+}
+
+/**
+ * Execute all plan actions
+ */
+export async function executeFullPlan({ conversationId, userAccountId, adAccountId }) {
+  const { data: messages } = await supabase
+    .from('ai_messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'assistant')
+    .not('plan_json', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (!messages?.length || !messages[0].plan_json) {
+    throw new Error('No pending plan found');
+  }
+
+  const plan = messages[0].plan_json;
+  const results = [];
+
+  const accessToken = await getAccessToken(userAccountId, adAccountId);
+
+  for (const step of plan.steps || []) {
+    const result = await executeTool(step.action, step.params, {
+      accessToken,
+      userAccountId,
+      adAccountId
+    });
+    results.push({ step, result });
+  }
+
+  // Save all results
+  await saveMessage({
+    conversationId,
+    role: 'system',
+    content: `План выполнен: ${results.filter(r => r.result.success).length}/${results.length} действий успешно`,
+    actionsJson: results
+  });
+
+  return { results, success: results.every(r => r.result.success) };
+}
+
+/**
+ * Register routes on Fastify instance
+ */
+export function registerChatRoutes(fastify) {
+  // Main chat endpoint
+  fastify.post('/api/brain/chat', async (request, reply) => {
+    const { message, conversationId, mode, userAccountId, adAccountId } = request.body;
+
+    if (!message || !userAccountId) {
+      return reply.code(400).send({ error: 'message and userAccountId are required' });
+    }
+
+    try {
+      const result = await processChat({
+        message,
+        conversationId,
+        mode: mode || 'auto',
+        userAccountId,
+        adAccountId
+      });
+
+      return reply.send(result);
+    } catch (error) {
+      fastify.log.error({ error: error.message }, 'Chat error');
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Get conversations list
+  fastify.get('/api/brain/conversations', async (request, reply) => {
+    const { userAccountId, adAccountId, limit } = request.query;
+
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId is required' });
+    }
+
+    try {
+      const conversations = await getConversations({
+        userAccountId,
+        adAccountId,
+        limit: parseInt(limit) || 20
+      });
+
+      return reply.send({ conversations });
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Get conversation messages
+  fastify.get('/api/brain/conversations/:id/messages', async (request, reply) => {
+    const { id } = request.params;
+    const { userAccountId } = request.query;
+
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId is required' });
+    }
+
+    try {
+      const { data: messages, error } = await supabase
+        .from('ai_messages')
+        .select('*')
+        .eq('conversation_id', id)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      return reply.send({ messages });
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Delete conversation
+  fastify.delete('/api/brain/conversations/:id', async (request, reply) => {
+    const { id } = request.params;
+    const { userAccountId } = request.query;
+
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId is required' });
+    }
+
+    try {
+      await deleteConversation(id, userAccountId);
+      return reply.send({ success: true });
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // Execute plan action
+  fastify.post('/api/brain/conversations/:id/execute', async (request, reply) => {
+    const { id } = request.params;
+    const { userAccountId, adAccountId, actionIndex, executeAll } = request.body;
+
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId is required' });
+    }
+
+    try {
+      let result;
+
+      if (executeAll) {
+        result = await executeFullPlan({
+          conversationId: id,
+          userAccountId,
+          adAccountId
+        });
+      } else if (actionIndex !== undefined) {
+        result = await executePlanAction({
+          conversationId: id,
+          actionIndex,
+          userAccountId,
+          adAccountId
+        });
+      } else {
+        return reply.code(400).send({ error: 'actionIndex or executeAll required' });
+      }
+
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  fastify.log.info('Chat Assistant routes registered');
+}
+
+export default {
+  processChat,
+  executePlanAction,
+  executeFullPlan,
+  registerChatRoutes
+};
