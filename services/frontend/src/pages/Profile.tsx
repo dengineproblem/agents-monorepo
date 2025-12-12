@@ -28,6 +28,8 @@ import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
+import { forceStartTour } from '@/hooks/useOnboardingTour';
+import { GraduationCap } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 
 
@@ -1158,7 +1160,11 @@ const Profile: React.FC = () => {
               */}
 
               {/* Направления бизнеса */}
-              {FEATURES.SHOW_DIRECTIONS && <DirectionsCard userAccountId={user?.id || null} accountId={currentAdAccountId} />}
+              {FEATURES.SHOW_DIRECTIONS && (
+                <div data-tour="directions-block">
+                  <DirectionsCard userAccountId={user?.id || null} accountId={currentAdAccountId} />
+                </div>
+              )}
 
               {/* WhatsApp Connection Card */}
               {FEATURES.SHOW_WHATSAPP && <WhatsAppConnectionCard userAccountId={user?.id || null} accountId={currentAdAccountId} />}
@@ -1232,6 +1238,21 @@ const Profile: React.FC = () => {
               }] : []),
             ]}
           />
+
+          {/* Кнопка для повторного прохождения обучения */}
+          <div className="mt-6">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                forceStartTour();
+              }}
+              className="w-full sm:w-auto"
+            >
+              <GraduationCap className="h-4 w-4 mr-2" />
+              Пройти обучение заново
+            </Button>
+          </div>
         </div>
 
         {/* Диалог смены пароля */}

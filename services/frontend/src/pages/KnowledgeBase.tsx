@@ -141,7 +141,7 @@ const KnowledgeBase: React.FC = () => {
         onBack={() => navigate('/knowledge-base')}
       />
 
-      <div className="pt-[60px] pb-20 lg:pb-0">
+      <div className="pt-[60px] pb-20 lg:pb-0" data-tour="knowledge-content">
         {/* Mobile: содержание в Sheet */}
         <div className="lg:hidden fixed bottom-20 right-4 z-40">
           <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>

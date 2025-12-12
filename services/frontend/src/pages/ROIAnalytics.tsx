@@ -616,7 +616,7 @@ const ROIAnalytics: React.FC = () => {
         </div>
       )}
       
-      <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full">
+      <div className="container mx-auto px-4 py-6 pt-[76px] max-w-full" data-tour="roi-content">
         {/* Хедер с заголовком */}
         <div className="mb-6">
           <div className="flex items-center gap-2">

@@ -311,7 +311,7 @@ const Dashboard: React.FC = () => {
         onOpenDatePicker={() => setDatePickerOpen(true)}
       />
       
-      <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full">
+      <div className="container mx-auto py-6 px-4 pt-[76px] max-w-full" data-tour="dashboard-content">
         <PageHero
           title={(() => {
             // В мультиаккаунтном режиме показываем имя текущего ad_account

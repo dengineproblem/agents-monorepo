@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe, Users2, BookOpen } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe, Users2, BookOpen, Bot } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -23,42 +23,56 @@ const menuItems = [
     label: 'menu.dashboard',
     icon: LayoutDashboard,
     show: true,
+    tourId: 'sidebar-dashboard',
   },
   {
     path: '/roi',
     label: 'menu.roi',
     icon: TrendingUp,
     show: FEATURES.SHOW_ROI_ANALYTICS,
+    tourId: 'sidebar-roi',
   },
   {
     path: '/creatives',
     label: 'menu.creatives',
     icon: Target,
     show: FEATURES.SHOW_CREATIVES,
+    tourId: 'sidebar-creatives',
   },
   {
     path: '/videos',
     label: 'menu.videos',
     icon: Upload,
     show: FEATURES.SHOW_VIDEOS,
+    tourId: 'sidebar-videos',
   },
   {
     path: '/competitors',
     label: 'menu.competitors',
     icon: Users2,
     show: FEATURES.SHOW_COMPETITORS,
+    tourId: 'sidebar-competitors',
   },
   {
     path: '/profile',
     label: 'menu.profile',
     icon: User,
     show: true,
+    tourId: 'sidebar-profile',
   },
   {
     path: '/knowledge-base',
     label: 'База знаний',
     icon: BookOpen,
     show: true,
+    tourId: 'sidebar-knowledge',
+  },
+  {
+    path: '/assistant',
+    label: 'AI Ассистент',
+    icon: Bot,
+    show: true,
+    tourId: 'sidebar-assistant',
   },
 ];
 
@@ -80,7 +94,7 @@ export function AppSidebar() {
               {visibleMenuItems.map((item) => {
                 const translatedLabel = t(item.label);
                 return (
-                  <SidebarMenuItem key={item.path}>
+                  <SidebarMenuItem key={item.path} data-tour={item.tourId}>
                     <SidebarMenuButton
                       onClick={() => navigate(item.path)}
                       isActive={location.pathname === item.path}

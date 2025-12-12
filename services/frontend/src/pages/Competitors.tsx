@@ -270,7 +270,7 @@ export default function Competitors() {
         tooltipKey={TooltipKeys.COMPETITOR_ADD_HOW}
       />
 
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 py-6" data-tour="competitors-content">
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Левая колонка - список конкурентов */}
           <div className="w-full lg:w-72 flex-shrink-0 space-y-4">

@@ -775,7 +775,7 @@ const CreativeGeneration = () => {
   return (
     <div className="bg-background w-full max-w-full overflow-x-hidden">
       <Header onOpenDatePicker={handleOpenDatePicker} />
-      <div className="w-full px-4 py-8 pt-[76px] max-w-full overflow-x-hidden">
+      <div className="w-full px-4 py-8 pt-[76px] max-w-full overflow-x-hidden" data-tour="creatives-content">
         <div className="max-w-3xl lg:max-w-6xl mx-auto w-full">
           <PageHero
             title="Генерация креативов"
