@@ -184,15 +184,18 @@ export async function logErrorToAdmin(params: LogErrorParams): Promise<void> {
 
     // Для critical ошибок создаём admin notification
     if (severity === 'critical' && insertedError?.id) {
-      await supabase
-        .from('admin_notifications')
-        .insert({
-          type: 'error',
-          title: `Критическая ошибка: ${error_type}`,
-          message: explanation,
-          metadata: { errorId: insertedError.id, user_account_id },
-        })
-        .catch(() => {}); // ignore
+      try {
+        await supabase
+          .from('admin_notifications')
+          .insert({
+            type: 'error',
+            title: `Критическая ошибка: ${error_type}`,
+            message: explanation,
+            metadata: { errorId: insertedError.id, user_account_id },
+          });
+      } catch {
+        // ignore notification errors
+      }
     }
 
     log.info({
