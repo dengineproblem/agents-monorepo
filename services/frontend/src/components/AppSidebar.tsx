@@ -1,6 +1,5 @@
-import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Globe, Users2, BookOpen, Bot } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -66,13 +65,6 @@ const menuItems = [
     icon: BookOpen,
     show: true,
     tourId: 'sidebar-knowledge',
-  },
-  {
-    path: '/assistant',
-    label: 'AI Ассистент',
-    icon: Bot,
-    show: true,
-    tourId: 'sidebar-assistant',
   },
 ];
 
