@@ -76,45 +76,80 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
 
       if (error) throw new Error(error.message);
 
-      // Get additional stats for each user (без campaigns - таблица не существует)
-      const usersWithStats = await Promise.all(
-        (users || []).map(async (user) => {
-          // Directions count (вместо campaigns)
-          const { count: directions_count } = await supabase
-            .from('account_directions')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_account_id', user.id);
+      if (!users || users.length === 0) {
+        return res.send({
+          users: [],
+          total: total || 0,
+          page: pageNum,
+          totalPages: Math.ceil((total || 0) / limitNum),
+        });
+      }
 
-          // Creatives count (user_creatives.user_id, не user_account_id!)
-          const { count: creatives_count } = await supabase
-            .from('user_creatives')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_id', user.id);
+      // Batch-запросы вместо N+1
+      const userIds = users.map(u => u.id);
 
-          // Leads count
-          const { count: leads_count } = await supabase
-            .from('leads')
-            .select('*', { count: 'exact', head: true })
-            .eq('user_account_id', user.id);
+      // Все счётчики одним batch-запросом каждый
+      const [directionsRes, creativesRes, leadsRes, sessionsRes] = await Promise.all([
+        // Directions count per user
+        supabase
+          .from('account_directions')
+          .select('user_account_id')
+          .in('user_account_id', userIds),
 
-          // Last activity (updated_at, не last_activity_at!)
-          const { data: session } = await supabase
-            .from('user_sessions')
-            .select('updated_at')
-            .eq('user_account_id', user.id)
-            .order('updated_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+        // Creatives count per user
+        supabase
+          .from('user_creatives')
+          .select('user_id')
+          .in('user_id', userIds),
 
-          return {
-            ...user,
-            directions_count: directions_count || 0,
-            creatives_count: creatives_count || 0,
-            leads_count: leads_count || 0,
-            last_activity_at: session?.updated_at || null,
-          };
-        })
-      );
+        // Leads count per user
+        supabase
+          .from('leads')
+          .select('user_account_id')
+          .in('user_account_id', userIds),
+
+        // Last activity per user (берём все сессии и группируем)
+        supabase
+          .from('user_sessions')
+          .select('user_account_id, updated_at')
+          .in('user_account_id', userIds)
+          .order('updated_at', { ascending: false })
+      ]);
+
+      // Подсчёт directions по user_id
+      const directionsCount: Record<string, number> = {};
+      (directionsRes.data || []).forEach(d => {
+        directionsCount[d.user_account_id] = (directionsCount[d.user_account_id] || 0) + 1;
+      });
+
+      // Подсчёт creatives по user_id
+      const creativesCount: Record<string, number> = {};
+      (creativesRes.data || []).forEach(c => {
+        creativesCount[c.user_id] = (creativesCount[c.user_id] || 0) + 1;
+      });
+
+      // Подсчёт leads по user_id
+      const leadsCount: Record<string, number> = {};
+      (leadsRes.data || []).forEach(l => {
+        leadsCount[l.user_account_id] = (leadsCount[l.user_account_id] || 0) + 1;
+      });
+
+      // Последняя активность (первая запись для каждого user т.к. отсортировано desc)
+      const lastActivity: Record<string, string> = {};
+      (sessionsRes.data || []).forEach(s => {
+        if (!lastActivity[s.user_account_id]) {
+          lastActivity[s.user_account_id] = s.updated_at;
+        }
+      });
+
+      // Собираем результат
+      const usersWithStats = users.map(user => ({
+        ...user,
+        directions_count: directionsCount[user.id] || 0,
+        creatives_count: creativesCount[user.id] || 0,
+        leads_count: leadsCount[user.id] || 0,
+        last_activity_at: lastActivity[user.id] || null,
+      }));
 
       return res.send({
         users: usersWithStats,
@@ -229,6 +264,101 @@ export default async function adminUsersRoutes(app: FastifyInstance) {
       }).catch(() => {});
 
       return res.status(500).send({ error: 'Failed to fetch user details' });
+    }
+  });
+
+  /**
+   * PUT /admin/users/:userId
+   * Обновить данные пользователя
+   */
+  app.put('/admin/users/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params as { userId: string };
+      const updates = req.body as Record<string, any>;
+
+      // Убираем поля, которые не должны обновляться напрямую
+      const { id, created_at, ...allowedUpdates } = updates;
+
+      // Список разрешённых полей для обновления
+      const allowedFields = [
+        // Facebook/Instagram
+        'access_token',
+        'ad_account_id',
+        'page_id',
+        'business_id',
+        'instagram_id',
+        'instagram_username',
+        // Telegram
+        'telegram_id',
+        'telegram_bot_token',
+        // TikTok
+        'tiktok_business_id',
+        'tiktok_account_id',
+        'tiktok_access_token',
+        // Тариф и бюджет
+        'tarif',
+        'tarif_expires',
+        'tarif_renewal_cost',
+        'plan_daily_budget_cents',
+        'default_cpl_target_cents',
+        // Прочее
+        'webhook_url',
+        'optimization',
+        'creative_generations_available',
+        'current_campaign_goal',
+        'prompt1',
+        'prompt2',
+        'prompt3',
+        'prompt4',
+        'onboarding_stage',
+        // Чекбоксы
+        'is_active',
+        'test',
+        'autopilot',
+        // Базовые
+        'username',
+      ];
+
+      // Фильтруем только разрешённые поля
+      const filteredUpdates: Record<string, any> = {};
+      for (const [key, value] of Object.entries(allowedUpdates)) {
+        if (allowedFields.includes(key)) {
+          // Преобразуем пустые строки в null
+          filteredUpdates[key] = value === '' ? null : value;
+        }
+      }
+
+      if (Object.keys(filteredUpdates).length === 0) {
+        return res.status(400).send({ error: 'No valid fields to update' });
+      }
+
+      const { data, error } = await supabase
+        .from('user_accounts')
+        .update(filteredUpdates)
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      log.info({ userId, fields: Object.keys(filteredUpdates) }, 'User updated by admin');
+
+      return res.send({ success: true, user: data });
+    } catch (err: any) {
+      log.error({ error: err instanceof Error ? err.message : JSON.stringify(err) }, 'Error updating user');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'admin_update_user',
+        endpoint: '/admin/users/:userId',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return res.status(500).send({ error: 'Failed to update user' });
     }
   });
 }

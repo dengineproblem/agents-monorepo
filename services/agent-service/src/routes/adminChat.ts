@@ -290,10 +290,12 @@ export default async function adminChatRoutes(app: FastifyInstance) {
   /**
    * GET /admin/chats/users-with-messages
    * Получает список пользователей, с которыми есть переписка
+   * ОПТИМИЗИРОВАНО: Один проход по данным вместо O(n²)
    */
   app.get('/admin/chats/users-with-messages', async (req, res) => {
     try {
       const { limit = '20' } = req.query as { limit?: string };
+      const limitNum = parseInt(limit);
 
       // Получаем последние сообщения (без FK join)
       const { data: chats, error } = await supabase
@@ -306,50 +308,68 @@ export default async function adminChatRoutes(app: FastifyInstance) {
           read_at
         `)
         .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(500); // Берём больше для корректной группировки
 
       if (error) {
         log.error({ error: error.message }, 'Failed to fetch users with messages');
         return res.status(500).send({ error: 'Failed to fetch data' });
       }
 
-      // Загружаем usernames отдельно
-      const userIds = [...new Set(chats?.map(c => c.user_account_id).filter(Boolean) || [])];
-      let usersData: Record<string, { username: string; telegram_id: string | null }> = {};
-      if (userIds.length > 0) {
-        const { data: users } = await supabase
-          .from('user_accounts')
-          .select('id, username, telegram_id')
-          .in('id', userIds);
-        usersData = Object.fromEntries(users?.map(u => [u.id, { username: u.username, telegram_id: u.telegram_id }]) || []);
+      if (!chats || chats.length === 0) {
+        return res.send({ users: [] });
       }
 
-      // Группируем по пользователям и берём последнее сообщение
-      const userMap = new Map<string, any>();
+      // Один проход: группируем и считаем unread
+      const userMap = new Map<string, {
+        lastMessage: string;
+        lastMessageTime: string;
+        unreadCount: number;
+      }>();
 
-      for (const chat of chats || []) {
+      for (const chat of chats) {
         const userId = chat.user_account_id;
-        if (!userMap.has(userId)) {
-          const unreadCount = (chats || []).filter(
-            c => c.user_account_id === userId && c.direction === 'from_user' && !c.read_at
-          ).length;
+        const existing = userMap.get(userId);
 
-          const userData = usersData[userId];
+        if (!existing) {
+          // Первое (самое новое) сообщение для пользователя
           userMap.set(userId, {
-            id: userId,
-            username: userData?.username || 'Unknown',
-            telegram_id: userData?.telegram_id || null,
-            last_message: chat.message,
-            last_message_time: chat.created_at,
-            unread_count: unreadCount,
-            is_online: false
+            lastMessage: chat.message,
+            lastMessageTime: chat.created_at,
+            unreadCount: chat.direction === 'from_user' && !chat.read_at ? 1 : 0
           });
+        } else {
+          // Только добавляем к счётчику непрочитанных
+          if (chat.direction === 'from_user' && !chat.read_at) {
+            existing.unreadCount++;
+          }
         }
       }
 
-      const users = Array.from(userMap.values())
+      // Загружаем usernames одним запросом
+      const userIds = Array.from(userMap.keys());
+      const { data: usersData } = await supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id')
+        .in('id', userIds);
+
+      const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
+
+      // Собираем результат
+      const users = Array.from(userMap.entries())
+        .map(([userId, data]) => {
+          const userData = usersMap.get(userId);
+          return {
+            id: userId,
+            username: userData?.username || 'Unknown',
+            telegram_id: userData?.telegram_id || null,
+            last_message: data.lastMessage,
+            last_message_time: data.lastMessageTime,
+            unread_count: data.unreadCount,
+            is_online: false
+          };
+        })
         .sort((a, b) => new Date(b.last_message_time).getTime() - new Date(a.last_message_time).getTime())
-        .slice(0, parseInt(limit));
+        .slice(0, limitNum);
 
       return res.send({ users });
     } catch (err: any) {

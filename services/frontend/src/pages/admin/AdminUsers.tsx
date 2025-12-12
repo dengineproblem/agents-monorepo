@@ -18,6 +18,7 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
+  Settings,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,7 @@ import { API_BASE_URL } from '@/config/api';
 import { format, formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import UserChatModal from '@/components/UserChatModal';
+import UserAccountEditModal from '@/components/admin/UserAccountEditModal';
 
 interface User {
   id: string;
@@ -85,6 +87,9 @@ const AdminUsers: React.FC = () => {
 
   // Chat modal
   const [chatUser, setChatUser] = useState<{ id: string; username: string } | null>(null);
+
+  // Edit modal
+  const [editUserId, setEditUserId] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -305,6 +310,15 @@ const AdminUsers: React.FC = () => {
                         <DropdownMenuItem
                           onClick={(e) => {
                             e.stopPropagation();
+                            setEditUserId(user.id);
+                          }}
+                        >
+                          <Settings className="h-4 w-4 mr-2" />
+                          Настройки аккаунта
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
                             handleImpersonate(user.id);
                           }}
                         >
@@ -355,6 +369,16 @@ const AdminUsers: React.FC = () => {
           username={chatUser.username}
           isOpen={!!chatUser}
           onClose={() => setChatUser(null)}
+        />
+      )}
+
+      {/* Edit User Account Modal */}
+      {editUserId && (
+        <UserAccountEditModal
+          open={!!editUserId}
+          onOpenChange={(open) => !open && setEditUserId(null)}
+          userId={editUserId}
+          onSave={fetchUsers}
         />
       )}
     </div>
