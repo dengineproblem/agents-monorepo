@@ -6,6 +6,7 @@
 import { supabase } from '../../../lib/supabaseClient.js';
 import { fbGraph } from '../../shared/fbGraph.js';
 import { logger } from '../../../lib/logger.js';
+import { creativeDryRunHandlers } from '../../shared/dryRunHandlers.js';
 
 export const creativeHandlers = {
   // ============================================================
@@ -491,7 +492,12 @@ export const creativeHandlers = {
     }
   },
 
-  async launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId, accessToken }) {
+  async launchCreative({ creative_id, direction_id, dry_run }, { userAccountId, adAccountId, accessToken }) {
+    // Dry-run mode: return preview without executing
+    if (dry_run) {
+      return creativeDryRunHandlers.launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId });
+    }
+
     // Get creative details
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
@@ -586,7 +592,12 @@ export const creativeHandlers = {
     }
   },
 
-  async pauseCreative({ creative_id, reason }, { userAccountId, accessToken, adAccountId }) {
+  async pauseCreative({ creative_id, reason, dry_run }, { userAccountId, accessToken, adAccountId }) {
+    // Dry-run mode: return preview without executing
+    if (dry_run) {
+      return creativeDryRunHandlers.pauseCreative({ creative_id }, { userAccountId, adAccountId });
+    }
+
     // Get all ads for this creative
     const { data: adMappings, error } = await supabase
       .from('ad_creative_mapping')
@@ -625,7 +636,12 @@ export const creativeHandlers = {
     };
   },
 
-  async startCreativeTest({ creative_id, objective = 'whatsapp' }, { userAccountId, adAccountId }) {
+  async startCreativeTest({ creative_id, objective = 'whatsapp', dry_run }, { userAccountId, adAccountId }) {
+    // Dry-run mode: return preview without executing
+    if (dry_run) {
+      return creativeDryRunHandlers.startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId });
+    }
+
     // Check if test already running
     const { data: existingTest } = await supabase
       .from('creative_tests')

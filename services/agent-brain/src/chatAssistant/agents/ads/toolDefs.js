@@ -22,6 +22,10 @@ const groupBySchema = z.enum(['campaign', 'day']);
 const uuidSchema = z.string().uuid('Invalid UUID format');
 const nonEmptyString = (field) => z.string().min(1, `${field} is required`);
 
+// Common WRITE tool options (added to all WRITE tools)
+const dryRunOption = z.boolean().optional().describe('Preview mode — show what will change without executing');
+const operationIdOption = z.string().optional().describe('Idempotency key — prevents duplicate execution on retry');
+
 /**
  * AdsAgent Tool Definitions
  */
@@ -100,10 +104,12 @@ export const AdsToolDefs = {
   // ============================================================
 
   pauseCampaign: {
-    description: 'Поставить кампанию на паузу',
+    description: 'Поставить кампанию на паузу. Используй dry_run: true для preview.',
     schema: z.object({
       campaign_id: nonEmptyString('campaign_id').describe('ID кампании для паузы'),
-      reason: z.string().optional().describe('Причина паузы (для логирования)')
+      reason: z.string().optional().describe('Причина паузы (для логирования)'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false, dangerous: true }
   },
@@ -111,16 +117,19 @@ export const AdsToolDefs = {
   resumeCampaign: {
     description: 'Возобновить приостановленную кампанию',
     schema: z.object({
-      campaign_id: nonEmptyString('campaign_id').describe('ID кампании для возобновления')
+      campaign_id: nonEmptyString('campaign_id').describe('ID кампании для возобновления'),
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false }
   },
 
   pauseAdSet: {
-    description: 'Поставить адсет на паузу',
+    description: 'Поставить адсет на паузу. Используй dry_run: true для preview.',
     schema: z.object({
       adset_id: nonEmptyString('adset_id').describe('ID адсета для паузы'),
-      reason: z.string().optional().describe('Причина паузы')
+      reason: z.string().optional().describe('Причина паузы'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false, dangerous: true }
   },
@@ -128,18 +137,21 @@ export const AdsToolDefs = {
   resumeAdSet: {
     description: 'Возобновить приостановленный адсет',
     schema: z.object({
-      adset_id: nonEmptyString('adset_id').describe('ID адсета для возобновления')
+      adset_id: nonEmptyString('adset_id').describe('ID адсета для возобновления'),
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false }
   },
 
   updateBudget: {
-    description: 'Изменить дневной бюджет адсета. ВНИМАНИЕ: изменение бюджета > 50% требует подтверждения.',
+    description: 'Изменить дневной бюджет адсета. Используй dry_run: true для preview изменений.',
     schema: z.object({
       adset_id: nonEmptyString('adset_id').describe('ID адсета'),
       new_budget_cents: z.number()
         .min(500, 'Minimum budget is 500 cents ($5)')
-        .describe('Новый дневной бюджет в центах (минимум 500, т.е. $5)')
+        .describe('Новый дневной бюджет в центах (минимум 500, т.е. $5)'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false, dangerous: true }
   },
@@ -149,12 +161,14 @@ export const AdsToolDefs = {
   // ============================================================
 
   updateDirectionBudget: {
-    description: 'Изменить суточный бюджет направления. Обновит budget_per_day в настройках направления.',
+    description: 'Изменить суточный бюджет направления. Используй dry_run: true для preview.',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
       new_budget: z.number()
         .positive('Budget must be positive')
-        .describe('Новый суточный бюджет в долларах (например: 50)')
+        .describe('Новый суточный бюджет в долларах (например: 50)'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false, dangerous: true }
   },
@@ -165,16 +179,19 @@ export const AdsToolDefs = {
       direction_id: uuidSchema.describe('UUID направления'),
       target_cpl: z.number()
         .positive('Target CPL must be positive')
-        .describe('Новый целевой CPL в долларах (например: 15.50)')
+        .describe('Новый целевой CPL в долларах (например: 15.50)'),
+      operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false }
   },
 
   pauseDirection: {
-    description: 'Поставить направление на паузу. Все связанные адсеты будут приостановлены.',
+    description: 'Поставить направление на паузу. Используй dry_run: true для preview. Все связанные адсеты будут приостановлены.',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
-      reason: z.string().optional().describe('Причина паузы (для логирования)')
+      reason: z.string().optional().describe('Причина паузы (для логирования)'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 20000, retryable: false, dangerous: true }
   }

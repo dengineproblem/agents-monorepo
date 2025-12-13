@@ -10,6 +10,7 @@ import { unifiedStore } from '../stores/unifiedStore.js';
 import { memoryStore } from '../stores/memoryStore.js';
 import { toolRegistry } from '../shared/toolRegistry.js';
 import { withTimeout } from '../shared/retryUtils.js';
+import { executeWithIdempotency } from '../shared/idempotentExecutor.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
@@ -194,7 +195,7 @@ export class BaseAgent {
   }
 
   /**
-   * Execute a tool by name with validation and timeout
+   * Execute a tool by name with validation, idempotency and timeout
    */
   async executeTool(name, args, context) {
     const handler = this.handlers[name];
@@ -222,12 +223,29 @@ export class BaseAgent {
     const metadata = toolRegistry.getMetadata(name);
 
     try {
-      // 3. Execute with timeout wrapper
-      const result = await withTimeout(
-        () => handler(validatedArgs, context),
-        metadata.timeout,
-        `tool:${name}`
+      // 3. Execute with idempotency wrapper (wraps timeout internally)
+      const result = await executeWithIdempotency(
+        name,
+        validatedArgs,
+        {
+          ...context,
+          source: 'chat_assistant'
+        },
+        async (args, ctx) => {
+          // Execute with timeout wrapper
+          return withTimeout(
+            () => handler(args, ctx),
+            metadata.timeout,
+            `tool:${name}`
+          );
+        }
       );
+
+      // Skip side effects if operation was already applied (cached result)
+      if (result.already_applied) {
+        logger.info({ agent: this.name, tool: name }, 'Tool already applied, returning cached result');
+        return result;
+      }
 
       // Auto-update focus entities after successful tool execution
       if (result.success !== false && context.conversationId) {

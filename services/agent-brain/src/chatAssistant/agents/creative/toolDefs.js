@@ -11,6 +11,10 @@ const uuidSchema = z.string().uuid('Invalid UUID format');
 const nonEmptyString = (field) => z.string().min(1, `${field} is required`);
 const periodSchema = z.enum(['7d', '14d', '30d', 'all']);
 
+// Common WRITE tool options
+const dryRunOption = z.boolean().optional().describe('Preview mode — show what will change without executing');
+const operationIdOption = z.string().optional().describe('Idempotency key — prevents duplicate execution on retry');
+
 export const CreativeToolDefs = {
   // ============================================================
   // READ TOOLS
@@ -114,34 +118,41 @@ export const CreativeToolDefs = {
   triggerCreativeAnalysis: {
     description: 'Запустить LLM-анализ креатива на основе текущих метрик',
     schema: z.object({
-      creative_id: uuidSchema
+      creative_id: uuidSchema,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 60000, retryable: false, dangerous: false }
   },
 
   launchCreative: {
-    description: 'Запустить креатив в выбранное направление (создать новое объявление). ВНИМАНИЕ: это потратит бюджет.',
+    description: 'Запустить креатив в выбранное направление. Используй dry_run: true для preview. ВНИМАНИЕ: это потратит бюджет.',
     schema: z.object({
       creative_id: uuidSchema,
-      direction_id: uuidSchema
+      direction_id: uuidSchema,
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 30000, retryable: false, dangerous: true }
   },
 
   pauseCreative: {
-    description: 'Поставить все объявления креатива на паузу',
+    description: 'Поставить все объявления креатива на паузу. Используй dry_run: true для preview.',
     schema: z.object({
       creative_id: uuidSchema,
-      reason: z.string().optional()
+      reason: z.string().optional(),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 20000, retryable: false, dangerous: true }
   },
 
   startCreativeTest: {
-    description: 'Запустить A/B тест креатива (1000 показов, ~$20 бюджет)',
+    description: 'Запустить A/B тест креатива. Используй dry_run: true для preview. (~$20 бюджет)',
     schema: z.object({
       creative_id: uuidSchema,
-      objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']).optional()
+      objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']).optional(),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 30000, retryable: false, dangerous: true }
   },
@@ -149,7 +160,8 @@ export const CreativeToolDefs = {
   stopCreativeTest: {
     description: 'Остановить текущий A/B тест креатива',
     schema: z.object({
-      creative_id: uuidSchema
+      creative_id: uuidSchema,
+      operation_id: operationIdOption
     }),
     meta: { timeout: 20000, retryable: false, dangerous: false }
   }

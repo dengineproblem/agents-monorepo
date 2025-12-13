@@ -1,12 +1,14 @@
 /**
  * PlanExecutor - Executes approved plans (for Web and Telegram)
- * Unified executor for all plan steps
+ * Unified executor for all plan steps with idempotency support
  */
 
 import { unifiedStore } from './stores/unifiedStore.js';
 import { executeTool } from './toolHandlers.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
+import { executeWithIdempotency } from './shared/idempotentExecutor.js';
+import crypto from 'crypto';
 
 /**
  * Get access token for user account
@@ -118,7 +120,11 @@ export class PlanExecutor {
       adAccountId
     };
 
-    // Execute each step
+    // Generate idempotency prefix for this plan execution
+    // This ensures each step has a unique operation_id tied to this plan
+    const planOperationPrefix = crypto.randomUUID().slice(0, 8);
+
+    // Execute each step with idempotency
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
 
@@ -139,13 +145,40 @@ export class PlanExecutor {
           action: step.action
         }, 'Executing plan step');
 
-        const result = await executeTool(step.action, step.params || {}, context);
+        // Add operation_id for idempotency (unique per plan + step)
+        const stepArgs = {
+          ...(step.params || {}),
+          operation_id: `plan-${planOperationPrefix}-step${i}-${step.action}`
+        };
+
+        // Execute with idempotency wrapper
+        const result = await executeWithIdempotency(
+          step.action,
+          stepArgs,
+          {
+            ...context,
+            planId,
+            source: 'plan_executor'
+          },
+          (args, ctx) => executeTool(step.action, args, ctx)
+        );
+
+        // Log if step was already applied (retry detection)
+        if (result.already_applied) {
+          logger.info({
+            planId,
+            step: i + 1,
+            action: step.action,
+            appliedAt: result.applied_at
+          }, 'Plan step already applied (retry detected)');
+        }
 
         results.push({
           step_index: i,
           action: step.action,
           description: step.description,
-          success: result.success,
+          success: result.success !== false,
+          already_applied: result.already_applied || false,
           message: result.message || result.data?.message,
           data: result.data
         });
@@ -158,7 +191,7 @@ export class PlanExecutor {
               index: i,
               total: steps.length,
               result,
-              success: result.success
+              success: result.success !== false
             });
           } catch (e) {
             logger.warn({ error: e.message }, 'onStepComplete callback error');

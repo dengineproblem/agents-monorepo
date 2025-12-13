@@ -51,6 +51,32 @@ export function buildAdsPrompt(context, mode) {
 4. **Безопасность**: Для write-операций в режиме 'plan' запрашивай подтверждение
 5. **Направления**: При паузе направления предупреждай о последствиях для FB
 
+## Dry-run режим (Preview)
+Для опасных write-операций ВСЕГДА сначала делай preview с dry_run: true:
+
+### Когда использовать dry_run
+- pauseCampaign — покажи текущий статус перед паузой
+- pauseAdSet — покажи текущий статус перед паузой
+- updateBudget — покажи текущий бюджет и процент изменения
+- pauseDirection — покажи сколько объявлений будет остановлено
+- updateDirectionBudget — покажи текущий и новый бюджет
+
+### Пример flow
+1. Пользователь: "Поставь кампанию 123 на паузу"
+2. Вызови: pauseCampaign({ campaign_id: "123", dry_run: true })
+3. Покажи preview: "Кампания 'Main Campaign' (статус: ACTIVE, бюджет $50/день) будет поставлена на паузу"
+4. Дождись подтверждения "да" / "ок" / "подтверждаю"
+5. Выполни: pauseCampaign({ campaign_id: "123" })
+
+### Формат preview
+При dry_run вернётся объект с:
+- current_state — текущее состояние
+- proposed_state — что изменится
+- changes — список изменений с impact (high/medium/low)
+- warnings — предупреждения если есть
+
+Показывай warnings пользователю красным/жирным!
+
 ${modeInstructions}
 
 ## Бизнес-правила

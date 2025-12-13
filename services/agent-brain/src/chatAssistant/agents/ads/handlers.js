@@ -6,6 +6,7 @@
 import { fbGraph } from '../../shared/fbGraph.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { supabase } from '../../../lib/supabaseClient.js';
+import { adsDryRunHandlers } from '../../shared/dryRunHandlers.js';
 
 export const adsHandlers = {
   // ============================================================
@@ -145,7 +146,12 @@ export const adsHandlers = {
   // WRITE HANDLERS
   // ============================================================
 
-  async pauseCampaign({ campaign_id, reason }, { accessToken, userAccountId, adAccountId }) {
+  async pauseCampaign({ campaign_id, reason, dry_run }, { accessToken, userAccountId, adAccountId }) {
+    // Dry-run mode: return preview without executing
+    if (dry_run) {
+      return adsDryRunHandlers.pauseCampaign({ campaign_id }, { accessToken });
+    }
+
     await fbGraph('POST', campaign_id, accessToken, { status: 'PAUSED' });
 
     // Log action
@@ -164,7 +170,12 @@ export const adsHandlers = {
     return { success: true, message: `Кампания ${campaign_id} возобновлена` };
   },
 
-  async pauseAdSet({ adset_id, reason }, { accessToken, adAccountId }) {
+  async pauseAdSet({ adset_id, reason, dry_run }, { accessToken, adAccountId }) {
+    // Dry-run mode: return preview without executing
+    if (dry_run) {
+      return adsDryRunHandlers.pauseAdSet({ adset_id }, { accessToken });
+    }
+
     await fbGraph('POST', adset_id, accessToken, { status: 'PAUSED' });
 
     await supabase.from('agent_logs').insert({
@@ -182,15 +193,16 @@ export const adsHandlers = {
     return { success: true, message: `Адсет ${adset_id} возобновлён` };
   },
 
-  async updateBudget({ adset_id, new_budget_cents }, { accessToken, adAccountId }) {
+  async updateBudget({ adset_id, new_budget_cents, dry_run }, { accessToken, adAccountId }) {
     // Validate minimum budget
     if (new_budget_cents < 500) {
       return { success: false, error: 'Минимальный бюджет $5 (500 центов)' };
     }
 
-    // TODO: Add 50% change validation
-    // Get current budget and compare with new_budget_cents
-    // If change > 50%, return warning for confirmation
+    // Dry-run mode: return preview with change % and warnings
+    if (dry_run) {
+      return adsDryRunHandlers.updateBudget({ adset_id, new_budget_cents }, { accessToken });
+    }
 
     await fbGraph('POST', adset_id, accessToken, {
       daily_budget: new_budget_cents
@@ -377,7 +389,12 @@ export const adsHandlers = {
     };
   },
 
-  async updateDirectionBudget({ direction_id, new_budget }, { adAccountId }) {
+  async updateDirectionBudget({ direction_id, new_budget, dry_run }, { adAccountId }) {
+    // Dry-run mode: return preview with change % and warnings
+    if (dry_run) {
+      return adsDryRunHandlers.updateDirectionBudget({ direction_id, new_budget }, { adAccountId });
+    }
+
     // Update direction budget
     const { data, error } = await supabase
       .from('directions')
@@ -428,7 +445,12 @@ export const adsHandlers = {
     };
   },
 
-  async pauseDirection({ direction_id, reason }, { adAccountId, accessToken }) {
+  async pauseDirection({ direction_id, reason, dry_run }, { adAccountId, accessToken }) {
+    // Dry-run mode: return preview with affected entities
+    if (dry_run) {
+      return adsDryRunHandlers.pauseDirection({ direction_id }, { adAccountId });
+    }
+
     // Get direction with adset_id
     const { data: direction, error: fetchError } = await supabase
       .from('directions')

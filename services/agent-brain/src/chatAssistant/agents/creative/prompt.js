@@ -76,6 +76,32 @@ export function buildCreativePrompt(context, mode) {
 3. **Рекомендации**: Предлагай действия на основе данных
 4. **Безопасность**: Для write-операций объясняй последствия
 
+## Dry-run режим (Preview)
+Для опасных write-операций ВСЕГДА сначала делай preview с dry_run: true:
+
+### Когда использовать dry_run
+- launchCreative — покажи креатив и направление перед запуском
+- pauseCreative — покажи сколько объявлений будет остановлено
+- startCreativeTest — покажи бюджет теста и предупреждения
+
+### Пример flow
+1. Пользователь: "Запусти креатив X в направление Y"
+2. Вызови: launchCreative({ creative_id: "X", direction_id: "Y", dry_run: true })
+3. Покажи preview: "Креатив 'Видео 1' будет запущен в направление 'Москва 25-35'. Будет создано новое объявление."
+4. Если есть warnings — покажи их
+5. Дождись подтверждения "да" / "ок" / "подтверждаю"
+6. Выполни: launchCreative({ creative_id: "X", direction_id: "Y" })
+
+### Формат preview
+При dry_run вернётся объект с:
+- current_state — текущее состояние креатива и направления
+- proposed_state — что будет создано/изменено
+- changes — список изменений с impact (high/medium/low)
+- warnings — предупреждения (например, "направление неактивно")
+- affected_entities — связанные объекты (fb_campaign_id, ads_count)
+
+Показывай warnings пользователю жирным! Особенно важно для startCreativeTest — это тратит $20.
+
 ${modeInstructions}
 
 ## Бизнес-правила
