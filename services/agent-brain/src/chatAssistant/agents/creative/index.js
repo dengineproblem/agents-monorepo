@@ -6,7 +6,7 @@
 import { BaseAgent } from '../BaseAgent.js';
 import { CREATIVE_TOOLS, CREATIVE_WRITE_TOOLS, CREATIVE_DANGEROUS_TOOLS } from './tools.js';
 import { creativeHandlers } from './handlers.js';
-import { buildCreativePrompt } from './prompt.js';
+import { buildCreativePrompt, PROMPT_VERSION } from './prompt.js';
 
 export class CreativeAgent extends BaseAgent {
   constructor() {
@@ -16,7 +16,8 @@ export class CreativeAgent extends BaseAgent {
       domain: 'creative',
       tools: CREATIVE_TOOLS,
       handlers: creativeHandlers,
-      buildSystemPrompt: buildCreativePrompt
+      buildSystemPrompt: buildCreativePrompt,
+      promptVersion: PROMPT_VERSION
     });
   }
 

@@ -6,7 +6,7 @@
 import { BaseAgent } from '../BaseAgent.js';
 import { WHATSAPP_TOOLS, WHATSAPP_WRITE_TOOLS } from './tools.js';
 import { whatsappHandlers } from './handlers.js';
-import { buildWhatsAppPrompt } from './prompt.js';
+import { buildWhatsAppPrompt, PROMPT_VERSION } from './prompt.js';
 
 export class WhatsAppAgent extends BaseAgent {
   constructor() {
@@ -16,7 +16,8 @@ export class WhatsAppAgent extends BaseAgent {
       domain: 'whatsapp',
       tools: WHATSAPP_TOOLS,
       handlers: whatsappHandlers,
-      buildSystemPrompt: buildWhatsAppPrompt
+      buildSystemPrompt: buildWhatsAppPrompt,
+      promptVersion: PROMPT_VERSION
     });
   }
 

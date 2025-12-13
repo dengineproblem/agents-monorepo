@@ -7,6 +7,7 @@ import { supabase } from '../../../lib/supabaseClient.js';
 import { fbGraph } from '../../shared/fbGraph.js';
 import { logger } from '../../../lib/logger.js';
 import { creativeDryRunHandlers } from '../../shared/dryRunHandlers.js';
+import { verifyAdStatus } from '../../shared/postCheck.js';
 
 export const creativeHandlers = {
   // ============================================================
@@ -609,29 +610,50 @@ export const creativeHandlers = {
       return { success: false, error: 'Нет активных объявлений для этого креатива' };
     }
 
-    // Pause each ad
+    // Pause each ad with post-check verification
     const results = await Promise.all(adMappings.map(async ({ ad_id }) => {
       try {
         await fbGraph('POST', ad_id, accessToken, { status: 'PAUSED' });
-        return { ad_id, success: true };
+
+        // Post-check verification for each ad
+        const verification = await verifyAdStatus(ad_id, 'PAUSED', accessToken);
+
+        return {
+          ad_id,
+          success: true,
+          verified: verification.verified,
+          after: verification.after
+        };
       } catch (err) {
         return { ad_id, success: false, error: err.message };
       }
     }));
 
     const successful = results.filter(r => r.success).length;
+    const verified = results.filter(r => r.verified).length;
 
     // Log action
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
       level: 'info',
       message: `Paused ${successful}/${results.length} ads for creative ${creative_id}`,
-      context: { creative_id, reason, source: 'CreativeAgent' }
+      context: {
+        creative_id,
+        reason,
+        source: 'CreativeAgent',
+        verified_count: verified
+      }
     });
 
     return {
       success: true,
       message: `Поставлено на паузу ${successful} из ${results.length} объявлений`,
+      verification: {
+        total: results.length,
+        successful,
+        verified,
+        warning: verified < successful ? 'Часть изменений не подтверждена' : null
+      },
       results
     };
   },

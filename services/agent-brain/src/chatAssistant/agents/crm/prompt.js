@@ -5,6 +5,9 @@
 
 import { formatSpecsContext, formatNotesContext } from '../../shared/memoryFormat.js';
 
+// Prompt version for tracking/debugging
+export const PROMPT_VERSION = 'crm-v1.0';
+
 /**
  * Build system prompt for CRMAgent
  * @param {Object} context - Business context (includes specs, notes)

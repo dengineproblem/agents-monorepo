@@ -6,7 +6,7 @@
 import { BaseAgent } from '../BaseAgent.js';
 import { ADS_TOOLS, ADS_WRITE_TOOLS, ADS_DANGEROUS_TOOLS } from './tools.js';
 import { adsHandlers } from './handlers.js';
-import { buildAdsPrompt } from './prompt.js';
+import { buildAdsPrompt, PROMPT_VERSION } from './prompt.js';
 
 export class AdsAgent extends BaseAgent {
   constructor() {
@@ -16,7 +16,8 @@ export class AdsAgent extends BaseAgent {
       domain: 'ads',
       tools: ADS_TOOLS,
       handlers: adsHandlers,
-      buildSystemPrompt: buildAdsPrompt
+      buildSystemPrompt: buildAdsPrompt,
+      promptVersion: PROMPT_VERSION
     });
   }
 

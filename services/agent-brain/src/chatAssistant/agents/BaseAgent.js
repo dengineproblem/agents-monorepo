@@ -12,6 +12,7 @@ import { runsStore } from '../stores/runsStore.js';
 import { toolRegistry } from '../shared/toolRegistry.js';
 import { withTimeout } from '../shared/retryUtils.js';
 import { executeWithIdempotency } from '../shared/idempotentExecutor.js';
+import { attemptToolRepair, isRepairableError } from '../shared/toolRepair.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
@@ -33,14 +34,16 @@ export class BaseAgent {
    * @param {Array} config.tools - OpenAI function definitions for this agent
    * @param {Object} config.handlers - Map of tool name to handler function
    * @param {Function} config.buildSystemPrompt - Function to build system prompt with context
+   * @param {string} [config.promptVersion] - Version string for prompt tracking
    */
-  constructor({ name, description, domain, tools, handlers, buildSystemPrompt }) {
+  constructor({ name, description, domain, tools, handlers, buildSystemPrompt, promptVersion }) {
     this.name = name;
     this.description = description;
     this.domain = domain || name.toLowerCase().replace('agent', '');
     this.tools = tools;
     this.handlers = handlers;
     this.buildSystemPrompt = buildSystemPrompt;
+    this.promptVersion = promptVersion || null;
   }
 
   /**
@@ -117,7 +120,8 @@ export class BaseAgent {
           model: MODEL,
           agent: this.name,
           domain: this.domain,
-          userMessage
+          userMessage,
+          promptVersion: this.promptVersion
         });
         runId = run.id;
 
@@ -290,6 +294,7 @@ export class BaseAgent {
 
   /**
    * Execute a tool by name with validation, idempotency and timeout
+   * Includes automatic repair loop for validation errors
    */
   async executeTool(name, args, context) {
     const handler = this.handlers[name];
@@ -302,9 +307,51 @@ export class BaseAgent {
     }
 
     // 1. Validate arguments through registry (graceful — if no schema, pass through)
-    const validation = toolRegistry.validate(name, args);
-    if (!validation.success) {
-      logger.warn({ agent: this.name, tool: name, error: validation.error }, 'Tool validation failed');
+    let validation = toolRegistry.validate(name, args);
+
+    // 2. If validation failed, attempt repair via LLM
+    if (!validation.success && isRepairableError(validation.error)) {
+      logger.info({ agent: this.name, tool: name, error: validation.error }, 'Attempting tool argument repair');
+
+      // Find tool definition for schema
+      const toolDefinition = this.tools.find(t => t.name === name);
+
+      const repairResult = await attemptToolRepair({
+        toolName: name,
+        originalArgs: args,
+        validationError: validation.error,
+        toolDefinition,
+        conversationContext: context.conversationHistory || []
+      });
+
+      if (repairResult.success) {
+        logger.info({
+          agent: this.name,
+          tool: name,
+          attempts: repairResult.attempts
+        }, 'Tool arguments repaired successfully');
+
+        // Use repaired args
+        validation = { success: true, data: repairResult.repairedArgs };
+      } else {
+        // Repair failed — return error with helpful message
+        logger.warn({
+          agent: this.name,
+          tool: name,
+          attempts: repairResult.attempts,
+          error: repairResult.error
+        }, 'Tool repair failed');
+
+        return {
+          success: false,
+          error: `Не удалось исправить аргументы инструмента "${name}": ${validation.error}. Попробуйте переформулировать запрос.`,
+          repairAttempted: true,
+          repairAttempts: repairResult.attempts
+        };
+      }
+    } else if (!validation.success) {
+      // Non-repairable error
+      logger.warn({ agent: this.name, tool: name, error: validation.error }, 'Tool validation failed (non-repairable)');
       return {
         success: false,
         error: validation.error
@@ -313,11 +360,11 @@ export class BaseAgent {
 
     const validatedArgs = validation.data;
 
-    // 2. Get metadata for timeout
+    // 3. Get metadata for timeout
     const metadata = toolRegistry.getMetadata(name);
 
     try {
-      // 3. Execute with idempotency wrapper (wraps timeout internally)
+      // 4. Execute with idempotency wrapper (wraps timeout internally)
       const result = await executeWithIdempotency(
         name,
         validatedArgs,
@@ -531,7 +578,8 @@ export class BaseAgent {
           model: MODEL,
           agent: this.name,
           domain: this.domain,
-          userMessage: message?.substring(0, 500)
+          userMessage: message?.substring(0, 500),
+          promptVersion: this.promptVersion
         });
         runId = run.id;
 

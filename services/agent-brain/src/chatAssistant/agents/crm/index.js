@@ -6,7 +6,7 @@
 import { BaseAgent } from '../BaseAgent.js';
 import { CRM_TOOLS, CRM_WRITE_TOOLS } from './tools.js';
 import { crmHandlers } from './handlers.js';
-import { buildCRMPrompt } from './prompt.js';
+import { buildCRMPrompt, PROMPT_VERSION } from './prompt.js';
 
 export class CRMAgent extends BaseAgent {
   constructor() {
@@ -16,7 +16,8 @@ export class CRMAgent extends BaseAgent {
       domain: 'crm',
       tools: CRM_TOOLS,
       handlers: crmHandlers,
-      buildSystemPrompt: buildCRMPrompt
+      buildSystemPrompt: buildCRMPrompt,
+      promptVersion: PROMPT_VERSION
     });
   }
 

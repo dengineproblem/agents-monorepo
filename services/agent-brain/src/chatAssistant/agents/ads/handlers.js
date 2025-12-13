@@ -7,6 +7,12 @@ import { fbGraph } from '../../shared/fbGraph.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import { adsDryRunHandlers } from '../../shared/dryRunHandlers.js';
+import {
+  verifyCampaignStatus,
+  verifyAdSetStatus,
+  verifyAdSetBudget,
+  verifyDirectionStatus
+} from '../../shared/postCheck.js';
 
 export const adsHandlers = {
   // ============================================================
@@ -152,22 +158,71 @@ export const adsHandlers = {
       return adsDryRunHandlers.pauseCampaign({ campaign_id }, { accessToken });
     }
 
+    // Get current status before change
+    let beforeStatus = null;
+    try {
+      const current = await fbGraph('GET', campaign_id, accessToken, { fields: 'status' });
+      beforeStatus = current.status;
+    } catch (e) {
+      // Continue even if we can't get before status
+    }
+
+    // Execute pause
     await fbGraph('POST', campaign_id, accessToken, { status: 'PAUSED' });
+
+    // Post-check verification
+    const verification = await verifyCampaignStatus(campaign_id, 'PAUSED', accessToken);
 
     // Log action
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
       level: 'info',
       message: `Campaign ${campaign_id} paused via Chat Assistant`,
-      context: { reason, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: {
+        reason,
+        source: 'chat_assistant',
+        agent: 'AdsAgent',
+        verified: verification.verified,
+        before: beforeStatus,
+        after: verification.after
+      }
     });
 
-    return { success: true, message: `Кампания ${campaign_id} поставлена на паузу` };
+    return {
+      success: true,
+      message: `Кампания ${campaign_id} поставлена на паузу`,
+      verification: {
+        verified: verification.verified,
+        before: beforeStatus,
+        after: verification.after,
+        warning: verification.warning
+      }
+    };
   },
 
   async resumeCampaign({ campaign_id }, { accessToken }) {
+    // Get current status before change
+    let beforeStatus = null;
+    try {
+      const current = await fbGraph('GET', campaign_id, accessToken, { fields: 'status' });
+      beforeStatus = current.status;
+    } catch (e) { /* ignore */ }
+
     await fbGraph('POST', campaign_id, accessToken, { status: 'ACTIVE' });
-    return { success: true, message: `Кампания ${campaign_id} возобновлена` };
+
+    // Post-check verification
+    const verification = await verifyCampaignStatus(campaign_id, 'ACTIVE', accessToken);
+
+    return {
+      success: true,
+      message: `Кампания ${campaign_id} возобновлена`,
+      verification: {
+        verified: verification.verified,
+        before: beforeStatus,
+        after: verification.after,
+        warning: verification.warning
+      }
+    };
   },
 
   async pauseAdSet({ adset_id, reason, dry_run }, { accessToken, adAccountId }) {
@@ -176,21 +231,67 @@ export const adsHandlers = {
       return adsDryRunHandlers.pauseAdSet({ adset_id }, { accessToken });
     }
 
+    // Get current status before change
+    let beforeStatus = null;
+    try {
+      const current = await fbGraph('GET', adset_id, accessToken, { fields: 'status' });
+      beforeStatus = current.status;
+    } catch (e) { /* ignore */ }
+
     await fbGraph('POST', adset_id, accessToken, { status: 'PAUSED' });
+
+    // Post-check verification
+    const verification = await verifyAdSetStatus(adset_id, 'PAUSED', accessToken);
 
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
       level: 'info',
       message: `AdSet ${adset_id} paused via Chat Assistant`,
-      context: { reason, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: {
+        reason,
+        source: 'chat_assistant',
+        agent: 'AdsAgent',
+        verified: verification.verified,
+        before: beforeStatus,
+        after: verification.after
+      }
     });
 
-    return { success: true, message: `Адсет ${adset_id} поставлен на паузу` };
+    return {
+      success: true,
+      message: `Адсет ${adset_id} поставлен на паузу`,
+      verification: {
+        verified: verification.verified,
+        before: beforeStatus,
+        after: verification.after,
+        warning: verification.warning
+      }
+    };
   },
 
   async resumeAdSet({ adset_id }, { accessToken }) {
+    // Get current status before change
+    let beforeStatus = null;
+    try {
+      const current = await fbGraph('GET', adset_id, accessToken, { fields: 'status' });
+      beforeStatus = current.status;
+    } catch (e) { /* ignore */ }
+
     await fbGraph('POST', adset_id, accessToken, { status: 'ACTIVE' });
-    return { success: true, message: `Адсет ${adset_id} возобновлён` };
+
+    // Post-check verification
+    const verification = await verifyAdSetStatus(adset_id, 'ACTIVE', accessToken);
+
+    return {
+      success: true,
+      message: `Адсет ${adset_id} возобновлён`,
+      verification: {
+        verified: verification.verified,
+        before: beforeStatus,
+        after: verification.after,
+        warning: verification.warning
+      }
+    };
   },
 
   async updateBudget({ adset_id, new_budget_cents, dry_run }, { accessToken, adAccountId }) {
@@ -204,20 +305,42 @@ export const adsHandlers = {
       return adsDryRunHandlers.updateBudget({ adset_id, new_budget_cents }, { accessToken });
     }
 
+    // Get current budget before change
+    let beforeBudget = null;
+    try {
+      const current = await fbGraph('GET', adset_id, accessToken, { fields: 'daily_budget' });
+      beforeBudget = parseInt(current.daily_budget || 0);
+    } catch (e) { /* ignore */ }
+
     await fbGraph('POST', adset_id, accessToken, {
       daily_budget: new_budget_cents
     });
+
+    // Post-check verification
+    const verification = await verifyAdSetBudget(adset_id, new_budget_cents, accessToken);
 
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
       level: 'info',
       message: `Budget updated for AdSet ${adset_id}: $${(new_budget_cents / 100).toFixed(2)}`,
-      context: { new_budget_cents, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: {
+        new_budget_cents,
+        before_budget_cents: beforeBudget,
+        verified: verification.verified,
+        source: 'chat_assistant',
+        agent: 'AdsAgent'
+      }
     });
 
     return {
       success: true,
-      message: `Бюджет адсета ${adset_id} изменён на $${(new_budget_cents / 100).toFixed(2)}/день`
+      message: `Бюджет адсета ${adset_id} изменён на $${(new_budget_cents / 100).toFixed(2)}/день`,
+      verification: {
+        verified: verification.verified,
+        before: beforeBudget ? `$${(beforeBudget / 100).toFixed(2)}` : null,
+        after: verification.after ? `$${(verification.after / 100).toFixed(2)}` : null,
+        warning: verification.warning
+      }
     };
   },
 

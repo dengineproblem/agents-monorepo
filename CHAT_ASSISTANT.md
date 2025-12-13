@@ -1012,21 +1012,217 @@ maxDelayMs: 10000
 timeoutMs: 30000
 ```
 
-**Facebook API retry:**
+**Facebook API retry + Circuit Breaker:**
 
 **Путь:** `services/agent-brain/src/chatAssistant/shared/fbGraph.js`
 
 ```javascript
 export async function fbGraph(method, path, accessToken, params, options) {
-  return withRetry(
+  const retryableFn = () => withRetry(
     () => fbGraphInternal(method, path, accessToken, params),
-    {
-      maxRetries: 2,
-      timeoutMs: 25000,
-      shouldRetry: isFbRetryable  // FB codes 4, 17, 32 + generic retryable
-    }
+    { maxRetries: 2, timeoutMs: 25000, shouldRetry: isFbRetryable }
   );
+
+  // Wrap with circuit breaker
+  return withCircuitBreaker('facebook-graph-api', retryableFn, {
+    failureThreshold: 5,
+    timeout: 60000,  // 1 min before HALF_OPEN
+    successThreshold: 2
+  });
 }
+```
+
+---
+
+### Circuit Breaker
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/circuitBreaker.js`
+
+Защита от каскадных сбоев при массовых ошибках внешних API.
+
+**States:**
+| State | Описание |
+|-------|----------|
+| `CLOSED` | Нормальная работа, запросы проходят |
+| `OPEN` | Превышен порог ошибок, запросы отклоняются |
+| `HALF_OPEN` | Тестирование восстановления, ограниченные запросы |
+
+**Конфигурация:**
+```javascript
+{
+  failureThreshold: 5,      // Ошибок до OPEN
+  successThreshold: 2,      // Успехов в HALF_OPEN для CLOSED
+  timeout: 60000,           // ms до перехода в HALF_OPEN
+  volumeThreshold: 5,       // Мин. запросов для расчёта failure rate
+  failureRateThreshold: 50  // % ошибок для срабатывания
+}
+```
+
+**Использование:**
+```javascript
+import { withCircuitBreaker, getCircuitBreaker } from './circuitBreaker.js';
+
+// Вариант 1: Wrapper
+const result = await withCircuitBreaker('facebook', myFn, config);
+
+// Вариант 2: Instance
+const breaker = getCircuitBreaker('facebook', config);
+const result = await breaker.execute(myFn);
+
+// Мониторинг
+const states = getAllCircuitStates();
+// { facebook: { state: 'CLOSED', failureCount: 0, ... } }
+```
+
+**Обработка CircuitOpenError:**
+```javascript
+try {
+  await fbGraph('GET', 'campaigns', token);
+} catch (error) {
+  if (error.isCircuitOpen) {
+    // "Facebook API временно недоступен. Попробуйте через 45 сек."
+    console.log(error.retryAfterMs);
+  }
+}
+```
+
+---
+
+### Tool-call Repair Loop
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/toolRepair.js`
+
+LLM-based исправление невалидных аргументов tools. До 2 попыток.
+
+**Когда срабатывает:**
+- Zod validation вернул ошибку
+- Ошибка содержит паттерны: `Invalid arguments`, `required`, `Expected`, `must be`
+
+**Пример flow:**
+```
+1. LLM вызывает: getCampaigns({ period: "week" })
+2. Zod error: "period must be 'today' | 'yesterday' | 'last_7d' | 'last_30d'"
+3. Repair prompt → LLM: "Исправь args: { period: 'last_7d' }"
+4. Retry с исправленными args
+```
+
+**Интеграция в BaseAgent.executeTool():**
+```javascript
+const validation = toolRegistry.validate(name, args);
+if (!validation.success && isRepairableError(validation.error)) {
+  const repairResult = await attemptToolRepair({
+    toolName: name,
+    originalArgs: args,
+    validationError: validation.error,
+    toolDefinition: toolDef
+  });
+
+  if (repairResult.success) {
+    // Используем исправленные args
+    args = repairResult.repairedArgs;
+  }
+}
+```
+
+---
+
+### Post-check Verification
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/postCheck.js`
+
+Верификация WRITE операций после выполнения. Проверяет что изменение реально применилось.
+
+**Функции:**
+| Функция | Описание |
+|---------|----------|
+| `verifyCampaignStatus(id, expected, token)` | Проверить статус кампании |
+| `verifyAdSetStatus(id, expected, token)` | Проверить статус адсета |
+| `verifyAdSetBudget(id, expected, token)` | Проверить бюджет адсета |
+| `verifyAdStatus(id, expected, token)` | Проверить статус объявления |
+| `verifyDirectionStatus(id, expected)` | Проверить статус направления (Supabase) |
+| `verifyDirectionBudget(id, expected)` | Проверить бюджет направления |
+
+**Конфигурация:**
+- До 2 попыток проверки
+- Пауза между попытками для eventual consistency
+- Tolerance 1% для бюджетов (округление)
+
+**Пример использования:**
+```javascript
+async pauseCampaign({ campaign_id }, { accessToken }) {
+  const beforeStatus = await getStatus(campaign_id);
+
+  await fbGraph('POST', campaign_id, accessToken, { status: 'PAUSED' });
+
+  const verification = await verifyCampaignStatus(campaign_id, 'PAUSED', accessToken);
+
+  return {
+    success: true,
+    message: `Кампания поставлена на паузу`,
+    verification: {
+      verified: verification.verified,  // true/false
+      before: beforeStatus,
+      after: verification.after,
+      warning: verification.warning      // если не удалось подтвердить
+    }
+  };
+}
+```
+
+**Результат в ответе агента:**
+```json
+{
+  "success": true,
+  "message": "Кампания 123 поставлена на паузу",
+  "verification": {
+    "verified": true,
+    "before": "ACTIVE",
+    "after": "PAUSED"
+  }
+}
+```
+
+---
+
+### Prompt Versioning
+
+**Путь:** `services/agent-brain/src/chatAssistant/agents/*/prompt.js`
+
+Версионирование промптов для отладки и A/B тестирования.
+
+**Версии:**
+| Агент | Версия | Файл |
+|-------|--------|------|
+| AdsAgent | `ads-v1.0` | `ads/prompt.js` |
+| CreativeAgent | `creative-v1.0` | `creative/prompt.js` |
+| CRMAgent | `crm-v1.0` | `crm/prompt.js` |
+| WhatsAppAgent | `whatsapp-v1.0` | `whatsapp/prompt.js` |
+
+**Интеграция:**
+```javascript
+// В prompt.js
+export const PROMPT_VERSION = 'ads-v1.0';
+
+// В index.js агента
+import { PROMPT_VERSION } from './prompt.js';
+super({
+  // ...
+  promptVersion: PROMPT_VERSION
+});
+
+// Сохраняется в ai_runs
+await runsStore.create({
+  promptVersion: this.promptVersion,
+  // ...
+});
+```
+
+**Использование для аналитики:**
+```sql
+SELECT prompt_version, COUNT(*), AVG(latency_ms)
+FROM ai_runs
+WHERE created_at > now() - interval '7 days'
+GROUP BY prompt_version;
 ```
 
 ---
