@@ -1487,19 +1487,56 @@ export async function runScoringAgent(userAccount, options = {}) {
         accountUUID
       );
       
-      logger.info({ 
-        where: 'scoring_agent', 
-        phase: 'metrics_saved' 
+      logger.info({
+        where: 'scoring_agent',
+        phase: 'metrics_saved'
       });
+
+      // Заполнить direction_metrics_rollup (агрегация по направлениям)
+      try {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+        const { data: rollupResult, error: rollupError } = await supabase.rpc(
+          'upsert_direction_metrics_rollup',
+          {
+            p_user_account_id: userAccountId,
+            p_account_id: accountUUID,
+            p_day: yesterdayStr
+          }
+        );
+
+        if (rollupError) {
+          logger.warn({
+            where: 'scoring_agent',
+            phase: 'direction_rollup_failed',
+            error: rollupError.message
+          }, 'Failed to update direction metrics rollup');
+        } else {
+          logger.info({
+            where: 'scoring_agent',
+            phase: 'direction_rollup_updated',
+            rows_affected: rollupResult
+          });
+        }
+      } catch (rollupErr) {
+        logger.warn({
+          where: 'scoring_agent',
+          phase: 'direction_rollup_error',
+          error: String(rollupErr)
+        }, 'Error updating direction metrics rollup');
+      }
+
     } catch (error) {
       // Не критическая ошибка - продолжаем работу даже если не удалось сохранить метрики
-      logger.error({ 
-        where: 'scoring_agent', 
+      logger.error({
+        where: 'scoring_agent',
         phase: 'metrics_save_failed',
         error: String(error)
       }, 'Failed to save metrics to history, continuing...');
     }
-    
+
     // ========================================
     // ОПРЕДЕЛЯЕМ НЕИСПОЛЬЗОВАННЫЕ КРЕАТИВЫ
     // ========================================

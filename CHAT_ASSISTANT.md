@@ -188,8 +188,9 @@ User Request
 - `ad_creative_mapping` — связь объявлений и креативов
 
 ### Metrics
-- `direction_metrics_daily` — метрики направлений по дням
-- `adset_metrics_history` — метрики адсетов
+- `direction_metrics_rollup` — дневной rollup метрик по направлениям (Two-Stage Retrieval)
+- `creative_metrics_history` — ежедневные снимки метрик по объявлениям
+- `scoring_executions` — результаты scoring job (scoring_output содержит готовую выжимку)
 
 ---
 
@@ -846,15 +847,141 @@ const { context, stats } = tokenBudget.build();
 
 ---
 
-## Миграция Memory Layers
+## Two-Stage Retrieval (Metrics)
 
-Единая миграция для всех уровней памяти:
+Двухуровневая система получения метрик: Rollup (быстро, из БД) → Drilldown (FB API при необходимости).
+
+### Источники данных
+
+| Источник | Обновление | Данные |
+|----------|------------|--------|
+| `scoring_executions.scoring_output` | Ежедневно 08:00 | Готовая выжимка: adsets, ready_creatives, trends, ROI |
+| `direction_metrics_rollup` | После scoring job | Агрегированные метрики по направлениям |
+| `creative_metrics_history` | Ежедневно 08:00 | Снимки метрик по объявлениям |
+| Facebook API | Real-time | Drilldown при отсутствии данных в rollup |
+
+### getTodayMetrics (Context Gathering)
+
+**Путь:** `services/agent-brain/src/chatAssistant/contextGatherer.js`
+
+Получает агрегированные метрики из `scoring_executions.scoring_output`:
+
+```javascript
+// scoring_output содержит готовую выжимку:
+{
+  adsets: [{
+    adset_id, adset_name, campaign_id,
+    metrics_last_7d: { impressions, spend, leads, avg_cpl, avg_ctr }
+  }],
+  ready_creatives: [{
+    name, user_creative_id, direction_id,
+    creatives: [{ objective, performance: { impressions, spend, leads } }]
+  }]
+}
+
+// Результат для контекста:
+{
+  spend: 15000.50,      // Сумма за 7 дней
+  leads: 45,
+  cpl: 333,
+  impressions: 150000,
+  clicks: 2500,
+  active_adsets: 5,
+  active_creatives: 12,
+  data_date: "2024-12-13T08:00:00Z",
+  period: "last_7d"
+}
+```
+
+### Direction Metrics Rollup
+
+**Миграция:** `migrations/094_direction_metrics_rollup.sql`
+
+Дневной rollup метрик по направлениям (бизнес-сущности).
+
+**Таблица:**
+```sql
+direction_metrics_rollup (
+  id UUID PRIMARY KEY,
+  user_account_id UUID NOT NULL,
+  account_id UUID,              -- для мультиаккаунтности
+  direction_id UUID NOT NULL,   -- FK → account_directions
+  day DATE NOT NULL,
+
+  -- Метрики
+  spend NUMERIC,
+  impressions BIGINT,
+  clicks BIGINT,
+  leads BIGINT,
+  cpl NUMERIC,
+  ctr NUMERIC,
+  cpm NUMERIC,
+
+  -- Креативы
+  active_creatives_count INTEGER,
+  active_ads_count INTEGER,
+
+  -- Delta vs yesterday
+  spend_delta NUMERIC,
+  leads_delta INTEGER,
+  cpl_delta NUMERIC
+)
+```
+
+**Заполнение:**
+
+SQL-функция `upsert_direction_metrics_rollup()` вызывается после `saveCreativeMetricsToHistory()` в scoring.js:
+
+```javascript
+// scoring.js — после сохранения метрик
+await supabase.rpc('upsert_direction_metrics_rollup', {
+  p_user_account_id: userAccountId,
+  p_account_id: accountUUID,
+  p_day: yesterdayStr  // дата за которую сохранили метрики
+});
+```
+
+### getDirectionMetrics (Two-Stage)
+
+**Путь:** `services/agent-brain/src/chatAssistant/agents/ads/handlers.js`
+
+1. **Stage 1 — Rollup (быстро):** Запрос в `direction_metrics_rollup`
+2. **Stage 2 — Fallback:** Агрегация из `creative_metrics_history` через `ad_creative_mapping`
+
+```javascript
+async getDirectionMetrics({ direction_id, period }, context) {
+  // 1. Try rollup first (fast)
+  const { data: rollupMetrics } = await supabase
+    .from('direction_metrics_rollup')
+    .select('*')
+    .eq('direction_id', direction_id)
+    .gte('day', startDate);
+
+  if (rollupMetrics?.length > 0) {
+    return { success: true, source: 'rollup', daily, totals };
+  }
+
+  // 2. Fallback: aggregate from creative_metrics_history
+  // ... via ad_creative_mapping
+  return { success: true, source: 'fallback_aggregation', daily, totals };
+}
+```
+
+**Ответ содержит:**
+- `source`: `'rollup'` или `'fallback_aggregation'`
+- `daily`: Метрики по дням с deltas
+- `totals`: Агрегированные итоги
+
+---
+
+## Миграции
 
 | Миграция | Описание |
 |----------|----------|
 | `092_business_memory.sql` | Session + Procedural + Mid-term + Semantic Memory |
+| `094_direction_metrics_rollup.sql` | Direction Metrics Rollup + SQL функция |
 
-**Содержимое миграции:**
+### 092_business_memory.sql
 ```sql
 -- Session Memory
 ALTER TABLE ai_conversations
@@ -877,4 +1004,41 @@ ADD COLUMN IF NOT EXISTS insights_json JSONB DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_briefing_user_account ON user_briefing_responses(user_id, account_id);
 CREATE INDEX IF NOT EXISTS dialog_analysis_summary_fts ON dialog_analysis USING gin(to_tsvector('russian', COALESCE(summary, '')));
 CREATE INDEX IF NOT EXISTS dialog_analysis_tags_idx ON dialog_analysis USING gin(tags);
+```
+
+### 094_direction_metrics_rollup.sql
+```sql
+-- Rollup таблица
+CREATE TABLE IF NOT EXISTS direction_metrics_rollup (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_account_id UUID NOT NULL,
+  account_id UUID,
+  direction_id UUID NOT NULL REFERENCES account_directions(id) ON DELETE CASCADE,
+  day DATE NOT NULL,
+  spend NUMERIC DEFAULT 0,
+  impressions BIGINT DEFAULT 0,
+  clicks BIGINT DEFAULT 0,
+  leads BIGINT DEFAULT 0,
+  cpl NUMERIC,
+  ctr NUMERIC,
+  cpm NUMERIC,
+  active_creatives_count INTEGER DEFAULT 0,
+  active_ads_count INTEGER DEFAULT 0,
+  spend_delta NUMERIC,
+  leads_delta INTEGER,
+  cpl_delta NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Unique constraint (с учётом NULL account_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_direction_metrics_rollup_unique
+ON direction_metrics_rollup (user_account_id, COALESCE(account_id, '00000000-0000-0000-0000-000000000000'::uuid), direction_id, day);
+
+-- SQL функция заполнения
+CREATE OR REPLACE FUNCTION upsert_direction_metrics_rollup(
+  p_user_account_id UUID,
+  p_account_id UUID,
+  p_day DATE DEFAULT CURRENT_DATE - INTERVAL '1 day'
+) RETURNS INTEGER AS $$ ... $$ LANGUAGE plpgsql;
 ```

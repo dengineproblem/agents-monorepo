@@ -132,48 +132,68 @@ async function getBusinessProfile(userAccountId) {
 }
 
 /**
- * Get today's campaign metrics summary
+ * Get today's campaign metrics summary from scoring_executions
+ * scoring_output содержит готовую выжимку метрик (обновляется каждый день в 08:00)
  */
 async function getTodayMetrics(userAccountId, adAccountId) {
-  // Try to get from campaign_reports or calculate from recent data
-  const today = new Date().toISOString().split('T')[0];
-
-  const { data: reports, error } = await supabase
-    .from('campaign_reports')
-    .select('spend, leads, impressions, clicks')
-    .eq('user_account_id', userAccountId)
-    .gte('report_date', today)
-    .limit(100);
-
-  if (error || !reports?.length) {
-    // Fallback: try to get from agent_executions summary
-    const { data: execData } = await supabase
-      .from('agent_executions')
-      .select('request_json')
-      .eq('ad_account_id', adAccountId)
-      .gte('created_at', today)
+  try {
+    // 1. Получить последний scoring_output (обновляется каждый день в 08:00)
+    let query = supabase
+      .from('scoring_executions')
+      .select('scoring_output, created_at')
+      .eq('user_account_id', userAccountId)
+      .eq('status', 'success')
       .order('created_at', { ascending: false })
       .limit(1);
 
-    if (execData?.[0]?.request_json?.metrics) {
-      return execData[0].request_json.metrics;
+    // Для мультиаккаунтности фильтруем по account_id
+    if (adAccountId) {
+      query = query.eq('account_id', adAccountId);
     }
 
+    const { data: execution, error } = await query.maybeSingle();
+
+    if (error) {
+      logger.warn({ error: error.message }, 'Failed to get scoring_executions');
+      return null;
+    }
+
+    if (!execution?.scoring_output) {
+      return null;
+    }
+
+    // 2. Извлечь агрегированные метрики из adsets
+    const { adsets, ready_creatives } = execution.scoring_output;
+
+    if (!adsets?.length) {
+      return null;
+    }
+
+    // 3. Суммировать по всем adsets (metrics_last_7d — это агрегат за 7 дней)
+    const totals = adsets.reduce((acc, adset) => {
+      const m = adset.metrics_last_7d || {};
+      return {
+        spend: acc.spend + (parseFloat(m.spend) || 0),
+        leads: acc.leads + (parseInt(m.total_leads) || 0),
+        impressions: acc.impressions + (parseInt(m.impressions) || 0),
+        clicks: acc.clicks + (parseInt(m.clicks) || 0)
+      };
+    }, { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
+    // Округляем spend
+    totals.spend = Math.round(totals.spend * 100) / 100;
+    totals.cpl = totals.leads > 0 ? Math.round(totals.spend / totals.leads) : null;
+    totals.active_adsets = adsets.length;
+    totals.active_creatives = ready_creatives?.filter(c => c.has_data)?.length || 0;
+    totals.data_date = execution.created_at;
+    totals.period = 'last_7d'; // scoring_output содержит метрики за 7 дней
+
+    return totals;
+
+  } catch (error) {
+    logger.warn({ error: error.message }, 'Error getting today metrics from scoring_executions');
     return null;
   }
-
-  // Aggregate metrics
-  const totals = reports.reduce((acc, r) => ({
-    spend: acc.spend + (r.spend || 0),
-    leads: acc.leads + (r.leads || 0),
-    impressions: acc.impressions + (r.impressions || 0),
-    clicks: acc.clicks + (r.clicks || 0)
-  }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
-
-  totals.cpl = totals.leads > 0 ? Math.round(totals.spend / totals.leads) : null;
-  totals.active_campaigns = reports.length;
-
-  return totals;
 }
 
 /**

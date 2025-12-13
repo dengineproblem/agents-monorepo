@@ -353,34 +353,122 @@ export const adsHandlers = {
     };
   },
 
-  async getDirectionMetrics({ direction_id, period }, { adAccountId }) {
+  async getDirectionMetrics({ direction_id, period }, { adAccountId, userAccountId }) {
     const days = { '7d': 7, '14d': 14, '30d': 30 }[period] || 7;
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-    // Get daily metrics breakdown
-    const { data: dailyMetrics, error } = await supabase
-      .from('direction_metrics_daily')
+    // 1. Пробуем получить из rollup (быстро)
+    const { data: rollupMetrics, error: rollupError } = await supabase
+      .from('direction_metrics_rollup')
       .select('*')
       .eq('direction_id', direction_id)
-      .gte('date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
-      .order('date', { ascending: true });
+      .gte('day', startDate)
+      .order('day', { ascending: true });
 
-    if (error) {
-      return { success: false, error: error.message };
+    if (!rollupError && rollupMetrics?.length > 0) {
+      // Используем данные из rollup
+      const totals = rollupMetrics.reduce((acc, d) => ({
+        spend: acc.spend + parseFloat(d.spend || 0),
+        leads: acc.leads + parseInt(d.leads || 0),
+        impressions: acc.impressions + parseInt(d.impressions || 0),
+        clicks: acc.clicks + parseInt(d.clicks || 0)
+      }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
+      // Форматируем daily для единообразия
+      const daily = rollupMetrics.map(d => ({
+        date: d.day,
+        spend: parseFloat(d.spend || 0),
+        leads: parseInt(d.leads || 0),
+        impressions: parseInt(d.impressions || 0),
+        clicks: parseInt(d.clicks || 0),
+        cpl: d.cpl ? parseFloat(d.cpl) : null,
+        ctr: d.ctr ? parseFloat(d.ctr) : null,
+        cpm: d.cpm ? parseFloat(d.cpm) : null,
+        active_creatives: d.active_creatives_count,
+        active_ads: d.active_ads_count,
+        spend_delta: d.spend_delta ? parseFloat(d.spend_delta) : null,
+        leads_delta: d.leads_delta,
+        cpl_delta: d.cpl_delta ? parseFloat(d.cpl_delta) : null
+      }));
+
+      return {
+        success: true,
+        direction_id,
+        period,
+        source: 'rollup',
+        daily,
+        totals: {
+          ...totals,
+          cpl: totals.leads > 0 ? (totals.spend / totals.leads).toFixed(2) : null,
+          ctr: totals.impressions > 0 ? ((totals.clicks / totals.impressions) * 100).toFixed(2) : null
+        }
+      };
     }
 
-    // Calculate totals
-    const totals = (dailyMetrics || []).reduce((acc, d) => ({
-      spend: acc.spend + parseFloat(d.spend || 0),
-      leads: acc.leads + parseInt(d.leads || 0),
-      impressions: acc.impressions + parseInt(d.impressions || 0),
-      clicks: acc.clicks + parseInt(d.clicks || 0)
+    // 2. Fallback: агрегируем из creative_metrics_history через ad_creative_mapping
+    const { data: metricsData, error: metricsError } = await supabase
+      .from('creative_metrics_history')
+      .select(`
+        date,
+        spend,
+        leads,
+        impressions,
+        clicks,
+        ad_id
+      `)
+      .eq('user_account_id', userAccountId)
+      .gte('date', startDate)
+      .eq('source', 'production');
+
+    if (metricsError) {
+      return { success: false, error: metricsError.message };
+    }
+
+    // Получаем ad_ids для этого direction
+    const { data: mappings } = await supabase
+      .from('ad_creative_mapping')
+      .select('ad_id')
+      .eq('direction_id', direction_id);
+
+    const directionAdIds = new Set((mappings || []).map(m => m.ad_id));
+
+    // Фильтруем метрики по ads этого direction
+    const filteredMetrics = (metricsData || []).filter(m => directionAdIds.has(m.ad_id));
+
+    // Группируем по дате
+    const byDate = {};
+    for (const m of filteredMetrics) {
+      if (!byDate[m.date]) {
+        byDate[m.date] = { spend: 0, leads: 0, impressions: 0, clicks: 0 };
+      }
+      byDate[m.date].spend += parseFloat(m.spend || 0);
+      byDate[m.date].leads += parseInt(m.leads || 0);
+      byDate[m.date].impressions += parseInt(m.impressions || 0);
+      byDate[m.date].clicks += parseInt(m.clicks || 0);
+    }
+
+    const daily = Object.entries(byDate)
+      .map(([date, d]) => ({
+        date,
+        ...d,
+        cpl: d.leads > 0 ? (d.spend / d.leads).toFixed(2) : null,
+        ctr: d.impressions > 0 ? ((d.clicks / d.impressions) * 100).toFixed(2) : null
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totals = daily.reduce((acc, d) => ({
+      spend: acc.spend + d.spend,
+      leads: acc.leads + d.leads,
+      impressions: acc.impressions + d.impressions,
+      clicks: acc.clicks + d.clicks
     }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
 
     return {
       success: true,
       direction_id,
       period,
-      daily: dailyMetrics || [],
+      source: 'fallback_aggregation',
+      daily,
       totals: {
         ...totals,
         cpl: totals.leads > 0 ? (totals.spend / totals.leads).toFixed(2) : null,
