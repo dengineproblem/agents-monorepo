@@ -7,6 +7,7 @@ import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
 import { logErrorToAdmin } from '../../lib/errorLogger.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
+import { memoryStore } from '../stores/memoryStore.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
@@ -24,13 +25,15 @@ export class BaseAgent {
    * @param {Object} config
    * @param {string} config.name - Agent name (e.g., 'AdsAgent')
    * @param {string} config.description - What this agent does
+   * @param {string} config.domain - Domain for memory storage ('ads', 'creative', 'whatsapp', 'crm')
    * @param {Array} config.tools - OpenAI function definitions for this agent
    * @param {Object} config.handlers - Map of tool name to handler function
    * @param {Function} config.buildSystemPrompt - Function to build system prompt with context
    */
-  constructor({ name, description, tools, handlers, buildSystemPrompt }) {
+  constructor({ name, description, domain, tools, handlers, buildSystemPrompt }) {
     this.name = name;
     this.description = description;
+    this.domain = domain || name.toLowerCase().replace('agent', '');
     this.tools = tools;
     this.handlers = handlers;
     this.buildSystemPrompt = buildSystemPrompt;
@@ -214,6 +217,16 @@ export class BaseAgent {
         }
       }
 
+      // Auto-capture notes from tool results (mid-term memory)
+      if (result.success !== false && context.userAccountId) {
+        const notes = this.extractNotes(name, args, result);
+        if (notes && notes.length > 0) {
+          memoryStore.addNotes(context.userAccountId, context.adAccountId, this.domain, notes).catch(err => {
+            logger.warn({ error: err.message, agent: this.name, tool: name }, 'Failed to save notes');
+          });
+        }
+      }
+
       return result;
     } catch (error) {
       logger.error({ agent: this.name, tool: name, error: error.message }, 'Tool execution failed');
@@ -269,6 +282,20 @@ export class BaseAgent {
     }
 
     return entities;
+  }
+
+  /**
+   * Extract notes from tool execution for mid-term memory
+   * Override in subclasses for agent-specific extraction
+   * @param {string} toolName - Name of executed tool
+   * @param {Object} args - Tool arguments
+   * @param {Object} result - Tool result
+   * @returns {Array<Object>} Array of notes: [{ text, source, importance }]
+   */
+  extractNotes(toolName, args, result) {
+    // Base implementation returns nothing
+    // Subclasses override this for specific capture logic
+    return [];
   }
 
   /**

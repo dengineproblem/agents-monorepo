@@ -3,15 +3,19 @@
  * Specialized prompt for Facebook/Instagram advertising
  */
 
+import { formatSpecsContext, formatNotesContext } from '../../shared/memoryFormat.js';
+
 /**
  * Build system prompt for AdsAgent
- * @param {Object} context - Business context
+ * @param {Object} context - Business context (includes specs, notes)
  * @param {string} mode - 'auto' | 'plan' | 'ask'
  * @returns {string} System prompt
  */
 export function buildAdsPrompt(context, mode) {
   const modeInstructions = getModeInstructions(mode);
   const metricsContext = formatMetricsContext(context);
+  const specsContext = formatSpecsContext(context?.specs);
+  const notesContext = formatNotesContext(context?.notes, 'ads');
 
   return `# AdsAgent — Эксперт по Facebook/Instagram рекламе
 
@@ -48,6 +52,11 @@ export function buildAdsPrompt(context, mode) {
 5. **Направления**: При паузе направления предупреждай о последствиях для FB
 
 ${modeInstructions}
+
+## Бизнес-правила
+${specsContext}
+
+${notesContext}
 
 ## Текущий контекст
 ${metricsContext}

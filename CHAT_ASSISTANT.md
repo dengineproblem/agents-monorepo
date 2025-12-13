@@ -599,10 +599,137 @@ searchDialogSummaries({ query, tags, limit })
 
 ---
 
-## Миграции Memory Layers
+### Mid-Term Memory (Agent Notes)
+
+**Хранение:** `user_briefing_responses.agent_notes JSONB`
+
+Накопленные наблюдения агентов — инсайты, паттерны, выводы из анализа данных.
+
+**Структура:**
+```json
+{
+  "ads": {
+    "notes": [
+      {
+        "id": "uuid",
+        "text": "Высокий CPL: 1200₽ за период 2024-12-01 - 2024-12-07",
+        "source": { "type": "tool", "ref": "getSpendReport" },
+        "importance": 0.7,
+        "created_at": "2024-12-13T10:00:00Z"
+      }
+    ],
+    "updated_at": "2024-12-13T10:00:00Z"
+  },
+  "creative": { "notes": [], "updated_at": null },
+  "whatsapp": { "notes": [], "updated_at": null },
+  "crm": { "notes": [], "updated_at": null }
+}
+```
+
+**Домены:**
+| Домен | Что capture-им |
+|-------|---------------|
+| `ads` | CPL тренды, проблемные кампании, лучшие направления |
+| `creative` | Топ-креативы, underperformers, эффективные хуки/углы |
+| `whatsapp` | Возражения клиентов, интересы, боли |
+| `crm` | Узкие места воронки, причины потерь, hot сегменты |
+
+**Auto-capture:**
+
+Агенты автоматически сохраняют заметки после выполнения tools:
+
+| Agent | Tool | Что capture-ит |
+|-------|------|---------------|
+| AdsAgent | `getSpendReport` | Высокий CPL (>1000₽), нет лидов при большом расходе, лучшая кампания |
+| AdsAgent | `getDirections` | Много паузнутых направлений |
+| CreativeAgent | `getCreativeMetrics` | Топ-креатив, креативы без лидов |
+| CreativeAgent | `analyzeCreative` | Эффективные хуки и углы |
+| WhatsAppAgent | `analyzeDialog` | Возражения, интересы, боли клиента |
+| CRMAgent | `getFunnelStats` | Высокий отвал на этапе, много холодных лидов |
+| CRMAgent | `getLeadDetails` | Причины потери лидов |
+
+**Реализация в BaseAgent:**
+```javascript
+// После выполнения tool
+const notes = this.extractNotes(toolName, args, result);
+if (notes.length > 0) {
+  await memoryStore.addNotes(userAccountId, adAccountId, this.domain, notes);
+}
+```
+
+**Управление через чат:**
+
+| Команда | Описание |
+|---------|----------|
+| `Запомни: <текст>` | Сохранить заметку вручную |
+| `Забудь: <текст>` | Удалить заметки по совпадению |
+| `Что ты помнишь?` | Показать все заметки |
+
+**MemoryStore:**
+
+**Путь:** `services/agent-brain/src/chatAssistant/stores/memoryStore.js`
+
+| Метод | Описание |
+|-------|----------|
+| `getSpecs(userAccountId, accountId)` | Получить business specs |
+| `getAllNotes(userAccountId, accountId)` | Все заметки всех доменов |
+| `getNotes(userAccountId, accountId, domain)` | Заметки одного домена |
+| `getNotesDigest(userAccountId, accountId, domains, maxPerDomain)` | Digest для промптов (отсортированные по importance) |
+| `addNote(userAccountId, accountId, domain, note)` | Добавить заметку |
+| `addNotes(userAccountId, accountId, domain, notes)` | Batch добавление |
+| `removeNote(userAccountId, accountId, domain, noteId)` | Удалить по ID |
+| `removeNoteByText(userAccountId, accountId, searchText)` | Удалить по тексту |
+| `clearNotes(userAccountId, accountId, domain)` | Очистить домен |
+| `listNotesSummary(userAccountId, accountId)` | Статистика заметок |
+
+**Лимиты:**
+- Max 20 заметок на домен
+- При превышении — удаляются старые с низким importance
+- Дедупликация по тексту
+
+**Подмешивание в промпты:**
+
+В каждом агенте notes инжектятся в system prompt:
+
+```javascript
+// В prompt.js каждого агента
+import { formatNotesContext } from '../../shared/memoryFormat.js';
+
+const notesContext = formatNotesContext(context?.notes, 'ads');
+// → "## Накопленные наблюдения\n• ⭐ Высокий CPL: 1200₽...\n• Лучшая кампания..."
+```
+
+---
+
+## Миграция Memory Layers
+
+Единая миграция для всех уровней памяти:
 
 | Миграция | Описание |
 |----------|----------|
-| `092_ai_conversations_focus_entities.sql` | Session Memory |
-| `093_briefing_specs.sql` | Procedural Memory |
-| `094_dialog_analysis_semantic.sql` | Semantic Memory + FTS индексы |
+| `092_business_memory.sql` | Session + Procedural + Mid-term + Semantic Memory |
+
+**Содержимое миграции:**
+```sql
+-- Session Memory
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS focus_entities JSONB DEFAULT '{}';
+
+-- Procedural + Mid-term Memory
+ALTER TABLE user_briefing_responses
+ADD COLUMN IF NOT EXISTS tracking_spec JSONB DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS crm_spec JSONB DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS kpi_spec JSONB DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS agent_notes JSONB DEFAULT '{}';
+
+-- Semantic Memory
+ALTER TABLE dialog_analysis
+ADD COLUMN IF NOT EXISTS summary TEXT,
+ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS insights_json JSONB DEFAULT '{}';
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_briefing_user_account ON user_briefing_responses(user_id, account_id);
+CREATE INDEX IF NOT EXISTS dialog_analysis_summary_fts ON dialog_analysis USING gin(to_tsvector('russian', COALESCE(summary, '')));
+CREATE INDEX IF NOT EXISTS dialog_analysis_tags_idx ON dialog_analysis USING gin(tags);
+```

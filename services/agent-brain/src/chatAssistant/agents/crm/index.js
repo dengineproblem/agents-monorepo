@@ -13,10 +13,75 @@ export class CRMAgent extends BaseAgent {
     super({
       name: 'CRMAgent',
       description: 'Управление лидами и воронкой продаж: поиск, статистика, изменение этапов',
+      domain: 'crm',
       tools: CRM_TOOLS,
       handlers: crmHandlers,
       buildSystemPrompt: buildCRMPrompt
     });
+  }
+
+  /**
+   * Extract notes from tool execution for mid-term memory
+   * Captures funnel insights and lead patterns
+   */
+  extractNotes(toolName, args, result) {
+    const notes = [];
+
+    // Capture from getFunnelStats - funnel bottlenecks
+    if (toolName === 'getFunnelStats' && result.stats) {
+      const stats = result.stats;
+
+      // High drop-off stages
+      if (stats.stages) {
+        for (const stage of stats.stages) {
+          if (stage.dropOffRate && stage.dropOffRate > 50) {
+            notes.push({
+              text: `Высокий отвал на этапе "${stage.name}": ${stage.dropOffRate}%`,
+              source: { type: 'tool', ref: 'getFunnelStats' },
+              importance: 0.8
+            });
+          }
+        }
+      }
+
+      // Cold leads accumulation
+      if (stats.cold && stats.total && (stats.cold / stats.total) > 0.6) {
+        notes.push({
+          text: `Много холодных лидов: ${stats.cold} из ${stats.total} (${Math.round(stats.cold / stats.total * 100)}%)`,
+          source: { type: 'tool', ref: 'getFunnelStats' },
+          importance: 0.7
+        });
+      }
+    }
+
+    // Capture from getLeadDetails - common loss reasons
+    if (toolName === 'getLeadDetails' && result.lead) {
+      const lead = result.lead;
+
+      if (lead.status === 'lost' && lead.loss_reason) {
+        notes.push({
+          text: `Причина потери лида: ${lead.loss_reason}`,
+          source: { type: 'tool', ref: 'getLeadDetails', leadId: args.leadId },
+          importance: 0.5
+        });
+      }
+    }
+
+    // Capture from searchLeads - segment patterns
+    if (toolName === 'searchLeads' && result.leads && result.leads.length > 5) {
+      const leads = result.leads;
+      const hotCount = leads.filter(l => l.temperature === 'hot').length;
+
+      if (hotCount > leads.length / 2) {
+        notes.push({
+          text: `Сегмент "${args.query || 'поиск'}" содержит много горячих лидов: ${hotCount} из ${leads.length}`,
+          source: { type: 'tool', ref: 'searchLeads' },
+          importance: 0.6
+        });
+      }
+    }
+
+    return notes;
   }
 
   /**

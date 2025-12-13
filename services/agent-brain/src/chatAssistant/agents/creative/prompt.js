@@ -3,15 +3,19 @@
  * Specialized prompt for creative management and analysis
  */
 
+import { formatSpecsContext, formatNotesContext } from '../../shared/memoryFormat.js';
+
 /**
  * Build system prompt for CreativeAgent
- * @param {Object} context - Business context
+ * @param {Object} context - Business context (includes specs, notes)
  * @param {string} mode - 'auto' | 'plan' | 'ask'
  * @returns {string} System prompt
  */
 export function buildCreativePrompt(context, mode) {
   const modeInstructions = getModeInstructions(mode);
   const creativesContext = formatCreativesContext(context);
+  const specsContext = formatSpecsContext(context?.specs);
+  const notesContext = formatNotesContext(context?.notes, 'creative');
 
   return `# CreativeAgent — Эксперт по рекламным креативам
 
@@ -73,6 +77,11 @@ export function buildCreativePrompt(context, mode) {
 4. **Безопасность**: Для write-операций объясняй последствия
 
 ${modeInstructions}
+
+## Бизнес-правила
+${specsContext}
+
+${notesContext}
 
 ${creativesContext}
 

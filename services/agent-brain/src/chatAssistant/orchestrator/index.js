@@ -10,6 +10,8 @@ import { AdsAgent } from '../agents/ads/index.js';
 import { CreativeAgent } from '../agents/creative/index.js';
 import { WhatsAppAgent } from '../agents/whatsapp/index.js';
 import { CRMAgent } from '../agents/crm/index.js';
+import { memoryStore } from '../stores/memoryStore.js';
+import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.js';
 import { logger } from '../../lib/logger.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
@@ -43,8 +45,34 @@ export class Orchestrator {
     const startTime = Date.now();
 
     try {
-      // 1. Classify the request
-      const classification = await classifyRequest(message, context);
+      // 0. Check for direct memory commands first
+      const memoryCommand = parseMemoryCommand(message);
+      if (memoryCommand) {
+        const result = await this.handleMemoryCommand(memoryCommand, toolContext);
+        return {
+          agent: 'Orchestrator',
+          content: result.content,
+          executedActions: result.executedActions || [],
+          classification: { domain: 'memory', agents: [] },
+          duration: Date.now() - startTime
+        };
+      }
+
+      // 1. Load memory (specs + notes)
+      const [specs, notes] = await Promise.all([
+        memoryStore.getSpecs(toolContext.userAccountId, toolContext.adAccountId),
+        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId)
+      ]);
+
+      // Enrich context with memory
+      const enrichedContext = {
+        ...context,
+        specs,
+        notes
+      };
+
+      // 2. Classify the request
+      const classification = await classifyRequest(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
@@ -58,13 +86,13 @@ export class Orchestrator {
         // Single agent - delegate directly
         response = await this.delegateToAgent(
           classification.agents[0],
-          { message, context, mode, toolContext, conversationHistory }
+          { message, context: enrichedContext, mode, toolContext, conversationHistory }
         );
       } else {
         // Multiple agents - coordinate
         response = await this.coordinateAgents(
           classification.agents,
-          { message, context, mode, toolContext, conversationHistory }
+          { message, context: enrichedContext, mode, toolContext, conversationHistory }
         );
       }
 
@@ -201,6 +229,111 @@ export class Orchestrator {
   }
 
   // ============================================================
+  // MEMORY COMMAND HANDLING
+  // ============================================================
+
+  /**
+   * Handle direct memory commands
+   * @param {Object} command - Parsed memory command
+   * @param {Object} toolContext - Context with user/account IDs
+   * @returns {Promise<Object>} Response
+   */
+  async handleMemoryCommand(command, toolContext) {
+    logger.info({ command: command.type }, 'Handling memory command');
+
+    switch (command.type) {
+      case 'remember': {
+        const domain = inferDomain(command.note);
+        const result = await memoryHandlers.rememberNote(
+          { note: command.note, domain, importance: 0.7 },
+          toolContext
+        );
+        return {
+          content: result.success
+            ? `✅ ${result.message}`
+            : `❌ ${result.error}`,
+          executedActions: [{
+            tool: 'rememberNote',
+            args: { note: command.note, domain },
+            result: result.success ? 'success' : 'failed'
+          }]
+        };
+      }
+
+      case 'forget': {
+        const result = await memoryHandlers.forgetNote(
+          { searchText: command.searchText },
+          toolContext
+        );
+        return {
+          content: result.success
+            ? `✅ ${result.message}`
+            : `❌ ${result.error}`,
+          executedActions: [{
+            tool: 'forgetNote',
+            args: { searchText: command.searchText },
+            result: result.success ? 'success' : 'failed'
+          }]
+        };
+      }
+
+      case 'list': {
+        const result = await memoryHandlers.listNotes({ domain: 'all' }, toolContext);
+
+        if (!result.success) {
+          return {
+            content: `❌ ${result.error}`,
+            executedActions: []
+          };
+        }
+
+        if (result.total === 0) {
+          return {
+            content: '📋 У меня пока нет сохранённых заметок.',
+            executedActions: []
+          };
+        }
+
+        // Format notes for display
+        const lines = ['📋 **Сохранённые заметки:**\n'];
+        const domainLabels = {
+          ads: '📊 Реклама',
+          creative: '🎨 Креативы',
+          whatsapp: '💬 Диалоги',
+          crm: '👥 CRM'
+        };
+
+        for (const [domain, notes] of Object.entries(result.notes)) {
+          if (notes.length > 0) {
+            lines.push(`\n**${domainLabels[domain]}** (${notes.length}):`);
+            for (const note of notes) {
+              const importance = note.importance >= 0.7 ? '⭐' : '';
+              lines.push(`• ${importance}${note.text}`);
+            }
+          }
+        }
+
+        lines.push(`\n_Всего: ${result.total} заметок_`);
+
+        return {
+          content: lines.join('\n'),
+          executedActions: [{
+            tool: 'listNotes',
+            args: { domain: 'all' },
+            result: 'success'
+          }]
+        };
+      }
+
+      default:
+        return {
+          content: 'Не понял команду памяти',
+          executedActions: []
+        };
+    }
+  }
+
+  // ============================================================
   // STREAMING METHODS
   // ============================================================
 
@@ -212,8 +345,43 @@ export class Orchestrator {
     const startTime = Date.now();
 
     try {
-      // 1. Classify the request
-      const classification = await classifyRequest(message, context);
+      // 0. Check for direct memory commands first
+      const memoryCommand = parseMemoryCommand(message);
+      if (memoryCommand) {
+        const result = await this.handleMemoryCommand(memoryCommand, toolContext);
+        yield {
+          type: 'text',
+          content: result.content,
+          accumulated: result.content
+        };
+        yield {
+          type: 'done',
+          agent: 'Orchestrator',
+          content: result.content,
+          executedActions: result.executedActions || [],
+          toolCalls: [],
+          domain: 'memory',
+          classification: { domain: 'memory', agents: [] },
+          duration: Date.now() - startTime
+        };
+        return;
+      }
+
+      // 1. Load memory (specs + notes)
+      const [specs, notes] = await Promise.all([
+        memoryStore.getSpecs(toolContext.userAccountId, toolContext.adAccountId),
+        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId)
+      ]);
+
+      // Enrich context with memory
+      const enrichedContext = {
+        ...context,
+        specs,
+        notes
+      };
+
+      // 2. Classify the request
+      const classification = await classifyRequest(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
@@ -244,7 +412,7 @@ export class Orchestrator {
       // 3. Stream through the agent
       for await (const event of agent.processStreamLoop({
         message,
-        context,
+        context: enrichedContext,
         mode,
         toolContext,
         conversationHistory

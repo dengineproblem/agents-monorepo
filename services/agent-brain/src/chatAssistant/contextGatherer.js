@@ -278,35 +278,27 @@ export async function deleteConversation(conversationId, userAccountId) {
  * @param {string} userAccountId
  * @param {string|null} accountId - For multi-account: ad_account FK, null for legacy
  * @returns {Promise<Object>} { tracking, crm, kpi }
+ * @deprecated Use memoryStore.getSpecs() directly
  */
 export async function getSpecs(userAccountId, accountId = null) {
-  let query = supabase
-    .from('user_briefing_responses')
-    .select('tracking_spec, crm_spec, kpi_spec')
-    .eq('user_id', userAccountId);
-
-  if (accountId) {
-    query = query.eq('account_id', accountId);
-  } else {
-    query = query.is('account_id', null);
-  }
-
-  const { data, error } = await query.maybeSingle();
-
-  if (error) {
-    logger.warn({ error: error.message, userAccountId, accountId }, 'Failed to get specs');
-    return { tracking: {}, crm: {}, kpi: {} };
-  }
-
-  return {
-    tracking: data?.tracking_spec || {},
-    crm: data?.crm_spec || {},
-    kpi: data?.kpi_spec || {}
-  };
+  const { memoryStore } = await import('./stores/memoryStore.js');
+  return memoryStore.getSpecs(userAccountId, accountId);
 }
 
-// Re-export unifiedStore for convenience
+/**
+ * Get agent notes digest (mid-term memory)
+ * @param {string} userAccountId
+ * @param {string|null} accountId
+ * @returns {Promise<Object>} { ads: [...], creative: [...], ... }
+ */
+export async function getNotesDigest(userAccountId, accountId = null) {
+  const { memoryStore } = await import('./stores/memoryStore.js');
+  return memoryStore.getNotesDigest(userAccountId, accountId);
+}
+
+// Re-export stores for convenience
 export { unifiedStore } from './stores/unifiedStore.js';
+export { memoryStore } from './stores/memoryStore.js';
 
 export default {
   gatherContext,
@@ -316,6 +308,8 @@ export default {
   getConversations,
   deleteConversation,
   getSpecs,
-  // Also expose unifiedStore on default export
-  unifiedStore
+  getNotesDigest,
+  // Also expose stores on default export
+  unifiedStore,
+  memoryStore
 };

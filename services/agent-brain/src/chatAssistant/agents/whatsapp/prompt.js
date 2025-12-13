@@ -3,14 +3,18 @@
  * Specialized prompt for WhatsApp dialog analysis
  */
 
+import { formatSpecsContext, formatNotesContext } from '../../shared/memoryFormat.js';
+
 /**
  * Build system prompt for WhatsAppAgent
- * @param {Object} context - Business context
+ * @param {Object} context - Business context (includes specs, notes)
  * @param {string} mode - 'auto' | 'plan' | 'ask'
  * @returns {string} System prompt
  */
 export function buildWhatsAppPrompt(context, mode) {
   const dialogsContext = formatDialogsContext(context);
+  const specsContext = formatSpecsContext(context?.specs);
+  const notesContext = formatNotesContext(context?.notes, 'whatsapp');
 
   return `# WhatsAppAgent — Эксперт по WhatsApp диалогам
 
@@ -39,6 +43,11 @@ export function buildWhatsAppPrompt(context, mode) {
 - 🔥 **Hot**: Готов к покупке, обсуждает детали
 - ⚡ **Warm**: Есть интерес, нужна дополнительная работа
 - ❄️ **Cold**: Слабый интерес, возможно не целевой
+
+## Бизнес-правила
+${specsContext}
+
+${notesContext}
 
 ${dialogsContext}
 

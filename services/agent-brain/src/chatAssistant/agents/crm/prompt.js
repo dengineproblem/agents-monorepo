@@ -3,15 +3,19 @@
  * Specialized prompt for CRM and leads management
  */
 
+import { formatSpecsContext, formatNotesContext } from '../../shared/memoryFormat.js';
+
 /**
  * Build system prompt for CRMAgent
- * @param {Object} context - Business context
+ * @param {Object} context - Business context (includes specs, notes)
  * @param {string} mode - 'auto' | 'plan' | 'ask'
  * @returns {string} System prompt
  */
 export function buildCRMPrompt(context, mode) {
   const modeInstructions = getModeInstructions(mode);
   const funnelContext = formatFunnelContext(context);
+  const specsContext = formatSpecsContext(context?.specs);
+  const notesContext = formatNotesContext(context?.notes, 'crm');
 
   return `# CRMAgent — Эксперт по лидам и воронке продаж
 
@@ -46,6 +50,11 @@ export function buildCRMPrompt(context, mode) {
 4. **Группировка**: Группируй лидов по температуре: hot → warm → cold
 
 ${modeInstructions}
+
+## Бизнес-правила
+${specsContext}
+
+${notesContext}
 
 ${funnelContext}
 
