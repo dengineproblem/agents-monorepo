@@ -8,6 +8,8 @@ import { logger } from '../../lib/logger.js';
 import { logErrorToAdmin } from '../../lib/errorLogger.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
 import { memoryStore } from '../stores/memoryStore.js';
+import { toolRegistry } from '../shared/toolRegistry.js';
+import { withTimeout } from '../shared/retryUtils.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
@@ -192,7 +194,7 @@ export class BaseAgent {
   }
 
   /**
-   * Execute a tool by name
+   * Execute a tool by name with validation and timeout
    */
   async executeTool(name, args, context) {
     const handler = this.handlers[name];
@@ -204,12 +206,32 @@ export class BaseAgent {
       };
     }
 
+    // 1. Validate arguments through registry (graceful — if no schema, pass through)
+    const validation = toolRegistry.validate(name, args);
+    if (!validation.success) {
+      logger.warn({ agent: this.name, tool: name, error: validation.error }, 'Tool validation failed');
+      return {
+        success: false,
+        error: validation.error
+      };
+    }
+
+    const validatedArgs = validation.data;
+
+    // 2. Get metadata for timeout
+    const metadata = toolRegistry.getMetadata(name);
+
     try {
-      const result = await handler(args, context);
+      // 3. Execute with timeout wrapper
+      const result = await withTimeout(
+        () => handler(validatedArgs, context),
+        metadata.timeout,
+        `tool:${name}`
+      );
 
       // Auto-update focus entities after successful tool execution
       if (result.success !== false && context.conversationId) {
-        const focusEntities = this.extractFocusEntities(name, args, result);
+        const focusEntities = this.extractFocusEntities(name, validatedArgs, result);
         if (Object.keys(focusEntities).length > 0) {
           unifiedStore.updateFocusEntities(context.conversationId, focusEntities).catch(err => {
             logger.warn({ error: err.message, conversationId: context.conversationId }, 'Failed to update focus entities');
@@ -219,7 +241,7 @@ export class BaseAgent {
 
       // Auto-capture notes from tool results (mid-term memory)
       if (result.success !== false && context.userAccountId) {
-        const notes = this.extractNotes(name, args, result);
+        const notes = this.extractNotes(name, validatedArgs, result);
         if (notes && notes.length > 0) {
           memoryStore.addNotes(context.userAccountId, context.adAccountId, this.domain, notes).catch(err => {
             logger.warn({ error: err.message, agent: this.name, tool: name }, 'Failed to save notes');
@@ -228,8 +250,17 @@ export class BaseAgent {
       }
 
       return result;
+
     } catch (error) {
-      logger.error({ agent: this.name, tool: name, error: error.message }, 'Tool execution failed');
+      // Determine error type for logging and LLM feedback
+      const isTimeout = error.message.includes('timed out');
+
+      logger.error({
+        agent: this.name,
+        tool: name,
+        error: error.message,
+        isTimeout
+      }, 'Tool execution failed');
 
       logErrorToAdmin({
         error_type: 'api',
@@ -241,7 +272,9 @@ export class BaseAgent {
 
       return {
         success: false,
-        error: error.message
+        error: isTimeout
+          ? `Tool ${name} timed out after ${metadata.timeout}ms. Try again or simplify the request.`
+          : error.message
       };
     }
   }

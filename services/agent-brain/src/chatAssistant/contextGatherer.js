@@ -1,6 +1,6 @@
 /**
  * Context Gatherer for Chat Assistant
- * Collects relevant context data before LLM call
+ * Collects relevant context data before LLM call with token budgeting
  *
  * NOTE: For conversation/message CRUD operations, prefer using unifiedStore.
  * This module focuses on gathering context data (metrics, profiles, etc.)
@@ -10,17 +10,19 @@ import { supabase, supabaseQuery } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { unifiedStore } from './stores/unifiedStore.js';
+import { TokenBudget } from './shared/tokenBudget.js';
 
 /**
- * Gather all context needed for the chat assistant
+ * Gather all context needed for the chat assistant with token budgeting
  * @param {Object} params
  * @param {string} params.userAccountId - User account ID
  * @param {string} params.adAccountId - Ad account ID (optional)
  * @param {string} params.conversationId - Current conversation ID
- * @returns {Promise<Object>} Context data
+ * @param {Object} params.budget - Optional custom budget configuration
+ * @returns {Promise<Object>} Context data with stats
  */
-export async function gatherContext({ userAccountId, adAccountId, conversationId }) {
-  const context = {};
+export async function gatherContext({ userAccountId, adAccountId, conversationId, budget = {} }) {
+  const tokenBudget = new TokenBudget(budget);
 
   try {
     // Run queries in parallel for speed
@@ -36,22 +38,40 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
       getActiveContexts(userAccountId)
     ]);
 
-    // Process results
-    if (chatHistory.status === 'fulfilled') {
-      context.recentMessages = chatHistory.value;
+    // Add blocks with priorities (higher = more important, kept first)
+    // Priority 10: Chat history — most important for continuity
+    if (chatHistory.status === 'fulfilled' && chatHistory.value) {
+      tokenBudget.addBlock('recentMessages', chatHistory.value, 10);
     }
 
-    if (businessProfile.status === 'fulfilled') {
-      context.businessProfile = businessProfile.value;
+    // Priority 8: Today's metrics — current state
+    if (todayMetrics.status === 'fulfilled' && todayMetrics.value) {
+      tokenBudget.addBlock('todayMetrics', todayMetrics.value, 8);
     }
 
-    if (todayMetrics.status === 'fulfilled') {
-      context.todayMetrics = todayMetrics.value;
+    // Priority 6: Business profile — context about the business
+    if (businessProfile.status === 'fulfilled' && businessProfile.value) {
+      tokenBudget.addBlock('businessProfile', businessProfile.value, 6);
     }
 
-    if (activeContexts.status === 'fulfilled') {
-      context.activeContexts = activeContexts.value;
+    // Priority 4: Active contexts — promotional contexts
+    if (activeContexts.status === 'fulfilled' && activeContexts.value) {
+      tokenBudget.addBlock('activeContexts', activeContexts.value, 4);
     }
+
+    // Build context with budgeting
+    const { context, stats } = tokenBudget.build();
+
+    logger.debug({
+      userAccountId,
+      conversationId,
+      contextStats: {
+        usedTokens: stats.usedTokens,
+        budget: stats.budget,
+        utilization: stats.utilization + '%',
+        blocks: stats.blocksIncluded
+      }
+    }, 'Context gathered with token budgeting');
 
     return context;
 
@@ -67,7 +87,7 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
       severity: 'warning'
     }).catch(() => {});
 
-    return context;
+    return {};
   }
 }
 

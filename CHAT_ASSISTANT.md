@@ -701,6 +701,151 @@ const notesContext = formatNotesContext(context?.notes, 'ads');
 
 ---
 
+## Reliability Layer (P0)
+
+### Tool Validation (Zod)
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/toolRegistry.js`
+
+Централизованная валидация аргументов tools через Zod schemas. Единый источник правды — `toolDefs.js` файлы.
+
+**Zod-first архитектура:**
+```
+toolDefs.js (Zod schemas) → runtime validation
+                         → OpenAI JSON Schema (future)
+```
+
+**Tool Definitions:**
+| Файл | Tools | Описание |
+|------|-------|----------|
+| `agents/ads/toolDefs.js` | 15 | Кампании, направления, бюджеты |
+| `agents/creative/toolDefs.js` | 15 | Креативы, тесты, анализ |
+| `agents/crm/toolDefs.js` | 4 | Лиды, воронка |
+| `agents/whatsapp/toolDefs.js` | 4 | Диалоги, поиск |
+
+**Пример toolDef:**
+```javascript
+import { z } from 'zod';
+
+export const AdsToolDefs = {
+  getCampaigns: {
+    description: 'Получить список кампаний',
+    schema: z.object({
+      period: z.enum(['today', 'yesterday', 'last_7d', 'last_30d']),
+      status: z.enum(['ACTIVE', 'PAUSED', 'all']).optional()
+    }),
+    meta: { timeout: 25000, retryable: true }
+  },
+  updateBudget: {
+    schema: z.object({
+      adset_id: z.string().min(1),
+      new_budget_cents: z.number().min(500, 'Minimum $5')
+    }),
+    meta: { timeout: 15000, retryable: false, dangerous: true }
+  }
+};
+```
+
+**Интеграция в BaseAgent.executeTool():**
+```javascript
+// 1. Validate args
+const validation = toolRegistry.validate(name, args);
+if (!validation.success) {
+  return { success: false, error: validation.error };
+}
+
+// 2. Execute with timeout
+const result = await withTimeout(
+  () => handler(validation.data, context),
+  metadata.timeout
+);
+```
+
+---
+
+### Retry & Timeout
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/retryUtils.js`
+
+| Функция | Описание |
+|---------|----------|
+| `withTimeout(fn, ms, name)` | Promise.race с timeout |
+| `withRetry(fn, options)` | Retry с exponential backoff |
+| `isRetryableError(error)` | Определяет retryable ошибки (429, 5xx, ECONNRESET) |
+
+**Конфигурация:**
+```javascript
+// defaults
+maxRetries: 3
+baseDelayMs: 1000
+maxDelayMs: 10000
+timeoutMs: 30000
+```
+
+**Facebook API retry:**
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/fbGraph.js`
+
+```javascript
+export async function fbGraph(method, path, accessToken, params, options) {
+  return withRetry(
+    () => fbGraphInternal(method, path, accessToken, params),
+    {
+      maxRetries: 2,
+      timeoutMs: 25000,
+      shouldRetry: isFbRetryable  // FB codes 4, 17, 32 + generic retryable
+    }
+  );
+}
+```
+
+---
+
+### Token Budgeting
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/tokenBudget.js`
+
+Приоритетное распределение токенов в контексте. Предотвращает переполнение при длинных чатах.
+
+**Default Budget:**
+```javascript
+{
+  total: 8000,        // Общий бюджет контекста
+  systemPrompt: 2000, // Резерв для system prompt
+  chatHistory: 3000,  // История сообщений
+  specs: 800,         // Business specs
+  notes: 600,         // Agent notes
+  metrics: 400,       // Today's metrics
+  contexts: 400,      // Promotional contexts
+  reserved: 800       // Buffer для tool responses
+}
+```
+
+**Приоритеты блоков:**
+| Priority | Block | Описание |
+|----------|-------|----------|
+| 10 | recentMessages | История чата (most important) |
+| 8 | todayMetrics | Текущие метрики |
+| 6 | businessProfile | Профиль бизнеса |
+| 4 | activeContexts | Промо-контексты |
+
+**Trimming:**
+- Arrays: удаляются старые элементы (с начала)
+- Objects: truncate длинных строк
+- При превышении лимита — блоки с низким приоритетом отбрасываются
+
+**Интеграция в contextGatherer:**
+```javascript
+const tokenBudget = new TokenBudget(budget);
+tokenBudget.addBlock('recentMessages', chatHistory, 10);
+tokenBudget.addBlock('todayMetrics', metrics, 8);
+
+const { context, stats } = tokenBudget.build();
+// stats: { usedTokens, budget, utilization, blocksIncluded }
+```
+
+---
+
 ## Миграция Memory Layers
 
 Единая миграция для всех уровней памяти:
