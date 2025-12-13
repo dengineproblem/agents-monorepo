@@ -20,6 +20,13 @@ import { Orchestrator } from './orchestrator/index.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import {
+  handleTelegramMessage,
+  handleClearCommand,
+  handleModeCommand,
+  handleStatusCommand
+} from './telegramHandler.js';
+import { conversationStore } from './persistence/conversationStore.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5; // Prevent infinite loops
@@ -602,12 +609,264 @@ export function registerChatRoutes(fastify) {
     }
   });
 
-  fastify.log.info('Chat Assistant routes registered');
+  // ============================================================
+  // TELEGRAM ENDPOINTS
+  // ============================================================
+
+  /**
+   * Process Telegram message with streaming persistence
+   * Called from external Telegram bot service
+   */
+  fastify.post('/api/brain/telegram/chat', async (request, reply) => {
+    const { telegramChatId, message } = request.body;
+
+    if (!telegramChatId || !message) {
+      return reply.code(400).send({ error: 'telegramChatId and message are required' });
+    }
+
+    try {
+      // Create a mock ctx for non-streaming response
+      // Real streaming happens when called from Telegram bot directly
+      const result = await processTelegramMessage(telegramChatId, message);
+      return reply.send(result);
+    } catch (error) {
+      fastify.log.error({ error: error.message }, 'Telegram chat error');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'telegram_chat_endpoint',
+        endpoint: '/api/brain/telegram/chat',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * Clear Telegram conversation
+   */
+  fastify.post('/api/brain/telegram/clear', async (request, reply) => {
+    const { telegramChatId } = request.body;
+
+    if (!telegramChatId) {
+      return reply.code(400).send({ error: 'telegramChatId is required' });
+    }
+
+    try {
+      const userAccount = await findUserByTelegramId(telegramChatId);
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User not found' });
+      }
+
+      const conversation = await conversationStore.getOrCreateConversation(
+        telegramChatId,
+        userAccount.id
+      );
+
+      await conversationStore.clearMessages(conversation.id);
+
+      return reply.send({ success: true, message: 'Conversation cleared' });
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * Set Telegram conversation mode
+   */
+  fastify.post('/api/brain/telegram/mode', async (request, reply) => {
+    const { telegramChatId, mode } = request.body;
+
+    if (!telegramChatId || !mode) {
+      return reply.code(400).send({ error: 'telegramChatId and mode are required' });
+    }
+
+    if (!['auto', 'plan', 'ask'].includes(mode)) {
+      return reply.code(400).send({ error: 'Invalid mode. Use: auto, plan, ask' });
+    }
+
+    try {
+      const userAccount = await findUserByTelegramId(telegramChatId);
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User not found' });
+      }
+
+      const conversation = await conversationStore.getOrCreateConversation(
+        telegramChatId,
+        userAccount.id
+      );
+
+      await conversationStore.setMode(conversation.id, mode);
+
+      return reply.send({ success: true, mode });
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * Get Telegram conversation status
+   */
+  fastify.get('/api/brain/telegram/status', async (request, reply) => {
+    const { telegramChatId } = request.query;
+
+    if (!telegramChatId) {
+      return reply.code(400).send({ error: 'telegramChatId is required' });
+    }
+
+    try {
+      const userAccount = await findUserByTelegramId(telegramChatId);
+      if (!userAccount) {
+        return reply.code(404).send({ error: 'User not found' });
+      }
+
+      const conversation = await conversationStore.getOrCreateConversation(
+        telegramChatId,
+        userAccount.id
+      );
+
+      const messageCount = await conversationStore.getMessageCount(conversation.id);
+      const pendingActions = await conversationStore.getPendingActions(conversation.id);
+
+      return reply.send({
+        conversationId: conversation.id,
+        mode: conversation.mode,
+        messageCount,
+        lastAgent: conversation.last_agent,
+        lastDomain: conversation.last_domain,
+        hasPendingActions: pendingActions.length > 0,
+        pendingActions: pendingActions.map(a => ({
+          id: a.id,
+          toolName: a.tool_name,
+          agent: a.agent
+        }))
+      });
+    } catch (error) {
+      return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  fastify.log.info('Chat Assistant routes registered (including Telegram endpoints)');
+}
+
+// ============================================================
+// TELEGRAM HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * Find user by telegram_id
+ */
+async function findUserByTelegramId(telegramChatId) {
+  const chatIdStr = String(telegramChatId);
+
+  const { data } = await supabase
+    .from('user_accounts')
+    .select('id, username, access_token, ad_account_id, multi_account_enabled')
+    .or(`telegram_id.eq.${chatIdStr},telegram_id_2.eq.${chatIdStr},telegram_id_3.eq.${chatIdStr},telegram_id_4.eq.${chatIdStr}`)
+    .limit(1)
+    .single();
+
+  if (!data) return null;
+
+  // Get default ad account if multi-account
+  if (data.multi_account_enabled) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id, access_token')
+      .eq('user_account_id', data.id)
+      .eq('is_default', true)
+      .single();
+
+    if (adAccount) {
+      data.default_ad_account_id = adAccount.id;
+      if (adAccount.access_token) {
+        data.access_token = adAccount.access_token;
+      }
+    }
+  }
+
+  return data;
+}
+
+/**
+ * Process Telegram message (non-streaming API version)
+ */
+async function processTelegramMessage(telegramChatId, message) {
+  // Find user
+  const userAccount = await findUserByTelegramId(telegramChatId);
+  if (!userAccount) {
+    throw new Error('User not found for this Telegram ID');
+  }
+
+  const adAccountId = userAccount.default_ad_account_id || userAccount.ad_account_id;
+
+  // Get or create conversation
+  const conversation = await conversationStore.getOrCreateConversation(
+    telegramChatId,
+    userAccount.id,
+    adAccountId
+  );
+
+  // Check lock
+  const lockAcquired = await conversationStore.acquireLock(conversation.id);
+  if (!lockAcquired) {
+    throw new Error('Conversation is busy, please wait');
+  }
+
+  try {
+    // Load history
+    const history = await conversationStore.loadMessages(conversation.id);
+
+    // Save user message
+    await conversationStore.addMessage(conversation.id, {
+      role: 'user',
+      content: message
+    });
+
+    // Get access token
+    const accessToken = await getAccessToken(userAccount.id, adAccountId);
+
+    // Process via orchestrator (non-streaming)
+    const response = await orchestrator.processRequest({
+      message,
+      context: { userAccountId: userAccount.id, adAccountId },
+      mode: conversation.mode || 'auto',
+      toolContext: { accessToken, userAccountId: userAccount.id, adAccountId },
+      conversationHistory: history
+    });
+
+    // Save assistant response
+    await conversationStore.addMessage(conversation.id, {
+      role: 'assistant',
+      content: response.content,
+      agent: response.agent
+    });
+
+    return {
+      success: true,
+      conversationId: conversation.id,
+      content: response.content,
+      agent: response.agent,
+      executedActions: response.executedActions
+    };
+
+  } finally {
+    await conversationStore.releaseLock(conversation.id);
+  }
 }
 
 export default {
   processChat,
   executePlanAction,
   executeFullPlan,
-  registerChatRoutes
+  registerChatRoutes,
+  // Telegram exports
+  handleTelegramMessage,
+  handleClearCommand,
+  handleModeCommand,
+  handleStatusCommand,
+  conversationStore
 };

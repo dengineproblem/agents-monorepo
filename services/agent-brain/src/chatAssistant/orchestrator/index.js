@@ -7,6 +7,7 @@ import OpenAI from 'openai';
 import { classifyRequest } from './classifier.js';
 import { buildOrchestratorPrompt, buildSynthesisPrompt } from './systemPrompt.js';
 import { AdsAgent } from '../agents/ads/index.js';
+import { CreativeAgent } from '../agents/creative/index.js';
 import { WhatsAppAgent } from '../agents/whatsapp/index.js';
 import { CRMAgent } from '../agents/crm/index.js';
 import { logger } from '../../lib/logger.js';
@@ -22,6 +23,7 @@ export class Orchestrator {
     // Initialize all agents
     this.agents = {
       ads: new AdsAgent(),
+      creative: new CreativeAgent(),
       whatsapp: new WhatsAppAgent(),
       crm: new CRMAgent()
     };
@@ -196,6 +198,116 @@ export class Orchestrator {
    */
   getAgent(name) {
     return this.agents[name];
+  }
+
+  // ============================================================
+  // STREAMING METHODS
+  // ============================================================
+
+  /**
+   * Process request with streaming
+   * @yields {Object} Stream events from agent: text, tool_start, tool_result, approval_required, done
+   */
+  async *processStreamRequest({ message, context, mode, toolContext, conversationHistory = [] }) {
+    const startTime = Date.now();
+
+    try {
+      // 1. Classify the request
+      const classification = await classifyRequest(message, context);
+
+      logger.info({
+        message: message.substring(0, 50),
+        classification
+      }, 'Request classified for streaming');
+
+      yield {
+        type: 'classification',
+        domain: classification.domain,
+        agents: classification.agents
+      };
+
+      // 2. Route to appropriate agent (single agent for streaming)
+      // For multi-agent requests, we use the primary agent
+      const primaryAgent = classification.agents[0];
+      const agent = this.agents[primaryAgent];
+
+      if (!agent) {
+        yield {
+          type: 'error',
+          error: `Unknown agent: ${primaryAgent}`
+        };
+        return;
+      }
+
+      logger.info({ agent: primaryAgent }, 'Streaming via agent');
+
+      // 3. Stream through the agent
+      for await (const event of agent.processStreamLoop({
+        message,
+        context,
+        mode,
+        toolContext,
+        conversationHistory
+      })) {
+        // Add classification info to done event
+        if (event.type === 'done') {
+          const duration = Date.now() - startTime;
+          yield {
+            ...event,
+            domain: classification.domain,
+            classification,
+            duration
+          };
+        } else {
+          yield event;
+        }
+      }
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Orchestrator streaming failed');
+
+      yield {
+        type: 'error',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Process streaming request with callback (convenience method)
+   */
+  async processStreamWithCallback({ message, context, mode, toolContext, conversationHistory = [] }, onEvent) {
+    let finalResult = null;
+
+    for await (const event of this.processStreamRequest({
+      message,
+      context,
+      mode,
+      toolContext,
+      conversationHistory
+    })) {
+      if (onEvent) {
+        await onEvent(event);
+      }
+
+      if (event.type === 'done') {
+        finalResult = {
+          agent: event.agent,
+          content: event.content,
+          executedActions: event.executedActions,
+          toolCalls: event.toolCalls,
+          classification: event.classification,
+          domain: event.domain,
+          duration: event.duration
+        };
+      }
+
+      if (event.type === 'error') {
+        throw new Error(event.error);
+      }
+    }
+
+    return finalResult;
   }
 }
 

@@ -207,5 +207,270 @@ export const adsHandlers = {
       success: true,
       message: `Бюджет адсета ${adset_id} изменён на $${(new_budget_cents / 100).toFixed(2)}/день`
     };
+  },
+
+  // ============================================================
+  // DIRECTIONS HANDLERS
+  // ============================================================
+
+  async getDirections({ status, period }, { userAccountId, adAccountId }) {
+    // Get directions for this ad account
+    let query = supabase
+      .from('directions')
+      .select(`
+        id,
+        name,
+        status,
+        budget_per_day,
+        target_cpl,
+        created_at,
+        updated_at,
+        campaign_id
+      `)
+      .eq('ad_account_id', adAccountId);
+
+    if (status && status !== 'all') {
+      query = query.eq('status', status);
+    }
+
+    const { data: directions, error } = await query.order('created_at', { ascending: false });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    // Get aggregated metrics for directions
+    const periodDays = {
+      'today': 1,
+      'yesterday': 1,
+      'last_7d': 7,
+      'last_30d': 30
+    };
+    const days = periodDays[period] || 7;
+
+    const { data: metrics, error: metricsError } = await supabase
+      .rpc('get_direction_aggregated_metrics', {
+        p_ad_account_id: adAccountId,
+        p_days: days
+      });
+
+    // Merge metrics with directions
+    const metricsMap = new Map((metrics || []).map(m => [m.direction_id, m]));
+
+    const enrichedDirections = directions.map(d => {
+      const m = metricsMap.get(d.id) || {};
+      return {
+        id: d.id,
+        name: d.name,
+        status: d.status,
+        budget_per_day: d.budget_per_day,
+        target_cpl: d.target_cpl,
+        campaign_id: d.campaign_id,
+        metrics: {
+          spend: parseFloat(m.total_spend || 0),
+          leads: parseInt(m.total_leads || 0),
+          cpl: m.total_leads > 0 ? (m.total_spend / m.total_leads).toFixed(2) : null,
+          impressions: parseInt(m.total_impressions || 0),
+          active_creatives: parseInt(m.active_creatives || 0)
+        }
+      };
+    });
+
+    return {
+      success: true,
+      period: period || 'last_7d',
+      directions: enrichedDirections,
+      total: enrichedDirections.length
+    };
+  },
+
+  async getDirectionDetails({ direction_id }, { userAccountId, adAccountId, accessToken }) {
+    // Get direction info
+    const { data: direction, error } = await supabase
+      .from('directions')
+      .select(`
+        id,
+        name,
+        status,
+        budget_per_day,
+        target_cpl,
+        campaign_id,
+        adset_id,
+        created_at,
+        updated_at
+      `)
+      .eq('id', direction_id)
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    // Get creatives linked to this direction
+    const { data: creatives } = await supabase
+      .from('user_creatives')
+      .select(`
+        id,
+        name,
+        status,
+        media_type,
+        created_at
+      `)
+      .eq('direction_id', direction_id)
+      .limit(20);
+
+    // Get adset info from Facebook if available
+    let adsetInfo = null;
+    if (direction.adset_id && accessToken) {
+      try {
+        adsetInfo = await fbGraph('GET', direction.adset_id, accessToken, {
+          fields: 'id,name,status,daily_budget,targeting'
+        });
+      } catch (e) {
+        // Ignore FB errors
+      }
+    }
+
+    return {
+      success: true,
+      direction: {
+        ...direction,
+        creatives: creatives || [],
+        adset: adsetInfo
+      }
+    };
+  },
+
+  async getDirectionMetrics({ direction_id, period }, { adAccountId }) {
+    const days = { '7d': 7, '14d': 14, '30d': 30 }[period] || 7;
+
+    // Get daily metrics breakdown
+    const { data: dailyMetrics, error } = await supabase
+      .from('direction_metrics_daily')
+      .select('*')
+      .eq('direction_id', direction_id)
+      .gte('date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+      .order('date', { ascending: true });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    // Calculate totals
+    const totals = (dailyMetrics || []).reduce((acc, d) => ({
+      spend: acc.spend + parseFloat(d.spend || 0),
+      leads: acc.leads + parseInt(d.leads || 0),
+      impressions: acc.impressions + parseInt(d.impressions || 0),
+      clicks: acc.clicks + parseInt(d.clicks || 0)
+    }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
+    return {
+      success: true,
+      direction_id,
+      period,
+      daily: dailyMetrics || [],
+      totals: {
+        ...totals,
+        cpl: totals.leads > 0 ? (totals.spend / totals.leads).toFixed(2) : null,
+        ctr: totals.impressions > 0 ? ((totals.clicks / totals.impressions) * 100).toFixed(2) : null
+      }
+    };
+  },
+
+  async updateDirectionBudget({ direction_id, new_budget }, { adAccountId }) {
+    // Update direction budget
+    const { data, error } = await supabase
+      .from('directions')
+      .update({ budget_per_day: new_budget, updated_at: new Date().toISOString() })
+      .eq('id', direction_id)
+      .select('id, name, budget_per_day')
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Direction budget updated: ${data.name} → $${new_budget}/day`,
+      context: { direction_id, new_budget, source: 'chat_assistant', agent: 'AdsAgent' }
+    });
+
+    return {
+      success: true,
+      message: `Бюджет направления "${data.name}" изменён на $${new_budget}/день`
+    };
+  },
+
+  async updateDirectionTargetCPL({ direction_id, target_cpl }, { adAccountId }) {
+    const { data, error } = await supabase
+      .from('directions')
+      .update({ target_cpl, updated_at: new Date().toISOString() })
+      .eq('id', direction_id)
+      .select('id, name, target_cpl')
+      .single();
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Direction target CPL updated: ${data.name} → $${target_cpl}`,
+      context: { direction_id, target_cpl, source: 'chat_assistant', agent: 'AdsAgent' }
+    });
+
+    return {
+      success: true,
+      message: `Целевой CPL направления "${data.name}" изменён на $${target_cpl}`
+    };
+  },
+
+  async pauseDirection({ direction_id, reason }, { adAccountId, accessToken }) {
+    // Get direction with adset_id
+    const { data: direction, error: fetchError } = await supabase
+      .from('directions')
+      .select('id, name, adset_id')
+      .eq('id', direction_id)
+      .single();
+
+    if (fetchError) {
+      return { success: false, error: fetchError.message };
+    }
+
+    // Update direction status
+    const { error: updateError } = await supabase
+      .from('directions')
+      .update({ status: 'paused', updated_at: new Date().toISOString() })
+      .eq('id', direction_id);
+
+    if (updateError) {
+      return { success: false, error: updateError.message };
+    }
+
+    // Pause FB adset if linked
+    let fbPaused = false;
+    if (direction.adset_id && accessToken) {
+      try {
+        await fbGraph('POST', direction.adset_id, accessToken, { status: 'PAUSED' });
+        fbPaused = true;
+      } catch (e) {
+        // Log but don't fail
+      }
+    }
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Direction paused: ${direction.name}`,
+      context: { direction_id, reason, fb_paused: fbPaused, source: 'chat_assistant', agent: 'AdsAgent' }
+    });
+
+    return {
+      success: true,
+      message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB адсет)' : ''}`
+    };
   }
 };

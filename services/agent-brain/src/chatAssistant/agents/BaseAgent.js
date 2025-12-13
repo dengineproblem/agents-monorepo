@@ -9,6 +9,10 @@ import { logErrorToAdmin } from '../../lib/errorLogger.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
+const MAX_STREAM_ITERATIONS = 5;
+
+// Dangerous tools that ALWAYS require approval regardless of mode
+const DANGEROUS_KEYWORDS = ['pause', 'delete', 'budget', 'bulk', 'массов'];
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -217,14 +221,32 @@ export class BaseAgent {
   }
 
   /**
+   * Check if tool is dangerous and ALWAYS requires approval
+   */
+  isDangerousTool(toolName) {
+    return DANGEROUS_KEYWORDS.some(kw => toolName.toLowerCase().includes(kw));
+  }
+
+  /**
    * Check if tool requires approval based on mode
    * Override in subclasses for agent-specific logic
    */
   shouldRequireApproval(toolName, mode) {
-    // By default, in 'plan' mode all write operations need approval
+    // Dangerous tools ALWAYS require approval
+    if (this.isDangerousTool(toolName)) {
+      return true;
+    }
+
+    // In 'plan' mode, all write operations need approval
     if (mode === 'plan') {
       return this.isWriteTool(toolName);
     }
+
+    // In 'ask' mode, everything needs approval
+    if (mode === 'ask') {
+      return true;
+    }
+
     return false;
   }
 
@@ -250,5 +272,220 @@ export class BaseAgent {
    */
   getToolNames() {
     return this.tools.map(t => t.name);
+  }
+
+  // ============================================================
+  // STREAMING METHODS
+  // ============================================================
+
+  /**
+   * Multi-round streaming with tool execution
+   * @yields {Object} Stream events: text, tool_start, tool_result, approval_required, done
+   */
+  async *processStreamLoop({ message, context, mode, toolContext, conversationHistory = [] }) {
+    const startTime = Date.now();
+    const systemPrompt = this.buildSystemPrompt(context, mode);
+
+    let currentMessages = [
+      { role: 'system', content: systemPrompt },
+      ...conversationHistory,
+      { role: 'user', content: message }
+    ];
+
+    const executedActions = [];
+    const allToolCalls = [];
+    let iterations = 0;
+    let finalContent = '';
+
+    // Format tools for OpenAI
+    const openAITools = this.tools.length > 0
+      ? this.tools.map(tool => ({ type: 'function', function: tool }))
+      : undefined;
+
+    try {
+      while (iterations < MAX_STREAM_ITERATIONS) {
+        iterations++;
+
+        // Streaming request to OpenAI
+        const stream = await openai.chat.completions.create({
+          model: MODEL,
+          messages: currentMessages,
+          tools: openAITools,
+          stream: true,
+          temperature: 0.7
+        });
+
+        let content = '';
+        let toolCallsRaw = [];  // [{index, id, name, arguments}]
+
+        // Process stream
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta;
+
+          // Text content
+          if (delta?.content) {
+            content += delta.content;
+            yield { type: 'text', content: delta.content, accumulated: content };
+          }
+
+          // Tool calls (accumulate across chunks)
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index;
+              if (!toolCallsRaw[idx]) {
+                toolCallsRaw[idx] = { id: '', name: '', arguments: '' };
+              }
+              if (tc.id) toolCallsRaw[idx].id = tc.id;
+              if (tc.function?.name) toolCallsRaw[idx].name = tc.function.name;
+              if (tc.function?.arguments) toolCallsRaw[idx].arguments += tc.function.arguments;
+            }
+          }
+        }
+
+        // No tool calls = final response
+        if (toolCallsRaw.length === 0) {
+          finalContent = content;
+          break;
+        }
+
+        // Build assistant message with tool_calls
+        const assistantMessage = {
+          role: 'assistant',
+          content: content || null,
+          tool_calls: toolCallsRaw.map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: tc.arguments }
+          }))
+        };
+        currentMessages.push(assistantMessage);
+
+        // Execute each tool
+        for (const tc of toolCallsRaw) {
+          // Parse arguments safely
+          let args = {};
+          try {
+            args = JSON.parse(tc.arguments);
+          } catch (e) {
+            logger.warn({ agent: this.name, tool: tc.name, args: tc.arguments }, 'Invalid tool arguments JSON');
+            args = {};
+          }
+
+          allToolCalls.push({ name: tc.name, args, id: tc.id });
+
+          // Check approval requirement
+          const requiresApproval = this.shouldRequireApproval(tc.name, mode);
+
+          if (requiresApproval) {
+            yield {
+              type: 'approval_required',
+              name: tc.name,
+              args,
+              toolCallId: tc.id,
+              message: `Действие "${tc.name}" требует подтверждения`
+            };
+
+            // Add pending result to messages
+            currentMessages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ status: 'pending_approval', tool: tc.name })
+            });
+            continue;
+          }
+
+          // Execute tool
+          yield { type: 'tool_start', name: tc.name, args };
+
+          const result = await this.executeTool(tc.name, args, toolContext);
+
+          executedActions.push({
+            tool: tc.name,
+            args,
+            result: result.success ? 'success' : 'failed',
+            message: result.message || result.error
+          });
+
+          yield { type: 'tool_result', name: tc.name, result };
+
+          // Add tool result to messages for next iteration
+          currentMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(result)
+          });
+        }
+      }
+
+      const duration = Date.now() - startTime;
+      logger.info({
+        agent: this.name,
+        duration,
+        iterations,
+        toolCalls: allToolCalls.length,
+        executedActions: executedActions.length
+      }, 'Agent stream completed');
+
+      yield {
+        type: 'done',
+        agent: this.name,
+        content: finalContent,
+        executedActions,
+        toolCalls: allToolCalls,
+        iterations
+      };
+
+    } catch (error) {
+      logger.error({ agent: this.name, error: error.message }, 'Agent stream failed');
+
+      logErrorToAdmin({
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: `agent_${this.name}_stream`,
+        severity: 'warning'
+      }).catch(() => {});
+
+      yield {
+        type: 'error',
+        agent: this.name,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Process with streaming (wrapper that returns final result)
+   * For cases where you need streaming but also want a final result
+   */
+  async processWithStream({ message, context, mode, toolContext, conversationHistory = [] }, onEvent) {
+    let finalResult = null;
+
+    for await (const event of this.processStreamLoop({
+      message,
+      context,
+      mode,
+      toolContext,
+      conversationHistory
+    })) {
+      if (onEvent) {
+        await onEvent(event);
+      }
+
+      if (event.type === 'done') {
+        finalResult = {
+          agent: event.agent,
+          content: event.content,
+          executedActions: event.executedActions,
+          toolCalls: event.toolCalls
+        };
+      }
+
+      if (event.type === 'error') {
+        throw new Error(event.error);
+      }
+    }
+
+    return finalResult;
   }
 }

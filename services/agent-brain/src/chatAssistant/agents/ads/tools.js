@@ -1,11 +1,11 @@
 /**
  * AdsAgent Tools - Facebook/Instagram Advertising
- * 9 tools: 4 READ + 5 WRITE
+ * 15 tools: 7 READ + 8 WRITE
  */
 
 export const ADS_TOOLS = [
   // ============================================================
-  // READ TOOLS
+  // READ TOOLS - Campaigns & AdSets
   // ============================================================
   {
     name: 'getCampaigns',
@@ -82,7 +82,63 @@ export const ADS_TOOLS = [
   },
 
   // ============================================================
-  // WRITE TOOLS
+  // READ TOOLS - Directions
+  // ============================================================
+  {
+    name: 'getDirections',
+    description: 'Получить список направлений (рекламных вертикалей) с метриками за период',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['active', 'paused', 'all'],
+          description: 'Фильтр по статусу направлений'
+        },
+        period: {
+          type: 'string',
+          enum: ['today', 'yesterday', 'last_7d', 'last_30d'],
+          description: 'Период для метрик'
+        }
+      }
+    }
+  },
+  {
+    name: 'getDirectionDetails',
+    description: 'Получить детальную информацию о направлении включая привязанные адсеты и креативы',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления из таблицы directions'
+        }
+      },
+      required: ['direction_id']
+    }
+  },
+  {
+    name: 'getDirectionMetrics',
+    description: 'Получить метрики направления с разбивкой по дням за период',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления'
+        },
+        period: {
+          type: 'string',
+          enum: ['7d', '14d', '30d'],
+          description: 'Период для метрик'
+        }
+      },
+      required: ['direction_id']
+    }
+  },
+
+  // ============================================================
+  // WRITE TOOLS - Campaigns & AdSets
   // ============================================================
   {
     name: 'pauseCampaign',
@@ -165,6 +221,64 @@ export const ADS_TOOLS = [
       },
       required: ['adset_id', 'new_budget_cents']
     }
+  },
+
+  // ============================================================
+  // WRITE TOOLS - Directions
+  // ============================================================
+  {
+    name: 'updateDirectionBudget',
+    description: 'Изменить суточный бюджет направления. Обновит budget_per_day в настройках направления.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления'
+        },
+        new_budget: {
+          type: 'number',
+          description: 'Новый суточный бюджет в долларах (например: 50)'
+        }
+      },
+      required: ['direction_id', 'new_budget']
+    }
+  },
+  {
+    name: 'updateDirectionTargetCPL',
+    description: 'Изменить целевой CPL направления. Используется для автоматической оптимизации.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления'
+        },
+        target_cpl: {
+          type: 'number',
+          description: 'Новый целевой CPL в долларах (например: 15.50)'
+        }
+      },
+      required: ['direction_id', 'target_cpl']
+    }
+  },
+  {
+    name: 'pauseDirection',
+    description: 'Поставить направление на паузу. Все связанные адсеты будут приостановлены.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления'
+        },
+        reason: {
+          type: 'string',
+          description: 'Причина паузы (для логирования)'
+        }
+      },
+      required: ['direction_id']
+    }
   }
 ];
 
@@ -174,8 +288,11 @@ export const ADS_WRITE_TOOLS = [
   'resumeCampaign',
   'pauseAdSet',
   'resumeAdSet',
-  'updateBudget'
+  'updateBudget',
+  'updateDirectionBudget',
+  'updateDirectionTargetCPL',
+  'pauseDirection'
 ];
 
 // Dangerous tools that ALWAYS require confirmation
-export const ADS_DANGEROUS_TOOLS = ['updateBudget'];
+export const ADS_DANGEROUS_TOOLS = ['updateBudget', 'pauseDirection'];

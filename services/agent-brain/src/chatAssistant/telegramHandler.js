@@ -1,0 +1,396 @@
+/**
+ * Telegram Chat Handler
+ * Handles Telegram messages with streaming and persistence
+ */
+
+import { orchestrator } from './orchestrator/index.js';
+import { conversationStore } from './persistence/conversationStore.js';
+import { TelegramStreamer, streamToTelegram } from './telegramStreamer.js';
+import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
+import { logErrorToAdmin } from '../lib/errorLogger.js';
+
+/**
+ * Process a Telegram message with streaming
+ * @param {Object} params
+ * @param {Object} params.ctx - Telegram context (grammY/telegraf)
+ * @param {string} params.message - User message text
+ * @param {string} params.telegramChatId - Telegram chat ID
+ * @returns {Promise<Object>} Final result
+ */
+export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
+  const startTime = Date.now();
+
+  try {
+    // 1. Find user account by telegram_id
+    const userAccount = await getUserAccountByTelegramId(telegramChatId);
+    if (!userAccount) {
+      await ctx.reply('❌ Аккаунт не найден. Свяжитесь с поддержкой.');
+      return { success: false, error: 'user_not_found' };
+    }
+
+    // 2. Get or create conversation
+    const adAccountId = userAccount.default_ad_account_id || userAccount.ad_account_id;
+    const conversation = await conversationStore.getOrCreateConversation(
+      telegramChatId,
+      userAccount.id,
+      adAccountId
+    );
+
+    // 3. Check concurrency lock
+    const lockAcquired = await conversationStore.acquireLock(conversation.id);
+    if (!lockAcquired) {
+      await ctx.reply('⏳ Подождите, обрабатываю предыдущий запрос...');
+      return { success: false, error: 'busy' };
+    }
+
+    try {
+      // 4. Load conversation history
+      const history = await conversationStore.loadMessages(conversation.id);
+
+      // Add rolling summary if exists
+      const messagesForLLM = conversation.rolling_summary
+        ? [{ role: 'system', content: `Предыдущий контекст диалога: ${conversation.rolling_summary}` }, ...history]
+        : history;
+
+      // 5. Save user message
+      await conversationStore.addMessage(conversation.id, {
+        role: 'user',
+        content: message
+      });
+
+      // 6. Get tool context
+      const accessToken = await getAccessToken(userAccount.id, adAccountId);
+      const toolContext = {
+        accessToken,
+        userAccountId: userAccount.id,
+        adAccountId
+      };
+
+      // 7. Get business context
+      const businessContext = await getBusinessContext(userAccount, adAccountId);
+
+      // 8. Start streaming response
+      const streamer = await new TelegramStreamer(ctx).start();
+
+      // 9. Process with streaming
+      let finalResult = null;
+      const pendingApprovals = [];
+
+      for await (const event of orchestrator.processStreamRequest({
+        message,
+        context: businessContext,
+        mode: conversation.mode || 'auto',
+        toolContext,
+        conversationHistory: messagesForLLM
+      })) {
+        await streamer.handleEvent(event);
+
+        if (event.type === 'approval_required') {
+          pendingApprovals.push({
+            toolName: event.name,
+            toolArgs: event.args,
+            agent: event.agent || 'unknown'
+          });
+        }
+
+        if (event.type === 'done') {
+          finalResult = event;
+        }
+      }
+
+      // 10. Save assistant response
+      if (finalResult) {
+        await conversationStore.addMessage(conversation.id, {
+          role: 'assistant',
+          content: finalResult.content,
+          agent: finalResult.agent
+        });
+
+        // Update conversation metadata
+        await conversationStore.updateMetadata(conversation.id, {
+          lastAgent: finalResult.agent,
+          lastDomain: finalResult.domain
+        });
+      }
+
+      // 11. Save pending approvals if any
+      for (const action of pendingApprovals) {
+        await conversationStore.addPendingAction(conversation.id, action);
+      }
+
+      const duration = Date.now() - startTime;
+      logger.info({
+        telegramChatId,
+        conversationId: conversation.id,
+        duration,
+        agent: finalResult?.agent,
+        pendingApprovals: pendingApprovals.length
+      }, 'Telegram message processed');
+
+      return {
+        success: true,
+        conversationId: conversation.id,
+        content: finalResult?.content,
+        agent: finalResult?.agent,
+        pendingApprovals: pendingApprovals.length > 0 ? pendingApprovals : undefined
+      };
+
+    } finally {
+      // Always release lock
+      await conversationStore.releaseLock(conversation.id);
+    }
+
+  } catch (error) {
+    logger.error({ error: error.message, telegramChatId }, 'Telegram handler failed');
+
+    logErrorToAdmin({
+      error_type: 'api',
+      raw_error: error.message || String(error),
+      stack_trace: error.stack,
+      action: 'telegram_chat_handler',
+      severity: 'warning'
+    }).catch(() => {});
+
+    try {
+      await ctx.reply(`❌ Произошла ошибка: ${error.message}`);
+    } catch (e) {
+      // Ignore reply errors
+    }
+
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Handle /clear command
+ */
+export async function handleClearCommand(ctx, telegramChatId) {
+  try {
+    const userAccount = await getUserAccountByTelegramId(telegramChatId);
+    if (!userAccount) {
+      return ctx.reply('❌ Аккаунт не найден.');
+    }
+
+    const conversation = await conversationStore.getOrCreateConversation(
+      telegramChatId,
+      userAccount.id
+    );
+
+    await conversationStore.clearMessages(conversation.id);
+
+    await ctx.reply('✅ История диалога очищена. Начинаем с чистого листа.');
+    logger.info({ telegramChatId }, 'Conversation cleared');
+  } catch (error) {
+    logger.error({ error: error.message, telegramChatId }, 'Clear command failed');
+    await ctx.reply(`❌ Ошибка: ${error.message}`);
+  }
+}
+
+/**
+ * Handle /mode command
+ */
+export async function handleModeCommand(ctx, telegramChatId, mode) {
+  const validModes = ['auto', 'plan', 'ask'];
+
+  if (!mode || !validModes.includes(mode)) {
+    return ctx.reply(
+      'Использование: /mode auto|plan|ask\n\n' +
+      '• *auto* — выполняет действия автоматически\n' +
+      '• *plan* — предлагает план, ждёт подтверждения\n' +
+      '• *ask* — спрашивает перед каждым действием',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  try {
+    const userAccount = await getUserAccountByTelegramId(telegramChatId);
+    if (!userAccount) {
+      return ctx.reply('❌ Аккаунт не найден.');
+    }
+
+    const conversation = await conversationStore.getOrCreateConversation(
+      telegramChatId,
+      userAccount.id
+    );
+
+    await conversationStore.setMode(conversation.id, mode);
+
+    const modeLabels = {
+      auto: '🚀 Автоматический',
+      plan: '📋 Планирование',
+      ask: '❓ С подтверждением'
+    };
+
+    await ctx.reply(`Режим изменён: ${modeLabels[mode]}`);
+    logger.info({ telegramChatId, mode }, 'Mode changed');
+  } catch (error) {
+    logger.error({ error: error.message, telegramChatId }, 'Mode command failed');
+    await ctx.reply(`❌ Ошибка: ${error.message}`);
+  }
+}
+
+/**
+ * Handle /status command
+ */
+export async function handleStatusCommand(ctx, telegramChatId) {
+  try {
+    const userAccount = await getUserAccountByTelegramId(telegramChatId);
+    if (!userAccount) {
+      return ctx.reply('❌ Аккаунт не найден.');
+    }
+
+    const conversation = await conversationStore.getOrCreateConversation(
+      telegramChatId,
+      userAccount.id
+    );
+
+    const messageCount = await conversationStore.getMessageCount(conversation.id);
+    const pendingActions = await conversationStore.getPendingActions(conversation.id);
+
+    const modeLabels = {
+      auto: '🚀 Автоматический',
+      plan: '📋 Планирование',
+      ask: '❓ С подтверждением'
+    };
+
+    let status =
+      `📊 *Статус диалога*\n\n` +
+      `• Режим: ${modeLabels[conversation.mode] || conversation.mode}\n` +
+      `• Сообщений: ${messageCount}\n` +
+      `• Последний агент: ${conversation.last_agent || 'нет'}`;
+
+    if (pendingActions.length > 0) {
+      status += `\n\n⚠️ *Ожидают подтверждения:*\n`;
+      for (const action of pendingActions) {
+        status += `• ${action.tool_name}\n`;
+      }
+    }
+
+    await ctx.reply(status, { parse_mode: 'Markdown' });
+  } catch (error) {
+    logger.error({ error: error.message, telegramChatId }, 'Status command failed');
+    await ctx.reply(`❌ Ошибка: ${error.message}`);
+  }
+}
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * Find user account by telegram_id (checks all telegram_id fields)
+ */
+async function getUserAccountByTelegramId(telegramChatId) {
+  const chatIdStr = String(telegramChatId);
+
+  // Check all telegram_id columns
+  const { data, error } = await supabase
+    .from('user_accounts')
+    .select('id, username, access_token, ad_account_id, telegram_id, multi_account_enabled')
+    .or(`telegram_id.eq.${chatIdStr},telegram_id_2.eq.${chatIdStr},telegram_id_3.eq.${chatIdStr},telegram_id_4.eq.${chatIdStr}`)
+    .limit(1)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error({ error, telegramChatId }, 'Error finding user by telegram_id');
+    return null;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  // If multi-account enabled, get default ad_account
+  if (data.multi_account_enabled) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id, access_token')
+      .eq('user_account_id', data.id)
+      .eq('is_default', true)
+      .single();
+
+    if (adAccount) {
+      data.default_ad_account_id = adAccount.id;
+      if (adAccount.access_token) {
+        data.access_token = adAccount.access_token;
+      }
+    }
+  }
+
+  return data;
+}
+
+/**
+ * Get access token for user/ad account
+ */
+async function getAccessToken(userAccountId, adAccountId) {
+  // First try ad_accounts
+  if (adAccountId) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('access_token')
+      .eq('id', adAccountId)
+      .single();
+
+    if (adAccount?.access_token) {
+      return adAccount.access_token;
+    }
+  }
+
+  // Fallback to user_accounts
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('access_token')
+    .eq('id', userAccountId)
+    .single();
+
+  return userAccount?.access_token || null;
+}
+
+/**
+ * Get business context for the chat
+ */
+async function getBusinessContext(userAccount, adAccountId) {
+  // Gather minimal context for agents
+  // Full context gathering happens in agents when they call tools
+
+  const context = {
+    userAccountId: userAccount.id,
+    adAccountId,
+    username: userAccount.username
+  };
+
+  // Get today's basic metrics if available
+  try {
+    const today = new Date().toISOString().split('T')[0];
+
+    const { data: todayMetrics } = await supabase
+      .from('direction_metrics_daily')
+      .select('spend, leads')
+      .eq('ad_account_id', adAccountId)
+      .eq('date', today);
+
+    if (todayMetrics?.length > 0) {
+      const totalSpend = todayMetrics.reduce((sum, m) => sum + parseFloat(m.spend || 0), 0);
+      const totalLeads = todayMetrics.reduce((sum, m) => sum + parseInt(m.leads || 0), 0);
+
+      context.todayMetrics = {
+        spend: totalSpend,
+        leads: totalLeads,
+        cpl: totalLeads > 0 ? totalSpend / totalLeads : null
+      };
+    }
+  } catch (e) {
+    // Ignore metrics errors
+  }
+
+  return context;
+}
+
+export default {
+  handleTelegramMessage,
+  handleClearCommand,
+  handleModeCommand,
+  handleStatusCommand
+};
