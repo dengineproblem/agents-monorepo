@@ -847,6 +847,86 @@ const { context, stats } = tokenBudget.build();
 
 ---
 
+### Idempotency Keys
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/idempotentExecutor.js`
+
+**Хранение:** `services/agent-brain/src/chatAssistant/stores/idempotencyStore.js`
+
+Предотвращает повторное выполнение WRITE операций при retry, double-click и т.д.
+
+**Как работает:**
+1. Для каждой WRITE операции генерируется `operation_key` (SHA256 от tool + args + context)
+2. Перед выполнением — проверка в `ai_idempotent_operations`
+3. Если найдено — возвращается cached результат
+4. Если нет — выполняется операция и сохраняется результат
+5. Записи автоматически удаляются через 24 часа
+
+**Таблица:**
+```sql
+ai_idempotent_operations (
+  id UUID PRIMARY KEY,
+  operation_key TEXT NOT NULL,      -- SHA256 hash
+  user_account_id UUID NOT NULL,
+  tool_name TEXT NOT NULL,
+  tool_args JSONB,
+  result JSONB,                     -- cached result
+  success BOOLEAN,
+  source TEXT,                      -- 'chat_assistant' | 'plan_executor'
+  expires_at TIMESTAMPTZ            -- auto-cleanup
+)
+```
+
+**Использование:**
+```javascript
+import { executeIdempotent } from '../shared/idempotentExecutor.js';
+
+const result = await executeIdempotent({
+  toolName: 'pauseCampaign',
+  args: { campaign_id: '123' },
+  context: { userAccountId, adAccountId },
+  executor: () => handlers.pauseCampaign(args, context)
+});
+
+// result.cached = true если вернулся из кэша
+```
+
+---
+
+### Dry-run Mode
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/dryRunHandlers.js`
+
+Режим "сухого запуска" для тестирования WRITE операций без реального выполнения.
+
+**Как включить:**
+```javascript
+// В запросе
+{ message: "...", dryRun: true }
+
+// Или через env
+DRY_RUN_MODE=true
+```
+
+**Что происходит в dry-run:**
+- READ операции выполняются нормально
+- WRITE операции возвращают симуляцию результата
+- В ответе `{ dryRun: true, wouldExecute: [...] }`
+
+**Пример ответа:**
+```json
+{
+  "dryRun": true,
+  "wouldExecute": [
+    { "tool": "pauseCampaign", "args": { "campaign_id": "123" } },
+    { "tool": "updateBudget", "args": { "adset_id": "456", "amount": 500 } }
+  ],
+  "message": "Dry-run: 2 операции были бы выполнены"
+}
+```
+
+---
+
 ## Two-Stage Retrieval (Metrics)
 
 Двухуровневая система получения метрик: Rollup (быстро, из БД) → Drilldown (FB API при необходимости).
@@ -974,11 +1054,212 @@ async getDirectionMetrics({ direction_id, period }, context) {
 
 ---
 
+## Frontend
+
+### Компоненты
+
+| Файл | Описание |
+|------|----------|
+| `pages/Assistant.tsx` | Главная страница чата |
+| `components/assistant/ChatSidebar.tsx` | Список чатов (история диалогов) |
+| `components/assistant/ChatMessages.tsx` | Лента сообщений |
+| `components/assistant/ChatInput.tsx` | Ввод сообщения + выбор режима |
+| `components/assistant/MessageBubble.tsx` | Одно сообщение (user/assistant) |
+| `components/assistant/ModeSelector.tsx` | Переключатель режимов (auto/plan/ask) |
+| `components/assistant/PlanApprovalModal.tsx` | Окно подтверждения плана |
+
+### Plan Approval Modal
+
+При построении плана (режим `plan`) появляется модальное окно:
+
+| Кнопка | Описание |
+|--------|----------|
+| **No** | Отменить план |
+| **Yes** | Выполнить все шаги плана |
+| **Yes + Auto** | Выполнить и автоматически корректировать при ошибках |
+| **Yes + Manual** | Подтверждать каждый шаг отдельно |
+
+### API клиент
+
+**Путь:** `services/frontend/src/services/assistantApi.ts`
+
+```typescript
+// Основные методы
+sendMessage(message, conversationId?, mode?)  // Отправить сообщение
+getConversations(limit?)                      // Список чатов
+getMessages(conversationId)                   // Сообщения чата
+deleteConversation(conversationId)            // Удалить чат
+executeAction(conversationId, actionIndex)    // Выполнить действие из плана
+executeAllActions(conversationId)             // Выполнить весь план
+```
+
+---
+
+## Конфигурация
+
+### Environment Variables (agent-brain)
+
+```bash
+# OpenAI
+OPENAI_API_KEY=sk-...
+CHAT_ASSISTANT_MODEL=gpt-4o           # Модель для Chat Assistant
+
+# Режим работы
+CHAT_USE_ORCHESTRATOR=true            # true = многоагентная система (default)
+                                      # false = legacy режим с одним агентом
+```
+
+### Frontend (.env)
+
+```bash
+VITE_BRAIN_API_BASE_URL=http://localhost:7080  # URL agent-brain для локальной разработки
+```
+
+---
+
+## Запуск
+
+### 1. Применить миграции
+
+```bash
+# В Supabase SQL Editor или через psql
+psql $DATABASE_URL < migrations/089_ai_chat_tables.sql
+psql $DATABASE_URL < migrations/091_ai_pending_plans.sql
+psql $DATABASE_URL < migrations/092_business_memory.sql
+psql $DATABASE_URL < migrations/093_idempotent_operations.sql
+psql $DATABASE_URL < migrations/094_direction_metrics_rollup.sql
+```
+
+### 2. Перезапустить agent-brain
+
+```bash
+cd services/agent-brain
+npm run dev  # или docker-compose restart agent-brain
+```
+
+### 3. Открыть в браузере
+
+```
+http://localhost:3001/assistant
+```
+
+---
+
+## Примеры использования
+
+### Просмотр данных
+```
+Пользователь: Покажи расходы за вчера
+Ассистент: [AdsAgent → getSpendReport]
+  Расходы за вчера: $127
+  • Кампания "Имплантация" — $85 (3 лида, CPL $28)
+  • Кампания "Виниры" — $42 (1 лид, CPL $42)
+```
+
+### Управление кампаниями (режим Plan)
+```
+Пользователь: Остановить неэффективные кампании
+Ассистент: [AdsAgent] Нашёл 2 кампании с CPL > $50:
+  1. "Имплантация Москва" — CPL $67
+  2. "Виниры СПб" — CPL $52
+
+  📋 План действий:
+  1. ⚠️ pauseCampaign("Имплантация Москва")
+  2. ⚠️ pauseCampaign("Виниры СПб")
+
+  Ожидаемая экономия: ~$120/день
+
+  [No] [Yes] [Yes+Auto] [Yes+Manual]
+```
+
+### Работа с лидами
+```
+Пользователь: Найди горячих лидов
+Ассистент: [CRMAgent → getLeads с interest_level=hot]
+  🔥 Горячие лиды (5):
+  1. Иван Петров — score 85, этап "Консультация"
+  2. Мария Сидорова — score 78, этап "Записана"
+  ...
+```
+
+### Анализ диалогов
+```
+Пользователь: Проанализируй диалог с +7999123456
+Ассистент: [WhatsAppAgent → analyzeDialog]
+  📱 Анализ диалога:
+
+  **Температура:** 🔥 Hot (score: 78)
+  **Интересы:** имплантация, цена
+  **Возражения:** высокая стоимость
+  **Рекомендация:** предложить рассрочку
+```
+
+### Мультиагентный запрос
+```
+Пользователь: Покажи лидов из кампании "Имплантация Москва"
+Ассистент: [Orchestrator координирует AdsAgent + CRMAgent]
+
+  Кампания "Имплантация Москва":
+  • Расход: $250
+  • Лидов: 5
+
+  Лиды из этой кампании:
+  1. 🔥 Анна Иванова — score 82
+  2. ⚡ Пётр Сидоров — score 54
+  ...
+```
+
+### Работа с креативами
+```
+Пользователь: Топ креативы по CPL
+Ассистент: [CreativeAgent → getTopCreatives]
+  🏆 Топ-5 креативов по CPL:
+  1. "Имплантация за 1 день" — CPL $18, 45 лидов
+  2. "Белоснежная улыбка" — CPL $22, 32 лида
+  ...
+```
+
+---
+
+## Troubleshooting
+
+### "No Facebook access token found"
+Убедитесь что у пользователя подключён Facebook аккаунт в профиле.
+
+### "Failed to get conversations"
+Проверьте что миграции применены и таблицы `ai_conversations`, `ai_messages` существуют.
+
+### Ошибки OpenAI
+1. Проверьте `OPENAI_API_KEY` в env
+2. Проверьте лимиты API
+3. Проверьте логи agent-brain
+
+### Запросы направляются не тому агенту
+1. Проверьте логи классификатора (`orchestrator/classifier.js`)
+2. Добавьте ключевые слова в `classifier.js`
+3. Используйте более явные формулировки в запросе
+
+### Отключить многоагентную систему
+```bash
+CHAT_USE_ORCHESTRATOR=false
+```
+Это вернёт legacy режим с одним агентом и всеми инструментами.
+
+### Plan не выполняется после approval
+1. Проверьте таблицу `ai_pending_plans` — статус должен быть `approved`
+2. Проверьте логи `PlanExecutor`
+3. Проверьте что tool handler не возвращает ошибку
+
+---
+
 ## Миграции
 
 | Миграция | Описание |
 |----------|----------|
+| `089_ai_chat_tables.sql` | ai_conversations, ai_messages — основные таблицы чата |
+| `091_ai_pending_plans.sql` | ai_pending_plans — планы для approval (Web/Telegram) |
 | `092_business_memory.sql` | Session + Procedural + Mid-term + Semantic Memory |
+| `093_idempotent_operations.sql` | ai_idempotent_operations — idempotency tracking |
 | `094_direction_metrics_rollup.sql` | Direction Metrics Rollup + SQL функция |
 
 ### 092_business_memory.sql
