@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
 import { logErrorToAdmin } from '../../lib/errorLogger.js';
+import { unifiedStore } from '../stores/unifiedStore.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5;
@@ -201,7 +202,19 @@ export class BaseAgent {
     }
 
     try {
-      return await handler(args, context);
+      const result = await handler(args, context);
+
+      // Auto-update focus entities after successful tool execution
+      if (result.success !== false && context.conversationId) {
+        const focusEntities = this.extractFocusEntities(name, args, result);
+        if (Object.keys(focusEntities).length > 0) {
+          unifiedStore.updateFocusEntities(context.conversationId, focusEntities).catch(err => {
+            logger.warn({ error: err.message, conversationId: context.conversationId }, 'Failed to update focus entities');
+          });
+        }
+      }
+
+      return result;
     } catch (error) {
       logger.error({ agent: this.name, tool: name, error: error.message }, 'Tool execution failed');
 
@@ -218,6 +231,44 @@ export class BaseAgent {
         error: error.message
       };
     }
+  }
+
+  /**
+   * Extract focus entities from tool execution
+   * Subclasses can override for agent-specific extraction
+   */
+  extractFocusEntities(toolName, args, result) {
+    const entities = {};
+
+    // Campaign-related tools
+    if (toolName === 'getCampaignDetails' && args.campaignId) {
+      entities.campaignId = args.campaignId;
+    }
+    if (toolName === 'getCampaigns' && result.campaigns?.length === 1) {
+      entities.campaignId = result.campaigns[0].id;
+    }
+
+    // Direction-related tools
+    if (toolName === 'getDirectionDetails' && args.directionId) {
+      entities.directionId = args.directionId;
+    }
+
+    // Dialog-related tools
+    if (toolName === 'getDialogMessages' && args.contact_phone) {
+      entities.dialogPhone = args.contact_phone;
+    }
+    if (toolName === 'analyzeDialog' && args.contact_phone) {
+      entities.dialogPhone = args.contact_phone;
+    }
+
+    // Date range tracking
+    if (args.startDate && args.endDate) {
+      entities.period = `${args.startDate}:${args.endDate}`;
+    } else if (args.date_from && args.date_to) {
+      entities.period = `${args.date_from}:${args.date_to}`;
+    }
+
+    return entities;
   }
 
   /**

@@ -1,6 +1,6 @@
 /**
  * WhatsAppAgent Tools - WhatsApp Dialogs
- * 3 tools: all READ
+ * 4 tools: all READ
  */
 
 export const WHATSAPP_TOOLS = [
@@ -52,6 +52,28 @@ export const WHATSAPP_TOOLS = [
         }
       },
       required: ['contact_phone']
+    }
+  },
+  {
+    name: 'searchDialogSummaries',
+    description: 'Поиск по истории диалогов. Используй для вопросов типа "найди где жаловались на цену", "кто интересовался имплантацией", "покажи диалоги с возражениями"',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Поисковый запрос (по резюме диалогов)'
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Фильтр по тегам (например: ["имплантация", "возражение:цена"])'
+        },
+        limit: {
+          type: 'number',
+          description: 'Максимальное количество результатов (по умолчанию 10)'
+        }
+      }
     }
   }
 ];

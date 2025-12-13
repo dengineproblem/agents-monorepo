@@ -511,3 +511,98 @@ User Request → LLM → approval_required event
 Если inline keyboard не работает:
 - "да", "yes", "ок", "подтверждаю" → approve
 - "нет", "no", "отмена", "отменить" → reject
+
+---
+
+## Память (Memory Layers)
+
+Chat Assistant использует 3-уровневую систему памяти:
+
+### Session Memory (focus_entities)
+
+**Хранение:** `ai_conversations.focus_entities JSONB`
+
+Контекст текущего диалога — о чём говорим, какой период, какая кампания.
+
+```json
+{
+  "campaignId": "123",
+  "directionId": "456",
+  "dialogPhone": "+77001234567",
+  "period": "2024-01-01:2024-01-07"
+}
+```
+
+**Автоматическое обновление** при вызове tools:
+- `getCampaignDetails(id)` → `campaignId`
+- `getDialogMessages(phone)` → `dialogPhone`
+- `getDirectionDetails(id)` → `directionId`
+- Любой date-range запрос → `period`
+
+**Методы UnifiedStore:**
+| Метод | Описание |
+|-------|----------|
+| `getFocusEntities(conversationId)` | Получить текущий контекст |
+| `updateFocusEntities(conversationId, entities)` | Merge с существующими |
+| `clearFocusEntities(conversationId)` | Очистить контекст |
+
+---
+
+### Procedural Memory (Business Specs)
+
+**Хранение:** `user_briefing_responses` — расширенные поля
+
+Бизнес-правила — как устроена воронка, какие KPI, откуда брать данные.
+
+| Поле | Описание | Пример |
+|------|----------|--------|
+| `tracking_spec` | Настройки атрибуции | `{"utm_ad_id_field": "utm_content", "phone_normalization": {"country": "KZ"}}` |
+| `crm_spec` | Этапы воронки, сигналы | `{"pipeline_stages": [...], "hot_signals": [...]}` |
+| `kpi_spec` | Глобальные KPI | `{"target_cpl_max": 5000, "priority_services": [...]}` |
+
+**Мультиаккаунтность:**
+- Legacy (`account_id = NULL`) → один бриф на user
+- Multi-account → бриф per ad_account
+
+**Метод ContextGatherer:**
+```javascript
+const specs = await getSpecs(userAccountId, accountId);
+// { tracking: {}, crm: {}, kpi: {} }
+```
+
+---
+
+### Semantic Memory (Dialog Search)
+
+**Хранение:** `dialog_analysis` — расширенные поля
+
+Поиск по истории диалогов — "найди где жаловались на цену".
+
+| Поле | Описание |
+|------|----------|
+| `summary TEXT` | Краткое резюме диалога (FTS индекс, Russian config) |
+| `tags TEXT[]` | Теги для фильтрации (GIN индекс) |
+| `insights_json JSONB` | Структурированные инсайты: objections, interests, next_action |
+
+**Пример:**
+```sql
+summary = 'Клиент интересовался имплантацией, возражал по цене, просил рассрочку'
+tags = ['имплантация', 'возражение:цена', 'рассрочка']
+insights_json = {"objections": ["дорого"], "interests": ["имплантация"]}
+```
+
+**Tool WhatsAppAgent:**
+```javascript
+searchDialogSummaries({ query, tags, limit })
+// Поиск по резюме (FTS) и/или тегам
+```
+
+---
+
+## Миграции Memory Layers
+
+| Миграция | Описание |
+|----------|----------|
+| `092_ai_conversations_focus_entities.sql` | Session Memory |
+| `093_briefing_specs.sql` | Procedural Memory |
+| `094_dialog_analysis_semantic.sql` | Semantic Memory + FTS индексы |

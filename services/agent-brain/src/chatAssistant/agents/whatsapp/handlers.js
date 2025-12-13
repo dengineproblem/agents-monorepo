@@ -110,5 +110,53 @@ export const whatsappHandlers = {
         analyzed_at: analysis.updated_at
       }
     };
+  },
+
+  async searchDialogSummaries({ query, tags, limit }, { userAccountId, adAccountId }) {
+    // Search dialogs by summary (FTS) and/or tags
+    let dbQuery = supabase
+      .from('dialog_analysis')
+      .select('contact_phone, contact_name, summary, tags, score, interest_level, funnel_stage, last_message_at')
+      .eq('user_account_id', userAccountId)
+      .not('summary', 'is', null);
+
+    if (adAccountId) {
+      dbQuery = dbQuery.eq('account_id', adAccountId);
+    }
+
+    // Full-text search by summary (Russian config)
+    if (query) {
+      dbQuery = dbQuery.textSearch('summary', query, { type: 'websearch', config: 'russian' });
+    }
+
+    // Filter by tags (overlaps = any match)
+    if (tags && tags.length > 0) {
+      dbQuery = dbQuery.overlaps('tags', tags);
+    }
+
+    dbQuery = dbQuery
+      .order('last_message_at', { ascending: false })
+      .limit(limit || 10);
+
+    const { data, error } = await dbQuery;
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      dialogs: (data || []).map(d => ({
+        contact_phone: d.contact_phone,
+        contact_name: d.contact_name,
+        summary: d.summary,
+        tags: d.tags || [],
+        score: d.score,
+        interest_level: d.interest_level,
+        funnel_stage: d.funnel_stage,
+        last_message_at: d.last_message_at
+      })),
+      total: data?.length || 0,
+      query,
+      tags_filter: tags
+    };
   }
 };
