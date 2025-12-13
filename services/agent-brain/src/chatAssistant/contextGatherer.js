@@ -1,11 +1,15 @@
 /**
  * Context Gatherer for Chat Assistant
  * Collects relevant context data before LLM call
+ *
+ * NOTE: For conversation/message CRUD operations, prefer using unifiedStore.
+ * This module focuses on gathering context data (metrics, profiles, etc.)
  */
 
 import { supabase, supabaseQuery } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { unifiedStore } from './stores/unifiedStore.js';
 
 /**
  * Gather all context needed for the chat assistant
@@ -173,63 +177,41 @@ async function getActiveContexts(userAccountId) {
 
 /**
  * Get or create a conversation
+ * @deprecated Use unifiedStore.getOrCreate() for new code
  */
 export async function getOrCreateConversation({ userAccountId, adAccountId, conversationId, mode }) {
-  // If conversationId provided, fetch it
+  // Delegate to unifiedStore for unified behavior
   if (conversationId) {
-    const { data, error } = await supabase
-      .from('ai_conversations')
-      .select('*')
-      .eq('id', conversationId)
-      .eq('user_account_id', userAccountId)
-      .single();
-
-    if (!error && data) {
-      return data;
+    const existing = await unifiedStore.getById(conversationId);
+    if (existing && existing.user_account_id === userAccountId) {
+      return existing;
     }
   }
 
-  // Create new conversation
-  const { data: newConv, error: createError } = await supabase
-    .from('ai_conversations')
-    .insert({
-      user_account_id: userAccountId,
-      ad_account_id: adAccountId,
-      title: 'Новый чат',
-      mode: mode || 'auto'
-    })
-    .select()
-    .single();
-
-  if (createError) {
-    throw new Error(`Failed to create conversation: ${createError.message}`);
-  }
-
-  return newConv;
+  // Create via unifiedStore (source: 'web' for backward compatibility)
+  return await unifiedStore.getOrCreate({
+    source: 'web',
+    userAccountId,
+    adAccountId,
+    mode
+  });
 }
 
 /**
  * Save a message to the conversation
+ * @deprecated Use unifiedStore.addMessage() for new code
  */
-export async function saveMessage({ conversationId, role, content, planJson, actionsJson, toolCallsJson }) {
-  const { data, error } = await supabase
-    .from('ai_messages')
-    .insert({
-      conversation_id: conversationId,
-      role,
-      content,
-      plan_json: planJson || null,
-      actions_json: actionsJson || null,
-      tool_calls_json: toolCallsJson || null
-    })
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to save message: ${error.message}`);
-  }
-
-  return data;
+export async function saveMessage({ conversationId, role, content, planJson, actionsJson, toolCallsJson, agent, domain }) {
+  // Delegate to unifiedStore for unified behavior
+  return await unifiedStore.addMessage(conversationId, {
+    role,
+    content,
+    plan_json: planJson,
+    actions_json: actionsJson,
+    tool_calls: toolCallsJson,
+    agent,
+    domain
+  });
 }
 
 /**
@@ -248,16 +230,21 @@ export async function updateConversationTitle(conversationId, message) {
 /**
  * Get list of conversations for user
  */
-export async function getConversations({ userAccountId, adAccountId, limit = 20 }) {
+export async function getConversations({ userAccountId, adAccountId, limit = 20, source = null }) {
   let query = supabase
     .from('ai_conversations')
-    .select('id, title, mode, updated_at, created_at')
+    .select('id, title, mode, source, last_agent, last_domain, updated_at, created_at')
     .eq('user_account_id', userAccountId)
     .order('updated_at', { ascending: false })
     .limit(limit);
 
   if (adAccountId) {
     query = query.eq('ad_account_id', adAccountId);
+  }
+
+  // Filter by source if specified (web, telegram)
+  if (source) {
+    query = query.eq('source', source);
   }
 
   const { data, error } = await query;
@@ -286,11 +273,49 @@ export async function deleteConversation(conversationId, userAccountId) {
   return { success: true };
 }
 
+/**
+ * Get business specs (procedural memory)
+ * @param {string} userAccountId
+ * @param {string|null} accountId - For multi-account: ad_account FK, null for legacy
+ * @returns {Promise<Object>} { tracking, crm, kpi }
+ */
+export async function getSpecs(userAccountId, accountId = null) {
+  let query = supabase
+    .from('user_briefing_responses')
+    .select('tracking_spec, crm_spec, kpi_spec')
+    .eq('user_id', userAccountId);
+
+  if (accountId) {
+    query = query.eq('account_id', accountId);
+  } else {
+    query = query.is('account_id', null);
+  }
+
+  const { data, error } = await query.maybeSingle();
+
+  if (error) {
+    logger.warn({ error: error.message, userAccountId, accountId }, 'Failed to get specs');
+    return { tracking: {}, crm: {}, kpi: {} };
+  }
+
+  return {
+    tracking: data?.tracking_spec || {},
+    crm: data?.crm_spec || {},
+    kpi: data?.kpi_spec || {}
+  };
+}
+
+// Re-export unifiedStore for convenience
+export { unifiedStore } from './stores/unifiedStore.js';
+
 export default {
   gatherContext,
   getOrCreateConversation,
   saveMessage,
   updateConversationTitle,
   getConversations,
-  deleteConversation
+  deleteConversation,
+  getSpecs,
+  // Also expose unifiedStore on default export
+  unifiedStore
 };

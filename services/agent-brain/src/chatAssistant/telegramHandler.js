@@ -1,11 +1,12 @@
 /**
  * Telegram Chat Handler
- * Handles Telegram messages with streaming and persistence
+ * Handles Telegram messages with streaming, persistence, and inline approval
  */
 
 import { orchestrator } from './orchestrator/index.js';
-import { conversationStore } from './persistence/conversationStore.js';
-import { TelegramStreamer, streamToTelegram } from './telegramStreamer.js';
+import { unifiedStore } from './stores/unifiedStore.js';
+import { TelegramStreamer } from './telegramStreamer.js';
+import { sendApprovalButtons, handleTextApproval } from './telegram/approvalHandler.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -29,37 +30,44 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
       return { success: false, error: 'user_not_found' };
     }
 
-    // 2. Get or create conversation
+    // 2. Get or create conversation (using unified store)
     const adAccountId = userAccount.default_ad_account_id || userAccount.ad_account_id;
-    const conversation = await conversationStore.getOrCreateConversation(
-      telegramChatId,
-      userAccount.id,
-      adAccountId
-    );
+    const conversation = await unifiedStore.getOrCreate({
+      source: 'telegram',
+      userAccountId: userAccount.id,
+      adAccountId,
+      telegramChatId: String(telegramChatId)
+    });
 
-    // 3. Check concurrency lock
-    const lockAcquired = await conversationStore.acquireLock(conversation.id);
+    // 3. Check for text-based approval first
+    const handled = await handleTextApproval(ctx, message, conversation.id);
+    if (handled) {
+      return { success: true, handled: 'text_approval' };
+    }
+
+    // 4. Check concurrency lock
+    const lockAcquired = await unifiedStore.acquireLock(conversation.id);
     if (!lockAcquired) {
       await ctx.reply('⏳ Подождите, обрабатываю предыдущий запрос...');
       return { success: false, error: 'busy' };
     }
 
     try {
-      // 4. Load conversation history
-      const history = await conversationStore.loadMessages(conversation.id);
+      // 5. Load conversation history
+      const history = await unifiedStore.loadMessages(conversation.id);
 
       // Add rolling summary if exists
       const messagesForLLM = conversation.rolling_summary
         ? [{ role: 'system', content: `Предыдущий контекст диалога: ${conversation.rolling_summary}` }, ...history]
         : history;
 
-      // 5. Save user message
-      await conversationStore.addMessage(conversation.id, {
+      // 6. Save user message
+      await unifiedStore.addMessage(conversation.id, {
         role: 'user',
         content: message
       });
 
-      // 6. Get tool context
+      // 7. Get tool context
       const accessToken = await getAccessToken(userAccount.id, adAccountId);
       const toolContext = {
         accessToken,
@@ -67,13 +75,13 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
         adAccountId
       };
 
-      // 7. Get business context
+      // 8. Get business context
       const businessContext = await getBusinessContext(userAccount, adAccountId);
 
-      // 8. Start streaming response
+      // 9. Start streaming response
       const streamer = await new TelegramStreamer(ctx).start();
 
-      // 9. Process with streaming
+      // 10. Process with streaming
       let finalResult = null;
       const pendingApprovals = [];
 
@@ -88,9 +96,11 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
 
         if (event.type === 'approval_required') {
           pendingApprovals.push({
-            toolName: event.name,
-            toolArgs: event.args,
-            agent: event.agent || 'unknown'
+            action: event.name,
+            params: event.args,
+            description: event.message || `Выполнить ${event.name}`,
+            agent: event.agent || 'unknown',
+            dangerous: event.dangerous || false
           });
         }
 
@@ -99,24 +109,43 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
         }
       }
 
-      // 10. Save assistant response
+      // 11. Save assistant response
       if (finalResult) {
-        await conversationStore.addMessage(conversation.id, {
+        await unifiedStore.addMessage(conversation.id, {
           role: 'assistant',
           content: finalResult.content,
-          agent: finalResult.agent
+          agent: finalResult.agent,
+          domain: finalResult.domain
         });
 
         // Update conversation metadata
-        await conversationStore.updateMetadata(conversation.id, {
+        await unifiedStore.updateMetadata(conversation.id, {
           lastAgent: finalResult.agent,
           lastDomain: finalResult.domain
         });
       }
 
-      // 11. Save pending approvals if any
-      for (const action of pendingApprovals) {
-        await conversationStore.addPendingAction(conversation.id, action);
+      // 12. Handle pending approvals with inline keyboard
+      if (pendingApprovals.length > 0) {
+        const plan = {
+          steps: pendingApprovals,
+          summary: `Требуется подтверждение для ${pendingApprovals.length} действий`
+        };
+
+        // Create pending plan
+        const pendingPlan = await unifiedStore.createPendingPlan(
+          conversation.id,
+          plan,
+          {
+            source: 'telegram',
+            telegramChatId: String(telegramChatId),
+            agent: finalResult?.agent,
+            domain: finalResult?.domain
+          }
+        );
+
+        // Send inline keyboard
+        await sendApprovalButtons(ctx, plan, pendingPlan.id);
       }
 
       const duration = Date.now() - startTime;
@@ -138,7 +167,7 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
 
     } finally {
       // Always release lock
-      await conversationStore.releaseLock(conversation.id);
+      await unifiedStore.releaseLock(conversation.id);
     }
 
   } catch (error) {
@@ -172,12 +201,13 @@ export async function handleClearCommand(ctx, telegramChatId) {
       return ctx.reply('❌ Аккаунт не найден.');
     }
 
-    const conversation = await conversationStore.getOrCreateConversation(
-      telegramChatId,
-      userAccount.id
-    );
+    const conversation = await unifiedStore.getOrCreate({
+      source: 'telegram',
+      userAccountId: userAccount.id,
+      telegramChatId: String(telegramChatId)
+    });
 
-    await conversationStore.clearMessages(conversation.id);
+    await unifiedStore.clearMessages(conversation.id);
 
     await ctx.reply('✅ История диалога очищена. Начинаем с чистого листа.');
     logger.info({ telegramChatId }, 'Conversation cleared');
@@ -209,12 +239,13 @@ export async function handleModeCommand(ctx, telegramChatId, mode) {
       return ctx.reply('❌ Аккаунт не найден.');
     }
 
-    const conversation = await conversationStore.getOrCreateConversation(
-      telegramChatId,
-      userAccount.id
-    );
+    const conversation = await unifiedStore.getOrCreate({
+      source: 'telegram',
+      userAccountId: userAccount.id,
+      telegramChatId: String(telegramChatId)
+    });
 
-    await conversationStore.setMode(conversation.id, mode);
+    await unifiedStore.setMode(conversation.id, mode);
 
     const modeLabels = {
       auto: '🚀 Автоматический',
@@ -240,13 +271,14 @@ export async function handleStatusCommand(ctx, telegramChatId) {
       return ctx.reply('❌ Аккаунт не найден.');
     }
 
-    const conversation = await conversationStore.getOrCreateConversation(
-      telegramChatId,
-      userAccount.id
-    );
+    const conversation = await unifiedStore.getOrCreate({
+      source: 'telegram',
+      userAccountId: userAccount.id,
+      telegramChatId: String(telegramChatId)
+    });
 
-    const messageCount = await conversationStore.getMessageCount(conversation.id);
-    const pendingActions = await conversationStore.getPendingActions(conversation.id);
+    const messageCount = await unifiedStore.getMessageCount(conversation.id);
+    const pendingPlan = await unifiedStore.getPendingPlan(conversation.id);
 
     const modeLabels = {
       auto: '🚀 Автоматический',
@@ -260,11 +292,13 @@ export async function handleStatusCommand(ctx, telegramChatId) {
       `• Сообщений: ${messageCount}\n` +
       `• Последний агент: ${conversation.last_agent || 'нет'}`;
 
-    if (pendingActions.length > 0) {
-      status += `\n\n⚠️ *Ожидают подтверждения:*\n`;
-      for (const action of pendingActions) {
-        status += `• ${action.tool_name}\n`;
+    if (pendingPlan) {
+      const steps = pendingPlan.plan_json?.steps || [];
+      status += `\n\n⚠️ *Ожидает подтверждения:*\n`;
+      for (const step of steps) {
+        status += `• ${step.description || step.action}\n`;
       }
+      status += `\nОтветьте "да" для выполнения или "нет" для отмены`;
     }
 
     await ctx.reply(status, { parse_mode: 'Markdown' });
@@ -352,9 +386,6 @@ async function getAccessToken(userAccountId, adAccountId) {
  * Get business context for the chat
  */
 async function getBusinessContext(userAccount, adAccountId) {
-  // Gather minimal context for agents
-  // Full context gathering happens in agents when they call tools
-
   const context = {
     userAccountId: userAccount.id,
     adAccountId,

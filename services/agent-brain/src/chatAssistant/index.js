@@ -26,7 +26,7 @@ import {
   handleModeCommand,
   handleStatusCommand
 } from './telegramHandler.js';
-import { conversationStore } from './persistence/conversationStore.js';
+// conversationStore deprecated, use unifiedStore instead (imported dynamically in executeFullPlan)
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 const MAX_TOOL_CALLS = 5; // Prevent infinite loops
@@ -347,9 +347,27 @@ async function getAccessToken(userAccountId, adAccountId) {
 
 /**
  * Execute a planned action (after user approval)
+ * Now uses unified store and plan executor
  */
 export async function executePlanAction({ conversationId, actionIndex, userAccountId, adAccountId }) {
-  // Get the message with the plan
+  // First try to find in ai_pending_plans (new system)
+  const { unifiedStore } = await import('./stores/unifiedStore.js');
+  const { planExecutor } = await import('./planExecutor.js');
+
+  const pendingPlan = await unifiedStore.getPendingPlan(conversationId);
+
+  if (pendingPlan) {
+    // New system: use planExecutor
+    await unifiedStore.approvePlan(pendingPlan.id);
+    const result = await planExecutor.executeSingleStep({
+      planId: pendingPlan.id,
+      stepIndex: actionIndex,
+      toolContext: { userAccountId, adAccountId }
+    });
+    return result;
+  }
+
+  // Fallback: Legacy system with plan_json in ai_messages
   const { data: messages } = await supabase
     .from('ai_messages')
     .select('*')
@@ -393,8 +411,35 @@ export async function executePlanAction({ conversationId, actionIndex, userAccou
 
 /**
  * Execute all plan actions
+ * Now uses unified store and plan executor
  */
 export async function executeFullPlan({ conversationId, userAccountId, adAccountId }) {
+  // First try to find in ai_pending_plans (new system)
+  const { unifiedStore } = await import('./stores/unifiedStore.js');
+  const { planExecutor } = await import('./planExecutor.js');
+
+  const pendingPlan = await unifiedStore.getPendingPlan(conversationId);
+
+  if (pendingPlan) {
+    // New system: use planExecutor
+    await unifiedStore.approvePlan(pendingPlan.id);
+    const result = await planExecutor.executeFullPlan({
+      planId: pendingPlan.id,
+      toolContext: { userAccountId, adAccountId }
+    });
+
+    // Save result message
+    await unifiedStore.addMessage(conversationId, {
+      role: 'system',
+      content: result.success
+        ? `✅ План выполнен: ${result.summary}`
+        : `⚠️ План выполнен частично: ${result.summary}`
+    });
+
+    return result;
+  }
+
+  // Fallback: Legacy system with plan_json in ai_messages
   const { data: messages } = await supabase
     .from('ai_messages')
     .select('*')

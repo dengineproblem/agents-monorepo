@@ -240,16 +240,17 @@ async toolName({ param1, param2 }, { accessToken, adAccountId, userAccountId }) 
 ### Архитектура Streaming
 
 ```
-Telegram Message
+Telegram/Web Message
        │
        ▼
 ┌──────────────────┐
 │ TelegramHandler  │  ← handleTelegramMessage()
+│ или Web API      │  ← processChat()
 └────────┬─────────┘
          │
          ▼
 ┌──────────────────┐
-│ConversationStore │  ← Persistence в Supabase
+│  UnifiedStore    │  ← Единый persistence layer
 └────────┬─────────┘
          │
          ▼
@@ -262,57 +263,108 @@ Telegram Message
 │    BaseAgent     │  ← processStreamLoop() (multi-round tool loop)
 └────────┬─────────┘
          │
-         ▼
-┌──────────────────┐
-│TelegramStreamer  │  ← Debounced message updates (500ms)
-└──────────────────┘
+    ┌────┴────┐
+    ▼         ▼
+┌────────┐ ┌──────────────┐
+│Telegram│ │ Web Modal    │
+│Streamer│ │ Approval     │
+└────────┘ └──────────────┘
 ```
 
-### ConversationStore
+### UnifiedStore (Unified Persistence Layer)
 
-**Путь:** `services/agent-brain/src/chatAssistant/persistence/conversationStore.js`
+**Путь:** `services/agent-brain/src/chatAssistant/stores/unifiedStore.js`
 
-**Методы:**
+Единый store для Web и Telegram. Заменяет старый `conversationStore.js`.
+
+**Основные методы:**
 | Метод | Описание |
 |-------|----------|
-| `getOrCreateConversation(telegramChatId, userId, adAccountId)` | Получить или создать диалог |
-| `loadMessages(conversationId, limit)` | Загрузить последние N сообщений |
+| `getOrCreate({ source, userAccountId, adAccountId, telegramChatId })` | Получить или создать диалог |
+| `getById(conversationId)` | Получить диалог по ID |
+| `loadMessages(conversationId, limit)` | Загрузить последние N сообщений (OpenAI формат) |
 | `addMessage(conversationId, message)` | Добавить сообщение |
+| `addMessages(conversationId, messages)` | Batch insert сообщений |
 | `acquireLock(conversationId)` | Захватить mutex (concurrency) |
 | `releaseLock(conversationId)` | Освободить mutex |
 | `clearMessages(conversationId)` | Очистить историю |
 | `setMode(conversationId, mode)` | Изменить режим (auto/plan/ask) |
 | `updateRollingSummary(conversationId, summary)` | Обновить саммари |
+| `updateMetadata(conversationId, { lastAgent, lastDomain })` | Обновить метаданные |
 
-### Таблицы Persistence
+**Методы для планов:**
+| Метод | Описание |
+|-------|----------|
+| `createPendingPlan(conversationId, planJson, options)` | Создать план для approval |
+| `getPendingPlan(conversationId)` | Получить pending план |
+| `getPendingPlanById(planId)` | Получить план по ID |
+| `approvePlan(planId)` | Одобрить план |
+| `rejectPlan(planId)` | Отклонить план |
+| `startExecution(planId)` | Начать выполнение |
+| `completeExecution(planId, results)` | Завершить выполнение |
+| `failExecution(planId, results)` | Отметить ошибку |
+| `updateTelegramMessageId(planId, messageId, chatId)` | Сохранить ID сообщения с inline кнопками |
+
+### PlanExecutor
+
+**Путь:** `services/agent-brain/src/chatAssistant/planExecutor.js`
+
+Выполняет одобренные планы.
+
+**Методы:**
+| Метод | Описание |
+|-------|----------|
+| `executeFullPlan({ planId, toolContext, onStepStart, onStepComplete })` | Выполнить все шаги плана |
+| `executeSingleStep({ planId, stepIndex, toolContext })` | Выполнить один шаг |
+
+### Таблицы Persistence (Unified Schema)
 
 ```sql
--- Шапка диалога
-chat_conversations (
-  id, user_account_id, ad_account_id,
-  source,           -- 'telegram' | 'web'
-  telegram_chat_id,
-  mode,             -- 'auto' | 'plan' | 'ask'
-  is_processing,    -- mutex для concurrency
-  rolling_summary,  -- саммари старых сообщений
-  last_agent, last_domain
+-- Диалоги (Web и Telegram)
+ai_conversations (
+  id UUID PRIMARY KEY,
+  user_account_id UUID NOT NULL,
+  ad_account_id UUID,
+  title TEXT,
+  mode TEXT,            -- 'auto' | 'plan' | 'ask'
+  source TEXT,          -- 'web' | 'telegram'
+  telegram_chat_id TEXT,
+  is_processing BOOLEAN,  -- mutex для concurrency
+  rolling_summary TEXT,   -- саммари старых сообщений
+  last_agent TEXT,
+  last_domain TEXT,
+  created_at, updated_at
 )
 
--- Отдельные сообщения
-chat_messages (
-  id, conversation_id,
-  role,             -- 'user' | 'assistant' | 'system' | 'tool'
-  content,
-  tool_calls,       -- JSONB [{name, arguments, id}]
-  tool_call_id, tool_name, tool_result,
-  agent, tokens_used
+-- Сообщения
+ai_messages (
+  id UUID PRIMARY KEY,
+  conversation_id UUID,
+  role TEXT,            -- 'user' | 'assistant' | 'system' | 'tool'
+  content TEXT,
+  plan_json JSONB,      -- для Web approval modal
+  actions_json JSONB,
+  tool_calls JSONB,     -- [{name, arguments, id}]
+  tool_call_id TEXT,
+  tool_name TEXT,
+  tool_result JSONB,
+  agent TEXT,
+  domain TEXT,
+  tokens_used INTEGER,
+  created_at
 )
 
--- Ожидающие подтверждения
-chat_pending_actions (
-  id, conversation_id,
-  tool_name, tool_args, agent,
-  status            -- 'pending' | 'approved' | 'rejected' | 'expired'
+-- Планы для approval (Web modal / Telegram inline keyboard)
+ai_pending_plans (
+  id UUID PRIMARY KEY,
+  conversation_id UUID,
+  plan_json JSONB,      -- { steps: [{action, params, description}], summary }
+  status TEXT,          -- 'pending' | 'approved' | 'rejected' | 'executing' | 'completed' | 'failed' | 'expired'
+  source TEXT,          -- 'web' | 'telegram'
+  telegram_chat_id TEXT,
+  telegram_message_id BIGINT,  -- ID сообщения с inline кнопками
+  execution_results JSONB,
+  created_at, resolved_at
 )
 ```
 
@@ -331,12 +383,35 @@ chat_pending_actions (
 | `done` | Завершение |
 | `error` | Ошибка |
 
-### Telegram API Endpoints
+### Telegram Approval (Inline Keyboard)
 
+**Путь:** `services/agent-brain/src/chatAssistant/telegram/approvalHandler.js`
+
+При требовании approval отправляются inline кнопки:
+```
+📋 Требуется подтверждение
+
+Действия:
+1. ⚠️ pauseDirection (direction_id: xxx)
+2. updateBudget (amount: 500)
+
+[✅ Выполнить] [❌ Отменить]
+```
+
+**Методы:**
+| Метод | Описание |
+|-------|----------|
+| `sendApprovalButtons(ctx, plan, planId)` | Отправить сообщение с inline keyboard |
+| `handleApprovalCallback(ctx, callbackQuery)` | Обработать нажатие кнопки |
+| `handleTextApproval(ctx, text, conversationId)` | Fallback: текстовые команды "да"/"нет" |
+
+### API Endpoints
+
+**Telegram:**
 ```
 POST /api/brain/telegram/chat
   body: { telegramChatId, message }
-  → Обработать сообщение (non-streaming)
+  → Обработать сообщение (streaming в Telegram)
 
 POST /api/brain/telegram/clear
   body: { telegramChatId }
@@ -348,6 +423,21 @@ POST /api/brain/telegram/mode
 
 GET /api/brain/telegram/status?telegramChatId=...
   → Получить статус диалога
+```
+
+**Web:**
+```
+POST /api/brain/chat/message
+  body: { message, conversationId?, mode?, userAccountId, adAccountId }
+  → Обработать сообщение
+
+POST /api/brain/chat/execute
+  body: { conversationId, userAccountId, adAccountId }
+  → Выполнить весь план (approve all)
+
+POST /api/brain/chat/execute-action
+  body: { conversationId, actionIndex, userAccountId, adAccountId }
+  → Выполнить одно действие из плана
 ```
 
 ### Dangerous Tools (100% confirmation)
@@ -371,3 +461,53 @@ GET /api/brain/telegram/status?telegramChatId=...
 | `/clear` | Очистить историю диалога |
 | `/mode auto\|plan\|ask` | Изменить режим |
 | `/status` | Показать статус диалога |
+
+---
+
+## Approval Flow
+
+### Web (Modal)
+```
+User Request → LLM → plan_json в ai_messages
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │  Web Modal          │
+              │  [Approve] [Cancel] │
+              └─────────────────────┘
+                         │
+              POST /execute или /execute-action
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │   PlanExecutor      │
+              │   executeFullPlan() │
+              └─────────────────────┘
+```
+
+### Telegram (Inline Keyboard)
+```
+User Request → LLM → approval_required event
+                         │
+                         ▼
+              ┌─────────────────────────────┐
+              │  Telegram Inline Keyboard   │
+              │  [✅ Выполнить] [❌ Отменить] │
+              └─────────────────────────────┘
+                         │
+              callback_query: approve:planId
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │   PlanExecutor      │
+              │   executeFullPlan() │
+              └─────────────────────┘
+                         │
+                         ▼
+              editMessageText(результат)
+```
+
+### Fallback (Text Approval)
+Если inline keyboard не работает:
+- "да", "yes", "ок", "подтверждаю" → approve
+- "нет", "no", "отмена", "отменить" → reject

@@ -1,0 +1,371 @@
+/**
+ * PlanExecutor - Executes approved plans (for Web and Telegram)
+ * Unified executor for all plan steps
+ */
+
+import { unifiedStore } from './stores/unifiedStore.js';
+import { executeTool } from './toolHandlers.js';
+import { supabase } from '../lib/supabaseClient.js';
+import { logger } from '../lib/logger.js';
+
+/**
+ * Get access token for user account
+ */
+async function getAccessToken(userAccountId, adAccountId) {
+  // Try to get from ad_accounts first
+  if (adAccountId) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('access_token')
+      .eq('id', adAccountId)
+      .single();
+
+    if (adAccount?.access_token) {
+      return adAccount.access_token;
+    }
+  }
+
+  // Fallback to user's default ad account
+  const { data: defaultAccount } = await supabase
+    .from('ad_accounts')
+    .select('access_token')
+    .eq('user_account_id', userAccountId)
+    .eq('is_default', true)
+    .single();
+
+  if (defaultAccount?.access_token) {
+    return defaultAccount.access_token;
+  }
+
+  // Final fallback - any active account
+  const { data: anyAccount } = await supabase
+    .from('ad_accounts')
+    .select('access_token')
+    .eq('user_account_id', userAccountId)
+    .eq('is_active', true)
+    .limit(1)
+    .single();
+
+  return anyAccount?.access_token || null;
+}
+
+/**
+ * Get ad account ID for user
+ */
+async function getAdAccountId(userAccountId, adAccountId) {
+  if (adAccountId) return adAccountId;
+
+  const { data } = await supabase
+    .from('ad_accounts')
+    .select('id, ad_account_id')
+    .eq('user_account_id', userAccountId)
+    .eq('is_default', true)
+    .single();
+
+  return data?.id || null;
+}
+
+export class PlanExecutor {
+
+  /**
+   * Execute full plan (all steps)
+   * @param {Object} params
+   * @param {string} params.planId - Plan UUID
+   * @param {Object} params.toolContext - Context with userAccountId, adAccountId
+   * @param {Function} [params.onStepStart] - Callback before each step
+   * @param {Function} [params.onStepComplete] - Callback after each step
+   * @returns {Promise<Object>} Execution result
+   */
+  async executeFullPlan({ planId, toolContext, onStepStart, onStepComplete }) {
+    // Get plan
+    const plan = await unifiedStore.getPendingPlanById(planId);
+
+    if (!plan) {
+      throw new Error('Plan not found');
+    }
+
+    if (plan.status !== 'approved') {
+      throw new Error(`Plan is not approved. Current status: ${plan.status}`);
+    }
+
+    // Mark as executing
+    await unifiedStore.startExecution(planId);
+
+    const steps = plan.plan_json?.steps || [];
+    const results = [];
+
+    // Get access token
+    const accessToken = await getAccessToken(
+      toolContext.userAccountId,
+      toolContext.adAccountId
+    );
+
+    if (!accessToken) {
+      const errorResults = [{ step_index: 0, success: false, error: 'No access token found' }];
+      await unifiedStore.failExecution(planId, errorResults, 'No access token');
+      return { success: false, results: errorResults, error: 'No access token found' };
+    }
+
+    // Get ad account ID
+    const adAccountId = await getAdAccountId(
+      toolContext.userAccountId,
+      toolContext.adAccountId
+    );
+
+    const context = {
+      accessToken,
+      userAccountId: toolContext.userAccountId,
+      adAccountId
+    };
+
+    // Execute each step
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+
+      // Callback before step
+      if (onStepStart) {
+        try {
+          await onStepStart({ step, index: i, total: steps.length });
+        } catch (e) {
+          logger.warn({ error: e.message }, 'onStepStart callback error');
+        }
+      }
+
+      try {
+        logger.info({
+          planId,
+          step: i + 1,
+          total: steps.length,
+          action: step.action
+        }, 'Executing plan step');
+
+        const result = await executeTool(step.action, step.params || {}, context);
+
+        results.push({
+          step_index: i,
+          action: step.action,
+          description: step.description,
+          success: result.success,
+          message: result.message || result.data?.message,
+          data: result.data
+        });
+
+        // Callback after step
+        if (onStepComplete) {
+          try {
+            await onStepComplete({
+              step,
+              index: i,
+              total: steps.length,
+              result,
+              success: result.success
+            });
+          } catch (e) {
+            logger.warn({ error: e.message }, 'onStepComplete callback error');
+          }
+        }
+
+      } catch (error) {
+        logger.error({
+          planId,
+          step: i + 1,
+          action: step.action,
+          error: error.message
+        }, 'Error executing plan step');
+
+        results.push({
+          step_index: i,
+          action: step.action,
+          description: step.description,
+          success: false,
+          error: error.message
+        });
+
+        // Callback after failed step
+        if (onStepComplete) {
+          try {
+            await onStepComplete({
+              step,
+              index: i,
+              total: steps.length,
+              result: { success: false, error: error.message },
+              success: false
+            });
+          } catch (e) {
+            logger.warn({ error: e.message }, 'onStepComplete callback error');
+          }
+        }
+      }
+    }
+
+    // Check if all succeeded
+    const allSucceeded = results.every(r => r.success);
+    const successCount = results.filter(r => r.success).length;
+
+    if (allSucceeded) {
+      await unifiedStore.completeExecution(planId, results);
+      logger.info({ planId, successCount, totalSteps: steps.length }, 'Plan execution completed');
+    } else {
+      await unifiedStore.failExecution(planId, results);
+      logger.warn({ planId, successCount, totalSteps: steps.length }, 'Plan execution partially failed');
+    }
+
+    return {
+      success: allSucceeded,
+      results,
+      successCount,
+      totalSteps: steps.length,
+      summary: `${successCount}/${steps.length} шагов выполнено успешно`
+    };
+  }
+
+  /**
+   * Execute single step from plan
+   * @param {Object} params
+   * @param {string} params.planId - Plan UUID
+   * @param {number} params.stepIndex - Step index to execute
+   * @param {Object} params.toolContext - Context with userAccountId, adAccountId
+   * @returns {Promise<Object>} Step result
+   */
+  async executeSingleStep({ planId, stepIndex, toolContext }) {
+    // Get plan
+    const plan = await unifiedStore.getPendingPlanById(planId);
+
+    if (!plan) {
+      throw new Error('Plan not found');
+    }
+
+    if (!['approved', 'executing'].includes(plan.status)) {
+      throw new Error(`Plan cannot be executed. Current status: ${plan.status}`);
+    }
+
+    const steps = plan.plan_json?.steps || [];
+    const step = steps[stepIndex];
+
+    if (!step) {
+      throw new Error(`Step ${stepIndex} not found in plan`);
+    }
+
+    // Mark as executing if not already
+    if (plan.status === 'approved') {
+      await unifiedStore.startExecution(planId);
+    }
+
+    // Get access token
+    const accessToken = await getAccessToken(
+      toolContext.userAccountId,
+      toolContext.adAccountId
+    );
+
+    if (!accessToken) {
+      return { success: false, error: 'No access token found' };
+    }
+
+    // Get ad account ID
+    const adAccountId = await getAdAccountId(
+      toolContext.userAccountId,
+      toolContext.adAccountId
+    );
+
+    const context = {
+      accessToken,
+      userAccountId: toolContext.userAccountId,
+      adAccountId
+    };
+
+    try {
+      logger.info({
+        planId,
+        stepIndex,
+        action: step.action
+      }, 'Executing single plan step');
+
+      const result = await executeTool(step.action, step.params || {}, context);
+
+      // Update execution results in plan
+      const currentResults = plan.execution_results || [];
+      currentResults.push({
+        step_index: stepIndex,
+        action: step.action,
+        success: result.success,
+        message: result.message,
+        executed_at: new Date().toISOString()
+      });
+
+      // Check if all steps done
+      const executedCount = currentResults.length;
+      if (executedCount >= steps.length) {
+        const allSucceeded = currentResults.every(r => r.success);
+        if (allSucceeded) {
+          await unifiedStore.completeExecution(planId, currentResults);
+        } else {
+          await unifiedStore.failExecution(planId, currentResults);
+        }
+      } else {
+        // Update partial results
+        await supabase
+          .from('ai_pending_plans')
+          .update({
+            execution_results: currentResults,
+            executed_steps: executedCount
+          })
+          .eq('id', planId);
+      }
+
+      return {
+        success: result.success,
+        message: result.message,
+        data: result.data,
+        stepIndex,
+        stepsRemaining: steps.length - executedCount
+      };
+
+    } catch (error) {
+      logger.error({
+        planId,
+        stepIndex,
+        action: step.action,
+        error: error.message
+      }, 'Error executing single step');
+
+      return {
+        success: false,
+        error: error.message,
+        stepIndex
+      };
+    }
+  }
+
+  /**
+   * Format execution result for display
+   */
+  formatResult(result) {
+    if (result.success) {
+      let text = `✅ *План выполнен успешно*\n`;
+      text += `${result.summary}\n\n`;
+
+      result.results.forEach((r, i) => {
+        const icon = r.success ? '✓' : '✗';
+        text += `${icon} ${r.description || r.action}\n`;
+        if (r.message) text += `   _${r.message}_\n`;
+        if (r.error) text += `   ❌ ${r.error}\n`;
+      });
+
+      return text;
+    } else {
+      let text = `⚠️ *План выполнен частично*\n`;
+      text += `${result.summary}\n\n`;
+
+      result.results.forEach((r, i) => {
+        const icon = r.success ? '✓' : '✗';
+        text += `${icon} ${r.description || r.action}\n`;
+        if (r.error) text += `   ❌ ${r.error}\n`;
+      });
+
+      return text;
+    }
+  }
+}
+
+// Export singleton instance
+export const planExecutor = new PlanExecutor();
