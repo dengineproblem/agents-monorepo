@@ -398,6 +398,23 @@ export class UnifiedConversationStore {
   }
 
   /**
+   * Update summary message count (for tracking when to update summary)
+   */
+  async updateSummaryMessageCount(conversationId, messageCount) {
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({
+        summary_message_count: messageCount
+      })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error updating summary message count');
+      throw error;
+    }
+  }
+
+  /**
    * Update conversation metadata
    */
   async updateMetadata(conversationId, metadata) {

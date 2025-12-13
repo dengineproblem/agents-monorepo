@@ -8,6 +8,7 @@ import { logger } from '../../lib/logger.js';
 import { logErrorToAdmin } from '../../lib/errorLogger.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
 import { memoryStore } from '../stores/memoryStore.js';
+import { runsStore } from '../stores/runsStore.js';
 import { toolRegistry } from '../shared/toolRegistry.js';
 import { withTimeout } from '../shared/retryUtils.js';
 import { executeWithIdempotency } from '../shared/idempotentExecutor.js';
@@ -96,13 +97,43 @@ export class BaseAgent {
 
   /**
    * Call LLM with tools and handle tool calls
+   * Includes full tracing via runsStore
    */
   async callLLMWithTools(messages, toolContext, mode) {
     const executedActions = [];
     const allToolCalls = [];
+    const startTime = Date.now();
+
+    // Extract user message for tracing
+    const userMessage = messages.filter(m => m.role === 'user').pop()?.content;
+
+    // Create run record for tracing (if we have context)
+    let runId = null;
+    if (toolContext?.conversationId && toolContext?.userAccountId) {
+      try {
+        const run = await runsStore.create({
+          conversationId: toolContext.conversationId,
+          userAccountId: toolContext.userAccountId,
+          model: MODEL,
+          agent: this.name,
+          domain: this.domain,
+          userMessage
+        });
+        runId = run.id;
+
+        // Record context stats if available
+        if (toolContext.contextStats) {
+          await runsStore.updateContextStats(runId, toolContext.contextStats);
+        }
+      } catch (err) {
+        logger.warn({ error: err.message }, 'Failed to create run record');
+      }
+    }
 
     let currentMessages = [...messages];
     let iterations = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
 
     // Format tools for OpenAI
     const openAITools = this.tools.map(tool => ({
@@ -110,88 +141,151 @@ export class BaseAgent {
       function: tool
     }));
 
-    while (iterations < MAX_TOOL_CALLS) {
-      iterations++;
+    try {
+      while (iterations < MAX_TOOL_CALLS) {
+        iterations++;
 
-      const completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: currentMessages,
-        tools: openAITools.length > 0 ? openAITools : undefined,
-        tool_choice: openAITools.length > 0 ? 'auto' : undefined,
-        temperature: 0.7
-      });
+        const completion = await openai.chat.completions.create({
+          model: MODEL,
+          messages: currentMessages,
+          tools: openAITools.length > 0 ? openAITools : undefined,
+          tool_choice: openAITools.length > 0 ? 'auto' : undefined,
+          temperature: 0.7
+        });
 
-      const assistantMessage = completion.choices[0].message;
-
-      // If no tool calls, return the response
-      if (!assistantMessage.tool_calls?.length) {
-        return {
-          content: assistantMessage.content,
-          executedActions,
-          toolCalls: allToolCalls
-        };
-      }
-
-      // Process tool calls
-      currentMessages.push(assistantMessage);
-
-      for (const toolCall of assistantMessage.tool_calls) {
-        const toolName = toolCall.function.name;
-        let toolArgs;
-
-        try {
-          toolArgs = JSON.parse(toolCall.function.arguments);
-        } catch (e) {
-          toolArgs = {};
+        // Track token usage
+        if (completion.usage) {
+          totalInputTokens += completion.usage.prompt_tokens || 0;
+          totalOutputTokens += completion.usage.completion_tokens || 0;
         }
 
-        allToolCalls.push({ name: toolName, args: toolArgs });
+        const assistantMessage = completion.choices[0].message;
 
-        // Check if tool requires confirmation in current mode
-        const requiresApproval = this.shouldRequireApproval(toolName, mode);
+        // If no tool calls, complete the run and return the response
+        if (!assistantMessage.tool_calls?.length) {
+          if (runId) {
+            await runsStore.complete(runId, {
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              latencyMs: Date.now() - startTime
+            });
+          }
 
-        if (requiresApproval) {
+          return {
+            content: assistantMessage.content,
+            executedActions,
+            toolCalls: allToolCalls,
+            runId
+          };
+        }
+
+        // Record planned tool calls
+        if (runId) {
+          await runsStore.recordToolsPlanned(runId, assistantMessage.tool_calls);
+        }
+
+        // Process tool calls
+        currentMessages.push(assistantMessage);
+
+        for (const toolCall of assistantMessage.tool_calls) {
+          const toolName = toolCall.function.name;
+          let toolArgs;
+
+          try {
+            toolArgs = JSON.parse(toolCall.function.arguments);
+          } catch (e) {
+            toolArgs = {};
+          }
+
+          allToolCalls.push({ name: toolName, args: toolArgs });
+
+          // Check if tool requires confirmation in current mode
+          const requiresApproval = this.shouldRequireApproval(toolName, mode);
+
+          if (requiresApproval) {
+            currentMessages.push({
+              role: 'tool',
+              tool_call_id: toolCall.id,
+              content: JSON.stringify({
+                status: 'pending_approval',
+                message: 'Это действие требует подтверждения перед выполнением'
+              })
+            });
+            continue;
+          }
+
+          // Execute the tool with timing
+          const toolStartTime = Date.now();
+          const result = await this.executeTool(toolName, toolArgs, toolContext);
+          const toolLatency = Date.now() - toolStartTime;
+
+          // Record tool execution
+          if (runId) {
+            await runsStore.recordToolExecution(runId, {
+              name: toolName,
+              args: toolArgs,
+              success: result.success !== false,
+              latencyMs: toolLatency,
+              cached: result.already_applied || false,
+              error: result.error,
+              errorCode: result.error_code
+            });
+          }
+
+          executedActions.push({
+            tool: toolName,
+            args: toolArgs,
+            result: result.success ? 'success' : 'failed',
+            message: result.message || result.error
+          });
+
           currentMessages.push({
             role: 'tool',
             tool_call_id: toolCall.id,
-            content: JSON.stringify({
-              status: 'pending_approval',
-              message: 'Это действие требует подтверждения перед выполнением'
-            })
+            content: JSON.stringify(result)
           });
-          continue;
         }
+      }
 
-        // Execute the tool
-        const result = await this.executeTool(toolName, toolArgs, toolContext);
+      // If we hit max iterations, get final response
+      const lastCompletion = await openai.chat.completions.create({
+        model: MODEL,
+        messages: currentMessages,
+        temperature: 0.7
+      });
 
-        executedActions.push({
-          tool: toolName,
-          args: toolArgs,
-          result: result.success ? 'success' : 'failed',
-          message: result.message || result.error
-        });
+      if (lastCompletion.usage) {
+        totalInputTokens += lastCompletion.usage.prompt_tokens || 0;
+        totalOutputTokens += lastCompletion.usage.completion_tokens || 0;
+      }
 
-        currentMessages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(result)
+      // Complete run
+      if (runId) {
+        await runsStore.complete(runId, {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          latencyMs: Date.now() - startTime
         });
       }
+
+      return {
+        content: lastCompletion.choices[0].message.content,
+        executedActions,
+        toolCalls: allToolCalls,
+        runId
+      };
+
+    } catch (error) {
+      // Record failure
+      if (runId) {
+        await runsStore.fail(runId, {
+          latencyMs: Date.now() - startTime,
+          errorMessage: error.message,
+          errorCode: error.code
+        });
+      }
+      throw error;
     }
-
-    // If we hit max iterations, get final response
-    const lastCompletion = await openai.chat.completions.create({
-      model: MODEL,
-      messages: currentMessages,
-      temperature: 0.7
-    });
-
-    return {
-      content: lastCompletion.choices[0].message.content,
-      executedActions,
-      toolCalls: allToolCalls
-    };
   }
 
   /**
@@ -409,6 +503,7 @@ export class BaseAgent {
 
   /**
    * Multi-round streaming with tool execution
+   * Includes full tracing via runsStore
    * @yields {Object} Stream events: text, tool_start, tool_result, approval_required, done
    */
   async *processStreamLoop({ message, context, mode, toolContext, conversationHistory = [] }) {
@@ -425,6 +520,29 @@ export class BaseAgent {
     const allToolCalls = [];
     let iterations = 0;
     let finalContent = '';
+
+    // Create run record for tracing (if we have context)
+    let runId = null;
+    if (toolContext?.conversationId && toolContext?.userAccountId) {
+      try {
+        const run = await runsStore.create({
+          conversationId: toolContext.conversationId,
+          userAccountId: toolContext.userAccountId,
+          model: MODEL,
+          agent: this.name,
+          domain: this.domain,
+          userMessage: message?.substring(0, 500)
+        });
+        runId = run.id;
+
+        // Record context stats if available
+        if (toolContext.contextStats) {
+          await runsStore.updateContextStats(runId, toolContext.contextStats);
+        }
+      } catch (err) {
+        logger.warn({ error: err.message }, 'Failed to create run record for streaming');
+      }
+    }
 
     // Format tools for OpenAI
     const openAITools = this.tools.length > 0
@@ -477,6 +595,13 @@ export class BaseAgent {
           break;
         }
 
+        // Record planned tool calls
+        if (runId) {
+          await runsStore.recordToolsPlanned(runId, toolCallsRaw.map(tc => ({
+            function: { name: tc.name, arguments: tc.arguments }
+          })));
+        }
+
         // Build assistant message with tool_calls
         const assistantMessage = {
           role: 'assistant',
@@ -523,10 +648,25 @@ export class BaseAgent {
             continue;
           }
 
-          // Execute tool
+          // Execute tool with timing
           yield { type: 'tool_start', name: tc.name, args };
 
+          const toolStartTime = Date.now();
           const result = await this.executeTool(tc.name, args, toolContext);
+          const toolLatency = Date.now() - toolStartTime;
+
+          // Record tool execution
+          if (runId) {
+            await runsStore.recordToolExecution(runId, {
+              name: tc.name,
+              args,
+              success: result.success !== false,
+              latencyMs: toolLatency,
+              cached: result.already_applied || false,
+              error: result.error,
+              errorCode: result.error_code
+            });
+          }
 
           executedActions.push({
             tool: tc.name,
@@ -555,17 +695,35 @@ export class BaseAgent {
         executedActions: executedActions.length
       }, 'Agent stream completed');
 
+      // Complete run record
+      if (runId) {
+        await runsStore.complete(runId, {
+          latencyMs: duration
+          // Note: streaming doesn't provide token counts
+        });
+      }
+
       yield {
         type: 'done',
         agent: this.name,
         content: finalContent,
         executedActions,
         toolCalls: allToolCalls,
-        iterations
+        iterations,
+        runId
       };
 
     } catch (error) {
       logger.error({ agent: this.name, error: error.message }, 'Agent stream failed');
+
+      // Record failure
+      if (runId) {
+        await runsStore.fail(runId, {
+          latencyMs: Date.now() - startTime,
+          errorMessage: error.message,
+          errorCode: error.code
+        });
+      }
 
       logErrorToAdmin({
         error_type: 'api',
@@ -578,7 +736,8 @@ export class BaseAgent {
       yield {
         type: 'error',
         agent: this.name,
-        error: error.message
+        error: error.message,
+        runId
       };
     }
   }

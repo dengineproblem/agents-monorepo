@@ -702,6 +702,235 @@ const notesContext = formatNotesContext(context?.notes, 'ads');
 
 ---
 
+### Rolling Summary (Long Conversations)
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/summaryGenerator.js`
+
+LLM-компрессия старых сообщений для поддержания контекста в длинных диалогах.
+
+**Хранение:** `ai_conversations.rolling_summary TEXT`
+
+**Когда обновляется:**
+- Сообщений > 20 И последнее обновление > 10 сообщений назад
+- ИЛИ token budget utilization > 90%
+
+**Методы:**
+| Метод | Описание |
+|-------|----------|
+| `shouldUpdateSummary(conversation, messageCount, tokenStats)` | Проверить нужно ли обновлять |
+| `generateSummary(existingSummary, messages)` | LLM-компрессия через gpt-4o-mini |
+| `maybeUpdateRollingSummary(conversationId, messages, tokenStats)` | Автообновление после обработки |
+| `getSummaryContext(conversationId)` | Получить summary для prompt |
+| `formatSummaryForPrompt(summary)` | Форматирование для инъекции |
+
+**LLM Prompt:**
+```
+Сожми диалог в краткое резюме (макс 500 слов).
+Сохрани:
+- О чём говорили (кампании, креативы, лиды)
+- Какие действия выполнялись
+- Какие решения приняты
+- Контекст для продолжения
+```
+
+**Интеграция:**
+```javascript
+// В Orchestrator после обработки запроса (async, don't wait)
+maybeUpdateRollingSummary(conversationId, conversationHistory, contextStats)
+  .catch(err => logger.warn('Failed to update rolling summary'));
+```
+
+---
+
+### Business Snapshot (Snapshot-First Pattern)
+
+**Путь:** `services/agent-brain/src/chatAssistant/contextGatherer.js`
+
+Агрегированный snapshot бизнес-данных, загружаемый ДО классификации запроса.
+
+**Структура snapshot:**
+```javascript
+{
+  ads: {
+    period: 'last_7d',
+    spend: 15000,
+    leads: 45,
+    cpl: 333,
+    activeAdsets: 5,
+    activeCreatives: 12,
+    topAdset: { name: '...', cpl: 250 },
+    worstAdset: { name: '...', cpl: 800 },
+    dataDate: '2024-12-13T08:00:00Z'
+  },
+  directions: {
+    count: 5,
+    totalSpend: 15000,
+    totalLeads: 45,
+    topDirection: { id: '...', cpl: 200 },
+    worstDirection: { id: '...', cpl: 600 }
+  },
+  creatives: {
+    totalWithScores: 20,
+    avgRiskScore: 45,
+    highRiskCount: 3,
+    highRiskCreatives: [{ id, score, verdict }]
+  },
+  notes: {
+    ads: [{ text: '...' }],
+    creative: [{ text: '...' }]
+  },
+  generatedAt: '2024-12-13T10:00:00Z',
+  latencyMs: 150,
+  freshness: 'fresh' | 'stale' | 'outdated' | 'missing'
+}
+```
+
+**Freshness:**
+| Значение | Описание |
+|----------|----------|
+| `fresh` | Данные < 24 часов |
+| `stale` | Данные 24-48 часов |
+| `outdated` | Данные > 48 часов |
+| `missing` | Нет данных |
+
+**Методы:**
+| Метод | Описание |
+|-------|----------|
+| `getBusinessSnapshot({ userAccountId, adAccountId })` | Получить snapshot |
+| `formatSnapshotForPrompt(snapshot)` | Форматировать для system prompt |
+
+**Интеграция в Orchestrator:**
+```javascript
+// Загрузка в параллели с memory
+const [specs, notes, summaryContext, snapshot] = await Promise.all([
+  memoryStore.getSpecs(...),
+  memoryStore.getNotesDigest(...),
+  getSummaryContext(...),
+  getBusinessSnapshot({ userAccountId, adAccountId })
+]);
+
+// Добавление в контекст
+const enrichedContext = {
+  ...context,
+  businessSnapshot: snapshot,
+  businessSnapshotFormatted: formatSnapshotForPrompt(snapshot)
+};
+
+// Трекинг для runsStore
+toolContext.contextStats = {
+  snapshotUsed: snapshot?.freshness !== 'error',
+  snapshotFreshness: snapshot?.freshness
+};
+```
+
+---
+
+### AI Runs (LLM Tracing)
+
+**Путь:** `services/agent-brain/src/chatAssistant/stores/runsStore.js`
+
+Полная трассировка LLM вызовов для дебага и аудита.
+
+**Хранение:** `ai_runs` таблица
+
+**Таблица:**
+```sql
+ai_runs (
+  id UUID PRIMARY KEY,
+  conversation_id UUID REFERENCES ai_conversations(id),
+  message_id UUID REFERENCES ai_messages(id),
+  user_account_id UUID NOT NULL,
+
+  -- LLM info
+  model TEXT NOT NULL,
+  agent TEXT,
+  domain TEXT,
+  user_message TEXT,
+
+  -- Tokens
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+
+  -- Tools
+  tools_planned JSONB DEFAULT '[]',     -- [{name, args}]
+  tools_executed JSONB DEFAULT '[]',    -- [{name, args, success, latency_ms}]
+  tool_errors JSONB DEFAULT '[]',       -- [{name, error}]
+
+  -- Context
+  context_stats JSONB,                  -- {snapshotUsed, rollingSummaryUsed, freshness}
+  snapshot_used BOOLEAN DEFAULT false,
+  rolling_summary_used BOOLEAN DEFAULT false,
+
+  -- Performance
+  latency_ms INTEGER,
+
+  -- Status
+  status TEXT DEFAULT 'pending',        -- pending | completed | error
+  error_message TEXT,
+  error_code TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT now()
+)
+```
+
+**Методы runsStore:**
+| Метод | Описание |
+|-------|----------|
+| `create({ conversationId, userAccountId, model, agent, domain })` | Создать запись run |
+| `updateContextStats(runId, stats)` | Обновить статистику контекста |
+| `recordToolsPlanned(runId, toolCalls)` | Записать планируемые tools |
+| `recordToolExecution(runId, { name, args, success, latencyMs })` | Записать выполненный tool |
+| `complete(runId, { inputTokens, outputTokens, latencyMs })` | Завершить успешно |
+| `fail(runId, { errorMessage, errorCode, latencyMs })` | Записать ошибку |
+| `getForConversation(conversationId, limit)` | Получить runs диалога |
+| `getStatsSummary(conversationId)` | Агрегированная статистика |
+| `cleanup(olderThanDays)` | Очистить старые записи |
+
+**Интеграция в BaseAgent:**
+```javascript
+async callLLMWithTools(messages, toolContext, mode) {
+  // Create run record
+  const run = await runsStore.create({
+    conversationId: toolContext.conversationId,
+    userAccountId: toolContext.userAccountId,
+    model: MODEL,
+    agent: this.name,
+    domain: this.domain
+  });
+
+  try {
+    // ... execute LLM call ...
+
+    // Record tool executions
+    for (const toolCall of assistantMessage.tool_calls) {
+      const result = await this.executeTool(toolName, toolArgs, toolContext);
+      await runsStore.recordToolExecution(run.id, {
+        name: toolName,
+        args: toolArgs,
+        success: result.success,
+        latencyMs: Date.now() - toolStartTime
+      });
+    }
+
+    // Complete on success
+    await runsStore.complete(run.id, {
+      inputTokens: completion.usage.prompt_tokens,
+      outputTokens: completion.usage.completion_tokens,
+      latencyMs: Date.now() - startTime
+    });
+
+  } catch (error) {
+    await runsStore.fail(run.id, {
+      errorMessage: error.message,
+      latencyMs: Date.now() - startTime
+    });
+    throw error;
+  }
+}
+```
+
+---
+
 ## Reliability Layer (P0)
 
 ### Tool Validation (Zod)
@@ -1128,6 +1357,7 @@ psql $DATABASE_URL < migrations/091_ai_pending_plans.sql
 psql $DATABASE_URL < migrations/092_business_memory.sql
 psql $DATABASE_URL < migrations/093_idempotent_operations.sql
 psql $DATABASE_URL < migrations/094_direction_metrics_rollup.sql
+psql $DATABASE_URL < migrations/095_ai_runs.sql
 ```
 
 ### 2. Перезапустить agent-brain
@@ -1261,6 +1491,7 @@ CHAT_USE_ORCHESTRATOR=false
 | `092_business_memory.sql` | Session + Procedural + Mid-term + Semantic Memory |
 | `093_idempotent_operations.sql` | ai_idempotent_operations — idempotency tracking |
 | `094_direction_metrics_rollup.sql` | Direction Metrics Rollup + SQL функция |
+| `095_ai_runs.sql` | ai_runs — LLM tracing + summary_message_count |
 
 ### 092_business_memory.sql
 ```sql

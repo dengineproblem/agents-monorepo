@@ -13,6 +13,9 @@ import { CRMAgent } from '../agents/crm/index.js';
 import { memoryStore } from '../stores/memoryStore.js';
 import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.js';
 import { logger } from '../../lib/logger.js';
+import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
+import { unifiedStore } from '../stores/unifiedStore.js';
+import { getBusinessSnapshot, formatSnapshotForPrompt } from '../contextGatherer.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 
@@ -58,28 +61,51 @@ export class Orchestrator {
         };
       }
 
-      // 1. Load memory (specs + notes)
-      const [specs, notes] = await Promise.all([
+      // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
+      const [specs, notes, summaryContext, snapshot] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, toolContext.adAccountId),
-        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId)
+        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId),
+        toolContext.conversationId
+          ? getSummaryContext(toolContext.conversationId)
+          : Promise.resolve({ summary: '', used: false }),
+        getBusinessSnapshot({
+          userAccountId: toolContext.userAccountId,
+          adAccountId: toolContext.adAccountId
+        })
       ]);
 
-      // Enrich context with memory
+      // Enrich context with memory AND snapshot (snapshot-first pattern)
       const enrichedContext = {
         ...context,
         specs,
-        notes
+        notes,
+        rollingSummary: summaryContext.summary,
+        rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
+        // Snapshot-first: pre-loaded business data
+        businessSnapshot: snapshot,
+        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot)
       };
 
-      // 2. Classify the request
+      // Track context stats for runsStore
+      const snapshotUsed = snapshot && snapshot.freshness !== 'error' && snapshot.freshness !== 'missing';
+      toolContext.contextStats = {
+        ...toolContext.contextStats,
+        rollingSummaryUsed: summaryContext.used,
+        snapshotUsed,
+        snapshotFreshness: snapshot?.freshness
+      };
+
+      // 2. Classify the request (now has snapshot for better routing)
       const classification = await classifyRequest(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
-        classification
+        classification,
+        usingSummary: summaryContext.used,
+        usingSnapshot: snapshotUsed
       }, 'Request classified');
 
-      // 2. Route to appropriate agent(s)
+      // 3. Route to appropriate agent(s)
       let response;
 
       if (classification.agents.length === 1) {
@@ -102,6 +128,17 @@ export class Orchestrator {
         agents: classification.agents,
         domain: classification.domain
       }, 'Orchestrator processed request');
+
+      // Update rolling summary if needed (async, don't wait)
+      if (toolContext.conversationId && conversationHistory.length > 0) {
+        maybeUpdateRollingSummary(
+          toolContext.conversationId,
+          conversationHistory,
+          toolContext.contextStats
+        ).catch(err => {
+          logger.warn({ error: err.message }, 'Failed to update rolling summary');
+        });
+      }
 
       return {
         ...response,
@@ -367,25 +404,48 @@ export class Orchestrator {
         return;
       }
 
-      // 1. Load memory (specs + notes)
-      const [specs, notes] = await Promise.all([
+      // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
+      const [specs, notes, summaryContext, snapshot] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, toolContext.adAccountId),
-        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId)
+        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId),
+        toolContext.conversationId
+          ? getSummaryContext(toolContext.conversationId)
+          : Promise.resolve({ summary: '', used: false }),
+        getBusinessSnapshot({
+          userAccountId: toolContext.userAccountId,
+          adAccountId: toolContext.adAccountId
+        })
       ]);
 
-      // Enrich context with memory
+      // Enrich context with memory AND snapshot (snapshot-first pattern)
       const enrichedContext = {
         ...context,
         specs,
-        notes
+        notes,
+        rollingSummary: summaryContext.summary,
+        rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
+        // Snapshot-first: pre-loaded business data
+        businessSnapshot: snapshot,
+        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot)
       };
 
-      // 2. Classify the request
+      // Track context stats for runsStore
+      const snapshotUsed = snapshot && snapshot.freshness !== 'error' && snapshot.freshness !== 'missing';
+      toolContext.contextStats = {
+        ...toolContext.contextStats,
+        rollingSummaryUsed: summaryContext.used,
+        snapshotUsed,
+        snapshotFreshness: snapshot?.freshness
+      };
+
+      // 2. Classify the request (now has snapshot for better routing)
       const classification = await classifyRequest(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
-        classification
+        classification,
+        usingSummary: summaryContext.used,
+        usingSnapshot: snapshotUsed
       }, 'Request classified for streaming');
 
       yield {
@@ -420,6 +480,18 @@ export class Orchestrator {
         // Add classification info to done event
         if (event.type === 'done') {
           const duration = Date.now() - startTime;
+
+          // Update rolling summary if needed (async, don't wait)
+          if (toolContext.conversationId && conversationHistory.length > 0) {
+            maybeUpdateRollingSummary(
+              toolContext.conversationId,
+              conversationHistory,
+              toolContext.contextStats
+            ).catch(err => {
+              logger.warn({ error: err.message }, 'Failed to update rolling summary after streaming');
+            });
+          }
+
           yield {
             ...event,
             domain: classification.domain,

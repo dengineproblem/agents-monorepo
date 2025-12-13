@@ -215,6 +215,322 @@ async function getActiveContexts(userAccountId) {
   return data || [];
 }
 
+// ============================================================
+// BUSINESS SNAPSHOT (Snapshot-First Pattern)
+// ============================================================
+
+/**
+ * Get compact business snapshot for context
+ * Provides aggregated view of ads, creatives, CRM in one call
+ *
+ * @param {Object} params
+ * @param {string} params.userAccountId
+ * @param {string} [params.adAccountId]
+ * @returns {Promise<Object>} Business snapshot
+ */
+export async function getBusinessSnapshot({ userAccountId, adAccountId }) {
+  const startTime = Date.now();
+
+  try {
+    // Run all queries in parallel
+    const [
+      scoringResult,
+      directionsResult,
+      creativesResult,
+      notesResult
+    ] = await Promise.allSettled([
+      getAdsSnapshot(userAccountId, adAccountId),
+      getDirectionsSnapshot(userAccountId, adAccountId),
+      getCreativesSnapshot(userAccountId, adAccountId),
+      getNotesSnapshot(userAccountId, adAccountId)
+    ]);
+
+    // Build snapshot
+    const snapshot = {
+      ads: scoringResult.status === 'fulfilled' ? scoringResult.value : null,
+      directions: directionsResult.status === 'fulfilled' ? directionsResult.value : null,
+      creatives: creativesResult.status === 'fulfilled' ? creativesResult.value : null,
+      notes: notesResult.status === 'fulfilled' ? notesResult.value : {},
+
+      // Metadata
+      generatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - startTime,
+      freshness: determineFreshness(scoringResult.value?.dataDate)
+    };
+
+    logger.debug({
+      userAccountId,
+      latencyMs: snapshot.latencyMs,
+      freshness: snapshot.freshness
+    }, 'Business snapshot generated');
+
+    return snapshot;
+
+  } catch (error) {
+    logger.error({ error: error.message }, 'Failed to generate business snapshot');
+    return {
+      ads: null,
+      directions: null,
+      creatives: null,
+      notes: {},
+      generatedAt: new Date().toISOString(),
+      latencyMs: Date.now() - startTime,
+      freshness: 'error'
+    };
+  }
+}
+
+/**
+ * Get ads snapshot from scoring_executions
+ */
+async function getAdsSnapshot(userAccountId, adAccountId) {
+  let query = supabase
+    .from('scoring_executions')
+    .select('scoring_output, created_at')
+    .eq('user_account_id', userAccountId)
+    .eq('status', 'success')
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (adAccountId) {
+    query = query.eq('account_id', adAccountId);
+  }
+
+  const { data: execution, error } = await query.maybeSingle();
+
+  if (error || !execution?.scoring_output) {
+    return null;
+  }
+
+  const { adsets, ready_creatives } = execution.scoring_output;
+
+  if (!adsets?.length) {
+    return null;
+  }
+
+  // Aggregate metrics
+  const totals = adsets.reduce((acc, adset) => {
+    const m = adset.metrics_last_7d || {};
+    return {
+      spend: acc.spend + (parseFloat(m.spend) || 0),
+      leads: acc.leads + (parseInt(m.total_leads) || 0),
+      impressions: acc.impressions + (parseInt(m.impressions) || 0),
+      clicks: acc.clicks + (parseInt(m.clicks) || 0)
+    };
+  }, { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
+  // Find best/worst by CPL
+  const adsetsWithCPL = adsets
+    .map(a => ({
+      name: a.adset_name,
+      campaignId: a.campaign_id,
+      spend: parseFloat(a.metrics_last_7d?.spend) || 0,
+      leads: parseInt(a.metrics_last_7d?.total_leads) || 0
+    }))
+    .filter(a => a.leads > 0)
+    .map(a => ({ ...a, cpl: Math.round(a.spend / a.leads) }))
+    .sort((a, b) => a.cpl - b.cpl);
+
+  return {
+    period: 'last_7d',
+    spend: Math.round(totals.spend * 100) / 100,
+    leads: totals.leads,
+    cpl: totals.leads > 0 ? Math.round(totals.spend / totals.leads) : null,
+    impressions: totals.impressions,
+    clicks: totals.clicks,
+    activeAdsets: adsets.length,
+    activeCreatives: ready_creatives?.filter(c => c.has_data)?.length || 0,
+    topAdset: adsetsWithCPL[0] || null,
+    worstAdset: adsetsWithCPL[adsetsWithCPL.length - 1] || null,
+    dataDate: execution.created_at
+  };
+}
+
+/**
+ * Get directions snapshot from direction_metrics_rollup
+ */
+async function getDirectionsSnapshot(userAccountId, adAccountId) {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  let query = supabase
+    .from('direction_metrics_rollup')
+    .select('direction_id, spend, leads, cpl, active_creatives_count')
+    .eq('user_account_id', userAccountId)
+    .gte('day', sevenDaysAgo);
+
+  if (adAccountId) {
+    query = query.eq('account_id', adAccountId);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data?.length) {
+    return null;
+  }
+
+  // Aggregate by direction
+  const byDirection = {};
+  data.forEach(row => {
+    const id = row.direction_id;
+    if (!byDirection[id]) {
+      byDirection[id] = { spend: 0, leads: 0, activeCreatives: 0 };
+    }
+    byDirection[id].spend += parseFloat(row.spend) || 0;
+    byDirection[id].leads += parseInt(row.leads) || 0;
+    byDirection[id].activeCreatives = Math.max(byDirection[id].activeCreatives, row.active_creatives_count || 0);
+  });
+
+  const directions = Object.entries(byDirection)
+    .map(([id, d]) => ({
+      id,
+      spend: Math.round(d.spend * 100) / 100,
+      leads: d.leads,
+      cpl: d.leads > 0 ? Math.round(d.spend / d.leads) : null,
+      activeCreatives: d.activeCreatives
+    }))
+    .sort((a, b) => (a.cpl || 9999) - (b.cpl || 9999));
+
+  return {
+    count: directions.length,
+    totalSpend: directions.reduce((sum, d) => sum + d.spend, 0),
+    totalLeads: directions.reduce((sum, d) => sum + d.leads, 0),
+    topDirection: directions[0] || null,
+    worstDirection: directions[directions.length - 1] || null
+  };
+}
+
+/**
+ * Get creatives snapshot from creative_scores / creative_analysis
+ */
+async function getCreativesSnapshot(userAccountId, adAccountId) {
+  // Get creative scores (risk assessment)
+  let scoresQuery = supabase
+    .from('creative_scores')
+    .select('user_creative_id, score, verdict, created_at')
+    .eq('user_account_id', userAccountId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (adAccountId) {
+    scoresQuery = scoresQuery.eq('account_id', adAccountId);
+  }
+
+  const { data: scores, error } = await scoresQuery;
+
+  if (error || !scores?.length) {
+    return null;
+  }
+
+  // Group by creative, take latest score
+  const latestScores = {};
+  scores.forEach(s => {
+    if (!latestScores[s.user_creative_id]) {
+      latestScores[s.user_creative_id] = s;
+    }
+  });
+
+  const allScores = Object.values(latestScores);
+  const highRisk = allScores.filter(s => s.score >= 70);
+  const avgScore = allScores.length > 0
+    ? Math.round(allScores.reduce((sum, s) => sum + s.score, 0) / allScores.length)
+    : null;
+
+  return {
+    totalWithScores: allScores.length,
+    avgRiskScore: avgScore,
+    highRiskCount: highRisk.length,
+    highRiskCreatives: highRisk.slice(0, 3).map(s => ({
+      id: s.user_creative_id,
+      score: s.score,
+      verdict: s.verdict
+    }))
+  };
+}
+
+/**
+ * Get notes snapshot from agent_notes
+ */
+async function getNotesSnapshot(userAccountId, adAccountId) {
+  const { memoryStore } = await import('./stores/memoryStore.js');
+  return memoryStore.getNotesDigest(userAccountId, adAccountId, ['ads', 'creative'], 3);
+}
+
+/**
+ * Determine data freshness
+ */
+function determineFreshness(dataDate) {
+  if (!dataDate) return 'missing';
+
+  const hoursAgo = (Date.now() - new Date(dataDate).getTime()) / (1000 * 60 * 60);
+
+  if (hoursAgo < 24) return 'fresh';      // Less than 24 hours
+  if (hoursAgo < 48) return 'stale';      // 24-48 hours
+  return 'outdated';                       // More than 48 hours
+}
+
+/**
+ * Format business snapshot for injection into prompt
+ * @param {Object} snapshot
+ * @returns {string}
+ */
+export function formatSnapshotForPrompt(snapshot) {
+  if (!snapshot || snapshot.freshness === 'error') {
+    return '';
+  }
+
+  const lines = ['## Текущее состояние бизнеса\n'];
+
+  // Ads summary
+  if (snapshot.ads) {
+    const a = snapshot.ads;
+    lines.push(`**Реклама (${a.period}):**`);
+    lines.push(`• Расход: $${a.spend} | Лиды: ${a.leads} | CPL: ${a.cpl || 'N/A'}`);
+    lines.push(`• Активных адсетов: ${a.activeAdsets} | Креативов: ${a.activeCreatives}`);
+    if (a.topAdset) {
+      lines.push(`• Лучший: ${a.topAdset.name} (CPL: $${a.topAdset.cpl})`);
+    }
+    if (a.worstAdset && a.worstAdset !== a.topAdset) {
+      lines.push(`• Худший: ${a.worstAdset.name} (CPL: $${a.worstAdset.cpl})`);
+    }
+    lines.push('');
+  }
+
+  // Creatives summary
+  if (snapshot.creatives) {
+    const c = snapshot.creatives;
+    lines.push(`**Креативы:**`);
+    lines.push(`• С оценками: ${c.totalWithScores} | Avg Risk: ${c.avgRiskScore || 'N/A'}`);
+    if (c.highRiskCount > 0) {
+      lines.push(`• ⚠️ Высокий риск: ${c.highRiskCount} креативов`);
+    }
+    lines.push('');
+  }
+
+  // Directions summary
+  if (snapshot.directions) {
+    const d = snapshot.directions;
+    lines.push(`**Направления:**`);
+    lines.push(`• Активных: ${d.count} | Расход: $${d.totalSpend} | Лиды: ${d.totalLeads}`);
+    lines.push('');
+  }
+
+  // Notes
+  if (snapshot.notes && Object.keys(snapshot.notes).length > 0) {
+    lines.push(`**Заметки:**`);
+    for (const [domain, notes] of Object.entries(snapshot.notes)) {
+      if (notes?.length > 0) {
+        notes.forEach(n => lines.push(`• [${domain}] ${n.text}`));
+      }
+    }
+    lines.push('');
+  }
+
+  lines.push(`_Данные: ${snapshot.freshness === 'fresh' ? 'актуальные' : snapshot.freshness}_`);
+  lines.push('---\n');
+
+  return lines.join('\n');
+}
+
 /**
  * Get or create a conversation
  * @deprecated Use unifiedStore.getOrCreate() for new code
