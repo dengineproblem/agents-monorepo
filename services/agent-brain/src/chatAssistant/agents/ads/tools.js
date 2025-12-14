@@ -166,14 +166,14 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getROIComparison',
-    description: 'Сравнить ROI между креативами или направлениями. Показывает топ N по окупаемости',
+    description: 'Сравнить ROI между креативами или направлениями. Показывает топ N по окупаемости. По умолчанию за всё время.',
     parameters: {
       type: 'object',
       properties: {
         period: {
           type: 'string',
-          enum: ['last_7d', 'last_30d'],
-          description: 'Период для сравнения'
+          enum: ['all', 'last_7d', 'last_30d', 'last_90d'],
+          description: 'Период для сравнения (по умолчанию all - за всё время)'
         },
         compare_by: {
           type: 'string',
@@ -185,7 +185,7 @@ export const ADS_TOOLS = [
           description: 'Количество топ позиций для вывода (по умолчанию 5)'
         }
       },
-      required: ['period', 'compare_by']
+      required: ['compare_by']
     }
   },
 

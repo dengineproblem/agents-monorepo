@@ -14,6 +14,8 @@ import {
   verifyDirectionStatus
 } from '../../shared/postCheck.js';
 import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
+import { getUsdToKzt } from '../../shared/currencyRate.js';
+import { logger } from '../../../lib/logger.js';
 
 export const adsHandlers = {
   // ============================================================
@@ -858,8 +860,8 @@ export const adsHandlers = {
       return d.toISOString().split('T')[0];
     })();
 
-    // USD to KZT rate - TODO: use dynamic rate from Task 10
-    const usdToKztRate = 530;
+    // USD to KZT rate from DB (cached, updated daily by cron)
+    const usdToKztRate = await getUsdToKzt();
 
     // Step 1: Load user_creatives
     let creativesQuery = supabase
@@ -887,6 +889,8 @@ export const adsHandlers = {
     }
 
     if (!creatives || creatives.length === 0) {
+      logger.info({ userAccountId, dbAccountId, period, direction_id, media_type },
+        'getROIReport: no creatives found');
       return {
         totalSpend: 0,
         totalRevenue: 0,
@@ -897,6 +901,9 @@ export const adsHandlers = {
         message: 'Креативы не найдены за указанный период'
       };
     }
+
+    logger.debug({ creativesCount: creatives.length, since, period },
+      'getROIReport: found creatives');
 
     const creativeIds = creatives.map(c => c.id);
 
@@ -1126,20 +1133,29 @@ export const adsHandlers = {
   /**
    * Compare ROI between creatives or directions
    */
-  async getROIComparison({ period, compare_by, top_n = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getROIComparison({ period = 'all', compare_by, top_n = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Period to days
-    const periodDays = period === 'last_7d' ? 7 : 30;
+    // Period to days (null = all time)
+    const periodDays = {
+      'last_7d': 7,
+      'last_30d': 30,
+      'last_90d': 90,
+      'all': null
+    }[period] || null;
 
     const since = (() => {
+      if (!periodDays) return null; // all time - no filter
       const d = new Date();
       d.setDate(d.getDate() - periodDays);
       d.setHours(0, 0, 0, 0);
       return d.toISOString().split('T')[0];
     })();
 
-    const usdToKztRate = 530;
+    // USD to KZT rate from DB (cached, updated daily by cron)
+    const usdToKztRate = await getUsdToKzt();
+
+    logger.debug({ period, compare_by, since, dbAccountId }, 'getROIComparison: starting');
 
     if (compare_by === 'direction') {
       // Compare by directions
@@ -1185,8 +1201,11 @@ export const adsHandlers = {
           .select('leads, spend')
           .in('user_creative_id', creativeIds)
           .eq('user_account_id', userAccountId)
-          .eq('source', 'production')
-          .gte('date', since);
+          .eq('source', 'production');
+
+        if (since) {
+          metricsQuery = metricsQuery.gte('date', since);
+        }
 
         const { data: metrics } = await metricsQuery;
 
@@ -1205,9 +1224,11 @@ export const adsHandlers = {
           .from('leads')
           .select('chat_id')
           .eq('user_account_id', userAccountId)
-          .eq('direction_id', direction.id)
-          .gte('created_at', since + 'T00:00:00.000Z');
+          .eq('direction_id', direction.id);
 
+        if (since) {
+          leadsQuery = leadsQuery.gte('created_at', since + 'T00:00:00.000Z');
+        }
         if (dbAccountId) {
           leadsQuery = leadsQuery.eq('account_id', dbAccountId);
         }
@@ -1221,9 +1242,11 @@ export const adsHandlers = {
             .from('purchases')
             .select('amount')
             .eq('user_account_id', userAccountId)
-            .in('client_phone', phones)
-            .gte('created_at', since + 'T00:00:00.000Z');
+            .in('client_phone', phones);
 
+          if (since) {
+            purchasesQuery = purchasesQuery.gte('created_at', since + 'T00:00:00.000Z');
+          }
           if (dbAccountId) {
             purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
           }
@@ -1255,20 +1278,32 @@ export const adsHandlers = {
 
     } else {
       // Compare by creatives - use getROIReport and sort by ROI
-      const report = await this.getROIReport(
+      const report = await adsHandlers.getROIReport(
         { period, direction_id: null, media_type: null },
         { userAccountId, adAccountId, adAccountDbId }
       );
 
-      if (report.error) return report;
+      if (report.error) {
+        logger.warn({ error: report.error, period }, 'getROIComparison: getROIReport returned error');
+        return report;
+      }
 
       // Sort by ROI
       const sorted = [...(report.campaigns || [])].sort((a, b) => b.roi - a.roi);
 
+      logger.debug({
+        period,
+        campaignsCount: report.campaigns?.length || 0,
+        sortedCount: sorted.length,
+        message: report.message
+      }, 'getROIComparison: returning creative comparison');
+
       return {
         period,
         compare_by: 'creative',
-        items: sorted.slice(0, top_n)
+        items: sorted.slice(0, top_n),
+        // Include message if no data found
+        ...(report.message && sorted.length === 0 ? { message: report.message } : {})
       };
     }
   }
