@@ -66,6 +66,25 @@ export const CRM_TOOLS = [
       required: ['period']
     }
   },
+  {
+    name: 'getRevenueStats',
+    description: 'Получить статистику выручки по лидам: сумма продаж, количество покупок, средний чек',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: {
+          type: 'string',
+          enum: ['last_7d', 'last_30d', 'all'],
+          description: 'Период для анализа выручки'
+        },
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления для фильтрации (опционально)'
+        }
+      },
+      required: ['period']
+    }
+  },
 
   // ============================================================
   // WRITE TOOLS

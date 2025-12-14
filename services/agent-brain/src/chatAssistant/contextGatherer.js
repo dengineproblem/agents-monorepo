@@ -33,9 +33,9 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
       activeContexts
     ] = await Promise.allSettled([
       getChatHistory(conversationId),
-      getBusinessProfile(userAccountId),
+      getBusinessProfile(userAccountId, adAccountId),
       getTodayMetrics(userAccountId, adAccountId),
-      getActiveContexts(userAccountId)
+      getActiveContexts(userAccountId, adAccountId)
     ]);
 
     // Add blocks with priorities (higher = more important, kept first)
@@ -116,12 +116,18 @@ async function getChatHistory(conversationId) {
 /**
  * Get business profile for personalized context
  */
-async function getBusinessProfile(userAccountId) {
-  const { data, error } = await supabase
+async function getBusinessProfile(userAccountId, adAccountId) {
+  let query = supabase
     .from('business_profile')
     .select('*')
-    .eq('user_account_id', userAccountId)
-    .maybeSingle();
+    .eq('user_account_id', userAccountId);
+
+  // Фильтр по account_id для мультиаккаунтности
+  if (adAccountId) {
+    query = query.eq('account_id', adAccountId);
+  }
+
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     logger.warn({ error: error.message }, 'Failed to get business profile');
@@ -198,14 +204,22 @@ async function getTodayMetrics(userAccountId, adAccountId) {
 
 /**
  * Get active promotional contexts
+ * @param {string} userAccountId
+ * @param {string} [adAccountId] - UUID из ad_accounts для мультиаккаунтности
  */
-async function getActiveContexts(userAccountId) {
-  const { data, error } = await supabase
+async function getActiveContexts(userAccountId, adAccountId) {
+  let query = supabase
     .from('campaign_contexts')
     .select('id, title, content, context_type')
     .eq('user_account_id', userAccountId)
-    .eq('is_active', true)
-    .limit(5);
+    .eq('is_active', true);
+
+  // Фильтр по account_id для мультиаккаунтности
+  if (adAccountId) {
+    query = query.eq('account_id', adAccountId);
+  }
+
+  const { data, error } = await query.limit(5);
 
   if (error) {
     logger.warn({ error: error.message }, 'Failed to get active contexts');

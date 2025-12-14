@@ -221,15 +221,21 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeAnalysis({ creative_id }, { userAccountId }) {
-    const { data, error } = await supabase
+  async getCreativeAnalysis({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    let query = supabase
       .from('creative_analysis')
       .select('*')
       .eq('creative_id', creative_id)
       .eq('user_account_id', userAccountId)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+
+    // Фильтр по account_id для мультиаккаунтности (если колонка есть в таблице)
+    // Примечание: creative_analysis может не иметь account_id, тогда фильтр не применяется
+
+    const { data, error } = await query.single();
 
     if (error || !data) {
       return {
@@ -353,13 +359,20 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeScores({ level = 'creative', risk_level, limit = 20 }, { userAccountId }) {
+  async getCreativeScores({ level = 'creative', risk_level, limit = 20 }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
     let query = supabase
       .from('creative_scores')
       .select('*')
       .eq('user_account_id', userAccountId)
       .eq('level', level)
       .order('date', { ascending: false });
+
+    // Фильтр по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    }
 
     if (risk_level && risk_level !== 'all') {
       query = query.eq('risk_level', risk_level);
@@ -392,13 +405,22 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeTests({ creative_id }, { userAccountId }) {
-    const { data, error } = await supabase
+  async getCreativeTests({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    let query = supabase
       .from('creative_tests')
       .select('*')
       .eq('user_creative_id', creative_id)
       .eq('user_id', userAccountId)
       .order('created_at', { ascending: false });
+
+    // Фильтр по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       return { success: false, error: error.message };
@@ -466,9 +488,11 @@ export const creativeHandlers = {
   // WRITE HANDLERS
   // ============================================================
 
-  async triggerCreativeAnalysis({ creative_id }, { userAccountId, adAccountId }) {
+  async triggerCreativeAnalysis({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
     // Call the analyzer endpoint
     const analyzerUrl = process.env.ANALYZER_URL || 'http://localhost:7080';
+    // Используем adAccountDbId (UUID) для БД операций, adAccountId (Facebook ID) для API
+    const dbAccountId = adAccountDbId || null;
 
     try {
       const response = await fetch(`${analyzerUrl}/api/analyzer/analyze-creative`, {
@@ -476,8 +500,9 @@ export const creativeHandlers = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           creative_id,
-          user_id: userAccountId,
-          account_id: adAccountId
+          user_account_id: userAccountId,
+          account_id: dbAccountId,  // UUID для БД
+          fb_account_id: adAccountId  // Facebook ID для API вызовов
         })
       });
 
@@ -569,12 +594,14 @@ export const creativeHandlers = {
       });
 
       // Save mapping
+      // Используем adAccountDbId (UUID) для account_id в БД
+      const dbAccountId = adAccountDbId || null;
       await supabase.from('ad_creative_mapping').insert({
         ad_id: adResult.id,
         user_creative_id: creative_id,
         direction_id,
         user_id: userAccountId,
-        account_id: adAccountId,
+        account_id: dbAccountId,  // UUID для мультиаккаунтности
         adset_id: adsetId,
         campaign_id: direction.fb_campaign_id,
         fb_creative_id: fbCreativeId,

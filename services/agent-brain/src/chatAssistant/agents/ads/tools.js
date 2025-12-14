@@ -138,6 +138,58 @@ export const ADS_TOOLS = [
   },
 
   // ============================================================
+  // READ TOOLS - ROI Analytics
+  // ============================================================
+  {
+    name: 'getROIReport',
+    description: 'Получить отчёт по ROI (окупаемости) креативов за период. Показывает расходы, выручку, ROI%, лиды и конверсии',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: {
+          type: 'string',
+          enum: ['last_7d', 'last_30d', 'last_90d', 'all'],
+          description: 'Период для анализа ROI'
+        },
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления для фильтрации (опционально)'
+        },
+        media_type: {
+          type: 'string',
+          enum: ['video', 'image', 'carousel'],
+          description: 'Тип креатива для фильтрации (опционально)'
+        }
+      },
+      required: ['period']
+    }
+  },
+  {
+    name: 'getROIComparison',
+    description: 'Сравнить ROI между креативами или направлениями. Показывает топ N по окупаемости',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: {
+          type: 'string',
+          enum: ['last_7d', 'last_30d'],
+          description: 'Период для сравнения'
+        },
+        compare_by: {
+          type: 'string',
+          enum: ['creative', 'direction'],
+          description: 'Группировка: по креативам или по направлениям'
+        },
+        top_n: {
+          type: 'number',
+          description: 'Количество топ позиций для вывода (по умолчанию 5)'
+        }
+      },
+      required: ['period', 'compare_by']
+    }
+  },
+
+  // ============================================================
   // WRITE TOOLS - Campaigns & AdSets
   // ============================================================
   {

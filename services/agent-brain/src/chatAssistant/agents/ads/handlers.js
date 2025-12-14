@@ -432,9 +432,11 @@ export const adsHandlers = {
   // DIRECTIONS HANDLERS
   // ============================================================
 
-  async getDirections({ status, period }, { userAccountId, adAccountId }) {
+  async getDirections({ status, period }, { userAccountId, adAccountId, adAccountDbId }) {
     // Get directions for this user account
     // Note: account_directions uses user_account_id, not ad_account_id
+    const dbAccountId = adAccountDbId || null;
+
     let query = supabase
       .from('account_directions')
       .select(`
@@ -450,6 +452,11 @@ export const adsHandlers = {
         updated_at
       `)
       .eq('user_account_id', userAccountId);
+
+    // Фильтр по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    }
 
     // Filter by status: 'active' = is_active=true, 'paused' = is_active=false
     if (status && status !== 'all') {
@@ -557,17 +564,26 @@ export const adsHandlers = {
     };
   },
 
-  async getDirectionMetrics({ direction_id, period }, { adAccountId, userAccountId }) {
+  async getDirectionMetrics({ direction_id, period }, { adAccountId, userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
     const days = { '7d': 7, '14d': 14, '30d': 30 }[period] || 7;
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
     // 1. Пробуем получить из rollup (быстро)
-    const { data: rollupMetrics, error: rollupError } = await supabase
+    let rollupQuery = supabase
       .from('direction_metrics_rollup')
       .select('*')
       .eq('direction_id', direction_id)
+      .eq('user_account_id', userAccountId)
       .gte('day', startDate)
       .order('day', { ascending: true });
+
+    // Фильтр по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      rollupQuery = rollupQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: rollupMetrics, error: rollupError } = await rollupQuery;
 
     if (!rollupError && rollupMetrics?.length > 0) {
       // Используем данные из rollup
@@ -610,7 +626,7 @@ export const adsHandlers = {
     }
 
     // 2. Fallback: агрегируем из creative_metrics_history через ad_creative_mapping
-    const { data: metricsData, error: metricsError } = await supabase
+    let metricsQuery = supabase
       .from('creative_metrics_history')
       .select(`
         date,
@@ -624,15 +640,29 @@ export const adsHandlers = {
       .gte('date', startDate)
       .eq('source', 'production');
 
+    // Фильтр по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      metricsQuery = metricsQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: metricsData, error: metricsError } = await metricsQuery;
+
     if (metricsError) {
       return { success: false, error: metricsError.message };
     }
 
     // Получаем ad_ids для этого direction
-    const { data: mappings } = await supabase
+    let mappingsQuery = supabase
       .from('ad_creative_mapping')
       .select('ad_id')
       .eq('direction_id', direction_id);
+
+    // Фильтр по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      mappingsQuery = mappingsQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: mappings } = await mappingsQuery;
 
     const directionAdIds = new Set((mappings || []).map(m => m.ad_id));
 
@@ -792,5 +822,380 @@ export const adsHandlers = {
       success: true,
       message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB кампанию)' : ''}`
     };
+  },
+
+  // ============================================================
+  // ROI ANALYTICS HANDLERS
+  // ============================================================
+
+  /**
+   * Get ROI report for creatives
+   * Logic adapted from salesApi.getROIData()
+   */
+  async getROIReport({ period, direction_id, media_type }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Period to days
+    const periodDays = {
+      'last_7d': 7,
+      'last_30d': 30,
+      'last_90d': 90,
+      'all': null
+    }[period] || null;
+
+    const since = (() => {
+      if (!periodDays) return null;
+      const d = new Date();
+      d.setDate(d.getDate() - periodDays);
+      d.setHours(0, 0, 0, 0);
+      return d.toISOString().split('T')[0];
+    })();
+
+    // USD to KZT rate
+    const usdToKztRate = 530;
+
+    // Step 1: Load user_creatives
+    let creativesQuery = supabase
+      .from('user_creatives')
+      .select('id, title, media_type, direction_id')
+      .eq('user_id', userAccountId)
+      .eq('status', 'ready')
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (dbAccountId) {
+      creativesQuery = creativesQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      creativesQuery = creativesQuery.eq('direction_id', direction_id);
+    }
+    if (media_type) {
+      creativesQuery = creativesQuery.eq('media_type', media_type);
+    }
+
+    const { data: creatives, error: creativesError } = await creativesQuery;
+
+    if (creativesError) {
+      return { error: `Ошибка загрузки креативов: ${creativesError.message}` };
+    }
+
+    if (!creatives || creatives.length === 0) {
+      return {
+        totalSpend: 0,
+        totalRevenue: 0,
+        totalROI: 0,
+        totalLeads: 0,
+        totalConversions: 0,
+        campaigns: [],
+        message: 'Креативы не найдены за указанный период'
+      };
+    }
+
+    const creativeIds = creatives.map(c => c.id);
+
+    // Step 2: Load metrics from creative_metrics_history
+    let metricsQuery = supabase
+      .from('creative_metrics_history')
+      .select('user_creative_id, impressions, clicks, leads, spend')
+      .in('user_creative_id', creativeIds)
+      .eq('user_account_id', userAccountId)
+      .eq('source', 'production');
+
+    if (since) {
+      metricsQuery = metricsQuery.gte('date', since);
+    }
+
+    const { data: metricsHistory } = await metricsQuery;
+
+    // Aggregate metrics by creative
+    const metricsMap = new Map();
+    for (const metric of metricsHistory || []) {
+      const creativeId = metric.user_creative_id;
+      if (!metricsMap.has(creativeId)) {
+        metricsMap.set(creativeId, { impressions: 0, clicks: 0, leads: 0, spend: 0 });
+      }
+      const agg = metricsMap.get(creativeId);
+      agg.impressions += metric.impressions || 0;
+      agg.clicks += metric.clicks || 0;
+      agg.leads += metric.leads || 0;
+      agg.spend += metric.spend || 0;
+    }
+
+    // Step 3: Load leads for revenue calculation
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, chat_id, creative_id, is_qualified')
+      .eq('user_account_id', userAccountId)
+      .in('creative_id', creativeIds);
+
+    if (dbAccountId) {
+      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      leadsQuery = leadsQuery.eq('direction_id', direction_id);
+    }
+    if (since) {
+      leadsQuery = leadsQuery.gte('created_at', since + 'T00:00:00.000Z');
+    }
+
+    const { data: leadsData } = await leadsQuery;
+
+    // Step 4: Load purchases for revenue
+    const leadPhones = leadsData?.map(l => l.chat_id).filter(Boolean) || [];
+
+    let purchasesQuery = supabase
+      .from('purchases')
+      .select('client_phone, amount')
+      .eq('user_account_id', userAccountId);
+
+    if (dbAccountId) {
+      purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
+    }
+    if (leadPhones.length > 0) {
+      purchasesQuery = purchasesQuery.in('client_phone', leadPhones);
+    } else {
+      purchasesQuery = purchasesQuery.in('client_phone', ['__no_match__']);
+    }
+    if (since) {
+      purchasesQuery = purchasesQuery.gte('created_at', since + 'T00:00:00.000Z');
+    }
+
+    const { data: purchasesData } = await purchasesQuery;
+
+    // Group purchases by phone
+    const purchasesByPhone = new Map();
+    for (const purchase of purchasesData || []) {
+      const phone = purchase.client_phone;
+      if (!purchasesByPhone.has(phone)) {
+        purchasesByPhone.set(phone, { count: 0, amount: 0 });
+      }
+      const p = purchasesByPhone.get(phone);
+      p.count++;
+      p.amount += Number(purchase.amount) || 0;
+    }
+
+    // Group revenue by creative
+    const revenueByCreative = new Map();
+    for (const lead of leadsData || []) {
+      const creativeId = lead.creative_id;
+      if (!creativeId) continue;
+
+      if (!revenueByCreative.has(creativeId)) {
+        revenueByCreative.set(creativeId, { revenue: 0, conversions: 0 });
+      }
+      const rev = revenueByCreative.get(creativeId);
+
+      const purchaseData = purchasesByPhone.get(lead.chat_id);
+      if (purchaseData) {
+        rev.revenue += purchaseData.amount;
+        rev.conversions += purchaseData.count;
+      }
+    }
+
+    // Step 5: Build result
+    const campaigns = [];
+    let totalRevenue = 0;
+    let totalSpend = 0;
+    let totalLeads = 0;
+    let totalConversions = 0;
+
+    for (const creative of creatives) {
+      const metrics = metricsMap.get(creative.id) || { impressions: 0, clicks: 0, leads: 0, spend: 0 };
+      const revenueData = revenueByCreative.get(creative.id) || { revenue: 0, conversions: 0 };
+
+      const leads = metrics.leads;
+      const spend = Math.round(metrics.spend * usdToKztRate);
+      const revenue = revenueData.revenue;
+      const conversions = revenueData.conversions;
+
+      // ROI calculation
+      const roi = spend > 0 ? Math.round(((revenue - spend) / spend) * 100) : 0;
+
+      if (leads > 0 || spend > 0) { // Only include creatives with activity
+        campaigns.push({
+          id: creative.id,
+          name: creative.title || `Креатив ${creative.id.substring(0, 8)}`,
+          media_type: creative.media_type,
+          spend,
+          revenue,
+          roi,
+          leads,
+          conversions
+        });
+
+        totalRevenue += revenue;
+        totalSpend += spend;
+        totalLeads += leads;
+        totalConversions += conversions;
+      }
+    }
+
+    // Sort by leads descending
+    campaigns.sort((a, b) => b.leads - a.leads);
+
+    const totalROI = totalSpend > 0 ? Math.round(((totalRevenue - totalSpend) / totalSpend) * 100) : 0;
+
+    return {
+      period,
+      totalSpend,
+      totalSpend_formatted: `${(totalSpend / 1000).toFixed(0)}K ₸`,
+      totalRevenue,
+      totalRevenue_formatted: `${(totalRevenue / 1000).toFixed(0)}K ₸`,
+      totalROI,
+      totalROI_formatted: `${totalROI}%`,
+      totalLeads,
+      totalConversions,
+      campaigns: campaigns.slice(0, 10) // Top 10 creatives
+    };
+  },
+
+  /**
+   * Compare ROI between creatives or directions
+   */
+  async getROIComparison({ period, compare_by, top_n = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Period to days
+    const periodDays = period === 'last_7d' ? 7 : 30;
+
+    const since = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() - periodDays);
+      d.setHours(0, 0, 0, 0);
+      return d.toISOString().split('T')[0];
+    })();
+
+    const usdToKztRate = 530;
+
+    if (compare_by === 'direction') {
+      // Compare by directions
+      let directionsQuery = supabase
+        .from('account_directions')
+        .select('id, name')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true);
+
+      if (dbAccountId) {
+        directionsQuery = directionsQuery.eq('account_id', dbAccountId);
+      }
+
+      const { data: directions } = await directionsQuery;
+
+      if (!directions || directions.length === 0) {
+        return { error: 'Направления не найдены' };
+      }
+
+      const results = [];
+
+      for (const direction of directions) {
+        // Load metrics for direction's creatives
+        let creativesQuery = supabase
+          .from('user_creatives')
+          .select('id')
+          .eq('user_id', userAccountId)
+          .eq('direction_id', direction.id)
+          .eq('status', 'ready');
+
+        if (dbAccountId) {
+          creativesQuery = creativesQuery.eq('account_id', dbAccountId);
+        }
+
+        const { data: dirCreatives } = await creativesQuery;
+        const creativeIds = dirCreatives?.map(c => c.id) || [];
+
+        if (creativeIds.length === 0) continue;
+
+        // Get metrics
+        let metricsQuery = supabase
+          .from('creative_metrics_history')
+          .select('leads, spend')
+          .in('user_creative_id', creativeIds)
+          .eq('user_account_id', userAccountId)
+          .eq('source', 'production')
+          .gte('date', since);
+
+        const { data: metrics } = await metricsQuery;
+
+        let totalLeads = 0;
+        let totalSpend = 0;
+
+        for (const m of metrics || []) {
+          totalLeads += m.leads || 0;
+          totalSpend += m.spend || 0;
+        }
+
+        const spendKzt = Math.round(totalSpend * usdToKztRate);
+
+        // Get revenue
+        let leadsQuery = supabase
+          .from('leads')
+          .select('chat_id')
+          .eq('user_account_id', userAccountId)
+          .eq('direction_id', direction.id)
+          .gte('created_at', since + 'T00:00:00.000Z');
+
+        if (dbAccountId) {
+          leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+        }
+
+        const { data: leadsData } = await leadsQuery;
+        const phones = leadsData?.map(l => l.chat_id).filter(Boolean) || [];
+
+        let revenue = 0;
+        if (phones.length > 0) {
+          let purchasesQuery = supabase
+            .from('purchases')
+            .select('amount')
+            .eq('user_account_id', userAccountId)
+            .in('client_phone', phones)
+            .gte('created_at', since + 'T00:00:00.000Z');
+
+          if (dbAccountId) {
+            purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
+          }
+
+          const { data: purchases } = await purchasesQuery;
+          revenue = purchases?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 0;
+        }
+
+        const roi = spendKzt > 0 ? Math.round(((revenue - spendKzt) / spendKzt) * 100) : 0;
+
+        results.push({
+          id: direction.id,
+          name: direction.name,
+          spend: spendKzt,
+          revenue,
+          roi,
+          leads: totalLeads
+        });
+      }
+
+      // Sort by ROI descending
+      results.sort((a, b) => b.roi - a.roi);
+
+      return {
+        period,
+        compare_by: 'direction',
+        items: results.slice(0, top_n)
+      };
+
+    } else {
+      // Compare by creatives - use getROIReport and sort by ROI
+      const report = await this.getROIReport(
+        { period, direction_id: null, media_type: null },
+        { userAccountId, adAccountId, adAccountDbId }
+      );
+
+      if (report.error) return report;
+
+      // Sort by ROI
+      const sorted = [...(report.campaigns || [])].sort((a, b) => b.roi - a.roi);
+
+      return {
+        period,
+        compare_by: 'creative',
+        items: sorted.slice(0, top_n)
+      };
+    }
   }
 };

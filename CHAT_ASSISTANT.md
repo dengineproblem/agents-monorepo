@@ -30,7 +30,7 @@ User Request
 ### AdsAgent — Реклама и Направления
 **Путь:** `services/agent-brain/src/chatAssistant/agents/ads/`
 
-**15 инструментов:**
+**17 инструментов:**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -41,6 +41,8 @@ User Request
 | `getDirections` | READ | Направления с агрегированными метриками |
 | `getDirectionDetails` | READ | Детали направления + креативы + FB адсет |
 | `getDirectionMetrics` | READ | Метрики направления по дням |
+| `getROIReport` | READ | Отчёт по ROI креативов (расходы, выручка, ROI%, лиды, конверсии) |
+| `getROIComparison` | READ | Сравнение ROI между креативами или направлениями |
 | `pauseCampaign` | WRITE | Пауза кампании |
 | `resumeCampaign` | WRITE | Возобновление кампании |
 | `pauseAdSet` | WRITE | Пауза адсета |
@@ -99,7 +101,15 @@ User Request
 ### CRMAgent — Лиды
 **Путь:** `services/agent-brain/src/chatAssistant/agents/crm/`
 
-Работа с лидами, воронкой продаж, квалификацией.
+**5 инструментов:**
+
+| Tool | Тип | Описание |
+|------|-----|----------|
+| `getLeads` | READ | Список лидов с фильтрами (температура, этап, score) |
+| `getLeadDetails` | READ | Детали лида (контакты, анализ диалога) |
+| `getFunnelStats` | READ | Статистика воронки продаж |
+| `getRevenueStats` | READ | Статистика выручки (сумма, ср. чек, конверсия, топ покупателей) |
+| `updateLeadStage` | WRITE | Изменение этапа воронки |
 
 ---
 
@@ -143,6 +153,8 @@ User Request
 | "Покажи расходы за сегодня" | AdsAgent | getSpendReport |
 | "Какие направления активны?" | AdsAgent | getDirections |
 | "Измени бюджет направления" | AdsAgent | updateDirectionBudget |
+| "Какой ROI за последнюю неделю?" | AdsAgent | getROIReport |
+| "Сравни окупаемость направлений" | AdsAgent | getROIComparison |
 | "Покажи все креативы" | CreativeAgent | getCreatives |
 | "Топ креативы по CPL" | CreativeAgent | getTopCreatives |
 | "Проанализируй креатив" | CreativeAgent | triggerCreativeAnalysis |
@@ -151,6 +163,7 @@ User Request
 | "Покажи retention видео" | CreativeAgent | getCreativeMetrics |
 | "Последние диалоги" | WhatsAppAgent | getDialogs |
 | "Лиды за сегодня" | CRMAgent | getLeads |
+| "Какая выручка за месяц?" | CRMAgent | getRevenueStats |
 
 ---
 
