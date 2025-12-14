@@ -24,8 +24,13 @@ export interface ChatMessage {
   plan_json?: Plan | null;
   actions_json?: ExecutedAction[] | null;
   tool_calls_json?: ToolCall[] | null;
+  ui_json?: UIComponentData[] | null;
   created_at: string;
 }
+
+// Re-export UI types for convenience
+import type { UIComponentData } from '@/types/assistantUI';
+export type { UIComponentData };
 
 export interface Plan {
   description: string;

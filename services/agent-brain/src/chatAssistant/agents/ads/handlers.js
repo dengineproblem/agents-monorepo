@@ -13,6 +13,7 @@ import {
   verifyAdSetBudget,
   verifyDirectionStatus
 } from '../../shared/postCheck.js';
+import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
 
 export const adsHandlers = {
   // ============================================================
@@ -76,11 +77,16 @@ export const adsHandlers = {
       };
     });
 
+    // Add entity refs for entity linking
+    const campaignsWithRefs = attachRefs(campaigns, 'c');
+    const entityMap = buildEntityMap(campaigns, 'c');
+
     return {
       success: true,
       period,
-      campaigns,
-      total: campaigns.length
+      campaigns: campaignsWithRefs,
+      total: campaigns.length,
+      _entityMap: entityMap  // For saving to focus_entities
     };
   },
 
@@ -831,8 +837,9 @@ export const adsHandlers = {
   /**
    * Get ROI report for creatives
    * Logic adapted from salesApi.getROIData()
+   * Enhanced with recommendations, top/worst performers
    */
-  async getROIReport({ period, direction_id, media_type }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getROIReport({ period, direction_id, media_type, group_by }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
     // Period to days
@@ -851,7 +858,7 @@ export const adsHandlers = {
       return d.toISOString().split('T')[0];
     })();
 
-    // USD to KZT rate
+    // USD to KZT rate - TODO: use dynamic rate from Task 10
     const usdToKztRate = 530;
 
     // Step 1: Load user_creatives
@@ -1030,12 +1037,70 @@ export const adsHandlers = {
       }
     }
 
-    // Sort by leads descending
+    // Sort by leads descending for main list
     campaigns.sort((a, b) => b.leads - a.leads);
 
     const totalROI = totalSpend > 0 ? Math.round(((totalRevenue - totalSpend) / totalSpend) * 100) : 0;
 
+    // Get top and worst performers by ROI
+    const sortedByROI = [...campaigns].sort((a, b) => b.roi - a.roi);
+    const topPerformers = sortedByROI.filter(c => c.roi > 0).slice(0, 3);
+    const worstPerformers = sortedByROI.filter(c => c.roi < 0 && c.spend > 0).reverse().slice(0, 3);
+
+    // Generate recommendations based on data analysis
+    const recommendations = [];
+
+    // Recommendation 1: Cut budget for negative ROI
+    for (const item of worstPerformers) {
+      if (item.roi < -20 && item.spend > 10000) { // More than -20% ROI and >10K spend
+        recommendations.push({
+          type: 'cut_budget',
+          entity_type: 'creative',
+          entity_id: item.id,
+          entity_name: item.name,
+          reason: `ROI ${item.roi}%, потрачено ${(item.spend / 1000).toFixed(0)}K ₸ без окупаемости`,
+          action_label: 'Снизить бюджет или остановить'
+        });
+      }
+    }
+
+    // Recommendation 2: Scale top performers
+    for (const item of topPerformers) {
+      if (item.roi > 100 && item.leads >= 5) { // >100% ROI with decent leads
+        recommendations.push({
+          type: 'increase_budget',
+          entity_type: 'creative',
+          entity_id: item.id,
+          entity_name: item.name,
+          reason: `ROI +${item.roi}%, ${item.leads} лидов — можно масштабировать`,
+          action_label: 'Увеличить бюджет'
+        });
+      }
+    }
+
+    // Recommendation 3: Overall performance insights
+    if (totalROI < 0 && totalSpend > 50000) {
+      recommendations.push({
+        type: 'review_strategy',
+        entity_type: 'account',
+        reason: `Общий ROI отрицательный (${totalROI}%). Рекомендуем пересмотреть стратегию.`,
+        action_label: 'Провести аудит кампаний'
+      });
+    }
+
+    // Recommendation 4: No conversions
+    const noConversionCampaigns = campaigns.filter(c => c.leads > 5 && c.conversions === 0);
+    if (noConversionCampaigns.length > 2) {
+      recommendations.push({
+        type: 'improve_funnel',
+        entity_type: 'funnel',
+        reason: `${noConversionCampaigns.length} креативов с лидами, но без продаж. Проверьте воронку.`,
+        action_label: 'Проверить обработку лидов'
+      });
+    }
+
     return {
+      success: true,
       period,
       totalSpend,
       totalSpend_formatted: `${(totalSpend / 1000).toFixed(0)}K ₸`,
@@ -1045,7 +1110,16 @@ export const adsHandlers = {
       totalROI_formatted: `${totalROI}%`,
       totalLeads,
       totalConversions,
-      campaigns: campaigns.slice(0, 10) // Top 10 creatives
+      conversionRate: totalLeads > 0 ? Math.round((totalConversions / totalLeads) * 100) : 0,
+      conversionRate_formatted: totalLeads > 0 ? `${Math.round((totalConversions / totalLeads) * 100)}%` : '0%',
+      campaigns: campaigns.slice(0, 10), // Top 10 creatives by leads
+      topPerformers,   // Top 3 by ROI
+      worstPerformers, // Worst 3 by ROI
+      recommendations, // Auto-generated recommendations
+      meta: {
+        source: 'creative_metrics_history',
+        usdKztRate: usdToKztRate
+      }
     };
   },
 

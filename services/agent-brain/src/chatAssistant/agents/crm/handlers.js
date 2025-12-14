@@ -5,9 +5,12 @@
 
 import { supabase } from '../../../lib/supabaseClient.js';
 import { getDateRange } from '../../shared/dateUtils.js';
+import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
 
 export const crmHandlers = {
-  async getLeads({ interest_level, funnel_stage, min_score, limit, search }, { userAccountId, adAccountId }) {
+  async getLeads({ interest_level, funnel_stage, min_score, limit, search }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
     let query = supabase
       .from('leads')
       .select(`
@@ -18,8 +21,8 @@ export const crmHandlers = {
       .order('created_at', { ascending: false })
       .limit(limit || 20);
 
-    if (adAccountId) {
-      query = query.eq('account_id', adAccountId);
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
     }
 
     if (search) {
@@ -28,7 +31,9 @@ export const crmHandlers = {
 
     const { data, error } = await query;
 
-    if (error) throw error;
+    if (error) {
+      return { success: false, error: `Ошибка загрузки лидов: ${error.message}` };
+    }
 
     // Filter by analysis fields (post-query since they're in related table)
     let leads = data || [];
@@ -43,24 +48,33 @@ export const crmHandlers = {
       leads = leads.filter(l => (l.dialog_analysis?.score || 0) >= min_score);
     }
 
+    const mappedLeads = leads.map(l => ({
+      id: l.id,
+      name: l.name,
+      phone: l.phone,
+      created_at: l.created_at,
+      interest_level: l.dialog_analysis?.interest_level || 'unknown',
+      score: l.dialog_analysis?.score || 0,
+      funnel_stage: l.dialog_analysis?.funnel_stage || 'новый',
+      summary: l.dialog_analysis?.summary
+    }));
+
+    // Add entity refs for entity linking
+    const leadsWithRefs = attachRefs(mappedLeads, 'l');
+    const entityMap = buildEntityMap(mappedLeads, 'l');
+
     return {
       success: true,
-      leads: leads.map(l => ({
-        id: l.id,
-        name: l.name,
-        phone: l.phone,
-        created_at: l.created_at,
-        interest_level: l.dialog_analysis?.interest_level || 'unknown',
-        score: l.dialog_analysis?.score || 0,
-        funnel_stage: l.dialog_analysis?.funnel_stage || 'новый',
-        summary: l.dialog_analysis?.summary
-      })),
-      total: leads.length
+      leads: leadsWithRefs,
+      total: leads.length,
+      _entityMap: entityMap  // For saving to focus_entities
     };
   },
 
-  async getLeadDetails({ lead_id }, { userAccountId }) {
-    const { data: lead, error } = await supabase
+  async getLeadDetails({ lead_id }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    let query = supabase
       .from('leads')
       .select(`
         *,
@@ -68,10 +82,17 @@ export const crmHandlers = {
         direction:direction_id(name)
       `)
       .eq('id', lead_id)
-      .eq('user_account_id', userAccountId)
-      .single();
+      .eq('user_account_id', userAccountId);
 
-    if (error) throw error;
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    }
+
+    const { data: lead, error } = await query.single();
+
+    if (error) {
+      return { success: false, error: `Ошибка загрузки лида: ${error.message}` };
+    }
     if (!lead) return { success: false, error: 'Лид не найден' };
 
     return {
@@ -96,7 +117,8 @@ export const crmHandlers = {
     };
   },
 
-  async getFunnelStats({ period }, { userAccountId, adAccountId }) {
+  async getFunnelStats({ period }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
     const dateRange = getDateRange(period);
 
     let query = supabase
@@ -109,12 +131,14 @@ export const crmHandlers = {
       .gte('created_at', dateRange.since)
       .lte('created_at', dateRange.until);
 
-    if (adAccountId) {
-      query = query.eq('account_id', adAccountId);
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      return { success: false, error: `Ошибка загрузки статистики: ${error.message}` };
+    }
 
     // Aggregate by funnel stage
     const stages = {};
@@ -137,18 +161,43 @@ export const crmHandlers = {
     };
   },
 
-  async updateLeadStage({ lead_id, new_stage, reason }, { userAccountId }) {
+  async updateLeadStage({ lead_id, new_stage, reason }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Сначала проверяем принадлежность лида к пользователю/аккаунту
+    let checkQuery = supabase
+      .from('leads')
+      .select('id, name')
+      .eq('id', lead_id)
+      .eq('user_account_id', userAccountId);
+
+    if (dbAccountId) {
+      checkQuery = checkQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: lead, error: checkError } = await checkQuery.maybeSingle();
+
+    if (checkError) {
+      return { success: false, error: `Ошибка проверки лида: ${checkError.message}` };
+    }
+
+    if (!lead) {
+      return { success: false, error: 'Лид не найден или не принадлежит вашему аккаунту' };
+    }
+
     // Update in dialog_analysis
     const { error } = await supabase
       .from('dialog_analysis')
       .update({ funnel_stage: new_stage })
       .eq('lead_id', lead_id);
 
-    if (error) throw error;
+    if (error) {
+      return { success: false, error: `Ошибка обновления: ${error.message}` };
+    }
 
     return {
       success: true,
-      message: `Этап лида изменён на "${new_stage}"${reason ? ` (${reason})` : ''}`
+      message: `Этап лида "${lead.name || lead_id}" изменён на "${new_stage}"${reason ? ` (${reason})` : ''}`
     };
   },
 

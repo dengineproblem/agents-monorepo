@@ -521,6 +521,39 @@ export class UnifiedConversationStore {
     }
   }
 
+  /**
+   * Set last_list for entity linking (replaces, not merges)
+   * @param {string} conversationId
+   * @param {Array} entityMap - Array of {ref, type, id, name}
+   */
+  async setLastList(conversationId, entityMap) {
+    if (!Array.isArray(entityMap)) return;
+
+    // Get current entities first
+    const { data: current } = await supabase
+      .from('ai_conversations')
+      .select('focus_entities')
+      .eq('id', conversationId)
+      .single();
+
+    // Replace only last_list, keep other focus entities
+    const updated = {
+      ...(current?.focus_entities || {}),
+      last_list: entityMap
+    };
+
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({ focus_entities: updated })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error setting last_list');
+    } else {
+      logger.debug({ conversationId, count: entityMap.length }, 'Set last_list for entity linking');
+    }
+  }
+
   // ============================================================
   // PENDING PLAN METHODS
   // ============================================================

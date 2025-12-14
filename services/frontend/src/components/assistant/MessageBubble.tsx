@@ -2,15 +2,18 @@ import { User, Bot, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ChatMessage, ExecutedAction, Plan } from '@/services/assistantApi';
 import ReactMarkdown from 'react-markdown';
+import { UIComponent } from './UIComponent';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   onApprove?: (plan: Plan) => void;
+  onUIAction?: (action: string, params: Record<string, unknown>) => void;
 }
 
-export function MessageBubble({ message, onApprove }: MessageBubbleProps) {
+export function MessageBubble({ message, onApprove, onUIAction }: MessageBubbleProps) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const uiComponents = message.ui_json;
 
   return (
     <div
@@ -46,6 +49,19 @@ export function MessageBubble({ message, onApprove }: MessageBubbleProps) {
         <div className={cn('prose prose-sm max-w-none', isUser && 'prose-invert')}>
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
+
+        {/* UI Components (cards, tables, etc.) */}
+        {uiComponents && uiComponents.length > 0 && (
+          <div className="mt-3 space-y-3">
+            {uiComponents.map((component, idx) => (
+              <UIComponent
+                key={idx}
+                component={component}
+                onAction={onUIAction}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Executed actions */}
         {message.actions_json && message.actions_json.length > 0 && (

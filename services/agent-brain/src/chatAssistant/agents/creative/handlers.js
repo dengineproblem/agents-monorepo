@@ -8,6 +8,7 @@ import { fbGraph } from '../../shared/fbGraph.js';
 import { logger } from '../../../lib/logger.js';
 import { creativeDryRunHandlers } from '../../shared/dryRunHandlers.js';
 import { verifyAdStatus } from '../../shared/postCheck.js';
+import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
 
 export const creativeHandlers = {
   // ============================================================
@@ -98,10 +99,15 @@ export const creativeHandlers = {
       });
     }
 
+    // Add entity refs for entity linking
+    const creativesWithRefs = attachRefs(enrichedCreatives, 'cr');
+    const entityMap = buildEntityMap(enrichedCreatives, 'cr');
+
     return {
       success: true,
-      creatives: enrichedCreatives,
-      total: enrichedCreatives.length
+      creatives: creativesWithRefs,
+      total: enrichedCreatives.length,
+      _entityMap: entityMap  // For saving to focus_entities
     };
   },
 

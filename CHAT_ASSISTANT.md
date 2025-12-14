@@ -1771,3 +1771,287 @@ CREATE OR REPLACE FUNCTION upsert_direction_metrics_rollup(
   p_day DATE DEFAULT CURRENT_DATE - INTERVAL '1 day'
 ) RETURNS INTEGER AS $$ ... $$ LANGUAGE plpgsql;
 ```
+
+### 096_ai_messages_ui_json.sql
+```sql
+-- UI Components для rich rendering
+ALTER TABLE ai_messages
+ADD COLUMN IF NOT EXISTS ui_json JSONB DEFAULT NULL;
+
+COMMENT ON COLUMN ai_messages.ui_json IS 'Structured UI components: cards, tables, buttons, charts';
+```
+
+### 097_currency_rates.sql
+```sql
+-- Курсы валют для динамической конвертации USD→KZT
+CREATE TABLE IF NOT EXISTS currency_rates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  from_currency VARCHAR(3) NOT NULL,
+  to_currency VARCHAR(3) NOT NULL,
+  rate DECIMAL(12, 4) NOT NULL,
+  source VARCHAR(50) DEFAULT 'exchangerate-api',
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(from_currency, to_currency)
+);
+
+-- Initial USD→KZT rate
+INSERT INTO currency_rates (from_currency, to_currency, rate, source)
+VALUES ('USD', 'KZT', 530.0, 'default')
+ON CONFLICT (from_currency, to_currency) DO NOTHING;
+```
+
+---
+
+## Entity Linking (Short References)
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/entityLinker.js`
+
+Система коротких ссылок для удобного обращения к элементам списков.
+
+### Как работает
+
+При выводе списков (кампании, лиды, креативы) каждый элемент получает короткий ref:
+
+| Тип | Ref | Пример |
+|-----|-----|--------|
+| Кампании | `c1, c2, c3...` | "Покажи детали c2" |
+| Направления | `d1, d2, d3...` | "Поставь на паузу d1" |
+| Лиды | `l1, l2, l3...` | "Детали l3" |
+| Креативы | `cr1, cr2, cr3...` | "Сравни cr1 и cr2" |
+
+### Функции
+
+| Функция | Описание |
+|---------|----------|
+| `attachRefs(items, type)` | Добавляет `_ref` к каждому элементу |
+| `buildEntityMap(items, type)` | Создаёт карту для хранения в focus_entities |
+| `resolveRef(input, focusEntities)` | Резолвит "c2", "2", "второй" в entity |
+
+### Пример использования
+
+```javascript
+// В handlers.js
+import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
+
+async getCampaigns(params, context) {
+  const campaigns = await fetchCampaigns();
+
+  // Добавляем refs
+  const campaignsWithRefs = attachRefs(campaigns, 'c');
+  const entityMap = buildEntityMap(campaigns, 'c');
+
+  return {
+    success: true,
+    campaigns: campaignsWithRefs,
+    _entityMap: entityMap  // Сохранится в focus_entities.last_list
+  };
+}
+```
+
+### Хранение
+
+`ai_conversations.focus_entities.last_list` содержит последний выведенный список:
+
+```json
+{
+  "last_list": [
+    { "ref": "c1", "type": "c", "id": "uuid-1", "name": "Имплантация" },
+    { "ref": "c2", "type": "c", "id": "uuid-2", "name": "Виниры" }
+  ]
+}
+```
+
+### Интеграция в промпты
+
+```
+## Entity Linking — ссылки на сущности
+При выводе списков каждый элемент получает короткий ref:
+- [c1], [c2] — кампании
+- [d1], [d2] — направления
+- [l1], [l2] — лиды
+- [cr1], [cr2] — креативы
+
+Пользователь может ссылаться на элементы: "поставь на паузу c2", "покажи детали cr1"
+```
+
+---
+
+## UI Components (Rich Rendering)
+
+**Путь:** `services/frontend/src/components/assistant/`
+
+Система компонентов для богатого отображения данных в чате.
+
+### Компоненты
+
+| Компонент | Описание |
+|-----------|----------|
+| `UICard.tsx` | Карточка с метриками и действиями |
+| `UITable.tsx` | Сортируемая таблица |
+| `UICopyField.tsx` | Поле с кнопкой копирования |
+| `UIComponent.tsx` | Router для рендеринга разных типов |
+
+### Хранение
+
+`ai_messages.ui_json` содержит массив UI-компонентов:
+
+```json
+[
+  {
+    "type": "card",
+    "data": {
+      "title": "Кампания 'Имплантация'",
+      "metrics": [
+        { "label": "Spend", "value": "$150", "delta": "+12%", "trend": "up" },
+        { "label": "Leads", "value": "45" }
+      ],
+      "actions": [
+        { "label": "Пауза", "action": "pauseCampaign", "params": { "id": "123" } }
+      ]
+    }
+  },
+  {
+    "type": "table",
+    "data": {
+      "headers": ["Название", "CPL", "Лиды"],
+      "rows": [["Имплантация", "$25", "12"], ["Виниры", "$35", "8"]],
+      "sortable": true
+    }
+  }
+]
+```
+
+### Интеграция в MessageBubble
+
+```tsx
+{message.ui_json && message.ui_json.length > 0 && (
+  <div className="mt-3 space-y-2">
+    {message.ui_json.map((component, idx) => (
+      <UIComponent key={idx} component={component} onAction={handleAction} />
+    ))}
+  </div>
+)}
+```
+
+### TypeScript типы
+
+```typescript
+interface UIComponent {
+  type: 'card' | 'table' | 'button' | 'chart' | 'copy_field';
+  data: CardData | TableData | ButtonData | ChartData | CopyFieldData;
+}
+
+interface CardData {
+  title: string;
+  subtitle?: string;
+  metrics?: { label: string; value: string; delta?: string; trend?: 'up' | 'down' }[];
+  actions?: { label: string; action: string; params: Record<string, any> }[];
+}
+```
+
+---
+
+## Currency Rate CRON (USD→KZT)
+
+**Путь:** `services/agent-brain/src/currencyRateCron.js`
+
+Автоматическое обновление курса USD→KZT раз в сутки.
+
+### CRON расписание
+
+- **Время:** 06:00 по Алмате (UTC+6)
+- **API:** `https://api.exchangerate-api.com/v4/latest/USD`
+- **Fallback:** При ошибке используется последний известный курс
+
+### Helper функции
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/currencyRate.js`
+
+| Функция | Описание |
+|---------|----------|
+| `getUsdToKzt()` | Получить текущий курс (с кэшированием 1 час) |
+| `convertUsdToKzt(amount, rate?)` | Конвертировать USD → KZT |
+| `convertKztToUsd(amount, rate?)` | Конвертировать KZT → USD |
+| `formatCurrency(amount, currency)` | Форматировать: "$25.00" или "150K ₸" |
+| `invalidateRateCache()` | Сбросить кэш (для тестов) |
+
+### Использование в handlers
+
+```javascript
+import { getUsdToKzt, convertUsdToKzt, formatCurrency } from '../../shared/currencyRate.js';
+
+async getROIReport(params, context) {
+  const rate = await getUsdToKzt();
+  const spendKzt = convertUsdToKzt(spendUsd, rate);
+
+  return {
+    success: true,
+    spend_usd: spendUsd,
+    spend_kzt: spendKzt,
+    spend_formatted: formatCurrency(spendKzt, 'KZT')  // "150K ₸"
+  };
+}
+```
+
+### API endpoint
+
+```
+POST /api/currency/update
+→ Ручной запуск обновления курса (для тестов)
+```
+
+### Таблица
+
+```sql
+currency_rates (
+  from_currency VARCHAR(3),  -- 'USD'
+  to_currency VARCHAR(3),    -- 'KZT'
+  rate DECIMAL(12, 4),       -- 530.1234
+  source VARCHAR(50),        -- 'exchangerate-api'
+  updated_at TIMESTAMPTZ
+)
+```
+
+---
+
+## Auto-Insights (Промпты агентов)
+
+Агенты автоматически добавляют инсайты и рекомендации при выводе данных.
+
+### Индикаторы
+
+| Индикатор | Значение |
+|-----------|----------|
+| ⚠️ | Проблема: CPL выше целевого, ROI отрицательный |
+| ✅ | Успех: ROI > 100%, CPL ниже целевого |
+| 🔥 | Топ: Лучший показатель среди всех |
+| ⏰ | Застрял на этапе (>3 дней без движения) |
+| ❄️ | Холодный лид (score < 40) |
+
+### Автоматические рекомендации
+
+**AdsAgent:**
+- CPL выше target на >20% → "Рекомендую снизить бюджет или остановить"
+- ROI > 100% → "Можно масштабировать — увеличить бюджет"
+- ROI отрицательный и spend > 10K ₸ → "Срочно остановить"
+- CTR < 1% → "Слабый креатив — нужна замена"
+
+**CRMAgent:**
+- 🔥 Hot лид (score 70+) → "Срочно связаться!"
+- ⏰ Застрял на этапе (>3 дней) → "Требует внимания"
+- ⚠️ Без контакта 7+ дней → "Возможно утрачен"
+
+### Формат ответа
+
+```
+Итог → Список → Вывод → Рекомендуемое действие
+
+Пример:
+"За последние 7 дней потрачено 150K ₸, получено 45 лидов.
+⚠️ CPL = 3,333 ₸ — выше целевого на 33%
+🔥 Лучший креатив: 'Доктор Айболит' (CPL 2,000 ₸)
+✅ ROI направления 'Имплантация': +85%
+
+**Рекомендация**: Снизить бюджет на 'Виниры' (ROI -20%), перераспределить на 'Имплантацию'."
+```

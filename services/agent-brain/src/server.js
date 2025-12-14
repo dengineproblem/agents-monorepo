@@ -9,6 +9,7 @@ import { runScoringAgent } from './scoring.js';
 import { startLogAlertsWorker } from './lib/logAlerts.js';
 import { supabase, supabaseQuery } from './lib/supabaseClient.js';
 import { startAmoCRMLeadsSyncCron } from './amocrmLeadsSyncCron.js';
+import { updateCurrencyRates } from './currencyRateCron.js';
 import { analyzeCreativeTest } from './creativeAnalyzer.js';
 import { registerChatRoutes } from './chatAssistant/index.js';
 import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
@@ -4014,6 +4015,25 @@ fastify.get('/api/brain/cron/batch-report', async (request, reply) => {
   }
 });
 
+// Manual currency rate update endpoint
+fastify.post('/api/brain/cron/update-currency', async (request, reply) => {
+  try {
+    const result = await updateCurrencyRates();
+    return reply.send(result);
+  } catch (err) {
+    logErrorToAdmin({
+      error_type: 'cron',
+      raw_error: err.message || String(err),
+      stack_trace: err.stack,
+      action: 'cron_update_currency',
+      endpoint: '/api/brain/cron/update-currency',
+      severity: 'warning'
+    }).catch(() => {});
+
+    return reply.code(500).send({ error: 'currency_update_failed', details: String(err?.message || err) });
+  }
+});
+
 /**
  * OPTIONS /api/analyzer/analyze-creative
  * CORS preflight handler
@@ -4290,6 +4310,33 @@ if (CRON_ENABLED) {
 
   // Start AmoCRM leads sync cron (every hour)
   startAmoCRMLeadsSyncCron();
+
+  // Currency rate update cron (daily at 06:00 Almaty time)
+  const CURRENCY_CRON_SCHEDULE = '0 6 * * *';
+  cron.schedule(CURRENCY_CRON_SCHEDULE, async () => {
+    fastify.log.info({ where: 'currency_rate_cron', status: 'triggered' });
+    try {
+      const result = await updateCurrencyRates();
+      fastify.log.info({ where: 'currency_rate_cron', status: 'completed', ...result });
+    } catch (err) {
+      fastify.log.error({ where: 'currency_rate_cron', status: 'failed', error: String(err) });
+    }
+  }, {
+    scheduled: true,
+    timezone: "Asia/Almaty"
+  });
+
+  fastify.log.info({
+    where: 'currency_rate_cron',
+    schedule: CURRENCY_CRON_SCHEDULE,
+    timezone: 'Asia/Almaty',
+    status: 'scheduled'
+  });
+
+  // Update currency rate on startup
+  updateCurrencyRates().catch(err => {
+    fastify.log.warn({ where: 'currency_rate_cron', status: 'startup_update_failed', error: String(err) });
+  });
 } else {
   fastify.log.info({ where: 'cron', status: 'disabled' });
 }

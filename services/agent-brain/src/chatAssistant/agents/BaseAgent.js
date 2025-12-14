@@ -445,6 +445,12 @@ export class BaseAgent {
   extractFocusEntities(toolName, args, result) {
     const entities = {};
 
+    // Handle entity maps from list-returning tools (for entity linking)
+    // If result contains _entityMap, save it as last_list
+    if (result._entityMap && Array.isArray(result._entityMap) && result._entityMap.length > 0) {
+      entities.last_list = result._entityMap;
+    }
+
     // Campaign-related tools
     if (toolName === 'getCampaignDetails' && args.campaignId) {
       entities.campaignId = args.campaignId;
