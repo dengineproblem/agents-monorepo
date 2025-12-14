@@ -53,13 +53,19 @@ export async function processChat({ message, conversationId, mode = 'auto', user
   const startTime = Date.now();
 
   try {
+    // 0. Resolve ad account ID if not provided
+    // Returns { dbId: UUID for database, fbId: Facebook account ID for API }
+    const { dbId, fbId } = await resolveAdAccountId(userAccountId, adAccountId);
+
     // 1. Get access token for Facebook API
-    const accessToken = await getAccessToken(userAccountId, adAccountId);
+    // Use dbId (UUID) for lookup in ad_accounts table
+    const accessToken = await getAccessToken(userAccountId, dbId);
 
     // 2. Get or create conversation
+    // Use dbId for database storage (null for legacy mode)
     const conversation = await getOrCreateConversation({
       userAccountId,
-      adAccountId,
+      adAccountId: dbId,
       conversationId,
       mode
     });
@@ -71,10 +77,12 @@ export async function processChat({ message, conversationId, mode = 'auto', user
     }
 
     // 3. Gather context
+    // Use dbId for database, fbId for Facebook context
     const context = await gatherContext({
       userAccountId,
-      adAccountId,
-      conversationId: conversation.id
+      adAccountId: dbId,
+      conversationId: conversation.id,
+      fbAdAccountId: fbId  // Pass Facebook ID for API context
     });
 
     // 4. Save user message
@@ -99,7 +107,9 @@ export async function processChat({ message, conversationId, mode = 'auto', user
     }
 
     // 7. Process via Orchestrator (multi-agent) or legacy LLM
-    const toolContext = { accessToken, userAccountId, adAccountId };
+    // adAccountId: fbId for Facebook API calls
+    // adAccountDbId: dbId (UUID) for database queries (memory, specs, notes)
+    const toolContext = { accessToken, userAccountId, adAccountId: fbId, adAccountDbId: dbId };
     let response;
 
     if (USE_ORCHESTRATOR) {
@@ -312,6 +322,68 @@ function parseAssistantResponse(content) {
     response: content,
     needs_clarification: false
   };
+}
+
+/**
+ * Resolve ad account ID if not provided
+ * Checks multi_account_enabled flag to determine source
+ * Returns { dbId, fbId } where:
+ *   - dbId: UUID for database (null for legacy mode)
+ *   - fbId: Facebook ad account ID for API calls
+ */
+async function resolveAdAccountId(userAccountId, adAccountId) {
+  // If adAccountId provided, it's a UUID from ad_accounts table
+  if (adAccountId) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id, ad_account_id')
+      .eq('id', adAccountId)
+      .single();
+
+    if (adAccount) {
+      return { dbId: adAccount.id, fbId: adAccount.ad_account_id };
+    }
+    return { dbId: adAccountId, fbId: null };
+  }
+
+  // Get user to check multi_account_enabled flag
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('ad_account_id, multi_account_enabled')
+    .eq('id', userAccountId)
+    .single();
+
+  if (!userAccount) {
+    logger.warn({ userAccountId }, 'User account not found');
+    return { dbId: null, fbId: null };
+  }
+
+  // Multi-account mode: get from ad_accounts table
+  if (userAccount.multi_account_enabled) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id, ad_account_id')
+      .eq('user_account_id', userAccountId)
+      .or('is_default.eq.true,is_active.eq.true')
+      .order('is_default', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (adAccount) {
+      logger.info({ userAccountId, dbId: adAccount.id, fbId: adAccount.ad_account_id, mode: 'multi' }, 'Resolved ad account');
+      return { dbId: adAccount.id, fbId: adAccount.ad_account_id };
+    }
+  }
+
+  // Legacy mode: ad_account_id is Facebook ID, not UUID
+  // dbId = null (can't store in FK), fbId = Facebook account ID
+  if (userAccount.ad_account_id) {
+    logger.info({ userAccountId, fbId: userAccount.ad_account_id, mode: 'legacy' }, 'Resolved ad account');
+    return { dbId: null, fbId: userAccount.ad_account_id };
+  }
+
+  logger.warn({ userAccountId }, 'No ad account found for user');
+  return { dbId: null, fbId: null };
 }
 
 /**
@@ -912,6 +984,5 @@ export default {
   handleTelegramMessage,
   handleClearCommand,
   handleModeCommand,
-  handleStatusCommand,
-  conversationStore
+  handleStatusCommand
 };

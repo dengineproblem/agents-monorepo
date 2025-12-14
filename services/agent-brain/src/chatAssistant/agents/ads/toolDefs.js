@@ -12,7 +12,8 @@
 import { z } from 'zod';
 
 // Common schemas
-const periodSchema = z.enum(['today', 'yesterday', 'last_7d', 'last_30d']);
+// Period can be preset (today, yesterday, etc.) or specific date (30 ноября, 2024-11-30, 30.11.2024)
+const periodSchema = z.string().describe('Период: today, yesterday, last_7d, last_30d или конкретная дата (30 ноября, 2024-11-30)');
 const campaignStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'all']);
 const directionStatusSchema = z.enum(['active', 'paused', 'all']);
 const directionPeriodSchema = z.enum(['7d', '14d', '30d']);

@@ -666,6 +666,5 @@ export default {
   getSpecs,
   getNotesDigest,
   // Also expose stores on default export
-  unifiedStore,
-  memoryStore
+  unifiedStore
 };

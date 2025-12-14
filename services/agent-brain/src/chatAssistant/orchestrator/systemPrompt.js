@@ -9,7 +9,19 @@
  * @returns {string} System prompt
  */
 export function buildOrchestratorPrompt(context = {}) {
+  // Current date for LLM to understand time context
+  const today = new Date();
+  const currentDate = today.toLocaleDateString('ru-RU', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
   return `# AI-ассистент для управления бизнесом
+
+## Текущая дата
+Сегодня: ${currentDate}
 
 ## Твоя роль
 Ты умный помощник для управления рекламой, лидами и коммуникациями. Ты координируешь специализированных агентов для ответа на запросы пользователя.

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu, X, LayoutDashboard, Target, TrendingUp, Video, User } from 'lucide-react';
+import { Menu, X, LayoutDashboard, Target, TrendingUp, Video, User, MessageSquare } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '../i18n/LanguageContext';
@@ -31,6 +31,11 @@ const Sidebar: React.FC = () => {
       path: '/videos',
       label: t('menu.videos'),
       icon: <Video className="h-5 w-5" />,
+    },
+    {
+      path: '/assistant',
+      label: 'AI Chat',
+      icon: <MessageSquare className="h-5 w-5" />,
     },
     {
       path: '/profile',

@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen, MessageSquare } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -51,6 +51,13 @@ const menuItems = [
     icon: Users2,
     show: FEATURES.SHOW_COMPETITORS,
     tourId: 'sidebar-competitors',
+  },
+  {
+    path: '/assistant',
+    label: 'AI Chat',
+    icon: MessageSquare,
+    show: true,
+    tourId: 'sidebar-assistant',
   },
   {
     path: '/profile',

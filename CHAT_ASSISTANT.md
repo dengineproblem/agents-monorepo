@@ -158,7 +158,10 @@ User Request
 
 ### Реклама
 - **Spend** — потраченный бюджет ($)
-- **Leads** — количество заявок
+- **Leads** — количество заявок (сумма всех источников):
+  - `onsite_conversion.total_messaging_connection` — WhatsApp/Instagram мессенджер лиды
+  - `offsite_conversion.fb_pixel_lead` — лиды с сайта через FB пиксель
+  - `offsite_conversion.custom*` — кастомные конверсии пикселя
 - **CPL** — Cost Per Lead (стоимость заявки)
 - **CPM** — Cost Per Mille (стоимость 1000 показов)
 - **CTR** — Click Through Rate (кликабельность)
@@ -177,7 +180,12 @@ User Request
 - `campaigns` — кампании FB
 - `adsets` — адсеты FB
 - `ads` — объявления FB
-- `directions` — направления (рекламные вертикали)
+- `account_directions` — направления (рекламные вертикали)
+  - `is_active` (boolean) — активно ли направление
+  - `campaign_status` — статус FB кампании (ACTIVE/PAUSED)
+  - `daily_budget_cents` — бюджет в центах
+  - `target_cpl_cents` — целевой CPL в центах
+  - `fb_campaign_id` — ID кампании в Facebook
 
 ### Creatives
 - `user_creatives` — креативы пользователя

@@ -3,9 +3,62 @@
  * Shared across all agents for period-based queries
  */
 
+// Month names in Russian
+const MONTH_NAMES_RU = {
+  'январ': 0, 'феврал': 1, 'март': 2, 'апрел': 3,
+  'ма': 4, 'июн': 5, 'июл': 6, 'август': 7,
+  'сентябр': 8, 'октябр': 9, 'ноябр': 10, 'декабр': 11
+};
+
+/**
+ * Parse a specific date from natural language
+ * @param {string} text - Date text like "30 ноября", "15 декабря 2024"
+ * @returns {Date|null} Parsed date or null
+ */
+function parseSpecificDate(text) {
+  if (!text) return null;
+
+  const lower = text.toLowerCase().trim();
+
+  // Try YYYY-MM-DD format first
+  const isoMatch = lower.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+  }
+
+  // Try DD.MM.YYYY or DD/MM/YYYY format
+  const dotMatch = lower.match(/(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
+  if (dotMatch) {
+    return new Date(parseInt(dotMatch[3]), parseInt(dotMatch[2]) - 1, parseInt(dotMatch[1]));
+  }
+
+  // Try Russian date like "30 ноября" or "30 ноября 2024"
+  const ruMatch = lower.match(/(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?/);
+  if (ruMatch) {
+    const day = parseInt(ruMatch[1]);
+    const monthText = ruMatch[2];
+    const year = ruMatch[3] ? parseInt(ruMatch[3]) : new Date().getFullYear();
+
+    // Find month
+    let month = -1;
+    for (const [prefix, m] of Object.entries(MONTH_NAMES_RU)) {
+      if (monthText.startsWith(prefix)) {
+        month = m;
+        break;
+      }
+    }
+
+    if (month >= 0) {
+      return new Date(year, month, day);
+    }
+  }
+
+  return null;
+}
+
 /**
  * Get date range for a period string
- * @param {string} period - Period identifier: 'today', 'yesterday', 'last_7d', 'last_30d'
+ * @param {string} period - Period identifier: 'today', 'yesterday', 'last_7d', 'last_30d', or specific date
  * @returns {{ since: string, until: string }} Date range in YYYY-MM-DD format
  */
 export function getDateRange(period) {
@@ -19,7 +72,7 @@ export function getDateRange(period) {
       break;
     case 'yesterday':
       since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-      until = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      until = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
       break;
     case 'last_7d':
       since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
@@ -30,8 +83,16 @@ export function getDateRange(period) {
       until = now;
       break;
     default:
-      since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-      until = now;
+      // Try to parse as specific date
+      const specificDate = parseSpecificDate(period);
+      if (specificDate) {
+        since = specificDate;
+        until = specificDate;
+      } else {
+        // Fallback to last 7 days
+        since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+        until = now;
+      }
   }
 
   return {
@@ -56,8 +117,8 @@ export function formatDate(date) {
 
 /**
  * Parse period from natural language to standard period
- * @param {string} text - Natural language period (e.g., "за сегодня", "за последнюю неделю")
- * @returns {string} Standard period identifier
+ * @param {string} text - Natural language period (e.g., "за сегодня", "за последнюю неделю", "за 30 ноября")
+ * @returns {string} Standard period identifier or specific date string
  */
 export function parsePeriod(text) {
   const lower = text.toLowerCase();
@@ -73,6 +134,25 @@ export function parsePeriod(text) {
   }
   if (lower.includes('месяц') || lower.includes('30 дн') || lower.includes('month')) {
     return 'last_30d';
+  }
+
+  // Try to parse specific date from the text
+  const specificDate = parseSpecificDate(text);
+  if (specificDate) {
+    // Return the date string as-is (will be parsed again in getDateRange)
+    // Extract just the date portion from text
+    const dateMatch = lower.match(/(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?/);
+    if (dateMatch) {
+      return dateMatch[0]; // Return matched date string
+    }
+    const isoMatch = lower.match(/\d{4}-\d{2}-\d{2}/);
+    if (isoMatch) {
+      return isoMatch[0];
+    }
+    const dotMatch = lower.match(/\d{1,2}[.\/]\d{1,2}[.\/]\d{4}/);
+    if (dotMatch) {
+      return dotMatch[0];
+    }
   }
 
   return 'last_7d'; // default

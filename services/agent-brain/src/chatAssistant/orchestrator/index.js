@@ -62,15 +62,17 @@ export class Orchestrator {
       }
 
       // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
+      // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
+      const dbAccountId = toolContext.adAccountDbId || null;
       const [specs, notes, summaryContext, snapshot] = await Promise.all([
-        memoryStore.getSpecs(toolContext.userAccountId, toolContext.adAccountId),
-        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId),
+        memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
+        memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
         getBusinessSnapshot({
           userAccountId: toolContext.userAccountId,
-          adAccountId: toolContext.adAccountId
+          adAccountId: toolContext.adAccountId  // FB ID for snapshot
         })
       ]);
 
@@ -405,15 +407,17 @@ export class Orchestrator {
       }
 
       // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
+      // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
+      const dbAccountId = toolContext.adAccountDbId || null;
       const [specs, notes, summaryContext, snapshot] = await Promise.all([
-        memoryStore.getSpecs(toolContext.userAccountId, toolContext.adAccountId),
-        memoryStore.getNotesDigest(toolContext.userAccountId, toolContext.adAccountId),
+        memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
+        memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
         getBusinessSnapshot({
           userAccountId: toolContext.userAccountId,
-          adAccountId: toolContext.adAccountId
+          adAccountId: toolContext.adAccountId  // FB ID for snapshot
         })
       ]);
 

@@ -14,7 +14,10 @@ export const creativeHandlers = {
   // READ HANDLERS
   // ============================================================
 
-  async getCreatives({ direction_id, status, sort_by, limit = 20 }, { userAccountId, adAccountId }) {
+  async getCreatives({ direction_id, status, sort_by, limit = 20 }, { userAccountId, adAccountId, adAccountDbId }) {
+    // Use adAccountDbId (UUID) for database queries, not adAccountId (Facebook ID)
+    const dbAccountId = adAccountDbId || null;
+
     let query = supabase
       .from('user_creatives')
       .select(`
@@ -24,8 +27,8 @@ export const creativeHandlers = {
       `)
       .eq('user_id', userAccountId);
 
-    if (adAccountId) {
-      query = query.eq('account_id', adAccountId);
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
     }
 
     if (direction_id) {
@@ -47,7 +50,7 @@ export const creativeHandlers = {
       const { data: metrics } = await supabase.rpc('get_creative_aggregated_metrics', {
         p_user_creative_id: creative.id,
         p_user_account_id: userAccountId,
-        p_account_id: adAccountId || null,
+        p_account_id: dbAccountId,
         p_days_limit: 30
       });
 
@@ -102,7 +105,7 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeDetails({ creative_id }, { userAccountId, adAccountId }) {
+  async getCreativeDetails({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
     const { data: creative, error } = await supabase
       .from('user_creatives')
       .select(`
@@ -151,13 +154,15 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeMetrics({ creative_id, period = '30d' }, { userAccountId, adAccountId }) {
+  async getCreativeMetrics({ creative_id, period = '30d' }, { userAccountId, adAccountId, adAccountDbId }) {
+    // Use adAccountDbId (UUID) for database queries
+    const dbAccountId = adAccountDbId || null;
     const days = parseInt(period) || 30;
 
     const { data, error } = await supabase.rpc('get_creative_aggregated_metrics', {
       p_user_creative_id: creative_id,
       p_user_account_id: userAccountId,
-      p_account_id: adAccountId || null,
+      p_account_id: dbAccountId,
       p_days_limit: days
     });
 
@@ -248,11 +253,11 @@ export const creativeHandlers = {
     };
   },
 
-  async getTopCreatives({ metric, direction_id, limit = 5 }, { userAccountId, adAccountId }) {
+  async getTopCreatives({ metric, direction_id, limit = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
     // Get all creatives first
     const result = await creativeHandlers.getCreatives(
       { direction_id, status: 'active', limit: 50 },
-      { userAccountId, adAccountId }
+      { userAccountId, adAccountId, adAccountDbId }
     );
 
     if (!result.success) return result;
@@ -286,10 +291,10 @@ export const creativeHandlers = {
     };
   },
 
-  async getWorstCreatives({ threshold_cpl, direction_id, limit = 5 }, { userAccountId, adAccountId }) {
+  async getWorstCreatives({ threshold_cpl, direction_id, limit = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
     const result = await creativeHandlers.getCreatives(
       { direction_id, status: 'active', limit: 50 },
-      { userAccountId, adAccountId }
+      { userAccountId, adAccountId, adAccountDbId }
     );
 
     if (!result.success) return result;
@@ -315,7 +320,7 @@ export const creativeHandlers = {
     };
   },
 
-  async compareCreatives({ creative_ids, period = '30d' }, { userAccountId, adAccountId }) {
+  async compareCreatives({ creative_ids, period = '30d' }, { userAccountId, adAccountId, adAccountDbId }) {
     if (!creative_ids || creative_ids.length < 2) {
       return { success: false, error: 'Нужно минимум 2 креатива для сравнения' };
     }
@@ -326,8 +331,8 @@ export const creativeHandlers = {
 
     const comparisons = await Promise.all(creative_ids.map(async (id) => {
       const [details, metrics] = await Promise.all([
-        creativeHandlers.getCreativeDetails({ creative_id: id }, { userAccountId, adAccountId }),
-        creativeHandlers.getCreativeMetrics({ creative_id: id, period }, { userAccountId, adAccountId })
+        creativeHandlers.getCreativeDetails({ creative_id: id }, { userAccountId, adAccountId, adAccountDbId }),
+        creativeHandlers.getCreativeMetrics({ creative_id: id, period }, { userAccountId, adAccountId, adAccountDbId })
       ]);
 
       return {
@@ -554,7 +559,9 @@ export const creativeHandlers = {
       const adsetId = adsetsResult.data[0].id;
 
       // Create ad
-      const adResult = await fbGraph('POST', `act_${adAccountId}/ads`, accessToken, {
+      // Normalize: don't add act_ prefix if already present
+      const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+      const adResult = await fbGraph('POST', `${actId}/ads`, accessToken, {
         name: `${creative.title} - Chat Assistant`,
         adset_id: adsetId,
         creative: JSON.stringify({ creative_id: fbCreativeId }),

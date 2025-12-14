@@ -24,7 +24,9 @@ export const adsHandlers = {
 
     const fields = 'id,name,status,objective,daily_budget,lifetime_budget,insights.date_preset(today){spend,impressions,clicks,actions}';
 
-    let path = `act_${adAccountId}/campaigns`;
+    // Normalize: don't add act_ prefix if already present
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    let path = `${actId}/campaigns`;
     const params = {
       fields,
       filtering: status && status !== 'all'
@@ -38,8 +40,27 @@ export const adsHandlers = {
     // Parse insights and format response
     const campaigns = (result.data || []).map(c => {
       const insights = c.insights?.data?.[0] || {};
-      const leads = insights.actions?.find(a => a.action_type === 'lead')?.value || 0;
       const spend = parseFloat(insights.spend || 0);
+
+      // Count leads from ALL sources like dashboard:
+      // - messaging leads (WhatsApp/Instagram conversations)
+      // - site leads (pixel events)
+      let messagingLeads = 0;
+      let siteLeads = 0;
+
+      if (insights.actions && Array.isArray(insights.actions)) {
+        for (const action of insights.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads += parseInt(action.value || '0', 10);
+          }
+        }
+      }
+
+      const leads = messagingLeads + siteLeads;
 
       return {
         id: c.id,
@@ -48,7 +69,7 @@ export const adsHandlers = {
         objective: c.objective,
         daily_budget: c.daily_budget ? parseInt(c.daily_budget) / 100 : null,
         spend: spend,
-        leads: parseInt(leads),
+        leads: leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
         impressions: parseInt(insights.impressions || 0),
         clicks: parseInt(insights.clicks || 0)
@@ -94,8 +115,25 @@ export const adsHandlers = {
 
     const adsets = (result.data || []).map(a => {
       const insights = a.insights?.data?.[0] || {};
-      const leads = insights.actions?.find(act => act.action_type === 'lead')?.value || 0;
       const spend = parseFloat(insights.spend || 0);
+
+      // Count leads from ALL sources like dashboard:
+      let messagingLeads = 0;
+      let siteLeads = 0;
+
+      if (insights.actions && Array.isArray(insights.actions)) {
+        for (const action of insights.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads += parseInt(action.value || '0', 10);
+          }
+        }
+      }
+
+      const leads = messagingLeads + siteLeads;
 
       return {
         id: a.id,
@@ -103,7 +141,7 @@ export const adsHandlers = {
         status: a.status,
         daily_budget: a.daily_budget ? parseInt(a.daily_budget) / 100 : null,
         spend,
-        leads: parseInt(leads),
+        leads: leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null
       };
     });
@@ -114,19 +152,61 @@ export const adsHandlers = {
   async getSpendReport({ period, group_by }, { accessToken, adAccountId }) {
     const dateRange = getDateRange(period);
 
-    const result = await fbGraph('GET', `act_${adAccountId}/insights`, accessToken, {
+    // Log for debugging
+    console.log('[getSpendReport] period:', period, '-> dateRange:', dateRange);
+
+    // Normalize: don't add act_ prefix if already present
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    const result = await fbGraph('GET', `${actId}/insights`, accessToken, {
       fields: 'spend,impressions,clicks,actions',
       time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
       time_increment: group_by === 'day' ? 1 : undefined,
-      level: group_by === 'campaign' ? 'campaign' : 'account'
+      level: group_by === 'campaign' ? 'campaign' : 'account',
+      // Request action breakdown to get all lead types
+      action_breakdowns: 'action_type'
     });
 
+    // Debug: log raw actions from FB API
+    console.log('[getSpendReport] FB API result.data:', JSON.stringify(result.data, null, 2));
+
     const data = (result.data || []).map(row => {
-      const leads = row.actions?.find(a => a.action_type === 'lead')?.value || 0;
+      // Count leads from ALL sources like dashboard does:
+      // - messaging leads (WhatsApp conversations)
+      // - site leads (pixel events)
+      // - custom conversions
+      let messagingLeads = 0;
+      let siteLeads = 0;
+
+      // Debug: log all action types for this row
+      if (row.actions) {
+        console.log('[getSpendReport] Actions for row:', row.actions.map(a => `${a.action_type}: ${a.value}`).join(', '));
+      }
+
+      if (row.actions && Array.isArray(row.actions)) {
+        for (const action of row.actions) {
+          // Messaging leads (WhatsApp/Instagram conversations started)
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          }
+          // Site leads from FB pixel
+          else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          }
+          // Custom pixel conversions (also count as site leads)
+          else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads += parseInt(action.value || '0', 10);
+          }
+        }
+      }
+
+      const totalLeads = messagingLeads + siteLeads;
+
       return {
         date: row.date_start,
         spend: parseFloat(row.spend || 0),
-        leads: parseInt(leads),
+        leads: totalLeads,
+        messagingLeads,
+        siteLeads,
         impressions: parseInt(row.impressions || 0),
         clicks: parseInt(row.clicks || 0)
       };
@@ -134,6 +214,8 @@ export const adsHandlers = {
 
     const totalSpend = data.reduce((sum, d) => sum + d.spend, 0);
     const totalLeads = data.reduce((sum, d) => sum + d.leads, 0);
+    const totalMessagingLeads = data.reduce((sum, d) => sum + d.messagingLeads, 0);
+    const totalSiteLeads = data.reduce((sum, d) => sum + d.siteLeads, 0);
 
     return {
       success: true,
@@ -143,6 +225,8 @@ export const adsHandlers = {
       totals: {
         spend: totalSpend.toFixed(2),
         leads: totalLeads,
+        messagingLeads: totalMessagingLeads,
+        siteLeads: totalSiteLeads,
         cpl: totalLeads > 0 ? (totalSpend / totalLeads).toFixed(2) : null
       }
     };
@@ -349,23 +433,31 @@ export const adsHandlers = {
   // ============================================================
 
   async getDirections({ status, period }, { userAccountId, adAccountId }) {
-    // Get directions for this ad account
+    // Get directions for this user account
+    // Note: account_directions uses user_account_id, not ad_account_id
     let query = supabase
-      .from('directions')
+      .from('account_directions')
       .select(`
         id,
         name,
-        status,
-        budget_per_day,
-        target_cpl,
+        is_active,
+        campaign_status,
+        daily_budget_cents,
+        target_cpl_cents,
+        objective,
+        fb_campaign_id,
         created_at,
-        updated_at,
-        campaign_id
+        updated_at
       `)
-      .eq('ad_account_id', adAccountId);
+      .eq('user_account_id', userAccountId);
 
+    // Filter by status: 'active' = is_active=true, 'paused' = is_active=false
     if (status && status !== 'all') {
-      query = query.eq('status', status);
+      if (status === 'active') {
+        query = query.eq('is_active', true);
+      } else if (status === 'paused') {
+        query = query.eq('is_active', false);
+      }
     }
 
     const { data: directions, error } = await query.order('created_at', { ascending: false });
@@ -374,40 +466,19 @@ export const adsHandlers = {
       return { success: false, error: error.message };
     }
 
-    // Get aggregated metrics for directions
-    const periodDays = {
-      'today': 1,
-      'yesterday': 1,
-      'last_7d': 7,
-      'last_30d': 30
-    };
-    const days = periodDays[period] || 7;
-
-    const { data: metrics, error: metricsError } = await supabase
-      .rpc('get_direction_aggregated_metrics', {
-        p_ad_account_id: adAccountId,
-        p_days: days
-      });
-
-    // Merge metrics with directions
-    const metricsMap = new Map((metrics || []).map(m => [m.direction_id, m]));
-
-    const enrichedDirections = directions.map(d => {
-      const m = metricsMap.get(d.id) || {};
+    // Format directions for response
+    const enrichedDirections = (directions || []).map(d => {
       return {
         id: d.id,
         name: d.name,
-        status: d.status,
-        budget_per_day: d.budget_per_day,
-        target_cpl: d.target_cpl,
-        campaign_id: d.campaign_id,
-        metrics: {
-          spend: parseFloat(m.total_spend || 0),
-          leads: parseInt(m.total_leads || 0),
-          cpl: m.total_leads > 0 ? (m.total_spend / m.total_leads).toFixed(2) : null,
-          impressions: parseInt(m.total_impressions || 0),
-          active_creatives: parseInt(m.active_creatives || 0)
-        }
+        status: d.is_active ? 'active' : 'paused',
+        campaign_status: d.campaign_status,
+        budget_per_day: d.daily_budget_cents / 100, // Convert cents to dollars
+        target_cpl: d.target_cpl_cents / 100, // Convert cents to dollars
+        objective: d.objective,
+        campaign_id: d.fb_campaign_id,
+        created_at: d.created_at,
+        updated_at: d.updated_at
       };
     });
 
@@ -422,15 +493,16 @@ export const adsHandlers = {
   async getDirectionDetails({ direction_id }, { userAccountId, adAccountId, accessToken }) {
     // Get direction info
     const { data: direction, error } = await supabase
-      .from('directions')
+      .from('account_directions')
       .select(`
         id,
         name,
-        status,
-        budget_per_day,
-        target_cpl,
-        campaign_id,
-        adset_id,
+        is_active,
+        campaign_status,
+        daily_budget_cents,
+        target_cpl_cents,
+        objective,
+        fb_campaign_id,
         created_at,
         updated_at
       `)
@@ -454,12 +526,12 @@ export const adsHandlers = {
       .eq('direction_id', direction_id)
       .limit(20);
 
-    // Get adset info from Facebook if available
-    let adsetInfo = null;
-    if (direction.adset_id && accessToken) {
+    // Get campaign info from Facebook if available
+    let campaignInfo = null;
+    if (direction.fb_campaign_id && accessToken) {
       try {
-        adsetInfo = await fbGraph('GET', direction.adset_id, accessToken, {
-          fields: 'id,name,status,daily_budget,targeting'
+        campaignInfo = await fbGraph('GET', direction.fb_campaign_id, accessToken, {
+          fields: 'id,name,status,daily_budget'
         });
       } catch (e) {
         // Ignore FB errors
@@ -469,9 +541,18 @@ export const adsHandlers = {
     return {
       success: true,
       direction: {
-        ...direction,
+        id: direction.id,
+        name: direction.name,
+        status: direction.is_active ? 'active' : 'paused',
+        campaign_status: direction.campaign_status,
+        budget_per_day: direction.daily_budget_cents / 100,
+        target_cpl: direction.target_cpl_cents / 100,
+        objective: direction.objective,
+        campaign_id: direction.fb_campaign_id,
+        created_at: direction.created_at,
+        updated_at: direction.updated_at,
         creatives: creatives || [],
-        adset: adsetInfo
+        campaign: campaignInfo
       }
     };
   },
@@ -600,18 +681,21 @@ export const adsHandlers = {
     };
   },
 
-  async updateDirectionBudget({ direction_id, new_budget, dry_run }, { adAccountId }) {
+  async updateDirectionBudget({ direction_id, new_budget, dry_run }, { adAccountId, userAccountId }) {
     // Dry-run mode: return preview with change % and warnings
     if (dry_run) {
       return adsDryRunHandlers.updateDirectionBudget({ direction_id, new_budget }, { adAccountId });
     }
 
-    // Update direction budget
+    // Convert dollars to cents for storage
+    const newBudgetCents = Math.round(new_budget * 100);
+
+    // Update direction budget (stored in cents)
     const { data, error } = await supabase
-      .from('directions')
-      .update({ budget_per_day: new_budget, updated_at: new Date().toISOString() })
+      .from('account_directions')
+      .update({ daily_budget_cents: newBudgetCents, updated_at: new Date().toISOString() })
       .eq('id', direction_id)
-      .select('id, name, budget_per_day')
+      .select('id, name, daily_budget_cents')
       .single();
 
     if (error) {
@@ -622,7 +706,7 @@ export const adsHandlers = {
       ad_account_id: adAccountId,
       level: 'info',
       message: `Direction budget updated: ${data.name} → $${new_budget}/day`,
-      context: { direction_id, new_budget, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: { direction_id, new_budget, new_budget_cents: newBudgetCents, source: 'chat_assistant', agent: 'AdsAgent' }
     });
 
     return {
@@ -632,11 +716,14 @@ export const adsHandlers = {
   },
 
   async updateDirectionTargetCPL({ direction_id, target_cpl }, { adAccountId }) {
+    // Convert dollars to cents for storage
+    const targetCplCents = Math.round(target_cpl * 100);
+
     const { data, error } = await supabase
-      .from('directions')
-      .update({ target_cpl, updated_at: new Date().toISOString() })
+      .from('account_directions')
+      .update({ target_cpl_cents: targetCplCents, updated_at: new Date().toISOString() })
       .eq('id', direction_id)
-      .select('id, name, target_cpl')
+      .select('id, name, target_cpl_cents')
       .single();
 
     if (error) {
@@ -647,7 +734,7 @@ export const adsHandlers = {
       ad_account_id: adAccountId,
       level: 'info',
       message: `Direction target CPL updated: ${data.name} → $${target_cpl}`,
-      context: { direction_id, target_cpl, source: 'chat_assistant', agent: 'AdsAgent' }
+      context: { direction_id, target_cpl, target_cpl_cents: targetCplCents, source: 'chat_assistant', agent: 'AdsAgent' }
     });
 
     return {
@@ -662,10 +749,10 @@ export const adsHandlers = {
       return adsDryRunHandlers.pauseDirection({ direction_id }, { adAccountId });
     }
 
-    // Get direction with adset_id
+    // Get direction with fb_campaign_id
     const { data: direction, error: fetchError } = await supabase
-      .from('directions')
-      .select('id, name, adset_id')
+      .from('account_directions')
+      .select('id, name, fb_campaign_id')
       .eq('id', direction_id)
       .single();
 
@@ -673,21 +760,21 @@ export const adsHandlers = {
       return { success: false, error: fetchError.message };
     }
 
-    // Update direction status
+    // Update direction status (is_active = false)
     const { error: updateError } = await supabase
-      .from('directions')
-      .update({ status: 'paused', updated_at: new Date().toISOString() })
+      .from('account_directions')
+      .update({ is_active: false, campaign_status: 'PAUSED', updated_at: new Date().toISOString() })
       .eq('id', direction_id);
 
     if (updateError) {
       return { success: false, error: updateError.message };
     }
 
-    // Pause FB adset if linked
+    // Pause FB campaign if linked
     let fbPaused = false;
-    if (direction.adset_id && accessToken) {
+    if (direction.fb_campaign_id && accessToken) {
       try {
-        await fbGraph('POST', direction.adset_id, accessToken, { status: 'PAUSED' });
+        await fbGraph('POST', direction.fb_campaign_id, accessToken, { status: 'PAUSED' });
         fbPaused = true;
       } catch (e) {
         // Log but don't fail
@@ -703,7 +790,7 @@ export const adsHandlers = {
 
     return {
       success: true,
-      message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB адсет)' : ''}`
+      message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB кампанию)' : ''}`
     };
   }
 };

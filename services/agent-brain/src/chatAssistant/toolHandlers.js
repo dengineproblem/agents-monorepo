@@ -92,7 +92,9 @@ const toolHandlers = {
 
     const fields = 'id,name,status,objective,daily_budget,lifetime_budget,insights.date_preset(today){spend,impressions,clicks,actions}';
 
-    let path = `act_${adAccountId}/campaigns`;
+    // Normalize: don't add act_ prefix if already present
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    let path = `${actId}/campaigns`;
     const params = {
       fields,
       filtering: status && status !== 'all'
@@ -187,7 +189,9 @@ const toolHandlers = {
       breakdown = 'day';
     }
 
-    const result = await fbGraph('GET', `act_${adAccountId}/insights`, accessToken, {
+    // Normalize: don't add act_ prefix if already present
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    const result = await fbGraph('GET', `${actId}/insights`, accessToken, {
       fields: 'spend,impressions,clicks,actions',
       time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
       time_increment: group_by === 'day' ? 1 : undefined,

@@ -20,7 +20,21 @@ export function buildAdsPrompt(context, mode) {
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'ads');
 
+  // Current date for LLM to understand time context
+  const today = new Date();
+  const currentDate = today.toLocaleDateString('ru-RU', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
   return `# AdsAgent — Эксперт по Facebook/Instagram рекламе
+
+## Текущая дата
+Сегодня: ${currentDate}
+
+ВАЖНО: Когда пользователь спрашивает о конкретной дате (например "30 ноября"), используй именно эту дату в параметре period, а НЕ "today". Например, для "расходы за 30 ноября" передай period="30 ноября".
 
 ## Роль
 Ты специализированный агент для управления рекламными кампаниями и направлениями. Твоя задача — помогать анализировать метрики, оптимизировать расходы и управлять статусом кампаний и направлений.

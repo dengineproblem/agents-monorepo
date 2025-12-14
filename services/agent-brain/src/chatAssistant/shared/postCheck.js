@@ -195,12 +195,13 @@ export async function verifyAdStatus(adId, expectedStatus, accessToken) {
 
 /**
  * Verify Supabase direction status change
+ * Note: account_directions uses is_active (boolean) instead of status (string)
  */
-export async function verifyDirectionStatus(directionId, expectedStatus) {
+export async function verifyDirectionStatus(directionId, expectedActive) {
   try {
     const { data, error } = await supabase
-      .from('directions')
-      .select('id, status')
+      .from('account_directions')
+      .select('id, is_active, campaign_status')
       .eq('id', directionId)
       .single();
 
@@ -211,12 +212,13 @@ export async function verifyDirectionStatus(directionId, expectedStatus) {
       };
     }
 
-    const isVerified = data.status === expectedStatus;
+    const isVerified = data.is_active === expectedActive;
 
     return {
       verified: isVerified,
-      after: data.status,
-      expected: expectedStatus
+      after: data.is_active ? 'active' : 'paused',
+      expected: expectedActive ? 'active' : 'paused',
+      campaign_status: data.campaign_status
     };
   } catch (error) {
     return {
@@ -228,12 +230,13 @@ export async function verifyDirectionStatus(directionId, expectedStatus) {
 
 /**
  * Verify Supabase direction budget change
+ * Note: account_directions stores budget in cents (daily_budget_cents)
  */
-export async function verifyDirectionBudget(directionId, expectedBudget) {
+export async function verifyDirectionBudget(directionId, expectedBudgetCents) {
   try {
     const { data, error } = await supabase
-      .from('directions')
-      .select('id, budget_per_day')
+      .from('account_directions')
+      .select('id, daily_budget_cents')
       .eq('id', directionId)
       .single();
 
@@ -244,12 +247,14 @@ export async function verifyDirectionBudget(directionId, expectedBudget) {
       };
     }
 
-    const isVerified = parseFloat(data.budget_per_day) === parseFloat(expectedBudget);
+    const isVerified = parseInt(data.daily_budget_cents) === parseInt(expectedBudgetCents);
 
     return {
       verified: isVerified,
-      after: data.budget_per_day,
-      expected: expectedBudget
+      after: data.daily_budget_cents,
+      expected: expectedBudgetCents,
+      after_dollars: data.daily_budget_cents / 100,
+      expected_dollars: expectedBudgetCents / 100
     };
   } catch (error) {
     return {
