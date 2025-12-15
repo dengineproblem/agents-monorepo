@@ -236,7 +236,8 @@ export class UnifiedConversationStore {
         tool_name: message.toolName,
         tool_result: message.toolResult,
         agent: message.agent,
-        tokens_used: message.tokensUsed
+        tokens_used: message.tokensUsed,
+        ui_json: message.uiJson  // UI components for rich rendering
       })
       .select('id')
       .single();
@@ -277,7 +278,8 @@ export class UnifiedConversationStore {
       tool_name: m.toolName,
       tool_result: m.toolResult,
       agent: m.agent,
-      tokens_used: m.tokensUsed
+      tokens_used: m.tokensUsed,
+      ui_json: m.uiJson  // UI components for rich rendering
     }));
 
     const { error } = await supabase

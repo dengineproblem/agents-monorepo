@@ -2,26 +2,35 @@ import { useEffect, useRef } from 'react';
 import { Bot } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { MessageBubble } from './MessageBubble';
+import { StreamingMessage, type StreamingState } from './StreamingMessage';
 import type { ChatMessage, Plan } from '@/services/assistantApi';
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
   isLoading?: boolean;
+  isStreaming?: boolean;
+  streamingState?: StreamingState | null;
   onApprove?: (plan: Plan) => void;
 }
 
-export function ChatMessages({ messages, isLoading, onApprove }: ChatMessagesProps) {
+export function ChatMessages({
+  messages,
+  isLoading,
+  isStreaming,
+  streamingState,
+  onApprove,
+}: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or streaming updates
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, isStreaming, streamingState?.text]);
 
   return (
     <ScrollArea className="flex-1">
       <div className="min-h-full flex flex-col">
-        {messages.length === 0 && !isLoading ? (
+        {messages.length === 0 && !isLoading && !isStreaming ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
               <Bot className="h-8 w-8 text-primary" />
@@ -59,8 +68,13 @@ export function ChatMessages({ messages, isLoading, onApprove }: ChatMessagesPro
               />
             ))}
 
-            {/* Typing indicator */}
-            {isLoading && (
+            {/* Streaming message (real-time response) */}
+            {isStreaming && streamingState && (
+              <StreamingMessage state={streamingState} />
+            )}
+
+            {/* Fallback typing indicator (if not streaming but loading) */}
+            {isLoading && !isStreaming && (
               <div className="flex gap-3 p-4">
                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Bot className="h-4 w-4 text-primary" />

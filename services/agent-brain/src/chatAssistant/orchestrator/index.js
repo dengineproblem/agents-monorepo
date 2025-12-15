@@ -72,7 +72,7 @@ export class Orchestrator {
           : Promise.resolve({ summary: '', used: false }),
         getBusinessSnapshot({
           userAccountId: toolContext.userAccountId,
-          adAccountId: toolContext.adAccountId  // FB ID for snapshot
+          adAccountId: dbAccountId  // UUID for database queries
         })
       ]);
 
@@ -417,7 +417,7 @@ export class Orchestrator {
           : Promise.resolve({ summary: '', used: false }),
         getBusinessSnapshot({
           userAccountId: toolContext.userAccountId,
-          adAccountId: toolContext.adAccountId  // FB ID for snapshot
+          adAccountId: dbAccountId  // UUID for database queries
         })
       ]);
 
@@ -456,6 +456,13 @@ export class Orchestrator {
         type: 'classification',
         domain: classification.domain,
         agents: classification.agents
+      };
+
+      // Yield thinking message based on domain
+      const thinkingMessage = getThinkingMessage(classification.domain);
+      yield {
+        type: 'thinking',
+        message: thinkingMessage
       };
 
       // 2. Route to appropriate agent (single agent for streaming)
@@ -553,6 +560,22 @@ export class Orchestrator {
 
     return finalResult;
   }
+}
+
+/**
+ * Get thinking message based on domain
+ * Provides user-friendly feedback about what the assistant is doing
+ */
+function getThinkingMessage(domain) {
+  const messages = {
+    ads: 'Смотрю статистику рекламы...',
+    creative: 'Анализирую креативы...',
+    crm: 'Проверяю лидов...',
+    whatsapp: 'Ищу диалоги...',
+    memory: 'Проверяю заметки...',
+    mixed: 'Собираю данные из нескольких источников...'
+  };
+  return messages[domain] || 'Обрабатываю запрос...';
 }
 
 // Export singleton instance

@@ -57,6 +57,8 @@ export async function processChat({ message, conversationId, mode = 'auto', user
     // Returns { dbId: UUID for database, fbId: Facebook account ID for API }
     const { dbId, fbId } = await resolveAdAccountId(userAccountId, adAccountId);
 
+    logger.info({ userAccountId, inputAdAccountId: adAccountId, resolvedDbId: dbId, resolvedFbId: fbId }, 'Resolved ad account');
+
     // 1. Get access token for Facebook API
     // Use dbId (UUID) for lookup in ad_accounts table
     const accessToken = await getAccessToken(userAccountId, dbId);
@@ -558,6 +560,9 @@ export function registerChatRoutes(fastify) {
   fastify.post('/api/brain/chat', async (request, reply) => {
     const { message, conversationId, mode, userAccountId, adAccountId } = request.body;
 
+    // Debug logging
+    fastify.log.info({ userAccountId, adAccountId, hasAdAccountId: !!adAccountId }, 'Chat request received');
+
     if (!message || !userAccountId) {
       return reply.code(400).send({ error: 'message and userAccountId are required' });
     }
@@ -586,6 +591,166 @@ export function registerChatRoutes(fastify) {
       }).catch(() => {});
 
       return reply.code(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================
+  // SSE STREAMING ENDPOINT
+  // ============================================================
+
+  /**
+   * Streaming chat endpoint using Server-Sent Events
+   * Returns real-time events: classification, thinking, text, tool_start, tool_result, done, error
+   */
+  fastify.post('/api/brain/chat/stream', async (request, reply) => {
+    const { message, conversationId, mode, userAccountId, adAccountId } = request.body;
+
+    if (!message || !userAccountId) {
+      return reply.code(400).send({ error: 'message and userAccountId are required' });
+    }
+
+    // Set SSE headers
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+      'X-Accel-Buffering': 'no'
+    });
+
+    // Helper to send SSE event
+    const sendEvent = (event) => {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    try {
+      // 0. Resolve ad account ID
+      const { dbId, fbId } = await resolveAdAccountId(userAccountId, adAccountId);
+
+      // 1. Get access token
+      const accessToken = await getAccessToken(userAccountId, dbId);
+
+      // 2. Get or create conversation
+      const conversation = await getOrCreateConversation({
+        userAccountId,
+        adAccountId: dbId,
+        conversationId,
+        mode
+      });
+
+      // Update title if first message
+      if (!conversationId) {
+        await updateConversationTitle(conversation.id, message);
+      }
+
+      // 3. Gather context
+      const context = await gatherContext({
+        userAccountId,
+        adAccountId: dbId,
+        conversationId: conversation.id,
+        fbAdAccountId: fbId
+      });
+
+      // 4. Save user message
+      await saveMessage({
+        conversationId: conversation.id,
+        role: 'user',
+        content: message
+      });
+
+      // 5. Build conversation history
+      const conversationHistory = [];
+      if (context.recentMessages?.length > 0) {
+        for (const msg of context.recentMessages.slice(-10)) {
+          if (msg.role === 'user' || msg.role === 'assistant') {
+            conversationHistory.push({ role: msg.role, content: msg.content });
+          }
+        }
+      }
+
+      // 6. Build prompts
+      const systemPrompt = buildSystemPrompt(mode, context.businessProfile);
+      const userPrompt = buildUserPrompt(message, context);
+
+      // 7. Tool context
+      const toolContext = {
+        accessToken,
+        userAccountId,
+        adAccountId: fbId,
+        adAccountDbId: dbId,
+        conversationId: conversation.id
+      };
+
+      // Send initial event with conversation ID
+      sendEvent({
+        type: 'init',
+        conversationId: conversation.id,
+        mode: mode || 'auto'
+      });
+
+      // Send thinking event immediately
+      sendEvent({
+        type: 'thinking',
+        message: 'Анализирую запрос...'
+      });
+
+      // 8. Stream via orchestrator
+      let finalContent = '';
+      let finalAgent = '';
+      let executedActions = [];
+      let uiComponents = [];
+
+      for await (const event of orchestrator.processStreamRequest({
+        message: userPrompt,
+        context,
+        mode: mode || 'auto',
+        toolContext,
+        conversationHistory
+      })) {
+        // Forward all events to client
+        sendEvent(event);
+
+        // Capture final result
+        if (event.type === 'done') {
+          finalContent = event.content;
+          finalAgent = event.agent;
+          executedActions = event.executedActions || [];
+          uiComponents = event.uiComponents || [];
+        }
+      }
+
+      // 9. Save assistant response to DB
+      await saveMessage({
+        conversationId: conversation.id,
+        role: 'assistant',
+        content: finalContent,
+        actionsJson: executedActions,
+        agent: finalAgent
+      });
+
+      // Close connection
+      reply.raw.end();
+
+    } catch (error) {
+      fastify.log.error({ error: error.message }, 'Chat stream error');
+
+      // Send error event
+      sendEvent({
+        type: 'error',
+        message: error.message
+      });
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'chat_stream_endpoint',
+        endpoint: '/api/brain/chat/stream',
+        severity: 'warning'
+      }).catch(() => {});
+
+      reply.raw.end();
     }
   });
 

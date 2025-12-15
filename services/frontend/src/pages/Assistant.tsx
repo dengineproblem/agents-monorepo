@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import Header from '../components/Header';
 import { useAppContext } from '../context/AppContext';
@@ -9,7 +9,7 @@ import {
   PlanApprovalModal,
 } from '../components/assistant';
 import {
-  sendMessage,
+  sendMessageStream,
   getConversations,
   getConversationMessages,
   deleteConversation,
@@ -18,7 +18,14 @@ import {
   type ChatMessage,
   type ChatMode,
   type Plan,
+  type StreamEvent,
 } from '../services/assistantApi';
+import {
+  StreamingMessage,
+  createInitialStreamingState,
+  updateStreamingState,
+  type StreamingState,
+} from '../components/assistant/StreamingMessage';
 
 const Assistant: React.FC = () => {
   const { currentAdAccountId } = useAppContext();
@@ -43,6 +50,11 @@ const Assistant: React.FC = () => {
   const [pendingPlan, setPendingPlan] = useState<Plan | null>(null);
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [isExecutingPlan, setIsExecutingPlan] = useState(false);
+
+  // Streaming state
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingState, setStreamingState] = useState<StreamingState | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Load user account ID
   useEffect(() => {
@@ -108,15 +120,25 @@ const Assistant: React.FC = () => {
     loadMessages();
   }, [loadMessages]);
 
-  // Handle sending a message
+  // Handle sending a message with streaming
   const handleSend = async (message: string) => {
     if (!userAccountId) {
       toast.error('Пользователь не авторизован');
       return;
     }
 
+    // Cancel any existing stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     try {
       setIsSending(true);
+      setIsStreaming(true);
+      setStreamingState(createInitialStreamingState());
 
       // Optimistically add user message
       const tempUserMessage: ChatMessage = {
@@ -128,49 +150,87 @@ const Assistant: React.FC = () => {
       };
       setMessages((prev) => [...prev, tempUserMessage]);
 
-      const response = await sendMessage({
-        message,
-        conversationId: activeConversationId || undefined,
-        mode,
-        userAccountId,
-        adAccountId: currentAdAccountId || undefined,
-      });
+      let currentConversationId = activeConversationId;
+      let finalContent = '';
+      let finalExecutedActions: ChatMessage['actions_json'] = [];
 
-      // Update active conversation
-      if (!activeConversationId) {
-        setActiveConversationId(response.conversationId);
-        loadConversations(); // Refresh list
+      // Stream the response
+      const stream = sendMessageStream(
+        {
+          message,
+          conversationId: activeConversationId || undefined,
+          mode,
+          userAccountId,
+          adAccountId: currentAdAccountId || undefined,
+        },
+        abortController.signal
+      );
+
+      for await (const event of stream) {
+        if (abortController.signal.aborted) break;
+
+        // Update streaming state
+        setStreamingState((prev) =>
+          prev ? updateStreamingState(prev, event) : createInitialStreamingState()
+        );
+
+        // Handle specific events
+        switch (event.type) {
+          case 'init':
+            if (!currentConversationId) {
+              currentConversationId = event.conversationId;
+              setActiveConversationId(event.conversationId);
+              // Update temp message with real conversation ID
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempUserMessage.id
+                    ? { ...m, conversation_id: event.conversationId }
+                    : m
+                )
+              );
+              loadConversations(); // Refresh sidebar
+            }
+            break;
+
+          case 'done':
+            finalContent = event.content;
+            finalExecutedActions = event.executedActions || [];
+            break;
+
+          case 'error':
+            toast.error(event.message || 'Ошибка при обработке');
+            break;
+        }
       }
 
-      // Replace temp message with actual response
-      const assistantMessage: ChatMessage = {
-        id: `response-${Date.now()}`,
-        conversation_id: response.conversationId,
-        role: 'assistant',
-        content: response.response,
-        plan_json: response.plan,
-        actions_json: response.executedActions,
-        created_at: new Date().toISOString(),
-      };
+      // Add final assistant message
+      if (finalContent && currentConversationId) {
+        const assistantMessage: ChatMessage = {
+          id: `response-${Date.now()}`,
+          conversation_id: currentConversationId,
+          role: 'assistant',
+          content: finalContent,
+          actions_json: finalExecutedActions,
+          created_at: new Date().toISOString(),
+        };
 
-      setMessages((prev) => [
-        ...prev.filter((m) => m.id !== tempUserMessage.id),
-        { ...tempUserMessage, conversation_id: response.conversationId },
-        assistantMessage,
-      ]);
-
-      // Show plan approval modal if needed
-      if (response.plan?.requires_approval) {
-        setPendingPlan(response.plan);
-        setPlanModalOpen(true);
+        setMessages((prev) => [...prev, assistantMessage]);
       }
+
     } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        // Stream was cancelled, ignore
+        return;
+      }
       console.error('Failed to send message:', error);
       toast.error('Не удалось отправить сообщение');
       // Remove temp message on error
       setMessages((prev) => prev.filter((m) => !m.id.startsWith('temp-')));
     } finally {
       setIsSending(false);
+      setIsStreaming(false);
+      setStreamingState(null);
+      abortControllerRef.current = null;
     }
   };
 
@@ -271,6 +331,8 @@ const Assistant: React.FC = () => {
           <ChatMessages
             messages={messages}
             isLoading={isSending || messagesLoading}
+            isStreaming={isStreaming}
+            streamingState={streamingState}
             onApprove={(plan) => {
               setPendingPlan(plan);
               setPlanModalOpen(true);
