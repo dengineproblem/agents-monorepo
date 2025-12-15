@@ -124,7 +124,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [userData, setUserData] = useState<any>(null);
-  const { refreshData, currentAdAccountId } = useAppContext();
+  const { refreshData, currentAdAccountId, multiAccountEnabled } = useAppContext();
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [dailyBudget, setDailyBudget] = useState(10); // по умолчанию 10$ (используется в форме изображений)
   const [dailyBudgetInstagram, setDailyBudgetInstagram] = useState(10); // Instagram (USD)
@@ -1199,8 +1199,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
       console.log('Запускаем рекламу для всех активных направлений:', { userId, currentAdAccountId });
 
-      // Проверяем что account_id есть (обязателен для мультиаккаунтности)
-      if (!currentAdAccountId) {
+      // Проверяем account_id только для мультиаккаунтности (legacy режим не требует)
+      if (multiAccountEnabled && !currentAdAccountId) {
         toast.error('Рекламный аккаунт не выбран. Выберите аккаунт в настройках.');
         setLaunchLoading(false);
         return;

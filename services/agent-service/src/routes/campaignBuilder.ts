@@ -95,7 +95,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           properties: {
             user_account_id: { type: 'string', format: 'uuid' },
             userId: { type: 'string', format: 'uuid' },
-            account_id: { type: 'string', format: 'uuid' }, // UUID из ad_accounts (для мультиаккаунтности)
+            account_id: {
+              oneOf: [
+                { type: 'string', format: 'uuid' },
+                { type: 'null' }
+              ]
+            }, // UUID из ad_accounts - nullable для legacy режима
           },
           anyOf: [
             { required: ['user_account_id'] },
@@ -671,7 +676,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           required: ['user_account_id', 'direction_id', 'creative_ids'],
           properties: {
             user_account_id: { type: 'string', format: 'uuid' },
-            account_id: { type: 'string', format: 'uuid' }, // UUID из ad_accounts (для мультиаккаунтности)
+            account_id: {
+              oneOf: [
+                { type: 'string', format: 'uuid' },
+                { type: 'null' }
+              ]
+            }, // UUID из ad_accounts - nullable для legacy режима
             direction_id: { type: 'string', format: 'uuid' },
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
             daily_budget_cents: { type: 'number', minimum: 500 },

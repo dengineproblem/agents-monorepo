@@ -5,6 +5,7 @@ import { KBSidebar } from '../components/knowledge-base/KBSidebar';
 import { KBArticle } from '../components/knowledge-base/KBArticle';
 import { KBBreadcrumbs } from '../components/knowledge-base/KBBreadcrumbs';
 import { KBSearch } from '../components/knowledge-base/KBSearch';
+import { KBTableOfContents } from '../components/knowledge-base/KBTableOfContents';
 import { knowledgeBaseContent, type Chapter } from '../content/knowledge-base';
 import { Input } from '../components/ui/input';
 import { Search, BookOpen, Menu, ChevronRight, GraduationCap } from 'lucide-react';
@@ -182,40 +183,57 @@ const KnowledgeBase: React.FC = () => {
           </Sheet>
         </div>
 
-        {/* Main content */}
-        <div className="max-w-4xl mx-auto px-4 py-8">
-          {currentChapter && currentSection ? (
-            <>
-              <KBBreadcrumbs
-                chapter={currentChapter}
-                section={currentSection}
-                onNavigateHome={() => navigate('/knowledge-base')}
-                onNavigateChapter={() => handleNavigate(currentChapter.id, currentChapter.sections[0]?.id)}
-              />
-              <KBArticle
-                chapter={currentChapter}
-                section={currentSection}
-                onNavigate={handleNavigate}
-              />
-            </>
-          ) : currentChapter ? (
-            <>
-              <KBBreadcrumbs
-                chapter={currentChapter}
-                onNavigateHome={() => navigate('/knowledge-base')}
-              />
-              {/* Показываем первый раздел главы */}
-              {currentChapter.sections[0] && (
-                <KBArticle
-                  chapter={currentChapter}
-                  section={currentChapter.sections[0]}
+        {/* Main content with right sidebar */}
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="flex gap-8">
+            {/* Article content */}
+            <div className="flex-1 min-w-0 max-w-4xl">
+              {currentChapter && currentSection ? (
+                <>
+                  <KBBreadcrumbs
+                    chapter={currentChapter}
+                    section={currentSection}
+                    onNavigateHome={() => navigate('/knowledge-base')}
+                    onNavigateChapter={() => handleNavigate(currentChapter.id, currentChapter.sections[0]?.id)}
+                  />
+                  <KBArticle
+                    chapter={currentChapter}
+                    section={currentSection}
+                    onNavigate={handleNavigate}
+                  />
+                </>
+              ) : currentChapter ? (
+                <>
+                  <KBBreadcrumbs
+                    chapter={currentChapter}
+                    onNavigateHome={() => navigate('/knowledge-base')}
+                  />
+                  {/* Показываем первый раздел главы */}
+                  {currentChapter.sections[0] && (
+                    <KBArticle
+                      chapter={currentChapter}
+                      section={currentChapter.sections[0]}
+                      onNavigate={handleNavigate}
+                    />
+                  )}
+                </>
+              ) : (
+                renderHome()
+              )}
+            </div>
+
+            {/* Right sidebar - Table of Contents (desktop only) */}
+            {chapterId && (
+              <aside className="hidden xl:block w-56 flex-shrink-0">
+                <KBTableOfContents
+                  chapters={knowledgeBaseContent}
+                  currentChapterId={chapterId}
+                  currentSectionId={sectionId}
                   onNavigate={handleNavigate}
                 />
-              )}
-            </>
-          ) : (
-            renderHome()
-          )}
+              </aside>
+            )}
+          </div>
         </div>
       </div>
     </div>

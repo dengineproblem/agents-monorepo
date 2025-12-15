@@ -79,6 +79,7 @@ const CreativeGeneration = () => {
   // State для редактирования
   const [isEditMode, setIsEditMode] = useState(false);
   const [editPrompt, setEditPrompt] = useState<string>('');
+  const [editReferenceImages, setEditReferenceImages] = useState<string[]>([]);
 
   // State для сохранения creative_id для upscale
   const [generatedCreativeId, setGeneratedCreativeId] = useState<string>('');
@@ -215,6 +216,7 @@ const CreativeGeneration = () => {
     setCompetitorReference(null);
     setIsEditMode(false);
     setEditPrompt('');
+    setEditReferenceImages([]);
     setSelectedStyle('modern_performance');
     setStylePrompt('');
   }, [currentAdAccountId]);
@@ -466,6 +468,40 @@ const CreativeGeneration = () => {
     }
   };
 
+  // Обработка загрузки референсного изображения в режиме редактирования (до 2)
+  const handleEditReferenceImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (editReferenceImages.length >= 2) {
+      toast.error('Максимум 2 референса');
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Пожалуйста, выберите изображение');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Размер изображения не должен превышать 10MB');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setEditReferenceImages(prev => [...prev, result]);
+      toast.success(`Референс ${editReferenceImages.length + 1} добавлен`);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Удаление референсного изображения в режиме редактирования
+  const removeEditReferenceImage = (index: number) => {
+    setEditReferenceImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   const generateCreative = async (isEdit: boolean = false) => {
     // TEMPORARILY DISABLED: Проверяем лимит генераций
     // if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
@@ -479,19 +515,30 @@ const CreativeGeneration = () => {
       let referenceImageBase64: string | undefined;
       let referenceImagesBase64: string[] = [];
 
-      // Если редактируем - используем сгенерированное изображение как референс
+      // Если редактируем - используем сгенерированное изображение + дополнительные референсы
       if (isEdit && generatedImage) {
+        // Конвертируем текущее изображение в base64
         const response = await fetch(generatedImage);
         const blob = await response.blob();
         const reader = new FileReader();
-        referenceImageBase64 = await new Promise((resolve) => {
+        const currentImageBase64: string = await new Promise((resolve) => {
           reader.onload = () => {
             const base64 = (reader.result as string).split(',')[1];
             resolve(base64);
           };
           reader.readAsDataURL(blob);
         });
-        referenceImagesBase64 = [referenceImageBase64];
+
+        // Собираем все референсы: текущее изображение + дополнительные
+        referenceImagesBase64 = [currentImageBase64];
+
+        // Добавляем дополнительные референсы (до 2)
+        if (editReferenceImages.length > 0) {
+          const additionalRefs = editReferenceImages.map(img => img.split(',')[1]);
+          referenceImagesBase64 = [...referenceImagesBase64, ...additionalRefs];
+        }
+
+        referenceImageBase64 = referenceImagesBase64[0]; // Первый для обратной совместимости
       }
       // Если есть референсные изображения - используем их
       else if (referenceImages.length > 0) {
@@ -578,6 +625,7 @@ const CreativeGeneration = () => {
         if (isEdit) {
           setIsEditMode(false);
           setEditPrompt('');
+          setEditReferenceImages([]);
         }
       } else {
         throw new Error('Не удалось получить URL изображения');
@@ -1134,6 +1182,39 @@ const CreativeGeneration = () => {
                         {/* Режим редактирования */}
                         {isEditMode && (
                           <div className="space-y-4 p-4 bg-blue-50/50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                            {/* Референсные изображения для редактирования */}
+                            <div className="space-y-2">
+                              <Label className="flex items-center gap-1">
+                                Дополнительные референсы (до 2)
+                              </Label>
+                              <div className="flex gap-2 items-start flex-wrap">
+                                {editReferenceImages.map((img, index) => (
+                                  <div key={index} className="relative rounded-lg overflow-hidden bg-muted/30">
+                                    <Button
+                                      variant="destructive"
+                                      size="icon"
+                                      className="absolute top-1 right-1 z-10 h-5 w-5"
+                                      onClick={() => removeEditReferenceImage(index)}
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                    <img src={img} alt={`Референс ${index + 1}`} className="w-16 h-16 object-cover rounded" />
+                                  </div>
+                                ))}
+                                {editReferenceImages.length < 2 && (
+                                  <Label htmlFor="edit-reference-upload" className="cursor-pointer">
+                                    <div className="w-16 h-16 border-2 border-dashed border-muted rounded-lg flex items-center justify-center hover:border-primary/50 transition-colors">
+                                      <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                                    </div>
+                                    <Input id="edit-reference-upload" type="file" accept="image/*" className="hidden" onChange={handleEditReferenceImageUpload} />
+                                  </Label>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                Добавьте изображения, на которые нужно ориентироваться при редактировании
+                              </p>
+                            </div>
+
                             <div className="space-y-2">
                               <Label className="flex items-center gap-1">
                                 Инструкции для редактирования
@@ -1142,11 +1223,11 @@ const CreativeGeneration = () => {
                               <Textarea
                                 value={editPrompt}
                                 onChange={(e) => setEditPrompt(e.target.value)}
-                                placeholder="Например: Сделай фон более ярким, измени цвет текста на синий..."
+                                placeholder="Например: Сделай фон более ярким, измени цвет текста на синий, используй стиль как на референсе..."
                                 className="min-h-[100px] resize-none"
                               />
                               <p className="text-xs text-muted-foreground">
-                                Опишите, что нужно изменить. Текущее изображение будет использовано как референс.
+                                Опишите, что нужно изменить. Текущее изображение + референсы будут учтены.
                               </p>
                             </div>
                             <div className="flex gap-2">
@@ -1172,6 +1253,7 @@ const CreativeGeneration = () => {
                                 onClick={() => {
                                   setIsEditMode(false);
                                   setEditPrompt('');
+                                  setEditReferenceImages([]);
                                 }}
                                 disabled={loading.image}
                               >
