@@ -16,9 +16,14 @@ import {
   formatScoringForPrompt,
   formatBrainHistoryForPrompt
 } from '../../shared/brainRules.js';
+import {
+  getExecutionPlaybooks,
+  getInteractiveRouter,
+  getPlaybookExamples
+} from './playbooks.js';
 
 // Prompt version for tracking/debugging
-export const PROMPT_VERSION = 'ads-v2.1';
+export const PROMPT_VERSION = 'ads-v2.2';
 
 /**
  * Build system prompt for AdsAgent
@@ -34,6 +39,11 @@ export function buildAdsPrompt(context, mode) {
   const integrationsContext = formatIntegrationsContext(context?.integrations);
   const toolRoutingRules = getToolRoutingRules();
   const fewShotExamples = getFewShotExamples();
+
+  // v2.2: Execution Playbooks
+  const executionPlaybooks = getExecutionPlaybooks();
+  const interactiveRouter = getInteractiveRouter();
+  const playbookExamples = getPlaybookExamples();
 
   // Brain rules (Health Score, матрица действий, ограничения)
   const brainRules = getBrainRulesPrompt();
@@ -103,6 +113,10 @@ export function buildAdsPrompt(context, mode) {
 ${integrationsContext}
 
 ${toolRoutingRules}
+
+${executionPlaybooks}
+
+${interactiveRouter}
 
 ## Dry-run режим (Preview)
 Для опасных write-операций ВСЕГДА сначала делай preview с dry_run: true:
@@ -224,6 +238,8 @@ ${brainHistoryContext}
 - \`📊 Уверенность: низкая\` — если sample_small = true (impressions < 1000 OR leads < 5)
 
 ${fewShotExamples}
+
+${playbookExamples}
 
 ## Формат ответа
 Отвечай на русском языке. Структурируй информацию:

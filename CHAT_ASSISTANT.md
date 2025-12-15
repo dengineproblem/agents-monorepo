@@ -1214,7 +1214,7 @@ async pauseCampaign({ campaign_id }, { accessToken }) {
 **Версии:**
 | Агент | Версия | Файл |
 |-------|--------|------|
-| AdsAgent | `ads-v2.1` | `ads/prompt.js` |
+| AdsAgent | `ads-v2.2` | `ads/prompt.js` |
 | CreativeAgent | `creative-v1.0` | `creative/prompt.js` |
 | CRMAgent | `crm-v1.0` | `crm/prompt.js` |
 | WhatsAppAgent | `whatsapp-v1.0` | `whatsapp/prompt.js` |
@@ -1274,26 +1274,87 @@ getIntegrations(userAccountId, adAccountId, hasFbToken)
 
 ---
 
-### Tool Routing Rules (AdsAgent v2.1)
+### Execution Playbooks (AdsAgent v2.2)
 
-**Путь:** `services/agent-brain/src/chatAssistant/agents/ads/prompt.js`
+**Путь:** `services/agent-brain/src/chatAssistant/agents/ads/playbooks.js`
 
-Детерминированный выбор тулов на основе типа вопроса.
+Диалоговая стратегия с цепочками диагностики и интерактивными next steps.
+
+**Файлы:**
+| Файл | Описание |
+|------|----------|
+| `playbooks.js` | Execution Playbooks, Interactive Router, Few-Shot примеры |
+| `prompt.js` | Интеграция playbooks в системный промпт (v2.2) |
 
 **Принципы:**
-1. **Context-First**: Если данные есть в контексте (brainActions, todayMetrics), не вызывай тулы
-2. **Минимум тулов**: Max 2 read-тула на ответ
-3. **Порядок**: getDirections → getSpendReport → getROIReport
+1. **Цепочка диагностики**: Brain (вчера) → today → углубление
+2. **Context-First**: Данные из контекста (brainActions, scoringDetails) БЕЗ tool calls
+3. **Interactive Next Steps**: 2-3 варианта после каждого ответа
+4. **Минимум тулов**: Max 2 read-тула на ответ
 
-**Матрица выбора:**
-| Тип вопроса | Обязательные тулы | НЕ вызывать |
-|-------------|-------------------|-------------|
-| "Почему мало клиентов?" | getDirections, getSpendReport | CRM/WA тулы |
-| "Сколько потратили?" | getSpendReport | getCampaigns, ROI |
-| "Топ креативов по ROI" | getROIReport | Ads spend тулы |
-| "Что Brain сделал?" | БЕЗ ТУЛОВ | всё |
+#### Trend Heuristic
 
-**16 Few-Shot примеров** включены в промпт для детерминированного поведения.
+Детерминированное определение `trend_level` из `scoring_output.adsets.trends`:
+
+```
+По d3 (если нет — d7, иначе d1):
+- declining: ctr_change_pct <= -15 ИЛИ cpm_change_pct >= +20
+- improving: ctr_change_pct >= +10 И cpm_change_pct <= +10
+- stable: иначе
+
+retention_ok = (risk_score < 50) AND (trend_level != 'declining')
+```
+
+#### Execution Playbooks
+
+| Playbook | Вопрос | Цепочка |
+|----------|--------|---------|
+| A | "Почему мало клиентов?" | brainActions → getDirections → getSpendReport(today) |
+| B | "Топ креативов по ROI" | getROIReport (preflight: roi=true) |
+| C | "Что Brain делал вчера?" | БЕЗ тулов (context.brainActions) |
+| D | "Лиды есть, продаж нет" | CRM: getFunnelStats; WA: getDialogs |
+| E | "Какой креатив выгорает?" | БЕЗ тулов (scoring_output.ready_creatives) |
+
+#### Interactive Next-Step Router
+
+После каждого ответа предлагаются 2-3 следующих шага:
+
+| Условие | Next Step |
+|---------|-----------|
+| `whatsapp=true` + CPL ≤ 130% target | "Разобрать 5 последних переписок?" |
+| `crm=true` + лидов много, продаж мало | "Проверим воронку: где просадка?" |
+| `roi=true` | "Топ креативов по ROI с рекомендациями?" |
+| Только Facebook | "Диагностика: где расход есть, а лидов мало" |
+
+**Формат next steps:**
+- 🟢 **Безопасно**: read-only диагностика
+- 🟡 **Агрессивно**: изменение бюджетов (dry_run preview)
+- 🔍 **Углубиться**: детализация по сущности
+
+#### 18 типовых вопросов
+
+| # | Вопрос | Цепочка тулов |
+|---|--------|---------------|
+| 1 | Почему мало клиентов? | brainActions → getSpendReport(today) → getDirections |
+| 2 | Сколько потратили? | getSpendReport(period) |
+| 3 | Сколько лидов и CPL? | getSpendReport(today) → getDirections |
+| 4 | Что Brain делал вчера? | БЕЗ тулов (brainActions) |
+| 5 | Топ креативов по ROI | getROIReport (если roi=true) |
+| 6 | ROI высокий — масштабировать? | getROIReport → правила sample/spend |
+| 7 | Лиды есть, продаж нет | CRM: getFunnelStats; WA: getDialogs |
+| 8 | Какие направления лучше? | getDirections |
+| 9 | Что делать с d2? | getDirections → getCampaigns |
+| 10 | Почему CPL вырос? | brainActions → getSpendReport(today vs yesterday) |
+| 11 | Худшие кампании | getCampaigns или getSpendReport(campaign) |
+| 12 | Какой креатив выгорает? | БЕЗ тулов (scoring_output) |
+| 13 | Качество WA-лидов | getSpendReport + analyzeDialog (если wa=true) |
+| 14 | Последние диалоги | getDialogs (если wa=true) |
+| 15 | Лиды за 7 дней | getLeads (если crm=true) |
+| 16 | Сколько денег принесли лиды? | getRevenueStats (если roi=true) |
+| 17 | Что улучшить прямо сейчас? | brainActions → getSpendReport(today) |
+| 18 | Метрики норм, но лидов мало | getSpendReport → WA/CRM анализ |
+
+**24 Few-Shot примеров** (16 базовых + 8 playbook) включены в промпт.
 
 ---
 
