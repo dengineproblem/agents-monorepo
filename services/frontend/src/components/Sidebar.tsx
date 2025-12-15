@@ -32,11 +32,12 @@ const Sidebar: React.FC = () => {
       label: t('menu.videos'),
       icon: <Video className="h-5 w-5" />,
     },
-    {
-      path: '/assistant',
-      label: 'AI Chat',
-      icon: <MessageSquare className="h-5 w-5" />,
-    },
+    // AI Chat скрыт временно
+    // {
+    //   path: '/assistant',
+    //   label: 'AI Chat',
+    //   icon: <MessageSquare className="h-5 w-5" />,
+    // },
     {
       path: '/profile',
       label: t('menu.profile'),
