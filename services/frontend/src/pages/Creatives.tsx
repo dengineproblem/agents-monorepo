@@ -676,11 +676,11 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
       };
 
-      // Если тест уже существует (любой статус), отправляем force:true для перезапуска с нуля
-      // Это позволяет перезапускать тест после остановки без ошибки "already running"
-      const hasExistingTest = analytics?.test?.exists || localTestRunning;
-
-      if (hasExistingTest) {
+      // Если тест уже был завершен/отменен, отправляем force:true для перезапуска
+      const hasCompletedTest = analytics?.test?.exists && 
+        (analytics.test.status === 'completed' || analytics.test.status === 'cancelled');
+      
+      if (hasCompletedTest) {
         payload.force = true;
       }
 
@@ -801,9 +801,16 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
         } : null
       } : null);
 
-      // НЕ вызываем fetchData сразу после остановки — оптимистичного обновления достаточно
-      // Это предотвращает перезапись статуса старыми данными с сервера
-      // Пользователь может обновить данные вручную через кнопку refresh
+      // Пробуем обновить аналитику, но игнорируем ошибки
+      try {
+        const freshData = await fetchData(true);
+        setTranscript(freshData.transcript);
+        if (freshData.analytics) {
+          setAnalytics(freshData.analytics);
+        }
+      } catch (e) {
+        console.warn('[CreativeDetails] Не удалось обновить аналитику после остановки теста:', e);
+      }
     } catch (error) {
       console.error('Ошибка остановки теста:', error);
       toast.error('Ошибка при остановке теста');
