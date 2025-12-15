@@ -11,6 +11,7 @@ import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { unifiedStore } from './stores/unifiedStore.js';
 import { TokenBudget } from './shared/tokenBudget.js';
+import { formatBrainActionsForNotes } from './shared/brainRules.js';
 
 /**
  * Gather all context needed for the chat assistant with token budgeting
@@ -296,6 +297,7 @@ export async function getBusinessSnapshot({ userAccountId, adAccountId }) {
 
 /**
  * Get ads snapshot from scoring_executions
+ * Returns aggregated metrics + full scoring details for AdsAgent prompt
  */
 async function getAdsSnapshot(userAccountId, adAccountId) {
   let query = supabase
@@ -316,7 +318,7 @@ async function getAdsSnapshot(userAccountId, adAccountId) {
     return null;
   }
 
-  const { adsets, ready_creatives } = execution.scoring_output;
+  const { adsets, ready_creatives, unused_creatives } = execution.scoring_output;
 
   if (!adsets?.length) {
     return null;
@@ -356,7 +358,14 @@ async function getAdsSnapshot(userAccountId, adAccountId) {
     activeCreatives: ready_creatives?.filter(c => c.has_data)?.length || 0,
     topAdset: adsetsWithCPL[0] || null,
     worstAdset: adsetsWithCPL[adsetsWithCPL.length - 1] || null,
-    dataDate: execution.created_at
+    dataDate: execution.created_at,
+
+    // Full scoring details for AdsAgent prompt (Brain rules integration)
+    scoringDetails: {
+      adsets: adsets,                      // Full adsets with trends, metrics
+      ready_creatives: ready_creatives,     // Creatives with performance data
+      unused_creatives: unused_creatives    // Unused creatives for rotation
+    }
   };
 }
 
@@ -666,6 +675,55 @@ export async function getNotesDigest(userAccountId, accountId = null) {
   return memoryStore.getNotesDigest(userAccountId, accountId);
 }
 
+// ============================================================
+// BRAIN ACTIONS HISTORY
+// ============================================================
+
+/**
+ * Get recent Brain agent actions for context
+ * Queries brain_executions table for last 3 days
+ *
+ * @param {string} userAccountId
+ * @param {string} [adAccountId]
+ * @returns {Promise<Array>} Array of formatted notes from Brain actions
+ */
+export async function getRecentBrainActions(userAccountId, adAccountId) {
+  try {
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+    let query = supabase
+      .from('brain_executions')
+      .select('actions_json, plan_json, created_at, status')
+      .eq('user_account_id', userAccountId)
+      .gte('created_at', threeDaysAgo)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    // Filter by account_id if provided
+    if (adAccountId) {
+      query = query.eq('account_id', adAccountId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      logger.warn({ error: error.message }, 'Failed to get brain executions');
+      return [];
+    }
+
+    if (!data?.length) {
+      return [];
+    }
+
+    // Format using shared function from brainRules.js
+    return formatBrainActionsForNotes(data);
+
+  } catch (error) {
+    logger.warn({ error: error.message }, 'Error getting recent brain actions');
+    return [];
+  }
+}
+
 // Re-export stores for convenience
 export { unifiedStore } from './stores/unifiedStore.js';
 export { memoryStore } from './stores/memoryStore.js';
@@ -679,6 +737,8 @@ export default {
   deleteConversation,
   getSpecs,
   getNotesDigest,
+  getRecentBrainActions,
+  getBusinessSnapshot,
   // Also expose stores on default export
   unifiedStore
 };

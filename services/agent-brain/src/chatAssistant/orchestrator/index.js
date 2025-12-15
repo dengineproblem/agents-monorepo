@@ -15,7 +15,7 @@ import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.j
 import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
-import { getBusinessSnapshot, formatSnapshotForPrompt } from '../contextGatherer.js';
+import { getBusinessSnapshot, formatSnapshotForPrompt, getRecentBrainActions } from '../contextGatherer.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 
@@ -64,7 +64,7 @@ export class Orchestrator {
       // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
       // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
       const dbAccountId = toolContext.adAccountDbId || null;
-      const [specs, notes, summaryContext, snapshot] = await Promise.all([
+      const [specs, notes, summaryContext, snapshot, brainActions] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
@@ -73,7 +73,9 @@ export class Orchestrator {
         getBusinessSnapshot({
           userAccountId: toolContext.userAccountId,
           adAccountId: dbAccountId  // UUID for database queries
-        })
+        }),
+        // Brain actions history (last 3 days) for AdsAgent context
+        getRecentBrainActions(toolContext.userAccountId, dbAccountId)
       ]);
 
       // Enrich context with memory AND snapshot (snapshot-first pattern)
@@ -85,7 +87,9 @@ export class Orchestrator {
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
         // Snapshot-first: pre-loaded business data
         businessSnapshot: snapshot,
-        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot)
+        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
+        // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
+        brainActions
       };
 
       // Track context stats for runsStore
@@ -409,7 +413,7 @@ export class Orchestrator {
       // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
       // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
       const dbAccountId = toolContext.adAccountDbId || null;
-      const [specs, notes, summaryContext, snapshot] = await Promise.all([
+      const [specs, notes, summaryContext, snapshot, brainActions] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
@@ -418,7 +422,9 @@ export class Orchestrator {
         getBusinessSnapshot({
           userAccountId: toolContext.userAccountId,
           adAccountId: dbAccountId  // UUID for database queries
-        })
+        }),
+        // Brain actions history (last 3 days) for AdsAgent context
+        getRecentBrainActions(toolContext.userAccountId, dbAccountId)
       ]);
 
       // Enrich context with memory AND snapshot (snapshot-first pattern)
@@ -430,7 +436,9 @@ export class Orchestrator {
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
         // Snapshot-first: pre-loaded business data
         businessSnapshot: snapshot,
-        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot)
+        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
+        // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
+        brainActions
       };
 
       // Track context stats for runsStore

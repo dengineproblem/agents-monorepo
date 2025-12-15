@@ -1214,7 +1214,7 @@ async pauseCampaign({ campaign_id }, { accessToken }) {
 **Версии:**
 | Агент | Версия | Файл |
 |-------|--------|------|
-| AdsAgent | `ads-v1.0` | `ads/prompt.js` |
+| AdsAgent | `ads-v2.0` | `ads/prompt.js` |
 | CreativeAgent | `creative-v1.0` | `creative/prompt.js` |
 | CRMAgent | `crm-v1.0` | `crm/prompt.js` |
 | WhatsAppAgent | `whatsapp-v1.0` | `whatsapp/prompt.js` |
@@ -2183,3 +2183,130 @@ const ok = isValidResponse(content);
 
 📊 Уверенность: средняя
 ```
+
+---
+
+## Brain Rules Integration (AdsAgent v2.0)
+
+**Путь:** `services/agent-brain/src/chatAssistant/shared/brainRules.js`
+
+Унификация логики принятия решений между Brain-агентом (batch утренняя оптимизация) и AdsAgent (интерактивный чат).
+
+### Проблема
+
+- **Brain-агент** (server.js): сложная логика с Health Score, матрицей действий, таймфреймами, scoring данными
+- **AdsAgent** (prompt.js v1.0): простые правила ("если CPL > target → снизить")
+- Рекомендации AdsAgent могли противоречить тому, что сделал Brain утром
+
+### Решение
+
+AdsAgent v2.0 теперь использует те же правила, что и Brain-агент.
+
+### Shared модуль brainRules.js
+
+**Экспорты:**
+
+| Функция/Константа | Описание |
+|-------------------|----------|
+| `HS_CLASSES` | Health Score классы: very_good (≥+25), good (+5..+24), neutral (-5..+4), slightly_bad (-25..-6), bad (≤-25) |
+| `BUDGET_LIMITS` | Ограничения: +30% max increase, -50% max decrease, $3-$100 range |
+| `TIMEFRAME_WEIGHTS` | Веса: yesterday (50%), 3d (25%), 7d (15%), 30d (10%) |
+| `getBrainRulesPrompt()` | Текст правил для промпта AdsAgent |
+| `formatScoringForPrompt(scoring)` | Форматирование scoring данных (adsets, creatives, trends) |
+| `formatBrainActionsForNotes(executions)` | Форматирование истории действий Brain |
+| `formatBrainHistoryForPrompt(notes)` | Форматирование истории для промпта |
+
+### Health Score система
+
+HS ∈ [-100; +100] — интегральная оценка эффективности ad set / кампании.
+
+**Компоненты:**
+1. **CPL/QCPL gap к таргету** (вес 45)
+2. **Тренды** (вес до 15): 3d vs 7d, 7d vs 30d
+3. **Диагностика** (до -30): CTR < 1%, CPM > медианы, Frequency > 2
+4. **Новизна** (<48ч): множитель 0.7
+5. **Объём** (impr < 1000): множитель доверия 0.6...1.0
+6. **Today-компенсация**: хорошее сегодня перевешивает плохое вчера
+
+**Матрица действий:**
+
+| HS Класс | Действие |
+|----------|----------|
+| very_good (≥+25) | Масштабировать +10..+30% |
+| good (+5..+24) | Держать; при недоборе +0..+10% |
+| neutral (-5..+4) | Держать; проверить "пожирателей" |
+| slightly_bad (-25..-6) | Снижать -20..-50%; ротация креативов |
+| bad (≤-25) | Пауза или снижение -50% |
+
+### История действий Brain
+
+**Источник:** таблица `brain_executions`
+
+**Функция:** `getRecentBrainActions(userAccountId, adAccountId)`
+
+Запрашивает последние 3 дня действий Brain и форматирует для контекста AdsAgent.
+
+```javascript
+// Результат
+[
+  { text: "[13 дек] Бюджет изменён: 123456 → $15.00", source: {...}, importance: 0.8 },
+  { text: "[12 дек] Пауза adset: 789012", source: {...}, importance: 0.8 }
+]
+```
+
+**Интеграция в orchestrator:**
+```javascript
+const [specs, notes, summaryContext, snapshot, brainActions] = await Promise.all([
+  memoryStore.getSpecs(...),
+  memoryStore.getNotesDigest(...),
+  getSummaryContext(...),
+  getBusinessSnapshot(...),
+  getRecentBrainActions(userAccountId, dbAccountId)  // NEW
+]);
+
+const enrichedContext = {
+  ...context,
+  brainActions  // Передаётся в AdsAgent
+};
+```
+
+### Scoring данные в контексте
+
+**Источник:** `scoring_executions.scoring_output`
+
+`getAdsSnapshot()` теперь возвращает `scoringDetails`:
+
+```javascript
+{
+  // ... existing aggregates ...
+  scoringDetails: {
+    adsets: [...],           // Full adsets with trends, metrics
+    ready_creatives: [...],   // Creatives with performance data
+    unused_creatives: [...]   // Unused creatives for rotation
+  }
+}
+```
+
+**Форматирование для промпта:**
+```javascript
+const scoringContext = formatScoringForPrompt(
+  context?.businessSnapshot?.ads?.scoringDetails
+);
+// → "**Ad Sets (5):**\n- Имплантация: spend $50, CPL $25 📈\n..."
+```
+
+### Защита от конфликтов
+
+AdsAgent теперь учитывает историю Brain:
+- Не предлагает повторять недавние действия
+- Если бюджет уже снижали — даёт время на стабилизацию
+- Если создали новый adset — проверяет результаты прежде чем предлагать ещё
+
+### Файлы
+
+| Файл | Изменение |
+|------|-----------|
+| `shared/brainRules.js` | **Создан** — общие правила Brain |
+| `agents/ads/prompt.js` | **Обновлён** → v2.0, интеграция Brain rules |
+| `contextGatherer.js` | **Обновлён** — `getRecentBrainActions()`, `scoringDetails` |
+| `orchestrator/index.js` | **Обновлён** — загрузка `brainActions` |

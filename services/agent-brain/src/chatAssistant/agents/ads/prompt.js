@@ -1,12 +1,24 @@
 /**
  * AdsAgent System Prompt
  * Specialized prompt for Facebook/Instagram advertising
+ *
+ * v2.0: Интеграция логики Brain-агента
+ * - Health Score система
+ * - Матрица действий
+ * - Ограничения бюджетов
+ * - Scoring данные
+ * - История действий Brain
  */
 
 import { formatSpecsContext, formatNotesContext } from '../../shared/memoryFormat.js';
+import {
+  getBrainRulesPrompt,
+  formatScoringForPrompt,
+  formatBrainHistoryForPrompt
+} from '../../shared/brainRules.js';
 
 // Prompt version for tracking/debugging
-export const PROMPT_VERSION = 'ads-v1.0';
+export const PROMPT_VERSION = 'ads-v2.0';
 
 /**
  * Build system prompt for AdsAgent
@@ -19,6 +31,19 @@ export function buildAdsPrompt(context, mode) {
   const metricsContext = formatMetricsContext(context);
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'ads');
+
+  // Brain rules (Health Score, матрица действий, ограничения)
+  const brainRules = getBrainRulesPrompt();
+
+  // Scoring данные (если есть)
+  const scoringContext = formatScoringForPrompt(
+    context?.businessSnapshot?.ads?.scoringDetails
+  );
+
+  // История действий Brain (если есть)
+  const brainHistoryContext = formatBrainHistoryForPrompt(
+    context?.brainActions
+  );
 
   // Current date for LLM to understand time context
   const today = new Date();
@@ -107,6 +132,13 @@ ${notesContext}
 
 ## Текущий контекст
 ${metricsContext}
+
+${brainRules}
+
+## Scoring данные (от Scoring Agent)
+${scoringContext}
+
+${brainHistoryContext}
 
 ## ROI Decision Rules (СТРОГО СЛЕДУЙ)
 
