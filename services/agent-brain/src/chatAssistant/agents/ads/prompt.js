@@ -18,7 +18,7 @@ import {
 } from '../../shared/brainRules.js';
 
 // Prompt version for tracking/debugging
-export const PROMPT_VERSION = 'ads-v2.0';
+export const PROMPT_VERSION = 'ads-v2.1';
 
 /**
  * Build system prompt for AdsAgent
@@ -31,6 +31,9 @@ export function buildAdsPrompt(context, mode) {
   const metricsContext = formatMetricsContext(context);
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'ads');
+  const integrationsContext = formatIntegrationsContext(context?.integrations);
+  const toolRoutingRules = getToolRoutingRules();
+  const fewShotExamples = getFewShotExamples();
 
   // Brain rules (Health Score, матрица действий, ограничения)
   const brainRules = getBrainRulesPrompt();
@@ -96,6 +99,10 @@ export function buildAdsPrompt(context, mode) {
 3. **Форматирование**: Бюджеты показывай в $, CPL с 2 знаками после запятой
 4. **Безопасность**: Для write-операций в режиме 'plan' запрашивай подтверждение
 5. **Направления**: При паузе направления предупреждай о последствиях для FB
+
+${integrationsContext}
+
+${toolRoutingRules}
 
 ## Dry-run режим (Preview)
 Для опасных write-операций ВСЕГДА сначала делай preview с dry_run: true:
@@ -216,6 +223,8 @@ ${brainHistoryContext}
 - \`📊 Уверенность: средняя\` — если impressions > 1000 AND leads > 5
 - \`📊 Уверенность: низкая\` — если sample_small = true (impressions < 1000 OR leads < 5)
 
+${fewShotExamples}
+
 ## Формат ответа
 Отвечай на русском языке. Структурируй информацию:
 - Для списков кампаний/адсетов используй таблицы или нумерованные списки
@@ -257,4 +266,191 @@ function formatMetricsContext(context) {
 - Лиды: ${m.leads || 0}
 - CPL: ${m.cpl ? '$' + m.cpl.toFixed(2) : 'N/A'}
 - Активные кампании: ${m.activeCampaigns || 'N/A'}`;
+}
+
+/**
+ * Format integrations availability for prompt
+ */
+function formatIntegrationsContext(integrations) {
+  if (!integrations) {
+    return '';
+  }
+
+  const lines = ['## Доступные интеграции (Preflight Check)'];
+  lines.push(`• Facebook Ads: ${integrations.fb ? '✅ подключен' : '❌ не подключен'}`);
+  lines.push(`• CRM (лиды): ${integrations.crm ? '✅ есть данные' : '❌ нет данных'}`);
+  lines.push(`• ROI (покупки): ${integrations.roi ? '✅ есть данные' : '❌ нет данных — НЕ вызывай getROIReport/getROIComparison'}`);
+  lines.push(`• WhatsApp: ${integrations.whatsapp ? '✅ подключен' : '❌ не подключен'}`);
+  lines.push('');
+  lines.push('**ВАЖНО:** Если интеграция недоступна (❌), НЕ вызывай соответствующие тулы.');
+
+  return lines.join('\n');
+}
+
+/**
+ * Tool Routing Rules - deterministic tool selection
+ */
+function getToolRoutingRules() {
+  return `## Tool Routing & Preflight (СТРОГО СЛЕДУЙ)
+
+### Принцип Context-First
+Если в контексте уже есть данные (todayMetrics, brainActions, scoringDetails), используй их ПЕРВЫМИ.
+Вызывай тулы только если:
+- Нужна детализация (breakdown по кампаниям)
+- Данных в контексте недостаточно
+- Пользователь явно просит "покажи список/топ/разбивку"
+
+### Правило минимальных тулов
+- Максимум 2 read-тула на один ответ (кроме сложных аналитических запросов)
+- Выбирай самый дешёвый тул: getSpendReport дешевле чем getCampaigns
+- Не дублируй данные: если вызвал getDirections, не нужен getCampaigns для тех же метрик
+
+### Обязательный порядок для анализа
+1. **getDirections()** — всегда первый, чтобы знать target_cpl и budgets
+2. **getSpendReport({period, group_by:"campaign"})** — для общей картины расходов
+3. **getROIReport()** — ТОЛЬКО если integrations.roi=true
+
+### Матрица выбора тулов
+| Тип вопроса | Обязательные тулы | Опционально | НЕ вызывать |
+|-------------|-------------------|-------------|-------------|
+| "Почему мало клиентов/лидов?" | getDirections, getSpendReport(today,campaign) | getROIReport если roi=true | CRM/WA тулы |
+| "Сколько потратили?" | getSpendReport(period,day/campaign) | — | getCampaigns, ROI |
+| "Топ/худшие кампании" | getDirections + getSpendReport | getSpendReport(today) | ROI/CRM |
+| "Топ креативов по ROI" | getROIReport(period) | getROIComparison | Ads spend тулы |
+| "Что делать с кампанией X?" | getDirections, getCampaigns(last_7d) | getSpendReport(today) | ROI/CRM без запроса |
+| "Пауза/бюджет" | dry_run write-tool | execute после "да" | read-тулы >2 |
+| "Что Brain сделал?" | БЕЗ ТУЛОВ (из context.brainActions) | — | всё |
+| "Покажи направления" | getDirections | — | getCampaigns |
+
+### Preflight Checks
+- Если integrations.fb=false → "Facebook Ads не подключен. Подключите в настройках."
+- Если integrations.roi=false → НЕ вызывай getROIReport/getROIComparison
+- Если context.brainActions есть и вопрос про Brain → отвечай БЕЗ tool calls
+
+### Timezone Warning
+Период "today" считается от 00:00 серверного времени (UTC). Если утром данные пустые — это нормально, предложи yesterday или last_7d.`;
+}
+
+/**
+ * Few-shot examples for tool routing
+ */
+function getFewShotExamples() {
+  return `## Примеры tool routing (Few-Shot)
+
+### Пример 1: "Почему так мало клиентов?"
+**План:** Проверить context.brainActions → getDirections → getSpendReport
+\`\`\`json
+[
+  {"name": "getDirections", "arguments": {}},
+  {"name": "getSpendReport", "arguments": {"period": "today", "group_by": "campaign"}}
+]
+\`\`\`
+**Ответ:** Итог → Таблица [d1]/[c1] с CPL vs target → Инсайты (2+) → Следующие шаги (🟢/🟡)
+
+### Пример 2: "Сколько потратили сегодня?"
+\`\`\`json
+[{"name": "getSpendReport", "arguments": {"period": "today", "group_by": "day"}}]
+\`\`\`
+**Ответ:** 1 строка итог + 2 инсайта + next steps
+
+### Пример 3: "Что Brain сделал сегодня?"
+**БЕЗ tool calls** — данные уже в context.brainActions
+**Ответ:** Список действий Brain с датами и причинами из brainActions
+
+### Пример 4: "Покажи направления"
+\`\`\`json
+[{"name": "getDirections", "arguments": {}}]
+\`\`\`
+**Ответ:** [d1], [d2]... с budget/day, target_cpl, текущий CPL, статус
+
+### Пример 5: "Топ креативы по ROI"
+**Preflight:** если integrations.roi=false → "ROI недоступен (нет purchases)"
+\`\`\`json
+[{"name": "getROIReport", "arguments": {"period": "last_7d"}}]
+\`\`\`
+**Ответ:** Таблица [cr1]/[cr2] с ROI%, Spend, Risk, Status
+
+### Пример 6: "Почему CPL вырос?"
+\`\`\`json
+[
+  {"name": "getDirections", "arguments": {}},
+  {"name": "getSpendReport", "arguments": {"period": "last_3d", "group_by": "campaign"}}
+]
+\`\`\`
+**Ответ:** Сравнение CPL по дням → выявление проблемных кампаний
+
+### Пример 7: "Какая кампания хуже всех?"
+\`\`\`json
+[
+  {"name": "getDirections", "arguments": {}},
+  {"name": "getSpendReport", "arguments": {"period": "today", "group_by": "campaign"}}
+]
+\`\`\`
+**Ответ:** Топ-3 "плохих" [c1..c3] с причинами
+
+### Пример 8: "Куда уходит бюджет?"
+\`\`\`json
+[{"name": "getSpendReport", "arguments": {"period": "last_7d", "group_by": "campaign"}}]
+\`\`\`
+**Ответ:** Breakdown расходов по кампаниям
+
+### Пример 9: "Почему расход есть, а лидов нет?"
+\`\`\`json
+[
+  {"name": "getDirections", "arguments": {}},
+  {"name": "getCampaigns", "arguments": {"period": "today"}}
+]
+\`\`\`
+**Инсайты:** impressions<1000 → "малый объём", CTR<1% → "слабый креатив"
+
+### Пример 10: "Покажи активные кампании"
+\`\`\`json
+[{"name": "getCampaigns", "arguments": {"period": "today", "status": "ACTIVE"}}]
+\`\`\`
+
+### Пример 11: "Что делать с кампанией c2?"
+\`\`\`json
+[
+  {"name": "getDirections", "arguments": {}},
+  {"name": "getCampaigns", "arguments": {"period": "last_7d"}}
+]
+\`\`\`
+**Ответ:** 2 варианта (safe/aggressive) + предупреждения
+
+### Пример 12: "Стоит ли увеличивать бюджет?"
+\`\`\`json
+[
+  {"name": "getDirections", "arguments": {}},
+  {"name": "getSpendReport", "arguments": {"period": "today", "group_by": "campaign"}}
+]
+\`\`\`
+**Правило:** увеличивать если CPL <= target*1.2 И impressions > 1000
+
+### Пример 13: "Поставь кампанию 123 на паузу"
+\`\`\`json
+[{"name": "pauseCampaign", "arguments": {"campaign_id": "123", "dry_run": true}}]
+\`\`\`
+**После подтверждения:**
+\`\`\`json
+[{"name": "pauseCampaign", "arguments": {"campaign_id": "123"}}]
+\`\`\`
+
+### Пример 14: "Увеличь бюджет d1 на 20%"
+\`\`\`json
+[{"name": "updateDirectionBudget", "arguments": {"direction_id": "d1", "change_pct": 20, "dry_run": true}}]
+\`\`\`
+**Ответ:** Preview текущего и нового бюджета + запрос подтверждения
+
+### Пример 15: "Дай топ направлений по CPL"
+\`\`\`json
+[{"name": "getDirections", "arguments": {"period": "last_7d"}}]
+\`\`\`
+**Ответ:** [d1..dN] отсортированные по CPL + сравнение с target_cpl
+
+### Пример 16: "Сделай план на завтра"
+**Минимум тулов** — используй context.brainActions + todayMetrics
+\`\`\`json
+[{"name": "getDirections", "arguments": {}}]
+\`\`\`
+**Ответ:** Чеклист: что проверить утром, условия для масштабирования, риски`;
 }

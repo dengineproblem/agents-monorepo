@@ -1214,7 +1214,7 @@ async pauseCampaign({ campaign_id }, { accessToken }) {
 **Версии:**
 | Агент | Версия | Файл |
 |-------|--------|------|
-| AdsAgent | `ads-v2.0` | `ads/prompt.js` |
+| AdsAgent | `ads-v2.1` | `ads/prompt.js` |
 | CreativeAgent | `creative-v1.0` | `creative/prompt.js` |
 | CRMAgent | `crm-v1.0` | `crm/prompt.js` |
 | WhatsAppAgent | `whatsapp-v1.0` | `whatsapp/prompt.js` |
@@ -1245,6 +1245,55 @@ FROM ai_runs
 WHERE created_at > now() - interval '7 days'
 GROUP BY prompt_version;
 ```
+
+---
+
+### Integrations Check (Preflight)
+
+**Путь:** `services/agent-brain/src/chatAssistant/contextGatherer.js`
+
+Проверка доступных интеграций перед вызовом тулов. Агенты используют эту информацию для preflight checks.
+
+**Функция:**
+```javascript
+getIntegrations(userAccountId, adAccountId, hasFbToken)
+// Returns: { fb: boolean, crm: boolean, roi: boolean, whatsapp: boolean }
+```
+
+**Что проверяется:**
+| Интеграция | Условие |
+|------------|---------|
+| `fb` | Есть accessToken |
+| `crm` | Есть записи в таблице `leads` |
+| `roi` | Есть записи в таблице `purchases` |
+| `whatsapp` | Активна интеграция `evolution_api` |
+
+**Использование в AdsAgent:**
+- Если `integrations.roi=false` → НЕ вызывать `getROIReport`/`getROIComparison`
+- Если `integrations.fb=false` → "Facebook Ads не подключен"
+
+---
+
+### Tool Routing Rules (AdsAgent v2.1)
+
+**Путь:** `services/agent-brain/src/chatAssistant/agents/ads/prompt.js`
+
+Детерминированный выбор тулов на основе типа вопроса.
+
+**Принципы:**
+1. **Context-First**: Если данные есть в контексте (brainActions, todayMetrics), не вызывай тулы
+2. **Минимум тулов**: Max 2 read-тула на ответ
+3. **Порядок**: getDirections → getSpendReport → getROIReport
+
+**Матрица выбора:**
+| Тип вопроса | Обязательные тулы | НЕ вызывать |
+|-------------|-------------------|-------------|
+| "Почему мало клиентов?" | getDirections, getSpendReport | CRM/WA тулы |
+| "Сколько потратили?" | getSpendReport | getCampaigns, ROI |
+| "Топ креативов по ROI" | getROIReport | Ads spend тулы |
+| "Что Brain сделал?" | БЕЗ ТУЛОВ | всё |
+
+**16 Few-Shot примеров** включены в промпт для детерминированного поведения.
 
 ---
 

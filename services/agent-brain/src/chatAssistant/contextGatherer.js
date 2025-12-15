@@ -724,6 +724,89 @@ export async function getRecentBrainActions(userAccountId, adAccountId) {
   }
 }
 
+// ============================================================
+// INTEGRATIONS CHECK
+// ============================================================
+
+/**
+ * Check which integrations are available for user
+ * Used by agents to avoid calling unavailable tools
+ *
+ * @param {string} userAccountId
+ * @param {string} [adAccountId] - UUID from ad_accounts
+ * @param {boolean} [hasFbToken] - Whether FB access token is available
+ * @returns {Promise<Object>} { fb, crm, roi, whatsapp }
+ */
+export async function getIntegrations(userAccountId, adAccountId, hasFbToken = false) {
+  try {
+    const [leadsResult, purchasesResult, waResult] = await Promise.allSettled([
+      // Check CRM: has any leads?
+      supabase
+        .from('leads')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_account_id', userAccountId)
+        .limit(1),
+      // Check ROI: has any purchases?
+      supabase
+        .from('purchases')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_account_id', userAccountId)
+        .limit(1),
+      // Check WhatsApp: has evolution_api configured?
+      supabase
+        .from('integrations')
+        .select('id')
+        .eq('user_account_id', userAccountId)
+        .eq('type', 'evolution_api')
+        .eq('is_active', true)
+        .maybeSingle()
+    ]);
+
+    const hasCRM = leadsResult.status === 'fulfilled' &&
+      (leadsResult.value?.count > 0 || leadsResult.value?.data?.length > 0);
+
+    const hasROI = purchasesResult.status === 'fulfilled' &&
+      (purchasesResult.value?.count > 0 || purchasesResult.value?.data?.length > 0);
+
+    const hasWhatsApp = waResult.status === 'fulfilled' &&
+      waResult.value?.data !== null;
+
+    return {
+      fb: hasFbToken,           // Facebook Ads connected
+      crm: hasCRM,              // Has leads data
+      roi: hasROI,              // Has purchases (for ROI calc)
+      whatsapp: hasWhatsApp     // WhatsApp integration active
+    };
+
+  } catch (error) {
+    logger.warn({ error: error.message }, 'Failed to check integrations');
+    return {
+      fb: hasFbToken,
+      crm: false,
+      roi: false,
+      whatsapp: false
+    };
+  }
+}
+
+/**
+ * Format integrations for prompt
+ * @param {Object} integrations
+ * @returns {string}
+ */
+export function formatIntegrationsForPrompt(integrations) {
+  if (!integrations) return '';
+
+  const lines = ['## Доступные интеграции'];
+  lines.push(`• Facebook Ads: ${integrations.fb ? '✅' : '❌'}`);
+  lines.push(`• CRM (лиды): ${integrations.crm ? '✅' : '❌'}`);
+  lines.push(`• ROI (покупки): ${integrations.roi ? '✅' : '❌'}`);
+  lines.push(`• WhatsApp: ${integrations.whatsapp ? '✅' : '❌'}`);
+  lines.push('');
+
+  return lines.join('\n');
+}
+
 // Re-export stores for convenience
 export { unifiedStore } from './stores/unifiedStore.js';
 export { memoryStore } from './stores/memoryStore.js';
@@ -739,6 +822,8 @@ export default {
   getNotesDigest,
   getRecentBrainActions,
   getBusinessSnapshot,
+  getIntegrations,
+  formatIntegrationsForPrompt,
   // Also expose stores on default export
   unifiedStore
 };

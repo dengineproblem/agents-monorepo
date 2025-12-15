@@ -15,7 +15,7 @@ import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.j
 import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
-import { getBusinessSnapshot, formatSnapshotForPrompt, getRecentBrainActions } from '../contextGatherer.js';
+import { getBusinessSnapshot, formatSnapshotForPrompt, getRecentBrainActions, getIntegrations, formatIntegrationsForPrompt } from '../contextGatherer.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
 
@@ -64,7 +64,9 @@ export class Orchestrator {
       // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
       // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
       const dbAccountId = toolContext.adAccountDbId || null;
-      const [specs, notes, summaryContext, snapshot, brainActions] = await Promise.all([
+      const hasFbToken = Boolean(toolContext.accessToken);
+
+      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
@@ -75,7 +77,9 @@ export class Orchestrator {
           adAccountId: dbAccountId  // UUID for database queries
         }),
         // Brain actions history (last 3 days) for AdsAgent context
-        getRecentBrainActions(toolContext.userAccountId, dbAccountId)
+        getRecentBrainActions(toolContext.userAccountId, dbAccountId),
+        // Check available integrations (fb, crm, roi, whatsapp)
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
       ]);
 
       // Enrich context with memory AND snapshot (snapshot-first pattern)
@@ -89,7 +93,10 @@ export class Orchestrator {
         businessSnapshot: snapshot,
         businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
-        brainActions
+        brainActions,
+        // Available integrations for tool routing
+        integrations,
+        integrationsFormatted: formatIntegrationsForPrompt(integrations)
       };
 
       // Track context stats for runsStore
@@ -98,7 +105,8 @@ export class Orchestrator {
         ...toolContext.contextStats,
         rollingSummaryUsed: summaryContext.used,
         snapshotUsed,
-        snapshotFreshness: snapshot?.freshness
+        snapshotFreshness: snapshot?.freshness,
+        integrations
       };
 
       // 2. Classify the request (now has snapshot for better routing)
@@ -108,7 +116,8 @@ export class Orchestrator {
         message: message.substring(0, 50),
         classification,
         usingSummary: summaryContext.used,
-        usingSnapshot: snapshotUsed
+        usingSnapshot: snapshotUsed,
+        integrations
       }, 'Request classified');
 
       // 3. Route to appropriate agent(s)
@@ -413,7 +422,9 @@ export class Orchestrator {
       // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
       // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
       const dbAccountId = toolContext.adAccountDbId || null;
-      const [specs, notes, summaryContext, snapshot, brainActions] = await Promise.all([
+      const hasFbToken = Boolean(toolContext.accessToken);
+
+      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
@@ -424,7 +435,9 @@ export class Orchestrator {
           adAccountId: dbAccountId  // UUID for database queries
         }),
         // Brain actions history (last 3 days) for AdsAgent context
-        getRecentBrainActions(toolContext.userAccountId, dbAccountId)
+        getRecentBrainActions(toolContext.userAccountId, dbAccountId),
+        // Check available integrations (fb, crm, roi, whatsapp)
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
       ]);
 
       // Enrich context with memory AND snapshot (snapshot-first pattern)
@@ -438,7 +451,10 @@ export class Orchestrator {
         businessSnapshot: snapshot,
         businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
-        brainActions
+        brainActions,
+        // Available integrations for tool routing
+        integrations,
+        integrationsFormatted: formatIntegrationsForPrompt(integrations)
       };
 
       // Track context stats for runsStore
@@ -447,7 +463,8 @@ export class Orchestrator {
         ...toolContext.contextStats,
         rollingSummaryUsed: summaryContext.used,
         snapshotUsed,
-        snapshotFreshness: snapshot?.freshness
+        snapshotFreshness: snapshot?.freshness,
+        integrations
       };
 
       // 2. Classify the request (now has snapshot for better routing)
@@ -457,7 +474,8 @@ export class Orchestrator {
         message: message.substring(0, 50),
         classification,
         usingSummary: summaryContext.used,
-        usingSnapshot: snapshotUsed
+        usingSnapshot: snapshotUsed,
+        integrations
       }, 'Request classified for streaming');
 
       yield {
