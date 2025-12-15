@@ -64,14 +64,27 @@ const getCurrentUserConfig = async () => {
         // Мультиаккаунтный режим — берём данные из текущего выбранного аккаунта
         const adAccounts = JSON.parse(storedAdAccounts);
         const currentAdAccountId = localStorage.getItem('currentAdAccountId');
-        const currentAcc = adAccounts.find((a: any) => a.id === currentAdAccountId) || adAccounts[0];
+
+        // DEBUG: детальный лог localStorage
+        console.log('[facebookApi] === READING LOCALSTORAGE ===');
+        console.log('[facebookApi] currentAdAccountId:', currentAdAccountId?.slice(0, 8));
+        adAccounts.forEach((a: any, i: number) => {
+          const picType = a.page_picture_url?.includes('584580002') ? 'AMANAT' : a.page_picture_url?.includes('311879771') ? 'YOUTRADE' : '?';
+          console.log(`[facebookApi] LS[${i}]:`, a.id?.slice(0, 8), a.name, a.ad_account_id, picType);
+        });
+
+        // ВАЖНО: ищем только по точному совпадению id
+        const currentAcc = adAccounts.find((a: any) => a.id === currentAdAccountId);
+
+        if (!currentAcc) {
+          console.error('[facebookApi] !!! НЕ НАЙДЕН по id:', currentAdAccountId);
+        } else {
+          const picType = currentAcc.page_picture_url?.includes('584580002') ? 'AMANAT' : currentAcc.page_picture_url?.includes('311879771') ? 'YOUTRADE' : '?';
+          console.log('[facebookApi] НАЙДЕН:', currentAcc.name, currentAcc.ad_account_id, picType);
+        }
 
         if (currentAcc && currentAcc.ad_account_id && currentAcc.access_token) {
-          console.log('[facebookApi] Мультиаккаунт: используем учетные данные:', {
-            name: currentAcc.name,
-            ad_account_id: currentAcc.ad_account_id,
-            access_token_length: currentAcc.access_token ? currentAcc.access_token.length : 0
-          });
+          console.log('[facebookApi] >>> ИСПОЛЬЗУЕМ:', currentAcc.name, currentAcc.ad_account_id);
 
           return {
             access_token: currentAcc.access_token,
@@ -357,7 +370,7 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
   if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
     return [];
   }
-  
+
   try {
     const endpoint = `${FB_API_CONFIG.ad_account_id}/insights`;
     const params = {
@@ -365,43 +378,44 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
       fields: 'adset_id,adset_name,spend,impressions,clicks,actions',
       time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
       filtering: JSON.stringify([{ field: 'campaign.id', operator: 'EQUAL', value: campaignId }]),
-      // БЕЗ action_breakdowns для снижения нагрузки на API!
+      // Добавляем action_breakdowns для получения детализации по типам действий (как на дашборде)
+      action_breakdowns: 'action_type',
       limit: '500',
     };
-    
-    console.log(`[API] Запрос статистики ad sets для кампании ${campaignId} без action_breakdowns`);
+
+    console.log(`[API] Запрос статистики ad sets для кампании ${campaignId} с action_breakdowns`);
     const response = await fetchFromFacebookAPI(endpoint, params);
-    
+
     if (response.data && response.data.length > 0) {
       return response.data.map((stat: any) => {
-        let leads = 0;
-        
-        // Упрощенный подсчет лидов без детализации по типам
-        // Facebook вернет агрегированные данные, если не указан action_breakdowns
+        // Используем ту же логику подсчёта лидов, что и на главном дашборде (getCampaignStats)
+        let messagingLeads = 0;
+        let siteLeads = 0;
+
         if (stat.actions && Array.isArray(stat.actions)) {
           for (const action of stat.actions) {
-            const actionType = action.action_type;
-            
-            // Собираем все типы лидов в одно значение
-            if (
-              actionType === 'onsite_conversion.total_messaging_connection' ||
-              actionType === 'onsite_conversion.messaging_conversation_started_7d' ||
-              actionType === 'onsite_web_lead' ||
-              actionType === 'offsite_conversion.fb_pixel_lead' ||
-              actionType === 'lead' ||
-              (typeof actionType === 'string' && 
-                (actionType.includes('lead') || actionType.includes('conversion')))
-            ) {
-              const value = parseInt(action.value || "0", 10);
-              // Берем максимум, чтобы избежать дублирования
-              leads = Math.max(leads, value);
+            // Общие лиды (messaging_connection)
+            if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+              messagingLeads = parseInt(action.value || "0", 10);
+            }
+            // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
+            // чтобы избежать дублирования с onsite_web_lead
+            else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+              siteLeads = parseInt(action.value || "0", 10);
+            }
+            // Кастомные конверсии пикселя (берем все custom как лиды сайта)
+            else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+              siteLeads += parseInt(action.value || "0", 10);
             }
           }
         }
-        
+
+        // Итог: только переписки + лиды сайта (без Facebook Lead Forms) — как на дашборде
+        const leads = messagingLeads + siteLeads;
+
         const spend = parseFloat(stat.spend || "0");
         const cpl = leads > 0 ? spend / leads : 0;
-        
+
         return {
           adset_id: stat.adset_id,
           adset_name: stat.adset_name,
@@ -413,7 +427,7 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
         };
       });
     }
-    
+
     return [];
   } catch (error) {
     console.error('Ошибка получения статистики ad sets:', error);
