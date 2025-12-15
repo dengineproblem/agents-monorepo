@@ -75,9 +75,10 @@ export const memoryHandlers = {
    */
   async rememberNote({ note, domain, importance = 0.7 }, context) {
     try {
+      // Use adAccountDbId (UUID) for database queries
       await memoryStore.addNote(
         context.userAccountId,
-        context.adAccountId,
+        context.adAccountDbId || null,
         domain,
         {
           text: note,
@@ -110,9 +111,10 @@ export const memoryHandlers = {
    */
   async forgetNote({ searchText }, context) {
     try {
+      // Use adAccountDbId (UUID) for database queries
       const removedCount = await memoryStore.removeNoteByText(
         context.userAccountId,
-        context.adAccountId,
+        context.adAccountDbId || null,
         searchText
       );
 
@@ -147,9 +149,10 @@ export const memoryHandlers = {
    */
   async listNotes({ domain = 'all' }, context) {
     try {
+      // Use adAccountDbId (UUID) for database queries
       const allNotes = await memoryStore.getAllNotes(
         context.userAccountId,
-        context.adAccountId
+        context.adAccountDbId || null
       );
 
       const domains = domain === 'all'

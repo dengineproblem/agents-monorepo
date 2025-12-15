@@ -30,12 +30,16 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
       return { success: false, error: 'user_not_found' };
     }
 
-    // 2. Get or create conversation (using unified store)
-    const adAccountId = userAccount.default_ad_account_id || userAccount.ad_account_id;
+    // 2. Resolve ad account IDs (multi-account support)
+    // dbId: UUID for database, fbId: Facebook ID for API
+    const { dbId, fbId } = await resolveAdAccountId(userAccount);
+
+    // 3. Get or create conversation (using unified store)
+    // Use dbId (UUID) for database storage
     const conversation = await unifiedStore.getOrCreate({
       source: 'telegram',
       userAccountId: userAccount.id,
-      adAccountId,
+      adAccountId: dbId,
       telegramChatId: String(telegramChatId)
     });
 
@@ -68,15 +72,17 @@ export async function handleTelegramMessage({ ctx, message, telegramChatId }) {
       });
 
       // 7. Get tool context
-      const accessToken = await getAccessToken(userAccount.id, adAccountId);
+      // Use dbId for database operations, fbId for Facebook API calls
+      const accessToken = await getAccessToken(userAccount.id, dbId);
       const toolContext = {
         accessToken,
         userAccountId: userAccount.id,
-        adAccountId
+        adAccountId: fbId,       // Facebook ID for API calls
+        adAccountDbId: dbId      // UUID for database queries
       };
 
-      // 8. Get business context
-      const businessContext = await getBusinessContext(userAccount, adAccountId);
+      // 8. Get business context (uses dbId for database queries)
+      const businessContext = await getBusinessContext(userAccount, dbId);
 
       // 9. Start streaming response
       const streamer = await new TelegramStreamer(ctx).start();
@@ -356,6 +362,54 @@ async function getUserAccountByTelegramId(telegramChatId) {
 }
 
 /**
+ * Resolve ad account IDs for multi-account support
+ * Returns both database UUID (dbId) and Facebook ID (fbId)
+ * @param {Object} userAccount - User account object with multi_account_enabled flag
+ * @returns {Promise<{dbId: string|null, fbId: string|null}>}
+ */
+async function resolveAdAccountId(userAccount) {
+  // Multi-account mode: get from ad_accounts table
+  if (userAccount.multi_account_enabled) {
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id, ad_account_id')
+      .eq('user_account_id', userAccount.id)
+      .eq('is_default', true)
+      .limit(1)
+      .single();
+
+    if (adAccount) {
+      return {
+        dbId: adAccount.id,           // UUID for database queries
+        fbId: adAccount.ad_account_id  // Facebook ID for API calls
+      };
+    }
+
+    // Fallback: try any active account
+    const { data: fallbackAccount } = await supabase
+      .from('ad_accounts')
+      .select('id, ad_account_id')
+      .eq('user_account_id', userAccount.id)
+      .eq('is_active', true)
+      .limit(1)
+      .single();
+
+    if (fallbackAccount) {
+      return {
+        dbId: fallbackAccount.id,
+        fbId: fallbackAccount.ad_account_id
+      };
+    }
+  }
+
+  // Legacy mode: use ad_account_id from user_accounts (это Facebook ID)
+  return {
+    dbId: null,
+    fbId: userAccount.ad_account_id
+  };
+}
+
+/**
  * Get access token for user/ad account
  */
 async function getAccessToken(userAccountId, adAccountId) {
@@ -397,10 +451,10 @@ async function getBusinessContext(userAccount, adAccountId) {
     const today = new Date().toISOString().split('T')[0];
 
     const { data: todayMetrics } = await supabase
-      .from('direction_metrics_daily')
+      .from('direction_metrics_rollup')
       .select('spend, leads')
-      .eq('ad_account_id', adAccountId)
-      .eq('date', today);
+      .eq('account_id', adAccountId)
+      .eq('day', today);
 
     if (todayMetrics?.length > 0) {
       const totalSpend = todayMetrics.reduce((sum, m) => sum + parseFloat(m.spend || 0), 0);
