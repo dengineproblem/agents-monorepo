@@ -77,6 +77,14 @@ const Assistant: React.FC = () => {
     loadConversations();
   }, [loadConversations]);
 
+  // Reset active conversation when ad account changes
+  useEffect(() => {
+    setActiveConversationId(null);
+    setMessages([]);
+    setPendingPlan(null);
+    setPlanModalOpen(false);
+  }, [currentAdAccountId]);
+
   // Load messages for active conversation
   const loadMessages = useCallback(async () => {
     if (!userAccountId || !activeConversationId) {
