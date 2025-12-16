@@ -4638,3 +4638,208 @@ chatAssistant/hybrid/
 ├── uiComponents.js         # UI components для Web
 └── responseTemplates.js    # Шаблоны текстовых ответов для playbooks
 ```
+
+---
+
+## Hybrid MCP Executor
+
+**Путь:** `services/agent-brain/src/chatAssistant/hybrid/`
+
+Архитектура где **Orchestrator контролирует**, **MCP выполняет**. Orchestrator определяет какие tools разрешены, MCP только исполняет в рамках ограничений.
+
+### Архитектура
+
+```
+User Request
+     │
+     ▼
+┌─────────────────┐
+│   Classifier    │  ← Определяет intent + domain
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  Policy Engine  │  ← Intent → allowedTools, maxToolCalls, playbookId
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Clarifying Gate │  ← Детерминированные уточняющие вопросы (period, metric)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│  MCP Executor   │  ← Выполнение tools в рамках policy
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ResponseAssembler│  ← Сборка ответа + nextSteps
+└─────────────────┘
+```
+
+### Ключевые компоненты
+
+| Компонент | Файл | Описание |
+|-----------|------|----------|
+| PolicyEngine | `policyEngine.js` | Резолвит intent в policy: allowedTools, maxToolCalls, clarifyingRequired |
+| ClarifyingGate | `clarifyingGate.js` | Детерминированная проверка периода (`hasPeriodInMessage()`) |
+| ToolFilter | `toolFilter.js` | Фильтрация tools перед отправкой в OpenAI |
+| ResponseAssembler | `responseAssembler.js` | Сборка ответа с секциями и nextSteps |
+| TierManager | `tierManager.js` | Управление tier-переходами (snapshot → drilldown → actions) |
+| PlaybookRegistry | `playbookRegistry.js` | Реестр 10+ playbooks с tier-конфигурацией |
+
+### Двойной замок allowedTools
+
+Tools фильтруются в двух местах:
+1. **toolFilter.js** — фильтрация перед отправкой в OpenAI
+2. **protocol.js:124-174** — валидация при выполнении
+
+```javascript
+// 1. Фильтрация
+const filteredTools = filterToolsForOpenAI(allTools, policy.allowedTools);
+
+// 2. Валидация
+if (!policy.allowedTools.includes(toolName)) {
+  return { error: 'Tool not allowed by policy' };
+}
+```
+
+### maxToolCalls enforcement
+
+**Файл:** `executor.js:33-50`
+
+```javascript
+incrementToolCalls() {
+  this.toolCallsCount++;
+  if (this.toolCallsCount >= this.maxToolCalls) {
+    return { blocked: true, error: 'tool_call_limit_reached' };
+  }
+  return { blocked: false };
+}
+```
+
+### ClarifyingGate детерминизм
+
+**Файл:** `clarifyingGate.js:158-172`
+
+Функция `hasPeriodInMessage()` детерминированно определяет наличие периода:
+
+```javascript
+const PERIOD_PATTERNS = [
+  /за\s*(сегодня|вчера)/i,
+  /за\s*\d+\s*(дн|день|дней)/i,
+  /последние?\s*\d+\s*(дн|день|дней)/i,
+  /(эту|прошлую)\s*неделю/i,
+  /за\s*(неделю|месяц)/i
+];
+
+export function hasPeriodInMessage(message) {
+  return PERIOD_PATTERNS.some(p => p.test(message));
+}
+```
+
+### runsStore — LLM Tracing
+
+**Файл:** `stores/runsStore.js`
+
+| Метод | Описание |
+|-------|----------|
+| `create()` | Создать запись run |
+| `recordHybridMetadata(runId, metadata)` | Записать hybrid-специфичные данные |
+| `recordHybridError(runId, error)` | Записать ошибку |
+| `complete(runId, stats)` | Завершить успешно |
+| `fail(runId, error)` | Записать ошибку |
+
+**hybrid_metadata JSONB:**
+```json
+{
+  "sessionId": "uuid",
+  "allowedTools": ["getSpendReport", "getDirections"],
+  "playbookId": "spend_report",
+  "intent": "spend_report",
+  "maxToolCalls": 5,
+  "toolCallsUsed": 2,
+  "clarifyingAnswers": { "period": "7d" }
+}
+```
+
+### Миграции Hybrid MCP
+
+| Миграция | Описание |
+|----------|----------|
+| `098_clarifying_state.sql` | `ai_conversations.clarifying_state` — состояние уточняющих вопросов |
+| `099_ai_runs_hybrid_metadata.sql` | `ai_runs.hybrid_metadata` — трейсинг hybrid запросов |
+| `100_add_tier_state.sql` | `ai_conversations.tier_state` — состояние tier-переходов |
+
+#### 098_clarifying_state.sql
+
+```sql
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS clarifying_state JSONB NULL;
+
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS clarifying_expires_at TIMESTAMPTZ NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_clarifying_active
+ON ai_conversations(clarifying_expires_at)
+WHERE clarifying_state IS NOT NULL;
+```
+
+#### 099_ai_runs_hybrid_metadata.sql
+
+```sql
+ALTER TABLE ai_runs
+ADD COLUMN IF NOT EXISTS hybrid_metadata JSONB NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_runs_hybrid_playbook
+ON ai_runs((hybrid_metadata->>'playbookId'))
+WHERE hybrid_metadata IS NOT NULL;
+```
+
+#### 100_add_tier_state.sql
+
+```sql
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS tier_state JSONB NULL;
+
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS tier_expires_at TIMESTAMPTZ NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_tier_active
+ON ai_conversations(tier_expires_at)
+WHERE tier_state IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_tier_playbook
+ON ai_conversations((tier_state->>'playbookId'))
+WHERE tier_state IS NOT NULL;
+```
+
+### Тесты
+
+**Путь:** `services/agent-brain/tests/hybrid/`
+
+| Файл | Описание |
+|------|----------|
+| `golden.test.js` | 34 теста: Period Detection, Policy Resolution, Clarifying Gate |
+| `e2e.test.js` | 15 тестов: Classification, Policy, RunsStore, Response Types |
+
+**Запуск:**
+```bash
+cd services/agent-brain
+npm test -- -t "Hybrid"
+```
+
+### Пример flow
+
+```
+1. User: "покажи расходы"
+2. Classifier: domain=ads, intent=spend_report
+3. PolicyEngine: allowedTools=[getSpendReport, getDirections], clarifyingRequired=true
+4. ClarifyingGate: hasPeriodInMessage("покажи расходы") = false → asks for period
+5. User: "за 7 дней"
+6. ClarifyingGate: hasPeriodInMessage("за 7 дней") = true → complete
+7. MCP Executor: calls getSpendReport({ period: '7d' })
+8. ResponseAssembler: formats response + nextSteps
+9. runsStore: recordHybridMetadata({ playbookId, toolCallsUsed, ... })
+```

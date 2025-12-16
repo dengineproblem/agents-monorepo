@@ -31,7 +31,7 @@ const ENTITY_PREFIXES = {
 /**
  * Interactive Router - правила для next steps
  */
-const NEXT_STEP_RULES = {
+export const NEXT_STEP_RULES = {
   spend_report: [
     { condition: 'highSpend', text: 'Показать топ расходов по кампаниям', action: 'getTopSpendCampaigns' },
     { condition: 'default', text: 'Сравнить с прошлым периодом', action: 'compareSpend' }

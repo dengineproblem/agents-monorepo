@@ -11,6 +11,7 @@ import { CreativeAgent } from '../agents/creative/index.js';
 import { WhatsAppAgent } from '../agents/whatsapp/index.js';
 import { CRMAgent } from '../agents/crm/index.js';
 import { memoryStore } from '../stores/memoryStore.js';
+import { runsStore } from '../stores/runsStore.js';
 import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.js';
 import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
@@ -198,7 +199,18 @@ export class Orchestrator {
     const startTime = Date.now();
 
     try {
-      // 0. Check for direct memory commands first
+      // 0. Reuse-or-create runId for tracing
+      const runId = toolContext?.runId ?? await runsStore.create({
+        conversationId: toolContext.conversationId,
+        userAccountId: toolContext.userAccountId,
+        model: MODEL,
+        agent: 'Orchestrator',
+        domain: 'hybrid',
+        userMessage: message?.substring(0, 200)
+      });
+      toolContext.runId = runId?.id || runId;
+
+      // 0.1 Check for direct memory commands first
       const memoryCommand = parseMemoryCommand(message);
       if (memoryCommand) {
         const result = await this.handleMemoryCommand(memoryCommand, toolContext);
@@ -405,6 +417,37 @@ export class Orchestrator {
         conversationHistory
       });
 
+      // 8.1 Handle tool limit reached with partial response
+      if (response.error === 'tool_call_limit_reached') {
+        const partialData = response.executedActions || [];
+
+        // Record error in runs
+        await runsStore.recordHybridError(toolContext.runId, {
+          type: 'limit_reached',
+          tool: response.lastTool,
+          message: `Tool limit ${policy.maxToolCalls} reached`,
+          meta: { toolCallsUsed: partialData.length }
+        });
+
+        // Build partial response with collected data
+        const partialContent = partialData.length > 0
+          ? assemblePartialResponse(partialData, {
+              disclaimer: `⚠️ Достигнут лимит вызовов (${policy.maxToolCalls}). Показываю собранные данные:`
+            })
+          : 'Не удалось собрать данные в рамках лимита.';
+
+        return {
+          type: 'limit_reached',
+          agent: 'Orchestrator',
+          content: partialContent,
+          partialData,
+          nextSteps: getContextualNextSteps(policy, partialData),
+          classification,
+          policy: { playbookId: policy.playbookId, intent: policy.intent },
+          duration: Date.now() - startTime
+        };
+      }
+
       // 9. Check for approval_required
       if (response.approvalRequired) {
         // Create pending plan for dangerous action
@@ -446,6 +489,36 @@ export class Orchestrator {
         });
       }
 
+      // Record hybrid metadata for tracing
+      await runsStore.recordHybridMetadata(toolContext.runId, {
+        sessionId,
+        allowedTools: policy.allowedTools,
+        playbookId: policy.playbookId,
+        intent: policy.intent,
+        maxToolCalls: policy.maxToolCalls,
+        toolCallsUsed: response.executedActions?.length || 0,
+        clarifyingAnswers: clarifyResult.answers
+      });
+
+      await runsStore.complete(toolContext.runId, {
+        latencyMs: duration,
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens
+      });
+
+      // Log completion with all relevant data
+      logger.info({
+        duration,
+        runId: toolContext.runId,
+        agents: classification.agents,
+        domain: classification.domain,
+        playbookId: policy.playbookId,
+        intent: policy.intent,
+        toolsUsed: response.executedActions?.length || 0,
+        nextStepsCount: response.nextSteps?.length || 0,
+        clarifyingAnswersCount: Object.keys(clarifyResult.answers || {}).length
+      }, 'Hybrid: Request completed');
+
       return {
         type: 'response',
         ...response,
@@ -459,6 +532,14 @@ export class Orchestrator {
       };
 
     } catch (error) {
+      // Record failure in runs
+      if (toolContext?.runId) {
+        await runsStore.fail(toolContext.runId, {
+          latencyMs: Date.now() - startTime,
+          errorMessage: error.message,
+          errorCode: error.code
+        }).catch(() => {}); // Don't fail on tracing error
+      }
       logger.error({ error: error.message }, 'Hybrid processing failed');
       throw error;
     }
@@ -1271,6 +1352,97 @@ function getThinkingMessage(domain) {
     mixed: 'Собираю данные из нескольких источников...'
   };
   return messages[domain] || 'Обрабатываю запрос...';
+}
+
+/**
+ * Get contextual next steps based on policy and partial data
+ * @param {Object} policy - Current policy with playbookId
+ * @param {Array} partialData - Executed actions so far
+ * @returns {Array} Next step suggestions
+ */
+function getContextualNextSteps(policy, partialData) {
+  const steps = [
+    { text: 'Сузить период (3d / 7d)', action: 'narrow_period', icon: '📅' }
+  ];
+
+  if (policy.playbookId?.includes('lead')) {
+    steps.push({ text: 'Проверить качество лидов', action: 'check_quality', icon: '🔍' });
+  }
+  if (policy.playbookId?.includes('creative')) {
+    steps.push({ text: 'Провалиться в креативы', action: 'drilldown_creatives', icon: '🎨' });
+  }
+  if (partialData?.some(d => d.tool === 'getDirections')) {
+    steps.push({ text: 'Детали направления', action: 'drilldown_direction', icon: '📊' });
+  }
+  if (policy.playbookId?.includes('spend') || policy.playbookId?.includes('expensive')) {
+    steps.push({ text: 'Сравнить с прошлым периодом', action: 'compare_periods', icon: '📈' });
+  }
+
+  return steps.slice(0, 3); // Max 3 next steps
+}
+
+/**
+ * Assemble partial response from executed actions
+ * @param {Array} executedActions - Results of executed tools
+ * @param {Object} options - { disclaimer }
+ * @returns {string} Formatted partial content
+ */
+function assemblePartialResponse(executedActions, { disclaimer = '' } = {}) {
+  if (!executedActions?.length) {
+    return disclaimer || 'Данные не собраны.';
+  }
+
+  const sections = [];
+
+  if (disclaimer) {
+    sections.push(disclaimer);
+  }
+
+  for (const action of executedActions) {
+    if (action.result?.success !== false) {
+      const toolName = action.tool || action.name;
+      const summary = summarizeToolResult(toolName, action.result);
+      if (summary) {
+        sections.push(summary);
+      }
+    }
+  }
+
+  return sections.join('\n\n') || 'Частичные данные недоступны.';
+}
+
+/**
+ * Summarize tool result for partial response
+ * @param {string} toolName
+ * @param {Object} result
+ * @returns {string|null}
+ */
+function summarizeToolResult(toolName, result) {
+  if (!result) return null;
+
+  // Summarize based on tool type
+  if (toolName === 'getSpendReport' && result.totals) {
+    const spend = result.totals.spend || 0;
+    const leads = result.totals.leads || 0;
+    const cpl = leads > 0 ? Math.round(spend / leads) : 0;
+    return `📊 **Расход**: ${spend.toLocaleString('ru-RU')}₽, лидов: ${leads}${cpl > 0 ? `, CPL: ${cpl}₽` : ''}`;
+  }
+  if (toolName === 'getDirections' && result.directions) {
+    const active = result.directions.filter(d => d.is_active).length;
+    return `📁 **Направлений**: ${result.directions.length} (активных: ${active})`;
+  }
+  if (toolName === 'getCampaigns' && result.campaigns) {
+    const active = result.campaigns.filter(c => c.status === 'ACTIVE').length;
+    return `📢 **Кампаний**: ${result.campaigns.length} (активных: ${active})`;
+  }
+  if (toolName === 'getLeads' && result.leads) {
+    return `👥 **Лидов**: ${result.leads.length}`;
+  }
+  if (toolName === 'getCreatives' && result.creatives) {
+    return `🎨 **Креативов**: ${result.creatives.length}`;
+  }
+
+  return null;
 }
 
 // Export singleton instance
