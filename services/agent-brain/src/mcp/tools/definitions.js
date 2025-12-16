@@ -164,30 +164,7 @@ export function getToolsByAgent(agent) {
   return allMCPTools.filter(t => t.agent === agent);
 }
 
-/**
- * List of dangerous tools that require confirmation
- * These tools can spend money or make irreversible changes
- */
-export const DANGEROUS_TOOLS = [
-  // Creative (3 dangerous)
-  'launchCreative',      // Spends budget
-  'pauseCreative',       // Stops ads
-  'startCreativeTest',   // Spends ~$20
-  // Ads (6 dangerous)
-  'pauseCampaign',       // Stops campaign
-  'pauseAdSet',          // Stops adset
-  'updateBudget',        // Changes spending
-  'updateDirectionBudget', // Changes spending
-  'pauseDirection'       // Stops all direction ads
-];
-
-/**
- * Check if a tool is dangerous
- * @param {string} toolName
- * @returns {boolean}
- */
-export function isDangerousTool(toolName) {
-  return DANGEROUS_TOOLS.includes(toolName);
-}
+// Re-export dangerous tools from constants for backward compatibility
+export { DANGEROUS_TOOLS, isDangerousTool } from './constants.js';
 
 export default allMCPTools;

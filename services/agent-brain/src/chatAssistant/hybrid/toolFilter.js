@@ -6,7 +6,7 @@
  */
 
 import { logger } from '../../lib/logger.js';
-import { DANGEROUS_TOOLS } from '../../mcp/tools/definitions.js';
+import { DANGEROUS_TOOLS } from '../../mcp/tools/constants.js';
 
 /**
  * Фильтрует tools для OpenAI API на основе policy

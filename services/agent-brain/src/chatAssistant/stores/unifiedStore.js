@@ -557,6 +557,137 @@ export class UnifiedConversationStore {
   }
 
   // ============================================================
+  // CLARIFYING STATE METHODS (for Hybrid MCP Executor)
+  // ============================================================
+
+  /**
+   * Get clarifying state from conversation
+   * Returns null if expired or not set
+   * @param {string} conversationId
+   * @returns {Promise<Object|null>} Clarifying state or null
+   */
+  async getClarifyingState(conversationId) {
+    const { data, error } = await supabase
+      .from('ai_conversations')
+      .select('clarifying_state, clarifying_expires_at')
+      .eq('id', conversationId)
+      .single();
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error getting clarifying state');
+      return null;
+    }
+
+    // Check if state exists
+    if (!data?.clarifying_state) {
+      return null;
+    }
+
+    // Check expiration
+    if (data.clarifying_expires_at && new Date(data.clarifying_expires_at) < new Date()) {
+      logger.debug({ conversationId }, 'Clarifying state expired, clearing');
+      await this.clearClarifyingState(conversationId);
+      return null;
+    }
+
+    return data.clarifying_state;
+  }
+
+  /**
+   * Set clarifying state with 30-minute TTL
+   * @param {string} conversationId
+   * @param {Object} state - {required, questions, answers, complete, policy, originalMessage}
+   */
+  async setClarifyingState(conversationId, state) {
+    const CLARIFYING_TTL_MINUTES = 30;
+    const expiresAt = new Date(Date.now() + CLARIFYING_TTL_MINUTES * 60 * 1000).toISOString();
+
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({
+        clarifying_state: state,
+        clarifying_expires_at: expiresAt
+      })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error setting clarifying state');
+      throw error;
+    }
+
+    logger.debug({
+      conversationId,
+      questionsCount: state.questions?.length || 0,
+      answersCount: Object.keys(state.answers || {}).length,
+      expiresAt
+    }, 'Set clarifying state');
+  }
+
+  /**
+   * Clear clarifying state (after successful execution or expiration)
+   * @param {string} conversationId
+   */
+  async clearClarifyingState(conversationId) {
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({
+        clarifying_state: null,
+        clarifying_expires_at: null
+      })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error clearing clarifying state');
+    } else {
+      logger.debug({ conversationId }, 'Cleared clarifying state');
+    }
+  }
+
+  /**
+   * Check if clarifying state is expired
+   * @param {string} conversationId
+   * @returns {Promise<boolean>} true if expired or not set
+   */
+  async isClarifyingExpired(conversationId) {
+    const { data } = await supabase
+      .from('ai_conversations')
+      .select('clarifying_expires_at')
+      .eq('id', conversationId)
+      .single();
+
+    if (!data?.clarifying_expires_at) return true;
+    return new Date(data.clarifying_expires_at) < new Date();
+  }
+
+  /**
+   * Update clarifying answers (merge with existing)
+   * @param {string} conversationId
+   * @param {Object} newAnswers - New answers to merge
+   */
+  async updateClarifyingAnswers(conversationId, newAnswers) {
+    const currentState = await this.getClarifyingState(conversationId);
+    if (!currentState) {
+      logger.warn({ conversationId }, 'No clarifying state to update');
+      return;
+    }
+
+    const updatedState = {
+      ...currentState,
+      answers: { ...(currentState.answers || {}), ...newAnswers }
+    };
+
+    // Check if all questions are answered
+    const requiredQuestions = currentState.questions?.filter(q => !q.optional) || [];
+    const allAnswered = requiredQuestions.every(q =>
+      updatedState.answers[q.field] !== undefined
+    );
+    updatedState.complete = allAnswered;
+
+    await this.setClarifyingState(conversationId, updatedState);
+    return updatedState;
+  }
+
+  // ============================================================
   // PENDING PLAN METHODS
   // ============================================================
 

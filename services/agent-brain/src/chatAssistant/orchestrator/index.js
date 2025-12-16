@@ -205,6 +205,18 @@ export class Orchestrator {
         };
       }
 
+      // 0.5 Load clarifyingState from DB (persistence for refresh/Telegram)
+      let effectiveClarifyingState = clarifyingState;
+      if (!effectiveClarifyingState && toolContext.conversationId) {
+        effectiveClarifyingState = await unifiedStore.getClarifyingState(toolContext.conversationId);
+        if (effectiveClarifyingState) {
+          logger.debug({
+            conversationId: toolContext.conversationId,
+            answersCount: Object.keys(effectiveClarifyingState.answers || {}).length
+          }, 'Hybrid: Loaded clarifying state from DB');
+        }
+      }
+
       // 1. Load context in parallel (same as processRequest)
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
@@ -275,7 +287,7 @@ export class Orchestrator {
       }
 
       // 5. Clarifying Gate
-      const existingAnswers = clarifyingState?.answers || {};
+      const existingAnswers = effectiveClarifyingState?.answers || {};
       const clarifyResult = clarifyingGate.evaluate({
         message,
         policy,
@@ -290,15 +302,22 @@ export class Orchestrator {
           questions: clarifyResult.questions,
           answers: clarifyResult.answers,
           complete: false,
-          policy
+          policy,
+          originalMessage: effectiveClarifyingState?.originalMessage || message
         };
+
+        // Persist to DB for refresh/Telegram support
+        if (toolContext.conversationId) {
+          await unifiedStore.setClarifyingState(toolContext.conversationId, newClarifyingState);
+        }
 
         const clarifyingContent = clarifyResult.formatForUser();
 
         logger.info({
           intent: policy.intent,
           pendingQuestions: clarifyResult.questions.length,
-          answeredCount: Object.keys(clarifyResult.answers).length
+          answeredCount: Object.keys(clarifyResult.answers).length,
+          persistedToDB: !!toolContext.conversationId
         }, 'Hybrid: Clarifying questions needed');
 
         return {
@@ -403,6 +422,11 @@ export class Orchestrator {
       }
 
       const duration = Date.now() - startTime;
+
+      // Clear clarifying state after successful execution
+      if (toolContext.conversationId) {
+        await unifiedStore.clearClarifyingState(toolContext.conversationId);
+      }
 
       // Update rolling summary if needed
       if (toolContext.conversationId && conversationHistory.length > 0) {

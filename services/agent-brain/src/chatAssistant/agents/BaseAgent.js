@@ -129,6 +129,18 @@ export class BaseAgent {
         if (toolContext.contextStats) {
           await runsStore.updateContextStats(runId, toolContext.contextStats);
         }
+
+        // Record Hybrid MCP metadata if available
+        if (toolContext.sessionId && toolContext.policy) {
+          await runsStore.recordHybridMetadata(runId, {
+            sessionId: toolContext.sessionId,
+            allowedTools: toolContext.policy.allowedTools,
+            playbookId: toolContext.policy.playbookId,
+            intent: toolContext.policy.intent,
+            maxToolCalls: toolContext.policy.maxToolCalls,
+            clarifyingAnswers: toolContext.clarifyingAnswers
+          });
+        }
       } catch (err) {
         logger.warn({ error: err.message }, 'Failed to create run record');
       }
@@ -234,6 +246,29 @@ export class BaseAgent {
               error: result.error,
               errorCode: result.error_code
             });
+
+            // Record Hybrid MCP specific errors
+            if (result.error === 'tool_call_limit_reached') {
+              await runsStore.recordHybridError(runId, {
+                type: 'limit_reached',
+                tool: toolName,
+                message: result.message,
+                meta: result.meta
+              });
+            } else if (result.error === 'tool_not_allowed' || result.code === 'TOOL_NOT_ALLOWED') {
+              await runsStore.recordHybridError(runId, {
+                type: 'not_allowed',
+                tool: toolName,
+                message: result.message || `Tool ${toolName} не разрешён для этой сессии`
+              });
+            } else if (result.approval_required) {
+              await runsStore.recordHybridError(runId, {
+                type: 'approval_required',
+                tool: toolName,
+                message: result.reason,
+                meta: result.meta
+              });
+            }
           }
 
           executedActions.push({
@@ -593,6 +628,18 @@ export class BaseAgent {
         if (toolContext.contextStats) {
           await runsStore.updateContextStats(runId, toolContext.contextStats);
         }
+
+        // Record Hybrid MCP metadata if available
+        if (toolContext.sessionId && toolContext.policy) {
+          await runsStore.recordHybridMetadata(runId, {
+            sessionId: toolContext.sessionId,
+            allowedTools: toolContext.policy.allowedTools,
+            playbookId: toolContext.policy.playbookId,
+            intent: toolContext.policy.intent,
+            maxToolCalls: toolContext.policy.maxToolCalls,
+            clarifyingAnswers: toolContext.clarifyingAnswers
+          });
+        }
       } catch (err) {
         logger.warn({ error: err.message }, 'Failed to create run record for streaming');
       }
@@ -720,6 +767,29 @@ export class BaseAgent {
               error: result.error,
               errorCode: result.error_code
             });
+
+            // Record Hybrid MCP specific errors
+            if (result.error === 'tool_call_limit_reached') {
+              await runsStore.recordHybridError(runId, {
+                type: 'limit_reached',
+                tool: tc.name,
+                message: result.message,
+                meta: result.meta
+              });
+            } else if (result.error === 'tool_not_allowed' || result.code === 'TOOL_NOT_ALLOWED') {
+              await runsStore.recordHybridError(runId, {
+                type: 'not_allowed',
+                tool: tc.name,
+                message: result.message || `Tool ${tc.name} не разрешён для этой сессии`
+              });
+            } else if (result.approval_required) {
+              await runsStore.recordHybridError(runId, {
+                type: 'approval_required',
+                tool: tc.name,
+                message: result.reason,
+                meta: result.meta
+              });
+            }
           }
 
           executedActions.push({

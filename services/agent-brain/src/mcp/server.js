@@ -147,8 +147,9 @@ export function registerMCPRoutes(fastify) {
       });
     }
 
-    // Handle the MCP request
-    const result = await handleMCPRequest(request.body, session || {});
+    // Handle the MCP request - include sessionId for tool call limit enforcement
+    const useRedis = getStoreType() === 'redis';
+    const result = await handleMCPRequest(request.body, { ...session, sessionId, useRedis } || { sessionId, useRedis });
 
     // Audit logging for tool executions
     if (request.body?.method === 'tools/call') {

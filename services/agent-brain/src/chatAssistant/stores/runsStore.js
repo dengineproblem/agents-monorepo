@@ -366,6 +366,152 @@ export class RunsStore {
 
     return data || 0;
   }
+
+  // ============================================================
+  // HYBRID MCP EXECUTOR OBSERVABILITY
+  // ============================================================
+
+  /**
+   * Record Hybrid MCP metadata for a run
+   * @param {string} runId
+   * @param {Object} metadata
+   * @param {string} [metadata.sessionId] - MCP session ID
+   * @param {string[]} [metadata.allowedTools] - Tools allowed by policy
+   * @param {string} [metadata.playbookId] - Playbook ID from policy
+   * @param {string} [metadata.intent] - Detected user intent
+   * @param {number} [metadata.maxToolCalls] - Max tool calls allowed
+   * @param {number} [metadata.toolCallsUsed] - Tool calls used so far
+   * @param {Object} [metadata.clarifyingAnswers] - Answers from clarifying gate
+   */
+  async recordHybridMetadata(runId, metadata) {
+    if (!runId || !metadata) return;
+
+    const hybridMetadata = {
+      sessionId: metadata.sessionId?.substring(0, 36), // UUID
+      allowedTools: metadata.allowedTools,
+      playbookId: metadata.playbookId,
+      intent: metadata.intent,
+      maxToolCalls: metadata.maxToolCalls,
+      toolCallsUsed: metadata.toolCallsUsed,
+      clarifyingAnswers: metadata.clarifyingAnswers,
+      recordedAt: new Date().toISOString()
+    };
+
+    const { error } = await supabase
+      .from('ai_runs')
+      .update({ hybrid_metadata: hybridMetadata })
+      .eq('id', runId);
+
+    if (error) {
+      logger.error({ error, runId }, 'Error recording hybrid metadata');
+    } else {
+      logger.debug({
+        runId,
+        playbookId: metadata.playbookId,
+        intent: metadata.intent,
+        toolCallsUsed: metadata.toolCallsUsed
+      }, 'Recorded hybrid metadata');
+    }
+  }
+
+  /**
+   * Record Hybrid MCP specific error
+   * @param {string} runId
+   * @param {Object} errorInfo
+   * @param {'limit_reached' | 'not_allowed' | 'approval_required' | 'clarifying_timeout'} errorInfo.type
+   * @param {string} [errorInfo.tool] - Tool that caused the error
+   * @param {string} [errorInfo.message] - Error message
+   * @param {Object} [errorInfo.meta] - Additional metadata
+   */
+  async recordHybridError(runId, errorInfo) {
+    if (!runId || !errorInfo) return;
+
+    // Get current hybrid_metadata
+    const { data: current } = await supabase
+      .from('ai_runs')
+      .select('hybrid_metadata')
+      .eq('id', runId)
+      .single();
+
+    const hybridMetadata = current?.hybrid_metadata || {};
+
+    // Add error to metadata
+    const hybridErrors = [...(hybridMetadata.errors || []), {
+      type: errorInfo.type,
+      tool: errorInfo.tool,
+      message: errorInfo.message,
+      meta: errorInfo.meta,
+      timestamp: new Date().toISOString()
+    }];
+
+    hybridMetadata.errors = hybridErrors;
+    hybridMetadata.lastError = errorInfo.type;
+
+    const { error } = await supabase
+      .from('ai_runs')
+      .update({ hybrid_metadata: hybridMetadata })
+      .eq('id', runId);
+
+    if (error) {
+      logger.error({ error, runId }, 'Error recording hybrid error');
+    } else {
+      logger.warn({
+        runId,
+        errorType: errorInfo.type,
+        tool: errorInfo.tool
+      }, 'Recorded hybrid error');
+    }
+  }
+
+  /**
+   * Get hybrid runs statistics for a playbook
+   * @param {string} playbookId
+   * @param {number} [limit=100]
+   */
+  async getHybridStatsByPlaybook(playbookId, limit = 100) {
+    const { data, error } = await supabase
+      .from('ai_runs')
+      .select('id, status, latency_ms, hybrid_metadata, created_at')
+      .not('hybrid_metadata', 'is', null)
+      .eq('hybrid_metadata->>playbookId', playbookId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      logger.error({ error, playbookId }, 'Error getting hybrid stats by playbook');
+      return null;
+    }
+
+    const runs = data || [];
+
+    // Aggregate stats
+    const stats = {
+      totalRuns: runs.length,
+      completedRuns: runs.filter(r => r.status === 'completed').length,
+      errorRuns: runs.filter(r => r.status === 'error').length,
+      avgToolCalls: 0,
+      limitReachedCount: 0,
+      notAllowedCount: 0,
+      approvalRequiredCount: 0
+    };
+
+    let totalToolCalls = 0;
+    runs.forEach(r => {
+      const meta = r.hybrid_metadata || {};
+      totalToolCalls += meta.toolCallsUsed || 0;
+
+      // Count error types
+      (meta.errors || []).forEach(e => {
+        if (e.type === 'limit_reached') stats.limitReachedCount++;
+        if (e.type === 'not_allowed') stats.notAllowedCount++;
+        if (e.type === 'approval_required') stats.approvalRequiredCount++;
+      });
+    });
+
+    stats.avgToolCalls = runs.length > 0 ? (totalToolCalls / runs.length).toFixed(2) : 0;
+
+    return stats;
+  }
 }
 
 // Export singleton instance

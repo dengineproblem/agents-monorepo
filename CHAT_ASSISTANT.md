@@ -3464,3 +3464,275 @@ export {
 // Config
 export { HYBRID_CONFIG };
 ```
+
+---
+
+### Hybrid MCP: DB Persistence
+
+#### Clarifying State Persistence
+
+**Миграция:** `migrations/098_clarifying_state.sql`
+
+```sql
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS clarifying_state JSONB NULL,
+ADD COLUMN IF NOT EXISTS clarifying_expires_at TIMESTAMPTZ NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_clarifying_active
+ON ai_conversations(clarifying_expires_at)
+WHERE clarifying_state IS NOT NULL;
+```
+
+**UnifiedStore методы:**
+
+| Метод | Описание |
+|-------|----------|
+| `getClarifyingState(conversationId)` | Получить state с проверкой TTL |
+| `setClarifyingState(conversationId, state)` | Сохранить с TTL 30 мин |
+| `clearClarifyingState(conversationId)` | Очистить после выполнения |
+
+**Интеграция в Orchestrator:**
+
+```javascript
+// На входе processHybridRequest(): загружать state из БД
+const clarifyingState = await unifiedStore.getClarifyingState(conversationId);
+
+// При clarifying response: сохранять в БД
+await unifiedStore.setClarifyingState(conversationId, {
+  questions: result.questions,
+  answers: result.answers,
+  complete: false
+});
+
+// После успешного выполнения: очищать state
+await unifiedStore.clearClarifyingState(conversationId);
+```
+
+---
+
+### maxToolCalls Enforcement
+
+**Путь:** `mcp/sessions.js` + `mcp/tools/executor.js`
+
+Лимитирование количества tool calls per session:
+
+```javascript
+// mcp/sessions.js — новые методы
+
+// Инкремент с проверкой лимита (sync API)
+incrementToolCalls(sessionId)
+// → { allowed: boolean, used: number, max: number }
+
+// Async версия для Redis
+incrementToolCallsAsync(sessionId)
+
+// Статистика без инкремента
+getToolCallStats(sessionId)
+// → { used: number, max: number }
+```
+
+**Проверка в executor.js:**
+
+```javascript
+// mcp/tools/executor.js
+
+async function executeToolWithContext(name, args, context) {
+  // Check limit before execution
+  if (context.sessionId) {
+    const limitCheck = context.useRedis
+      ? await incrementToolCallsAsync(context.sessionId)
+      : incrementToolCalls(context.sessionId);
+
+    if (!limitCheck.allowed) {
+      return {
+        success: false,
+        error: 'tool_call_limit_reached',
+        message: `Достигнут лимит вызовов инструментов (${limitCheck.max})`,
+        meta: {
+          toolCallsUsed: limitCheck.used,
+          maxToolCalls: limitCheck.max,
+          sessionId: context.sessionId
+        }
+      };
+    }
+  }
+
+  // ... execute tool
+}
+```
+
+**Policy Metadata:**
+
+```javascript
+createSession({
+  ...toolContext,
+  policyMetadata: {
+    maxToolCalls: policy.maxToolCalls || 5,
+    toolCallCount: 0,
+    playbookId: policy.playbookId,
+    intent: policy.intent
+  }
+});
+```
+
+---
+
+### runsStore Hybrid Instrumentation
+
+**Миграция:** `migrations/099_ai_runs_hybrid_metadata.sql`
+
+```sql
+ALTER TABLE ai_runs
+ADD COLUMN IF NOT EXISTS hybrid_metadata JSONB NULL;
+
+CREATE INDEX IF NOT EXISTS idx_ai_runs_hybrid_playbook
+ON ai_runs((hybrid_metadata->>'playbookId'))
+WHERE hybrid_metadata IS NOT NULL;
+```
+
+**Новые методы runsStore:**
+
+| Метод | Описание |
+|-------|----------|
+| `recordHybridMetadata(runId, metadata)` | Записать metadata: sessionId, allowedTools, playbookId, intent, maxToolCalls |
+| `recordHybridError(runId, errorInfo)` | Записать ошибку: limit_reached, not_allowed, approval_required |
+| `getHybridStatsByPlaybook(playbookId)` | Статистика по playbook |
+
+**Структура hybrid_metadata:**
+
+```javascript
+{
+  sessionId: 'uuid',
+  allowedTools: ['getSpendReport', 'getDirections'],
+  playbookId: 'spend_report',
+  intent: 'spend_report',
+  maxToolCalls: 5,
+  toolCallsUsed: 3,
+  clarifyingAnswers: { period: 'last_7d' },
+  errors: [{
+    type: 'limit_reached',
+    tool: 'getCampaigns',
+    message: 'Превышен лимит',
+    timestamp: '2024-01-15T10:00:00Z'
+  }],
+  lastError: 'limit_reached',
+  recordedAt: '2024-01-15T10:00:00Z'
+}
+```
+
+**Интеграция в BaseAgent:**
+
+```javascript
+// После создания run
+if (this.hybridMetadata) {
+  await runsStore.recordHybridMetadata(run.id, this.hybridMetadata);
+}
+
+// При ошибке tool execution
+if (execution.error && this.isHybridError(execution.error)) {
+  await runsStore.recordHybridError(run.id, {
+    type: this.getHybridErrorType(execution.error),
+    tool: toolName,
+    message: execution.error.message
+  });
+}
+```
+
+---
+
+### Unit Tests
+
+**Путь:** `services/agent-brain/tests/hybrid/`
+
+```
+tests/hybrid/
+├── policyEngine.test.js    # detectIntent, resolvePolicy (14 tests)
+├── clarifyingGate.test.js  # evaluate, extractFromMessage (10 tests)
+├── toolFilter.test.js      # filtering, validation (13 tests)
+├── sessions.test.js        # incrementToolCalls (9 tests)
+└── integration.test.js     # (future: end-to-end flow)
+```
+
+**Запуск тестов:**
+
+```bash
+cd services/agent-brain
+
+# Run all tests
+npm run test
+
+# Watch mode
+npm run test:watch
+```
+
+**Vitest конфигурация:**
+
+```javascript
+// vitest.config.js
+export default {
+  test: {
+    environment: 'node',
+    globals: true
+  }
+};
+```
+
+**Покрытие тестов:**
+
+| Файл | Tests | Описание |
+|------|-------|----------|
+| `policyEngine.test.js` | 14 | detectIntent (8), resolvePolicy (6) |
+| `clarifyingGate.test.js` | 10 | evaluate (4), extractFromMessage (6) |
+| `toolFilter.test.js` | 13 | filterToolsForOpenAI (4), validateToolCall (4), isDangerousTool (2), getToolType (2), filterReadOnlyTools (1) |
+| `sessions.test.js` | 9 | createSession (2), incrementToolCalls (3), getToolCallStats (2), default maxToolCalls (1), cleanup (1) |
+
+---
+
+### Дополнительные файлы
+
+| Файл | Описание |
+|------|----------|
+| `mcp/tools/constants.js` | DANGEROUS_TOOLS без тяжёлых зависимостей (для тестов) |
+| `frontend/src/types/assistantUI.ts` | QuickActionsData тип |
+| `frontend/src/components/assistant/UIComponent.tsx` | UIQuickActions компонент |
+
+---
+
+### Frontend Types для Hybrid
+
+```typescript
+// services/frontend/src/services/assistantApi.ts
+
+// Clarifying event type
+export interface StreamEventClarifying {
+  type: 'clarifying';
+  question: string;
+  questionType: 'period' | 'entity' | 'amount' | 'metric' | 'confirmation';
+  options?: string[];
+  required?: boolean;
+}
+
+// Quick Actions для nextSteps
+export interface QuickActionsData {
+  type: 'quick_actions';
+  actions: Array<{
+    label: string;
+    action: string;
+    params?: Record<string, unknown>;
+    variant?: 'safe' | 'aggressive' | 'neutral';
+  }>;
+}
+
+// StreamEventType union
+export type StreamEventType =
+  | 'init'
+  | 'thinking'
+  | 'classification'
+  | 'text'
+  | 'tool_start'
+  | 'tool_result'
+  | 'approval_required'
+  | 'clarifying'  // NEW
+  | 'done'
+  | 'error';
+```

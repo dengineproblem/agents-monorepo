@@ -96,6 +96,7 @@ export type StreamEventType =
   | 'tool_start'
   | 'tool_result'
   | 'approval_required'
+  | 'clarifying'
   | 'done'
   | 'error';
 
@@ -142,6 +143,14 @@ export interface StreamEventApprovalRequired {
   message: string;
 }
 
+export interface StreamEventClarifying {
+  type: 'clarifying';
+  question: string;
+  questionType: 'period' | 'entity' | 'amount' | 'metric' | 'confirmation';
+  options?: string[];
+  required?: boolean;
+}
+
 export interface StreamEventDone {
   type: 'done';
   agent: string;
@@ -170,6 +179,7 @@ export type StreamEvent =
   | StreamEventToolStart
   | StreamEventToolResult
   | StreamEventApprovalRequired
+  | StreamEventClarifying
   | StreamEventDone
   | StreamEventError;
 

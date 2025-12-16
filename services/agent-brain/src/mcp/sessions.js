@@ -381,6 +381,129 @@ export async function updateClarifyingStateAsync(sessionId, clarifyingState) {
   return true;
 }
 
+// ============================================================
+// TOOL CALL LIMIT ENFORCEMENT
+// ============================================================
+
+/**
+ * Increment tool call counter and check limit
+ * @param {string} sessionId
+ * @returns {{allowed: boolean, used: number, max: number}}
+ */
+export function incrementToolCalls(sessionId) {
+  const s = store;
+  if (!s || storeType !== 'memory') {
+    return { allowed: true, used: 0, max: 0 };
+  }
+
+  const session = s.sessions.get(sessionId);
+  if (!session) {
+    return { allowed: false, used: 0, max: 0, error: 'session_not_found' };
+  }
+
+  // Get max from policyMetadata or default to 5
+  const maxToolCalls = session.policyMetadata?.maxToolCalls || 5;
+
+  // Initialize counter if not exists
+  if (!session.policyMetadata) {
+    session.policyMetadata = { toolCallCount: 0, maxToolCalls };
+  }
+
+  // Increment counter
+  session.policyMetadata.toolCallCount = (session.policyMetadata.toolCallCount || 0) + 1;
+  const used = session.policyMetadata.toolCallCount;
+
+  logger.debug({
+    sessionId: sessionId.substring(0, 8),
+    used,
+    max: maxToolCalls
+  }, 'Tool call incremented');
+
+  return {
+    allowed: used <= maxToolCalls,
+    used,
+    max: maxToolCalls
+  };
+}
+
+/**
+ * Async version for Redis
+ * @param {string} sessionId
+ * @returns {Promise<{allowed: boolean, used: number, max: number}>}
+ */
+export async function incrementToolCallsAsync(sessionId) {
+  const s = await getStore();
+  const session = await s.get(sessionId);
+
+  if (!session) {
+    return { allowed: false, used: 0, max: 0, error: 'session_not_found' };
+  }
+
+  const maxToolCalls = session.policyMetadata?.maxToolCalls || 5;
+
+  // Initialize or increment counter
+  if (!session.policyMetadata) {
+    session.policyMetadata = { toolCallCount: 0, maxToolCalls };
+  }
+
+  session.policyMetadata.toolCallCount = (session.policyMetadata.toolCallCount || 0) + 1;
+  const used = session.policyMetadata.toolCallCount;
+
+  // Save updated session
+  await s.set(sessionId, session, SESSION_TTL_MS);
+
+  logger.debug({
+    sessionId: sessionId.substring(0, 8),
+    used,
+    max: maxToolCalls
+  }, 'Tool call incremented (async)');
+
+  return {
+    allowed: used <= maxToolCalls,
+    used,
+    max: maxToolCalls
+  };
+}
+
+/**
+ * Get current tool call stats without incrementing
+ * @param {string} sessionId
+ * @returns {{used: number, max: number}}
+ */
+export function getToolCallStats(sessionId) {
+  const s = store;
+  if (!s || storeType !== 'memory') {
+    return { used: 0, max: 0 };
+  }
+
+  const session = s.sessions.get(sessionId);
+  if (!session) {
+    return { used: 0, max: 0 };
+  }
+
+  return {
+    used: session.policyMetadata?.toolCallCount || 0,
+    max: session.policyMetadata?.maxToolCalls || 5
+  };
+}
+
+/**
+ * Async version of getToolCallStats
+ */
+export async function getToolCallStatsAsync(sessionId) {
+  const s = await getStore();
+  const session = await s.get(sessionId);
+
+  if (!session) {
+    return { used: 0, max: 0 };
+  }
+
+  return {
+    used: session.policyMetadata?.toolCallCount || 0,
+    max: session.policyMetadata?.maxToolCalls || 5
+  };
+}
+
 /**
  * Проверить, разрешён ли tool для сессии
  * @param {string} sessionId

@@ -222,6 +222,17 @@ export function updateStreamingState(
         ),
       };
 
+    case 'clarifying':
+      // Clarifying questions are displayed as text with optional choices
+      const clarifyText = event.options?.length
+        ? `${event.question}\n\n${event.options.map((o, i) => `${i + 1}. ${o}`).join('\n')}`
+        : event.question;
+      return {
+        ...state,
+        phase: 'processing',
+        text: clarifyText,
+      };
+
     case 'done':
       return {
         ...state,

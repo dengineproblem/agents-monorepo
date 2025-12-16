@@ -8,6 +8,7 @@
  */
 
 import { getToolByName, isDangerousTool } from './definitions.js';
+import { incrementToolCalls, incrementToolCallsAsync } from '../sessions.js';
 
 /**
  * Execute a tool with user context
@@ -19,6 +20,7 @@ import { getToolByName, isDangerousTool } from './definitions.js';
  * @param {string} context.accessToken
  * @param {string} [context.dangerousPolicy='block'] - Policy for dangerous tools
  * @param {string} [context.conversationId] - Conversation ID for pending plan
+ * @param {string} [context.sessionId] - MCP session ID for tool call limits
  * @returns {Promise<Object>} Tool result or approval_required response
  */
 export async function executeToolWithContext(name, args, context) {
@@ -26,6 +28,26 @@ export async function executeToolWithContext(name, args, context) {
 
   if (!tool) {
     throw new Error(`Tool not found: ${name}`);
+  }
+
+  // Hybrid: Check maxToolCalls limit before executing
+  if (context.sessionId) {
+    const limitCheck = context.useRedis
+      ? await incrementToolCallsAsync(context.sessionId)
+      : incrementToolCalls(context.sessionId);
+
+    if (!limitCheck.allowed) {
+      return {
+        success: false,
+        error: 'tool_call_limit_reached',
+        message: `Достигнут лимит вызовов инструментов (${limitCheck.max}). Уточните запрос или начните новую сессию.`,
+        meta: {
+          toolCallsUsed: limitCheck.used,
+          maxToolCalls: limitCheck.max,
+          sessionId: context.sessionId
+        }
+      };
+    }
   }
 
   const { handler, meta } = tool;
@@ -169,5 +191,4 @@ export function formatValidationErrors(errors) {
   }).join('; ');
 }
 
-export { getToolDangerReason, formatValidationErrors };
 export default { executeToolWithContext, validateToolArgs, getToolDangerReason, formatValidationErrors };

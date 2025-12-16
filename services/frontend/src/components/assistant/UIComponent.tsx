@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { UICard } from './UICard';
 import { UITable } from './UITable';
 import { UICopyField } from './UICopyField';
-import type { UIComponentData, ButtonData } from '@/types/assistantUI';
+import type { UIComponentData, ButtonData, QuickActionsData, QuickAction } from '@/types/assistantUI';
 
 interface UIComponentProps {
   component: UIComponentData;
@@ -24,6 +24,9 @@ export function UIComponent({ component, onAction }: UIComponentProps) {
 
     case 'button':
       return <UIButton data={data as ButtonData} onAction={onAction} />;
+
+    case 'quick_actions':
+      return <UIQuickActions data={data as QuickActionsData} onAction={onAction} />;
 
     default:
       console.warn(`Unknown UI component type: ${type}`);
@@ -55,6 +58,43 @@ function UIButton({
     >
       {label}
     </Button>
+  );
+}
+
+function UIQuickActions({
+  data,
+  onAction,
+}: {
+  data: QuickActionsData;
+  onAction?: (action: string, params: Record<string, unknown>) => void;
+}) {
+  const { title, actions } = data;
+
+  const variantMap = {
+    primary: 'default' as const,
+    secondary: 'outline' as const,
+    danger: 'destructive' as const,
+  };
+
+  return (
+    <div className="space-y-2">
+      {title && (
+        <p className="text-xs font-medium text-muted-foreground">{title}</p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {actions.map((action: QuickAction, idx: number) => (
+          <Button
+            key={idx}
+            size="sm"
+            variant={variantMap[action.variant || 'secondary']}
+            onClick={() => onAction?.(action.action, action.params)}
+            className="text-xs"
+          >
+            {action.label}
+          </Button>
+        ))}
+      </div>
+    </div>
   );
 }
 
