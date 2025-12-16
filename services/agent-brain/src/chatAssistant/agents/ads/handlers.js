@@ -1306,5 +1306,226 @@ export const adsHandlers = {
         ...(report.message && sorted.length === 0 ? { message: report.message } : {})
       };
     }
+  },
+
+  // ============================================================
+  // BRAIN AGENT HANDLERS
+  // ============================================================
+
+  /**
+   * Get recent Brain Agent actions from brain_executions
+   * Shows what the automated optimization has done recently
+   */
+  async getAgentBrainActions({ period, limit, action_type }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Calculate date range
+    const periodDays = {
+      'last_1d': 1,
+      'last_3d': 3,
+      'last_7d': 7
+    }[period] || 3;
+
+    const sinceDate = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
+
+    // Query brain_executions
+    let query = supabase
+      .from('brain_executions')
+      .select('id, actions_json, plan_json, created_at, status, execution_mode')
+      .eq('user_account_id', userAccountId)
+      .gte('created_at', sinceDate)
+      .order('created_at', { ascending: false })
+      .limit(10); // Max 10 executions, then filter actions
+
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    }
+
+    const { data: executions, error } = await query;
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    if (!executions || executions.length === 0) {
+      return {
+        success: true,
+        period,
+        actions: [],
+        total: 0,
+        message: 'Brain Agent не выполнял действий за указанный период'
+      };
+    }
+
+    // Flatten and format all actions from all executions
+    const allActions = [];
+
+    for (const execution of executions) {
+      if (!execution.actions_json) continue;
+
+      const actions = Array.isArray(execution.actions_json)
+        ? execution.actions_json
+        : [execution.actions_json];
+
+      for (const action of actions) {
+        // Determine action type
+        let type = 'other';
+        if (action.action === 'budget_change' || action.type === 'budget_change') {
+          type = 'budget_change';
+        } else if (action.action === 'pause' || action.type === 'pause' || action.status === 'PAUSED') {
+          type = 'pause';
+        } else if (action.action === 'resume' || action.type === 'resume' || action.status === 'ACTIVE') {
+          type = 'resume';
+        } else if (action.action === 'launch' || action.type === 'creative_launch') {
+          type = 'launch';
+        }
+
+        // Filter by action_type if specified
+        if (action_type !== 'all' && type !== action_type) continue;
+
+        allActions.push({
+          id: action.id || action.adset_id || action.ad_id,
+          name: action.name || action.adset_name || action.ad_name || 'Unknown',
+          type,
+          action_label: action.action || action.type || type,
+          details: {
+            old_budget: action.old_budget,
+            new_budget: action.new_budget,
+            reason: action.reason,
+            score: action.score,
+            metrics: action.metrics
+          },
+          executed_at: execution.created_at,
+          execution_id: execution.id,
+          execution_mode: execution.execution_mode,
+          status: execution.status
+        });
+      }
+    }
+
+    // Apply limit
+    const limitedActions = allActions.slice(0, limit || 20);
+
+    // Group by type for summary
+    const summary = {
+      budget_changes: allActions.filter(a => a.type === 'budget_change').length,
+      pauses: allActions.filter(a => a.type === 'pause').length,
+      resumes: allActions.filter(a => a.type === 'resume').length,
+      launches: allActions.filter(a => a.type === 'launch').length
+    };
+
+    return {
+      success: true,
+      period,
+      actions: limitedActions,
+      total: allActions.length,
+      summary,
+      executions_count: executions.length
+    };
+  },
+
+  /**
+   * Trigger a Brain Agent optimization run
+   * WARNING: This is a dangerous operation that can modify budgets and pause/resume adsets
+   */
+  async triggerBrainOptimizationRun({ direction_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Dry-run mode: show what would be optimized
+    if (dry_run) {
+      // Get current state for preview
+      let directionsQuery = supabase
+        .from('account_directions')
+        .select('id, name, is_active, daily_budget_cents, target_cpl_cents')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true);
+
+      if (dbAccountId) {
+        directionsQuery = directionsQuery.eq('account_id', dbAccountId);
+      }
+      if (direction_id) {
+        directionsQuery = directionsQuery.eq('id', direction_id);
+      }
+
+      const { data: directions } = await directionsQuery;
+
+      // Get last scoring output for insights
+      let scoringQuery = supabase
+        .from('scoring_executions')
+        .select('scoring_output, created_at')
+        .eq('user_account_id', userAccountId)
+        .eq('status', 'success')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (dbAccountId) {
+        scoringQuery = scoringQuery.eq('account_id', dbAccountId);
+      }
+
+      const { data: lastScoring } = await scoringQuery.maybeSingle();
+
+      return {
+        success: true,
+        dry_run: true,
+        preview: {
+          directions_to_optimize: (directions || []).map(d => ({
+            id: d.id,
+            name: d.name,
+            current_budget: d.daily_budget_cents / 100,
+            target_cpl: d.target_cpl_cents / 100
+          })),
+          total_directions: directions?.length || 0,
+          last_scoring_at: lastScoring?.created_at,
+          adsets_in_scope: lastScoring?.scoring_output?.adsets?.length || 0
+        },
+        warning: 'Brain Agent может изменить бюджеты и статусы адсетов. Используй dry_run: false для выполнения.'
+      };
+    }
+
+    // Actual execution — create brain_executions record and trigger
+    const executionId = crypto.randomUUID();
+
+    // Insert execution record
+    const { error: insertError } = await supabase
+      .from('brain_executions')
+      .insert({
+        id: executionId,
+        user_account_id: userAccountId,
+        account_id: dbAccountId,
+        execution_mode: 'manual_trigger',
+        status: 'pending',
+        plan_json: {
+          triggered_by: 'chat_assistant',
+          reason: reason || 'Manual trigger via Chat Assistant',
+          direction_id: direction_id || null,
+          triggered_at: new Date().toISOString()
+        }
+      });
+
+    if (insertError) {
+      return { success: false, error: `Не удалось создать запись выполнения: ${insertError.message}` };
+    }
+
+    // Log the action
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Brain optimization triggered via Chat Assistant`,
+      context: {
+        execution_id: executionId,
+        direction_id,
+        reason,
+        source: 'chat_assistant',
+        agent: 'AdsAgent'
+      }
+    });
+
+    return {
+      success: true,
+      message: 'Brain Agent оптимизация запущена',
+      execution_id: executionId,
+      note: 'Результаты будут доступны через getAgentBrainActions через несколько минут',
+      approval_required: false // Already approved if we got here
+    };
   }
 };

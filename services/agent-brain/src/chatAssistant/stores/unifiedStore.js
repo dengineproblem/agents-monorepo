@@ -688,6 +688,149 @@ export class UnifiedConversationStore {
   }
 
   // ============================================================
+  // TIER STATE METHODS (for Playbook Registry)
+  // ============================================================
+
+  /**
+   * Get tier state from conversation
+   * Returns null if expired or not set
+   * @param {string} conversationId
+   * @returns {Promise<Object|null>} Tier state or null
+   */
+  async getTierState(conversationId) {
+    const { data, error } = await supabase
+      .from('ai_conversations')
+      .select('tier_state, tier_expires_at')
+      .eq('id', conversationId)
+      .single();
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error getting tier state');
+      return null;
+    }
+
+    // Check if state exists
+    if (!data?.tier_state) {
+      return null;
+    }
+
+    // Check expiration (1 hour TTL)
+    if (data.tier_expires_at && new Date(data.tier_expires_at) < new Date()) {
+      logger.debug({ conversationId }, 'Tier state expired, clearing');
+      await this.clearTierState(conversationId);
+      return null;
+    }
+
+    return data.tier_state;
+  }
+
+  /**
+   * Set tier state with 1-hour TTL
+   * @param {string} conversationId
+   * @param {Object} state - Tier state object
+   */
+  async setTierState(conversationId, state) {
+    const TIER_TTL_MINUTES = 60;  // 1 hour
+    const expiresAt = new Date(Date.now() + TIER_TTL_MINUTES * 60 * 1000).toISOString();
+
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({
+        tier_state: state,
+        tier_expires_at: expiresAt
+      })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error setting tier state');
+      throw error;
+    }
+
+    logger.debug({
+      conversationId,
+      playbookId: state.playbookId,
+      currentTier: state.currentTier,
+      expiresAt
+    }, 'Set tier state');
+  }
+
+  /**
+   * Clear tier state (after completion or expiration)
+   * @param {string} conversationId
+   */
+  async clearTierState(conversationId) {
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({
+        tier_state: null,
+        tier_expires_at: null
+      })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error clearing tier state');
+    } else {
+      logger.debug({ conversationId }, 'Cleared tier state');
+    }
+  }
+
+  /**
+   * Update tier state (partial update, merges with existing)
+   * @param {string} conversationId
+   * @param {Object} updates - Fields to update
+   */
+  async updateTierState(conversationId, updates) {
+    const currentState = await this.getTierState(conversationId);
+    if (!currentState) {
+      logger.warn({ conversationId }, 'No tier state to update');
+      return null;
+    }
+
+    const updatedState = {
+      ...currentState,
+      ...updates,
+      lastUpdatedAt: Date.now()
+    };
+
+    await this.setTierState(conversationId, updatedState);
+    return updatedState;
+  }
+
+  /**
+   * Check if tier state is expired
+   * @param {string} conversationId
+   * @returns {Promise<boolean>} true if expired or not set
+   */
+  async isTierExpired(conversationId) {
+    const { data } = await supabase
+      .from('ai_conversations')
+      .select('tier_expires_at')
+      .eq('id', conversationId)
+      .single();
+
+    if (!data?.tier_expires_at) return true;
+    return new Date(data.tier_expires_at) < new Date();
+  }
+
+  /**
+   * Extend tier state TTL (refresh expiration)
+   * @param {string} conversationId
+   */
+  async extendTierTTL(conversationId) {
+    const TIER_TTL_MINUTES = 60;
+    const expiresAt = new Date(Date.now() + TIER_TTL_MINUTES * 60 * 1000).toISOString();
+
+    const { error } = await supabase
+      .from('ai_conversations')
+      .update({ tier_expires_at: expiresAt })
+      .eq('id', conversationId);
+
+    if (error) {
+      logger.error({ error, conversationId }, 'Error extending tier TTL');
+    }
+  }
+
+  // ============================================================
   // PENDING PLAN METHODS
   // ============================================================
 

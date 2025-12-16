@@ -219,6 +219,30 @@ export const AdsToolDefs = {
       top_n: z.number().min(1).max(20).default(5).describe('Количество топ элементов для вывода')
     }),
     meta: { timeout: 30000, retryable: true }
+  },
+
+  // ============================================================
+  // BRAIN AGENT TOOLS (Tier-based)
+  // ============================================================
+
+  getAgentBrainActions: {
+    description: 'Получить историю действий Brain Agent за период: изменения бюджетов, паузы адсетов, запуски креативов. Используй для анализа автоматической оптимизации.',
+    schema: z.object({
+      period: z.enum(['last_1d', 'last_3d', 'last_7d']).default('last_3d').describe('Период для выборки действий'),
+      limit: z.number().min(1).max(50).default(20).describe('Максимум действий для возврата'),
+      action_type: z.enum(['all', 'budget_change', 'pause', 'resume', 'launch']).default('all').describe('Фильтр по типу действия')
+    }),
+    meta: { timeout: 15000, retryable: true }
+  },
+
+  triggerBrainOptimizationRun: {
+    description: 'Запустить принудительный цикл Brain Agent оптимизации ПРЯМО СЕЙЧАС. ОПАСНАЯ ОПЕРАЦИЯ — агент может изменить бюджеты, остановить или запустить адсеты.',
+    schema: z.object({
+      direction_id: uuidSchema.optional().describe('UUID направления для оптимизации (опционально — если не указано, оптимизирует весь аккаунт)'),
+      dry_run: dryRunOption.describe('Preview mode — показать что будет сделано без выполнения'),
+      reason: z.string().optional().describe('Причина запуска (для логирования)')
+    }),
+    meta: { timeout: 120000, retryable: false, dangerous: true }
   }
 };
 

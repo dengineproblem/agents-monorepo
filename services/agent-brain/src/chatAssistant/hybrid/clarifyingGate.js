@@ -15,7 +15,9 @@ export const QUESTION_TYPES = {
   ENTITY: 'entity',
   AMOUNT: 'amount',
   METRIC: 'metric',
-  CONFIRMATION: 'confirmation'
+  CONFIRMATION: 'confirmation',
+  CHOICE: 'choice',  // Выбор из вариантов (radio/select)
+  STAGE: 'stage'     // Этап воронки
 };
 
 /**
@@ -73,8 +75,118 @@ const EXTRACTION_PATTERNS = {
   confirmation: [
     { pattern: /^(да|yes|ок|подтверждаю|согласен|точно|верно)$/i, extract: () => true },
     { pattern: /^(нет|no|отмена|отменить|стоп)$/i, extract: () => false }
+  ],
+
+  stage: [
+    { pattern: /(?:новы[йеих]|new)/i, extract: () => 'new' },
+    { pattern: /(?:в работе|in.?progress|обрабатыва)/i, extract: () => 'in_progress' },
+    { pattern: /(?:квалифицирован|qualified)/i, extract: () => 'qualified' },
+    { pattern: /(?:отклонён|rejected|отказ)/i, extract: () => 'rejected' },
+    { pattern: /(?:все?|all)/i, extract: () => 'all' }
+  ],
+
+  choice: [
+    // Для choice типа извлекаем по value из options
+    { pattern: /^(\d)$/, extract: (m) => ({ optionIndex: parseInt(m[1]) - 1 }) }
   ]
 };
+
+/**
+ * Паттерны для определения "размытых" сообщений
+ */
+const VAGUE_PATTERNS = {
+  // Общие фразы без конкретики
+  phrases: [
+    /^(?:не работает|не работают)$/i,
+    /^(?:дорого|слишком дорого)$/i,
+    /^(?:плохие? лид[ыаов]?)$/i,
+    /^(?:мало лидов|нет лидов)$/i,
+    /^(?:что-то не так)$/i,
+    /^(?:проблемы? с)$/i,
+    /^(?:помоги|помогите)$/i,
+    /^(?:посмотри|покажи|дай)$/i
+  ],
+
+  // Слова которые указывают на размытость
+  vagueWords: [
+    'что-то', 'какой-то', 'почему-то', 'вроде', 'наверное', 'кажется'
+  ]
+};
+
+/**
+ * Проверить, является ли сообщение "размытым"
+ * @param {string} message
+ * @returns {boolean}
+ */
+export function isVagueMessage(message) {
+  if (!message) return true;
+
+  const trimmed = message.trim();
+
+  // Слишком короткое сообщение
+  if (trimmed.length < 25) {
+    // Но если это конкретная команда - не размытое
+    if (/(?:покажи|дай|сколько|какой|где).*(?:направлен|кампани|креатив|лид|расход)/i.test(trimmed)) {
+      return false;
+    }
+    return true;
+  }
+
+  // Проверяем на размытые фразы
+  for (const pattern of VAGUE_PATTERNS.phrases) {
+    if (pattern.test(trimmed)) {
+      return true;
+    }
+  }
+
+  // Проверяем на размытые слова
+  const lower = trimmed.toLowerCase();
+  for (const word of VAGUE_PATTERNS.vagueWords) {
+    if (lower.includes(word)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Проверить, упомянут ли период в сообщении
+ * @param {string} message
+ * @returns {boolean}
+ */
+export function hasPeriodInMessage(message) {
+  if (!message) return false;
+
+  const periodPatterns = [
+    /сегодня|вчера/i,
+    /последн\w*\s*\d+/i,
+    /за\s*(?:\d+|неделю|месяц|год)/i,
+    /\d+\s*дн/i,
+    /эт(?:у|от)\s*(?:недел|месяц)/i,
+    /прошл\w*\s*(?:недел|месяц)/i,
+    /\d{4}-\d{2}-\d{2}/
+  ];
+
+  return periodPatterns.some(p => p.test(message));
+}
+
+/**
+ * Проверить, упомянута ли метрика в сообщении
+ * @param {string} message
+ * @returns {boolean}
+ */
+export function hasMetricInMessage(message) {
+  if (!message) return false;
+
+  const metricPatterns = [
+    /cpm|ctr|cpl|cpc|roas|roi/i,
+    /расход|конверс|охват|показ|клик/i,
+    /стоимост\w*\s*лид/i
+  ];
+
+  return metricPatterns.some(p => p.test(message));
+}
 
 /**
  * Helpers для конвертации
@@ -113,11 +225,11 @@ function metricToCode(word) {
  */
 export class ClarifyingGate {
   constructor() {
-    this.defaultPeriod = 'last_7d';
+    this.defaultPeriod = 'last_3d';  // Updated default
   }
 
   /**
-   * Оценить, нужны ли уточняющие вопросы
+   * Оценить, нужны ли уточняющие вопросы (legacy метод)
    * @param {Object} params
    * @param {string} params.message - Сообщение пользователя
    * @param {Object} params.policy - Policy от PolicyEngine
@@ -183,6 +295,186 @@ export class ClarifyingGate {
       answers: existingAnswers,
       complete: !needsClarifying,
       formatForUser: () => this.formatQuestions(pendingQuestions, policy)
+    };
+  }
+
+  /**
+   * Оценить вопросы из playbook с поддержкой askIf/alwaysAsk
+   * @param {Object} params
+   * @param {string} params.message - Сообщение пользователя
+   * @param {Array} params.questions - Вопросы из playbook
+   * @param {Object} params.businessContext - Бизнес-контекст для условий
+   * @param {Object} params.existingAnswers - Уже полученные ответы
+   * @returns {{ needsClarifying: boolean, questions: Array, answers: Object, uiComponents: Array }}
+   */
+  evaluateWithPlaybook({ message, questions, businessContext = {}, existingAnswers = {} }) {
+    if (!questions || questions.length === 0) {
+      return {
+        needsClarifying: false,
+        questions: [],
+        answers: existingAnswers,
+        uiComponents: []
+      };
+    }
+
+    const pendingQuestions = [];
+    const uiComponents = [];
+
+    // Подготавливаем контекст для проверки условий
+    const evalContext = {
+      ...businessContext,
+      extractedPeriod: hasPeriodInMessage(message),
+      extractedMetric: hasMetricInMessage(message),
+      extractedStage: this.extractFromMessage(message, 'stage') !== null,
+      isVague: isVagueMessage(message),
+      messageLength: message?.length || 0
+    };
+
+    for (const q of questions) {
+      const field = q.field || q.type;
+
+      // Проверяем, есть ли уже ответ
+      if (existingAnswers[field] !== undefined) {
+        continue;
+      }
+
+      // Проверяем условие askIf
+      if (q.askIf && !this.evaluateAskIf(q.askIf, evalContext)) {
+        // Условие не выполнено, используем default если есть
+        if (q.default !== undefined) {
+          existingAnswers[field] = q.default;
+        }
+        continue;
+      }
+
+      // Проверяем alwaysAskIf
+      if (q.alwaysAskIf && !this.evaluateAskIf(q.alwaysAskIf, evalContext)) {
+        // Условие не выполнено, пропускаем
+        if (q.default !== undefined) {
+          existingAnswers[field] = q.default;
+        }
+        continue;
+      }
+
+      // alwaysAsk — всегда задаём
+      if (!q.alwaysAsk) {
+        // Пробуем извлечь ответ из сообщения
+        const extracted = this.extractFromMessage(message, q.type);
+        if (extracted !== null) {
+          existingAnswers[field] = extracted;
+          continue;
+        }
+
+        // Для period используем default
+        if (q.type === QUESTION_TYPES.PERIOD && q.default) {
+          existingAnswers[field] = q.default;
+          continue;
+        }
+      }
+
+      // Вопрос нужен
+      pendingQuestions.push(q);
+
+      // Формируем UI component для Web
+      if (q.type === QUESTION_TYPES.CHOICE || q.options) {
+        uiComponents.push(this.createChoiceComponent(q));
+      } else if (q.type === QUESTION_TYPES.PERIOD && q.options) {
+        uiComponents.push(this.createChoiceComponent(q));
+      }
+    }
+
+    const needsClarifying = pendingQuestions.length > 0;
+
+    logger.debug({
+      totalQuestions: questions.length,
+      pending: pendingQuestions.length,
+      answered: Object.keys(existingAnswers).length,
+      evalContext: { isVague: evalContext.isVague, extractedPeriod: evalContext.extractedPeriod }
+    }, 'ClarifyingGate playbook evaluation');
+
+    return {
+      needsClarifying,
+      questions: pendingQuestions,
+      answers: existingAnswers,
+      complete: !needsClarifying,
+      uiComponents,
+      formatForUser: () => this.formatQuestions(pendingQuestions, { intent: 'playbook' })
+    };
+  }
+
+  /**
+   * Проверить условие askIf
+   * @param {string} condition - Условие
+   * @param {Object} context - Контекст с данными
+   * @returns {boolean}
+   */
+  evaluateAskIf(condition, context) {
+    // Специальные условия
+    switch (condition) {
+      case 'period_not_in_message':
+        return !context.extractedPeriod;
+
+      case 'metric_not_in_message':
+        return !context.extractedMetric;
+
+      case 'stage_not_in_message':
+        return !context.extractedStage;
+
+      case 'user_message_is_vague':
+        return context.isVague;
+
+      case 'directions_count > 1':
+        return (context.directionsCount || context.directions_count || 0) > 1;
+
+      case 'hasWhatsApp':
+        return !!context.integrations?.whatsapp;
+
+      case 'hasCRM':
+        return !!context.integrations?.crm;
+
+      default:
+        // Попробуем как простое выражение
+        if (condition.includes('>') || condition.includes('<') || condition.includes('==')) {
+          try {
+            // Безопасный eval для простых выражений
+            const [left, op, right] = condition.split(/\s*(>|<|>=|<=|==|!=)\s*/);
+            const leftVal = context[left] ?? 0;
+            const rightVal = isNaN(right) ? context[right] ?? 0 : parseFloat(right);
+
+            switch (op) {
+              case '>': return leftVal > rightVal;
+              case '<': return leftVal < rightVal;
+              case '>=': return leftVal >= rightVal;
+              case '<=': return leftVal <= rightVal;
+              case '==': return leftVal == rightVal;
+              case '!=': return leftVal != rightVal;
+            }
+          } catch (e) {
+            logger.warn({ condition, error: e.message }, 'Failed to evaluate askIf condition');
+          }
+        }
+
+        // По умолчанию true (задаём вопрос)
+        return true;
+    }
+  }
+
+  /**
+   * Создать UI component для choice вопроса
+   * @param {Object} question
+   * @returns {Object}
+   */
+  createChoiceComponent(question) {
+    return {
+      type: 'choice',
+      fieldId: question.field || question.type,
+      title: question.text,
+      options: (question.options || []).map(opt => ({
+        value: typeof opt === 'string' ? opt : opt.value,
+        label: typeof opt === 'string' ? opt : opt.label
+      })),
+      default: question.default,
+      required: !question.optional
     };
   }
 
@@ -389,9 +681,15 @@ export class ClarifyingGate {
 // Singleton instance
 export const clarifyingGate = new ClarifyingGate();
 
+// Re-export EXTRACTION_PATTERNS
+export { EXTRACTION_PATTERNS };
+
 export default {
   ClarifyingGate,
   clarifyingGate,
   QUESTION_TYPES,
-  EXTRACTION_PATTERNS
+  EXTRACTION_PATTERNS,
+  isVagueMessage,
+  hasPeriodInMessage,
+  hasMetricInMessage
 };

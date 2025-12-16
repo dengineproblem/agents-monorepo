@@ -232,6 +232,7 @@ async function getStore() {
  * @param {Object} [context.integrations] - Available integrations for user
  * @param {Object} [context.clarifyingState] - Clarifying Gate state
  * @param {Object} [context.policyMetadata] - Policy metadata (playbookId, intent, etc.)
+ * @param {Object} [context.tierState] - Tier state from PlaybookRegistry
  * @returns {string} Session ID
  */
 export function createSession({
@@ -248,7 +249,9 @@ export function createSession({
   // Clarifying Gate state
   clarifyingState = null,
   // Policy metadata
-  policyMetadata = null
+  policyMetadata = null,
+  // Tier state for PlaybookRegistry
+  tierState = null
 }) {
   const sessionId = crypto.randomUUID();
 
@@ -267,7 +270,9 @@ export function createSession({
     // Clarifying Gate state
     clarifyingState,     // { required, questions, answers, complete }
     // Policy metadata
-    policyMetadata       // { playbookId, intent, maxToolCalls, toolCallCount }
+    policyMetadata,      // { playbookId, intent, maxToolCalls, toolCallCount }
+    // Tier state for PlaybookRegistry
+    tierState            // { playbookId, currentTier, completedTiers, snapshotData, pendingNextStep }
   };
 
   // Fire and forget - session creation is sync for API compatibility
@@ -312,7 +317,8 @@ export function getSession(sessionId) {
       dangerousPolicy: session.dangerousPolicy,
       integrations: session.integrations,
       clarifyingState: session.clarifyingState,
-      policyMetadata: session.policyMetadata
+      policyMetadata: session.policyMetadata,
+      tierState: session.tierState
     };
   }
 
@@ -346,7 +352,8 @@ export async function getSessionAsync(sessionId) {
     dangerousPolicy: session.dangerousPolicy,
     integrations: session.integrations,
     clarifyingState: session.clarifyingState,
-    policyMetadata: session.policyMetadata
+    policyMetadata: session.policyMetadata,
+    tierState: session.tierState
   };
 }
 
@@ -379,6 +386,57 @@ export async function updateClarifyingStateAsync(sessionId, clarifyingState) {
   session.clarifyingState = clarifyingState;
   await s.set(sessionId, session, SESSION_TTL_MS);
   return true;
+}
+
+/**
+ * Обновить tierState в сессии
+ * @param {string} sessionId
+ * @param {Object} tierState
+ */
+export function updateTierState(sessionId, tierState) {
+  const s = store;
+  if (!s || storeType !== 'memory') return false;
+
+  const session = s.sessions.get(sessionId);
+  if (!session) return false;
+
+  session.tierState = tierState;
+  session.lastAccessedAt = Date.now();
+
+  return true;
+}
+
+/**
+ * Async version of updateTierState
+ */
+export async function updateTierStateAsync(sessionId, tierState) {
+  const s = await getStore();
+  const session = await s.get(sessionId);
+  if (!session) return false;
+
+  session.tierState = tierState;
+  await s.set(sessionId, session, SESSION_TTL_MS);
+  return true;
+}
+
+/**
+ * Get tierState from session
+ * @param {string} sessionId
+ * @returns {Object|null}
+ */
+export function getTierState(sessionId) {
+  const session = getSession(sessionId);
+  if (!session) return null;
+  return session.tierState || null;
+}
+
+/**
+ * Async version of getTierState
+ */
+export async function getTierStateAsync(sessionId) {
+  const session = await getSessionAsync(sessionId);
+  if (!session) return null;
+  return session.tierState || null;
 }
 
 // ============================================================
@@ -633,5 +691,10 @@ export default {
   requiresApproval,
   // Clarifying Gate helpers
   updateClarifyingState,
-  updateClarifyingStateAsync
+  updateClarifyingStateAsync,
+  // Tier state helpers
+  updateTierState,
+  updateTierStateAsync,
+  getTierState,
+  getTierStateAsync
 };

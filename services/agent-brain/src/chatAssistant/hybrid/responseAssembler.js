@@ -413,6 +413,192 @@ export class ResponseAssembler {
       metadata: assembled.metadata
     };
   }
+
+  // ============================================================
+  // TIER-BASED UI COMPONENTS
+  // ============================================================
+
+  /**
+   * Format next steps menu from playbook for tier transitions
+   * @param {Array} nextSteps - Next steps from playbook
+   * @param {Object} tierState - Current tier state
+   * @returns {Object} UI component for next steps menu
+   */
+  formatNextStepsMenu(nextSteps, tierState = null) {
+    if (!nextSteps || nextSteps.length === 0) return null;
+
+    return {
+      type: 'actions',
+      title: 'Что сделать дальше?',
+      items: nextSteps.map(step => ({
+        id: step.id,
+        label: step.label,
+        icon: step.icon || '➡️',
+        payload: {
+          nextStepId: step.id,
+          targetTier: step.targetTier,
+          playbookId: tierState?.playbookId
+        },
+        style: step.targetTier === 'actions' ? 'danger' : 'default'
+      })),
+      layout: nextSteps.length <= 2 ? 'horizontal' : 'vertical'
+    };
+  }
+
+  /**
+   * Format choice component for clarifying questions (CHOICE type)
+   * @param {Object} question - Question definition from playbook
+   * @param {string} conversationId - Conversation ID for payload
+   * @returns {Object} UI component for choice selection
+   */
+  formatChoiceComponent(question, conversationId) {
+    if (!question || !question.options) return null;
+
+    return {
+      type: 'choice',
+      fieldId: question.field,
+      title: question.question || `Выберите ${question.field}`,
+      options: question.options.map(opt => ({
+        label: opt.label,
+        value: opt.value,
+        selected: opt.value === question.default
+      })),
+      default: question.default,
+      required: question.required !== false,
+      payload: {
+        conversationId,
+        fieldId: question.field
+      }
+    };
+  }
+
+  /**
+   * Format approval request for Tier-3 actions
+   * @param {Object} action - Action requiring approval
+   * @param {Object} context - Business context
+   * @returns {Object} UI component for approval
+   */
+  formatApprovalRequest(action, context = {}) {
+    return {
+      type: 'approval',
+      title: 'Требуется подтверждение',
+      action: {
+        tool: action.tool,
+        args: action.args,
+        label: action.label || `Выполнить ${action.tool}`
+      },
+      warning: action.warning || this.generateWarning(action.tool, action.args, context),
+      buttons: [
+        {
+          label: 'Подтвердить',
+          style: 'danger',
+          payload: { approve: true, toolCallId: action.toolCallId }
+        },
+        {
+          label: 'Отмена',
+          style: 'secondary',
+          payload: { approve: false, toolCallId: action.toolCallId }
+        }
+      ]
+    };
+  }
+
+  /**
+   * Generate warning message for dangerous actions
+   */
+  generateWarning(toolName, args, context) {
+    const warnings = {
+      pauseCampaign: `Кампания будет остановлена. Текущий расход: ${context.spend || 'неизвестен'}`,
+      updateBudget: `Бюджет будет изменён с ${args.currentBudget || '?'} на ${args.newBudget || '?'}`,
+      bulkPause: `Будет остановлено ${args.count || 'несколько'} объектов`,
+      deleteCampaign: 'Кампания будет удалена безвозвратно!'
+    };
+
+    return warnings[toolName] || 'Это действие может повлиять на ваши рекламные кампании';
+  }
+
+  /**
+   * Format tier transition indicator
+   * @param {Object} tierState - Current tier state
+   * @returns {Object} UI component showing tier progress
+   */
+  formatTierIndicator(tierState) {
+    if (!tierState) return null;
+
+    const tiers = ['snapshot', 'drilldown', 'actions'];
+    const tierLabels = {
+      snapshot: 'Обзор',
+      drilldown: 'Детали',
+      actions: 'Действия'
+    };
+
+    return {
+      type: 'progress',
+      current: tierState.currentTier,
+      items: tiers.map((tier, idx) => ({
+        id: tier,
+        label: tierLabels[tier],
+        status: tierState.completedTiers?.includes(tier)
+          ? 'completed'
+          : tierState.currentTier === tier
+            ? 'current'
+            : 'pending',
+        order: idx + 1
+      }))
+    };
+  }
+
+  /**
+   * Assemble tier-aware response with UI components
+   * @param {Object} response - Agent response
+   * @param {Object} options - Options including tierState and nextStepsMenu
+   * @returns {Object} Assembled response with tier components
+   */
+  assembleTierResponse(response, { policy, classification, toolResults = [], tierState = null, nextStepsFromPlaybook = [] }) {
+    // First, do standard assembly
+    const assembled = this.assemble(response, { policy, classification, toolResults });
+
+    // Add tier-specific components
+    const tierComponents = [];
+
+    // Add tier indicator
+    if (tierState) {
+      const indicator = this.formatTierIndicator(tierState);
+      if (indicator) {
+        tierComponents.push(indicator);
+      }
+    }
+
+    // Add next steps menu from playbook (replaces generic next steps)
+    if (nextStepsFromPlaybook && nextStepsFromPlaybook.length > 0) {
+      const menu = this.formatNextStepsMenu(nextStepsFromPlaybook, tierState);
+      if (menu) {
+        tierComponents.push(menu);
+        // Clear generic next steps since we're using playbook-based ones
+        assembled.nextSteps = [];
+      }
+    }
+
+    // Merge tier components into uiJson
+    if (tierComponents.length > 0) {
+      assembled.uiJson = assembled.uiJson || { components: [] };
+      assembled.uiJson.components = [
+        ...(assembled.uiJson.components || []),
+        ...tierComponents
+      ];
+    }
+
+    // Add tier state to metadata
+    if (tierState) {
+      assembled.metadata.tierState = {
+        currentTier: tierState.currentTier,
+        playbookId: tierState.playbookId,
+        completedTiers: tierState.completedTiers
+      };
+    }
+
+    return assembled;
+  }
 }
 
 // Singleton instance
@@ -422,5 +608,10 @@ export default {
   ResponseAssembler,
   responseAssembler,
   SECTION_TYPES,
-  NEXT_STEP_RULES
+  NEXT_STEP_RULES,
+  // Tier-based formatters (for external use)
+  formatNextStepsMenu: (steps, state) => responseAssembler.formatNextStepsMenu(steps, state),
+  formatChoiceComponent: (q, cid) => responseAssembler.formatChoiceComponent(q, cid),
+  formatApprovalRequest: (a, ctx) => responseAssembler.formatApprovalRequest(a, ctx),
+  formatTierIndicator: (state) => responseAssembler.formatTierIndicator(state)
 };

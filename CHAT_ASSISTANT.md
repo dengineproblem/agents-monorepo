@@ -30,7 +30,7 @@ User Request
 ### AdsAgent — Реклама и Направления
 **Путь:** `services/agent-brain/src/chatAssistant/agents/ads/`
 
-**17 инструментов:**
+**19 инструментов:**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -43,6 +43,7 @@ User Request
 | `getDirectionMetrics` | READ | Метрики направления по дням |
 | `getROIReport` | READ | Отчёт по ROI креативов (расходы, выручка, ROI%, лиды, конверсии) |
 | `getROIComparison` | READ | Сравнение ROI между креативами или направлениями |
+| `getAgentBrainActions` | READ | История действий Brain Agent за период |
 | `pauseCampaign` | WRITE | Пауза кампании |
 | `resumeCampaign` | WRITE | Возобновление кампании |
 | `pauseAdSet` | WRITE | Пауза адсета |
@@ -51,6 +52,7 @@ User Request
 | `updateDirectionBudget` | WRITE | Изменение бюджета направления |
 | `updateDirectionTargetCPL` | WRITE | Изменение целевого CPL |
 | `pauseDirection` | WRITE | Пауза направления + FB адсет |
+| `triggerBrainOptimizationRun` | WRITE | Запуск Brain Agent оптимизации (dangerous) |
 
 **Файлы:**
 - `index.js` — класс AdsAgent
@@ -3735,4 +3737,603 @@ export type StreamEventType =
   | 'clarifying'  // NEW
   | 'done'
   | 'error';
+```
+
+---
+
+## Tier-based Playbook Registry (Phase 4-5)
+
+**Архитектура:** Progressive disclosure — от snapshot к actions.
+
+### Концепция Tiers
+
+```
+User Message
+     ↓
+┌─────────────────┐
+│ PlaybookRegistry│ → resolve playbook by intent
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│   TierManager   │ → manage tier transitions
+└────────┬────────┘
+         │
+    ┌────┴────┬────────┐
+    ▼         ▼        ▼
+┌────────┐ ┌────────┐ ┌────────┐
+│SNAPSHOT│ │DRILLDOWN│ │ACTIONS│
+│read-only│→│expanded │→│dangerous│
+│tools   │ │tools    │ │+approval│
+└────────┘ └────────┘ └────────┘
+```
+
+**3 Tiers:**
+
+| Tier | Tools | Policy | Назначение |
+|------|-------|--------|------------|
+| `snapshot` | Read-only | `block` dangerous | Быстрый обзор данных |
+| `drilldown` | Expanded read | `block` dangerous | Детализация и анализ |
+| `actions` | All including write | `require_approval` | Действия с подтверждением |
+
+---
+
+### PlaybookRegistry (`hybrid/playbookRegistry.js`)
+
+10 playbooks для типичных сценариев:
+
+```javascript
+import { playbookRegistry, PLAYBOOKS } from './hybrid/index.js';
+
+// Get playbook by ID
+const playbook = playbookRegistry.getPlaybook('ads_not_working');
+
+// Get tools for specific tier
+const tools = playbookRegistry.getToolsForTier('ads_not_working', 'snapshot');
+// → ['getDirections', 'getSpendReport', 'getCampaigns']
+
+// Get policy for tier
+const policy = playbookRegistry.getTierPolicy('ads_not_working', 'actions');
+// → { dangerousPolicy: 'require_approval', maxToolCalls: 5 }
+
+// Get available next steps
+const nextSteps = playbookRegistry.getNextSteps('ads_not_working', snapshotData);
+// → [{ id: 'drilldown_creatives', label: 'Посмотреть креативы', targetTier: 'drilldown' }]
+```
+
+**Доступные Playbooks:**
+
+| ID | Domain | Intent | Описание |
+|----|--------|--------|----------|
+| `ads_not_working` | ads | no_results, zero_spend | Реклама не работает |
+| `spend_report` | ads | spend_report | Отчёт по расходам |
+| `lead_expensive` | crm | expensive_leads | Дорогие лиды |
+| `roi_analysis` | ads | roi_report | Анализ ROI |
+| `creative_performance` | creative | creative_top | Эффективность креативов |
+| `budget_change` | ads | budget_change | Изменение бюджета |
+| `pause_campaign` | ads | pause_campaign | Пауза кампании |
+| `brain_analysis` | brain | brain_history | Анализ Brain Agent |
+| `lead_search` | crm | lead_search | Поиск лидов |
+| `general_question` | - | general | Общие вопросы |
+
+---
+
+### Структура Playbook
+
+```javascript
+const PLAYBOOK_EXAMPLE = {
+  id: 'ads_not_working',
+  intents: ['ads_not_working', 'no_results', 'zero_spend'],
+  domain: 'ads',
+
+  tiers: {
+    snapshot: {
+      tools: ['getDirections', 'getSpendReport'],
+      maxToolCalls: 4,
+      dangerousPolicy: 'block'
+    },
+    drilldown: {
+      tools: ['getCampaigns', 'getAdSets', 'getTopCreatives'],
+      maxToolCalls: 5,
+      enterIf: ['user_chose_drilldown', 'isHighCPL']
+    },
+    actions: {
+      tools: ['pauseCampaign', 'updateBudget', 'pauseDirection'],
+      dangerousPolicy: 'require_approval',
+      maxToolCalls: 3
+    }
+  },
+
+  clarifyingQuestions: [
+    { field: 'period', type: 'period', default: 'last_3d', askIf: 'period_not_in_message' },
+    { field: 'direction', type: 'entity', askIf: 'directions_count > 1' }
+  ],
+
+  nextSteps: [
+    { id: 'drilldown_creatives', label: 'Посмотреть креативы', targetTier: 'drilldown', icon: '🎨' },
+    { id: 'pause_worst', label: 'Остановить худшие', targetTier: 'actions', icon: '⏸️' }
+  ],
+
+  enterConditions: {
+    isSmallSample: { expression: 'impressions < 1000' },
+    isHighCPL: { expression: 'cpl > targetCpl * 1.3' }
+  }
+};
+```
+
+---
+
+### TierManager (`hybrid/tierManager.js`)
+
+Управление состоянием и переходами между tiers:
+
+```javascript
+import { tierManager, TIERS } from './hybrid/index.js';
+
+// Create initial state
+const tierState = tierManager.createInitialState('ads_not_working');
+// → { playbookId: 'ads_not_working', currentTier: 'snapshot', completedTiers: [], snapshotData: null }
+
+// Check if transition is allowed
+const canTransition = tierManager.canTransitionTo(tierState, 'drilldown', snapshotData);
+// → true/false
+
+// Execute transition
+const newState = tierManager.transitionTo(tierState, 'drilldown', { reason: 'user_choice' });
+// → { ...state, currentTier: 'drilldown', completedTiers: ['snapshot'] }
+
+// Save snapshot data for later tiers
+tierState = tierManager.saveSnapshotData(tierState, {
+  totalSpend: 5000,
+  cpl: 25.5,
+  impressions: 15000
+});
+
+// Evaluate enter conditions
+const conditions = tierManager.evaluateEnterConditions('ads_not_working', snapshotData, businessContext);
+// → { isHighCPL: true, isSmallSample: false }
+```
+
+**Tier State Structure:**
+
+```javascript
+{
+  playbookId: 'spend_report',
+  currentTier: 'snapshot',        // 'snapshot' | 'drilldown' | 'actions'
+  completedTiers: [],
+  snapshotData: null,             // Результаты snapshot tier
+  transitionHistory: [],
+  pendingNextStep: null           // Выбранный пользователем next step
+}
+```
+
+---
+
+### ExpressionEvaluator (`hybrid/expressionEvaluator.js`)
+
+Безопасный eval для условий в playbooks:
+
+```javascript
+import { evaluateExpression, evaluateCondition, PRESET_CONDITIONS } from './hybrid/index.js';
+
+// Evaluate simple expression
+const result = evaluateExpression('cpl > targetCpl * 1.3', {
+  cpl: 25,
+  targetCpl: 15
+});
+// → true
+
+// Evaluate condition with context
+const conditionResult = evaluateCondition('isHighCPL', {
+  expression: 'cpl > targetCpl * 1.3'
+}, context);
+
+// Preset conditions
+PRESET_CONDITIONS.isSmallSample({ impressions: 500 });  // true
+PRESET_CONDITIONS.isHighCPL({ cpl: 25, targetCpl: 15 }); // true
+PRESET_CONDITIONS.isLowROI({ roi: 0.5 });               // true
+```
+
+**Поддерживаемые операторы:**
+- Сравнение: `>`, `<`, `>=`, `<=`, `===`, `!==`
+- Арифметика: `+`, `-`, `*`, `/`
+- Логические: `&&`, `||`, `!`
+
+**Безопасность:**
+- Whitelist операторов
+- Нет eval() / Function()
+- Только числа, строки, boolean
+
+---
+
+### UI Components (`hybrid/uiComponents.js`)
+
+Генерация ui_json для Web frontend:
+
+```javascript
+import {
+  createActionsComponent,
+  createChoiceComponent,
+  createApprovalComponent,
+  createProgressComponent,
+  createTableComponent,
+  createCardsComponent,
+  createMetricComponent,
+  createMetricsRowComponent,
+  createAlertComponent,
+  assembleUiJson,
+  createPlaybookNextSteps
+} from './hybrid/index.js';
+
+// Actions menu (next steps)
+const actions = createActionsComponent({
+  title: 'Что сделать дальше?',
+  items: [
+    { id: 'drilldown', label: 'Детализация', icon: '🔍', payload: { nextStepId: 'drilldown' } },
+    { id: 'pause', label: 'Остановить', icon: '⏸️', style: 'danger' }
+  ]
+});
+
+// Choice for clarifying questions
+const choice = createChoiceComponent({
+  fieldId: 'period',
+  title: 'За какой период?',
+  options: [
+    { value: 'last_3d', label: '3 дня' },
+    { value: 'last_7d', label: '7 дней' }
+  ],
+  default: 'last_3d'
+});
+
+// Approval dialog for dangerous actions
+const approval = createApprovalComponent({
+  tool: 'pauseCampaign',
+  args: { campaign_id: '123' },
+  warning: 'Кампания будет остановлена'
+});
+
+// Progress indicator
+const progress = createProgressComponent({
+  currentTier: 'drilldown',
+  completedTiers: ['snapshot'],
+  playbookId: 'ads_not_working'
+});
+
+// Metrics row
+const metrics = createMetricsRowComponent([
+  { label: 'Расход', value: 5000, unit: '₽', trend: 'up', trendValue: '+15%' },
+  { label: 'CPL', value: 25.5, unit: '₽', trend: 'down', trendValue: '-5%' }
+]);
+
+// Assemble all components
+const uiJson = assembleUiJson([progress, metrics, actions]);
+```
+
+**Типы компонентов:**
+
+| Type | Назначение |
+|------|------------|
+| `actions` | Меню кнопок (next steps) |
+| `choice` | Radio/select для вопросов |
+| `approval` | Диалог подтверждения |
+| `progress` | Индикатор tier |
+| `table` | Таблица данных |
+| `cards` | Карточки сущностей |
+| `metric` | Одна KPI метрика |
+| `metrics_row` | Ряд метрик |
+| `alert` | Уведомление/warning |
+
+---
+
+### Новые Tools для Brain Agent
+
+**Файлы:** `agents/ads/toolDefs.js`, `agents/ads/handlers.js`
+
+#### getAgentBrainActions
+
+Получить историю действий Brain Agent:
+
+```javascript
+// Tool Definition
+getAgentBrainActions: {
+  description: 'Получить историю действий Brain Agent за период',
+  schema: z.object({
+    period: z.enum(['last_1d', 'last_3d', 'last_7d']).default('last_3d'),
+    limit: z.number().min(1).max(50).default(20),
+    action_type: z.enum(['all', 'budget_change', 'pause', 'resume', 'launch']).default('all')
+  }),
+  meta: { timeout: 15000, retryable: true }
+}
+
+// Response
+{
+  success: true,
+  actions: [
+    {
+      id: 'uuid',
+      type: 'budget_change',
+      target: { type: 'adset', id: '123', name: 'Test AdSet' },
+      details: { old_budget: 1000, new_budget: 1500, change_pct: 50 },
+      reason: 'Good CPL performance',
+      timestamp: '2024-01-15T10:00:00Z'
+    }
+  ],
+  summary: {
+    total: 15,
+    by_type: { budget_change: 8, pause: 4, resume: 2, launch: 1 }
+  }
+}
+```
+
+#### triggerBrainOptimizationRun
+
+Запустить принудительный цикл оптимизации:
+
+```javascript
+// Tool Definition
+triggerBrainOptimizationRun: {
+  description: 'Запустить цикл Brain Agent оптимизации. ОПАСНАЯ ОПЕРАЦИЯ.',
+  schema: z.object({
+    direction_id: uuidSchema.optional(),
+    dry_run: z.boolean().optional(),
+    reason: z.string().optional()
+  }),
+  meta: { timeout: 120000, retryable: false, dangerous: true }
+}
+
+// Response (dry_run: true)
+{
+  success: true,
+  dry_run: true,
+  would_execute: [
+    { type: 'budget_change', target: 'AdSet #123', change: '+20%' },
+    { type: 'pause', target: 'AdSet #456', reason: 'High CPL' }
+  ],
+  message: 'Preview: 2 действия будут выполнены'
+}
+
+// Response (dry_run: false)
+{
+  success: true,
+  execution_id: 'uuid',
+  status: 'running',
+  message: 'Brain Agent запущен, результаты через 1-2 минуты'
+}
+```
+
+---
+
+### Миграция: Tier State Persistence
+
+**Файл:** `migrations/100_add_tier_state.sql`
+
+```sql
+-- Tier State для Playbook Registry
+ALTER TABLE ai_conversations
+ADD COLUMN IF NOT EXISTS tier_state JSONB DEFAULT NULL,
+ADD COLUMN IF NOT EXISTS tier_expires_at TIMESTAMPTZ DEFAULT NULL;
+
+-- Index для активных tier states
+CREATE INDEX IF NOT EXISTS idx_ai_conversations_tier_active
+ON ai_conversations(tier_expires_at)
+WHERE tier_state IS NOT NULL;
+
+-- Comment
+COMMENT ON COLUMN ai_conversations.tier_state IS 'Tier-based playbook state: currentTier, snapshotData, transitions';
+```
+
+**UnifiedStore методы:**
+
+| Метод | Описание |
+|-------|----------|
+| `getTierState(conversationId)` | Получить tier state с проверкой TTL |
+| `setTierState(conversationId, state)` | Сохранить с TTL 1 час |
+| `clearTierState(conversationId)` | Очистить после завершения |
+
+---
+
+### Conditional Clarifying Questions
+
+Расширение ClarifyingGate для условных вопросов:
+
+```javascript
+// askIf conditions
+clarifyingQuestions: [
+  {
+    field: 'period',
+    type: 'period',
+    default: 'last_3d',
+    askIf: 'period_not_in_message'  // Спрашивать только если не извлечено из сообщения
+  },
+  {
+    field: 'direction',
+    type: 'entity',
+    askIf: 'directions_count > 1'   // Спрашивать только если >1 направление
+  },
+  {
+    field: 'symptom',
+    type: 'choice',
+    options: [
+      { value: 'no_spend', label: 'Нет расхода' },
+      { value: 'spend_no_leads', label: 'Расход есть, лидов нет' }
+    ],
+    alwaysAskIf: 'user_message_is_vague'  // Всегда спрашивать если сообщение размытое
+  }
+]
+```
+
+**Vague Message Detection:**
+- Длина < 25 символов
+- Нет period слов (сегодня, вчера, неделя)
+- Нет entity refs ([d1], кампания, направление)
+- Общие фразы: "не работает", "дорого", "плохо"
+
+---
+
+### Tier Flow в Orchestrator
+
+```javascript
+// orchestrator/index.js
+
+async processHybridRequest({ message, context, tierState, ... }) {
+  // 1. Load or create tier state
+  const currentTierState = tierState ||
+    await unifiedStore.getTierState(conversationId) ||
+    tierManager.createInitialState(policy.playbookId);
+
+  // 2. Handle pending next step (user clicked button)
+  if (currentTierState.pendingNextStep) {
+    const { targetTier } = currentTierState.pendingNextStep;
+    currentTierState = tierManager.transitionTo(currentTierState, targetTier, {
+      reason: 'user_choice'
+    });
+  }
+
+  // 3. Get tools for current tier
+  const tierPolicy = playbookRegistry.getTierPolicy(
+    currentTierState.playbookId,
+    currentTierState.currentTier
+  );
+
+  // 4. Execute with tier-limited tools
+  const response = await this.executeWithTier(message, tierPolicy, context);
+
+  // 5. Evaluate enter conditions for auto-transition
+  if (currentTierState.currentTier === 'snapshot') {
+    const conditions = tierManager.evaluateEnterConditions(
+      currentTierState.playbookId,
+      response.data,
+      context
+    );
+    currentTierState.evaluatedConditions = conditions;
+  }
+
+  // 6. Save tier state
+  await unifiedStore.setTierState(conversationId, currentTierState);
+
+  // 7. Assemble response with next steps
+  return responseAssembler.assembleTierResponse(response, {
+    tierState: currentTierState,
+    playbook: playbookRegistry.getPlaybook(currentTierState.playbookId)
+  });
+}
+```
+
+---
+
+### Configuration
+
+```bash
+# Environment Variables
+
+# Enable Tier State (default: true)
+TIER_STATE_ENABLED=true
+
+# Tier State TTL in ms (default: 1 hour)
+TIER_STATE_TTL=3600000
+```
+
+```javascript
+// hybrid/index.js
+
+export const HYBRID_CONFIG = {
+  enabled: process.env.HYBRID_ENABLED === 'true',
+  clarifyingGateEnabled: process.env.CLARIFYING_GATE_ENABLED !== 'false',
+  maxToolCalls: parseInt(process.env.HYBRID_MAX_TOOL_CALLS || '5', 10),
+  defaultDangerousPolicy: 'block',
+  tierStateEnabled: process.env.TIER_STATE_ENABLED !== 'false',
+  tierStateTTL: parseInt(process.env.TIER_STATE_TTL || '3600000', 10)
+};
+```
+
+---
+
+### Module Exports (Updated)
+
+```javascript
+// hybrid/index.js
+
+// Phase 1: Policy Engine + Tool Filter
+export { PolicyEngine, policyEngine } from './policyEngine.js';
+export {
+  filterToolsForOpenAI,
+  validateToolCall,
+  isDangerousTool,
+  getToolType,
+  getToolsSummary,
+  filterReadOnlyTools,
+  policyToSessionExtensions
+} from './toolFilter.js';
+
+// Phase 2: Clarifying Gate
+export {
+  ClarifyingGate,
+  clarifyingGate,
+  QUESTION_TYPES,
+  EXTRACTION_PATTERNS,
+  isVagueMessage,
+  hasPeriodInMessage,
+  hasMetricInMessage
+} from './clarifyingGate.js';
+
+// Phase 3: Response Assembler
+export {
+  ResponseAssembler,
+  responseAssembler,
+  SECTION_TYPES,
+  NEXT_STEP_RULES
+} from './responseAssembler.js';
+
+// Phase 4: Playbook Registry + Tier Manager
+export {
+  PlaybookRegistry,
+  playbookRegistry,
+  PLAYBOOKS
+} from './playbookRegistry.js';
+
+export {
+  TierManager,
+  tierManager,
+  TIERS
+} from './tierManager.js';
+
+export {
+  evaluateExpression,
+  evaluateCondition,
+  PRESET_CONDITIONS
+} from './expressionEvaluator.js';
+
+// Phase 5: UI Components for Web
+export {
+  createActionsComponent,
+  createChoiceComponent,
+  createApprovalComponent,
+  createProgressComponent,
+  createTableComponent,
+  createCardsComponent,
+  createMetricComponent,
+  createMetricsRowComponent,
+  createAlertComponent,
+  assembleUiJson,
+  createPlaybookNextSteps
+} from './uiComponents.js';
+
+// Config
+export { HYBRID_CONFIG };
+```
+
+---
+
+### Файловая структура (обновлённая)
+
+```
+chatAssistant/hybrid/
+├── index.js                # Экспорты + HYBRID_CONFIG
+├── policyEngine.js         # Intent detection + policy resolution
+├── toolFilter.js           # Фильтрация tools для OpenAI
+├── clarifyingGate.js       # Уточняющие вопросы (+ askIf, vague detection)
+├── responseAssembler.js    # Сборка финального ответа (+ tier UI)
+├── playbookRegistry.js     # 10 playbooks + PlaybookRegistry class
+├── tierManager.js          # TierManager class для переходов
+├── expressionEvaluator.js  # Безопасный eval для условий
+└── uiComponents.js         # UI components для Web
 ```

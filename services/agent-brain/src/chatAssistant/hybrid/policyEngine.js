@@ -10,6 +10,7 @@
  */
 
 import { logger } from '../../lib/logger.js';
+import { playbookRegistry } from './playbookRegistry.js';
 
 /**
  * Intent patterns - паттерны для определения intent
@@ -650,6 +651,128 @@ export class PolicyEngine {
    */
   getAllIntentPatterns() {
     return INTENT_PATTERNS;
+  }
+
+  // ============================================================
+  // PLAYBOOK REGISTRY INTEGRATION
+  // ============================================================
+
+  /**
+   * Получить policy для конкретного tier playbook'а
+   * @param {Object} params
+   * @param {string} params.playbookId - ID playbook'а
+   * @param {string} params.tier - Название tier'а ('snapshot', 'drilldown', 'actions')
+   * @param {Object} params.context - Бизнес-контекст
+   * @param {Object} params.integrations - Доступные интеграции
+   * @returns {Policy}
+   */
+  resolveTierPolicy({ playbookId, tier = 'snapshot', context = {}, integrations = {} }) {
+    const tierPolicy = playbookRegistry.getTierPolicy(playbookId, tier);
+
+    if (!tierPolicy || tierPolicy.allowedTools.length === 0) {
+      // Fallback на legacy policy
+      const playbook = playbookRegistry.getPlaybook(playbookId);
+      if (playbook) {
+        const legacyPolicy = this.resolvePolicy({
+          intent: playbookId,
+          domains: [playbook.domain],
+          context,
+          integrations
+        });
+        return {
+          ...legacyPolicy,
+          tier: 'snapshot',
+          fromPlaybook: false
+        };
+      }
+
+      return {
+        playbookId,
+        tier,
+        intent: 'unknown',
+        domain: 'unknown',
+        allowedTools: [],
+        dangerousPolicy: 'block',
+        maxToolCalls: 0,
+        fromPlaybook: false
+      };
+    }
+
+    // Добавляем clarifyingQuestions из playbook
+    const playbook = playbookRegistry.getPlaybook(playbookId);
+    const clarifyingQuestions = playbook?.clarifyingQuestions || [];
+
+    const policy = {
+      ...tierPolicy,
+      clarifyingRequired: clarifyingQuestions.length > 0 && tier === 'snapshot',
+      clarifyingQuestions,
+      fromPlaybook: true
+    };
+
+    // Preflight checks для интеграций
+    if (policy.domain === 'crm' && !integrations.crm) {
+      policy.preflightFailed = true;
+      policy.preflightError = 'CRM не подключен — данные недоступны.';
+      policy.allowedTools = [];
+    }
+
+    if (policy.domain === 'whatsapp' && !integrations.whatsapp) {
+      policy.preflightFailed = true;
+      policy.preflightError = 'WhatsApp не подключен.';
+      policy.allowedTools = [];
+    }
+
+    logger.debug({
+      playbookId,
+      tier,
+      allowedTools: policy.allowedTools,
+      dangerousPolicy: policy.dangerousPolicy
+    }, 'Tier policy resolved');
+
+    return policy;
+  }
+
+  /**
+   * Найти playbook по intent
+   * @param {string} intent
+   * @returns {Object|null}
+   */
+  getPlaybookForIntent(intent) {
+    return playbookRegistry.getPlaybookByIntent(intent);
+  }
+
+  /**
+   * Проверить, есть ли playbook для intent
+   * @param {string} intent
+   * @returns {boolean}
+   */
+  hasPlaybook(intent) {
+    return playbookRegistry.getPlaybookByIntent(intent) !== null;
+  }
+
+  /**
+   * Получить все playbooks для domain
+   * @param {string} domain
+   * @returns {Object[]}
+   */
+  getPlaybooksForDomain(domain) {
+    return playbookRegistry.getPlaybooksForDomain(domain);
+  }
+
+  /**
+   * Определить intent и получить playbook за один вызов
+   * @param {string} message - Сообщение пользователя
+   * @returns {{ intent: Object, playbook: Object|null }}
+   */
+  detectIntentWithPlaybook(message) {
+    const intent = this.detectIntent(message);
+    const playbook = playbookRegistry.getPlaybookByIntent(intent.intent);
+
+    return {
+      ...intent,
+      playbook,
+      playbookId: playbook?.id || null
+    };
   }
 }
 

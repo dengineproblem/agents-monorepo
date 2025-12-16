@@ -8,6 +8,9 @@
  * - toolFilter - Фильтрация tools перед OpenAI
  * - ClarifyingGate - Уточняющие вопросы (Phase 2)
  * - ResponseAssembler - Сборка ответа (Phase 3)
+ * - PlaybookRegistry - Tier-based playbooks (Phase 4)
+ * - TierManager - Управление переходами между tier'ами
+ * - ExpressionEvaluator - Безопасный eval для условий
  */
 
 // Phase 1: Policy Engine + Tool Filter
@@ -27,7 +30,10 @@ export {
   ClarifyingGate,
   clarifyingGate,
   QUESTION_TYPES,
-  EXTRACTION_PATTERNS
+  EXTRACTION_PATTERNS,
+  isVagueMessage,
+  hasPeriodInMessage,
+  hasMetricInMessage
 } from './clarifyingGate.js';
 
 // Phase 3: Response Assembler
@@ -38,10 +44,46 @@ export {
   NEXT_STEP_RULES
 } from './responseAssembler.js';
 
+// Phase 4: Playbook Registry + Tier Manager
+export {
+  PlaybookRegistry,
+  playbookRegistry,
+  PLAYBOOKS
+} from './playbookRegistry.js';
+
+export {
+  TierManager,
+  tierManager,
+  TIERS
+} from './tierManager.js';
+
+export {
+  evaluateExpression,
+  evaluateCondition,
+  PRESET_CONDITIONS
+} from './expressionEvaluator.js';
+
+// Phase 5: UI Components for Web
+export {
+  createActionsComponent,
+  createChoiceComponent,
+  createApprovalComponent,
+  createProgressComponent,
+  createTableComponent,
+  createCardsComponent,
+  createMetricComponent,
+  createMetricsRowComponent,
+  createAlertComponent,
+  assembleUiJson,
+  createPlaybookNextSteps
+} from './uiComponents.js';
+
 // Config
 export const HYBRID_CONFIG = {
   enabled: process.env.HYBRID_ENABLED === 'true',
   clarifyingGateEnabled: process.env.CLARIFYING_GATE_ENABLED !== 'false',  // Default true
   maxToolCalls: parseInt(process.env.HYBRID_MAX_TOOL_CALLS || '5', 10),
-  defaultDangerousPolicy: 'block'
+  defaultDangerousPolicy: 'block',
+  tierStateEnabled: process.env.TIER_STATE_ENABLED !== 'false',  // Default true
+  tierStateTTL: parseInt(process.env.TIER_STATE_TTL || '3600000', 10)  // 1 hour
 };

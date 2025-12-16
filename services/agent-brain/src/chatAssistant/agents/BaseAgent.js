@@ -152,7 +152,9 @@ export class BaseAgent {
     let totalOutputTokens = 0;
 
     // Format tools for OpenAI
-    const openAITools = this.tools.map(tool => ({
+    // IMPORTANT: Use filtered tools from policy if provided (for tier-based filtering)
+    const effectiveTools = toolContext?.filteredTools || this.tools;
+    const openAITools = effectiveTools.map(tool => ({
       type: 'function',
       function: tool
     }));
@@ -646,8 +648,10 @@ export class BaseAgent {
     }
 
     // Format tools for OpenAI
-    const openAITools = this.tools.length > 0
-      ? this.tools.map(tool => ({ type: 'function', function: tool }))
+    // IMPORTANT: Use filtered tools from policy if provided (for tier-based filtering)
+    const effectiveTools = toolContext?.filteredTools || this.tools;
+    const openAITools = effectiveTools.length > 0
+      ? effectiveTools.map(tool => ({ type: 'function', function: tool }))
       : undefined;
 
     try {
