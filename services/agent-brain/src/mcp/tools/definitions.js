@@ -5,7 +5,7 @@
  * Использует zod-to-json-schema для преобразования Zod схем в JSON Schema.
  *
  * Phase 4: All agents (WhatsApp, CRM, Creative, Ads)
- * Total: 38 tools (4 + 4 + 15 + 15)
+ * Total: 40 tools (4 + 4 + 15 + 17)
  */
 
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -22,7 +22,7 @@ import { crmHandlers } from '../../chatAssistant/agents/crm/handlers.js';
 import { CreativeToolDefs, CREATIVE_DANGEROUS_TOOLS } from '../../chatAssistant/agents/creative/toolDefs.js';
 import { creativeHandlers } from '../../chatAssistant/agents/creative/handlers.js';
 
-// Ads Agent (7 READ + 8 WRITE tools)
+// Ads Agent (9 READ + 8 WRITE tools)
 import { AdsToolDefs } from '../../chatAssistant/agents/ads/toolDefs.js';
 import { adsHandlers } from '../../chatAssistant/agents/ads/handlers.js';
 
@@ -55,6 +55,7 @@ function createMCPTool(name, toolDef, handler, agent) {
     name,
     description: toolDef.description,
     inputSchema: zodToMCPSchema(toolDef.schema),
+    zodSchema: toolDef.schema,  // Keep original Zod schema for validation
     handler,
     agent,
     meta: toolDef.meta || {}
@@ -107,7 +108,7 @@ export const creativeTools = [
 ];
 
 /**
- * Ads Agent Tools (7 READ + 8 WRITE)
+ * Ads Agent Tools (9 READ + 8 WRITE)
  */
 export const adsTools = [
   // READ tools - Campaigns & AdSets
@@ -119,6 +120,9 @@ export const adsTools = [
   createMCPTool('getDirections', AdsToolDefs.getDirections, adsHandlers.getDirections, 'ads'),
   createMCPTool('getDirectionDetails', AdsToolDefs.getDirectionDetails, adsHandlers.getDirectionDetails, 'ads'),
   createMCPTool('getDirectionMetrics', AdsToolDefs.getDirectionMetrics, adsHandlers.getDirectionMetrics, 'ads'),
+  // READ tools - ROI Reports
+  createMCPTool('getROIReport', AdsToolDefs.getROIReport, adsHandlers.getROIReport, 'ads'),
+  createMCPTool('getROIComparison', AdsToolDefs.getROIComparison, adsHandlers.getROIComparison, 'ads'),
   // WRITE tools - Campaigns & AdSets
   createMCPTool('pauseCampaign', AdsToolDefs.pauseCampaign, adsHandlers.pauseCampaign, 'ads'),
   createMCPTool('resumeCampaign', AdsToolDefs.resumeCampaign, adsHandlers.resumeCampaign, 'ads'),
@@ -133,7 +137,7 @@ export const adsTools = [
 
 /**
  * All MCP tools - Phase 4 complete
- * WhatsApp (4) + CRM (4) + Creative (15) + Ads (15) = 38 tools
+ * WhatsApp (4) + CRM (4) + Creative (15) + Ads (17) = 40 tools
  */
 export const allMCPTools = [
   ...whatsappTools,

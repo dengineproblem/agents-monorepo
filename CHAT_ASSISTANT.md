@@ -2715,3 +2715,307 @@ MCP_ENABLED=false
 | `server.js` | Import + регистрация MCP routes |
 | `chatAssistant/index.js` | `processChatViaMCP()`, MCP логика в `processChat()` |
 | `.env` | `MCP_ENABLED`, `MCP_SERVER_URL` |
+
+---
+
+### Phase 2: Качество ответов
+
+#### 2.1 Zod Validation
+
+Валидация аргументов tools через Zod схемы:
+
+```javascript
+// mcp/tools/executor.js
+import { validateToolArgs } from './executor.js';
+
+// Перед выполнением tool
+const validation = validateToolArgs(toolName, args);
+if (!validation.success) {
+  return {
+    isError: true,
+    error: 'validation_error',
+    message: validation.error,
+    field: validation.field
+  };
+}
+```
+
+#### 2.2 Response Formatting
+
+Форматирование ответов MCP с валидацией и entity linking:
+
+```javascript
+// mcp/responseFormatter.js
+import { formatMCPResponse } from './responseFormatter.js';
+
+const formatted = formatMCPResponse(
+  { content: rawContent, toolCalls },
+  {
+    domain: 'ads',
+    validate: true,    // Применить responseValidator
+    addRefs: true      // Добавить entity refs [c1], [d1], [cr1]
+  }
+);
+
+// Результат:
+{
+  content: '...',      // Отформатированный текст
+  entities: [...],     // Найденные сущности
+  uiJson: {...},       // Для UI карточек
+  validation: {...}    // Результат валидации
+}
+```
+
+#### 2.3 Streaming Support
+
+Async generator для streaming событий:
+
+```javascript
+// mcp/mcpStreamer.js
+import { processChatViaMCPStream, collectStreamEvents } from './mcpStreamer.js';
+
+// Streaming events
+for await (const event of processChatViaMCPStream({ systemPrompt, userPrompt, toolContext })) {
+  switch (event.type) {
+    case 'thinking':           // Анализирую запрос...
+    case 'classification':     // { domain, confidence, agents }
+    case 'tool_start':         // { name, args }
+    case 'tool_result':        // { name, result, success }
+    case 'approval_required':  // { name, tool, args, reason }
+    case 'text':               // { content, accumulated }
+    case 'done':               // { content, agent, domain, toolCalls, entities }
+    case 'error':              // { error, sessionId }
+  }
+}
+
+// Или собрать все события
+const { events, finalResult } = await collectStreamEvents(stream);
+```
+
+**Типы событий:**
+
+| Event | Описание |
+|-------|----------|
+| `thinking` | Агент обрабатывает запрос |
+| `classification` | Определён домен запроса |
+| `tool_start` | Начало выполнения tool |
+| `tool_result` | Результат tool |
+| `approval_required` | Dangerous tool требует подтверждения |
+| `text` | Текстовый chunk ответа |
+| `done` | Обработка завершена |
+| `error` | Произошла ошибка |
+
+---
+
+### Phase 3: Масштабирование
+
+#### 3.1 Redis Sessions
+
+Поддержка Redis для хранения сессий (с fallback на in-memory):
+
+```javascript
+// mcp/sessions.js
+
+// Автоматический выбор store
+// - REDIS_URL → RedisStore
+// - иначе → MemoryStore (Map)
+
+// Sync API (для in-memory совместимости)
+const session = getSession(sessionId);
+
+// Async API (для Redis)
+const session = await getSessionAsync(sessionId);
+await extendSessionAsync(sessionId);
+const stats = await getSessionStatsAsync();
+
+// Проверка типа store
+const storeType = getStoreType(); // 'redis' | 'memory'
+```
+
+**Конфигурация:**
+
+```bash
+# .env
+REDIS_URL=redis://localhost:6379  # Включает Redis store
+# Без REDIS_URL — in-memory fallback
+```
+
+**Session TTL:** 15 минут (уменьшено для безопасности)
+
+**Health endpoint:**
+
+```json
+GET /mcp/health
+{
+  "status": "ok",
+  "sessions": { "active": 5, "total": 5 },
+  "sessionStore": "redis"  // или "memory"
+}
+```
+
+#### 3.2 Mixed Queries
+
+Обработка запросов, требующих данные из нескольких доменов:
+
+```javascript
+// chatAssistant/index.js
+
+// Ограничения для mixed queries:
+// - Max 2 домена (больше → общий ответ без tools)
+// - Max 3 read-only tools на домен
+// - Только READ операции (безопасно)
+
+const MIXED_QUERY_READ_TOOLS = {
+  ads: ['getCampaigns', 'getCampaignDetails', 'getAdSets', 'getSpendReport',
+        'getDirections', 'getDirectionDetails', 'getDirectionMetrics'],
+  creative: ['getCreatives', 'getCreativeDetails', 'getCreativeMetrics',
+             'getTopCreatives', 'getWorstCreatives', 'getCreativeScores'],
+  crm: ['getLeads', 'getLeadDetails', 'getFunnelStats'],
+  whatsapp: ['getDialogs', 'getDialogMessages', 'analyzeDialog', 'searchDialogSummaries']
+};
+```
+
+**Синтез ответа:**
+
+```javascript
+// Для mixed queries добавляются секции по доменам
+function synthesizeMixedResponse(content, toolCalls, domains) {
+  // Группирует tools по доменам
+  // Добавляет заголовки секций: "## Реклама", "## CRM"
+  // Возвращает структурированный ответ
+}
+```
+
+**Пример mixed query:**
+
+```
+User: "Покажи расходы за неделю и сколько лидов в CRM"
+
+→ domains: ['ads', 'crm']
+→ tools: ['getSpendReport', 'getLeads', 'getFunnelStats']
+→ response: секция "Реклама" + секция "CRM"
+```
+
+#### 3.3 MCP Resources как контекст
+
+Облегчённый system prompt с ссылками на MCP Resources:
+
+```javascript
+// chatAssistant/systemPrompt.js
+
+// Для MCP: минимальный prompt + инструкции по ресурсам
+export function buildSystemPromptForMCP(mode, businessProfile) {
+  return `${BASE_INSTRUCTIONS}
+
+## MCP Ресурсы
+| URI | Описание |
+| \`project://metrics/today\` | Метрики за 7 дней |
+| \`project://snapshot/business\` | Полный снимок бизнеса |
+| \`project://notes/{domain}\` | Заметки агента |
+| \`project://brain/actions\` | История автопилота |
+
+**Использование:**
+1. Запроси нужный resource через MCP
+2. Данные из resource используй для ответа
+3. Не запрашивай resource повторно в одном запросе`;
+}
+
+// Минимальный user prompt
+export function buildUserPromptForMCP(message) {
+  return message; // Только сообщение пользователя
+}
+```
+
+**Преимущества:**
+- Меньше токенов в контексте
+- Данные загружаются по требованию
+- Актуальные данные (не cached snapshot)
+
+---
+
+### Extended Session (Hybrid C)
+
+Расширенная структура сессии для фильтрации и политик:
+
+```javascript
+createSession({
+  // Core
+  userAccountId,
+  adAccountId,
+  accessToken,
+  conversationId,
+
+  // Hybrid C extensions
+  allowedDomains: ['ads'],           // От classifier
+  allowedTools: ['getCampaigns', ...], // Конкретные tools
+  mode: 'auto',                      // auto | plan | ask
+  dangerousPolicy: 'block',          // block | allow
+  integrations: {                    // Доступные интеграции
+    fb: true,
+    crm: true,
+    roi: true,
+    whatsapp: false
+  }
+});
+```
+
+**Фильтрация tools:**
+
+```javascript
+// mcp/protocol.js → handleToolsList()
+// Возвращает только tools из session.allowedTools
+
+// mcp/tools/executor.js
+// Проверяет tool в allowedTools перед выполнением
+```
+
+**Approval для DANGEROUS tools:**
+
+```javascript
+// При dangerousPolicy: 'block'
+if (isDangerousTool(name)) {
+  return {
+    approval_required: true,
+    tool: name,
+    args: args,
+    reason: 'Это действие требует подтверждения'
+  };
+}
+```
+
+---
+
+### MCP Module Exports
+
+```javascript
+// mcp/index.js
+
+// Sessions
+export { createSession, getSession, getSessionAsync } from './sessions.js';
+export { deleteSession, extendSession, extendSessionAsync } from './sessions.js';
+export { getSessionStats, getSessionStatsAsync, getStoreType } from './sessions.js';
+
+// Protocol
+export { handleMCPRequest } from './protocol.js';
+export { registerMCPRoutes } from './server.js';
+
+// Tools
+export { getToolRegistry, getToolHandler, hasToolHandler } from './tools/registry.js';
+export { executeToolWithContext, validateToolArgs } from './tools/executor.js';
+export { DANGEROUS_TOOLS, isDangerousTool } from './tools/definitions.js';
+
+// Resources
+export { getResourceRegistry, readResource } from './resources/registry.js';
+
+// Response & Streaming
+export { formatMCPResponse } from './responseFormatter.js';
+export { processChatViaMCPStream, collectStreamEvents } from './mcpStreamer.js';
+
+// Config
+export const MCP_CONFIG = {
+  enabled: process.env.MCP_ENABLED === 'true',
+  serverUrl: process.env.MCP_SERVER_URL,
+  enabledAgents: ['whatsapp', 'crm', 'creative', 'ads'],
+  fallbackToLegacy: true
+};
+```

@@ -7,12 +7,26 @@
  */
 
 export { registerMCPRoutes } from './server.js';
-export { createSession, getSession, deleteSession, extendSession, getSessionStats } from './sessions.js';
+export {
+  createSession,
+  getSession,
+  getSessionAsync,
+  deleteSession,
+  extendSession,
+  extendSessionAsync,
+  getSessionStats,
+  getSessionStatsAsync,
+  getStoreType
+} from './sessions.js';
 export { handleMCPRequest } from './protocol.js';
 export { getToolRegistry, getToolHandler, hasToolHandler } from './tools/registry.js';
-export { executeToolWithContext } from './tools/executor.js';
+export { executeToolWithContext, validateToolArgs } from './tools/executor.js';
 export { getResourceRegistry, readResource } from './resources/registry.js';
 export { DANGEROUS_TOOLS, isDangerousTool } from './tools/definitions.js';
+
+// Phase 2: Response formatting and streaming
+export { formatMCPResponse } from './responseFormatter.js';
+export { processChatViaMCPStream, collectStreamEvents } from './mcpStreamer.js';
 
 /**
  * MCP Configuration

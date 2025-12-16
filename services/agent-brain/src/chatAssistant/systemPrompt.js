@@ -191,7 +191,83 @@ function formatPersonalizedContext(ctx) {
   return lines.join('\n');
 }
 
+/**
+ * MCP Resources instructions
+ * Phase 3: Guide model to use resources for context
+ */
+const MCP_RESOURCES_PROMPT = `## MCP Ресурсы
+
+Тебе доступны следующие MCP ресурсы для получения контекста:
+
+| URI | Описание |
+|-----|----------|
+| \`project://metrics/today\` | Агрегированные метрики за 7 дней (spend, leads, CPL) |
+| \`project://snapshot/business\` | Полный снимок бизнеса: ads, directions, creatives |
+| \`project://notes/{domain}\` | Заметки агента (ads, creative, crm, whatsapp) |
+| \`project://brain/actions\` | История автопилота за 3 дня |
+
+### Когда использовать ресурсы
+
+- **Перед анализом данных** — запроси \`project://metrics/today\` для актуальных метрик
+- **Для общего обзора** — используй \`project://snapshot/business\`
+- **Для контекста по домену** — запроси \`project://notes/{domain}\`
+- **Для истории автопилота** — используй \`project://brain/actions\`
+
+Ресурсы содержат актуальные данные и уменьшают необходимость в tool calls для базовой информации.`;
+
+/**
+ * Build system prompt for MCP mode
+ * Includes resource instructions and reduced inline context
+ * @param {string} mode - 'auto' | 'plan' | 'ask'
+ * @param {Object} businessProfile - from business_profile table
+ * @returns {string}
+ */
+export function buildSystemPromptForMCP(mode, businessProfile) {
+  const modeInstruction = MODE_INSTRUCTIONS[mode] || MODE_INSTRUCTIONS.auto;
+
+  let businessContext = '';
+  if (businessProfile) {
+    // Minimal business context - details available via resources
+    businessContext = `
+## Контекст бизнеса
+
+**Ниша:** ${businessProfile.industry || 'Не указана'}
+**Описание:** ${businessProfile.description || 'Не указано'}
+
+_Детальный контекст доступен через MCP ресурсы._`;
+  }
+
+  return `${BASE_ROLE_PROMPT}
+
+## Текущий режим: ${mode.toUpperCase()}
+
+${modeInstruction}
+
+${businessContext}
+
+${MCP_RESOURCES_PROMPT}
+
+${RESPONSE_FORMAT_PROMPT}`.trim();
+}
+
+/**
+ * Build minimal user prompt for MCP mode
+ * Context is fetched via resources, not inline
+ * @param {string} message - user's message
+ * @returns {string}
+ */
+export function buildUserPromptForMCP(message) {
+  return `## Запрос пользователя
+
+${message}
+
+---
+_Используй MCP tools и resources для получения необходимых данных._`;
+}
+
 export default {
   buildSystemPrompt,
-  buildUserPrompt
+  buildUserPrompt,
+  buildSystemPromptForMCP,
+  buildUserPromptForMCP
 };

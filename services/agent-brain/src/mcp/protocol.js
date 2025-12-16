@@ -13,6 +13,7 @@
 import { getToolRegistry } from './tools/registry.js';
 import { executeToolWithContext } from './tools/executor.js';
 import { getResourceRegistry, readResource } from './resources/registry.js';
+import { isToolAllowed } from './sessions.js';
 
 // MCP Protocol version
 const PROTOCOL_VERSION = '2024-11-05';
@@ -94,12 +95,20 @@ function handleInitialize(id, params) {
 
 /**
  * Handle tools/list request
+ * Filters tools based on session allowedTools if specified
  */
 function handleToolsList(id, params, context) {
   const tools = getToolRegistry();
+  const { sessionId, allowedTools } = context || {};
+
+  // Filter tools based on session allowedTools
+  let filteredTools = tools;
+  if (allowedTools && Array.isArray(allowedTools) && allowedTools.length > 0) {
+    filteredTools = tools.filter(tool => allowedTools.includes(tool.name));
+  }
 
   // Convert to MCP format
-  const mcpTools = tools.map(tool => ({
+  const mcpTools = filteredTools.map(tool => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema
@@ -110,12 +119,33 @@ function handleToolsList(id, params, context) {
 
 /**
  * Handle tools/call request
+ * Checks if tool is allowed for session before execution
  */
 async function handleToolsCall(id, params, context) {
   const { name, arguments: args } = params || {};
+  const { sessionId, allowedTools } = context || {};
 
   if (!name) {
     return createErrorResponse(id, -32602, 'Invalid params: tool name is required');
+  }
+
+  // Security check: verify tool is in allowedTools (if specified)
+  if (allowedTools && Array.isArray(allowedTools) && allowedTools.length > 0) {
+    if (!allowedTools.includes(name)) {
+      return createSuccessResponse(id, {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              error: `Tool "${name}" is not allowed for this session`,
+              success: false,
+              code: 'TOOL_NOT_ALLOWED'
+            })
+          }
+        ],
+        isError: true
+      });
+    }
   }
 
   try {

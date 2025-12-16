@@ -195,6 +195,30 @@ export const AdsToolDefs = {
       operation_id: operationIdOption
     }),
     meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
+  // READ TOOLS - ROI Reports
+  // ============================================================
+
+  getROIReport: {
+    description: 'Получить отчёт по ROI креативов: расходы, выручка, ROI%, лиды, конверсии. Включает топ/худших и рекомендации.',
+    schema: z.object({
+      period: z.enum(['last_7d', 'last_30d', 'last_90d', 'all']).default('last_7d').describe('Период для расчёта ROI'),
+      direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
+      media_type: z.enum(['video', 'image']).optional().describe('Фильтр по типу медиа')
+    }),
+    meta: { timeout: 30000, retryable: true }
+  },
+
+  getROIComparison: {
+    description: 'Сравнить ROI между креативами или направлениями. Возвращает топ N по ROI.',
+    schema: z.object({
+      period: z.enum(['last_7d', 'last_30d', 'last_90d', 'all']).default('all').describe('Период для сравнения'),
+      compare_by: z.enum(['creative', 'direction']).default('creative').describe('По чему сравнивать'),
+      top_n: z.number().min(1).max(20).default(5).describe('Количество топ элементов для вывода')
+    }),
+    meta: { timeout: 30000, retryable: true }
   }
 };
 

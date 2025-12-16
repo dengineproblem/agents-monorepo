@@ -7,10 +7,65 @@
  * Endpoints:
  * - POST /mcp - JSON-RPC requests от OpenAI
  * - GET /mcp - SSE stream для server-initiated messages
+ *
+ * Security (Hybrid C):
+ * - Rate limiting: 100 req/min per session
+ * - Secret header verification (X-MCP-Secret)
+ * - Audit logging for tool executions
  */
 
-import { getSession } from './sessions.js';
+import { getSession, getSessionAsync, getStoreType } from './sessions.js';
 import { handleMCPRequest } from './protocol.js';
+
+// Rate limiting: 100 requests per minute per session
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 100;
+const rateLimitStore = new Map();
+
+// MCP Secret (shared between agent-brain and MCP server)
+const MCP_SECRET = process.env.MCP_SECRET || null;
+
+/**
+ * Simple rate limiter per session
+ * @param {string} sessionId
+ * @returns {boolean} true if request is allowed
+ */
+function checkRateLimit(sessionId) {
+  if (!sessionId) return true; // Allow requests without session for initialize
+
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+
+  let sessionData = rateLimitStore.get(sessionId);
+  if (!sessionData) {
+    sessionData = { requests: [] };
+    rateLimitStore.set(sessionId, sessionData);
+  }
+
+  // Remove old requests outside window
+  sessionData.requests = sessionData.requests.filter(ts => ts > windowStart);
+
+  // Check limit
+  if (sessionData.requests.length >= RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+
+  // Record this request
+  sessionData.requests.push(now);
+  return true;
+}
+
+// Cleanup rate limit data periodically
+setInterval(() => {
+  const now = Date.now();
+  const windowStart = now - RATE_LIMIT_WINDOW_MS;
+  for (const [sessionId, data] of rateLimitStore) {
+    data.requests = data.requests.filter(ts => ts > windowStart);
+    if (data.requests.length === 0) {
+      rateLimitStore.delete(sessionId);
+    }
+  }
+}, 60 * 1000);
 
 /**
  * Register MCP routes in Fastify instance
@@ -22,10 +77,52 @@ export function registerMCPRoutes(fastify) {
    *
    * OpenAI calls this endpoint directly when using MCP tools.
    * Session ID is passed in headers for context injection.
+   *
+   * Security checks:
+   * 1. Secret header verification (if MCP_SECRET is set)
+   * 2. Rate limiting per session
+   * 3. Audit logging for tool executions
    */
   fastify.post('/mcp', async (request, reply) => {
     const sessionId = request.headers['mcp-session-id'];
     const protocolVersion = request.headers['mcp-protocol-version'];
+    const providedSecret = request.headers['x-mcp-secret'];
+    const startTime = Date.now();
+
+    // Security: Verify secret header (if configured)
+    if (MCP_SECRET && providedSecret !== MCP_SECRET) {
+      fastify.log.warn({
+        method: 'POST',
+        path: '/mcp',
+        sessionId: sessionId ? sessionId.substring(0, 8) + '...' : 'none',
+        hasSecret: !!providedSecret
+      }, 'MCP request with invalid secret');
+      return reply.code(403).send({
+        jsonrpc: '2.0',
+        id: request.body?.id,
+        error: {
+          code: -32000,
+          message: 'Invalid MCP secret'
+        }
+      });
+    }
+
+    // Security: Rate limit check
+    if (!checkRateLimit(sessionId)) {
+      fastify.log.warn({
+        method: 'POST',
+        path: '/mcp',
+        sessionId: sessionId ? sessionId.substring(0, 8) + '...' : 'none'
+      }, 'MCP rate limit exceeded');
+      return reply.code(429).send({
+        jsonrpc: '2.0',
+        id: request.body?.id,
+        error: {
+          code: -32000,
+          message: 'Rate limit exceeded (100 req/min)'
+        }
+      });
+    }
 
     // Log incoming request
     fastify.log.info({
@@ -36,8 +133,8 @@ export function registerMCPRoutes(fastify) {
       jsonrpcMethod: request.body?.method
     }, 'MCP request received');
 
-    // Get user context from session
-    const session = getSession(sessionId);
+    // Get user context from session (use async for Redis support)
+    const session = await getSessionAsync(sessionId);
     if (!session && request.body?.method !== 'initialize') {
       fastify.log.warn({ sessionId }, 'MCP request with invalid session');
       return reply.code(401).send({
@@ -52,6 +149,23 @@ export function registerMCPRoutes(fastify) {
 
     // Handle the MCP request
     const result = await handleMCPRequest(request.body, session || {});
+
+    // Audit logging for tool executions
+    if (request.body?.method === 'tools/call') {
+      const toolName = request.body?.params?.name;
+      const duration = Date.now() - startTime;
+      const isError = result?.result?.isError;
+
+      fastify.log.info({
+        audit: 'tool_execution',
+        sessionId: sessionId ? sessionId.substring(0, 8) + '...' : 'none',
+        userAccountId: session?.userAccountId?.substring(0, 8) + '...',
+        tool: toolName,
+        duration,
+        success: !isError,
+        approvalRequired: result?.result?.content?.[0]?.text?.includes('approval_required')
+      }, `MCP tool executed: ${toolName}`);
+    }
 
     // Null result means notification (no response)
     if (result === null) {
@@ -115,6 +229,7 @@ export function registerMCPRoutes(fastify) {
       status: 'ok',
       service: 'mcp-server',
       version: '1.0.0',
+      sessionStore: getStoreType(),
       timestamp: new Date().toISOString()
     };
   });

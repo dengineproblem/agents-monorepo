@@ -5,7 +5,7 @@
  */
 
 import OpenAI from 'openai';
-import { buildSystemPrompt, buildUserPrompt } from './systemPrompt.js';
+import { buildSystemPrompt, buildUserPrompt, buildSystemPromptForMCP, buildUserPromptForMCP } from './systemPrompt.js';
 import { getToolsForOpenAI, isToolDangerous } from './tools.js';
 import { executeTool } from './toolHandlers.js';
 import {
@@ -27,7 +27,134 @@ import {
   handleStatusCommand
 } from './telegramHandler.js';
 import { createSession, MCP_CONFIG } from '../mcp/index.js';
+import { classifyRequest } from './orchestrator/classifier.js';
+import { getToolsByAgent } from '../mcp/tools/definitions.js';
+import { formatMCPResponse, needsRepairPass } from '../mcp/responseFormatter.js';
 // conversationStore deprecated, use unifiedStore instead (imported dynamically in executeFullPlan)
+
+/**
+ * Map classifier domain to MCP agent name
+ */
+const DOMAIN_TO_MCP_AGENT = {
+  ads: 'ads',
+  creative: 'creative',
+  whatsapp: 'whatsapp',
+  crm: 'crm'
+};
+
+/**
+ * Get allowed tools for domains (from classifier result)
+ * @param {string[]} domains - List of domains from classifier
+ * @returns {string[]} List of allowed tool names
+ */
+function getAllowedToolsForDomains(domains) {
+  const tools = [];
+  for (const domain of domains) {
+    const agentName = DOMAIN_TO_MCP_AGENT[domain];
+    if (agentName) {
+      const agentTools = getToolsByAgent(agentName);
+      tools.push(...agentTools.map(t => t.name));
+    }
+  }
+  return [...new Set(tools)]; // Remove duplicates
+}
+
+/**
+ * Read-only tools whitelist per domain
+ * Used for mixed queries to prevent writes
+ */
+const MIXED_QUERY_READ_TOOLS = {
+  ads: ['getCampaigns', 'getCampaignDetails', 'getAdSets', 'getSpendReport', 'getDirections', 'getDirectionDetails', 'getDirectionMetrics', 'getROIReport', 'getROIComparison'],
+  creative: ['getCreatives', 'getCreativeDetails', 'getCreativeMetrics', 'getCreativeAnalysis', 'getTopCreatives', 'getWorstCreatives', 'compareCreatives', 'getCreativeScores', 'getCreativeTests', 'getCreativeTranscript'],
+  crm: ['getLeads', 'getLeadDetails', 'getFunnelStats'],
+  whatsapp: ['getDialogs', 'getDialogMessages', 'analyzeDialog', 'searchDialogSummaries']
+};
+
+/**
+ * Get read-only tools for mixed queries
+ * Limits to max 3 read tools per domain
+ * @param {string[]} domains - List of domains
+ * @returns {string[]} List of read-only tool names
+ */
+function getMixedQueryReadTools(domains) {
+  const tools = [];
+  const MAX_TOOLS_PER_DOMAIN = 3;
+
+  for (const domain of domains) {
+    const domainReadTools = MIXED_QUERY_READ_TOOLS[domain];
+    if (domainReadTools) {
+      // Take first N read tools per domain
+      tools.push(...domainReadTools.slice(0, MAX_TOOLS_PER_DOMAIN));
+    }
+  }
+
+  return [...new Set(tools)];
+}
+
+/**
+ * Domain names for synthesis headers
+ */
+const DOMAIN_NAMES_RU = {
+  ads: '📊 Реклама',
+  creative: '🎨 Креативы',
+  crm: '👥 CRM',
+  whatsapp: '💬 WhatsApp'
+};
+
+/**
+ * Synthesize mixed response from multiple domain tool calls
+ * Adds section headers and summary for mixed queries
+ * @param {string} content - Original MCP response
+ * @param {Array} toolCalls - Tool calls made
+ * @param {string[]} domains - Domains involved
+ * @returns {string} Synthesized response
+ */
+function synthesizeMixedResponse(content, toolCalls, domains) {
+  // If content already has good structure, return as-is
+  if (content.includes('## ') || content.includes('**Итог**')) {
+    return content;
+  }
+
+  // Group tool calls by domain
+  const toolsByDomain = {};
+  for (const tc of toolCalls) {
+    // Determine domain from tool name
+    for (const [domain, tools] of Object.entries(MIXED_QUERY_READ_TOOLS)) {
+      if (tools.includes(tc.name)) {
+        if (!toolsByDomain[domain]) toolsByDomain[domain] = [];
+        toolsByDomain[domain].push(tc);
+        break;
+      }
+    }
+  }
+
+  // If only one domain actually used, no need for synthesis
+  const usedDomains = Object.keys(toolsByDomain);
+  if (usedDomains.length <= 1) {
+    return content;
+  }
+
+  // Build synthesized response with domain sections
+  const parts = [];
+
+  // Add intro
+  parts.push('📋 **Сводка по нескольким направлениям:**\n');
+
+  // Split content by potential domain boundaries and add headers
+  // This is a heuristic approach - content might naturally mention different topics
+  for (const domain of usedDomains) {
+    const domainName = DOMAIN_NAMES_RU[domain] || domain;
+    const domainTools = toolsByDomain[domain];
+    parts.push(`\n### ${domainName}\n`);
+    parts.push(`_Использовано: ${domainTools.map(t => t.name).join(', ')}_\n`);
+  }
+
+  // Add original content (which should already contain the combined analysis)
+  parts.push('\n---\n');
+  parts.push(content);
+
+  return parts.join('');
+}
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 const MAX_TOOL_CALLS = 5; // Prevent infinite loops
@@ -95,9 +222,13 @@ export async function processChat({ message, conversationId, mode = 'auto', user
       content: message
     });
 
-    // 5. Build prompts
-    const systemPrompt = buildSystemPrompt(mode, context.businessProfile);
-    const userPrompt = buildUserPrompt(message, context);
+    // 5. Build prompts (use MCP-optimized prompts if MCP enabled)
+    const systemPrompt = MCP_CONFIG.enabled
+      ? buildSystemPromptForMCP(mode, context.businessProfile)
+      : buildSystemPrompt(mode, context.businessProfile);
+    const userPrompt = MCP_CONFIG.enabled
+      ? buildUserPromptForMCP(message)
+      : buildUserPrompt(message, context);
 
     // 6. Prepare conversation history for agents
     const conversationHistory = [];
@@ -332,32 +463,96 @@ function shouldRequireApproval(toolName, mode) {
 
 /**
  * Process chat via MCP (OpenAI Responses API with MCP tools)
+ * Hybrid C: Uses classifier to filter tools, handles dangerous tool approval
  * @param {Object} params
  * @returns {Promise<Object>} Response in same format as orchestrator
  */
 async function processChatViaMCP({ systemPrompt, userPrompt, toolContext, conversationHistory, mode }) {
-  // 1. Create MCP session with user context
+  // 1. Classify the request to determine domain and allowed tools
+  let classification;
+  let allowedTools = null;
+  let allowedDomains = null;
+  let isMixedQuery = false;
+
+  try {
+    classification = await classifyRequest(userPrompt, {
+      userAccountId: toolContext.userAccountId
+    });
+
+    // Get allowed tools based on classification
+    if (classification.domain !== 'mixed' && classification.domain !== 'unknown') {
+      allowedDomains = [classification.domain];
+      allowedTools = getAllowedToolsForDomains(allowedDomains);
+    } else if (classification.domain === 'mixed' && classification.agents) {
+      // Phase 3: Enhanced mixed query handling
+      // Limit to max 2 domains for mixed queries
+      isMixedQuery = true;
+      const detectedDomains = classification.agents.map(a => a.replace('Agent', '').toLowerCase());
+      allowedDomains = detectedDomains.slice(0, 2); // Max 2 domains
+
+      // Get read-only tools for mixed queries (no writes in mixed mode)
+      allowedTools = getMixedQueryReadTools(allowedDomains);
+
+      logger.info({
+        originalDomains: detectedDomains.length,
+        limitedDomains: allowedDomains,
+        readToolsCount: allowedTools.length
+      }, 'Mixed query tool limiting applied');
+    }
+    // For 'unknown', allowedTools stays null (all tools allowed)
+
+    logger.info({
+      domain: classification.domain,
+      confidence: classification.confidence,
+      isMixedQuery,
+      allowedToolsCount: allowedTools?.length || 'all'
+    }, 'MCP classifier result');
+
+  } catch (classifyError) {
+    logger.warn({ error: classifyError.message }, 'Classification failed, allowing all tools');
+    classification = { domain: 'unknown', confidence: 0 };
+  }
+
+  // 2. Create MCP session with user context and Hybrid C extensions
+  const dangerousPolicy = mode === 'plan' ? 'block' : (mode === 'ask' ? 'block' : 'block');
+
   const sessionId = createSession({
     userAccountId: toolContext.userAccountId,
     adAccountId: toolContext.adAccountId,
     accessToken: toolContext.accessToken,
-    conversationId: toolContext.conversationId
+    conversationId: toolContext.conversationId,
+    // Hybrid C extensions
+    allowedDomains,
+    allowedTools,
+    mode,
+    dangerousPolicy,
+    integrations: toolContext.integrations || null
   });
 
   logger.info({
     sessionId: sessionId.substring(0, 8) + '...',
     userAccountId: toolContext.userAccountId,
-    mcpServerUrl: MCP_CONFIG.serverUrl
-  }, 'MCP session created');
+    mcpServerUrl: MCP_CONFIG.serverUrl,
+    allowedDomains,
+    dangerousPolicy
+  }, 'MCP session created with Hybrid C');
 
-  // 2. Build messages for OpenAI
+  // 3. Build messages for OpenAI
   const messages = [
     { role: 'system', content: systemPrompt },
     ...conversationHistory,
     { role: 'user', content: userPrompt }
   ];
 
-  // 3. Call OpenAI Responses API with MCP
+  // 4. Build MCP headers (include secret if configured)
+  const mcpHeaders = {
+    'Mcp-Session-Id': sessionId
+  };
+  if (process.env.MCP_SECRET) {
+    mcpHeaders['X-MCP-Secret'] = process.env.MCP_SECRET;
+  }
+
+  // 5. Call OpenAI Responses API with MCP
   // Note: OpenAI will call our /mcp endpoint directly with the session ID
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -373,10 +568,8 @@ async function processChatViaMCP({ systemPrompt, userPrompt, toolContext, conver
           type: 'mcp',
           server_label: 'agents-mcp',
           server_url: MCP_CONFIG.serverUrl,
-          headers: {
-            'Mcp-Session-Id': sessionId
-          },
-          require_approval: 'never'  // Phase 2: WhatsApp tools are all READ-only
+          headers: mcpHeaders,
+          require_approval: 'never'  // Approval handled by our executor via dangerousPolicy
         }],
         tool_choice: 'auto'
       })
@@ -395,18 +588,78 @@ async function processChatViaMCP({ systemPrompt, userPrompt, toolContext, conver
       hasToolCalls: !!result.tool_calls?.length
     }, 'MCP response received');
 
-    // 4. Parse and return in orchestrator format
+    // 6. Check for approval_required in tool results
+    const toolCalls = result.tool_calls || [];
+    let approvalRequired = null;
+
+    for (const tc of toolCalls) {
+      // Check if any tool returned approval_required
+      if (tc.result) {
+        try {
+          const parsed = typeof tc.result === 'string' ? JSON.parse(tc.result) : tc.result;
+          if (parsed.approval_required) {
+            approvalRequired = {
+              tool: parsed.tool,
+              args: parsed.args,
+              reason: parsed.reason
+            };
+            break;
+          }
+        } catch (e) {
+          // Not JSON, ignore
+        }
+      }
+    }
+
+    // 7. Apply response formatting (Phase 2)
+    const rawContent = result.output_text || result.output?.[0]?.content || '';
+    const formatted = formatMCPResponse(
+      { content: rawContent, toolCalls },
+      {
+        domain: classification.domain,
+        validate: true,
+        addRefs: true
+      }
+    );
+
+    // Log validation results
+    if (formatted.validation) {
+      logger.info({
+        valid: formatted.validation.valid,
+        errors: formatted.validation.errors?.length || 0,
+        warnings: formatted.validation.warnings?.length || 0,
+        refs: formatted.validation.stats?.refs || 0
+      }, 'MCP response validation');
+    }
+
+    // 8. Phase 3: Apply synthesis for mixed queries
+    let finalContent = formatted.content;
+    if (isMixedQuery && toolCalls.length > 0) {
+      finalContent = synthesizeMixedResponse(formatted.content, toolCalls, allowedDomains);
+    }
+
+    // 9. Return in orchestrator format with formatting
     return {
-      content: result.output_text || result.output?.[0]?.content || '',
+      content: finalContent,
       agent: 'MCP',
-      delegatedTo: null,
-      classification: { domain: 'mcp', confidence: 1.0 },
-      executedActions: (result.tool_calls || []).map(tc => ({
+      delegatedTo: classification.domain,
+      classification: {
+        domain: classification.domain,
+        confidence: classification.confidence,
+        isMixed: isMixedQuery,
+        domains: allowedDomains
+      },
+      executedActions: toolCalls.map(tc => ({
         tool: tc.name,
         args: tc.arguments,
         result: 'executed_via_mcp'
       })),
-      toolCalls: result.tool_calls || []
+      toolCalls,
+      approvalRequired,  // Will be handled by caller to create pending plan
+      // Phase 2: Additional formatting data
+      entities: formatted.entities,
+      uiJson: formatted.uiJson,
+      validation: formatted.validation
     };
 
   } catch (error) {
