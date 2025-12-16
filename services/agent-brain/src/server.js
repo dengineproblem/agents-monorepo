@@ -13,6 +13,7 @@ import { updateCurrencyRates } from './currencyRateCron.js';
 import { analyzeCreativeTest } from './creativeAnalyzer.js';
 import { registerChatRoutes } from './chatAssistant/index.js';
 import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
+import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
@@ -4343,6 +4344,14 @@ if (CRON_ENABLED) {
 
 // Register Chat Assistant routes
 registerChatRoutes(fastify);
+
+// Register MCP routes (if enabled)
+if (MCP_CONFIG.enabled) {
+  registerMCPRoutes(fastify);
+  fastify.log.info({ mcpServerUrl: MCP_CONFIG.serverUrl }, 'MCP server enabled');
+} else {
+  fastify.log.info('MCP server disabled (set MCP_ENABLED=true to enable)');
+}
 
 const port = Number(process.env.BRAIN_PORT || 7080);
 fastify.listen({ host:'0.0.0.0', port }).then(()=>fastify.log.info(`Brain listening on ${port}`)).catch(err=>{ fastify.log.error(err); process.exit(1); });

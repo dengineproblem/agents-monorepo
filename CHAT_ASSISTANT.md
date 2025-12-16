@@ -2420,3 +2420,170 @@ AdsAgent теперь учитывает историю Brain:
 | `agents/ads/prompt.js` | **Обновлён** → v2.0, интеграция Brain rules |
 | `contextGatherer.js` | **Обновлён** — `getRecentBrainActions()`, `scoringDetails` |
 | `orchestrator/index.js` | **Обновлён** — загрузка `brainActions` |
+
+---
+
+## MCP (Model Context Protocol) Integration
+
+MCP — открытый стандарт для подключения AI к внешним инструментам и данным.
+
+### Архитектура
+
+```
+┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+│   Frontend      │────▶│   agent-brain        │────▶│   OpenAI API    │
+│   (React)       │     │   /api/brain/chat    │     │   Responses API │
+└─────────────────┘     └──────────────────────┘     └────────┬────────┘
+                                                              │
+                        ┌──────────────────────┐              │ MCP calls
+                        │   MCP Server         │◀─────────────┘
+                        │   /mcp endpoint      │
+                        │   (embedded)         │
+                        └──────────────────────┘
+```
+
+**Как это работает:**
+1. Frontend вызывает `/api/brain/chat` как раньше
+2. agent-brain создаёт MCP session с контекстом пользователя
+3. agent-brain вызывает OpenAI Responses API с `tools: [{ type: "mcp" }]`
+4. OpenAI **напрямую** вызывает наш MCP server для выполнения tools
+5. Результат возвращается через agent-brain в frontend
+
+### Структура файлов
+
+```
+services/agent-brain/src/mcp/
+├── index.js               # Entry point + MCP_CONFIG
+├── server.js              # Fastify routes: POST/GET /mcp
+├── protocol.js            # JSON-RPC 2.0 handler
+├── sessions.js            # Session management (30 min TTL)
+├── tools/
+│   ├── definitions.js     # Agent tools → MCP format
+│   ├── registry.js        # Tool discovery
+│   └── executor.js        # Tool execution with context
+└── resources/
+    └── registry.js        # Resource definitions (Phase 3)
+```
+
+### Session Management
+
+**Проблема:** OpenAI вызывает MCP server напрямую, не зная userAccountId/adAccountId.
+
+**Решение:** Session-based mapping
+
+```javascript
+// 1. Создаём сессию перед вызовом OpenAI
+const sessionId = createSession({
+  userAccountId,
+  adAccountId,
+  accessToken,
+  conversationId
+});
+
+// 2. Передаём sessionId в headers
+tools: [{
+  type: 'mcp',
+  server_url: MCP_SERVER_URL,
+  headers: { 'Mcp-Session-Id': sessionId }
+}]
+
+// 3. MCP server получает контекст из сессии
+const session = getSession(sessionId);
+// → { userAccountId, adAccountId, accessToken }
+```
+
+### MCP Tools (Phase 2: WhatsApp)
+
+| Tool | Описание | Тип |
+|------|----------|-----|
+| `getDialogs` | Список WhatsApp диалогов | READ |
+| `getDialogMessages` | Сообщения диалога | READ |
+| `analyzeDialog` | AI-анализ диалога | READ |
+| `searchDialogSummaries` | Поиск по истории | READ |
+
+**Следующие фазы:**
+- Phase 4: CRM (4 tools), Creative (15 tools), Ads (15 tools)
+- Phase 5: Brain (Autopilot) migration
+
+### MCP Resources (Phase 3)
+
+| URI | Описание |
+|-----|----------|
+| `project://metrics/today` | Метрики за 7 дней |
+| `project://snapshot/business` | Business snapshot |
+| `project://notes/{domain}` | Agent notes |
+| `project://brain/actions` | Brain history |
+
+### Конфигурация
+
+```bash
+# .env
+MCP_ENABLED=false          # Включить MCP
+MCP_SERVER_URL=http://localhost:7080/mcp
+
+# Production (публичный URL для OpenAI)
+MCP_SERVER_URL=https://api.yourdomain.com/mcp
+```
+
+### Логика обработки
+
+```javascript
+// chatAssistant/index.js
+
+if (MCP_CONFIG.enabled) {
+  try {
+    response = await processChatViaMCP({ ... });
+  } catch (mcpError) {
+    if (MCP_CONFIG.fallbackToLegacy) {
+      // Fallback to orchestrator
+      response = null;
+    }
+  }
+}
+
+if (!response) {
+  // Standard orchestrator/legacy path
+  response = await orchestrator.processRequest({ ... });
+}
+```
+
+### Endpoints
+
+| Endpoint | Метод | Описание |
+|----------|-------|----------|
+| `/mcp` | POST | JSON-RPC requests от OpenAI |
+| `/mcp` | GET | SSE stream (server-initiated) |
+| `/mcp/health` | GET | Health check |
+
+### Тестирование
+
+```bash
+# 1. Включить MCP
+export MCP_ENABLED=true
+
+# 2. Запустить сервер
+cd services/agent-brain && npm start
+
+# 3. Health check
+curl http://localhost:7080/mcp/health
+
+# 4. Для production — ngrok туннель
+ngrok http 7080
+# MCP_SERVER_URL=https://abc123.ngrok.io/mcp
+```
+
+### Rollback
+
+```bash
+# Мгновенный откат через env
+MCP_ENABLED=false
+```
+
+### Файлы изменений
+
+| Файл | Изменение |
+|------|-----------|
+| `package.json` | `@modelcontextprotocol/sdk` dependency |
+| `server.js` | Import + регистрация MCP routes |
+| `chatAssistant/index.js` | `processChatViaMCP()`, MCP логика в `processChat()` |
+| `.env` | `MCP_ENABLED`, `MCP_SERVER_URL` |

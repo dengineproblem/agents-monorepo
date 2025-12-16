@@ -26,6 +26,7 @@ import {
   handleModeCommand,
   handleStatusCommand
 } from './telegramHandler.js';
+import { createSession, MCP_CONFIG } from '../mcp/index.js';
 // conversationStore deprecated, use unifiedStore instead (imported dynamically in executeFullPlan)
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
@@ -108,29 +109,60 @@ export async function processChat({ message, conversationId, mode = 'auto', user
       }
     }
 
-    // 7. Process via Orchestrator (multi-agent) or legacy LLM
+    // 7. Process via MCP, Orchestrator (multi-agent), or legacy LLM
     // adAccountId: fbId for Facebook API calls
     // adAccountDbId: dbId (UUID) for database queries (memory, specs, notes)
-    const toolContext = { accessToken, userAccountId, adAccountId: fbId, adAccountDbId: dbId };
+    const toolContext = {
+      accessToken,
+      userAccountId,
+      adAccountId: fbId,
+      adAccountDbId: dbId,
+      conversationId: conversation.id
+    };
     let response;
 
-    if (USE_ORCHESTRATOR) {
-      // NEW: Multi-agent orchestrator
-      response = await orchestrator.processRequest({
-        message: userPrompt,
-        context,
-        mode,
-        toolContext,
-        conversationHistory
-      });
-    } else {
-      // LEGACY: Direct LLM with all tools
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        ...conversationHistory,
-        { role: 'user', content: userPrompt }
-      ];
-      response = await callLLMWithTools(messages, toolContext, mode);
+    // Try MCP first if enabled
+    if (MCP_CONFIG.enabled) {
+      try {
+        logger.info({ mode, userAccountId }, 'Processing via MCP');
+        response = await processChatViaMCP({
+          systemPrompt,
+          userPrompt,
+          toolContext,
+          conversationHistory,
+          mode
+        });
+      } catch (mcpError) {
+        // Fallback to orchestrator if MCP fails
+        if (MCP_CONFIG.fallbackToLegacy) {
+          logger.warn({ error: mcpError.message }, 'MCP failed, falling back to orchestrator');
+          response = null;  // Will be handled below
+        } else {
+          throw mcpError;
+        }
+      }
+    }
+
+    // If no MCP response, use orchestrator or legacy
+    if (!response) {
+      if (USE_ORCHESTRATOR) {
+        // Multi-agent orchestrator
+        response = await orchestrator.processRequest({
+          message: userPrompt,
+          context,
+          mode,
+          toolContext,
+          conversationHistory
+        });
+      } else {
+        // LEGACY: Direct LLM with all tools
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          ...conversationHistory,
+          { role: 'user', content: userPrompt }
+        ];
+        response = await callLLMWithTools(messages, toolContext, mode);
+      }
     }
 
     // 8. Parse and save assistant response
@@ -296,6 +328,98 @@ function shouldRequireApproval(toolName, mode) {
   }
 
   return false;
+}
+
+/**
+ * Process chat via MCP (OpenAI Responses API with MCP tools)
+ * @param {Object} params
+ * @returns {Promise<Object>} Response in same format as orchestrator
+ */
+async function processChatViaMCP({ systemPrompt, userPrompt, toolContext, conversationHistory, mode }) {
+  // 1. Create MCP session with user context
+  const sessionId = createSession({
+    userAccountId: toolContext.userAccountId,
+    adAccountId: toolContext.adAccountId,
+    accessToken: toolContext.accessToken,
+    conversationId: toolContext.conversationId
+  });
+
+  logger.info({
+    sessionId: sessionId.substring(0, 8) + '...',
+    userAccountId: toolContext.userAccountId,
+    mcpServerUrl: MCP_CONFIG.serverUrl
+  }, 'MCP session created');
+
+  // 2. Build messages for OpenAI
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...conversationHistory,
+    { role: 'user', content: userPrompt }
+  ];
+
+  // 3. Call OpenAI Responses API with MCP
+  // Note: OpenAI will call our /mcp endpoint directly with the session ID
+  try {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o',
+        input: messages,
+        tools: [{
+          type: 'mcp',
+          server_label: 'agents-mcp',
+          server_url: MCP_CONFIG.serverUrl,
+          headers: {
+            'Mcp-Session-Id': sessionId
+          },
+          require_approval: 'never'  // Phase 2: WhatsApp tools are all READ-only
+        }],
+        tool_choice: 'auto'
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI Responses API error: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+
+    logger.info({
+      sessionId: sessionId.substring(0, 8) + '...',
+      outputLength: result.output_text?.length,
+      hasToolCalls: !!result.tool_calls?.length
+    }, 'MCP response received');
+
+    // 4. Parse and return in orchestrator format
+    return {
+      content: result.output_text || result.output?.[0]?.content || '',
+      agent: 'MCP',
+      delegatedTo: null,
+      classification: { domain: 'mcp', confidence: 1.0 },
+      executedActions: (result.tool_calls || []).map(tc => ({
+        tool: tc.name,
+        args: tc.arguments,
+        result: 'executed_via_mcp'
+      })),
+      toolCalls: result.tool_calls || []
+    };
+
+  } catch (error) {
+    logger.error({ error: error.message, sessionId: sessionId.substring(0, 8) + '...' }, 'MCP processing failed');
+
+    // Fallback to legacy if enabled
+    if (MCP_CONFIG.fallbackToLegacy) {
+      logger.info('Falling back to legacy orchestrator');
+      throw error;  // Let caller handle fallback
+    }
+
+    throw error;
+  }
 }
 
 /**
