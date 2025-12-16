@@ -550,7 +550,22 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const userData = JSON.parse(storedUser);
       if (!userData.id) return;
 
+      // Очищаем старый кэш перед загрузкой свежих данных
+      localStorage.removeItem('adAccounts');
+      console.log('[AppContext] Очищен кэш adAccounts, загружаем свежие данные...');
+
       const response = await adAccountsApi.list(userData.id);
+
+      // DEBUG: что пришло с API (RAW данные)
+      console.log('[AppContext] === RAW API RESPONSE ===');
+      response.ad_accounts.forEach((acc, i) => {
+        console.log(`[AppContext] RAW[${i}]:`, {
+          id: acc.id?.slice(0, 8),
+          name: acc.name,
+          fb_ad_account_id: acc.fb_ad_account_id,
+          page_picture_url: acc.page_picture_url?.includes('584580002') ? 'AMANAT_PIC' : acc.page_picture_url?.includes('311879771') ? 'YOUTRADE_PIC' : acc.page_picture_url?.slice(-20),
+        });
+      });
 
       const mappedAccounts = response.ad_accounts.map(acc => {
         // Автоматически определяем connection_status на основе наличия всех обязательных полей
@@ -613,6 +628,17 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       console.log('[AppContext] Загружены рекламные аккаунты:', {
         multiAccountEnabled: response.multi_account_enabled,
         count: response.ad_accounts.length,
+      });
+
+      // DEBUG: детальный лог для диагностики проблемы с перепутанными аккаунтами
+      console.log('[AppContext] === ДЕТАЛИ АККАУНТОВ ===');
+      mappedAccounts.forEach((acc, i) => {
+        console.log(`[AppContext] Аккаунт ${i}:`, {
+          id: acc.id.slice(0, 8),
+          name: acc.name,
+          ad_account_id: acc.ad_account_id,
+          page_picture_url: acc.page_picture_url?.slice(-30),
+        });
       });
 
       // Автоматически обновляем аватары для аккаунтов без page_picture_url

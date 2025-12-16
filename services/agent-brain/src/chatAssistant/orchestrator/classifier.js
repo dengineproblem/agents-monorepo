@@ -152,9 +152,22 @@ async function llmClassify(message, context) {
     const jsonMatch = response.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      const domain = parsed.domain || 'ads';
+
+      // Valid agent names (not "mixed")
+      const validAgents = ['ads', 'creative', 'whatsapp', 'crm'];
+
+      // Filter to only valid agents
+      let agents = (parsed.agents || []).filter(a => validAgents.includes(a));
+
+      // If no valid agents, use domain (if valid) or all agents for "mixed"
+      if (agents.length === 0) {
+        agents = validAgents.includes(domain) ? [domain] : validAgents;
+      }
+
       return {
-        domain: parsed.domain || 'ads',
-        agents: parsed.agents || [parsed.domain],
+        domain,
+        agents,
         instructions: parsed.instructions || ''
       };
     }

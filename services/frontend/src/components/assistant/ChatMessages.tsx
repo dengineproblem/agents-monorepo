@@ -1,9 +1,17 @@
 import { useEffect, useRef } from 'react';
-import { Bot } from 'lucide-react';
+import { Bot, Plus, MessageSquare, ChevronDown } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { MessageBubble } from './MessageBubble';
 import { StreamingMessage, type StreamingState } from './StreamingMessage';
-import type { ChatMessage, Plan } from '@/services/assistantApi';
+import type { ChatMessage, Plan, Conversation } from '@/services/assistantApi';
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -11,6 +19,11 @@ interface ChatMessagesProps {
   isStreaming?: boolean;
   streamingState?: StreamingState | null;
   onApprove?: (plan: Plan) => void;
+  // Conversation management
+  conversations?: Conversation[];
+  activeConversationId?: string;
+  onSelectConversation?: (id: string) => void;
+  onNewConversation?: () => void;
 }
 
 export function ChatMessages({
@@ -19,6 +32,10 @@ export function ChatMessages({
   isStreaming,
   streamingState,
   onApprove,
+  conversations = [],
+  activeConversationId,
+  onSelectConversation,
+  onNewConversation,
 }: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -27,9 +44,43 @@ export function ChatMessages({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading, isStreaming, streamingState?.text]);
 
+  const activeConversation = conversations.find(c => c.id === activeConversationId);
+
   return (
-    <ScrollArea className="flex-1">
-      <div className="min-h-full flex flex-col">
+    <div className="flex-1 flex flex-col overflow-hidden relative">
+      {/* Conversation dropdown - top left */}
+      <div className="absolute top-2 left-2 z-10">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="gap-2 bg-background/80 backdrop-blur-sm">
+              <MessageSquare className="h-4 w-4" />
+              <span className="max-w-[120px] truncate">
+                {activeConversation?.title || 'Новый чат'}
+              </span>
+              <ChevronDown className="h-3 w-3 opacity-50" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuItem onClick={onNewConversation} className="gap-2">
+              <Plus className="h-4 w-4" />
+              Новый чат
+            </DropdownMenuItem>
+            {conversations.length > 0 && <DropdownMenuSeparator />}
+            {conversations.slice(0, 10).map((conversation) => (
+              <DropdownMenuItem
+                key={conversation.id}
+                onClick={() => onSelectConversation?.(conversation.id)}
+                className={activeConversationId === conversation.id ? 'bg-accent' : ''}
+              >
+                <span className="truncate">{conversation.title || 'Новый чат'}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <ScrollArea className="flex-1">
+        <div className="min-h-full flex flex-col pt-12">
         {messages.length === 0 && !isLoading && !isStreaming ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
             <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
@@ -92,8 +143,9 @@ export function ChatMessages({
             <div ref={bottomRef} />
           </div>
         )}
-      </div>
-    </ScrollArea>
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 

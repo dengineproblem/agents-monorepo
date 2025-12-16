@@ -3,7 +3,6 @@ import { toast } from 'sonner';
 import Header from '../components/Header';
 import { useAppContext } from '../context/AppContext';
 import {
-  ChatSidebar,
   ChatMessages,
   ChatInput,
   PlanApprovalModal,
@@ -309,45 +308,34 @@ const Assistant: React.FC = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
-      <Header />
+    <div className="min-h-screen bg-background">
+      <Header onOpenDatePicker={() => {}} />
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        <div className="w-64 flex-shrink-0">
-          <ChatSidebar
-            conversations={conversations}
-            activeConversationId={activeConversationId || undefined}
-            onSelectConversation={handleSelectConversation}
-            onNewConversation={handleNewConversation}
-            onDeleteConversation={handleDeleteConversation}
-            isLoading={conversationsLoading}
-          />
-        </div>
+      <div className="h-[calc(100vh-76px)] flex flex-col overflow-hidden pt-[76px]">
+        {/* Messages with conversation dropdown */}
+        <ChatMessages
+          messages={messages}
+          isLoading={isSending || messagesLoading}
+          isStreaming={isStreaming}
+          streamingState={streamingState}
+          onApprove={(plan) => {
+            setPendingPlan(plan);
+            setPlanModalOpen(true);
+          }}
+          conversations={conversations}
+          activeConversationId={activeConversationId || undefined}
+          onSelectConversation={handleSelectConversation}
+          onNewConversation={handleNewConversation}
+        />
 
-        {/* Main chat area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Messages */}
-          <ChatMessages
-            messages={messages}
-            isLoading={isSending || messagesLoading}
-            isStreaming={isStreaming}
-            streamingState={streamingState}
-            onApprove={(plan) => {
-              setPendingPlan(plan);
-              setPlanModalOpen(true);
-            }}
-          />
-
-          {/* Input */}
-          <ChatInput
-            onSend={handleSend}
-            mode={mode}
-            onModeChange={setMode}
-            isLoading={isSending}
-            disabled={!userAccountId}
-          />
-        </div>
+        {/* Input */}
+        <ChatInput
+          onSend={handleSend}
+          mode={mode}
+          onModeChange={setMode}
+          isLoading={isSending}
+          disabled={!userAccountId}
+        />
       </div>
 
       {/* Plan approval modal */}

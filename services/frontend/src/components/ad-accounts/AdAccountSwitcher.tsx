@@ -1,15 +1,14 @@
-import React from 'react';
+import { useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import { Building2, CheckCircle, AlertCircle, Clock, Plus } from 'lucide-react';
+import { Building2, CheckCircle, AlertCircle, Clock, Plus, ChevronDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AdAccountSwitcherProps {
@@ -48,7 +47,6 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
   }
 
   // Если нет аккаунтов - не показываем ничего в хедере
-  // Кнопка "Добавить аккаунт" находится на главном экране Dashboard
   if (adAccounts.length === 0) {
     return null;
   }
@@ -57,6 +55,15 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
   const activeAccounts = adAccounts.filter(a => a.is_active);
   const currentAccount = adAccounts.find(a => a.id === currentAdAccountId);
   const canAddMore = adAccounts.length < 5;
+
+  // Debug: логируем при изменении аккаунта
+  useEffect(() => {
+    console.log('[AdAccountSwitcher] ACCOUNT CHANGED:', {
+      currentAdAccountId,
+      currentAccountName: currentAccount?.name,
+      currentAccountId: currentAccount?.id,
+    });
+  }, [currentAdAccountId, currentAccount]);
 
   // Если нет активных аккаунтов - показываем предупреждение
   if (activeAccounts.length === 0) {
@@ -79,66 +86,102 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
     );
   }
 
+  // Cache-bust для картинки - timestamp для полного сброса кэша
+  const timestamp = Date.now();
+  const getAvatarSrc = (url: string | undefined, accountId: string) => {
+    if (!url) return '';
+    return `${url}${url.includes('?') ? '&' : '?'}v=${accountId}&t=${timestamp}`;
+  };
+
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <Select
-        value={currentAdAccountId || undefined}
-        onValueChange={(value) => setCurrentAdAccountId(value)}
-      >
-        <SelectTrigger className="w-[200px] h-9">
-          <SelectValue placeholder="Выберите аккаунт">
-            {currentAccount && (
-              <div className="flex items-center gap-2">
-                <Avatar className="h-5 w-5">
-                  {currentAccount.page_picture_url ? (
-                    <AvatarImage src={currentAccount.page_picture_url} alt={currentAccount.name} />
-                  ) : null}
-                  <AvatarFallback className="text-[10px] bg-muted">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            key={`btn-${currentAdAccountId}`}
+            variant="outline"
+            className="w-[200px] h-9 justify-between px-3"
+            data-current-account={currentAccount?.name}
+          >
+            {currentAccount ? (
+              <div key={currentAccount.id} className="flex items-center gap-2 flex-1 min-w-0">
+                {/* Простой img вместо Avatar для избежания кэширования */}
+                {currentAccount.page_picture_url ? (
+                  <img
+                    key={`${currentAccount.id}-${timestamp}`}
+                    src={getAvatarSrc(currentAccount.page_picture_url, currentAccount.id)}
+                    alt={currentAccount.name}
+                    className="h-5 w-5 rounded-full flex-shrink-0 object-cover"
+                    referrerPolicy="no-referrer"
+                    loading="eager"
+                  />
+                ) : (
+                  <div className="h-5 w-5 rounded-full flex-shrink-0 bg-muted flex items-center justify-center text-[10px]">
                     {currentAccount.name?.charAt(0)?.toUpperCase() || 'A'}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="truncate">{currentAccount.name}</span>
+                  </div>
+                )}
+                <span key={`name-${currentAccount.id}`} className="truncate flex-1 text-left">
+                  {currentAccount.name}
+                </span>
                 {currentAccount.connection_status && (
-                  <span className={cn('h-2 w-2 rounded-full', {
+                  <span className={cn('h-2 w-2 rounded-full flex-shrink-0', {
                     'bg-green-500': currentAccount.connection_status === 'connected',
                     'bg-yellow-500': currentAccount.connection_status === 'pending',
                     'bg-red-500': currentAccount.connection_status === 'error',
                   })} />
                 )}
               </div>
+            ) : (
+              <span className="text-muted-foreground">Выберите аккаунт</span>
             )}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent>
+            <ChevronDown className="h-4 w-4 opacity-50 flex-shrink-0 ml-2" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-[200px]">
           {activeAccounts.map((account) => {
             const StatusIcon = STATUS_ICONS[account.connection_status as keyof typeof STATUS_ICONS] || Clock;
+            const isSelected = account.id === currentAdAccountId;
             return (
-              <SelectItem key={account.id} value={account.id}>
-                <div className="flex items-center gap-2">
-                  {/* Аватар в выпадающем списке */}
+              <DropdownMenuItem
+                key={account.id}
+                onClick={() => {
+                  console.log('[AdAccountSwitcher] select:', account.name);
+                  setCurrentAdAccountId(account.id);
+                }}
+                className="cursor-pointer"
+              >
+                <div className="flex items-center gap-2 flex-1">
                   <Avatar className="h-5 w-5">
                     {account.page_picture_url ? (
-                      <AvatarImage src={account.page_picture_url} alt={account.name} />
+                      <AvatarImage
+                        src={getAvatarSrc(account.page_picture_url, account.id)}
+                        alt={account.name}
+                        referrerPolicy="no-referrer"
+                      />
                     ) : null}
                     <AvatarFallback className="text-[10px] bg-muted">
                       {account.name?.charAt(0)?.toUpperCase() || 'A'}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="truncate">{account.name}</span>
-                  <StatusIcon
-                    className={cn(
-                      'h-3 w-3 ml-auto',
-                      STATUS_COLORS[account.connection_status as keyof typeof STATUS_COLORS] || 'text-gray-400'
-                    )}
-                  />
+                  <span className="truncate flex-1">{account.name}</span>
+                  {isSelected ? (
+                    <Check className="h-4 w-4 text-primary flex-shrink-0" />
+                  ) : (
+                    <StatusIcon
+                      className={cn(
+                        'h-3 w-3 flex-shrink-0',
+                        STATUS_COLORS[account.connection_status as keyof typeof STATUS_COLORS] || 'text-gray-400'
+                      )}
+                    />
+                  )}
                 </div>
-              </SelectItem>
+              </DropdownMenuItem>
             );
           })}
-        </SelectContent>
-      </Select>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      {/* Кнопка добавления нового аккаунта — открывает полный онбординг */}
+      {/* Кнопка добавления нового аккаунта */}
       {showAddButton && canAddMore && (
         <Button
           variant="ghost"
