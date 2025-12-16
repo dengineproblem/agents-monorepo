@@ -264,6 +264,94 @@ export function createAlertComponent({ type, message, title, dismissible = true 
 }
 
 /**
+ * Create a metrics comparison component (current vs previous period)
+ * @param {Object} options
+ * @param {Object} options.current - Current period metrics { spend, leads, cpl, ctr, cpm, cpc }
+ * @param {Object} [options.previous] - Previous period metrics
+ * @param {Object} [options.delta] - Deltas { spend_pct, leads_pct, cpl_pct, ctr_pct, cpm_pct }
+ * @param {Object} [options.periods] - Period info { current: {start, end}, previous: {start, end} }
+ * @param {string} [options.title] - Component title
+ * @returns {Object} Metrics comparison component
+ */
+export function createComparisonMetricsComponent({ current, previous, delta, periods, title }) {
+  if (!current) return null;
+
+  // Define metric rows with labels and formatting
+  const metricDefs = [
+    { key: 'spend', label: 'Расход', format: (v) => `$${(v || 0).toFixed(2)}`, deltaKey: 'spend_pct', inverse: false },
+    { key: 'leads', label: 'Лиды', format: (v) => String(v || 0), deltaKey: 'leads_pct', inverse: false },
+    { key: 'cpl', label: 'CPL', format: (v) => `$${(v || 0).toFixed(2)}`, deltaKey: 'cpl_pct', inverse: true },
+    { key: 'ctr', label: 'CTR', format: (v) => `${((v || 0) * 100).toFixed(2)}%`, deltaKey: 'ctr_pct', inverse: false },
+    { key: 'cpm', label: 'CPM', format: (v) => `$${(v || 0).toFixed(2)}`, deltaKey: 'cpm_pct', inverse: true },
+    { key: 'cpc', label: 'CPC', format: (v) => `$${(v || 0).toFixed(2)}`, deltaKey: 'cpc_pct', inverse: true }
+  ];
+
+  const rows = metricDefs
+    .filter(def => current[def.key] !== undefined)
+    .map(def => {
+      const currentVal = current[def.key];
+      const previousVal = previous?.[def.key];
+      const deltaVal = delta?.[def.deltaKey];
+
+      // Determine trend direction
+      let trend = 'neutral';
+      if (deltaVal !== undefined && deltaVal !== null && deltaVal !== 0) {
+        const isPositive = deltaVal > 0;
+        // For inverse metrics (like CPL, CPM), positive delta is bad
+        trend = def.inverse
+          ? (isPositive ? 'down' : 'up')
+          : (isPositive ? 'up' : 'down');
+      }
+
+      return {
+        label: def.label,
+        current: def.format(currentVal),
+        previous: previousVal !== undefined ? def.format(previousVal) : null,
+        delta: deltaVal !== undefined ? `${deltaVal > 0 ? '+' : ''}${deltaVal.toFixed(1)}%` : null,
+        trend,
+        inverse: def.inverse
+      };
+    });
+
+  return {
+    type: 'metrics_comparison',
+    title: title || 'Сравнение периодов',
+    data: {
+      rows,
+      periods: periods ? {
+        current: periods.current,
+        previous: periods.previous
+      } : null,
+      hasPrevious: !!previous
+    }
+  };
+}
+
+/**
+ * Create a soft confirmation component (non-blocking)
+ * For showing extracted values with option to change
+ * @param {Object} options
+ * @param {string} options.field - Field name
+ * @param {string} options.value - Extracted value
+ * @param {string} options.text - Confirmation text
+ * @param {Array} options.options - Alternative options
+ * @returns {Object} Soft confirm component
+ */
+export function createSoftConfirmComponent({ field, value, text, options }) {
+  return {
+    type: 'soft_confirm',
+    field,
+    currentValue: value,
+    text,
+    options: (options || []).map(opt => ({
+      value: typeof opt === 'string' ? opt : opt.value,
+      label: typeof opt === 'string' ? opt : opt.label
+    })),
+    dismissible: true
+  };
+}
+
+/**
  * Combine multiple components into a ui_json structure
  * @param {Array} components - Array of components
  * @returns {Object} ui_json structure
@@ -317,6 +405,8 @@ export default {
   createMetricComponent,
   createMetricsRowComponent,
   createAlertComponent,
+  createComparisonMetricsComponent,
+  createSoftConfirmComponent,
   assembleUiJson,
   createPlaybookNextSteps
 };

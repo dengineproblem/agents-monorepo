@@ -1527,5 +1527,460 @@ export const adsHandlers = {
       note: 'Результаты будут доступны через getAgentBrainActions через несколько минут',
       approval_required: false // Already approved if we got here
     };
+  },
+
+  // ============================================================
+  // PRE-CHECK & INSIGHTS HANDLERS (Hybrid MCP)
+  // ============================================================
+
+  /**
+   * Get ad account status - pre-check for playbooks
+   * Checks if account can run ads, blocking reasons, limits
+   */
+  async getAdAccountStatus({}, { accessToken, adAccountId }) {
+    // Normalize: don't add act_ prefix if already present
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    try {
+      const result = await fbGraph('GET', actId, accessToken, {
+        fields: 'account_status,disable_reason,spend_cap,amount_spent,currency,name,funding_source_details,business'
+      });
+
+      // Map FB account_status to our status enum
+      // 1 = ACTIVE, 2 = DISABLED, 3 = UNSETTLED, 7 = PENDING_RISK_REVIEW, 8 = PENDING_SETTLEMENT, 9 = IN_GRACE_PERIOD, 100 = PENDING_CLOSURE, 101 = CLOSED, 201 = ANY_ACTIVE, 202 = ANY_CLOSED
+      const statusMap = {
+        1: 'ACTIVE',
+        2: 'DISABLED',
+        3: 'PAYMENT_REQUIRED',
+        7: 'REVIEW',
+        8: 'PAYMENT_REQUIRED',
+        9: 'ACTIVE',
+        100: 'DISABLED',
+        101: 'DISABLED'
+      };
+
+      const status = statusMap[result.account_status] || 'ERROR';
+      const canRunAds = result.account_status === 1 || result.account_status === 9;
+
+      // Build blocking reasons
+      const blockingReasons = [];
+
+      if (result.account_status === 2) {
+        blockingReasons.push({
+          code: 'ACCOUNT_DISABLED',
+          message: result.disable_reason || 'Аккаунт отключён'
+        });
+      }
+
+      if (result.account_status === 3 || result.account_status === 8) {
+        blockingReasons.push({
+          code: 'BILLING',
+          message: 'Проблема с оплатой — проверьте платёжный метод'
+        });
+      }
+
+      if (result.account_status === 7) {
+        blockingReasons.push({
+          code: 'REVIEW',
+          message: 'Аккаунт на проверке — ожидайте рассмотрения'
+        });
+      }
+
+      // Check spend limits
+      const spendCap = result.spend_cap ? parseFloat(result.spend_cap) / 100 : null;
+      const amountSpent = result.amount_spent ? parseFloat(result.amount_spent) / 100 : 0;
+
+      if (spendCap && amountSpent >= spendCap * 0.95) {
+        blockingReasons.push({
+          code: 'SPEND_LIMIT',
+          message: `Лимит расхода почти исчерпан: $${amountSpent.toFixed(2)} из $${spendCap.toFixed(2)}`
+        });
+      }
+
+      return {
+        success: true,
+        status,
+        can_run_ads: canRunAds,
+        blocking_reasons: blockingReasons,
+        limits: {
+          spend_cap: spendCap,
+          amount_spent: amountSpent,
+          currency: result.currency || 'USD'
+        },
+        account: {
+          id: actId,
+          name: result.name
+        },
+        last_error: blockingReasons.length > 0 ? blockingReasons[0] : null
+      };
+    } catch (error) {
+      logger.error({ error: error.message, adAccountId }, 'getAdAccountStatus failed');
+
+      return {
+        success: false,
+        status: 'ERROR',
+        can_run_ads: false,
+        blocking_reasons: [{
+          code: 'API_ERROR',
+          message: `Не удалось проверить статус: ${error.message}`
+        }],
+        limits: { spend_cap: null, amount_spent: null, currency: 'USD' },
+        last_error: { code: 'API_ERROR', message: error.message }
+      };
+    }
+  },
+
+  /**
+   * Get direction insights with period comparison
+   * Returns current metrics + delta vs previous period
+   */
+  async getDirectionInsights({ direction_id, period = 'last_3d', compare }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Parse period
+    const periodDays = {
+      'last_3d': 3,
+      'last_7d': 7,
+      'last_14d': 14,
+      'last_30d': 30
+    }[period] || 3;
+
+    const now = new Date();
+    const currentEnd = now.toISOString().split('T')[0];
+    const currentStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Get direction info including target CPL
+    const { data: direction } = await supabase
+      .from('account_directions')
+      .select('id, name, target_cpl_cents, daily_budget_cents')
+      .eq('id', direction_id)
+      .single();
+
+    const targetCpl = direction?.target_cpl_cents ? direction.target_cpl_cents / 100 : null;
+
+    // Get current period metrics from rollup
+    let currentQuery = supabase
+      .from('direction_metrics_rollup')
+      .select('*')
+      .eq('direction_id', direction_id)
+      .eq('user_account_id', userAccountId)
+      .gte('day', currentStart)
+      .lte('day', currentEnd)
+      .order('day', { ascending: true });
+
+    if (dbAccountId) {
+      currentQuery = currentQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: currentMetrics } = await currentQuery;
+
+    // Aggregate current period
+    const current = (currentMetrics || []).reduce((acc, d) => ({
+      spend: acc.spend + parseFloat(d.spend || 0),
+      leads: acc.leads + parseInt(d.leads || 0),
+      impressions: acc.impressions + parseInt(d.impressions || 0),
+      clicks: acc.clicks + parseInt(d.clicks || 0)
+    }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
+    // Calculate derived metrics
+    current.cpl = current.leads > 0 ? current.spend / current.leads : null;
+    current.ctr = current.impressions > 0 ? (current.clicks / current.impressions) * 100 : null;
+    current.cpm = current.impressions > 0 ? (current.spend / current.impressions) * 1000 : null;
+    current.cpc = current.clicks > 0 ? current.spend / current.clicks : null;
+
+    let previous = null;
+    let delta = null;
+
+    // Get previous period if comparison requested
+    if (compare === 'previous_same') {
+      const prevEnd = new Date(new Date(currentStart).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const prevStart = new Date(new Date(prevEnd).getTime() - (periodDays - 1) * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      let prevQuery = supabase
+        .from('direction_metrics_rollup')
+        .select('*')
+        .eq('direction_id', direction_id)
+        .eq('user_account_id', userAccountId)
+        .gte('day', prevStart)
+        .lte('day', prevEnd);
+
+      if (dbAccountId) {
+        prevQuery = prevQuery.eq('account_id', dbAccountId);
+      }
+
+      const { data: prevMetrics } = await prevQuery;
+
+      previous = (prevMetrics || []).reduce((acc, d) => ({
+        spend: acc.spend + parseFloat(d.spend || 0),
+        leads: acc.leads + parseInt(d.leads || 0),
+        impressions: acc.impressions + parseInt(d.impressions || 0),
+        clicks: acc.clicks + parseInt(d.clicks || 0)
+      }), { spend: 0, leads: 0, impressions: 0, clicks: 0 });
+
+      previous.cpl = previous.leads > 0 ? previous.spend / previous.leads : null;
+      previous.ctr = previous.impressions > 0 ? (previous.clicks / previous.impressions) * 100 : null;
+      previous.cpm = previous.impressions > 0 ? (previous.spend / previous.impressions) * 1000 : null;
+      previous.cpc = previous.clicks > 0 ? previous.spend / previous.clicks : null;
+
+      // Calculate deltas
+      delta = {
+        spend_pct: previous.spend > 0 ? ((current.spend - previous.spend) / previous.spend) * 100 : null,
+        leads_pct: previous.leads > 0 ? ((current.leads - previous.leads) / previous.leads) * 100 : null,
+        cpl_pct: previous.cpl > 0 ? ((current.cpl - previous.cpl) / previous.cpl) * 100 : null,
+        ctr_pct: previous.ctr > 0 ? ((current.ctr - previous.ctr) / previous.ctr) * 100 : null,
+        cpm_pct: previous.cpm > 0 ? ((current.cpm - previous.cpm) / previous.cpm) * 100 : null
+      };
+    }
+
+    // Check guards
+    const minImpressions = Math.min(...(currentMetrics || []).map(d => parseInt(d.impressions || 0)));
+    const isSmallSample = minImpressions < 1000;
+
+    // CPL vs target analysis
+    let cplStatus = 'normal';
+    let cplVsTargetPct = null;
+    if (targetCpl && current.cpl) {
+      cplVsTargetPct = ((current.cpl - targetCpl) / targetCpl) * 100;
+      if (cplVsTargetPct > 30) {
+        cplStatus = 'high';
+      } else if (cplVsTargetPct < -20) {
+        cplStatus = 'low';
+      }
+    }
+
+    return {
+      success: true,
+      direction_id,
+      direction_name: direction?.name,
+      period: { start: currentStart, end: currentEnd },
+      current: {
+        ...current,
+        cpl: current.cpl?.toFixed(2) || null,
+        ctr: current.ctr?.toFixed(2) || null,
+        cpm: current.cpm?.toFixed(2) || null,
+        cpc: current.cpc?.toFixed(2) || null
+      },
+      previous: previous ? {
+        ...previous,
+        cpl: previous.cpl?.toFixed(2) || null,
+        ctr: previous.ctr?.toFixed(2) || null,
+        cpm: previous.cpm?.toFixed(2) || null,
+        cpc: previous.cpc?.toFixed(2) || null,
+        period: compare === 'previous_same' ? {
+          start: new Date(new Date(currentStart).getTime() - periodDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          end: new Date(new Date(currentStart).getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        } : null
+      } : null,
+      delta: delta ? {
+        spend_pct: delta.spend_pct?.toFixed(1) || null,
+        leads_pct: delta.leads_pct?.toFixed(1) || null,
+        cpl_pct: delta.cpl_pct?.toFixed(1) || null,
+        ctr_pct: delta.ctr_pct?.toFixed(1) || null,
+        cpm_pct: delta.cpm_pct?.toFixed(1) || null
+      } : null,
+      analysis: {
+        target_cpl: targetCpl,
+        cpl_vs_target_pct: cplVsTargetPct?.toFixed(1) || null,
+        cpl_status: cplStatus,
+        is_small_sample: isSmallSample
+      },
+      source: 'rollup'
+    };
+  },
+
+  /**
+   * Get leads engagement rate (2+ messages)
+   * Quality metric for lead quality assessment
+   */
+  async getLeadsEngagementRate({ direction_id, period = 'last_7d' }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    const periodDays = {
+      'last_3d': 3,
+      'last_7d': 7,
+      'last_14d': 14,
+      'last_30d': 30
+    }[period] || 7;
+
+    const since = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
+
+    // Get leads for the period
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, chat_id')
+      .eq('user_account_id', userAccountId)
+      .gte('created_at', since);
+
+    if (dbAccountId) {
+      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      leadsQuery = leadsQuery.eq('direction_id', direction_id);
+    }
+
+    const { data: leads, error: leadsError } = await leadsQuery;
+
+    if (leadsError) {
+      return { success: false, error: leadsError.message };
+    }
+
+    const totalLeads = leads?.length || 0;
+
+    if (totalLeads === 0) {
+      return {
+        success: true,
+        period,
+        leads_total: 0,
+        leads_with_2plus_msgs: 0,
+        engagement_rate: 0,
+        source: 'no_leads'
+      };
+    }
+
+    // Get chat_ids
+    const chatIds = leads.map(l => l.chat_id).filter(Boolean);
+
+    if (chatIds.length === 0) {
+      return {
+        success: true,
+        period,
+        leads_total: totalLeads,
+        leads_with_2plus_msgs: 0,
+        engagement_rate: 0,
+        source: 'no_chat_ids'
+      };
+    }
+
+    // Count messages per chat from dialogs table
+    let dialogsQuery = supabase
+      .from('dialogs')
+      .select('id, phone, messages_count')
+      .eq('user_account_id', userAccountId)
+      .in('phone', chatIds);
+
+    if (dbAccountId) {
+      dialogsQuery = dialogsQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: dialogs } = await dialogsQuery;
+
+    // Count leads with 2+ messages
+    let leadsWithEngagement = 0;
+    const engagedChatIds = new Set();
+
+    for (const dialog of dialogs || []) {
+      if ((dialog.messages_count || 0) >= 2) {
+        engagedChatIds.add(dialog.phone);
+      }
+    }
+
+    leadsWithEngagement = leads.filter(l => engagedChatIds.has(l.chat_id)).length;
+
+    const engagementRate = totalLeads > 0 ? (leadsWithEngagement / totalLeads) * 100 : 0;
+
+    return {
+      success: true,
+      period,
+      leads_total: totalLeads,
+      leads_with_2plus_msgs: leadsWithEngagement,
+      engagement_rate: engagementRate.toFixed(1),
+      source: 'dialogs'
+    };
+  },
+
+  /**
+   * Competitor analysis from Facebook Ad Library
+   * Returns insights about competitor ads (graceful fallback if not configured)
+   */
+  async competitorAnalysis({ direction_id, keywords }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Get direction for context
+    const { data: direction } = await supabase
+      .from('account_directions')
+      .select('id, name')
+      .eq('id', direction_id)
+      .single();
+
+    // Check if competitor tracking is configured
+    // For now, return graceful fallback since this requires separate setup
+    const { data: competitorConfig } = await supabase
+      .from('user_settings')
+      .select('competitor_tracking_enabled')
+      .eq('user_account_id', userAccountId)
+      .single();
+
+    if (!competitorConfig?.competitor_tracking_enabled) {
+      return {
+        success: true,
+        status: 'not_configured',
+        message: 'Отслеживание конкурентов не настроено',
+        direction: direction?.name,
+        setup_guide: 'Для включения анализа конкурентов добавьте ключевые слова в настройках или используйте параметр keywords',
+        recommendations: [
+          'Настройте ключевые слова для отслеживания конкурентов',
+          'Используйте Facebook Ad Library напрямую: https://www.facebook.com/ads/library'
+        ]
+      };
+    }
+
+    // If configured, fetch from competitor_ads table (pre-collected data)
+    let competitorQuery = supabase
+      .from('competitor_ads')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (dbAccountId) {
+      competitorQuery = competitorQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      competitorQuery = competitorQuery.eq('direction_id', direction_id);
+    }
+
+    const { data: competitorAds } = await competitorQuery;
+
+    if (!competitorAds || competitorAds.length === 0) {
+      return {
+        success: true,
+        status: 'no_data',
+        message: 'Нет данных о конкурентах за последний период',
+        direction: direction?.name,
+        recommendations: ['Проверьте настройки отслеживания', 'Добавьте больше ключевых слов']
+      };
+    }
+
+    // Group by competitor
+    const byCompetitor = {};
+    for (const ad of competitorAds) {
+      const key = ad.competitor_name || 'Unknown';
+      if (!byCompetitor[key]) {
+        byCompetitor[key] = { ads: [], creativeTypes: new Set(), angles: [] };
+      }
+      byCompetitor[key].ads.push(ad);
+      if (ad.creative_type) byCompetitor[key].creativeTypes.add(ad.creative_type);
+      if (ad.angle) byCompetitor[key].angles.push(ad.angle);
+    }
+
+    const insights = Object.entries(byCompetitor).map(([name, data]) => ({
+      competitor: name,
+      ad_count: data.ads.length,
+      creative_types: Array.from(data.creativeTypes),
+      top_angles: [...new Set(data.angles)].slice(0, 3)
+    }));
+
+    return {
+      success: true,
+      status: 'success',
+      direction: direction?.name,
+      competitors_found: insights.length,
+      ads_analyzed: competitorAds.length,
+      insights,
+      recommendations: [
+        insights.length > 0 ? `Конкуренты активно используют: ${insights[0].creative_types.join(', ')}` : null,
+        'Проанализируйте успешные форматы конкурентов'
+      ].filter(Boolean)
+    };
   }
 };

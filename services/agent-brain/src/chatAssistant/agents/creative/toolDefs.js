@@ -1,7 +1,7 @@
 /**
  * CreativeAgent Tool Definitions
  * Zod schemas as single source of truth for validation
- * 15 tools: 10 READ + 5 WRITE
+ * 16 tools: 10 READ + 6 WRITE
  */
 
 import { z } from 'zod';
@@ -164,6 +164,17 @@ export const CreativeToolDefs = {
       operation_id: operationIdOption
     }),
     meta: { timeout: 20000, retryable: false, dangerous: false }
+  },
+
+  generateCreatives: {
+    description: 'Запустить генерацию новых креативов для направления. Graceful fallback если сервис не подключен.',
+    schema: z.object({
+      direction_id: uuidSchema.describe('UUID направления для генерации'),
+      offer_hints: z.array(z.string()).optional().describe('Подсказки по офферу'),
+      angles: z.array(z.string()).optional().describe('Рекламные углы/подходы'),
+      count: z.number().min(1).max(10).default(3).describe('Количество креативов для генерации')
+    }),
+    meta: { timeout: 30000, retryable: false, dangerous: true }
   }
 };
 
@@ -173,10 +184,11 @@ export const CREATIVE_WRITE_TOOLS = [
   'launchCreative',
   'pauseCreative',
   'startCreativeTest',
-  'stopCreativeTest'
+  'stopCreativeTest',
+  'generateCreatives'
 ];
 
 // Dangerous tools that ALWAYS require confirmation
-export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest', 'pauseCreative'];
+export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest', 'pauseCreative', 'generateCreatives'];
 
 export default CreativeToolDefs;

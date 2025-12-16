@@ -1,7 +1,7 @@
 /**
  * CRMAgent Tool Definitions
  * Zod schemas as single source of truth for validation
- * 4 tools: 3 READ + 1 WRITE
+ * 5 tools: 4 READ + 1 WRITE
  */
 
 import { z } from 'zod';
@@ -9,6 +9,8 @@ import { z } from 'zod';
 // Common schemas
 const nonEmptyString = (field) => z.string().min(1, `${field} is required`);
 const periodSchema = z.enum(['today', 'yesterday', 'last_7d', 'last_30d']);
+const extendedPeriodSchema = z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']);
+const uuidSchema = z.string().uuid('Invalid UUID format');
 
 export const CrmToolDefs = {
   // ============================================================
@@ -41,6 +43,15 @@ export const CrmToolDefs = {
       period: periodSchema
     }),
     meta: { timeout: 20000, retryable: true }
+  },
+
+  getSalesQuality: {
+    description: 'Получить показатели качества продаж: количество продаж, сумма, квалифицированные лиды, конверсия. KPI ladder для анализа CPL.',
+    schema: z.object({
+      direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
+      period: extendedPeriodSchema.default('last_7d').describe('Период для анализа')
+    }),
+    meta: { timeout: 25000, retryable: true }
   },
 
   // ============================================================

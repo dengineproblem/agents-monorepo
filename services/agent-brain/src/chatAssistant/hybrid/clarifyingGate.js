@@ -299,13 +299,13 @@ export class ClarifyingGate {
   }
 
   /**
-   * Оценить вопросы из playbook с поддержкой askIf/alwaysAsk
+   * Оценить вопросы из playbook с поддержкой askIf/alwaysAsk/softConfirm
    * @param {Object} params
    * @param {string} params.message - Сообщение пользователя
    * @param {Array} params.questions - Вопросы из playbook
    * @param {Object} params.businessContext - Бизнес-контекст для условий
    * @param {Object} params.existingAnswers - Уже полученные ответы
-   * @returns {{ needsClarifying: boolean, questions: Array, answers: Object, uiComponents: Array }}
+   * @returns {{ needsClarifying: boolean, questions: Array, answers: Object, uiComponents: Array, softConfirmations: Array }}
    */
   evaluateWithPlaybook({ message, questions, businessContext = {}, existingAnswers = {} }) {
     if (!questions || questions.length === 0) {
@@ -313,12 +313,14 @@ export class ClarifyingGate {
         needsClarifying: false,
         questions: [],
         answers: existingAnswers,
-        uiComponents: []
+        uiComponents: [],
+        softConfirmations: []
       };
     }
 
     const pendingQuestions = [];
     const uiComponents = [];
+    const softConfirmations = [];
 
     // Подготавливаем контекст для проверки условий
     const evalContext = {
@@ -356,7 +358,36 @@ export class ClarifyingGate {
         continue;
       }
 
-      // alwaysAsk — всегда задаём
+      // === softConfirm логика ===
+      // Если alwaysAsk + softConfirm и период уже в сообщении — мягкое подтверждение
+      if (q.alwaysAsk && q.softConfirm) {
+        const extracted = this.extractFromMessage(message, q.type);
+        if (extracted !== null) {
+          // Период указан → используем его, но добавляем мягкое подтверждение
+          existingAnswers[field] = extracted;
+
+          // Добавляем soft confirmation для UI (не блокирует выполнение)
+          softConfirmations.push({
+            field: field,
+            value: extracted,
+            text: this.formatSoftConfirmText(q, extracted),
+            options: q.options || [],
+            type: 'soft_confirm'
+          });
+          continue;
+        }
+
+        // Период не указан → полный вопрос
+        pendingQuestions.push(q);
+
+        // Формируем UI component
+        if (q.options) {
+          uiComponents.push(this.createChoiceComponent(q));
+        }
+        continue;
+      }
+
+      // alwaysAsk без softConfirm — всегда задаём
       if (!q.alwaysAsk) {
         // Пробуем извлечь ответ из сообщения
         const extracted = this.extractFromMessage(message, q.type);
@@ -388,6 +419,7 @@ export class ClarifyingGate {
     logger.debug({
       totalQuestions: questions.length,
       pending: pendingQuestions.length,
+      softConfirms: softConfirmations.length,
       answered: Object.keys(existingAnswers).length,
       evalContext: { isVague: evalContext.isVague, extractedPeriod: evalContext.extractedPeriod }
     }, 'ClarifyingGate playbook evaluation');
@@ -398,8 +430,36 @@ export class ClarifyingGate {
       answers: existingAnswers,
       complete: !needsClarifying,
       uiComponents,
+      softConfirmations,
       formatForUser: () => this.formatQuestions(pendingQuestions, { intent: 'playbook' })
     };
+  }
+
+  /**
+   * Форматировать текст для мягкого подтверждения
+   * @param {Object} question
+   * @param {string} extractedValue
+   * @returns {string}
+   */
+  formatSoftConfirmText(question, extractedValue) {
+    const periodLabels = {
+      'today': 'сегодня',
+      'yesterday': 'вчера',
+      'last_3d': 'последние 3 дня',
+      'last_7d': 'последние 7 дней',
+      'last_14d': 'последние 14 дней',
+      'last_30d': 'последние 30 дней',
+      'last_week': 'прошлую неделю',
+      'last_month': 'прошлый месяц'
+    };
+
+    const label = periodLabels[extractedValue] || extractedValue;
+
+    if (question.type === QUESTION_TYPES.PERIOD) {
+      return `Смотрю за ${label}. Другой период?`;
+    }
+
+    return `Использую: ${label}. Изменить?`;
   }
 
   /**

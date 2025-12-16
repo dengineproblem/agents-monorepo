@@ -6,7 +6,7 @@
  * - Tool descriptions
  * - Metadata (timeout, retryable, dangerous)
  *
- * 15 tools: 7 READ + 8 WRITE
+ * 19 tools: 11 READ + 8 WRITE
  */
 
 import { z } from 'zod';
@@ -98,6 +98,44 @@ export const AdsToolDefs = {
       period: directionPeriodSchema.optional().describe('Период для метрик')
     }),
     meta: { timeout: 20000, retryable: true }
+  },
+
+  // ============================================================
+  // READ TOOLS - Pre-checks & Insights
+  // ============================================================
+
+  getAdAccountStatus: {
+    description: 'Проверить статус рекламного аккаунта: может ли крутить рекламу, причины блокировки, лимиты расхода. Используй как pre-check перед анализом.',
+    schema: z.object({}),
+    meta: { timeout: 15000, retryable: true }
+  },
+
+  getDirectionInsights: {
+    description: 'Получить метрики направления с сравнением vs предыдущий период. Включает CPL, CTR, CPM, CPC и delta.',
+    schema: z.object({
+      direction_id: uuidSchema.describe('UUID направления'),
+      period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']).default('last_3d').describe('Период для метрик'),
+      compare: z.enum(['previous_same', 'previous_7d']).optional().describe('Сравнить с предыдущим периодом')
+    }),
+    meta: { timeout: 25000, retryable: true }
+  },
+
+  getLeadsEngagementRate: {
+    description: 'Получить показатель вовлечённости лидов (2+ сообщения). Используй для оценки качества трафика.',
+    schema: z.object({
+      direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
+      period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']).default('last_7d').describe('Период для анализа')
+    }),
+    meta: { timeout: 20000, retryable: true }
+  },
+
+  competitorAnalysis: {
+    description: 'Анализ конкурентных объявлений из Facebook Ad Library. Показывает топ-креативы конкурентов и рекомендации.',
+    schema: z.object({
+      direction_id: uuidSchema.describe('UUID направления для контекста'),
+      keywords: z.array(z.string()).optional().describe('Ключевые слова для поиска конкурентов')
+    }),
+    meta: { timeout: 30000, retryable: true }
   },
 
   // ============================================================

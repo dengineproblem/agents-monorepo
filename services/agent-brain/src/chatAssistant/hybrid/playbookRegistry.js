@@ -104,64 +104,129 @@ export const PLAYBOOKS = {
   lead_expensive: {
     id: 'lead_expensive',
     name: 'Дорогой лид',
-    intents: ['cpl_analysis', 'lead_expensive', 'high_cpl'],
+    intents: ['cpl_analysis', 'lead_expensive', 'high_cpl', 'why_expensive'],
     domain: 'ads',
+
+    // Pre-checks перед анализом
+    prechecks: [
+      { tool: 'getAdAccountStatus', onFail: 'return_status_fix_flow' }
+    ],
+
     tiers: {
       snapshot: {
-        tools: ['getDirections', 'getSpendReport'],
-        maxToolCalls: 3,
-        dangerousPolicy: 'block'
+        tools: ['getAdAccountStatus', 'getDirections', 'getDirectionInsights'],
+        maxToolCalls: 4,
+        dangerousPolicy: 'block',
+        output: ['cpl_vs_target', 'spend_leads_impr', 'cpm_ctr_cpc', 'compare_prev']
       },
       drilldown: {
-        tools: ['getCampaigns', 'getAdSets', 'getCreativeScores', 'getTopCreatives'],
-        maxToolCalls: 5,
+        tools: [
+          // Branch A: Funnel breakdown
+          'getDirectionInsights',
+          // Branch C: Top creatives
+          'getTopCreatives', 'getCreativeMetrics', 'getCreativeScores',
+          // Branch E: Lead quality
+          'getSalesQuality', 'getLeadsEngagementRate',
+          // Branch F: Actions preview
+          'getAgentBrainActions'
+        ],
+        maxToolCalls: 6,
         dangerousPolicy: 'block',
         enterIf: ['user_chose_drilldown']
       },
       actions: {
-        tools: ['pauseCampaign', 'pauseAdSet', 'updateBudget'],
+        tools: ['triggerBrainOptimizationRun', 'generateCreatives', 'competitorAnalysis'],
         maxToolCalls: 3,
         dangerousPolicy: 'require_approval'
       }
     },
+
     clarifyingQuestions: [
       {
         field: 'period',
         type: 'period',
-        text: 'За какой период анализировать CPL?',
+        text: 'За какой период смотреть?',
+        options: [
+          { value: 'last_3d', label: '3 дня (рекомендуется)' },
+          { value: 'last_7d', label: '7 дней' },
+          { value: 'last_14d', label: '14 дней' },
+          { value: 'last_30d', label: '30 дней' }
+        ],
         default: 'last_3d',
-        askIf: 'period_not_in_message'
+        alwaysAsk: true,
+        softConfirm: true  // Мягкое подтверждение если период уже указан
       },
       {
         field: 'direction',
         type: 'entity',
-        text: 'Какое направление?',
+        text: 'По какому направлению?',
         askIf: 'directions_count > 1'
       }
     ],
+
+    // Ветки drilldown
+    drilldownBranches: [
+      { id: 'funnel_breakdown', label: 'A: Разложить воронку (CPM→CTR→CPC→CVR)', icon: '📊' },
+      { id: 'top_creatives', label: 'C: Топ-3 креатива по spend', icon: '🎨' },
+      { id: 'lead_quality', label: 'E: Проверить качество лидов', icon: '✅', showIf: 'hasCRM || hasWhatsApp' },
+      { id: 'actions_menu', label: 'F: Предложить действия', icon: '⚡' }
+    ],
+
     nextSteps: [
       {
-        id: 'drilldown_adsets',
-        label: 'Разбить по адсетам',
+        id: 'funnel_breakdown',
+        label: 'Разложить воронку',
         targetTier: 'drilldown',
-        icon: '🔍'
+        icon: '📊',
+        branch: 'funnel_breakdown'
       },
       {
-        id: 'drilldown_creatives',
+        id: 'top_creatives',
         label: 'Посмотреть креативы',
         targetTier: 'drilldown',
-        icon: '🎨'
+        icon: '🎨',
+        branch: 'top_creatives'
       },
       {
-        id: 'pause_expensive',
-        label: 'Остановить дорогие',
+        id: 'lead_quality',
+        label: 'Проверить качество',
+        targetTier: 'drilldown',
+        icon: '✅',
+        branch: 'lead_quality',
+        showIf: 'hasCRM || hasWhatsApp'
+      },
+      {
+        id: 'run_optimization',
+        label: 'Запустить оптимизацию',
         targetTier: 'actions',
-        icon: '⏸️'
+        icon: '🤖',
+        style: 'warning'
+      },
+      {
+        id: 'generate_creatives',
+        label: 'Новые креативы',
+        targetTier: 'actions',
+        icon: '✨'
+      },
+      {
+        id: 'competitor_analysis',
+        label: 'Анализ конкурентов',
+        targetTier: 'actions',
+        icon: '🔍'
       }
     ],
+
     enterConditions: {
       isHighCPL: { expression: 'cpl > targetCpl * 1.3' },
-      isSmallSample: { expression: 'impressions < 1000' }
+      isSmallSample: { expression: 'min_adset_impressions < 1000' }
+    },
+
+    guards: {
+      smallSample: {
+        when: 'min_adset_impressions < 1000',
+        messageKey: 'small_sample_disclaimer',
+        message: 'По части адсетов < 1000 показов — выводы могут быть шумными'
+      }
     }
   },
 

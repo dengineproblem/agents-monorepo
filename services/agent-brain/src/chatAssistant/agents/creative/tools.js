@@ -1,6 +1,6 @@
 /**
  * CreativeAgent Tools - Creative Management
- * 15 tools: 10 READ + 5 WRITE
+ * 16 tools: 10 READ + 6 WRITE
  */
 
 export const CREATIVE_TOOLS = [
@@ -282,6 +282,34 @@ export const CREATIVE_TOOLS = [
       },
       required: ['creative_id']
     }
+  },
+  {
+    name: 'generateCreatives',
+    description: 'Запустить генерацию новых креативов для направления. Graceful fallback если сервис не подключен.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления для генерации'
+        },
+        offer_hints: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Подсказки по офферу (опционально)'
+        },
+        angles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Рекламные углы/подходы (опционально)'
+        },
+        count: {
+          type: 'number',
+          description: 'Количество креативов для генерации (по умолчанию 3)'
+        }
+      },
+      required: ['direction_id']
+    }
   }
 ];
 
@@ -291,8 +319,9 @@ export const CREATIVE_WRITE_TOOLS = [
   'launchCreative',
   'pauseCreative',
   'startCreativeTest',
-  'stopCreativeTest'
+  'stopCreativeTest',
+  'generateCreatives'
 ];
 
 // Dangerous tools that ALWAYS require confirmation
-export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest'];
+export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest', 'generateCreatives'];

@@ -30,7 +30,7 @@ User Request
 ### AdsAgent — Реклама и Направления
 **Путь:** `services/agent-brain/src/chatAssistant/agents/ads/`
 
-**19 инструментов:**
+**23 инструмента:**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -44,6 +44,10 @@ User Request
 | `getROIReport` | READ | Отчёт по ROI креативов (расходы, выручка, ROI%, лиды, конверсии) |
 | `getROIComparison` | READ | Сравнение ROI между креативами или направлениями |
 | `getAgentBrainActions` | READ | История действий Brain Agent за период |
+| `getAdAccountStatus` | READ | Pre-check статуса аккаунта (ACTIVE/PAUSED/DISABLED) |
+| `getDirectionInsights` | READ | Метрики направления с compare периодов (delta %) |
+| `getLeadsEngagementRate` | READ | Вовлечённость лидов (% с 2+ сообщениями) |
+| `competitorAnalysis` | READ | Анализ конкурентов (Ad Library) с graceful fallback |
 | `pauseCampaign` | WRITE | Пауза кампании |
 | `resumeCampaign` | WRITE | Возобновление кампании |
 | `pauseAdSet` | WRITE | Пауза адсета |
@@ -65,7 +69,7 @@ User Request
 ### CreativeAgent — Креативы
 **Путь:** `services/agent-brain/src/chatAssistant/agents/creative/`
 
-**15 инструментов:**
+**16 инструментов:**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -84,6 +88,7 @@ User Request
 | `pauseCreative` | WRITE | Пауза всех объявлений креатива |
 | `startCreativeTest` | WRITE | Запуск A/B теста (~$20) |
 | `stopCreativeTest` | WRITE | Остановка теста |
+| `generateCreatives` | WRITE | Генерация новых креативов (graceful fallback) |
 
 **Файлы:**
 - `index.js` — класс CreativeAgent
@@ -103,7 +108,7 @@ User Request
 ### CRMAgent — Лиды
 **Путь:** `services/agent-brain/src/chatAssistant/agents/crm/`
 
-**5 инструментов:**
+**6 инструментов:**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -111,6 +116,7 @@ User Request
 | `getLeadDetails` | READ | Детали лида (контакты, анализ диалога) |
 | `getFunnelStats` | READ | Статистика воронки продаж |
 | `getRevenueStats` | READ | Статистика выручки (сумма, ср. чек, конверсия, топ покупателей) |
+| `getSalesQuality` | READ | KPI ladder: продажи, qual_rate, конверсия |
 | `updateLeadStage` | WRITE | Изменение этапа воронки |
 
 ---
@@ -2002,6 +2008,7 @@ async getCampaigns(params, context) {
 | `UICard.tsx` | Карточка с метриками и действиями |
 | `UITable.tsx` | Сортируемая таблица |
 | `UICopyField.tsx` | Поле с кнопкой копирования |
+| `UIMetricsComparison.tsx` | Сравнение метрик двух периодов (delta %) |
 | `UIComponent.tsx` | Router для рендеринга разных типов |
 
 ### Хранение
@@ -3806,7 +3813,7 @@ const nextSteps = playbookRegistry.getNextSteps('ads_not_working', snapshotData)
 |----|--------|--------|----------|
 | `ads_not_working` | ads | no_results, zero_spend | Реклама не работает |
 | `spend_report` | ads | spend_report | Отчёт по расходам |
-| `lead_expensive` | crm | expensive_leads | Дорогие лиды |
+| `lead_expensive` | ads | cpl_analysis, high_cpl | Дорогие лиды (с pre-checks, softConfirm) |
 | `roi_analysis` | ads | roi_report | Анализ ROI |
 | `creative_performance` | creative | creative_top | Эффективность креативов |
 | `budget_change` | ads | budget_change | Изменение бюджета |
@@ -3821,41 +3828,84 @@ const nextSteps = playbookRegistry.getNextSteps('ads_not_working', snapshotData)
 
 ```javascript
 const PLAYBOOK_EXAMPLE = {
-  id: 'ads_not_working',
-  intents: ['ads_not_working', 'no_results', 'zero_spend'],
+  id: 'lead_expensive',
+  name: 'Дорогой лид',
+  intents: ['cpl_analysis', 'lead_expensive', 'high_cpl', 'why_expensive'],
   domain: 'ads',
+
+  // Pre-checks — выполняются ДО основного flow
+  prechecks: [
+    { tool: 'getAdAccountStatus', onFail: 'return_status_fix_flow' }
+  ],
 
   tiers: {
     snapshot: {
-      tools: ['getDirections', 'getSpendReport'],
+      tools: ['getAdAccountStatus', 'getDirections', 'getDirectionInsights'],
       maxToolCalls: 4,
-      dangerousPolicy: 'block'
+      dangerousPolicy: 'block',
+      output: ['cpl_vs_target', 'spend_leads_impr', 'cpm_ctr_cpc', 'compare_prev']
     },
     drilldown: {
-      tools: ['getCampaigns', 'getAdSets', 'getTopCreatives'],
-      maxToolCalls: 5,
-      enterIf: ['user_chose_drilldown', 'isHighCPL']
+      tools: [
+        'getDirectionInsights', 'getTopCreatives', 'getCreativeMetrics',
+        'getCreativeAnalysis', 'getSalesQuality', 'getLeadsEngagementRate',
+        'getAgentBrainActions'
+      ],
+      maxToolCalls: 6,
+      dangerousPolicy: 'block',
+      enterIf: ['user_chose_drilldown']
     },
     actions: {
-      tools: ['pauseCampaign', 'updateBudget', 'pauseDirection'],
+      tools: ['triggerBrainOptimizationRun', 'generateCreatives', 'competitorAnalysis'],
       dangerousPolicy: 'require_approval',
       maxToolCalls: 3
     }
   },
 
   clarifyingQuestions: [
-    { field: 'period', type: 'period', default: 'last_3d', askIf: 'period_not_in_message' },
+    {
+      field: 'period',
+      type: 'period',
+      text: 'За какой период смотреть?',
+      options: [
+        { value: 'last_3d', label: '3 дня (рекомендуется)' },
+        { value: 'last_7d', label: '7 дней' },
+        { value: 'last_14d', label: '14 дней' }
+      ],
+      default: 'last_3d',
+      alwaysAsk: true,
+      softConfirm: true  // НЕ блокирует — показывает "Смотрю за X. Другой период?"
+    },
     { field: 'direction', type: 'entity', askIf: 'directions_count > 1' }
   ],
 
+  // Ветки для drilldown tier
+  drilldownBranches: [
+    { id: 'funnel_breakdown', label: 'A: Разложить воронку (CPM→CTR→CPC→CVR)', icon: '📊' },
+    { id: 'top_creatives', label: 'C: Топ-3 креатива по spend', icon: '🎨' },
+    { id: 'lead_quality', label: 'E: Проверить качество лидов', icon: '✅', showIf: 'hasCRM || hasWhatsApp' },
+    { id: 'actions_menu', label: 'F: Предложить действия', icon: '⚡' }
+  ],
+
   nextSteps: [
-    { id: 'drilldown_creatives', label: 'Посмотреть креативы', targetTier: 'drilldown', icon: '🎨' },
-    { id: 'pause_worst', label: 'Остановить худшие', targetTier: 'actions', icon: '⏸️' }
+    { id: 'funnel_breakdown', label: 'Разложить воронку', targetTier: 'drilldown', icon: '📊' },
+    { id: 'top_creatives', label: 'Посмотреть креативы', targetTier: 'drilldown', icon: '🎨' },
+    { id: 'lead_quality', label: 'Проверить качество', targetTier: 'drilldown', icon: '✅', showIf: 'hasCRM || hasWhatsApp' },
+    { id: 'run_optimization', label: 'Запустить оптимизацию', targetTier: 'actions', icon: '🤖', style: 'warning' },
+    { id: 'generate_creatives', label: 'Новые креативы', targetTier: 'actions', icon: '✨' }
   ],
 
   enterConditions: {
-    isSmallSample: { expression: 'impressions < 1000' },
-    isHighCPL: { expression: 'cpl > targetCpl * 1.3' }
+    isHighCPL: { expression: 'cpl > targetCpl * 1.3' },
+    isSmallSample: { expression: 'min_adset_impressions < 1000' }
+  },
+
+  // Guards — предупреждения на основе условий
+  guards: {
+    smallSample: {
+      when: 'min_adset_impressions < 1000',
+      message: 'По части адсетов < 1000 показов — выводы могут быть шумными'
+    }
   }
 };
 ```
@@ -3961,7 +4011,9 @@ import {
   createMetricsRowComponent,
   createAlertComponent,
   assembleUiJson,
-  createPlaybookNextSteps
+  createPlaybookNextSteps,
+  createComparisonMetricsComponent,  // NEW: Сравнение периодов
+  createSoftConfirmComponent         // NEW: Мягкое подтверждение
 } from './hybrid/index.js';
 
 // Actions menu (next steps)
@@ -4004,8 +4056,31 @@ const metrics = createMetricsRowComponent([
   { label: 'CPL', value: 25.5, unit: '₽', trend: 'down', trendValue: '-5%' }
 ]);
 
+// NEW: Metrics comparison (сравнение периодов)
+const comparison = createComparisonMetricsComponent({
+  current: { spend: 5000, leads: 25, cpl: 200, ctr: 2.5, cpm: 150 },
+  previous: { spend: 4500, leads: 20, cpl: 225, ctr: 2.2, cpm: 140 },
+  delta: { spend_pct: 11.1, leads_pct: 25, cpl_pct: -11.1, ctr_pct: 13.6, cpm_pct: 7.1 },
+  periods: {
+    current: { start: '2024-01-10', end: '2024-01-12' },
+    previous: { start: '2024-01-07', end: '2024-01-09' }
+  }
+});
+
+// NEW: Soft confirm (мягкое подтверждение периода)
+const softConfirm = createSoftConfirmComponent({
+  field: 'period',
+  value: 'last_3d',
+  text: 'Смотрю за последние 3 дня',
+  altText: 'Другой период?',
+  options: [
+    { value: 'last_7d', label: '7 дней' },
+    { value: 'last_14d', label: '14 дней' }
+  ]
+});
+
 // Assemble all components
-const uiJson = assembleUiJson([progress, metrics, actions]);
+const uiJson = assembleUiJson([progress, comparison, metrics, actions]);
 ```
 
 **Типы компонентов:**
@@ -4020,6 +4095,8 @@ const uiJson = assembleUiJson([progress, metrics, actions]);
 | `cards` | Карточки сущностей |
 | `metric` | Одна KPI метрика |
 | `metrics_row` | Ряд метрик |
+| `metrics_comparison` | Сравнение метрик двух периодов |
+| `soft_confirm` | Мягкое подтверждение (не блокирует) |
 | `alert` | Уведомление/warning |
 
 ---
@@ -4099,6 +4176,229 @@ triggerBrainOptimizationRun: {
   message: 'Brain Agent запущен, результаты через 1-2 минуты'
 }
 ```
+
+---
+
+### Hybrid Tools (Phase 6)
+
+#### getAdAccountStatus
+
+Pre-check tool для проверки статуса рекламного аккаунта:
+
+```javascript
+// Tool Definition
+getAdAccountStatus: {
+  description: 'Pre-check: статус рекламного аккаунта',
+  schema: z.object({}),  // Нет параметров, использует context
+  meta: { timeout: 15000, retryable: true }
+}
+
+// Response
+{
+  success: true,
+  status: 'ACTIVE',  // ACTIVE | PAUSED | DISABLED | PAYMENT_REQUIRED | REVIEW | ERROR
+  can_run_ads: true,
+  blocking_reasons: [],
+  limits: { spend_cap: 100000, amount_spent: 45000, currency: 'KZT' },
+  last_error: null
+}
+```
+
+#### getDirectionInsights
+
+Метрики направления с compare периодов:
+
+```javascript
+// Tool Definition
+getDirectionInsights: {
+  description: 'Метрики направления с compare периодов',
+  schema: z.object({
+    direction_id: uuidSchema,
+    period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']),
+    compare: z.enum(['previous_same', 'previous_7d']).optional()
+  }),
+  meta: { timeout: 25000, retryable: true }
+}
+
+// Response
+{
+  success: true,
+  current: { spend: 5000, leads: 25, cpl: 200, ctr: 2.5, cpm: 150 },
+  previous: { spend: 4500, leads: 20, cpl: 225, ctr: 2.2, cpm: 140 },
+  delta: { spend_pct: 11.1, leads_pct: 25, cpl_pct: -11.1, ctr_pct: 13.6, cpm_pct: 7.1 },
+  period: { start: '2024-01-10', end: '2024-01-12' },
+  previous_period: { start: '2024-01-07', end: '2024-01-09' }
+}
+```
+
+#### getSalesQuality
+
+KPI ladder: продажи и качество лидов:
+
+```javascript
+// Tool Definition (CRM Agent)
+getSalesQuality: {
+  description: 'KPI ladder: продажи, qual_rate, конверсия',
+  schema: z.object({
+    direction_id: uuidSchema.optional(),
+    period: z.enum(['last_7d', 'last_14d', 'last_30d'])
+  }),
+  meta: { timeout: 20000, retryable: true }
+}
+
+// Response
+{
+  success: true,
+  sales_count: 12,
+  sales_amount: 450000,
+  leads_total: 45,
+  qualified_count: 28,
+  qual_rate: 62.2,        // qualified / leads_total
+  conversion_rate: 26.7,  // sales / leads_total
+  attribution: 'crm_primary'
+}
+```
+
+#### getLeadsEngagementRate
+
+Вовлечённость лидов (% с 2+ сообщениями):
+
+```javascript
+// Tool Definition
+getLeadsEngagementRate: {
+  description: 'Вовлечённость лидов (% с 2+ сообщениями)',
+  schema: z.object({
+    direction_id: uuidSchema.optional(),
+    period: z.enum(['last_7d', 'last_14d', 'last_30d'])
+  }),
+  meta: { timeout: 20000, retryable: true }
+}
+
+// Response
+{
+  success: true,
+  leads_total: 45,
+  leads_with_2plus_msgs: 32,
+  engagement_rate: 71.1,
+  source: 'meta_messages'  // или 'whatsapp'
+}
+```
+
+#### generateCreatives
+
+Генерация новых креативов с graceful fallback:
+
+```javascript
+// Tool Definition (Creative Agent)
+generateCreatives: {
+  description: 'Генерация новых креативов. Graceful fallback если сервис не подключен.',
+  schema: z.object({
+    direction_id: uuidSchema,
+    offer_hints: z.array(z.string()).optional(),
+    angles: z.array(z.string()).optional(),
+    count: z.number().min(1).max(10).default(3)
+  }),
+  meta: { timeout: 30000, retryable: false, dangerous: true }
+}
+
+// Response (success)
+{
+  success: true,
+  status: 'queued',
+  job_id: 'uuid',
+  creatives_count: 3,
+  estimated_time_sec: 120
+}
+
+// Response (not configured - graceful fallback)
+{
+  success: true,
+  status: 'not_configured',
+  message: 'Сервис генерации креативов не подключен',
+  setup_guide: 'Подключите creative-generation-service для автоматической генерации'
+}
+```
+
+#### competitorAnalysis
+
+Анализ конкурентов (Ad Library) с graceful fallback:
+
+```javascript
+// Tool Definition
+competitorAnalysis: {
+  description: 'Анализ конкурентов через Ad Library',
+  schema: z.object({
+    direction_id: uuidSchema,
+    competitors: z.array(z.string()).optional()
+  }),
+  meta: { timeout: 30000, retryable: true }
+}
+
+// Response (success)
+{
+  success: true,
+  competitors_found: 5,
+  ads_analyzed: 23,
+  insights: [
+    { competitor: 'Competitor A', ad_count: 8, avg_spend_estimate: 'High', top_angles: ['price', 'quality'] }
+  ],
+  recommendations: ['Попробуйте акцент на срочность', 'Видео форматы работают лучше']
+}
+
+// Response (not configured)
+{
+  success: true,
+  status: 'not_configured',
+  message: 'Отслеживание конкурентов не настроено'
+}
+```
+
+---
+
+### Response Templates (`hybrid/responseTemplates.js`)
+
+Шаблоны текстовых ответов для playbooks:
+
+```javascript
+import {
+  LEAD_EXPENSIVE_TEMPLATES,
+  ADS_NOT_WORKING_TEMPLATES,
+  NO_SALES_TEMPLATES,
+  GENERAL_TEMPLATES,
+  formatTemplate,
+  selectLeadExpensiveTemplates
+} from './hybrid/responseTemplates.js';
+
+// Format template with values
+const message = formatTemplate(
+  LEAD_EXPENSIVE_TEMPLATES.summary.highCPL,
+  { cpl: 250, target_cpl: 180, delta_pct: 39 }
+);
+// → "CPL 250₸ — на 39% выше целевого (180₸)"
+
+// Auto-select templates based on metrics
+const messages = selectLeadExpensiveTemplates(
+  { cpl: 250, target_cpl: 180, impressions: 500 },
+  { cpm_pct: 25, ctr_pct: -18 }
+);
+// → [
+//   { type: 'summary', text: 'CPL 250₸ — на 39% выше целевого...' },
+//   { type: 'insight', text: '📈 CPM вырос на 25% — аудитория дорожает...' },
+//   { type: 'insight', text: '📉 CTR упал на 18% — креативы устарели...' },
+//   { type: 'warning', text: '⚠️ Мало данных (<1000 показов)...' }
+// ]
+```
+
+**Категории шаблонов:**
+
+| Категория | Описание |
+|-----------|----------|
+| `summary` | Главное заключение (highCPL, improving, stable, noData) |
+| `insights` | Выводы по метрикам (cpm_high, ctr_low, audience_fatigue) |
+| `diagnostics` | Диагностика воронки (funnel_top, funnel_middle) |
+| `recommendations` | Рекомендации к действию (pause_worst, test_new) |
+| `nextStepsContext` | Контекст для next steps (hasCRM, hasWhatsApp) |
+| `periodLabels` | Человекочитаемые названия периодов |
 
 ---
 
@@ -4330,10 +4630,11 @@ chatAssistant/hybrid/
 ├── index.js                # Экспорты + HYBRID_CONFIG
 ├── policyEngine.js         # Intent detection + policy resolution
 ├── toolFilter.js           # Фильтрация tools для OpenAI
-├── clarifyingGate.js       # Уточняющие вопросы (+ askIf, vague detection)
+├── clarifyingGate.js       # Уточняющие вопросы (+ askIf, softConfirm)
 ├── responseAssembler.js    # Сборка финального ответа (+ tier UI)
 ├── playbookRegistry.js     # 10 playbooks + PlaybookRegistry class
 ├── tierManager.js          # TierManager class для переходов
 ├── expressionEvaluator.js  # Безопасный eval для условий
-└── uiComponents.js         # UI components для Web
+├── uiComponents.js         # UI components для Web
+└── responseTemplates.js    # Шаблоны текстовых ответов для playbooks
 ```

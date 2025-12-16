@@ -776,5 +776,111 @@ export const creativeHandlers = {
       success: true,
       message: 'Тест остановлен'
     };
+  },
+
+  /**
+   * generateCreatives - Генерация новых креативов на основе направления
+   * Graceful fallback если сервис генерации не подключен
+   */
+  async generateCreatives({ direction_id, offer_hints, angles, count = 3 }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Check if creative generation service is configured
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      // Graceful fallback
+      return {
+        success: true,
+        status: 'not_configured',
+        message: 'Сервис генерации креативов не подключен',
+        setup_guide: 'Для автоматической генерации креативов необходимо подключить Creative Generation Service. Обратитесь к администратору.',
+        recommendations: [
+          'Вы можете загрузить креативы вручную через интерфейс',
+          'Или использовать существующие креативы из библиотеки'
+        ]
+      };
+    }
+
+    // Get direction details for context
+    const { data: direction, error: dirError } = await supabase
+      .from('account_directions')
+      .select('id, name, description, objective, target_audience')
+      .eq('id', direction_id)
+      .eq('user_account_id', userAccountId)
+      .single();
+
+    if (dirError || !direction) {
+      return { success: false, error: 'Направление не найдено' };
+    }
+
+    try {
+      // Call creative generation service
+      const response = await fetch(`${creativeServiceUrl}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          direction_id,
+          direction_name: direction.name,
+          direction_description: direction.description,
+          objective: direction.objective,
+          target_audience: direction.target_audience,
+          offer_hints: offer_hints || [],
+          angles: angles || [],
+          count,
+          user_account_id: userAccountId,
+          account_id: dbAccountId
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        logger.error({ status: response.status, error: errorData }, 'Creative generation failed');
+
+        return {
+          success: true,
+          status: 'error',
+          message: 'Ошибка генерации креативов',
+          error_details: errorData.message || 'Сервис временно недоступен'
+        };
+      }
+
+      const result = await response.json();
+
+      // Log the generation request
+      await supabase.from('agent_logs').insert({
+        ad_account_id: dbAccountId,
+        level: 'info',
+        message: `Creative generation requested for direction ${direction.name}`,
+        context: {
+          direction_id,
+          count,
+          job_id: result.job_id,
+          source: 'CreativeAgent'
+        }
+      });
+
+      return {
+        success: true,
+        status: result.status || 'queued',
+        job_id: result.job_id,
+        creatives_count: count,
+        estimated_time_sec: result.estimated_time_sec || 120,
+        message: `Запущена генерация ${count} креативов для направления "${direction.name}"`
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to call creative generation service');
+
+      return {
+        success: true,
+        status: 'service_unavailable',
+        message: 'Сервис генерации временно недоступен',
+        recommendations: [
+          'Попробуйте позже',
+          'Или загрузите креативы вручную'
+        ]
+      };
+    }
   }
 };

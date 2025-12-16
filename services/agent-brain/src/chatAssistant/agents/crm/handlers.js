@@ -399,5 +399,113 @@ export const crmHandlers = {
       conversionRate_formatted: `${conversionRate}%`,
       topBuyers
     };
+  },
+
+  /**
+   * getSalesQuality - KPI ladder для анализа качества трафика
+   * Возвращает: sales_count, sales_amount, leads_total, qualified_count, qual_rate, conversion_rate
+   */
+  async getSalesQuality({ direction_id, period }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Period to days
+    const periodDays = {
+      'last_3d': 3,
+      'last_7d': 7,
+      'last_14d': 14,
+      'last_30d': 30
+    }[period] || 7;
+
+    const since = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() - periodDays);
+      d.setHours(0, 0, 0, 0);
+      return d.toISOString();
+    })();
+
+    // Step 1: Get leads
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, chat_id, name, direction_id, is_qualified, created_at')
+      .eq('user_account_id', userAccountId)
+      .gte('created_at', since);
+
+    if (dbAccountId) {
+      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      leadsQuery = leadsQuery.eq('direction_id', direction_id);
+    }
+
+    const { data: leadsData, error: leadsError } = await leadsQuery;
+
+    if (leadsError) {
+      return { success: false, error: `Ошибка загрузки лидов: ${leadsError.message}` };
+    }
+
+    const leads = leadsData || [];
+    const leads_total = leads.length;
+    const qualified_count = leads.filter(l => l.is_qualified === true).length;
+
+    // Step 2: Get purchases linked to leads
+    const leadPhones = leads.map(l => l.chat_id).filter(Boolean);
+
+    if (leadPhones.length === 0) {
+      return {
+        success: true,
+        sales_count: 0,
+        sales_amount: 0,
+        sales_amount_formatted: '0 ₸',
+        leads_total,
+        qualified_count,
+        qual_rate: 0,
+        qual_rate_formatted: '0%',
+        conversion_rate: 0,
+        conversion_rate_formatted: '0%',
+        attribution: 'crm_primary',
+        period
+      };
+    }
+
+    let purchasesQuery = supabase
+      .from('purchases')
+      .select('id, client_phone, amount, created_at')
+      .eq('user_account_id', userAccountId)
+      .in('client_phone', leadPhones)
+      .gte('created_at', since);
+
+    if (dbAccountId) {
+      purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: purchasesData, error: purchasesError } = await purchasesQuery;
+
+    if (purchasesError) {
+      return { success: false, error: `Ошибка загрузки продаж: ${purchasesError.message}` };
+    }
+
+    // Calculate stats
+    const sales_count = purchasesData?.length || 0;
+    const sales_amount = purchasesData?.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) || 0;
+
+    // Unique buyers for conversion
+    const uniqueBuyers = new Set(purchasesData?.map(p => p.client_phone) || []);
+    const conversion_rate = leads_total > 0 ? Math.round((uniqueBuyers.size / leads_total) * 100) : 0;
+    const qual_rate = leads_total > 0 ? Math.round((qualified_count / leads_total) * 100) : 0;
+
+    return {
+      success: true,
+      sales_count,
+      sales_amount,
+      sales_amount_formatted: `${(sales_amount / 1000).toFixed(0)}K ₸`,
+      leads_total,
+      qualified_count,
+      qual_rate,
+      qual_rate_formatted: `${qual_rate}%`,
+      conversion_rate,
+      conversion_rate_formatted: `${conversion_rate}%`,
+      attribution: 'crm_primary',
+      period
+    };
   }
 };

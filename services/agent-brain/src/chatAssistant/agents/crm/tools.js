@@ -1,6 +1,6 @@
 /**
  * CRMAgent Tools - Leads & Funnel
- * 4 tools: 3 READ + 1 WRITE
+ * 6 tools: 5 READ + 1 WRITE
  */
 
 export const CRM_TOOLS = [
@@ -83,6 +83,24 @@ export const CRM_TOOLS = [
         }
       },
       required: ['period']
+    }
+  },
+  {
+    name: 'getSalesQuality',
+    description: 'Получить показатели качества продаж: количество продаж, сумма, квалифицированные лиды, конверсия. KPI ladder для анализа CPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления для фильтрации (опционально)'
+        },
+        period: {
+          type: 'string',
+          enum: ['last_3d', 'last_7d', 'last_14d', 'last_30d'],
+          description: 'Период для анализа (по умолчанию last_7d)'
+        }
+      }
     }
   },
 

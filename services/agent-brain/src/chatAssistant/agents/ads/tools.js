@@ -1,6 +1,6 @@
 /**
  * AdsAgent Tools - Facebook/Instagram Advertising
- * 15 tools: 7 READ + 8 WRITE
+ * 19 tools: 11 READ + 8 WRITE
  */
 
 export const ADS_TOOLS = [
@@ -186,6 +186,80 @@ export const ADS_TOOLS = [
         }
       },
       required: ['compare_by']
+    }
+  },
+
+  // ============================================================
+  // READ TOOLS - Pre-checks & Insights (Hybrid MCP)
+  // ============================================================
+  {
+    name: 'getAdAccountStatus',
+    description: 'Проверить статус рекламного аккаунта: может ли крутить рекламу, причины блокировки, лимиты. Используй как pre-check перед анализом.',
+    parameters: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'getDirectionInsights',
+    description: 'Получить метрики направления с сравнением vs предыдущий период. Включает CPL, CTR, CPM, CPC и delta.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления'
+        },
+        period: {
+          type: 'string',
+          enum: ['last_3d', 'last_7d', 'last_14d', 'last_30d'],
+          description: 'Период для метрик (по умолчанию last_3d)'
+        },
+        compare: {
+          type: 'string',
+          enum: ['previous_same', 'previous_7d'],
+          description: 'Сравнить с предыдущим периодом той же длины'
+        }
+      },
+      required: ['direction_id']
+    }
+  },
+  {
+    name: 'getLeadsEngagementRate',
+    description: 'Получить показатель вовлечённости лидов (2+ сообщения). Используй для оценки качества трафика.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления для фильтрации (опционально)'
+        },
+        period: {
+          type: 'string',
+          enum: ['last_3d', 'last_7d', 'last_14d', 'last_30d'],
+          description: 'Период для анализа'
+        }
+      },
+      required: ['period']
+    }
+  },
+  {
+    name: 'competitorAnalysis',
+    description: 'Анализ конкурентных объявлений из Facebook Ad Library. Показывает топ-креативы конкурентов и рекомендации.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления для контекста'
+        },
+        keywords: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Ключевые слова для поиска конкурентов'
+        }
+      },
+      required: ['direction_id']
     }
   },
 

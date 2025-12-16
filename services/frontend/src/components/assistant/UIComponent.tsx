@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { UICard } from './UICard';
 import { UITable } from './UITable';
 import { UICopyField } from './UICopyField';
+import { UIMetricsComparison } from './UIMetricsComparison';
 import type { UIComponentData, ButtonData, QuickActionsData, QuickAction } from '@/types/assistantUI';
 
 interface UIComponentProps {
@@ -27,6 +28,9 @@ export function UIComponent({ component, onAction }: UIComponentProps) {
 
     case 'quick_actions':
       return <UIQuickActions data={data as QuickActionsData} onAction={onAction} />;
+
+    case 'metrics_comparison':
+      return <UIMetricsComparison data={data} title={component.title} />;
 
     default:
       console.warn(`Unknown UI component type: ${type}`);
