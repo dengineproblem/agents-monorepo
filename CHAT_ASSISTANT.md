@@ -2492,27 +2492,155 @@ const session = getSession(sessionId);
 // → { userAccountId, adAccountId, accessToken }
 ```
 
-### MCP Tools (Phase 2: WhatsApp)
+### MCP Tools (Phase 4: Все агенты)
+
+**Всего: 38 tools** (WhatsApp 4 + CRM 4 + Creative 15 + Ads 15)
+
+#### WhatsApp Agent (4 READ)
+
+| Tool | Описание |
+|------|----------|
+| `getDialogs` | Список WhatsApp диалогов |
+| `getDialogMessages` | Сообщения диалога |
+| `analyzeDialog` | AI-анализ диалога |
+| `searchDialogSummaries` | Поиск по истории |
+
+#### CRM Agent (3 READ + 1 WRITE)
 
 | Tool | Описание | Тип |
 |------|----------|-----|
-| `getDialogs` | Список WhatsApp диалогов | READ |
-| `getDialogMessages` | Сообщения диалога | READ |
-| `analyzeDialog` | AI-анализ диалога | READ |
-| `searchDialogSummaries` | Поиск по истории | READ |
+| `getLeads` | Список лидов | READ |
+| `getLeadDetails` | Детали лида | READ |
+| `getFunnelStats` | Статистика воронки | READ |
+| `updateLeadStage` | Изменить этап лида | WRITE |
 
-**Следующие фазы:**
-- Phase 4: CRM (4 tools), Creative (15 tools), Ads (15 tools)
-- Phase 5: Brain (Autopilot) migration
+#### Creative Agent (10 READ + 5 WRITE)
+
+| Tool | Описание | Тип |
+|------|----------|-----|
+| `getCreatives` | Список креативов | READ |
+| `getCreativeDetails` | Детали креатива | READ |
+| `getCreativeMetrics` | Метрики креатива | READ |
+| `getCreativeAnalysis` | AI-анализ креатива | READ |
+| `getTopCreatives` | Топ креативы | READ |
+| `getWorstCreatives` | Худшие креативы | READ |
+| `compareCreatives` | Сравнение креативов | READ |
+| `getCreativeScores` | Risk scores | READ |
+| `getCreativeTests` | Список тестов | READ |
+| `getCreativeTranscript` | Транскрипт видео | READ |
+| `triggerCreativeAnalysis` | Запуск анализа | WRITE |
+| `launchCreative` | Запуск креатива | ⚠️ DANGEROUS |
+| `pauseCreative` | Пауза креатива | ⚠️ DANGEROUS |
+| `startCreativeTest` | Запуск теста (~$20) | ⚠️ DANGEROUS |
+| `stopCreativeTest` | Остановка теста | WRITE |
+
+#### Ads Agent (7 READ + 8 WRITE)
+
+| Tool | Описание | Тип |
+|------|----------|-----|
+| `getCampaigns` | Список кампаний | READ |
+| `getCampaignDetails` | Детали кампании | READ |
+| `getAdSets` | Список adsets | READ |
+| `getSpendReport` | Отчёт по расходам | READ |
+| `getDirections` | Список направлений | READ |
+| `getDirectionDetails` | Детали направления | READ |
+| `getDirectionMetrics` | Метрики направления | READ |
+| `pauseCampaign` | Пауза кампании | ⚠️ DANGEROUS |
+| `resumeCampaign` | Возобновление кампании | WRITE |
+| `pauseAdSet` | Пауза adset | ⚠️ DANGEROUS |
+| `resumeAdSet` | Возобновление adset | WRITE |
+| `updateBudget` | Изменение бюджета | ⚠️ DANGEROUS |
+| `updateDirectionBudget` | Изменение бюджета направления | ⚠️ DANGEROUS |
+| `updateDirectionTargetCPL` | Изменение target CPL | WRITE |
+| `pauseDirection` | Пауза направления | ⚠️ DANGEROUS |
+
+### DANGEROUS_TOOLS
+
+Инструменты, требующие подтверждения (тратят бюджет или необратимы):
+
+```javascript
+export const DANGEROUS_TOOLS = [
+  // Creative (3)
+  'launchCreative',      // Тратит бюджет
+  'pauseCreative',       // Останавливает рекламу
+  'startCreativeTest',   // Тратит ~$20
+  // Ads (5)
+  'pauseCampaign',       // Останавливает кампанию
+  'pauseAdSet',          // Останавливает adset
+  'updateBudget',        // Меняет расход
+  'updateDirectionBudget', // Меняет расход
+  'pauseDirection'       // Останавливает все ads направления
+];
+```
 
 ### MCP Resources (Phase 3)
 
-| URI | Описание |
-|-----|----------|
-| `project://metrics/today` | Метрики за 7 дней |
-| `project://snapshot/business` | Business snapshot |
-| `project://notes/{domain}` | Agent notes |
-| `project://brain/actions` | Brain history |
+| URI | Источник | Описание |
+|-----|----------|----------|
+| `project://metrics/today` | `scoring_executions.scoring_output` | Метрики за 7 дней (spend, leads, CPL, CTR) |
+| `project://snapshot/business` | Aggregated | Полный snapshot (ads, directions, creatives, notes) |
+| `project://notes/{domain}` | `agent_notes` | Заметки по домену (ads, creative, crm, whatsapp) |
+| `project://brain/actions` | `brain_executions` | История Brain за 3 дня |
+
+#### Resource: metrics/today
+
+```javascript
+// Возвращает агрегированные метрики из scoring_output
+{
+  period: 'last_7d',
+  spend: 1234.56,
+  leads: 50,
+  cpl: 24.69,
+  impressions: 100000,
+  clicks: 5000,
+  ctr: 5.0,
+  activeAdsets: 5,
+  activeCreatives: 12,
+  dataDate: '2024-01-15T10:00:00Z'
+}
+```
+
+#### Resource: snapshot/business
+
+```javascript
+// Параллельно загружает 4 секции
+{
+  ads: { spend, leads, cpl, topAdset, worstAdset, ... },
+  directions: { count, totalSpend, topDirection, ... },
+  creatives: { totalWithScores, avgRiskScore, highRiskCreatives, ... },
+  notes: { ads: [...], creative: [...], ... },
+  generatedAt: '2024-01-15T10:00:00Z',
+  latencyMs: 150
+}
+```
+
+#### Resource: notes/{domain}
+
+```javascript
+// Заметки агента по домену (max 20)
+{
+  domain: 'ads',
+  notes: [
+    { id, text, source, importance, created_at },
+    ...
+  ],
+  total: 15
+}
+```
+
+#### Resource: brain/actions
+
+```javascript
+// История Brain executions за 3 дня
+{
+  period: 'last_3d',
+  executions: [
+    { id, status, createdAt, plan, actions },
+    ...
+  ],
+  total: 5
+}
+```
 
 ### Конфигурация
 
