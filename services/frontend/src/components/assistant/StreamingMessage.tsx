@@ -6,7 +6,7 @@
 
 import { Bot, Loader2, CheckCircle2, Sparkles, Database, BarChart3, MessageSquare, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import ReactMarkdown from 'react-markdown';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { getToolLabel } from '@/services/assistantApi';
 import type { StreamEvent } from '@/services/assistantApi';
 
@@ -91,20 +91,12 @@ export function StreamingMessage({ state }: StreamingMessageProps) {
           </div>
         )}
 
-        {/* Current Tool (if running) */}
-        {state.currentTool && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>{getToolLabel(state.currentTool)}</span>
-          </div>
-        )}
-
         {/* Streaming Text */}
         {state.text && (
-          <div className="prose prose-sm max-w-none">
-            <ReactMarkdown>{state.text}</ReactMarkdown>
+          <div className="relative">
+            <MarkdownRenderer content={state.text} />
             {state.phase === 'processing' && (
-              <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5" />
+              <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-middle" />
             )}
           </div>
         )}
