@@ -17,7 +17,7 @@ import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } 
 import { unifiedStore } from '../stores/unifiedStore.js';
 import { getBusinessSnapshot, formatSnapshotForPrompt, getRecentBrainActions, getIntegrations, formatIntegrationsForPrompt } from '../contextGatherer.js';
 
-const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
+const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY

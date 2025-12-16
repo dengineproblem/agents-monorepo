@@ -7,7 +7,7 @@ import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
 
-const SUMMARY_MODEL = process.env.SUMMARY_MODEL || 'gpt-4o-mini';
+const SUMMARY_MODEL = process.env.SUMMARY_MODEL || 'gpt-5-mini';
 
 // Thresholds for triggering summary update
 const MIN_MESSAGES_FOR_SUMMARY = 20;       // Don't summarize until we have this many messages

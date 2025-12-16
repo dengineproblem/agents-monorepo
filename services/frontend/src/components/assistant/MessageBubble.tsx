@@ -179,7 +179,9 @@ function ActionItem({ action }: { action: ExecutedAction }) {
     <div
       className={cn(
         'flex items-center gap-2 text-xs p-2 rounded',
-        isSuccess ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+        isSuccess
+          ? 'bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-400'
+          : 'bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-400'
       )}
     >
       {isSuccess ? (

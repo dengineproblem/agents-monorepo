@@ -12,7 +12,7 @@ const openai = new OpenAI({
 });
 
 // Use a faster model for classification
-const CLASSIFIER_MODEL = 'gpt-4o-mini';
+const CLASSIFIER_MODEL = 'gpt-5-mini';
 
 /**
  * Domain keywords for quick classification

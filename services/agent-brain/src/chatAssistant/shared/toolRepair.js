@@ -11,7 +11,7 @@ import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
 import { toolRegistry } from './toolRegistry.js';
 
-const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
+const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 const MAX_REPAIR_ATTEMPTS = 2;
 
 const openai = new OpenAI({

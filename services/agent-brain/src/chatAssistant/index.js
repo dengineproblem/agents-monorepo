@@ -28,7 +28,7 @@ import {
 } from './telegramHandler.js';
 // conversationStore deprecated, use unifiedStore instead (imported dynamically in executeFullPlan)
 
-const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
+const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 const MAX_TOOL_CALLS = 5; // Prevent infinite loops
 
 // Use multi-agent orchestrator

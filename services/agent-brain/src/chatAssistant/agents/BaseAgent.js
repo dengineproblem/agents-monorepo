@@ -14,7 +14,7 @@ import { withTimeout } from '../shared/retryUtils.js';
 import { executeWithIdempotency } from '../shared/idempotentExecutor.js';
 import { attemptToolRepair, isRepairableError } from '../shared/toolRepair.js';
 
-const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-4o';
+const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 const MAX_TOOL_CALLS = 5;
 const MAX_STREAM_ITERATIONS = 5;
 

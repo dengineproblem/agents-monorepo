@@ -128,7 +128,9 @@ function ToolProgressItem({ tool }: { tool: ToolExecution }) {
   return (
     <div className={cn(
       'flex items-center gap-2 text-xs px-2 py-1 rounded',
-      isRunning ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'
+      isRunning
+        ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400'
+        : 'bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400'
     )}>
       {isRunning ? (
         <Loader2 className="h-3 w-3 animate-spin" />
