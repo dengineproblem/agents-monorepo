@@ -2,6 +2,8 @@
  * MCP Module Entry Point
  *
  * Exports all MCP functionality for use in agent-brain.
+ *
+ * Phase 4: All agents enabled (WhatsApp, CRM, Creative, Ads)
  */
 
 export { registerMCPRoutes } from './server.js';
@@ -10,6 +12,7 @@ export { handleMCPRequest } from './protocol.js';
 export { getToolRegistry, getToolHandler, hasToolHandler } from './tools/registry.js';
 export { executeToolWithContext } from './tools/executor.js';
 export { getResourceRegistry, readResource } from './resources/registry.js';
+export { DANGEROUS_TOOLS, isDangerousTool } from './tools/definitions.js';
 
 /**
  * MCP Configuration
@@ -21,8 +24,8 @@ export const MCP_CONFIG = {
   get serverUrl() {
     return process.env.MCP_SERVER_URL || 'http://localhost:7080/mcp';
   },
-  // Phase 2: Only WhatsApp enabled
-  enabledAgents: ['whatsapp'],
+  // Phase 4: All agents enabled
+  enabledAgents: ['whatsapp', 'crm', 'creative', 'ads'],
   // Fallback to legacy orchestrator if MCP fails
   fallbackToLegacy: true
 };

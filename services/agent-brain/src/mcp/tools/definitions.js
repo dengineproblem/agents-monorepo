@@ -3,11 +3,28 @@
  *
  * Конвертирует существующие toolDefs агентов в формат MCP.
  * Использует zod-to-json-schema для преобразования Zod схем в JSON Schema.
+ *
+ * Phase 4: All agents (WhatsApp, CRM, Creative, Ads)
+ * Total: 38 tools (4 + 4 + 15 + 15)
  */
 
 import { zodToJsonSchema } from 'zod-to-json-schema';
+
+// WhatsApp Agent (4 READ-only tools)
 import { WhatsappToolDefs } from '../../chatAssistant/agents/whatsapp/toolDefs.js';
 import { whatsappHandlers } from '../../chatAssistant/agents/whatsapp/handlers.js';
+
+// CRM Agent (3 READ + 1 WRITE tools)
+import { CrmToolDefs } from '../../chatAssistant/agents/crm/toolDefs.js';
+import { crmHandlers } from '../../chatAssistant/agents/crm/handlers.js';
+
+// Creative Agent (10 READ + 5 WRITE tools)
+import { CreativeToolDefs, CREATIVE_DANGEROUS_TOOLS } from '../../chatAssistant/agents/creative/toolDefs.js';
+import { creativeHandlers } from '../../chatAssistant/agents/creative/handlers.js';
+
+// Ads Agent (7 READ + 8 WRITE tools)
+import { AdsToolDefs } from '../../chatAssistant/agents/ads/toolDefs.js';
+import { adsHandlers } from '../../chatAssistant/agents/ads/handlers.js';
 
 /**
  * Convert Zod schema to JSON Schema for MCP
@@ -55,13 +72,74 @@ export const whatsappTools = [
 ];
 
 /**
- * All MCP tools - will be extended with other agents in future phases
- * Phase 2: WhatsApp (4 tools)
- * Phase 4: CRM (4 tools), Creative (15 tools), Ads (15 tools)
+ * CRM Agent Tools (3 READ + 1 WRITE)
+ */
+export const crmTools = [
+  // READ tools
+  createMCPTool('getLeads', CrmToolDefs.getLeads, crmHandlers.getLeads, 'crm'),
+  createMCPTool('getLeadDetails', CrmToolDefs.getLeadDetails, crmHandlers.getLeadDetails, 'crm'),
+  createMCPTool('getFunnelStats', CrmToolDefs.getFunnelStats, crmHandlers.getFunnelStats, 'crm'),
+  // WRITE tools
+  createMCPTool('updateLeadStage', CrmToolDefs.updateLeadStage, crmHandlers.updateLeadStage, 'crm')
+];
+
+/**
+ * Creative Agent Tools (10 READ + 5 WRITE)
+ */
+export const creativeTools = [
+  // READ tools
+  createMCPTool('getCreatives', CreativeToolDefs.getCreatives, creativeHandlers.getCreatives, 'creative'),
+  createMCPTool('getCreativeDetails', CreativeToolDefs.getCreativeDetails, creativeHandlers.getCreativeDetails, 'creative'),
+  createMCPTool('getCreativeMetrics', CreativeToolDefs.getCreativeMetrics, creativeHandlers.getCreativeMetrics, 'creative'),
+  createMCPTool('getCreativeAnalysis', CreativeToolDefs.getCreativeAnalysis, creativeHandlers.getCreativeAnalysis, 'creative'),
+  createMCPTool('getTopCreatives', CreativeToolDefs.getTopCreatives, creativeHandlers.getTopCreatives, 'creative'),
+  createMCPTool('getWorstCreatives', CreativeToolDefs.getWorstCreatives, creativeHandlers.getWorstCreatives, 'creative'),
+  createMCPTool('compareCreatives', CreativeToolDefs.compareCreatives, creativeHandlers.compareCreatives, 'creative'),
+  createMCPTool('getCreativeScores', CreativeToolDefs.getCreativeScores, creativeHandlers.getCreativeScores, 'creative'),
+  createMCPTool('getCreativeTests', CreativeToolDefs.getCreativeTests, creativeHandlers.getCreativeTests, 'creative'),
+  createMCPTool('getCreativeTranscript', CreativeToolDefs.getCreativeTranscript, creativeHandlers.getCreativeTranscript, 'creative'),
+  // WRITE tools
+  createMCPTool('triggerCreativeAnalysis', CreativeToolDefs.triggerCreativeAnalysis, creativeHandlers.triggerCreativeAnalysis, 'creative'),
+  createMCPTool('launchCreative', CreativeToolDefs.launchCreative, creativeHandlers.launchCreative, 'creative'),
+  createMCPTool('pauseCreative', CreativeToolDefs.pauseCreative, creativeHandlers.pauseCreative, 'creative'),
+  createMCPTool('startCreativeTest', CreativeToolDefs.startCreativeTest, creativeHandlers.startCreativeTest, 'creative'),
+  createMCPTool('stopCreativeTest', CreativeToolDefs.stopCreativeTest, creativeHandlers.stopCreativeTest, 'creative')
+];
+
+/**
+ * Ads Agent Tools (7 READ + 8 WRITE)
+ */
+export const adsTools = [
+  // READ tools - Campaigns & AdSets
+  createMCPTool('getCampaigns', AdsToolDefs.getCampaigns, adsHandlers.getCampaigns, 'ads'),
+  createMCPTool('getCampaignDetails', AdsToolDefs.getCampaignDetails, adsHandlers.getCampaignDetails, 'ads'),
+  createMCPTool('getAdSets', AdsToolDefs.getAdSets, adsHandlers.getAdSets, 'ads'),
+  createMCPTool('getSpendReport', AdsToolDefs.getSpendReport, adsHandlers.getSpendReport, 'ads'),
+  // READ tools - Directions
+  createMCPTool('getDirections', AdsToolDefs.getDirections, adsHandlers.getDirections, 'ads'),
+  createMCPTool('getDirectionDetails', AdsToolDefs.getDirectionDetails, adsHandlers.getDirectionDetails, 'ads'),
+  createMCPTool('getDirectionMetrics', AdsToolDefs.getDirectionMetrics, adsHandlers.getDirectionMetrics, 'ads'),
+  // WRITE tools - Campaigns & AdSets
+  createMCPTool('pauseCampaign', AdsToolDefs.pauseCampaign, adsHandlers.pauseCampaign, 'ads'),
+  createMCPTool('resumeCampaign', AdsToolDefs.resumeCampaign, adsHandlers.resumeCampaign, 'ads'),
+  createMCPTool('pauseAdSet', AdsToolDefs.pauseAdSet, adsHandlers.pauseAdSet, 'ads'),
+  createMCPTool('resumeAdSet', AdsToolDefs.resumeAdSet, adsHandlers.resumeAdSet, 'ads'),
+  createMCPTool('updateBudget', AdsToolDefs.updateBudget, adsHandlers.updateBudget, 'ads'),
+  // WRITE tools - Directions
+  createMCPTool('updateDirectionBudget', AdsToolDefs.updateDirectionBudget, adsHandlers.updateDirectionBudget, 'ads'),
+  createMCPTool('updateDirectionTargetCPL', AdsToolDefs.updateDirectionTargetCPL, adsHandlers.updateDirectionTargetCPL, 'ads'),
+  createMCPTool('pauseDirection', AdsToolDefs.pauseDirection, adsHandlers.pauseDirection, 'ads')
+];
+
+/**
+ * All MCP tools - Phase 4 complete
+ * WhatsApp (4) + CRM (4) + Creative (15) + Ads (15) = 38 tools
  */
 export const allMCPTools = [
-  ...whatsappTools
-  // TODO Phase 4: Add CRM, Creative, Ads tools
+  ...whatsappTools,
+  ...crmTools,
+  ...creativeTools,
+  ...adsTools
 ];
 
 /**
@@ -80,6 +158,32 @@ export function getToolByName(name) {
  */
 export function getToolsByAgent(agent) {
   return allMCPTools.filter(t => t.agent === agent);
+}
+
+/**
+ * List of dangerous tools that require confirmation
+ * These tools can spend money or make irreversible changes
+ */
+export const DANGEROUS_TOOLS = [
+  // Creative (3 dangerous)
+  'launchCreative',      // Spends budget
+  'pauseCreative',       // Stops ads
+  'startCreativeTest',   // Spends ~$20
+  // Ads (6 dangerous)
+  'pauseCampaign',       // Stops campaign
+  'pauseAdSet',          // Stops adset
+  'updateBudget',        // Changes spending
+  'updateDirectionBudget', // Changes spending
+  'pauseDirection'       // Stops all direction ads
+];
+
+/**
+ * Check if a tool is dangerous
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+export function isDangerousTool(toolName) {
+  return DANGEROUS_TOOLS.includes(toolName);
 }
 
 export default allMCPTools;
