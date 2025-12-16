@@ -1,11 +1,14 @@
 /**
  * Request Classifier
  * Determines which agent(s) should handle a user request
+ *
+ * Extended (Hybrid C): Now detects intent for policy-based tool filtering
  */
 
 import OpenAI from 'openai';
 import { logger } from '../../lib/logger.js';
 import { logErrorToAdmin } from '../../lib/errorLogger.js';
+import { policyEngine } from '../hybrid/policyEngine.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -87,19 +90,29 @@ function quickClassify(message) {
 
   // If only one domain matched, return it
   if (topDomains.length === 1 && maxScore >= 2) {
+    // Detect intent using PolicyEngine
+    const intentResult = policyEngine.detectIntent(message);
+
     return {
       domain: topDomains[0],
       agents: topDomains,
-      confidence: Math.min(maxScore * 0.3, 0.9)
+      confidence: Math.min(maxScore * 0.3, 0.9),
+      intent: intentResult.intent,
+      intentConfidence: intentResult.confidence
     };
   }
 
   // Multiple domains or low confidence - need LLM
   if (topDomains.length > 1) {
+    // Detect intent for mixed requests
+    const intentResult = policyEngine.detectIntent(message);
+
     return {
       domain: 'mixed',
       agents: topDomains,
-      confidence: 0.5
+      confidence: 0.5,
+      intent: intentResult.intent,
+      intentConfidence: intentResult.confidence
     };
   }
 
@@ -165,10 +178,15 @@ async function llmClassify(message, context) {
         agents = validAgents.includes(domain) ? [domain] : validAgents;
       }
 
+      // Detect intent using PolicyEngine
+      const intentResult = policyEngine.detectIntent(message);
+
       return {
         domain,
         agents,
-        instructions: parsed.instructions || ''
+        instructions: parsed.instructions || '',
+        intent: intentResult.intent,
+        intentConfidence: intentResult.confidence
       };
     }
   } catch (error) {
@@ -183,11 +201,15 @@ async function llmClassify(message, context) {
     }).catch(() => {});
   }
 
-  // Default fallback
+  // Default fallback - also detect intent
+  const intentResult = policyEngine.detectIntent(message);
+
   return {
     domain: 'ads',
     agents: ['ads'],
-    instructions: ''
+    instructions: '',
+    intent: intentResult.intent,
+    intentConfidence: intentResult.confidence
   };
 }
 
@@ -195,7 +217,7 @@ async function llmClassify(message, context) {
  * Classify a user request to determine which agent(s) should handle it
  * @param {string} message - User message
  * @param {Object} context - Business context
- * @returns {Promise<{ domain: string, agents: string[], instructions?: string }>}
+ * @returns {Promise<{ domain: string, agents: string[], intent: string, instructions?: string }>}
  */
 export async function classifyRequest(message, context = {}) {
   // Try quick keyword classification first
@@ -204,13 +226,18 @@ export async function classifyRequest(message, context = {}) {
   if (quickResult && quickResult.confidence >= 0.7) {
     logger.info({
       message: message.substring(0, 50),
-      result: quickResult,
+      domain: quickResult.domain,
+      intent: quickResult.intent,
+      confidence: quickResult.confidence,
+      intentConfidence: quickResult.intentConfidence,
       method: 'keywords'
     }, 'Request classified via keywords');
 
     return {
       domain: quickResult.domain,
       agents: quickResult.agents,
+      intent: quickResult.intent,
+      intentConfidence: quickResult.intentConfidence,
       instructions: ''
     };
   }
@@ -220,7 +247,9 @@ export async function classifyRequest(message, context = {}) {
 
   logger.info({
     message: message.substring(0, 50),
-    result: llmResult,
+    domain: llmResult.domain,
+    intent: llmResult.intent,
+    intentConfidence: llmResult.intentConfidence,
     method: 'llm'
   }, 'Request classified via LLM');
 

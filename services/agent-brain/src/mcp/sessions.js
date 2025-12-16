@@ -230,6 +230,8 @@ async function getStore() {
  * @param {string} [context.mode='auto'] - Agent mode: auto | plan | ask
  * @param {string} [context.dangerousPolicy='block'] - Policy for dangerous tools: block | allow
  * @param {Object} [context.integrations] - Available integrations for user
+ * @param {Object} [context.clarifyingState] - Clarifying Gate state
+ * @param {Object} [context.policyMetadata] - Policy metadata (playbookId, intent, etc.)
  * @returns {string} Session ID
  */
 export function createSession({
@@ -242,7 +244,11 @@ export function createSession({
   allowedTools = null,
   mode = 'auto',
   dangerousPolicy = 'block',
-  integrations = null
+  integrations = null,
+  // Clarifying Gate state
+  clarifyingState = null,
+  // Policy metadata
+  policyMetadata = null
 }) {
   const sessionId = crypto.randomUUID();
 
@@ -257,7 +263,11 @@ export function createSession({
     allowedTools,        // ['getCampaigns', 'getSpendReport'] | null (all)
     mode,                // 'auto' | 'plan' | 'ask'
     dangerousPolicy,     // 'block' | 'allow'
-    integrations         // { fb: true, crm: true, roi: true, whatsapp: false }
+    integrations,        // { fb: true, crm: true, roi: true, whatsapp: false }
+    // Clarifying Gate state
+    clarifyingState,     // { required, questions, answers, complete }
+    // Policy metadata
+    policyMetadata       // { playbookId, intent, maxToolCalls, toolCallCount }
   };
 
   // Fire and forget - session creation is sync for API compatibility
@@ -300,7 +310,9 @@ export function getSession(sessionId) {
       allowedTools: session.allowedTools,
       mode: session.mode,
       dangerousPolicy: session.dangerousPolicy,
-      integrations: session.integrations
+      integrations: session.integrations,
+      clarifyingState: session.clarifyingState,
+      policyMetadata: session.policyMetadata
     };
   }
 
@@ -332,8 +344,41 @@ export async function getSessionAsync(sessionId) {
     allowedTools: session.allowedTools,
     mode: session.mode,
     dangerousPolicy: session.dangerousPolicy,
-    integrations: session.integrations
+    integrations: session.integrations,
+    clarifyingState: session.clarifyingState,
+    policyMetadata: session.policyMetadata
   };
+}
+
+/**
+ * Обновить clarifyingState в сессии
+ * @param {string} sessionId
+ * @param {Object} clarifyingState
+ */
+export function updateClarifyingState(sessionId, clarifyingState) {
+  const s = store;
+  if (!s || storeType !== 'memory') return false;
+
+  const session = s.sessions.get(sessionId);
+  if (!session) return false;
+
+  session.clarifyingState = clarifyingState;
+  session.lastAccessedAt = Date.now();
+
+  return true;
+}
+
+/**
+ * Async version of updateClarifyingState
+ */
+export async function updateClarifyingStateAsync(sessionId, clarifyingState) {
+  const s = await getStore();
+  const session = await s.get(sessionId);
+  if (!session) return false;
+
+  session.clarifyingState = clarifyingState;
+  await s.set(sessionId, session, SESSION_TTL_MS);
+  return true;
 }
 
 /**
@@ -462,5 +507,8 @@ export default {
   // Hybrid C helpers
   isToolAllowed,
   isToolAllowedAsync,
-  requiresApproval
+  requiresApproval,
+  // Clarifying Gate helpers
+  updateClarifyingState,
+  updateClarifyingStateAsync
 };

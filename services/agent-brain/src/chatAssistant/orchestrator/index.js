@@ -16,6 +16,9 @@ import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
 import { getBusinessSnapshot, formatSnapshotForPrompt, getRecentBrainActions, getIntegrations, formatIntegrationsForPrompt } from '../contextGatherer.js';
+// Hybrid MCP imports
+import { policyEngine, clarifyingGate, filterToolsForOpenAI } from '../hybrid/index.js';
+import { createSession } from '../../mcp/sessions.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 
@@ -163,6 +166,319 @@ export class Orchestrator {
 
     } catch (error) {
       logger.error({ error: error.message }, 'Orchestrator processing failed');
+      throw error;
+    }
+  }
+
+  // ============================================================
+  // HYBRID MCP FLOW
+  // ============================================================
+
+  /**
+   * Process request with Hybrid MCP flow
+   * Orchestrator controls, MCP executes
+   *
+   * @param {Object} params
+   * @param {string} params.message - User message
+   * @param {Object} params.context - Business context
+   * @param {string} params.mode - 'auto' | 'plan' | 'ask'
+   * @param {Object} params.toolContext - Context for tool execution
+   * @param {Array} params.conversationHistory - Previous messages
+   * @param {Object} params.clarifyingState - Existing clarifying state (for follow-up)
+   * @returns {Promise<Object>} Response
+   */
+  async processHybridRequest({ message, context, mode, toolContext, conversationHistory = [], clarifyingState = null }) {
+    const startTime = Date.now();
+
+    try {
+      // 0. Check for direct memory commands first
+      const memoryCommand = parseMemoryCommand(message);
+      if (memoryCommand) {
+        const result = await this.handleMemoryCommand(memoryCommand, toolContext);
+        return {
+          type: 'response',
+          agent: 'Orchestrator',
+          content: result.content,
+          executedActions: result.executedActions || [],
+          classification: { domain: 'memory', agents: [], intent: 'memory' },
+          duration: Date.now() - startTime
+        };
+      }
+
+      // 1. Load context in parallel (same as processRequest)
+      const dbAccountId = toolContext.adAccountDbId || null;
+      const hasFbToken = Boolean(toolContext.accessToken);
+
+      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
+        memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
+        memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
+        toolContext.conversationId
+          ? getSummaryContext(toolContext.conversationId)
+          : Promise.resolve({ summary: '', used: false }),
+        getBusinessSnapshot({
+          userAccountId: toolContext.userAccountId,
+          adAccountId: dbAccountId
+        }),
+        getRecentBrainActions(toolContext.userAccountId, dbAccountId),
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
+      ]);
+
+      const enrichedContext = {
+        ...context,
+        specs,
+        notes,
+        rollingSummary: summaryContext.summary,
+        rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
+        businessSnapshot: snapshot,
+        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
+        brainActions,
+        integrations,
+        integrationsFormatted: formatIntegrationsForPrompt(integrations)
+      };
+
+      // 2. Classify request (now includes intent)
+      const classification = await classifyRequest(message, enrichedContext);
+
+      logger.info({
+        message: message.substring(0, 50),
+        domain: classification.domain,
+        intent: classification.intent,
+        intentConfidence: classification.intentConfidence
+      }, 'Hybrid: Request classified');
+
+      // 3. Resolve policy based on intent
+      const policy = policyEngine.resolvePolicy({
+        intent: classification.intent,
+        domains: classification.agents,
+        context: enrichedContext,
+        integrations
+      });
+
+      logger.info({
+        intent: policy.intent,
+        playbookId: policy.playbookId,
+        allowedTools: policy.allowedTools?.length || 0,
+        clarifyingRequired: policy.clarifyingRequired,
+        dangerousPolicy: policy.dangerousPolicy
+      }, 'Hybrid: Policy resolved');
+
+      // 4. Handle context-only responses (no tools needed)
+      if (policy.useContextOnly) {
+        return this.handleContextOnlyResponse({
+          message,
+          context: enrichedContext,
+          policy,
+          classification,
+          conversationHistory,
+          startTime
+        });
+      }
+
+      // 5. Clarifying Gate
+      const existingAnswers = clarifyingState?.answers || {};
+      const clarifyResult = clarifyingGate.evaluate({
+        message,
+        policy,
+        context: { recentMessages: conversationHistory },
+        existingAnswers
+      });
+
+      if (clarifyResult.needsClarifying) {
+        // Store state for follow-up
+        const newClarifyingState = {
+          required: true,
+          questions: clarifyResult.questions,
+          answers: clarifyResult.answers,
+          complete: false,
+          policy
+        };
+
+        const clarifyingContent = clarifyResult.formatForUser();
+
+        logger.info({
+          intent: policy.intent,
+          pendingQuestions: clarifyResult.questions.length,
+          answeredCount: Object.keys(clarifyResult.answers).length
+        }, 'Hybrid: Clarifying questions needed');
+
+        return {
+          type: 'clarifying',
+          agent: 'Orchestrator',
+          content: clarifyingContent,
+          clarifyingState: newClarifyingState,
+          classification,
+          policy: {
+            playbookId: policy.playbookId,
+            intent: policy.intent
+          },
+          duration: Date.now() - startTime
+        };
+      }
+
+      // 6. Create MCP session with policy restrictions
+      const sessionId = createSession({
+        userAccountId: toolContext.userAccountId,
+        adAccountId: toolContext.adAccountId,
+        accessToken: toolContext.accessToken,
+        conversationId: toolContext.conversationId,
+        allowedDomains: classification.agents,
+        allowedTools: policy.allowedTools,
+        mode: policy.clarifyingRequired ? 'plan' : mode,
+        dangerousPolicy: policy.dangerousPolicy,
+        integrations,
+        clarifyingState: {
+          required: false,
+          complete: true,
+          answers: clarifyResult.answers
+        },
+        policyMetadata: {
+          playbookId: policy.playbookId,
+          intent: policy.intent,
+          maxToolCalls: policy.maxToolCalls,
+          toolCallCount: 0
+        }
+      });
+
+      logger.info({
+        sessionId,
+        allowedTools: policy.allowedTools,
+        clarifyingAnswers: clarifyResult.answers
+      }, 'Hybrid: MCP session created');
+
+      // 7. Get agent and filter tools
+      const primaryAgent = classification.agents[0];
+      const agent = this.agents[primaryAgent];
+
+      if (!agent) {
+        throw new Error(`Unknown agent: ${primaryAgent}`);
+      }
+
+      // Filter tools based on policy
+      const allTools = agent.getTools ? agent.getTools() : [];
+      const filteredTools = filterToolsForOpenAI(allTools, policy);
+
+      logger.info({
+        agent: primaryAgent,
+        totalTools: allTools.length,
+        filteredTools: filteredTools.length
+      }, 'Hybrid: Tools filtered');
+
+      // 8. Execute via agent with filtered tools
+      // Pass sessionId and filteredTools to agent
+      const response = await agent.process({
+        message,
+        context: enrichedContext,
+        mode,
+        toolContext: {
+          ...toolContext,
+          sessionId,
+          filteredTools,
+          policy,
+          clarifyingAnswers: clarifyResult.answers
+        },
+        conversationHistory
+      });
+
+      // 9. Check for approval_required
+      if (response.approvalRequired) {
+        // Create pending plan for dangerous action
+        const planId = await unifiedStore.createPendingPlan(toolContext.conversationId, {
+          steps: response.pendingSteps || [{ action: response.blockedTool, params: response.blockedArgs }],
+          summary: `Требуется подтверждение: ${response.blockedTool}`
+        });
+
+        return {
+          type: 'approval_required',
+          agent: 'Orchestrator',
+          content: response.content || `Для выполнения ${response.blockedTool} требуется подтверждение.`,
+          planId,
+          blockedTool: response.blockedTool,
+          classification,
+          policy: {
+            playbookId: policy.playbookId,
+            intent: policy.intent
+          },
+          duration: Date.now() - startTime
+        };
+      }
+
+      const duration = Date.now() - startTime;
+
+      // Update rolling summary if needed
+      if (toolContext.conversationId && conversationHistory.length > 0) {
+        maybeUpdateRollingSummary(
+          toolContext.conversationId,
+          conversationHistory,
+          toolContext.contextStats
+        ).catch(err => {
+          logger.warn({ error: err.message }, 'Failed to update rolling summary');
+        });
+      }
+
+      return {
+        type: 'response',
+        ...response,
+        classification,
+        policy: {
+          playbookId: policy.playbookId,
+          intent: policy.intent,
+          toolsUsed: response.executedActions?.length || 0
+        },
+        duration
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Hybrid processing failed');
+      throw error;
+    }
+  }
+
+  /**
+   * Handle context-only responses (no tool calls needed)
+   */
+  async handleContextOnlyResponse({ message, context, policy, classification, conversationHistory, startTime }) {
+    // Build prompt with context
+    const systemPrompt = buildOrchestratorPrompt();
+    const contextInfo = policy.contextSource === 'brain_history'
+      ? context.brainActions
+      : context.businessSnapshotFormatted;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      ...conversationHistory.slice(-10),
+      { role: 'user', content: message }
+    ];
+
+    // Add context as system message
+    if (contextInfo) {
+      messages.splice(1, 0, {
+        role: 'system',
+        content: `Контекст для ответа:\n${JSON.stringify(contextInfo, null, 2)}`
+      });
+    }
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model: MODEL,
+        messages,
+        temperature: 0.7
+      });
+
+      return {
+        type: 'response',
+        agent: 'Orchestrator',
+        content: completion.choices[0].message.content,
+        executedActions: [],
+        classification,
+        policy: {
+          playbookId: policy.playbookId,
+          intent: policy.intent,
+          contextOnly: true
+        },
+        duration: Date.now() - startTime
+      };
+    } catch (error) {
+      logger.error({ error: error.message }, 'Context-only response failed');
       throw error;
     }
   }

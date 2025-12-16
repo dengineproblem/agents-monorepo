@@ -3019,3 +3019,448 @@ export const MCP_CONFIG = {
   fallbackToLegacy: true
 };
 ```
+
+---
+
+## Hybrid MCP Executor
+
+**Архитектура:** Orchestrator контролирует логику, MCP выполняет tools.
+
+### Концепция
+
+```
+User Message
+     ↓
+┌─────────────────┐
+│   Classifier    │ → domain + intent
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│  PolicyEngine   │ → allowedTools, clarifying
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│ ClarifyingGate  │ → вопросы (если нужны)
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│   MCP Session   │ → tools filtered by policy
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│ResponseAssembler│ → sections, entity refs, ui_json
+└─────────────────┘
+```
+
+### Файлы модуля
+
+```
+chatAssistant/hybrid/
+├── index.js              # Экспорты + HYBRID_CONFIG
+├── policyEngine.js       # Intent detection + policy resolution
+├── toolFilter.js         # Фильтрация tools для OpenAI
+├── clarifyingGate.js     # Уточняющие вопросы
+└── responseAssembler.js  # Сборка финального ответа
+```
+
+---
+
+### Policy Engine (`hybrid/policyEngine.js`)
+
+Определяет allowedTools на основе intent:
+
+```javascript
+import { policyEngine } from './hybrid/index.js';
+
+// Detect intent from message
+const { intent, domain, confidence } = policyEngine.detectIntent(message);
+// → { intent: 'spend_report', domain: 'ads', confidence: 0.9 }
+
+// Resolve policy for intent
+const policy = policyEngine.resolvePolicy({
+  intent,
+  domains: ['ads'],
+  context,
+  integrations: { fb: true, crm: true }
+});
+// → {
+//     playbookId: 'spend_report',
+//     intent: 'spend_report',
+//     allowedTools: ['getSpendReport', 'getDirections', 'getCampaigns'],
+//     dangerousPolicy: 'block',
+//     maxToolCalls: 5,
+//     clarifyingRequired: true,
+//     clarifyingQuestions: [{ type: 'period', default: 'last_7d' }]
+//   }
+```
+
+**Маппинг intent → policy:**
+
+| Intent | Domain | allowedTools | clarifying |
+|--------|--------|--------------|------------|
+| `spend_report` | ads | getSpendReport, getDirections, getCampaigns | period (default) |
+| `roi_analysis` | ads | getROIReport, getROIComparison, getDirections | period |
+| `budget_change` | ads | updateBudget, updateDirectionBudget, getBudgets | entity, amount, confirm |
+| `pause_campaign` | ads | pauseCampaign, getCampaigns | entity, confirm |
+| `creative_top` | ads | getTopCreatives, getCreativeMetrics | period, metric |
+| `lead_search` | crm | searchLeads, getLeadDetails | entity |
+| `brain_history` | brain | - (context only) | нет |
+
+---
+
+### Tool Filter (`hybrid/toolFilter.js`)
+
+Механическое ограничение tools перед OpenAI API:
+
+```javascript
+import { filterToolsForOpenAI, validateToolCall, isDangerousTool } from './hybrid/index.js';
+
+// Filter tools before sending to OpenAI
+const filteredTools = filterToolsForOpenAI(allTools, policy);
+// Только tools из policy.allowedTools
+
+// Validate tool call before execution
+const validation = validateToolCall(toolCall, policy);
+if (!validation.valid) {
+  console.log(validation.reason); // 'Tool not in allowedTools'
+}
+
+// Check if tool is dangerous
+isDangerousTool('pauseCampaign'); // true
+isDangerousTool('getCampaigns');  // false
+```
+
+**Dangerous Tools:**
+- `pauseCampaign`
+- `updateBudget`
+- `updateDirectionBudget`
+- `deleteCreative`
+- `launchCreative`
+- `updateAdSet`
+
+---
+
+### Clarifying Gate (`hybrid/clarifyingGate.js`)
+
+Задаёт 1-3 уточняющих вопроса перед выполнением:
+
+```javascript
+import { clarifyingGate, QUESTION_TYPES } from './hybrid/index.js';
+
+const result = clarifyingGate.evaluate({
+  message: 'покажи расходы',
+  policy,
+  context,
+  existingAnswers: {}
+});
+
+if (result.needsClarifying) {
+  // Вернуть вопрос пользователю
+  return result.formatForUser();
+  // → "За какой период показать данные?\n\n1. Сегодня\n2. Вчера\n3. 7 дней\n4. 30 дней"
+}
+
+// Продолжить с извлечёнными ответами
+const { answers } = result; // { period: 'last_7d' }
+```
+
+**Типы вопросов:**
+
+| Тип | Паттерны извлечения | Пример |
+|-----|---------------------|--------|
+| `PERIOD` | "за неделю", "7 дней", "сегодня" | "last_7d" |
+| `ENTITY` | "[d1]", "направление #5", "кампания 123" | `{ type: 'direction', id: '5' }` |
+| `AMOUNT` | "5000₽", "+10%", "5к" | `{ value: 5000, currency: 'RUB' }` |
+| `METRIC` | "по CPL", "расход" | "cpl" |
+| `CONFIRMATION` | "да", "нет", "подтверждаю" | true/false |
+
+**Минимальная агрессивность:**
+- READ с defaults: 0-1 вопрос
+- READ аналитика: 1 вопрос
+- WRITE: 2-3 вопроса (включая confirm)
+
+---
+
+### Response Assembler (`hybrid/responseAssembler.js`)
+
+Форматирует ответ с секциями и entity refs:
+
+```javascript
+import { responseAssembler, SECTION_TYPES } from './hybrid/index.js';
+
+const assembled = responseAssembler.assemble(response, {
+  policy,
+  classification,
+  toolResults
+});
+
+// assembled = {
+//   content: 'Расход за 7 дней: 50,000₽\n\n"Продажа курсов" [c1]: 30,000₽',
+//   sections: [
+//     { type: 'summary', content: 'Общий расход 50,000₽' },
+//     { type: 'data', content: '...' }
+//   ],
+//   nextSteps: [
+//     { text: 'Показать топ расходов', action: 'getTopSpendCampaigns' }
+//   ],
+//   uiJson: { components: [{ type: 'table', ... }] },
+//   metadata: { intent, playbookId, toolsUsed, entityRefs }
+// }
+
+// Format for Telegram
+const telegram = responseAssembler.formatForTelegram(assembled);
+// → { text, ui_json, metadata }
+```
+
+**Типы секций:**
+- `SUMMARY` - краткий итог
+- `DATA` - данные/таблицы
+- `INSIGHTS` - инсайты и рекомендации
+- `NEXT_STEPS` - следующие шаги
+
+**Entity Refs:**
+- `[c1]` - campaign
+- `[d1]` - direction
+- `[cr1]` - creative
+- `[l1]` - lead
+
+---
+
+### Hybrid Flow в Orchestrator
+
+```javascript
+// orchestrator/index.js
+
+async processHybridRequest({
+  message,
+  context,
+  mode,
+  toolContext,
+  conversationHistory,
+  clarifyingState
+}) {
+  // 1. Classify request
+  const classification = await classifyRequest(message, context);
+  // → { domain: 'ads', agents: ['ads'], intent: 'spend_report' }
+
+  // 2. Resolve policy
+  const policy = policyEngine.resolvePolicy({
+    intent: classification.intent,
+    domains: classification.domains,
+    context,
+    integrations: toolContext?.integrations
+  });
+
+  // 3. Handle context-only (brain_history, etc.)
+  if (policy.useContextOnly) {
+    return this.handleContextOnlyResponse(message, policy, context);
+  }
+
+  // 4. Clarifying Gate
+  const clarifyResult = clarifyingGate.evaluate({
+    message,
+    policy,
+    context,
+    existingAnswers: clarifyingState?.answers || {}
+  });
+
+  if (clarifyResult.needsClarifying) {
+    return {
+      type: 'clarifying',
+      content: clarifyResult.formatForUser(),
+      clarifyingState: {
+        questions: clarifyResult.questions,
+        answers: clarifyResult.answers,
+        complete: false
+      }
+    };
+  }
+
+  // 5. Create MCP session with policy
+  const sessionId = createSession({
+    ...toolContext,
+    allowedTools: policy.allowedTools,
+    dangerousPolicy: policy.dangerousPolicy,
+    policyMetadata: {
+      playbookId: policy.playbookId,
+      maxToolCalls: policy.maxToolCalls,
+      intent: policy.intent
+    },
+    clarifyingState: clarifyResult
+  });
+
+  // 6. Filter tools
+  const filteredTools = filterToolsForOpenAI(agent.tools, policy);
+
+  // 7. Execute via MCP
+  const response = await processChatViaMCP({
+    message,
+    conversationHistory,
+    systemPrompt,
+    tools: filteredTools,
+    sessionId
+  });
+
+  // 8. Handle approval_required
+  if (response.approval_required) {
+    return {
+      type: 'approval_required',
+      tool: response.tool,
+      args: response.args,
+      content: `Требуется подтверждение: ${response.tool}`
+    };
+  }
+
+  // 9. Assemble response
+  return {
+    type: 'response',
+    ...responseAssembler.assemble(response, {
+      policy,
+      classification,
+      toolResults: response.executedActions || []
+    })
+  };
+}
+```
+
+---
+
+### Интеграция в chatAssistant/index.js
+
+```javascript
+import { HYBRID_CONFIG } from './hybrid/index.js';
+
+// В processChatMessage():
+if (HYBRID_CONFIG.enabled && USE_ORCHESTRATOR) {
+  const response = await orchestrator.processHybridRequest({
+    message,
+    context,
+    mode,
+    toolContext,
+    conversationHistory,
+    clarifyingState: session?.clarifyingState
+  });
+
+  // Handle clarifying questions
+  if (response.type === 'clarifying') {
+    return {
+      content: response.content,
+      clarifying: true,
+      clarifyingState: response.clarifyingState
+    };
+  }
+
+  // Handle approval required
+  if (response.type === 'approval_required') {
+    await unifiedStore.savePendingPlan(conversationId, {
+      steps: [{ action: response.tool, params: response.args }],
+      summary: response.content
+    });
+    return {
+      content: response.content,
+      approval_required: true
+    };
+  }
+
+  // Normal response
+  return response;
+}
+```
+
+---
+
+### Session Extensions для Hybrid
+
+```javascript
+// mcp/sessions.js
+
+createSession({
+  // ... existing fields
+
+  // Hybrid extensions
+  clarifyingState: {
+    required: boolean,
+    questions: ClarifyingQuestion[],
+    answers: Record<string, any>,
+    complete: boolean
+  },
+  policyMetadata: {
+    playbookId: string,
+    maxToolCalls: number,
+    intent: string
+  }
+});
+
+// Update clarifying state
+updateClarifyingState(sessionId, {
+  answers: { period: 'last_7d' },
+  complete: true
+});
+```
+
+---
+
+### Configuration
+
+```bash
+# Environment Variables
+
+# Enable Hybrid MCP Executor
+HYBRID_ENABLED=true
+
+# Clarifying Gate (default: true)
+CLARIFYING_GATE_ENABLED=true
+
+# Max tool calls per request (default: 5)
+HYBRID_MAX_TOOL_CALLS=5
+```
+
+```javascript
+// hybrid/index.js
+
+export const HYBRID_CONFIG = {
+  enabled: process.env.HYBRID_ENABLED === 'true',
+  clarifyingGateEnabled: process.env.CLARIFYING_GATE_ENABLED !== 'false',
+  maxToolCalls: parseInt(process.env.HYBRID_MAX_TOOL_CALLS || '5', 10),
+  defaultDangerousPolicy: 'block'
+};
+```
+
+---
+
+### Module Exports
+
+```javascript
+// hybrid/index.js
+
+// Phase 1: Policy Engine + Tool Filter
+export { PolicyEngine, policyEngine } from './policyEngine.js';
+export {
+  filterToolsForOpenAI,
+  validateToolCall,
+  isDangerousTool,
+  getToolType,
+  getToolsSummary,
+  filterReadOnlyTools,
+  policyToSessionExtensions
+} from './toolFilter.js';
+
+// Phase 2: Clarifying Gate
+export {
+  ClarifyingGate,
+  clarifyingGate,
+  QUESTION_TYPES,
+  EXTRACTION_PATTERNS
+} from './clarifyingGate.js';
+
+// Phase 3: Response Assembler
+export {
+  ResponseAssembler,
+  responseAssembler,
+  SECTION_TYPES,
+  NEXT_STEP_RULES
+} from './responseAssembler.js';
+
+// Config
+export { HYBRID_CONFIG };
+```

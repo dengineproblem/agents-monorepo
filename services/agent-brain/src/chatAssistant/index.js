@@ -28,6 +28,7 @@ import {
 } from './telegramHandler.js';
 import { createSession, MCP_CONFIG } from '../mcp/index.js';
 import { classifyRequest } from './orchestrator/classifier.js';
+import { HYBRID_CONFIG } from './hybrid/index.js';
 import { getToolsByAgent } from '../mcp/tools/definitions.js';
 import { formatMCPResponse, needsRepairPass } from '../mcp/responseFormatter.js';
 // conversationStore deprecated, use unifiedStore instead (imported dynamically in executeFullPlan)
@@ -240,7 +241,7 @@ export async function processChat({ message, conversationId, mode = 'auto', user
       }
     }
 
-    // 7. Process via MCP, Orchestrator (multi-agent), or legacy LLM
+    // 7. Process via Hybrid, MCP, Orchestrator (multi-agent), or legacy LLM
     // adAccountId: fbId for Facebook API calls
     // adAccountDbId: dbId (UUID) for database queries (memory, specs, notes)
     const toolContext = {
@@ -252,8 +253,61 @@ export async function processChat({ message, conversationId, mode = 'auto', user
     };
     let response;
 
-    // Try MCP first if enabled
-    if (MCP_CONFIG.enabled) {
+    // Try Hybrid MCP flow first if enabled (Orchestrator controls, MCP executes)
+    if (HYBRID_CONFIG.enabled && USE_ORCHESTRATOR) {
+      try {
+        logger.info({ mode, userAccountId, hybrid: true }, 'Processing via Hybrid MCP');
+        response = await orchestrator.processHybridRequest({
+          message: userPrompt,
+          context,
+          mode,
+          toolContext,
+          conversationHistory
+        });
+
+        // Handle clarifying response
+        if (response.type === 'clarifying') {
+          // Return clarifying question to user
+          return {
+            conversationId: conversation.id,
+            response: response.content,
+            needsClarification: true,
+            clarifyingState: response.clarifyingState,
+            mode,
+            agent: response.agent,
+            classification: response.classification
+          };
+        }
+
+        // Handle approval_required response
+        if (response.type === 'approval_required') {
+          // Save as pending plan
+          await saveMessage({
+            conversationId: conversation.id,
+            role: 'assistant',
+            content: response.content,
+            planJson: { planId: response.planId, blockedTool: response.blockedTool }
+          });
+
+          return {
+            conversationId: conversation.id,
+            response: response.content,
+            plan: { id: response.planId, status: 'pending_approval' },
+            mode,
+            agent: response.agent,
+            classification: response.classification
+          };
+        }
+
+      } catch (hybridError) {
+        // Fallback to MCP or orchestrator if Hybrid fails
+        logger.warn({ error: hybridError.message }, 'Hybrid flow failed, falling back');
+        response = null;
+      }
+    }
+
+    // Try MCP if Hybrid not enabled or failed
+    if (!response && MCP_CONFIG.enabled) {
       try {
         logger.info({ mode, userAccountId }, 'Processing via MCP');
         response = await processChatViaMCP({
