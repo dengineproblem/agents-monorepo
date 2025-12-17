@@ -567,6 +567,33 @@ async function processChatViaMCP({ systemPrompt, userPrompt, toolContext, conver
     classification = { domain: 'unknown', confidence: 0 };
   }
 
+  // Handle greeting intent - return preflight response without LLM
+  if (classification.intent === 'greeting_neutral') {
+    const { runPreflight, generateSmartGreetingSuggestions, formatGreetingResponse } = await import('./hybrid/preflightService.js');
+
+    const preflight = await runPreflight({
+      userAccountId: toolContext.userAccountId,
+      adAccountId: toolContext.adAccountId,
+      adAccountDbId: toolContext.adAccountDbId,
+      accessToken: toolContext.accessToken,
+      integrations: toolContext.integrations || {}
+    });
+
+    const smartSuggestions = generateSmartGreetingSuggestions(preflight);
+    const { content, uiJson } = formatGreetingResponse(smartSuggestions);
+
+    logger.info({ intent: 'greeting_neutral', hasAlert: !!smartSuggestions.alert }, 'Greeting preflight response');
+
+    return {
+      type: 'greeting_response',
+      content,
+      uiJson,
+      suggestions: smartSuggestions.suggestions,
+      classification,
+      mode: 'mcp'
+    };
+  }
+
   // 2. Create MCP session with user context and Hybrid C extensions
   const dangerousPolicy = mode === 'plan' ? 'block' : (mode === 'ask' ? 'block' : 'block');
 
@@ -1146,7 +1173,7 @@ export function registerChatRoutes(fastify) {
           finalContent = event.content;
           finalAgent = event.agent;
           executedActions = event.executedActions || [];
-          uiComponents = event.uiComponents || [];
+          uiComponents = event.uiComponents || event.uiJson || [];
         }
       }
 
@@ -1156,6 +1183,7 @@ export function registerChatRoutes(fastify) {
         role: 'assistant',
         content: finalContent,
         actionsJson: executedActions,
+        uiJson: uiComponents,
         agent: finalAgent
       });
 

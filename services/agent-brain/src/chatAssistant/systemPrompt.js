@@ -140,13 +140,17 @@ ${RESPONSE_FORMAT_PROMPT}`.trim();
 export function buildUserPrompt(message, context = {}) {
   const parts = [];
 
-  // Today's metrics summary
+  // Metrics summary from scoring (last 7 days, updated daily at 08:00)
   if (context.todayMetrics) {
-    parts.push(`## Метрики за сегодня
-- Расход: $${(context.todayMetrics.spend / 100).toFixed(2)}
+    const dataDate = context.todayMetrics.data_date
+      ? new Date(context.todayMetrics.data_date).toLocaleDateString('ru-RU')
+      : 'н/д';
+    parts.push(`## Метрики за последние 7 дней (данные от ${dataDate})
+- Расход: $${context.todayMetrics.spend?.toFixed(2) || '0.00'}
 - Лиды: ${context.todayMetrics.leads || 0}
-- CPL: $${context.todayMetrics.cpl ? (context.todayMetrics.cpl / 100).toFixed(2) : 'N/A'}
-- Активных кампаний: ${context.todayMetrics.active_campaigns || 'N/A'}`);
+- CPL: $${context.todayMetrics.cpl?.toFixed(2) || 'N/A'}
+- Активных adsets: ${context.todayMetrics.active_adsets || 'N/A'}
+⚠️ Это кэшированные данные. Для актуальных метрик используй getSpendReport.`);
   }
 
   // Active contexts (promotions, cases)

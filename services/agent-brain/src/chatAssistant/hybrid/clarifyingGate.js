@@ -471,6 +471,9 @@ export class ClarifyingGate {
   evaluateAskIf(condition, context) {
     // Специальные условия
     switch (condition) {
+      case 'never':
+        return false;  // Никогда не спрашивать, использовать default
+
       case 'period_not_in_message':
         return !context.extractedPeriod;
 

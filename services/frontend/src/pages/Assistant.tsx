@@ -152,6 +152,7 @@ const Assistant: React.FC = () => {
       let currentConversationId = activeConversationId;
       let finalContent = '';
       let finalExecutedActions: ChatMessage['actions_json'] = [];
+      let finalUiJson: ChatMessage['ui_json'] = undefined;
 
       // Stream the response
       const stream = sendMessageStream(
@@ -194,6 +195,7 @@ const Assistant: React.FC = () => {
           case 'done':
             finalContent = event.content;
             finalExecutedActions = event.executedActions || [];
+            finalUiJson = event.uiJson || event.uiComponents;
             break;
 
           case 'error':
@@ -210,6 +212,7 @@ const Assistant: React.FC = () => {
           role: 'assistant',
           content: finalContent,
           actions_json: finalExecutedActions,
+          ui_json: finalUiJson,
           created_at: new Date().toISOString(),
         };
 
@@ -321,6 +324,27 @@ const Assistant: React.FC = () => {
           onApprove={(plan) => {
             setPendingPlan(plan);
             setPlanModalOpen(true);
+          }}
+          onUIAction={(action) => {
+            // Convert action to user message and send
+            const actionMessages: Record<string, string> = {
+              'show_blocking_reason': 'Покажи подробности о причине блокировки',
+              'check_billing': 'Проверь платёжный метод',
+              'show_last_campaigns': 'Покажи последние кампании',
+              'connect_fb': 'Как подключить Facebook?',
+              'show_integrations': 'Что подключено?',
+              'show_capabilities': 'Что ты умеешь?',
+              'diagnose_no_activity': 'Почему нет активности?',
+              'show_campaigns': 'Покажи кампании',
+              'run_diagnosis': 'Проведи диагностику',
+              'spend_report': 'Покажи расходы за неделю',
+              'roi_report': 'Покажи отчёт по ROI',
+              'leads_list': 'Покажи лиды за сегодня',
+              'cpl_analysis': 'Проведи анализ CPL',
+              'dialogs_list': 'Покажи последние диалоги',
+            };
+            const message = actionMessages[action] || `Выполни: ${action}`;
+            handleSend(message);
           }}
           conversations={conversations}
           activeConversationId={activeConversationId || undefined}

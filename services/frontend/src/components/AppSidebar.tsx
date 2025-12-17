@@ -56,7 +56,7 @@ const menuItems = [
     path: '/assistant',
     label: 'AI Chat',
     icon: MessageSquare,
-    show: false, // Temporarily hidden
+    show: true,
     tourId: 'sidebar-assistant',
   },
   {

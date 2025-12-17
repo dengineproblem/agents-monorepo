@@ -169,6 +169,17 @@ async function getTodayMetrics(userAccountId, adAccountId) {
       return null;
     }
 
+    // Check freshness — if data is older than 3 days, don't show it
+    const dataAge = Date.now() - new Date(execution.created_at).getTime();
+    const maxAgeDays = 3;
+    if (dataAge > maxAgeDays * 24 * 60 * 60 * 1000) {
+      logger.info({
+        dataDate: execution.created_at,
+        ageDays: Math.round(dataAge / (24 * 60 * 60 * 1000))
+      }, 'Scoring data too old, skipping');
+      return null;
+    }
+
     // 2. Извлечь агрегированные метрики из adsets
     const { adsets, ready_creatives } = execution.scoring_output;
 
@@ -580,14 +591,15 @@ export async function getOrCreateConversation({ userAccountId, adAccountId, conv
  * Save a message to the conversation
  * @deprecated Use unifiedStore.addMessage() for new code
  */
-export async function saveMessage({ conversationId, role, content, planJson, actionsJson, toolCallsJson, agent, domain }) {
+export async function saveMessage({ conversationId, role, content, planJson, actionsJson, toolCallsJson, uiJson, agent, domain }) {
   // Delegate to unifiedStore for unified behavior
   return await unifiedStore.addMessage(conversationId, {
     role,
     content,
-    plan_json: planJson,
-    actions_json: actionsJson,
-    tool_calls: toolCallsJson,
+    planJson,
+    actionsJson,
+    toolCalls: toolCallsJson,
+    uiJson,
     agent,
     domain
   });

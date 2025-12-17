@@ -54,12 +54,48 @@ const DOMAIN_KEYWORDS = {
 };
 
 /**
+ * Extract user request from formatted message
+ * @param {string} message - Full formatted message
+ * @returns {string} - Just the user's request
+ */
+function extractUserRequest(message) {
+  const userRequestMatch = message.match(/## Запрос пользователя\s*\n\n(.+)/s);
+  return userRequestMatch ? userRequestMatch[1].trim() : message;
+}
+
+/**
+ * Check if message is a greeting
+ * @param {string} userRequest - User's request text
+ * @returns {boolean}
+ */
+function isGreeting(userRequest) {
+  const greetingPattern = /^(?:привет|салам|здравствуй|хай|йо|hello|hi|хей|ку|здаров|приветик|хола|добр(?:ый|ое|ого)\s*(?:день|утр|вечер)|как дела|что нового|\?)!?$/i;
+  return greetingPattern.test(userRequest.trim());
+}
+
+/**
  * Quick keyword-based classification
  * @param {string} message - User message
  * @returns {{ domain: string, agents: string[], confidence: number } | null}
  */
 function quickClassify(message) {
-  const lower = message.toLowerCase();
+  // Extract just the user's request
+  const userRequest = extractUserRequest(message);
+
+  // Check for greeting FIRST
+  if (isGreeting(userRequest)) {
+    logger.info({ userRequest }, 'Quick classify: detected greeting');
+    return {
+      domain: 'general',
+      agents: [],
+      confidence: 0.95,
+      intent: 'greeting_neutral',
+      intentConfidence: 0.95
+    };
+  }
+
+  // Use user request for keyword matching (not full context)
+  const lower = userRequest.toLowerCase();
 
   const scores = {
     ads: 0,
@@ -90,8 +126,8 @@ function quickClassify(message) {
 
   // If only one domain matched, return it
   if (topDomains.length === 1 && maxScore >= 2) {
-    // Detect intent using PolicyEngine
-    const intentResult = policyEngine.detectIntent(message);
+    // Detect intent using PolicyEngine on user request only
+    const intentResult = policyEngine.detectIntent(userRequest);
 
     return {
       domain: topDomains[0],
@@ -105,7 +141,7 @@ function quickClassify(message) {
   // Multiple domains or low confidence - need LLM
   if (topDomains.length > 1) {
     // Detect intent for mixed requests
-    const intentResult = policyEngine.detectIntent(message);
+    const intentResult = policyEngine.detectIntent(userRequest);
 
     return {
       domain: 'mixed',
@@ -130,6 +166,7 @@ async function llmClassify(message, context) {
 Определи к какому домену относится запрос пользователя.
 
 ДОМЕНЫ:
+- greeting: Приветствия и нейтральные сообщения (привет, салам, здравствуй, как дела, йо, хай, добрый день, ?)
 - ads: Facebook/Instagram реклама (кампании, адсеты, бюджеты направлений, расходы, пауза/возобновление кампаний)
 - creative: Креативы (анализ креативов, метрики креативов, видео retention, тесты креативов, запуск креативов, сравнение креативов, топ/худшие креативы)
 - whatsapp: WhatsApp диалоги (переписки, сообщения, анализ диалога)
@@ -137,15 +174,16 @@ async function llmClassify(message, context) {
 - mixed: Запрос требует данных из нескольких доменов
 
 ПРАВИЛА:
-1. Если запрос про креативы (видео, картинки, баннеры, анализ креативов) — выбери "creative"
-2. Если запрос про кампании, адсеты, направления, бюджеты — выбери "ads"
-3. Если нужны данные из нескольких источников — выбери "mixed" и укажи нужные домены
-4. Если непонятно — выбери наиболее вероятный домен
+1. Если сообщение это приветствие или нейтральное (привет, салам, йо, как дела, ?) — выбери "greeting"
+2. Если запрос про креативы (видео, картинки, баннеры, анализ креативов) — выбери "creative"
+3. Если запрос про кампании, адсеты, направления, бюджеты — выбери "ads"
+4. Если нужны данные из нескольких источников — выбери "mixed" и укажи нужные домены
+5. Если непонятно — выбери наиболее вероятный домен
 
 Ответь ТОЛЬКО валидным JSON:
 {
-  "domain": "ads" | "creative" | "whatsapp" | "crm" | "mixed",
-  "agents": ["ads"] // массив нужных агентов
+  "domain": "greeting" | "ads" | "creative" | "whatsapp" | "crm" | "mixed",
+  "agents": [] // пустой для greeting, иначе массив нужных агентов
 }`;
 
   try {
@@ -155,11 +193,39 @@ async function llmClassify(message, context) {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: message }
       ],
-      temperature: 0.1,
-      max_tokens: 100
+      max_completion_tokens: 10000
     });
 
-    const response = completion.choices[0].message.content;
+    const fullMessage = completion.choices[0].message;
+    const response = fullMessage.content || '';
+    const finishReason = completion.choices[0].finish_reason;
+
+    logger.info({
+      llmResponse: response,
+      fullMessage: JSON.stringify(fullMessage),
+      finishReason,
+      messagePreview: message.substring(0, 100)
+    }, 'LLM classifier raw response');
+
+    // If response is empty or truncated, check for greeting in original message
+    if (!response || finishReason === 'length') {
+      // Extract just the user's request from the formatted message
+      const userRequestMatch = message.match(/## Запрос пользователя\s*\n\n(.+)/s);
+      const userRequest = userRequestMatch ? userRequestMatch[1].trim() : message;
+
+      // Check if it's a greeting
+      const greetingPattern = /^(?:привет|салам|здравствуй|хай|йо|hello|hi|хей|ку|здаров|приветик|хола|добр(?:ый|ое|ого)\s*(?:день|утр|вечер)|как дела|что нового|\?)!?$/i;
+      if (greetingPattern.test(userRequest)) {
+        logger.info({ userRequest }, 'LLM empty response, detected greeting from message');
+        return {
+          domain: 'general',
+          agents: [],
+          instructions: '',
+          intent: 'greeting_neutral',
+          intentConfidence: 0.9
+        };
+      }
+    }
 
     // Parse JSON from response
     const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -167,7 +233,18 @@ async function llmClassify(message, context) {
       const parsed = JSON.parse(jsonMatch[0]);
       const domain = parsed.domain || 'ads';
 
-      // Valid agent names (not "mixed")
+      // Handle greeting domain specially
+      if (domain === 'greeting') {
+        return {
+          domain: 'general',
+          agents: [],
+          instructions: '',
+          intent: 'greeting_neutral',
+          intentConfidence: 0.9
+        };
+      }
+
+      // Valid agent names (not "mixed" or "greeting")
       const validAgents = ['ads', 'creative', 'whatsapp', 'crm'];
 
       // Filter to only valid agents

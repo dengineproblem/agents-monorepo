@@ -19,6 +19,7 @@ interface ChatMessagesProps {
   isStreaming?: boolean;
   streamingState?: StreamingState | null;
   onApprove?: (plan: Plan) => void;
+  onUIAction?: (action: string, params: Record<string, unknown>) => void;
   // Conversation management
   conversations?: Conversation[];
   activeConversationId?: string;
@@ -32,6 +33,7 @@ export function ChatMessages({
   isStreaming,
   streamingState,
   onApprove,
+  onUIAction,
   conversations = [],
   activeConversationId,
   onSelectConversation,
@@ -116,6 +118,7 @@ export function ChatMessages({
                 key={message.id}
                 message={message}
                 onApprove={onApprove}
+                onUIAction={onUIAction}
               />
             ))}
 

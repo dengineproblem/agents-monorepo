@@ -17,7 +17,19 @@ import { playbookRegistry } from './playbookRegistry.js';
  * Порядок важен: первый match выигрывает
  */
 const INTENT_PATTERNS = [
-  // === WRITE intents (проверяем первыми) ===
+  // === GREETING/NEUTRAL intents (проверяем первыми) ===
+  {
+    intent: 'greeting_neutral',
+    domain: 'general',
+    patterns: [
+      /^(?:привет|салам|здравствуй|хай|йо|hello|hi|хей|ку|здаров|приветик|хола)$/i,
+      /^(?:добр(?:ый|ое|ого)\s*(?:день|утр|вечер))!?$/i,
+      /^(?:как дела|что нового)\??$/i,
+      /^(?:\?|ой|ау|тут|здесь)$/i
+    ]
+  },
+
+  // === WRITE intents ===
   {
     intent: 'budget_change',
     domain: 'ads',
@@ -529,6 +541,16 @@ const POLICY_DEFINITIONS = {
     maxToolCalls: 0,
     clarifyingRequired: false,
     useContextOnly: true
+  },
+
+  // === GREETING/NEUTRAL ===
+  greeting_neutral: {
+    domain: 'general',
+    allowedTools: [],  // Не используем tools, preflight делает orchestrator
+    dangerousPolicy: 'block',
+    maxToolCalls: 0,
+    clarifyingRequired: false,  // Не спрашивать уточнения
+    specialHandler: 'greeting_preflight'  // Флаг для orchestrator
   },
 
   // === FALLBACK ===

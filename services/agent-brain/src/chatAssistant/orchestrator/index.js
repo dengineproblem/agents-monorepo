@@ -26,6 +26,7 @@ import {
   tierManager,
   TIERS
 } from '../hybrid/index.js';
+import { runPreflight, generateSmartGreetingSuggestions, formatGreetingResponse } from '../hybrid/preflightService.js';
 import { createSession, updateTierState } from '../../mcp/sessions.js';
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
@@ -292,6 +293,50 @@ export class Orchestrator {
         clarifyingRequired: policy.clarifyingRequired,
         dangerousPolicy: policy.dangerousPolicy
       }, 'Hybrid: Policy resolved');
+
+      // 3.5. Handle greeting/neutral with preflight
+      if (policy.specialHandler === 'greeting_preflight') {
+        logger.info({ intent: policy.intent }, 'Hybrid: Handling greeting with preflight');
+
+        const preflight = await runPreflight({
+          userAccountId: toolContext.userAccountId,
+          adAccountId: toolContext.adAccountId,
+          adAccountDbId: toolContext.adAccountDbId,
+          accessToken: toolContext.accessToken,
+          integrations
+        });
+
+        const smartSuggestions = generateSmartGreetingSuggestions(preflight);
+        const { content, uiJson } = formatGreetingResponse(smartSuggestions);
+
+        logger.info({
+          hasFb: integrations.fb,
+          canRunAds: preflight.adAccountStatus?.can_run_ads,
+          hasActivity: preflight.lastActivity?.hasRecentActivity,
+          suggestionsCount: smartSuggestions.suggestions?.length
+        }, 'Hybrid: Greeting preflight completed');
+
+        return {
+          type: 'greeting_response',
+          agent: 'Orchestrator',
+          content,
+          uiJson,
+          suggestions: smartSuggestions.suggestions,
+          preflight: {
+            integrations,
+            adAccountStatus: preflight.adAccountStatus?.status,
+            canRunAds: preflight.adAccountStatus?.can_run_ads,
+            hasRecentActivity: preflight.lastActivity?.hasRecentActivity
+          },
+          classification,
+          policy: {
+            playbookId: policy.playbookId,
+            intent: policy.intent,
+            specialHandler: 'greeting_preflight'
+          },
+          duration: Date.now() - startTime
+        };
+      }
 
       // 4. Handle context-only responses (no tools needed)
       if (policy.useContextOnly) {
@@ -1233,6 +1278,48 @@ export class Orchestrator {
         domain: classification.domain,
         agents: classification.agents
       };
+
+      // Handle greeting intent - return preflight response
+      if (classification.intent === 'greeting_neutral') {
+        logger.info({ intent: 'greeting_neutral' }, 'Streaming: Handling greeting with preflight');
+
+        const preflight = await runPreflight({
+          userAccountId: toolContext.userAccountId,
+          adAccountId: toolContext.adAccountId,
+          adAccountDbId: toolContext.adAccountDbId,
+          accessToken: toolContext.accessToken,
+          integrations
+        });
+
+        const smartSuggestions = generateSmartGreetingSuggestions(preflight);
+        logger.info({ smartSuggestions }, 'Greeting: Generated smart suggestions');
+
+        const { content, uiJson } = formatGreetingResponse(smartSuggestions);
+        logger.info({ content, hasUiJson: !!uiJson }, 'Greeting: Formatted response');
+
+        const textEvent = {
+          type: 'text',
+          content,
+          accumulated: content
+        };
+        logger.info({ textEvent }, 'Greeting: Yielding text event');
+        yield textEvent;
+
+        const doneEvent = {
+          type: 'done',
+          content,
+          uiJson,
+          uiComponents: uiJson,  // For route compatibility
+          suggestions: smartSuggestions.suggestions,
+          classification,
+          duration: Date.now() - startTime
+        };
+        logger.info({ doneEventType: doneEvent.type, hasContent: !!doneEvent.content }, 'Greeting: Yielding done event');
+        yield doneEvent;
+
+        logger.info('Greeting: Flow complete, returning');
+        return;
+      }
 
       // Yield thinking message based on domain
       const thinkingMessage = getThinkingMessage(classification.domain);

@@ -19,8 +19,8 @@ export function validateAgentResponse(content, options = {}) {
   // 1. Проверка секций
   const hasItog = /\*\*Итог\*\*|📊\s*\*?\*?Итог/i.test(content);
   const hasInsights = /\*\*Инсайты?\*\*|Инсайт[ыи]?:/i.test(content);
-  const hasNextSteps = /\*\*Следующие шаги\*\*|Следующие шаги:|🟢|🟡/i.test(content);
-  const hasConfidence = /📊\s*Уверенность:/i.test(content);
+  const hasNextSteps = /\*\*Следующие шаги\*\*|Следующие шаги:/i.test(content);
+  const hasConfidence = false; // Removed confidence requirement
 
   if (!hasItog) {
     (strict ? errors : warnings).push('Нет секции "Итог"');
@@ -31,9 +31,7 @@ export function validateAgentResponse(content, options = {}) {
   if (!hasNextSteps) {
     (strict ? errors : warnings).push('Нет секции "Следующие шаги"');
   }
-  if (!hasConfidence) {
-    warnings.push('Нет строки "📊 Уверенность:"');
-  }
+  // Confidence check removed
 
   // 2. Проверка refs
   const refs = content.match(/\[(c|d|cr|l)\d+\]/g) || [];
@@ -67,18 +65,7 @@ export function validateAgentResponse(content, options = {}) {
     warnings.push('Есть refs, но нет таблицы — лучше структурировать');
   }
 
-  // 7. Проверка следующих шагов (должно быть минимум 2)
-  const greenSteps = (content.match(/🟢/g) || []).length;
-  const yellowSteps = (content.match(/🟡/g) || []).length;
-  if (greenSteps + yellowSteps < 2 && hasNextSteps) {
-    warnings.push('Меньше 2 вариантов действий (🟢 безопасный + 🟡 агрессивный)');
-  }
-
-  // 8. Проверка уровня уверенности (формат)
-  const confidenceMatch = content.match(/📊\s*Уверенность:\s*(высокая|средняя|низкая)/i);
-  if (hasConfidence && !confidenceMatch) {
-    warnings.push('Неверный формат уверенности (должно быть: высокая/средняя/низкая)');
-  }
+  // 7. Проверка следующих шагов removed (emoji markers no longer required)
 
   return {
     valid: errors.length === 0,

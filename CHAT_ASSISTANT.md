@@ -1282,6 +1282,92 @@ getIntegrations(userAccountId, adAccountId, hasFbToken)
 
 ---
 
+### Greeting Preflight Service
+
+**Путь:** `services/agent-brain/src/chatAssistant/hybrid/preflightService.js`
+
+Умная обработка приветственных сообщений с preflight проверками и контекстными quick-replies.
+
+**Когда срабатывает:**
+- Сообщения: `привет`, `салам`, `йо`, `хай`, `как дела`, `?`
+- Intent: `greeting_neutral`
+- Policy: `specialHandler: 'greeting_preflight'`
+
+**Функции:**
+
+| Функция | Описание |
+|---------|----------|
+| `runPreflight({ userAccountId, adAccountId, accessToken, integrations })` | Запуск preflight проверок (кэш 10 мин) |
+| `generateSmartGreetingSuggestions(preflight)` | Генерация контекстных suggestions |
+| `formatGreetingResponse(smartSuggestions)` | Форматирование с UI компонентами |
+| `invalidatePreflightCache(userAccountId, adAccountId)` | Инвалидация кэша |
+
+**Preflight проверки (параллельно):**
+
+| Проверка | Источник |
+|----------|----------|
+| Ad Account Status | `getAdAccountStatus()` — статус FB аккаунта |
+| Last Activity | `direction_metrics_rollup` — последняя активность за 14 дней |
+
+**Кейсы Smart Suggestions:**
+
+| Условие | Текст | Quick Replies |
+|---------|-------|---------------|
+| `fb=false` | "Facebook не подключён" | [Подключить FB, Что подключено?, Что умеет?] |
+| `can_run_ads=false` | "Реклама не крутится: {причина}" | [Подробнее, Проверить платежи, Последние кампании] |
+| `no_activity 14d+` | "Аккаунт ок, но рекламы нет" | [Почему?, Показать кампании, Диагностика] |
+| `has_activity` | "Данные доступны" | [Расходы за неделю, ROI/Лиды (по integrations)] |
+
+**Кэш:**
+```javascript
+const preflightCache = new Map();
+const PREFLIGHT_TTL = 10 * 60 * 1000; // 10 минут
+// key: `${userAccountId}:${adAccountDbId}`
+```
+
+**UI компоненты ответа:**
+- `type: 'alert'` — блок с причиной проблемы (error/warning/info/success)
+- `type: 'actions'` — интерактивные кнопки quick-replies
+
+**Пример ответа:**
+```json
+{
+  "content": "Привет! Вижу проблему с рекламным аккаунтом: нужна оплата",
+  "uiJson": [
+    {
+      "type": "alert",
+      "alertType": "error",
+      "title": "Реклама не крутится",
+      "message": "Проблема с оплатой — проверьте платёжный метод"
+    },
+    {
+      "type": "actions",
+      "title": "Быстрые действия",
+      "items": [
+        { "id": "show_reason", "label": "Подробнее о причине", "icon": "🔍", "payload": { "action": "show_blocking_reason" } },
+        { "id": "check_billing", "label": "Проверить платежи", "icon": "💳", "payload": { "action": "check_billing" } }
+      ],
+      "layout": "horizontal"
+    }
+  ]
+}
+```
+
+**Интеграция в Orchestrator:**
+```javascript
+// orchestrator/index.js — после resolvePolicy()
+if (policy.specialHandler === 'greeting_preflight') {
+  const preflight = await runPreflight({ userAccountId, adAccountId, accessToken, integrations });
+  const smartSuggestions = generateSmartGreetingSuggestions(preflight);
+  const { content, uiJson } = formatGreetingResponse(smartSuggestions);
+
+  yield { type: 'text', content, accumulated: content };
+  yield { type: 'done', content, uiJson, suggestions: smartSuggestions.suggestions };
+}
+```
+
+---
+
 ### Execution Playbooks (AdsAgent v2.2)
 
 **Путь:** `services/agent-brain/src/chatAssistant/agents/ads/playbooks.js`
@@ -2010,6 +2096,8 @@ async getCampaigns(params, context) {
 | `UICopyField.tsx` | Поле с кнопкой копирования |
 | `UIMetricsComparison.tsx` | Сравнение метрик двух периодов (delta %) |
 | `UIComponent.tsx` | Router для рендеринга разных типов |
+| `UIActionsFlat` | Интерактивные кнопки действий (inline в UIComponent.tsx) |
+| `UIAlertFlat` | Alert блок с иконкой и стилями (inline в UIComponent.tsx) |
 
 ### Хранение
 
@@ -2057,8 +2145,12 @@ async getCampaigns(params, context) {
 
 ```typescript
 interface UIComponent {
-  type: 'card' | 'table' | 'button' | 'chart' | 'copy_field';
-  data: CardData | TableData | ButtonData | ChartData | CopyFieldData;
+  type: 'card' | 'table' | 'button' | 'chart' | 'copy_field' | 'actions' | 'alert' | 'quick_actions';
+  data?: CardData | TableData | ButtonData | ChartData | CopyFieldData;
+  // Flat structure for actions/alert (data на верхнем уровне)
+  items?: ActionItem[];
+  alertType?: 'info' | 'warning' | 'error' | 'success';
+  message?: string;
 }
 
 interface CardData {
@@ -2066,6 +2158,30 @@ interface CardData {
   subtitle?: string;
   metrics?: { label: string; value: string; delta?: string; trend?: 'up' | 'down' }[];
   actions?: { label: string; action: string; params: Record<string, any> }[];
+}
+
+// Actions component (flat structure)
+interface ActionsComponent {
+  type: 'actions';
+  title?: string;
+  items: ActionItem[];
+  layout?: 'horizontal' | 'vertical';
+}
+
+interface ActionItem {
+  id: string;
+  label: string;
+  icon?: string;
+  payload?: { action: string; [key: string]: unknown };
+  disabled?: boolean;
+}
+
+// Alert component (flat structure)
+interface AlertComponent {
+  type: 'alert';
+  alertType: 'info' | 'warning' | 'error' | 'success';
+  title?: string;
+  message: string;
 }
 ```
 
@@ -4617,6 +4733,15 @@ export {
   createPlaybookNextSteps
 } from './uiComponents.js';
 
+// Phase 6: Preflight Service (greeting handling)
+export {
+  runPreflight,
+  generateSmartGreetingSuggestions,
+  formatGreetingResponse,
+  invalidatePreflightCache,
+  clearPreflightCache
+} from './preflightService.js';
+
 // Config
 export { HYBRID_CONFIG };
 ```
@@ -4636,6 +4761,7 @@ chatAssistant/hybrid/
 ├── tierManager.js          # TierManager class для переходов
 ├── expressionEvaluator.js  # Безопасный eval для условий
 ├── uiComponents.js         # UI components для Web
+├── preflightService.js     # Greeting preflight + smart suggestions (Phase 6)
 └── responseTemplates.js    # Шаблоны текстовых ответов для playbooks
 ```
 

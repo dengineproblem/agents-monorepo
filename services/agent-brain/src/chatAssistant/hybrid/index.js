@@ -78,6 +78,15 @@ export {
   createPlaybookNextSteps
 } from './uiComponents.js';
 
+// Phase 6: Preflight Service (greeting handling)
+export {
+  runPreflight,
+  generateSmartGreetingSuggestions,
+  formatGreetingResponse,
+  invalidatePreflightCache,
+  clearPreflightCache
+} from './preflightService.js';
+
 // Config
 export const HYBRID_CONFIG = {
   enabled: process.env.HYBRID_ENABLED === 'true',

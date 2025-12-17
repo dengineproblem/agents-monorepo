@@ -361,9 +361,8 @@ export function assembleUiJson(components) {
 
   if (validComponents.length === 0) return null;
 
-  return {
-    components: validComponents
-  };
+  // Return array directly for frontend compatibility
+  return validComponents;
 }
 
 /**
