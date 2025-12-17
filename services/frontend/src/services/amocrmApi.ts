@@ -63,7 +63,7 @@ export interface Pipeline {
 
 /**
  * Get funnel stage distribution for a specific creative
- * 
+ *
  * @param params - Query parameters
  * @returns Funnel statistics
  */
@@ -73,11 +73,16 @@ export async function getCreativeFunnelStats(params: {
   directionId?: string;
   dateFrom?: string;
   dateTo?: string;
+  accountId?: string;
 }): Promise<FunnelStats> {
   const queryParams = new URLSearchParams({
     userAccountId: params.userAccountId,
     creativeId: params.creativeId,
   });
+
+  if (params.accountId) {
+    queryParams.append('accountId', params.accountId);
+  }
 
   if (params.directionId) {
     queryParams.append('directionId', params.directionId);
@@ -105,13 +110,23 @@ export async function getCreativeFunnelStats(params: {
 
 /**
  * Trigger manual leads synchronization from AmoCRM
- * 
+ *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Sync result
  */
-export async function triggerLeadsSync(userAccountId: string): Promise<SyncResult> {
+export async function triggerLeadsSync(
+  userAccountId: string,
+  accountId?: string
+): Promise<SyncResult> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/sync-leads?userAccountId=${userAccountId}`,
+    `${API_BASE_URL}/amocrm/sync-leads?${queryParams.toString()}`,
     {
       method: 'POST',
     }
@@ -127,17 +142,28 @@ export async function triggerLeadsSync(userAccountId: string): Promise<SyncResul
 
 /**
  * Быстрая синхронизация лидов конкретного креатива из AmoCRM (с параллелизацией)
- * 
+ *
  * @param userAccountId - User account UUID
  * @param creativeId - Creative UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Sync result
  */
 export async function triggerCreativeLeadsSync(
-  userAccountId: string, 
-  creativeId: string
+  userAccountId: string,
+  creativeId: string,
+  accountId?: string
 ): Promise<SyncResult> {
+  const queryParams = new URLSearchParams({
+    userAccountId,
+    creativeId,
+  });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/sync-creative-leads?userAccountId=${userAccountId}&creativeId=${creativeId}`,
+    `${API_BASE_URL}/amocrm/sync-creative-leads?${queryParams.toString()}`,
     {
       method: 'POST',
     }
@@ -155,10 +181,20 @@ export async function triggerCreativeLeadsSync(
  * Get all pipelines with their stages
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Array of pipelines with stages
  */
-export async function getPipelines(userAccountId: string): Promise<Pipeline[]> {
-  const url = `${API_BASE_URL}/amocrm/pipelines?userAccountId=${userAccountId}`;
+export async function getPipelines(
+  userAccountId: string,
+  accountId?: string
+): Promise<Pipeline[]> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const url = `${API_BASE_URL}/amocrm/pipelines?${queryParams.toString()}`;
   console.log('[amocrmApi] Fetching pipelines from:', url);
 
   const response = await fetch(url);
@@ -263,11 +299,13 @@ export async function getDirectionKeyStageStats(
  *
  * @param userAccountId - User account UUID
  * @param directionId - Optional direction UUID to sync specific direction
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Sync result
  */
 export async function recalculateKeyStageStats(
   userAccountId: string,
-  directionId?: string
+  directionId?: string,
+  accountId?: string
 ): Promise<{ success: boolean; synced: number; not_found: number; errors: number }> {
   const queryParams = new URLSearchParams({
     userAccountId,
@@ -275,6 +313,10 @@ export async function recalculateKeyStageStats(
 
   if (directionId) {
     queryParams.append('directionId', directionId);
+  }
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
   }
 
   const response = await fetch(
@@ -337,13 +379,21 @@ export interface QualifiedLeadsByCreative {
  * Get all checkbox custom fields from AmoCRM (for qualification field selection)
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Array of checkbox custom fields
  */
 export async function getLeadCustomFields(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string
 ): Promise<{ fields: CustomField[] }> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/lead-custom-fields?userAccountId=${userAccountId}`
+    `${API_BASE_URL}/amocrm/lead-custom-fields?${queryParams.toString()}`
   );
 
   if (!response.ok) {
@@ -358,13 +408,21 @@ export async function getLeadCustomFields(
  * Get current qualification field setting
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Current qualification field setting
  */
 export async function getQualificationField(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string
 ): Promise<QualificationFieldSetting> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/qualification-field?userAccountId=${userAccountId}`
+    `${API_BASE_URL}/amocrm/qualification-field?${queryParams.toString()}`
   );
 
   if (!response.ok) {
@@ -384,6 +442,7 @@ export async function getQualificationField(
  * @param fieldType - Field type (checkbox, select, multiselect)
  * @param enumId - For select/multiselect: enum ID that means qualified
  * @param enumValue - For select/multiselect: enum value name
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Success status
  */
 export async function setQualificationField(
@@ -392,10 +451,17 @@ export async function setQualificationField(
   fieldName: string | null,
   fieldType?: string | null,
   enumId?: number | null,
-  enumValue?: string | null
+  enumValue?: string | null,
+  accountId?: string
 ): Promise<{ success: boolean }> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/qualification-field?userAccountId=${userAccountId}`,
+    `${API_BASE_URL}/amocrm/qualification-field?${queryParams.toString()}`,
     {
       method: 'PATCH',
       headers: {
@@ -417,13 +483,21 @@ export async function setQualificationField(
  * Get qualification fields settings (up to 3 fields)
  *
  * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Array of qualification field configs
  */
 export async function getQualificationFields(
-  userAccountId: string
+  userAccountId: string,
+  accountId?: string
 ): Promise<QualificationFieldsSettings> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/qualification-fields?userAccountId=${userAccountId}`
+    `${API_BASE_URL}/amocrm/qualification-fields?${queryParams.toString()}`
   );
 
   if (!response.ok) {
@@ -440,14 +514,22 @@ export async function getQualificationFields(
  *
  * @param userAccountId - User account UUID
  * @param fields - Array of field configs (max 3)
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Success status
  */
 export async function setQualificationFields(
   userAccountId: string,
-  fields: QualificationFieldConfig[]
+  fields: QualificationFieldConfig[],
+  accountId?: string
 ): Promise<{ success: boolean }> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
   const response = await fetch(
-    `${API_BASE_URL}/amocrm/qualification-fields?userAccountId=${userAccountId}`,
+    `${API_BASE_URL}/amocrm/qualification-fields?${queryParams.toString()}`,
     {
       method: 'PATCH',
       headers: {
@@ -472,12 +554,14 @@ export async function setQualificationFields(
  * @param userAccountId - User account UUID
  * @param dateFrom - Optional start date (ISO format)
  * @param dateTo - Optional end date (ISO format)
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Qualified leads count by creative
  */
 export async function getQualifiedLeadsByCreative(
   userAccountId: string,
   dateFrom?: string,
-  dateTo?: string
+  dateTo?: string,
+  accountId?: string
 ): Promise<QualifiedLeadsByCreative> {
   const queryParams = new URLSearchParams({
     userAccountId,
@@ -489,6 +573,10 @@ export async function getQualifiedLeadsByCreative(
 
   if (dateTo) {
     queryParams.append('dateTo', dateTo);
+  }
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
   }
 
   const response = await fetch(
@@ -518,12 +606,14 @@ export interface QualifiedLeadsTotal {
  * @param userAccountId - User account UUID
  * @param dateFrom - Optional start date (ISO format YYYY-MM-DD)
  * @param dateTo - Optional end date (ISO format YYYY-MM-DD)
+ * @param accountId - Optional ad_account UUID for multi-account mode
  * @returns Total qualified leads count and configuration status
  */
 export async function getQualifiedLeadsTotal(
   userAccountId: string,
   dateFrom?: string,
-  dateTo?: string
+  dateTo?: string,
+  accountId?: string
 ): Promise<QualifiedLeadsTotal> {
   const queryParams = new URLSearchParams({
     userAccountId,
@@ -535,6 +625,10 @@ export async function getQualifiedLeadsTotal(
 
   if (dateTo) {
     queryParams.append('dateTo', dateTo);
+  }
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
   }
 
   const response = await fetch(

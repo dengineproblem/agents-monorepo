@@ -28,6 +28,7 @@ interface CreativeFunnelModalProps {
   directionId?: string;
   dateFrom?: string;
   dateTo?: string;
+  accountId?: string; // UUID из ad_accounts для мультиаккаунтности
 }
 
 export function CreativeFunnelModal({
@@ -39,6 +40,7 @@ export function CreativeFunnelModal({
   directionId,
   dateFrom,
   dateTo,
+  accountId,
 }: CreativeFunnelModalProps) {
   const [stats, setStats] = useState<FunnelStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,6 +57,7 @@ export function CreativeFunnelModal({
         directionId,
         dateFrom,
         dateTo,
+        accountId,
       });
       setStats(data);
     } catch (err: any) {
@@ -68,7 +71,7 @@ export function CreativeFunnelModal({
     setSyncing(true);
     try {
       // Используем быструю синхронизацию только для лидов этого креатива
-      await triggerCreativeLeadsSync(userAccountId, creativeId);
+      await triggerCreativeLeadsSync(userAccountId, creativeId, accountId);
       // Перезагружаем статистику после синхронизации
       await loadStats();
     } catch (err: any) {
@@ -82,7 +85,7 @@ export function CreativeFunnelModal({
     if (isOpen) {
       loadStats();
     }
-  }, [isOpen, creativeId, userAccountId, directionId, dateFrom, dateTo]);
+  }, [isOpen, creativeId, userAccountId, directionId, dateFrom, dateTo, accountId]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

@@ -1692,6 +1692,7 @@ const ROIAnalytics: React.FC = () => {
             creativeName={selectedCreative.name}
             userAccountId={userAccountId}
             directionId={selectedDirectionId || undefined}
+            accountId={currentAdAccountId}
           />
         )}
       </div>

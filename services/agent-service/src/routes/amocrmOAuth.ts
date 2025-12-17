@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { exchangeCodeForToken, getAccountInfo } from '../adapters/amocrm.js';
 import {
   saveAmoCRMTokens,
+  saveAmoCRMTokensToAdAccount,
   disconnectAmoCRM,
   getAmoCRMStatus
 } from '../lib/amocrmTokens.js';
@@ -175,6 +176,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
 
       let userAccountId: string;
       let subdomain: string;
+      let accountId: string | undefined; // Optional: ad_account UUID for multi-account mode
       let clientId: string | undefined;
       let clientSecret: string | undefined;
       let isAutoCreated = false;
@@ -246,7 +248,10 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
         // Traditional flow with pre-configured integration
         try {
           const decoded = Buffer.from(state, 'base64').toString('utf-8');
-          [userAccountId, subdomain] = decoded.split('|');
+          const parts = decoded.split('|');
+          userAccountId = parts[0];
+          subdomain = parts[1];
+          accountId = parts[2]; // Optional: ad_account UUID for multi-account mode
 
           if (!userAccountId || !subdomain) {
             throw new Error('Invalid state format');
@@ -262,6 +267,7 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
         app.log.info({
           userAccountId,
           subdomain,
+          accountId,
           code: code.substring(0, 10) + '...'
         }, 'Received AmoCRM OAuth callback (pre-configured integration)');
       }
@@ -269,8 +275,15 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
       // Exchange code for tokens (with optional credentials for auto-created integrations)
       const tokens = await exchangeCodeForToken(code, subdomain, clientId, clientSecret);
 
-      // Save tokens to database (with client credentials for auto-created integrations)
-      await saveAmoCRMTokens(userAccountId, subdomain, tokens, clientId, clientSecret);
+      // Save tokens to appropriate table based on multi-account mode
+      if (accountId) {
+        // Multi-account mode: save to ad_accounts
+        await saveAmoCRMTokensToAdAccount(accountId, subdomain, tokens, clientId, clientSecret);
+        app.log.info({ userAccountId, accountId, subdomain }, 'AmoCRM tokens saved to ad_accounts (multi-account mode)');
+      } else {
+        // Legacy mode: save to user_accounts
+        await saveAmoCRMTokens(userAccountId, subdomain, tokens, clientId, clientSecret);
+      }
 
       // Delete temporary credentials if this was an auto-created integration
       if (isAutoCreated) {

@@ -514,12 +514,13 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
    */
   app.get('/amocrm/creative-funnel-stats', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId, creativeId, directionId, dateFrom, dateTo } = request.query as {
+      const { userAccountId, creativeId, directionId, dateFrom, dateTo, accountId } = request.query as {
         userAccountId?: string;
         creativeId?: string;
         directionId?: string;
         dateFrom?: string;
         dateTo?: string;
+        accountId?: string;
       };
 
       if (!userAccountId) {
@@ -534,7 +535,7 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      app.log.info({ userAccountId, creativeId, directionId }, 'Fetching creative funnel stats');
+      app.log.info({ userAccountId, creativeId, directionId, accountId }, 'Fetching creative funnel stats');
 
       // Build SQL query for leads
       let query = supabase
@@ -544,6 +545,11 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         .eq('creative_id', creativeId)
         .not('amocrm_lead_id', 'is', null)
         .not('current_status_id', 'is', null);
+
+      // Filter by account_id for multi-account mode
+      if (accountId) {
+        query = query.eq('account_id', accountId);
+      }
 
       if (directionId) {
         query = query.eq('direction_id', directionId);

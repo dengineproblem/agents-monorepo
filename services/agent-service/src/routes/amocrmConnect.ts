@@ -16,7 +16,7 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
    *   - userAccountId: UUID of user account (required)
    */
   app.get('/amocrm/connect', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId, subdomain } = request.query as { userAccountId?: string; subdomain?: string };
+    const { userAccountId, subdomain, accountId } = request.query as { userAccountId?: string; subdomain?: string; accountId?: string };
 
     if (!userAccountId) {
       return reply.code(400).send({
@@ -38,6 +38,9 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
     const baseUrl = `${protocol}://${host}`;
     const redirectUri = `${baseUrl}/amocrm/callback`;
     const secretsUri = `${baseUrl}/amocrm/secrets`;
+
+    // Include accountId in state for multi-account mode
+    const stateData = accountId ? `${userAccountId}|${subdomain}|${accountId}` : `${userAccountId}|${subdomain}`;
 
     const html = `<!DOCTYPE html>
 <html lang="ru">
@@ -223,7 +226,7 @@ export default async function amocrmConnectRoutes(app: FastifyInstance) {
     data-secrets_uri="${secretsUri}"
     data-scopes="crm,notifications"
     data-title="Подключить amoCRM"
-    data-state="${Buffer.from(`${userAccountId}|${subdomain}`).toString('base64')}"
+    data-state="${Buffer.from(stateData).toString('base64')}"
     data-mode="popup"
     data-error-callback="onAmoAuthError"
     src="https://www.amocrm.ru/auth/button.min.js">

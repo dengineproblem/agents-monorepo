@@ -895,7 +895,11 @@ const Profile: React.FC = () => {
   const handleAmoCRMConnectSubmit = () => {
     if (!user?.id || !amocrmInputSubdomain.trim()) return;
 
-    const url = `${API_BASE_URL}/amocrm/connect?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
+    // Include accountId for multi-account mode
+    let url = `${API_BASE_URL}/amocrm/connect?userAccountId=${user.id}&subdomain=${amocrmInputSubdomain.trim()}`;
+    if (multiAccountEnabled && currentAdAccountId) {
+      url += `&accountId=${currentAdAccountId}`;
+    }
     window.location.href = url;
   };
 
