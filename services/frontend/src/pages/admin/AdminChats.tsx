@@ -6,7 +6,7 @@
  * @module pages/admin/AdminChats
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -60,7 +60,6 @@ const AdminChats: React.FC = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch users with messages
   const fetchUsers = useCallback(async () => {
@@ -89,7 +88,7 @@ const AdminChats: React.FC = () => {
   const fetchMessages = useCallback(async (uId: string) => {
     setLoadingMessages(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}`);
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=50`);
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -124,22 +123,15 @@ const AdminChats: React.FC = () => {
     }
   }, [selectedUser, fetchMessages, navigate]);
 
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
-  // Polling for real-time updates (every 10 seconds)
+  // Polling for users list only (every 30 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
       fetchUsers();
-      if (selectedUser) {
-        fetchMessages(selectedUser.id);
-      }
-    }, 10000);
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [selectedUser, fetchUsers, fetchMessages]);
+  }, [fetchUsers]);
 
   // Send message
   const handleSendMessage = async () => {
@@ -298,7 +290,8 @@ const AdminChats: React.FC = () => {
             </div>
 
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4">
+            <div className="relative overflow-hidden flex-1">
+            <ScrollArea className="absolute inset-0 p-4">
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full">
                   <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -351,10 +344,10 @@ const AdminChats: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                  <div ref={messagesEndRef} />
                 </div>
               )}
             </ScrollArea>
+            </div>
 
             {/* Input */}
             <div className="p-4 border-t flex gap-2">
