@@ -10,7 +10,7 @@
  */
 
 import { logger } from '../../lib/logger.js';
-import { playbookRegistry } from './playbookRegistry.js';
+import { playbookRegistry, getPlaybookWithStackExtensions } from './playbookRegistry.js';
 
 /**
  * Intent patterns - паттерны для определения intent
@@ -596,9 +596,10 @@ export class PolicyEngine {
    * @param {string[]} params.domains - Домены от classifier
    * @param {Object} params.context - Бизнес-контекст
    * @param {Object} params.integrations - Доступные интеграции
+   * @param {string} params.stack - Стек интеграций клиента (fb_only, fb_wa, fb_crm, fb_wa_crm, no_fb)
    * @returns {Policy}
    */
-  resolvePolicy({ intent, domains, context, integrations }) {
+  resolvePolicy({ intent, domains, context, integrations, stack }) {
     const basePolicyDef = POLICY_DEFINITIONS[intent] || POLICY_DEFINITIONS.unknown;
 
     // Копируем policy
@@ -612,7 +613,8 @@ export class PolicyEngine {
       clarifyingRequired: basePolicyDef.clarifyingRequired,
       clarifyingQuestions: basePolicyDef.clarifyingQuestions ? [...basePolicyDef.clarifyingQuestions] : [],
       useContextOnly: basePolicyDef.useContextOnly || false,
-      contextSource: basePolicyDef.contextSource || null
+      contextSource: basePolicyDef.contextSource || null,
+      stack: stack || 'fb_only'  // Добавляем stack в policy
     };
 
     // Preflight check
@@ -686,9 +688,10 @@ export class PolicyEngine {
    * @param {string} params.tier - Название tier'а ('snapshot', 'drilldown', 'actions')
    * @param {Object} params.context - Бизнес-контекст
    * @param {Object} params.integrations - Доступные интеграции
+   * @param {string} params.stack - Стек интеграций клиента
    * @returns {Policy}
    */
-  resolveTierPolicy({ playbookId, tier = 'snapshot', context = {}, integrations = {} }) {
+  resolveTierPolicy({ playbookId, tier = 'snapshot', context = {}, integrations = {}, stack = 'fb_only' }) {
     const tierPolicy = playbookRegistry.getTierPolicy(playbookId, tier);
 
     if (!tierPolicy || tierPolicy.allowedTools.length === 0) {
@@ -699,12 +702,14 @@ export class PolicyEngine {
           intent: playbookId,
           domains: [playbook.domain],
           context,
-          integrations
+          integrations,
+          stack
         });
         return {
           ...legacyPolicy,
           tier: 'snapshot',
-          fromPlaybook: false
+          fromPlaybook: false,
+          stack
         };
       }
 
@@ -716,19 +721,25 @@ export class PolicyEngine {
         allowedTools: [],
         dangerousPolicy: 'block',
         maxToolCalls: 0,
-        fromPlaybook: false
+        fromPlaybook: false,
+        stack
       };
     }
 
-    // Добавляем clarifyingQuestions из playbook
-    const playbook = playbookRegistry.getPlaybook(playbookId);
+    // Получаем playbook с учётом stack extensions
+    const playbook = getPlaybookWithStackExtensions(playbookId, stack);
     const clarifyingQuestions = playbook?.clarifyingQuestions || [];
 
     const policy = {
       ...tierPolicy,
       clarifyingRequired: clarifyingQuestions.length > 0 && tier === 'snapshot',
       clarifyingQuestions,
-      fromPlaybook: true
+      fromPlaybook: true,
+      stack,
+      // Добавляем stack-extended данные в policy
+      nextSteps: playbook?.nextSteps || [],
+      drilldownBranches: playbook?.drilldownBranches || [],
+      stackExtended: playbook?._stackExtended || null
     };
 
     // Preflight checks для интеграций

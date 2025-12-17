@@ -25,6 +25,7 @@ services:
       - MONITORING_CHAT_ID=313145981
       - HOSTNAME=agent-brain-prod
       - OPENAI_MAX_RETRIES=3
+      - HYBRID_ENABLED=true
     ports:
       - "7080:7080"
     restart: unless-stopped

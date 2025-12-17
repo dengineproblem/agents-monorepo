@@ -18,6 +18,7 @@ export function buildWhatsAppPrompt(context, mode) {
   const dialogsContext = formatDialogsContext(context);
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'whatsapp');
+  const stackContext = formatStackContext(context);
 
   return `# WhatsAppAgent — Эксперт по WhatsApp диалогам
 
@@ -52,6 +53,8 @@ ${specsContext}
 
 ${notesContext}
 
+${stackContext}
+
 ${dialogsContext}
 
 ## Формат ответа
@@ -69,4 +72,59 @@ function formatDialogsContext(context) {
   return `## Текущий контекст
 - Активных диалогов за 24ч: ${context.activeDialogs || 0}
 - Всего диалогов: ${context.totalDialogs || 0}`;
+}
+
+/**
+ * Format stack context for WhatsApp agent
+ */
+function formatStackContext(context) {
+  // Если есть готовый integrationsFormatted — используем его
+  if (context?.integrationsFormatted) {
+    return context.integrationsFormatted;
+  }
+
+  if (!context?.stack) {
+    return '';
+  }
+
+  const lines = ['## Стек клиента'];
+  lines.push(`**Тип:** ${context.stack}`);
+
+  if (context.stackDescription) {
+    lines.push(`**Описание:** ${context.stackDescription}`);
+  }
+
+  // WhatsApp-specific guidance
+  const guidance = {
+    no_fb: [
+      'Facebook не подключён — нет связи диалогов с рекламой',
+      'Анализируй диалоги без контекста рекламных кампаний'
+    ],
+    fb_only: [
+      'WhatsApp не подключён к Facebook',
+      'Можешь анализировать диалоги, но нет связи с рекламой'
+    ],
+    fb_wa: [
+      'Диалоги связаны с рекламой — можешь указывать источник лида',
+      'Нет CRM — используй диалоги как основной источник для оценки качества'
+    ],
+    fb_crm: [
+      'WhatsApp и CRM не связаны',
+      'Рекомендуй проверить данные лида в CRM после анализа диалога'
+    ],
+    fb_wa_crm: [
+      'Полный стек — диалоги связаны с CRM',
+      'Комплексный анализ: история диалога + данные лида из CRM',
+      'Можешь предлагать обновить этап воронки по результатам диалога'
+    ]
+  };
+
+  const stackGuidance = guidance[context.stack] || [];
+  if (stackGuidance.length > 0) {
+    lines.push('');
+    lines.push('**Рекомендации:**');
+    stackGuidance.forEach(g => lines.push(`• ${g}`));
+  }
+
+  return lines.join('\n');
 }

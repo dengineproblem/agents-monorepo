@@ -653,6 +653,233 @@ export const PLAYBOOKS = {
 };
 
 /**
+ * Stack-specific расширения для playbooks
+ *
+ * Каждый стек может добавлять:
+ * - extraDrilldownBranches: дополнительные ветки drilldown
+ * - extraNextSteps: дополнительные next steps
+ * - extraTools: дополнительные tools для tier
+ */
+export const STACK_EXTENSIONS = {
+  // Расширения для fb_wa стека (Facebook + WhatsApp)
+  fb_wa: {
+    lead_expensive: {
+      extraDrilldownBranches: [
+        {
+          id: 'dialog_quality',
+          label: 'Качество диалогов',
+          icon: '💬',
+          tools: ['getDialogs', 'analyzeDialog', 'getDialogMessages']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'check_dialogs',
+          label: 'Проверить переписки',
+          targetTier: 'drilldown',
+          icon: '💬',
+          branch: 'dialog_quality'
+        }
+      ]
+    },
+    ads_not_working: {
+      extraDrilldownBranches: [
+        {
+          id: 'dialog_analysis',
+          label: 'Анализ переписок',
+          icon: '💬',
+          tools: ['getDialogs', 'getDialogMessages']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'analyze_dialogs',
+          label: 'Проанализировать диалоги',
+          targetTier: 'drilldown',
+          icon: '💬',
+          branch: 'dialog_analysis'
+        }
+      ]
+    }
+  },
+
+  // Расширения для fb_crm стека (Facebook + CRM)
+  fb_crm: {
+    lead_expensive: {
+      extraDrilldownBranches: [
+        {
+          id: 'lead_quality',
+          label: 'Качество лидов в CRM',
+          icon: '👥',
+          tools: ['getLeads', 'getFunnelStats', 'getSalesQuality']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'check_funnel',
+          label: 'Проверить воронку',
+          targetTier: 'drilldown',
+          icon: '📊',
+          branch: 'lead_quality'
+        }
+      ]
+    },
+    ads_not_working: {
+      extraDrilldownBranches: [
+        {
+          id: 'funnel_analysis',
+          label: 'Анализ воронки',
+          icon: '📊',
+          tools: ['getFunnelStats', 'getLeads']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'check_leads',
+          label: 'Посмотреть лидов',
+          targetTier: 'drilldown',
+          icon: '👥',
+          branch: 'funnel_analysis'
+        }
+      ]
+    }
+  },
+
+  // Расширения для полного стека fb_wa_crm (Facebook + WhatsApp + CRM)
+  fb_wa_crm: {
+    lead_expensive: {
+      extraDrilldownBranches: [
+        {
+          id: 'full_quality_analysis',
+          label: 'Полный анализ качества',
+          icon: '🔍',
+          tools: ['getDialogs', 'analyzeDialog', 'getLeads', 'getFunnelStats', 'getSalesQuality', 'getLeadsEngagementRate']
+        },
+        {
+          id: 'dialog_lead_correlation',
+          label: 'Связь диалогов и лидов',
+          icon: '🔗',
+          tools: ['getDialogs', 'getLeads', 'getDialogMessages']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'full_quality_check',
+          label: 'Полная проверка качества',
+          targetTier: 'drilldown',
+          icon: '🔍',
+          branch: 'full_quality_analysis'
+        },
+        {
+          id: 'check_correlation',
+          label: 'Сопоставить диалоги и лиды',
+          targetTier: 'drilldown',
+          icon: '🔗',
+          branch: 'dialog_lead_correlation'
+        }
+      ]
+    },
+    ads_not_working: {
+      extraDrilldownBranches: [
+        {
+          id: 'full_diagnosis',
+          label: 'Полная диагностика',
+          icon: '🩺',
+          tools: ['getDialogs', 'getDialogMessages', 'getFunnelStats', 'getLeads', 'getSalesQuality']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'run_full_diagnosis',
+          label: 'Полная диагностика',
+          targetTier: 'drilldown',
+          icon: '🩺',
+          branch: 'full_diagnosis'
+        }
+      ]
+    },
+    no_sales: {
+      extraDrilldownBranches: [
+        {
+          id: 'dialog_to_sale',
+          label: 'Путь от диалога до продажи',
+          icon: '💰',
+          tools: ['getDialogs', 'getDialogMessages', 'getLeads', 'getFunnelStats']
+        }
+      ],
+      extraNextSteps: [
+        {
+          id: 'analyze_conversion_path',
+          label: 'Анализ пути конверсии',
+          targetTier: 'drilldown',
+          icon: '💰',
+          branch: 'dialog_to_sale'
+        }
+      ]
+    }
+  }
+};
+
+/**
+ * Получить playbook с учётом stack extensions
+ * @param {string} playbookId
+ * @param {string} stack - 'fb_only' | 'fb_wa' | 'fb_crm' | 'fb_wa_crm' | 'no_fb'
+ * @returns {Object|null}
+ */
+export function getPlaybookWithStackExtensions(playbookId, stack) {
+  const basePlaybook = PLAYBOOKS[playbookId];
+  if (!basePlaybook) return null;
+
+  // Если нет расширений для этого стека, возвращаем базовый playbook
+  const extensions = STACK_EXTENSIONS[stack]?.[playbookId];
+  if (!extensions) return basePlaybook;
+
+  // Мержим drilldownBranches
+  const mergedDrilldownBranches = [
+    ...(basePlaybook.drilldownBranches || []),
+    ...(extensions.extraDrilldownBranches || [])
+  ];
+
+  // Мержим nextSteps
+  const mergedNextSteps = [
+    ...(basePlaybook.nextSteps || []),
+    ...(extensions.extraNextSteps || [])
+  ];
+
+  // Мержим tools в drilldown tier если есть extraTools
+  let mergedTiers = basePlaybook.tiers;
+  if (extensions.extraTools) {
+    mergedTiers = {
+      ...basePlaybook.tiers,
+      drilldown: {
+        ...basePlaybook.tiers.drilldown,
+        tools: [
+          ...(basePlaybook.tiers.drilldown?.tools || []),
+          ...extensions.extraTools
+        ]
+      }
+    };
+  }
+
+  logger.debug({
+    playbookId,
+    stack,
+    baseBranches: basePlaybook.drilldownBranches?.length || 0,
+    extendedBranches: mergedDrilldownBranches.length,
+    baseNextSteps: basePlaybook.nextSteps?.length || 0,
+    extendedNextSteps: mergedNextSteps.length
+  }, 'Playbook extended with stack extensions');
+
+  return {
+    ...basePlaybook,
+    drilldownBranches: mergedDrilldownBranches,
+    nextSteps: mergedNextSteps,
+    tiers: mergedTiers,
+    _stackExtended: stack  // Маркер что playbook был расширен
+  };
+}
+
+/**
  * PlaybookRegistry class
  */
 export class PlaybookRegistry {

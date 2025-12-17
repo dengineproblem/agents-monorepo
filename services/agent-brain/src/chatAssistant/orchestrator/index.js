@@ -16,7 +16,16 @@ import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.j
 import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
-import { getBusinessSnapshot, formatSnapshotForPrompt, getRecentBrainActions, getIntegrations, formatIntegrationsForPrompt } from '../contextGatherer.js';
+import {
+  getBusinessSnapshot,
+  formatSnapshotForPrompt,
+  getRecentBrainActions,
+  getIntegrations,
+  formatIntegrationsForPrompt,
+  getIntegrationStack,
+  getStackDescription,
+  getStackCapabilities
+} from '../contextGatherer.js';
 // Hybrid MCP imports
 import {
   policyEngine,
@@ -94,6 +103,9 @@ export class Orchestrator {
         getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
       ]);
 
+      // Определить стек интеграций клиента
+      const stack = getIntegrationStack(integrations);
+
       // Enrich context with memory AND snapshot (snapshot-first pattern)
       const enrichedContext = {
         ...context,
@@ -108,7 +120,11 @@ export class Orchestrator {
         brainActions,
         // Available integrations for tool routing
         integrations,
-        integrationsFormatted: formatIntegrationsForPrompt(integrations)
+        integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
+        // Stack info for personalized responses
+        stack,
+        stackDescription: getStackDescription(stack),
+        stackCapabilities: getStackCapabilities(stack)
       };
 
       // Track context stats for runsStore
@@ -118,7 +134,8 @@ export class Orchestrator {
         rollingSummaryUsed: summaryContext.used,
         snapshotUsed,
         snapshotFreshness: snapshot?.freshness,
-        integrations
+        integrations,
+        stack
       };
 
       // 2. Classify the request (now has snapshot for better routing)
@@ -255,6 +272,9 @@ export class Orchestrator {
         getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
       ]);
 
+      // Определить стек интеграций клиента
+      const stack = getIntegrationStack(integrations);
+
       const enrichedContext = {
         ...context,
         specs,
@@ -265,7 +285,11 @@ export class Orchestrator {
         businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         brainActions,
         integrations,
-        integrationsFormatted: formatIntegrationsForPrompt(integrations)
+        integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
+        // Stack info for personalized responses
+        stack,
+        stackDescription: getStackDescription(stack),
+        stackCapabilities: getStackCapabilities(stack)
       };
 
       // 2. Classify request (now includes intent)
@@ -283,7 +307,8 @@ export class Orchestrator {
         intent: classification.intent,
         domains: classification.agents,
         context: enrichedContext,
-        integrations
+        integrations,
+        stack
       });
 
       logger.info({
@@ -683,6 +708,9 @@ export class Orchestrator {
         getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
       ]);
 
+      // Определить стек интеграций клиента
+      const stack = getIntegrationStack(integrations);
+
       const enrichedContext = {
         ...context,
         specs,
@@ -693,7 +721,11 @@ export class Orchestrator {
         businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         brainActions,
         integrations,
-        integrationsFormatted: formatIntegrationsForPrompt(integrations)
+        integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
+        // Stack info for personalized responses
+        stack,
+        stackDescription: getStackDescription(stack),
+        stackCapabilities: getStackCapabilities(stack)
       };
 
       // 4. Get directions count for conditional questions
@@ -737,7 +769,8 @@ export class Orchestrator {
         playbookId,
         tier: currentTier,
         context: enrichedContext,
-        integrations
+        integrations,
+        stack
       });
 
       logger.info({
@@ -1235,6 +1268,9 @@ export class Orchestrator {
         getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
       ]);
 
+      // Определить стек интеграций клиента
+      const stack = getIntegrationStack(integrations);
+
       // Enrich context with memory AND snapshot (snapshot-first pattern)
       const enrichedContext = {
         ...context,
@@ -1249,7 +1285,11 @@ export class Orchestrator {
         brainActions,
         // Available integrations for tool routing
         integrations,
-        integrationsFormatted: formatIntegrationsForPrompt(integrations)
+        integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
+        // Stack info for personalized responses
+        stack,
+        stackDescription: getStackDescription(stack),
+        stackCapabilities: getStackCapabilities(stack)
       };
 
       // Track context stats for runsStore
@@ -1259,7 +1299,8 @@ export class Orchestrator {
         rollingSummaryUsed: summaryContext.used,
         snapshotUsed,
         snapshotFreshness: snapshot?.freshness,
-        integrations
+        integrations,
+        stack
       };
 
       // 2. Classify the request (now has snapshot for better routing)

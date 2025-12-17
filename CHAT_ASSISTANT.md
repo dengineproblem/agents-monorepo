@@ -1282,6 +1282,92 @@ getIntegrations(userAccountId, adAccountId, hasFbToken)
 
 ---
 
+### Integration Stack System
+
+**Путь:** `services/agent-brain/src/chatAssistant/contextGatherer.js`
+
+Система определения "стека интеграций" клиента для персонализированных ответов и stack-specific playbooks.
+
+**Стеки интеграций:**
+
+| Stack ID | Описание | Условие |
+|----------|----------|---------|
+| `fb_only` | Только Facebook | fb && !wa && !crm |
+| `fb_wa` | Facebook + WhatsApp | fb && wa && !crm |
+| `fb_crm` | Facebook + CRM | fb && !wa && crm |
+| `fb_wa_crm` | Полный стек | fb && wa && crm |
+| `no_fb` | Нет Facebook | !fb |
+
+**Функции:**
+
+| Функция | Описание |
+|---------|----------|
+| `getIntegrationStack(integrations)` | Определить стек по интеграциям |
+| `getStackDescription(stack)` | Человекочитаемое описание стека |
+| `getStackCapabilities(stack)` | Массив доступных возможностей |
+| `getStackLabel(stack)` | Короткий label для UI |
+| `formatIntegrationsForPrompt(integrations, stack)` | Форматирование для промптов с limitations |
+
+**Пример:**
+```javascript
+const integrations = { fb: true, crm: false, whatsapp: true, roi: false };
+const stack = getIntegrationStack(integrations); // 'fb_wa'
+const caps = getStackCapabilities(stack);
+// ['campaigns', 'adsets', 'creatives', 'spend', 'cpl', 'dialogs', 'dialog_analysis']
+```
+
+**Использование в orchestrator:**
+```javascript
+const stack = getIntegrationStack(integrations);
+const enrichedContext = {
+  ...context,
+  stack,
+  stackDescription: getStackDescription(stack),
+  stackCapabilities: getStackCapabilities(stack),
+  integrationsFormatted: formatIntegrationsForPrompt(integrations, stack)
+};
+```
+
+**Stack Extensions в playbooks:**
+
+Playbooks расширяются stack-specific ветками через `STACK_EXTENSIONS` в `playbookRegistry.js`:
+
+```javascript
+// Пример: для fb_wa стека добавляем анализ диалогов
+STACK_EXTENSIONS = {
+  fb_wa: {
+    lead_expensive: {
+      extraDrilldownBranches: [
+        { id: 'dialog_quality', label: 'Качество диалогов', tools: ['getDialogs', 'analyzeDialog'] }
+      ],
+      extraNextSteps: [
+        { id: 'check_dialogs', label: 'Проверить переписки', icon: '💬' }
+      ]
+    }
+  }
+};
+```
+
+**Ограничения по стекам:**
+
+| Stack | Ограничения |
+|-------|-------------|
+| `no_fb` | Нет доступа к рекламным данным |
+| `fb_only` | Нет данных о лидах, нет анализа диалогов |
+| `fb_wa` | Нет CRM данных, нет воронки продаж |
+| `fb_crm` | Нет анализа WhatsApp переписок |
+| `fb_wa_crm` | Полный доступ ко всем функциям |
+
+**Использование в агентах:**
+
+Каждый агент получает `context.stack` и `context.integrationsFormatted` для адаптации ответов:
+- AdsAgent — показывает ROI только если `integrations.roi=true`
+- CreativeAgent — предлагает анализ качества лидов только для `fb_wa`/`fb_wa_crm`
+- CRMAgent — добавляет инсайты про связь с рекламой только если есть FB
+- WhatsAppAgent — связывает диалоги с CRM только для `fb_wa_crm`
+
+---
+
 ### Greeting Preflight Service
 
 **Путь:** `services/agent-brain/src/chatAssistant/hybrid/preflightService.js`

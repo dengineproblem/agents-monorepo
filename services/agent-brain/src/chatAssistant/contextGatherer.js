@@ -802,19 +802,101 @@ export async function getIntegrations(userAccountId, adAccountId, hasFbToken = f
 }
 
 /**
- * Format integrations for prompt
- * @param {Object} integrations
+ * Определить стек интеграций клиента
+ * @param {Object} integrations - { fb, crm, roi, whatsapp }
+ * @returns {string} - Stack ID: 'fb_only' | 'fb_wa' | 'fb_crm' | 'fb_wa_crm' | 'no_fb'
+ */
+export function getIntegrationStack(integrations) {
+  if (!integrations) return 'no_fb';
+
+  const { fb, crm, whatsapp } = integrations;
+
+  if (!fb) return 'no_fb';
+  if (fb && whatsapp && crm) return 'fb_wa_crm';
+  if (fb && whatsapp && !crm) return 'fb_wa';
+  if (fb && !whatsapp && crm) return 'fb_crm';
+  return 'fb_only';
+}
+
+/**
+ * Получить человекочитаемое описание стека
+ * @param {string} stack - Stack ID
  * @returns {string}
  */
-export function formatIntegrationsForPrompt(integrations) {
+export function getStackDescription(stack) {
+  const descriptions = {
+    no_fb: 'Facebook не подключён. Доступны только базовые функции.',
+    fb_only: 'Подключён только Facebook Ads. Данные о лидах и диалогах недоступны.',
+    fb_wa: 'Facebook Ads + WhatsApp. Можно анализировать диалоги, но нет CRM.',
+    fb_crm: 'Facebook Ads + CRM. Есть данные о лидах, но нет WhatsApp переписок.',
+    fb_wa_crm: 'Полный стек: Facebook + WhatsApp + CRM. Все функции доступны.'
+  };
+  return descriptions[stack] || descriptions.fb_only;
+}
+
+/**
+ * Получить список доступных возможностей для стека
+ * @param {string} stack - Stack ID
+ * @returns {string[]}
+ */
+export function getStackCapabilities(stack) {
+  const caps = {
+    no_fb: ['general_questions'],
+    fb_only: ['campaigns', 'adsets', 'creatives', 'spend', 'cpl'],
+    fb_wa: ['campaigns', 'adsets', 'creatives', 'spend', 'cpl', 'dialogs', 'dialog_analysis'],
+    fb_crm: ['campaigns', 'adsets', 'creatives', 'spend', 'cpl', 'leads', 'funnel', 'revenue'],
+    fb_wa_crm: ['campaigns', 'adsets', 'creatives', 'spend', 'cpl', 'dialogs', 'dialog_analysis', 'leads', 'funnel', 'revenue']
+  };
+  return caps[stack] || caps.fb_only;
+}
+
+/**
+ * Получить короткое название стека для UI
+ * @param {string} stack - Stack ID
+ * @returns {string}
+ */
+export function getStackLabel(stack) {
+  const labels = {
+    no_fb: 'Нет FB',
+    fb_only: 'FB Only',
+    fb_wa: 'FB + WhatsApp',
+    fb_crm: 'FB + CRM',
+    fb_wa_crm: 'Полный стек'
+  };
+  return labels[stack] || 'Unknown';
+}
+
+/**
+ * Format integrations for prompt with stack info
+ * @param {Object} integrations
+ * @param {string} stack - Optional stack ID (will be calculated if not provided)
+ * @returns {string}
+ */
+export function formatIntegrationsForPrompt(integrations, stack = null) {
   if (!integrations) return '';
 
-  const lines = ['## Доступные интеграции'];
+  const effectiveStack = stack || getIntegrationStack(integrations);
+  const lines = [];
+
+  lines.push('## Стек клиента');
+  lines.push(`**Тип:** ${getStackLabel(effectiveStack)}`);
+  lines.push(`**Описание:** ${getStackDescription(effectiveStack)}`);
+  lines.push('');
+  lines.push('**Интеграции:**');
   lines.push(`• Facebook Ads: ${integrations.fb ? '✅' : '❌'}`);
+  lines.push(`• WhatsApp: ${integrations.whatsapp ? '✅' : '❌'}`);
   lines.push(`• CRM (лиды): ${integrations.crm ? '✅' : '❌'}`);
   lines.push(`• ROI (покупки): ${integrations.roi ? '✅' : '❌'}`);
-  lines.push(`• WhatsApp: ${integrations.whatsapp ? '✅' : '❌'}`);
   lines.push('');
+
+  // Добавить важные ограничения
+  if (effectiveStack === 'fb_only') {
+    lines.push('**Ограничения:** Нет данных о диалогах и лидах. Не предлагай анализ качества лидов.');
+  } else if (effectiveStack === 'fb_wa') {
+    lines.push('**Ограничения:** Нет CRM. Можно анализировать диалоги, но нет данных о воронке.');
+  } else if (effectiveStack === 'fb_crm') {
+    lines.push('**Ограничения:** Нет WhatsApp. Нельзя анализировать переписки.');
+  }
 
   return lines.join('\n');
 }
@@ -836,6 +918,11 @@ export default {
   getBusinessSnapshot,
   getIntegrations,
   formatIntegrationsForPrompt,
+  // Stack functions
+  getIntegrationStack,
+  getStackDescription,
+  getStackCapabilities,
+  getStackLabel,
   // Also expose stores on default export
   unifiedStore
 };

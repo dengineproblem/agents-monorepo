@@ -36,7 +36,7 @@ export function buildAdsPrompt(context, mode) {
   const metricsContext = formatMetricsContext(context);
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'ads');
-  const integrationsContext = formatIntegrationsContext(context?.integrations);
+  const integrationsContext = formatIntegrationsContext(context?.integrations, context);
   const toolRoutingRules = getToolRoutingRules();
   const fewShotExamples = getFewShotExamples();
 
@@ -278,11 +278,16 @@ function formatMetricsContext(context) {
 }
 
 /**
- * Format integrations availability for prompt
+ * Format integrations availability for prompt with stack context
  */
-function formatIntegrationsContext(integrations) {
+function formatIntegrationsContext(integrations, context) {
   if (!integrations) {
     return '';
+  }
+
+  // Если есть готовый integrationsFormatted из contextGatherer — используем его
+  if (context?.integrationsFormatted) {
+    return context.integrationsFormatted;
   }
 
   const lines = ['## Доступные интеграции (Preflight Check)'];
@@ -293,7 +298,53 @@ function formatIntegrationsContext(integrations) {
   lines.push('');
   lines.push('**ВАЖНО:** Если интеграция недоступна (❌), НЕ вызывай соответствующие тулы.');
 
+  // Добавляем stack-specific ограничения
+  if (context?.stack) {
+    lines.push('');
+    lines.push(`**Стек клиента:** ${context.stack}`);
+
+    const limitations = getStackLimitations(context.stack);
+    if (limitations.length > 0) {
+      lines.push('');
+      lines.push('**Ограничения:**');
+      limitations.forEach(l => lines.push(`• ${l}`));
+    }
+  }
+
   return lines.join('\n');
+}
+
+/**
+ * Get stack-specific limitations for prompt guidance
+ */
+function getStackLimitations(stack) {
+  const limitations = {
+    no_fb: [
+      'Facebook Ads не подключён — только общие вопросы',
+      'НЕ вызывай рекламные тулы (getCampaigns, getDirections и т.д.)'
+    ],
+    fb_only: [
+      'Нет CRM — НЕ предлагай анализ воронки продаж',
+      'Нет WhatsApp — НЕ предлагай анализ диалогов',
+      'Фокусируйся на рекламных метриках: CPL, CTR, CPM'
+    ],
+    fb_wa: [
+      'Нет CRM — НЕ предлагай анализ воронки и лидов',
+      'WhatsApp доступен — можешь анализировать переписки',
+      'Качество лидов оценивай через диалоги'
+    ],
+    fb_crm: [
+      'Нет WhatsApp — НЕ предлагай анализ диалогов',
+      'CRM доступен — можешь анализировать воронку и лидов',
+      'Качество лидов оценивай через этапы воронки'
+    ],
+    fb_wa_crm: [
+      'Полный стек — все функции доступны',
+      'Используй комплексный анализ: реклама + диалоги + воронка'
+    ]
+  };
+
+  return limitations[stack] || [];
 }
 
 /**

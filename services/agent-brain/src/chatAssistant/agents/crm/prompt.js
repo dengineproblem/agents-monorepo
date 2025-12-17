@@ -19,6 +19,7 @@ export function buildCRMPrompt(context, mode) {
   const funnelContext = formatFunnelContext(context);
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'crm');
+  const stackContext = formatStackContext(context);
 
   return `# CRMAgent — Эксперт по лидам и воронке продаж
 
@@ -56,6 +57,8 @@ export function buildCRMPrompt(context, mode) {
 4. **Группировка**: Группируй лидов по температуре: hot → warm → cold
 
 ${modeInstructions}
+
+${stackContext}
 
 ## Бизнес-правила
 ${specsContext}
@@ -173,4 +176,58 @@ function formatFunnelContext(context) {
 - Горячих: ${stats.hot || 0}
 - Тёплых: ${stats.warm || 0}
 - Холодных: ${stats.cold || 0}`;
+}
+
+/**
+ * Format stack context for CRM agent
+ */
+function formatStackContext(context) {
+  // Если есть готовый integrationsFormatted — используем его
+  if (context?.integrationsFormatted) {
+    return context.integrationsFormatted;
+  }
+
+  if (!context?.stack) {
+    return '';
+  }
+
+  const lines = ['## Стек клиента'];
+  lines.push(`**Тип:** ${context.stack}`);
+
+  if (context.stackDescription) {
+    lines.push(`**Описание:** ${context.stackDescription}`);
+  }
+
+  // CRM-specific guidance
+  const guidance = {
+    no_fb: [
+      'Facebook не подключён — нет связи лидов с рекламой',
+      'Можешь анализировать только данные CRM'
+    ],
+    fb_only: [
+      'Нет CRM интеграции — данные о лидах могут быть неполными',
+      'Связь с рекламными кампаниями доступна'
+    ],
+    fb_wa: [
+      'Нет CRM — используй данные WhatsApp для анализа лидов',
+      'Можешь предлагать проверить диалоги для оценки качества'
+    ],
+    fb_crm: [
+      'Полноценный CRM — все данные о лидах доступны',
+      'Нет WhatsApp — НЕ предлагай анализ диалогов'
+    ],
+    fb_wa_crm: [
+      'Полный стек — все функции доступны',
+      'Комплексный анализ: CRM + WhatsApp диалоги'
+    ]
+  };
+
+  const stackGuidance = guidance[context.stack] || [];
+  if (stackGuidance.length > 0) {
+    lines.push('');
+    lines.push('**Рекомендации:**');
+    stackGuidance.forEach(g => lines.push(`• ${g}`));
+  }
+
+  return lines.join('\n');
 }

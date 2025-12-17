@@ -19,6 +19,7 @@ export function buildCreativePrompt(context, mode) {
   const creativesContext = formatCreativesContext(context);
   const specsContext = formatSpecsContext(context?.specs);
   const notesContext = formatNotesContext(context?.notes, 'creative');
+  const stackContext = formatStackContext(context);
 
   return `# CreativeAgent — Эксперт по рекламным креативам
 
@@ -127,6 +128,8 @@ export function buildCreativePrompt(context, mode) {
 
 ${modeInstructions}
 
+${stackContext}
+
 ## Бизнес-правила
 ${specsContext}
 
@@ -210,4 +213,60 @@ function formatCreativesContext(context) {
 - Всего креативов: ${context.creativesCount}
 - Активных: ${context.activeCreatives || 'N/A'}
 - С метриками за 30 дней: ${context.creativesWithMetrics || 'N/A'}`;
+}
+
+/**
+ * Format stack context for Creative agent
+ */
+function formatStackContext(context) {
+  // Если есть готовый integrationsFormatted — используем его
+  if (context?.integrationsFormatted) {
+    return context.integrationsFormatted;
+  }
+
+  if (!context?.stack) {
+    return '';
+  }
+
+  const lines = ['## Стек клиента'];
+  lines.push(`**Тип:** ${context.stack}`);
+
+  if (context.stackDescription) {
+    lines.push(`**Описание:** ${context.stackDescription}`);
+  }
+
+  // Creative-specific guidance
+  const guidance = {
+    no_fb: [
+      'Facebook не подключён — креативы недоступны',
+      'НЕ вызывай тулы для работы с креативами'
+    ],
+    fb_only: [
+      'Креативы и метрики доступны полностью',
+      'Нет CRM/WhatsApp — НЕ предлагай анализ качества лидов',
+      'Оценивай креативы по CPL, CTR, retention'
+    ],
+    fb_wa: [
+      'Можешь предложить анализ диалогов для оценки качества лидов от креативов',
+      'Нет CRM — quality_score не доступен'
+    ],
+    fb_crm: [
+      'Можешь предложить проверить конверсию лидов от креативов в CRM',
+      'Нет WhatsApp — анализ диалогов не доступен'
+    ],
+    fb_wa_crm: [
+      'Полный стек — комплексный анализ креативов',
+      'Качество креативов можно оценить через CRM конверсии + анализ диалогов',
+      'Предлагай A/B тесты с отслеживанием качества лидов'
+    ]
+  };
+
+  const stackGuidance = guidance[context.stack] || [];
+  if (stackGuidance.length > 0) {
+    lines.push('');
+    lines.push('**Рекомендации:**');
+    stackGuidance.forEach(g => lines.push(`• ${g}`));
+  }
+
+  return lines.join('\n');
 }
