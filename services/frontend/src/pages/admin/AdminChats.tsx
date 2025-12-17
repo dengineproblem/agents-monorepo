@@ -290,8 +290,7 @@ const AdminChats: React.FC = () => {
             </div>
 
             {/* Messages */}
-            <div className="relative overflow-hidden flex-1">
-            <ScrollArea className="absolute inset-0 p-4">
+            <div className="flex-1 overflow-y-auto p-4">
               {loadingMessages ? (
                 <div className="flex items-center justify-center h-full">
                   <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -346,7 +345,6 @@ const AdminChats: React.FC = () => {
                   ))}
                 </div>
               )}
-            </ScrollArea>
             </div>
 
             {/* Input */}
