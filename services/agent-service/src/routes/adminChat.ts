@@ -46,30 +46,41 @@ export default async function adminChatRoutes(app: FastifyInstance) {
   /**
    * GET /admin/chats/:userId
    * Получает историю сообщений с пользователем
+   * Ищет по user_account_id и telegram_id (для полной истории включая онбординг)
    */
   app.get('/admin/chats/:userId', async (req, res) => {
     try {
       const { userId } = req.params as { userId: string };
-      const { limit = '50', offset = '0' } = req.query as { limit?: string; offset?: string };
+      const { limit = '100', offset = '0' } = req.query as { limit?: string; offset?: string };
 
-      const { data: messages, error } = await supabase
+      // Получаем информацию о пользователе (включая telegram_id)
+      const { data: user } = await supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id')
+        .eq('id', userId)
+        .single();
+
+      // Ищем сообщения по user_account_id ИЛИ telegram_id
+      let query = supabase
         .from('admin_user_chats')
         .select('*')
-        .eq('user_account_id', userId)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: true });
+
+      if (user?.telegram_id) {
+        // Если есть telegram_id - ищем по обоим полям
+        query = query.or(`user_account_id.eq.${userId},telegram_id.eq.${user.telegram_id}`);
+      } else {
+        // Если нет telegram_id - только по user_account_id
+        query = query.eq('user_account_id', userId);
+      }
+
+      const { data: messages, error } = await query
         .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
 
       if (error) {
         log.error({ error: error.message, userId }, 'Failed to fetch chat messages');
         return res.status(500).send({ error: 'Failed to fetch messages' });
       }
-
-      // Также получаем информацию о пользователе
-      const { data: user } = await supabase
-        .from('user_accounts')
-        .select('id, username, telegram_id')
-        .eq('id', userId)
-        .single();
 
       return res.send({
         messages: messages || [],
@@ -122,15 +133,19 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         return res.status(400).send({ error: 'User has no Telegram ID' });
       }
 
-      // Отправляем в Telegram
-      const sent = await sendTelegramNotification(user.telegram_id, message);
+      // Отправляем в Telegram (с логированием и source='admin')
+      const sent = await sendTelegramNotification(user.telegram_id, message, {
+        userAccountId: userId,
+        source: 'admin',
+        skipLog: true // Логируем вручную ниже с admin_id
+      });
 
       if (!sent) {
         log.error({ userId, username: user.username }, 'Failed to send message to Telegram');
         return res.status(500).send({ error: 'Failed to send message to Telegram' });
       }
 
-      // Сохраняем сообщение в БД
+      // Сохраняем сообщение в БД (с admin_id)
       const { data: chatMessage, error: insertError } = await supabase
         .from('admin_user_chats')
         .insert({
@@ -138,6 +153,7 @@ export default async function adminChatRoutes(app: FastifyInstance) {
           direction: 'to_user',
           message: message.trim(),
           admin_id: adminId || null,
+          source: 'admin',
           delivered: true
         })
         .select()

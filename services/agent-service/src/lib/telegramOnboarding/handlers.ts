@@ -175,7 +175,8 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
 /restart - начать заново
 /help - показать эту справку
 
-🎤 Вы можете отвечать текстом или голосовыми сообщениями!`
+🎤 Вы можете отвечать текстом или голосовыми сообщениями!`,
+          { source: 'onboarding' }
         );
         return { handled: true };
       }
@@ -202,7 +203,8 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
       if (!transcription.success || !transcription.text) {
         await sendTelegramNotification(
           chatId,
-          `⚠️ ${transcription.error || 'Не удалось распознать речь. Попробуйте ещё раз или отправьте текстом.'}`
+          `⚠️ ${transcription.error || 'Не удалось распознать речь. Попробуйте ещё раз или отправьте текстом.'}`,
+          { source: 'onboarding' }
         );
         return { handled: true };
       }
@@ -210,7 +212,8 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
       // Показываем что распознали
       await sendTelegramNotification(
         chatId,
-        `🎤 <i>Распознано:</i> "${transcription.text}"`
+        `🎤 <i>Распознано:</i> "${transcription.text}"`,
+        { source: 'onboarding' }
       );
 
       // Обрабатываем как текстовый ответ
@@ -235,7 +238,7 @@ export async function handleOnboardingMessage(message: TelegramMessage): Promise
  */
 async function sendBotResponse(chatId: number | string, response: BotResponse): Promise<void> {
   for (const message of response.messages) {
-    await sendTelegramNotification(String(chatId), message);
+    await sendTelegramNotification(String(chatId), message, { source: 'onboarding' });
     // Небольшая задержка между сообщениями
     if (response.messages.length > 1) {
       await sleep(300);

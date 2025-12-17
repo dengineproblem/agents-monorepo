@@ -70,9 +70,10 @@ export default async function telegramWebhook(app: FastifyInstance) {
    * Обрабатывает входящие сообщения от Telegram
    *
    * Логика обработки:
-   * 1. Сначала проверяем онбординг (новые пользователи, /start, активные сессии)
-   * 2. Если онбординг не обработал - проверяем зарегистрированного пользователя
-   * 3. Сохраняем сообщение в admin_user_chats и уведомляем админов
+   * 1. Логируем ВСЕ входящие сообщения в admin_user_chats
+   * 2. Пробуем обработать как онбординг (новые пользователи, /start, активные сессии)
+   * 3. Если онбординг не обработал - проверяем зарегистрированного пользователя
+   * 4. Уведомляем админов
    */
   app.post('/telegram/webhook', async (req, res) => {
     try {
@@ -86,6 +87,7 @@ export default async function telegramWebhook(app: FastifyInstance) {
       const message = update.message;
       const telegramId = String(message.from!.id);
       const telegramMessageId = message.message_id;
+      const messageText = message.text || (message.voice ? '[Голосовое сообщение]' : '[Медиа]');
 
       log.info({
         telegramId,
@@ -93,6 +95,27 @@ export default async function telegramWebhook(app: FastifyInstance) {
         hasVoice: !!message.voice,
         messageId: telegramMessageId
       }, 'Received message from Telegram');
+
+      // ===================================================
+      // 0. Логируем ВСЕ входящие сообщения (до обработки)
+      // ===================================================
+      const { data: users } = await supabase
+        .from('user_accounts')
+        .select('id')
+        .eq('telegram_id', telegramId);
+
+      const user = users?.[0];
+
+      // Логируем входящее сообщение (по user_account_id или telegram_id)
+      await supabase.from('admin_user_chats').insert({
+        user_account_id: user?.id || null,
+        telegram_id: !user ? telegramId : null, // telegram_id только если юзер не найден
+        direction: 'from_user',
+        message: messageText,
+        source: 'bot',
+        telegram_message_id: telegramMessageId,
+        delivered: true
+      });
 
       // ===================================================
       // 1. Пробуем обработать как онбординг
@@ -114,54 +137,26 @@ export default async function telegramWebhook(app: FastifyInstance) {
         return res.send({ ok: true });
       }
 
-      const messageText = message.text;
-
-      // Ищем пользователя по telegram_id (может быть несколько аккаунтов)
-      const { data: users, error: userError } = await supabase
-        .from('user_accounts')
-        .select('id, username')
-        .eq('telegram_id', telegramId);
-
-      // Берём первого найденного пользователя
-      const user = users?.[0];
-
-      if (userError || !user) {
-        // Пользователь не найден - возможно хочет зарегистрироваться
-        // Подсказываем про /start
+      // Если пользователь не найден - подсказываем /start
+      if (!user) {
         log.debug({ telegramId }, 'Message from unknown user');
-
-        // Отправляем подсказку (не блокируем)
         sendStartHint(message.chat.id).catch(() => {});
-
         return res.send({ ok: true });
       }
 
-      // ===================================================
-      // 3. Сохраняем сообщение от существующего пользователя
-      // ===================================================
-
-      const { error: insertError } = await supabase
-        .from('admin_user_chats')
-        .insert({
-          user_account_id: user.id,
-          direction: 'from_user',
-          message: messageText,
-          telegram_message_id: telegramMessageId,
-          delivered: true
-        });
-
-      if (insertError) {
-        log.error({ error: insertError.message, userId: user.id }, 'Failed to save user message');
-      } else {
-        log.info({ userId: user.id, username: user.username }, 'User message saved');
-      }
+      // Получаем username для уведомления
+      const { data: userData } = await supabase
+        .from('user_accounts')
+        .select('username')
+        .eq('id', user.id)
+        .single();
 
       // Уведомляем админов в группу
-      const adminNotification = `<b>Новое сообщение от ${user.username || 'пользователя'}</b>
+      const adminNotification = `<b>Новое сообщение от ${userData?.username || 'пользователя'}</b>
 
-${escapeHtml(messageText)}
+${escapeHtml(message.text)}
 
-<a href="${APP_BASE_URL}/admin/onboarding">Ответить в админке</a>`;
+<a href="${APP_BASE_URL}/admin/chats/${user.id}">Ответить в админке</a>`;
 
       notifyAdminGroup(adminNotification).catch(err => {
         log.error({ error: String(err) }, 'Failed to notify admin group');
