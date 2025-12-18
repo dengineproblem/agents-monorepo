@@ -466,6 +466,336 @@ export const adsHandlers = {
     };
   },
 
+  /**
+   * Create AdSet in campaign with creatives
+   * Uses direction settings for targeting
+   */
+  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, dry_run }, { accessToken, adAccountId, userAccountId, pageId }) {
+    // 1. Get direction with campaign_id and settings
+    const { data: direction, error: dirError } = await supabase
+      .from('account_directions')
+      .select('id, name, fb_campaign_id, objective, daily_budget_cents, pixel_id')
+      .eq('id', direction_id)
+      .single();
+
+    if (dirError || !direction) {
+      return { success: false, error: `Направление не найдено: ${dirError?.message || 'not found'}` };
+    }
+
+    if (!direction.fb_campaign_id) {
+      return { success: false, error: 'У направления нет привязанной FB кампании' };
+    }
+
+    // 2. Get direction settings for targeting
+    const { data: settings, error: settingsError } = await supabase
+      .from('default_ad_settings')
+      .select('*')
+      .eq('direction_id', direction_id)
+      .maybeSingle();
+
+    if (settingsError || !settings) {
+      return { success: false, error: `Настройки таргетинга не настроены для направления: ${settingsError?.message || 'not configured'}` };
+    }
+
+    // 3. Get creatives
+    const { data: creatives, error: creativesError } = await supabase
+      .from('user_creatives')
+      .select('id, title, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads')
+      .in('id', creative_ids)
+      .eq('user_id', userAccountId)
+      .eq('status', 'ready');
+
+    if (creativesError || !creatives || creatives.length === 0) {
+      return { success: false, error: `Креативы не найдены или не готовы: ${creativesError?.message || 'no valid creatives'}` };
+    }
+
+    // 4. Build targeting
+    const targeting = {
+      age_min: 18,
+      age_max: 65,
+      targeting_automation: { advantage_audience: 1 }
+    };
+
+    if (settings.gender && settings.gender !== 'all') {
+      targeting.genders = settings.gender === 'male' ? [1] : [2];
+    }
+
+    if (settings.cities && Array.isArray(settings.cities) && settings.cities.length > 0) {
+      const countries = [];
+      const cities = [];
+      for (const item of settings.cities) {
+        if (typeof item === 'string' && item.length === 2 && item === item.toUpperCase()) {
+          countries.push(item);
+        } else {
+          cities.push(String(item));
+        }
+      }
+      targeting.geo_locations = {};
+      if (countries.length > 0) targeting.geo_locations.countries = countries;
+      if (cities.length > 0) targeting.geo_locations.cities = cities.map(id => ({ key: id }));
+    }
+
+    // 5. Get optimization_goal and billing_event based on objective
+    const objectiveMap = {
+      whatsapp: { optimization_goal: 'CONVERSATIONS', billing_event: 'IMPRESSIONS', destination_type: 'WHATSAPP' },
+      instagram_traffic: { optimization_goal: 'LINK_CLICKS', billing_event: 'IMPRESSIONS', destination_type: 'INSTAGRAM_PROFILE' },
+      site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' }
+    };
+    const objectiveSettings = objectiveMap[direction.objective] || objectiveMap.whatsapp;
+
+    // 6. Build promoted_object
+    let promoted_object = {};
+    if (direction.objective === 'whatsapp') {
+      promoted_object = { page_id: pageId };
+    } else if (direction.objective === 'instagram_traffic') {
+      promoted_object = { page_id: pageId };
+    } else if (direction.objective === 'site_leads') {
+      promoted_object = { custom_event_type: 'LEAD' };
+      if (direction.pixel_id || settings.pixel_id) {
+        promoted_object.pixel_id = String(direction.pixel_id || settings.pixel_id);
+      }
+    }
+
+    const finalBudget = daily_budget_cents || direction.daily_budget_cents || 500;
+    const finalName = adset_name || `${direction.name} - ${new Date().toISOString().split('T')[0]}`;
+
+    // Dry-run mode
+    if (dry_run) {
+      return {
+        success: true,
+        dry_run: true,
+        preview: {
+          campaign_id: direction.fb_campaign_id,
+          direction_id,
+          direction_name: direction.name,
+          adset_name: finalName,
+          daily_budget: finalBudget / 100,
+          targeting,
+          objective: direction.objective,
+          optimization_goal: objectiveSettings.optimization_goal,
+          creatives_count: creatives.length,
+          creatives: creatives.map(c => ({ id: c.id, title: c.title }))
+        },
+        message: `Будет создан адсет "${finalName}" с бюджетом $${(finalBudget / 100).toFixed(2)}/день и ${creatives.length} объявлениями`
+      };
+    }
+
+    // 7. Create AdSet via FB Graph API
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    const adsetBody = {
+      name: finalName,
+      campaign_id: direction.fb_campaign_id,
+      daily_budget: finalBudget,
+      billing_event: objectiveSettings.billing_event,
+      optimization_goal: objectiveSettings.optimization_goal,
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+      targeting,
+      status: 'ACTIVE',
+      destination_type: objectiveSettings.destination_type,
+      promoted_object
+    };
+
+    let adsetResult;
+    try {
+      adsetResult = await fbGraph('POST', `${actId}/adsets`, accessToken, adsetBody);
+    } catch (fbError) {
+      logger.error({ err: fbError, direction_id, adsetBody }, 'createAdSet: FB API error');
+      return { success: false, error: `Ошибка создания адсета: ${fbError.message}` };
+    }
+
+    const adsetId = adsetResult.id;
+    logger.info({ adsetId, direction_id, creativesCount: creatives.length }, 'createAdSet: adset created');
+
+    // 8. Create Ads for each creative
+    const createdAds = [];
+    for (const creative of creatives) {
+      const creativeIdField = direction.objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
+        : direction.objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
+        : 'fb_creative_id_site_leads';
+
+      const fbCreativeId = creative[creativeIdField];
+      if (!fbCreativeId) {
+        logger.warn({ creativeId: creative.id, objective: direction.objective }, 'createAdSet: no FB creative ID for objective');
+        continue;
+      }
+
+      try {
+        const adResult = await fbGraph('POST', `${actId}/ads`, accessToken, {
+          name: `Ad - ${creative.title}`,
+          adset_id: adsetId,
+          creative: { creative_id: fbCreativeId },
+          status: 'ACTIVE'
+        });
+
+        createdAds.push({
+          ad_id: adResult.id,
+          name: `Ad - ${creative.title}`,
+          creative_id: creative.id,
+          creative_title: creative.title
+        });
+
+        // Save mapping for lead tracking
+        await supabase.from('ad_creative_mapping').insert({
+          ad_id: adResult.id,
+          user_creative_id: creative.id,
+          direction_id,
+          user_id: userAccountId,
+          adset_id: adsetId,
+          campaign_id: direction.fb_campaign_id
+        }).catch(() => {});
+
+      } catch (adError) {
+        logger.error({ err: adError, creativeId: creative.id }, 'createAdSet: failed to create ad');
+      }
+    }
+
+    // Log action
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `AdSet created: ${finalName} with ${createdAds.length} ads`,
+      context: {
+        adset_id: adsetId,
+        direction_id,
+        direction_name: direction.name,
+        daily_budget_cents: finalBudget,
+        ads_count: createdAds.length,
+        source: 'chat_assistant',
+        agent: 'AdsAgent'
+      }
+    });
+
+    return {
+      success: true,
+      message: `Создан адсет "${finalName}" с ${createdAds.length} объявлениями`,
+      adset_id: adsetId,
+      adset_name: finalName,
+      daily_budget: finalBudget / 100,
+      ads_created: createdAds.length,
+      ads: createdAds,
+      direction_id,
+      direction_name: direction.name,
+      campaign_id: direction.fb_campaign_id
+    };
+  },
+
+  /**
+   * Create single Ad in existing AdSet
+   */
+  async createAd({ adset_id, creative_id, ad_name, dry_run }, { accessToken, adAccountId, userAccountId }) {
+    // 1. Get creative
+    const { data: creative, error: creativeError } = await supabase
+      .from('user_creatives')
+      .select('id, title, direction_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads')
+      .eq('id', creative_id)
+      .eq('user_id', userAccountId)
+      .eq('status', 'ready')
+      .single();
+
+    if (creativeError || !creative) {
+      return { success: false, error: `Креатив не найден или не готов: ${creativeError?.message || 'not found'}` };
+    }
+
+    // 2. Get adset to determine objective
+    let adsetInfo;
+    try {
+      adsetInfo = await fbGraph('GET', adset_id, accessToken, { fields: 'id,name,campaign_id,optimization_goal' });
+    } catch (fbError) {
+      return { success: false, error: `Адсет не найден: ${fbError.message}` };
+    }
+
+    // Determine objective from optimization_goal
+    const goalToObjective = {
+      'CONVERSATIONS': 'whatsapp',
+      'LINK_CLICKS': 'instagram_traffic',
+      'OFFSITE_CONVERSIONS': 'site_leads'
+    };
+    const objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
+
+    // Get appropriate FB creative ID
+    const creativeIdField = objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
+      : objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
+      : 'fb_creative_id_site_leads';
+
+    const fbCreativeId = creative[creativeIdField];
+    if (!fbCreativeId) {
+      return { success: false, error: `У креатива нет FB creative ID для objective "${objective}"` };
+    }
+
+    const finalName = ad_name || `Ad - ${creative.title}`;
+
+    // Dry-run mode
+    if (dry_run) {
+      return {
+        success: true,
+        dry_run: true,
+        preview: {
+          adset_id,
+          adset_name: adsetInfo.name,
+          ad_name: finalName,
+          creative_id: creative.id,
+          creative_title: creative.title,
+          fb_creative_id: fbCreativeId,
+          objective
+        },
+        message: `Будет создано объявление "${finalName}" в адсете "${adsetInfo.name}"`
+      };
+    }
+
+    // 3. Create Ad
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    let adResult;
+    try {
+      adResult = await fbGraph('POST', `${actId}/ads`, accessToken, {
+        name: finalName,
+        adset_id,
+        creative: { creative_id: fbCreativeId },
+        status: 'ACTIVE'
+      });
+    } catch (fbError) {
+      logger.error({ err: fbError, adset_id, creative_id }, 'createAd: FB API error');
+      return { success: false, error: `Ошибка создания объявления: ${fbError.message}` };
+    }
+
+    // Save mapping
+    await supabase.from('ad_creative_mapping').insert({
+      ad_id: adResult.id,
+      user_creative_id: creative.id,
+      direction_id: creative.direction_id,
+      user_id: userAccountId,
+      adset_id,
+      campaign_id: adsetInfo.campaign_id
+    }).catch(() => {});
+
+    // Log action
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Ad created: ${finalName} in AdSet ${adsetInfo.name}`,
+      context: {
+        ad_id: adResult.id,
+        adset_id,
+        creative_id: creative.id,
+        creative_title: creative.title,
+        source: 'chat_assistant',
+        agent: 'AdsAgent'
+      }
+    });
+
+    return {
+      success: true,
+      message: `Создано объявление "${finalName}" в адсете "${adsetInfo.name}"`,
+      ad_id: adResult.id,
+      ad_name: finalName,
+      adset_id,
+      adset_name: adsetInfo.name,
+      creative_id: creative.id,
+      creative_title: creative.title
+    };
+  },
+
   // ============================================================
   // DIRECTIONS HANDLERS
   // ============================================================
@@ -1522,7 +1852,7 @@ export const adsHandlers = {
    * Trigger a Brain Agent optimization run
    * WARNING: This is a dangerous operation that can modify budgets and pause/resume adsets
    */
-  async triggerBrainOptimizationRun({ direction_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId }) {
+  async triggerBrainOptimizationRun({ direction_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
     const dbAccountId = adAccountDbId || null;
 
     // Dry-run mode: show what would be optimized
@@ -1576,51 +1906,123 @@ export const adsHandlers = {
       };
     }
 
-    // Actual execution — create brain_executions record and trigger
-    const executionId = crypto.randomUUID();
+    // ========================================
+    // INTERACTIVE MODE: Generate proposals without executing
+    // ========================================
+    try {
+      const { runInteractiveBrain } = await import('../../../scoring.js');
 
-    // Insert execution record
-    const { error: insertError } = await supabase
-      .from('brain_executions')
-      .insert({
-        id: executionId,
-        user_account_id: userAccountId,
-        account_id: dbAccountId,
-        execution_mode: 'manual_trigger',
-        status: 'pending',
-        plan_json: {
-          triggered_by: 'chat_assistant',
-          reason: reason || 'Manual trigger via Chat Assistant',
-          direction_id: direction_id || null,
-          triggered_at: new Date().toISOString()
+      // Get user account data for Brain
+      const { data: userAccount, error: userError } = await supabase
+        .from('user_accounts')
+        .select('id, ad_account_id, access_token')
+        .eq('id', userAccountId)
+        .single();
+
+      if (userError || !userAccount) {
+        return { success: false, error: 'Не удалось получить данные пользователя' };
+      }
+
+      // Use provided accessToken or from user_account
+      const finalAccessToken = accessToken || userAccount.access_token;
+
+      if (!finalAccessToken) {
+        return { success: false, error: 'Access token не доступен' };
+      }
+
+      // Run interactive brain
+      const result = await runInteractiveBrain(
+        {
+          ad_account_id: userAccount.ad_account_id,
+          access_token: finalAccessToken,
+          id: userAccountId
+        },
+        {
+          directionId: direction_id,
+          supabase,
+          logger
+        }
+      );
+
+      // Log the action
+      await supabase.from('agent_logs').insert({
+        ad_account_id: adAccountId,
+        level: 'info',
+        message: `Brain interactive analysis completed: ${result.proposals?.length || 0} proposals`,
+        context: {
+          direction_id,
+          reason,
+          proposals_count: result.proposals?.length || 0,
+          source: 'chat_assistant',
+          agent: 'AdsAgent',
+          mode: 'interactive'
         }
       });
 
-    if (insertError) {
-      return { success: false, error: `Не удалось создать запись выполнения: ${insertError.message}` };
-    }
+      // Return proposals for user confirmation
+      return {
+        success: true,
+        mode: 'interactive',
+        message: result.proposals?.length > 0
+          ? `Brain Agent предлагает ${result.proposals.length} действий для оптимизации`
+          : 'Brain Agent не нашёл действий для оптимизации на данный момент',
+        proposals: result.proposals || [],
+        context: result.context,
+        instructions: result.proposals?.length > 0
+          ? 'Для выполнения действий используй соответствующие tools: pauseAdSet, updateBudget, createAdSet и т.д.'
+          : null
+      };
 
-    // Log the action
-    await supabase.from('agent_logs').insert({
-      ad_account_id: adAccountId,
-      level: 'info',
-      message: `Brain optimization triggered via Chat Assistant`,
-      context: {
-        execution_id: executionId,
-        direction_id,
-        reason,
-        source: 'chat_assistant',
-        agent: 'AdsAgent'
+    } catch (brainError) {
+      logger.error({ err: brainError, userAccountId }, 'triggerBrainOptimizationRun: interactive brain failed');
+
+      // Fallback to legacy mode if interactive fails
+      const executionId = crypto.randomUUID();
+
+      const { error: insertError } = await supabase
+        .from('brain_executions')
+        .insert({
+          id: executionId,
+          user_account_id: userAccountId,
+          account_id: dbAccountId,
+          execution_mode: 'manual_trigger',
+          status: 'pending',
+          plan_json: {
+            triggered_by: 'chat_assistant',
+            reason: reason || 'Manual trigger via Chat Assistant (fallback)',
+            direction_id: direction_id || null,
+            triggered_at: new Date().toISOString(),
+            interactive_failed: true,
+            interactive_error: String(brainError)
+          }
+        });
+
+      if (insertError) {
+        return { success: false, error: `Не удалось создать запись выполнения: ${insertError.message}` };
       }
-    });
 
-    return {
-      success: true,
-      message: 'Brain Agent оптимизация запущена',
-      execution_id: executionId,
-      note: 'Результаты будут доступны через getAgentBrainActions через несколько минут',
-      approval_required: false // Already approved if we got here
-    };
+      await supabase.from('agent_logs').insert({
+        ad_account_id: adAccountId,
+        level: 'warn',
+        message: `Brain interactive mode failed, falling back to async execution`,
+        context: {
+          execution_id: executionId,
+          direction_id,
+          reason,
+          error: String(brainError),
+          source: 'chat_assistant',
+          agent: 'AdsAgent'
+        }
+      });
+
+      return {
+        success: true,
+        message: 'Brain Agent оптимизация запущена в фоновом режиме (interactive mode недоступен)',
+        execution_id: executionId,
+        note: 'Результаты будут доступны через getAgentBrainActions через несколько минут',
+        fallback: true
+      };
+    }
   },
 
   // ============================================================

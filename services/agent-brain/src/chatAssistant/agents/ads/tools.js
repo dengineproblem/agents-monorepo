@@ -1,6 +1,6 @@
 /**
  * AdsAgent Tools - Facebook/Instagram Advertising
- * 21 tools: 13 READ + 8 WRITE
+ * 23 tools: 13 READ + 10 WRITE
  */
 
 export const ADS_TOOLS = [
@@ -397,6 +397,63 @@ export const ADS_TOOLS = [
       required: ['adset_id', 'new_budget_cents']
     }
   },
+  {
+    name: 'createAdSet',
+    description: '⚠️ DANGEROUS: Создать новый адсет в кампании направления. Использует настройки таргетинга из direction settings. Автоматически создаёт объявления для указанных креативов.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления (для получения campaign_id и настроек таргетинга)'
+        },
+        creative_ids: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Массив UUID креативов для запуска в адсете'
+        },
+        daily_budget_cents: {
+          type: 'number',
+          description: 'Дневной бюджет адсета в центах (если не указан — используется default из настроек направления)'
+        },
+        adset_name: {
+          type: 'string',
+          description: 'Название адсета (опционально — генерируется автоматически)'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет создано без выполнения'
+        }
+      },
+      required: ['direction_id', 'creative_ids']
+    }
+  },
+  {
+    name: 'createAd',
+    description: '⚠️ DANGEROUS: Создать объявление в существующем адсете с указанным креативом.',
+    parameters: {
+      type: 'object',
+      properties: {
+        adset_id: {
+          type: 'string',
+          description: 'ID адсета в Facebook'
+        },
+        creative_id: {
+          type: 'string',
+          description: 'UUID креатива из таблицы creatives'
+        },
+        ad_name: {
+          type: 'string',
+          description: 'Название объявления (опционально — генерируется автоматически)'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет создано без выполнения'
+        }
+      },
+      required: ['adset_id', 'creative_id']
+    }
+  },
 
   // ============================================================
   // WRITE TOOLS - Directions (1 направление = 1 FB кампания)
@@ -517,6 +574,8 @@ export const ADS_WRITE_TOOLS = [
   'pauseAd',
   'resumeAd',
   'updateBudget',
+  'createAdSet',
+  'createAd',
   'updateDirectionBudget',
   'updateDirectionTargetCPL',
   'pauseDirection',
@@ -527,6 +586,8 @@ export const ADS_WRITE_TOOLS = [
 // Dangerous tools that ALWAYS require confirmation
 export const ADS_DANGEROUS_TOOLS = [
   'updateBudget',
+  'createAdSet',
+  'createAd',
   'updateDirectionBudget',
   'pauseDirection',
   'pauseAdSet',

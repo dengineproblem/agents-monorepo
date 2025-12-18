@@ -1692,3 +1692,288 @@ export async function runScoringAgent(userAccount, options = {}) {
   }
 }
 
+/**
+ * Interactive Brain Mode
+ *
+ * Собирает данные с фокусом на TODAY и генерирует proposals без выполнения
+ * Proposals возвращаются для подтверждения пользователем через Chat Assistant
+ *
+ * @param {Object} userAccount - данные пользователя (ad_account_id, access_token, id)
+ * @param {Object} options - опции
+ * @param {string} options.directionId - UUID направления (опционально, для фильтрации)
+ * @param {Object} options.supabase - Supabase client
+ * @param {Object} options.logger - logger instance
+ * @returns {Object} - { proposals: [...], context: {...} }
+ */
+export async function runInteractiveBrain(userAccount, options = {}) {
+  const startTime = Date.now();
+  const { ad_account_id, access_token, id: userAccountId } = userAccount;
+
+  const supabase = options.supabase || createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE
+  );
+
+  const log = options.logger || logger;
+  const directionId = options.directionId || null;
+
+  log.info({ where: 'interactive_brain', phase: 'start', userId: userAccountId, directionId });
+
+  try {
+    // ========================================
+    // ЧАСТЬ 1: СБОР ДАННЫХ ЗА СЕГОДНЯ (REAL-TIME)
+    // ========================================
+
+    log.info({ where: 'interactive_brain', phase: 'fetching_today_data' });
+
+    // Получаем данные за сегодня из FB API
+    const [todayData, yesterdayActions] = await Promise.all([
+      fetchAdsetsActions(ad_account_id, access_token, 'today'),
+      fetchAdsetsActions(ad_account_id, access_token, 'yesterday')
+    ]);
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'today_data_fetched',
+      today_rows: todayData.length,
+      yesterday_rows: yesterdayActions.length
+    });
+
+    // ========================================
+    // ЧАСТЬ 2: ЗАГРУЗКА ИСТОРИЧЕСКИХ ДАННЫХ
+    // ========================================
+
+    log.info({ where: 'interactive_brain', phase: 'loading_historical' });
+
+    // Получаем последний успешный scoring_output
+    const { data: lastExecution } = await supabase
+      .from('scoring_executions')
+      .select('scoring_output, completed_at')
+      .eq('user_account_id', userAccountId)
+      .eq('status', 'success')
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    const historicalData = lastExecution?.scoring_output || null;
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'historical_loaded',
+      has_historical: !!historicalData,
+      historical_adsets: historicalData?.adsets?.length || 0
+    });
+
+    // ========================================
+    // ЧАСТЬ 3: ПОЛУЧАЕМ НАПРАВЛЕНИЯ И НАСТРОЙКИ
+    // ========================================
+
+    let directionsQuery = supabase
+      .from('account_directions')
+      .select('id, name, fb_campaign_id, objective, daily_budget_cents, target_cpl_cents, is_active')
+      .eq('user_account_id', userAccountId)
+      .eq('is_active', true);
+
+    if (directionId) {
+      directionsQuery = directionsQuery.eq('id', directionId);
+    }
+
+    const { data: directions } = await directionsQuery;
+
+    // ========================================
+    // ЧАСТЬ 4: АНАЛИЗ И ГЕНЕРАЦИЯ PROPOSALS
+    // ========================================
+
+    log.info({ where: 'interactive_brain', phase: 'generating_proposals' });
+
+    const proposals = [];
+
+    // Анализируем каждый активный adset
+    for (const todayAdset of todayData) {
+      const yesterdayAdset = yesterdayActions.find(a => a.adset_id === todayAdset.adset_id);
+      const historicalAdset = historicalData?.adsets?.find(a => a.adset_id === todayAdset.adset_id);
+
+      // Получаем direction для этого adset
+      const direction = directions?.find(d => d.fb_campaign_id === todayAdset.campaign_id);
+
+      const todaySpend = parseFloat(todayAdset.spend || 0);
+      const todayLeads = parseInt(todayAdset.leads || 0);
+      const todayCPL = todayLeads > 0 ? todaySpend / todayLeads : null;
+
+      const yesterdaySpend = parseFloat(yesterdayAdset?.spend || 0);
+      const yesterdayLeads = parseInt(yesterdayAdset?.leads || 0);
+      const yesterdayCPL = yesterdayLeads > 0 ? yesterdaySpend / yesterdayLeads : null;
+
+      const targetCPL = direction?.target_cpl_cents ? direction.target_cpl_cents / 100 : null;
+
+      // ========================================
+      // ПРАВИЛА ГЕНЕРАЦИИ PROPOSALS
+      // ========================================
+
+      // 1. HIGH CPL TODAY → предложить паузу или снижение бюджета
+      if (todayCPL && targetCPL && todayCPL > targetCPL * 1.5) {
+        proposals.push({
+          action: 'pauseAdSet',
+          entity_type: 'adset',
+          entity_id: todayAdset.adset_id,
+          entity_name: todayAdset.adset_name,
+          direction_id: direction?.id,
+          direction_name: direction?.name,
+          reason: `CPL сегодня ($${todayCPL.toFixed(2)}) превышает target ($${targetCPL.toFixed(2)}) на ${((todayCPL / targetCPL - 1) * 100).toFixed(0)}%`,
+          confidence: 0.8,
+          metrics: {
+            today_spend: todaySpend,
+            today_leads: todayLeads,
+            today_cpl: todayCPL,
+            target_cpl: targetCPL
+          }
+        });
+      }
+
+      // 2. GOOD CPL + много расхода → предложить увеличить бюджет
+      else if (todayCPL && targetCPL && todayCPL < targetCPL * 0.8 && todaySpend > 10) {
+        proposals.push({
+          action: 'updateBudget',
+          entity_type: 'adset',
+          entity_id: todayAdset.adset_id,
+          entity_name: todayAdset.adset_name,
+          direction_id: direction?.id,
+          direction_name: direction?.name,
+          reason: `Хороший CPL ($${todayCPL.toFixed(2)}) ниже target ($${targetCPL.toFixed(2)}) на ${((1 - todayCPL / targetCPL) * 100).toFixed(0)}%. Можно масштабировать.`,
+          confidence: 0.7,
+          suggested_action_params: {
+            increase_percent: 20
+          },
+          metrics: {
+            today_spend: todaySpend,
+            today_leads: todayLeads,
+            today_cpl: todayCPL,
+            target_cpl: targetCPL
+          }
+        });
+      }
+
+      // 3. DROPPING CTR trend → предупреждение
+      const historicalCTR = historicalAdset?.metrics_last_7d?.ctr;
+      const todayCTR = todayAdset.clicks && todayAdset.impressions
+        ? (todayAdset.clicks / todayAdset.impressions * 100)
+        : null;
+
+      if (historicalCTR && todayCTR && todayCTR < historicalCTR * 0.7) {
+        proposals.push({
+          action: 'review',
+          entity_type: 'adset',
+          entity_id: todayAdset.adset_id,
+          entity_name: todayAdset.adset_name,
+          direction_id: direction?.id,
+          direction_name: direction?.name,
+          reason: `CTR упал с ${historicalCTR.toFixed(2)}% до ${todayCTR.toFixed(2)}% (-${((1 - todayCTR / historicalCTR) * 100).toFixed(0)}%). Возможно, аудитория устала.`,
+          confidence: 0.6,
+          metrics: {
+            historical_ctr: historicalCTR,
+            today_ctr: todayCTR
+          }
+        });
+      }
+    }
+
+    // ========================================
+    // ЧАСТЬ 5: АНАЛИЗ НЕИСПОЛЬЗОВАННЫХ КРЕАТИВОВ
+    // ========================================
+
+    if (historicalData?.unused_creatives?.length > 0) {
+      // Группируем по direction для более умных рекомендаций
+      const byDirection = {};
+      for (const uc of historicalData.unused_creatives) {
+        const dirId = uc.direction_id || 'no_direction';
+        if (!byDirection[dirId]) byDirection[dirId] = [];
+        byDirection[dirId].push(uc);
+      }
+
+      for (const [dirId, creatives] of Object.entries(byDirection)) {
+        if (creatives.length > 0 && dirId !== 'no_direction') {
+          const direction = directions?.find(d => d.id === dirId);
+
+          proposals.push({
+            action: 'createAdSet',
+            entity_type: 'direction',
+            entity_id: dirId,
+            entity_name: direction?.name || 'Unknown',
+            reason: `${creatives.length} неиспользованных креативов готовы к запуску`,
+            confidence: 0.75,
+            suggested_action_params: {
+              creative_ids: creatives.slice(0, 5).map(c => c.id),
+              creative_titles: creatives.slice(0, 5).map(c => c.title)
+            }
+          });
+        }
+      }
+    }
+
+    // ========================================
+    // ЧАСТЬ 6: СОХРАНЕНИЕ И ВОЗВРАТ
+    // ========================================
+
+    const duration = Date.now() - startTime;
+
+    // Сохраняем запуск для аудита
+    await supabase.from('brain_executions').insert({
+      user_account_id: userAccountId,
+      mode: 'interactive',
+      direction_id: directionId,
+      started_at: new Date(startTime).toISOString(),
+      completed_at: new Date().toISOString(),
+      duration_ms: duration,
+      status: 'proposals_generated',
+      proposals_count: proposals.length,
+      proposals_json: proposals
+    });
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'complete',
+      proposals_count: proposals.length,
+      duration
+    });
+
+    return {
+      success: true,
+      mode: 'interactive',
+      proposals,
+      context: {
+        today_adsets: todayData.length,
+        yesterday_adsets: yesterdayActions.length,
+        historical_available: !!historicalData,
+        directions_count: directions?.length || 0,
+        generated_at: new Date().toISOString()
+      }
+    };
+
+  } catch (error) {
+    const duration = Date.now() - startTime;
+
+    log.error({
+      where: 'interactive_brain',
+      phase: 'error',
+      userId: userAccountId,
+      duration,
+      error: String(error),
+      stack: error.stack
+    });
+
+    // Сохраняем ошибку
+    await supabase.from('brain_executions').insert({
+      user_account_id: userAccountId,
+      mode: 'interactive',
+      direction_id: directionId,
+      started_at: new Date(startTime).toISOString(),
+      completed_at: new Date().toISOString(),
+      duration_ms: duration,
+      status: 'error',
+      error_message: String(error)
+    });
+
+    throw error;
+  }
+}
+

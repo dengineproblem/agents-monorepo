@@ -121,7 +121,7 @@ User Request
 ### AdsAgent — Реклама и Направления
 **Путь:** `services/agent-brain/src/chatAssistant/agents/ads/`
 
-**21 инструмент (13 READ + 8 WRITE):**
+**23 инструмента (13 READ + 10 WRITE):**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -143,12 +143,47 @@ User Request
 | `pauseAd` | WRITE | Пауза объявления (dangerous) |
 | `resumeAd` | WRITE | Возобновление объявления |
 | `updateBudget` | WRITE | Изменение бюджета адсета (dangerous) |
+| `createAdSet` | WRITE | Создание адсета в направлении с креативами (dangerous) |
+| `createAd` | WRITE | Создание объявления в адсете (dangerous) |
 | `pauseDirection` | WRITE | Пауза направления (паузит FB кампанию + все адсеты, dangerous) |
 | `resumeDirection` | WRITE | Возобновление направления |
 | `updateDirectionBudget` | WRITE | Изменение бюджета направления (dangerous) |
 | `updateDirectionTargetCPL` | WRITE | Изменение целевого CPL |
-| `triggerBrainOptimizationRun` | WRITE | Запуск Brain Agent оптимизации (dangerous) |
+| `triggerBrainOptimizationRun` | WRITE | Interactive Brain — анализ и proposals (dangerous) |
 | `customFbQuery` | READ | LLM-powered кастомный запрос к FB API (3 retry на ошибку) |
+
+#### Interactive Brain Mode
+
+`triggerBrainOptimizationRun` теперь работает в interactive режиме:
+
+1. **Анализ TODAY**: Собирает real-time данные за сегодня из FB API
+2. **Исторические данные**: Использует сохранённые данные из `scoring_executions`
+3. **Proposals**: Генерирует предложения без выполнения
+4. **Подтверждение**: Пользователь подтверждает/редактирует через Chat Assistant
+5. **Выполнение**: Оркестратор выполняет через стандартные tools
+
+**Пример proposals:**
+```json
+{
+  "proposals": [
+    {
+      "action": "pauseAdSet",
+      "entity_id": "123...",
+      "entity_name": "AdSet Name",
+      "reason": "CPL сегодня ($15) превышает target ($10) на 50%",
+      "confidence": 0.8
+    },
+    {
+      "action": "createAdSet",
+      "entity_id": "direction-uuid",
+      "reason": "3 неиспользованных креатива готовы к запуску",
+      "suggested_action_params": {
+        "creative_ids": ["uuid1", "uuid2"]
+      }
+    }
+  ]
+}
+```
 
 **Файлы:**
 - `index.js` — класс AdsAgent
