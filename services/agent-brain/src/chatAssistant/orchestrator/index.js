@@ -35,6 +35,9 @@ import {
 // Greeting preflight removed - handled via LLM prompt with adAccountStatus context
 import { createSession, updateTierState } from '../../mcp/sessions.js';
 import { adsHandlers } from '../agents/ads/handlers.js';
+// Meta-tools orchestrator
+import { processWithMetaTools } from './metaOrchestrator.js';
+import { selectOrchestratorMode, ORCHESTRATOR_CONFIG } from '../config.js';
 
 // In-memory кэш для статуса рекламного кабинета
 const adAccountStatusCache = new Map();
@@ -262,6 +265,45 @@ export class Orchestrator {
           executedActions: result.executedActions || [],
           classification: { domain: 'memory', agents: [] },
           duration: Date.now() - startTime
+        };
+      }
+
+      // 0.1 Route to meta-tools orchestrator if enabled
+      const orchestratorMode = selectOrchestratorMode(toolContext);
+      if (orchestratorMode === 'meta') {
+        logger.info({ mode: 'meta' }, 'Routing to meta-tools orchestrator');
+
+        // Gather minimal context for meta-tools
+        const dbAccountId = toolContext.adAccountDbId || null;
+        const hasFbToken = Boolean(toolContext.accessToken);
+
+        const [integrations, adAccountStatus] = await Promise.all([
+          getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
+          getCachedAdAccountStatus(toolContext)
+        ]);
+
+        const metaResult = await processWithMetaTools({
+          message,
+          context: {
+            ...context,
+            integrations,
+            adAccountStatus
+          },
+          conversationHistory,
+          toolContext
+        });
+
+        return {
+          agent: 'MetaOrchestrator',
+          content: metaResult.content,
+          executedActions: metaResult.executedTools || [],
+          classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
+          duration: Date.now() - startTime,
+          metadata: {
+            iterations: metaResult.iterations,
+            tokens: metaResult.tokens,
+            orchestratorMode: 'meta'
+          }
         };
       }
 

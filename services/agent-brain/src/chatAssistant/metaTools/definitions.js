@@ -1,0 +1,215 @@
+/**
+ * Meta-Tools Definitions
+ *
+ * 3 meta-tools for lazy-loading domain tools:
+ * - getAvailableDomains() - список доступных доменов
+ * - getDomainTools(domain) - tools конкретного домена
+ * - executeTool(name, args) - выполнение tool
+ */
+
+import { z } from 'zod';
+import { formatToolsForLLM, loadDomainTools, getDomainDescription } from './formatters.js';
+import { executeToolByName } from './executor.js';
+
+/**
+ * Domain configurations
+ */
+const DOMAINS = {
+  ads: {
+    name: 'ads',
+    description: 'Управление рекламой: кампании, бюджеты, расходы, CPL, ROI, направления'
+  },
+  creative: {
+    name: 'creative',
+    description: 'Креативы: анализ, retention, risk score, топ/худшие, запуск, A/B тесты'
+  },
+  crm: {
+    name: 'crm',
+    description: 'Лиды: воронка, этапы, квалификация, детали контакта'
+  },
+  whatsapp: {
+    name: 'whatsapp',
+    description: 'Диалоги: история сообщений, AI-анализ переписок, поиск'
+  }
+};
+
+/**
+ * Meta-Tool Definitions
+ */
+export const META_TOOLS = {
+  /**
+   * Get available domains with descriptions
+   */
+  getAvailableDomains: {
+    name: 'getAvailableDomains',
+    description: 'Получить список доступных доменов (ads, creative, crm, whatsapp) с описанием возможностей каждого. Вызови первым чтобы понять какие домены нужны для запроса.',
+    schema: z.object({}),
+    handler: async (_args, context) => {
+      const domains = Object.values(DOMAINS).map(d => ({
+        name: d.name,
+        description: d.description,
+        available: isDomainAvailable(d.name, context)
+      }));
+
+      return {
+        domains,
+        hint: 'Используй getDomainTools(domain) чтобы получить список tools нужного домена'
+      };
+    }
+  },
+
+  /**
+   * Get tools for specific domain
+   */
+  getDomainTools: {
+    name: 'getDomainTools',
+    description: 'Получить список tools для конкретного домена с описаниями и параметрами. Tools с меткой DANGEROUS требуют подтверждения пользователя.',
+    schema: z.object({
+      domain: z.enum(['ads', 'creative', 'crm', 'whatsapp'])
+        .describe('Домен для получения tools')
+    }),
+    handler: async ({ domain }, _context) => {
+      const tools = loadDomainTools(domain);
+      const formattedTools = formatToolsForLLM(tools);
+
+      return {
+        domain,
+        description: getDomainDescription(domain),
+        tools_count: formattedTools.length,
+        tools: formattedTools
+      };
+    }
+  },
+
+  /**
+   * Execute a tool by name
+   */
+  executeTool: {
+    name: 'executeTool',
+    description: 'Выполнить tool по имени с аргументами. Возвращает результат или ошибку. DANGEROUS tools требуют подтверждения — сначала спроси пользователя!',
+    schema: z.object({
+      tool_name: z.string()
+        .describe('Имя tool для выполнения (например: getSpendReport, getCampaigns)'),
+      arguments: z.record(z.unknown())
+        .describe('Аргументы для tool в формате { key: value }')
+    }),
+    handler: async ({ tool_name, arguments: args }, context) => {
+      return executeToolByName(tool_name, args, context);
+    }
+  }
+};
+
+/**
+ * Check if domain is available for user
+ * @param {string} domain - Domain name
+ * @param {Object} context - User context with integrations
+ * @returns {boolean}
+ */
+function isDomainAvailable(domain, context) {
+  const integrations = context?.integrations || {};
+
+  switch (domain) {
+    case 'ads':
+    case 'creative':
+      return integrations.fb === true;
+    case 'crm':
+      return integrations.crm === true;
+    case 'whatsapp':
+      return integrations.whatsapp === true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Get meta-tools formatted for OpenAI function calling
+ * @returns {Array} OpenAI tools format
+ */
+export function getMetaToolsForOpenAI() {
+  return Object.values(META_TOOLS).map(tool => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: zodToJsonSchema(tool.schema)
+    }
+  }));
+}
+
+/**
+ * Convert Zod schema to JSON Schema for OpenAI
+ * @param {z.ZodType} zodSchema
+ * @returns {Object} JSON Schema
+ */
+function zodToJsonSchema(zodSchema) {
+  // For empty object schema
+  if (zodSchema._def.typeName === 'ZodObject' && Object.keys(zodSchema.shape).length === 0) {
+    return {
+      type: 'object',
+      properties: {},
+      required: []
+    };
+  }
+
+  const shape = zodSchema.shape;
+  const properties = {};
+  const required = [];
+
+  for (const [key, value] of Object.entries(shape)) {
+    const prop = {
+      type: getZodType(value)
+    };
+
+    // Add description if exists
+    if (value._def.description) {
+      prop.description = value._def.description;
+    }
+
+    // Add enum if exists
+    if (value._def.typeName === 'ZodEnum') {
+      prop.enum = value._def.values;
+    }
+
+    properties[key] = prop;
+
+    // Check if required
+    if (!value.isOptional()) {
+      required.push(key);
+    }
+  }
+
+  return {
+    type: 'object',
+    properties,
+    required
+  };
+}
+
+/**
+ * Get JSON Schema type from Zod type
+ */
+function getZodType(zodType) {
+  const typeName = zodType._def.typeName;
+
+  switch (typeName) {
+    case 'ZodString':
+      return 'string';
+    case 'ZodNumber':
+      return 'number';
+    case 'ZodBoolean':
+      return 'boolean';
+    case 'ZodArray':
+      return 'array';
+    case 'ZodObject':
+    case 'ZodRecord':
+      return 'object';
+    case 'ZodEnum':
+      return 'string';
+    case 'ZodOptional':
+      return getZodType(zodType._def.innerType);
+    default:
+      return 'string';
+  }
+}
+
+export default META_TOOLS;

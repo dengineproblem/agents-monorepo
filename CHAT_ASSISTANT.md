@@ -2,7 +2,82 @@
 
 AI-ассистент для управления Facebook рекламой через Telegram бота.
 
-## Архитектура (Single-LLM)
+## Режимы работы Orchestrator
+
+Orchestrator поддерживает два режима работы, переключаемых через `ORCHESTRATOR_MODE`:
+
+| Режим | Описание | Env |
+|-------|----------|-----|
+| `legacy` | Intent Detection → Policy → Agent (default) | `ORCHESTRATOR_MODE=legacy` |
+| `meta` | Meta-Tools с lazy loading (GPT-5.2) | `ORCHESTRATOR_MODE=meta` |
+| `parallel` | A/B тестирование legacy vs meta | `ORCHESTRATOR_MODE=parallel` |
+
+---
+
+## Архитектура: Meta-Tools (NEW)
+
+**Путь:** `services/agent-brain/src/chatAssistant/metaTools/`
+
+```
+User Request
+     │
+     ▼
+┌─────────────────────────────────────────────┐
+│         MetaOrchestrator (GPT-5.2)          │
+│                    │                         │
+│         ┌─────────┴─────────┐               │
+│         ▼                   ▼               │
+│  getAvailableDomains()  getDomainTools()    │  ← Meta-Tools
+│         │                   │               │
+│         └─────────┬─────────┘               │
+│                   ▼                         │
+│           executeTool(name, args)           │  ← Lazy Loading
+│                   │                         │
+│         ┌────────┴────────┐                │
+│         ▼        ▼        ▼                │
+│       ads    creative   crm   whatsapp      │  ← Domain Tools
+│                   │                         │
+│                   ▼                         │
+│            Final Response                   │
+└─────────────────────────────────────────────┘
+```
+
+**Meta-Tools Architecture:** Один мощный LLM (GPT-5.2 Thinking) с lazy-loading tools через 3 meta-tools. Модель сама решает какие домены загружать.
+
+### Meta-Tools
+
+| Tool | Описание |
+|------|----------|
+| `getAvailableDomains()` | Список доступных доменов (ads, creative, crm, whatsapp) |
+| `getDomainTools(domain)` | Загрузить tools конкретного домена |
+| `executeTool(name, args)` | Выполнить tool по имени |
+
+### Файлы Meta-Tools
+
+| Файл | Описание |
+|------|----------|
+| `metaTools/definitions.js` | 3 meta-tools definitions |
+| `metaTools/formatters.js` | Загрузка и форматирование domain tools |
+| `metaTools/executor.js` | Выполнение tools с валидацией |
+| `orchestrator/metaOrchestrator.js` | Tool loop orchestrator |
+| `orchestrator/metaSystemPrompt.js` | System prompt для meta mode |
+| `chatAssistant/config.js` | Feature flags |
+
+### Конфигурация Meta-Tools
+
+```bash
+# Включить meta-tools режим
+ORCHESTRATOR_MODE=meta
+META_ORCHESTRATOR_MODEL=gpt-5.2
+
+# A/B тестирование (10% meta, 90% legacy)
+ORCHESTRATOR_MODE=parallel
+META_TOOLS_PERCENTAGE=10
+```
+
+---
+
+## Архитектура: Legacy (Single-LLM)
 
 ```
 User Request
