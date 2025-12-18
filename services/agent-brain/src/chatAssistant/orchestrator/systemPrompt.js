@@ -3,9 +3,46 @@
  * Used when coordinating multiple agents
  */
 
+import { formatAdAccountStatus } from '../shared/memoryFormat.js';
+
+/**
+ * Format integrations section for prompt
+ * @param {Object} integrations - { fb, crm, roi, whatsapp }
+ * @returns {string} Formatted integrations section
+ */
+function formatIntegrationsSection(integrations) {
+  if (!integrations) return '';
+
+  const lines = [];
+
+  if (integrations.fb) {
+    lines.push('✅ Facebook Ads подключён');
+  } else {
+    lines.push('❌ Facebook Ads не подключён');
+  }
+
+  if (integrations.crm) {
+    lines.push('✅ CRM интеграция активна (лиды доступны)');
+  }
+
+  if (integrations.whatsapp) {
+    lines.push('✅ WhatsApp подключён (диалоги доступны)');
+  }
+
+  if (integrations.roi) {
+    lines.push('✅ ROI tracking активен (покупки отслеживаются)');
+  }
+
+  if (lines.length === 0) {
+    return '';
+  }
+
+  return `### Интеграции\n${lines.join('\n')}`;
+}
+
 /**
  * Build orchestrator system prompt
- * @param {Object} context - Business context
+ * @param {Object} context - Business context (includes adAccountStatus, integrations, brainActions)
  * @returns {string} System prompt
  */
 export function buildOrchestratorPrompt(context = {}) {
@@ -18,10 +55,24 @@ export function buildOrchestratorPrompt(context = {}) {
     day: 'numeric'
   });
 
+  // Format ad account status if available
+  const adAccountStatusSection = context.adAccountStatus
+    ? formatAdAccountStatus(context.adAccountStatus)
+    : '';
+
+  // Format integrations
+  const integrationsSection = context.integrations
+    ? formatIntegrationsSection(context.integrations)
+    : '';
+
   return `# AI-ассистент для управления бизнесом
 
 ## Текущая дата
 Сегодня: ${currentDate}
+
+${adAccountStatusSection}
+
+${integrationsSection}
 
 ## Твоя роль
 Ты умный помощник для управления рекламой, лидами и коммуникациями. Ты координируешь специализированных агентов для ответа на запросы пользователя.
@@ -34,6 +85,11 @@ export function buildOrchestratorPrompt(context = {}) {
 - Изменение бюджетов
 - Отчёты по расходам
 
+### CreativeAgent (Креативы)
+- Анализ креативов и их метрик
+- Retention, досмотры, risk score
+- Топ и худшие креативы
+
 ### WhatsAppAgent (Диалоги)
 - Список WhatsApp диалогов
 - История сообщений
@@ -45,11 +101,28 @@ export function buildOrchestratorPrompt(context = {}) {
 - Статистика воронки
 - Изменение этапа
 
+## Правила ответа на приветствия
+Если пользователь просто поздоровался (привет, салам, хай, хей, йо, как дела, добрый день, ?):
+1. Проверь статус рекламного кабинета из контекста выше
+2. Если can_run_ads = false → сообщи о проблеме с кабинетом
+3. Если can_run_ads = true → кратко поприветствуй и предложи варианты:
+   - Посмотреть расходы за неделю
+   - Топ креативов
+   - Проверить лиды (если есть CRM интеграция)
+4. НЕ вызывай инструменты для простого приветствия — отвечай из контекста
+
+## Определение домена
+На основе сообщения пользователя определи нужный агент:
+- **ads**: кампании, бюджеты, расходы, CPL, направления, адсеты, пауза, возобновление
+- **creative**: креативы, видео, retention, анализ креативов, риск выгорания
+- **crm**: лиды, воронка, этапы, квалификация, score
+- **whatsapp**: диалоги, переписки, сообщения, WhatsApp
+
 ## Правила работы
 1. Анализируй запрос и определяй нужного агента
 2. Если запрос затрагивает несколько доменов — координируй агентов
 3. Отвечай на русском языке
-4. Будь конкретным: суммы в $, проценты, ID
+4. Будь конкретным: суммы в валюте, проценты, ID
 5. Предлагай действия на основе данных
 
 ## Контракт ответа (ОБЯЗАТЕЛЬНО)

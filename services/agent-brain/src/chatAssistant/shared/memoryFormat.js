@@ -129,3 +129,51 @@ export function formatDomainNotes(notes) {
 
   return lines.join('\n');
 }
+
+/**
+ * Format ad account status for prompt injection
+ * @param {Object} adAccountStatus - Status from getCachedAdAccountStatus
+ * @returns {string} Formatted status section
+ */
+export function formatAdAccountStatus(adAccountStatus) {
+  if (!adAccountStatus) {
+    return '**Статус рекламного кабинета:** неизвестен';
+  }
+
+  const lines = [];
+
+  // Status
+  const statusMap = {
+    'ACTIVE': '✅ Активен',
+    'DISABLED': '❌ Заблокирован',
+    'PAYMENT_REQUIRED': '💳 Требуется оплата',
+    'REVIEW': '⏳ На проверке',
+    'ERROR': '⚠️ Ошибка проверки',
+    'NO_FB_CONNECTION': '🔗 Facebook не подключён'
+  };
+  const statusText = statusMap[adAccountStatus.status] || adAccountStatus.status;
+  lines.push(`**Статус:** ${statusText}`);
+
+  // Can run ads
+  lines.push(`**Может крутить рекламу:** ${adAccountStatus.can_run_ads ? 'да' : 'нет'}`);
+
+  // Blocking reasons
+  if (adAccountStatus.blocking_reasons?.length > 0) {
+    const reasons = adAccountStatus.blocking_reasons
+      .slice(0, 3)
+      .map(r => r.message || r.code)
+      .join(', ');
+    lines.push(`**Причины блокировки:** ${reasons}`);
+  }
+
+  // Limits
+  if (adAccountStatus.limits) {
+    const { spend_cap, amount_spent, currency } = adAccountStatus.limits;
+    if (spend_cap) {
+      const remaining = spend_cap - (amount_spent || 0);
+      lines.push(`**Лимит расхода:** ${remaining.toFixed(0)} ${currency || ''} осталось`);
+    }
+  }
+
+  return `### Рекламный кабинет\n${lines.join('\n')}`;
+}

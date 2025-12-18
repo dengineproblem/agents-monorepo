@@ -9,7 +9,7 @@ User Request
      │
      ▼
 ┌─────────────────┐
-│   Classifier    │  ← Определяет домен запроса (keywords + LLM fallback)
+│   Classifier    │  ← Определяет домен запроса через LLM (GPT-4o-mini)
 └────────┬────────┘
          │
          ▼
@@ -126,9 +126,7 @@ User Request
 **Путь:** `services/agent-brain/src/chatAssistant/orchestrator/`
 
 ### Classifier (`classifier.js`)
-Определяет домен запроса:
-1. **Quick classification** — поиск ключевых слов
-2. **LLM fallback** — GPT-4o-mini для сложных запросов
+Определяет домен запроса через LLM (GPT-4o-mini).
 
 **Домены:**
 - `ads` — кампании, адсеты, направления, бюджеты
@@ -232,7 +230,7 @@ User Request
    - `handlers.js` — обработчики
    - `prompt.js` — системный промпт
 3. Зарегистрировать в `orchestrator/index.js`
-4. Добавить keywords в `orchestrator/classifier.js`
+4. Добавить домен в LLM classifier prompt (`orchestrator/classifier.js`)
 5. Обновить `getAvailableDomains()`
 
 ---
@@ -771,86 +769,18 @@ maybeUpdateRollingSummary(conversationId, conversationHistory, contextStats)
 
 ---
 
-### Business Snapshot (Snapshot-First Pattern)
+### Business Snapshot (On-Demand)
 
 **Путь:** `services/agent-brain/src/chatAssistant/contextGatherer.js`
 
-Агрегированный snapshot бизнес-данных, загружаемый ДО классификации запроса.
-
-**Структура snapshot:**
-```javascript
-{
-  ads: {
-    period: 'last_7d',
-    spend: 15000,
-    leads: 45,
-    cpl: 333,
-    activeAdsets: 5,
-    activeCreatives: 12,
-    topAdset: { name: '...', cpl: 250 },
-    worstAdset: { name: '...', cpl: 800 },
-    dataDate: '2024-12-13T08:00:00Z'
-  },
-  directions: {
-    count: 5,
-    totalSpend: 15000,
-    totalLeads: 45,
-    topDirection: { id: '...', cpl: 200 },
-    worstDirection: { id: '...', cpl: 600 }
-  },
-  creatives: {
-    totalWithScores: 20,
-    avgRiskScore: 45,
-    highRiskCount: 3,
-    highRiskCreatives: [{ id, score, verdict }]
-  },
-  notes: {
-    ads: [{ text: '...' }],
-    creative: [{ text: '...' }]
-  },
-  generatedAt: '2024-12-13T10:00:00Z',
-  latencyMs: 150,
-  freshness: 'fresh' | 'stale' | 'outdated' | 'missing'
-}
-```
-
-**Freshness:**
-| Значение | Описание |
-|----------|----------|
-| `fresh` | Данные < 24 часов |
-| `stale` | Данные 24-48 часов |
-| `outdated` | Данные > 48 часов |
-| `missing` | Нет данных |
+Агрегированный snapshot бизнес-данных. **Не загружается автоматически** — агенты запрашивают данные через tools по необходимости.
 
 **Методы:**
 | Метод | Описание |
 |-------|----------|
-| `getBusinessSnapshot({ userAccountId, adAccountId })` | Получить snapshot |
-| `formatSnapshotForPrompt(snapshot)` | Форматировать для system prompt |
+| `getBusinessSnapshot({ userAccountId, adAccountId })` | Получить snapshot (используется внутри AdsAgent) |
 
-**Интеграция в Orchestrator:**
-```javascript
-// Загрузка в параллели с memory
-const [specs, notes, summaryContext, snapshot] = await Promise.all([
-  memoryStore.getSpecs(...),
-  memoryStore.getNotesDigest(...),
-  getSummaryContext(...),
-  getBusinessSnapshot({ userAccountId, adAccountId })
-]);
-
-// Добавление в контекст
-const enrichedContext = {
-  ...context,
-  businessSnapshot: snapshot,
-  businessSnapshotFormatted: formatSnapshotForPrompt(snapshot)
-};
-
-// Трекинг для runsStore
-toolContext.contextStats = {
-  snapshotUsed: snapshot?.freshness !== 'error',
-  snapshotFreshness: snapshot?.freshness
-};
-```
+**Примечание:** Ранее snapshot загружался в параллели с другим контекстом. Теперь агенты используют tools (`getDirections`, `getSpendReport` и др.) для получения актуальных данных по запросу
 
 ---
 
@@ -1368,89 +1298,28 @@ STACK_EXTENSIONS = {
 
 ---
 
-### Greeting Preflight Service
+### Обработка приветствий (Greeting via LLM Prompt)
 
-**Путь:** `services/agent-brain/src/chatAssistant/hybrid/preflightService.js`
+Приветственные сообщения (`привет`, `салам`, `хай`, `как дела`) обрабатываются через LLM с контекстом `adAccountStatus`.
 
-Умная обработка приветственных сообщений с preflight проверками и контекстными quick-replies.
+**Как работает:**
+1. При загрузке контекста вызывается `getCachedAdAccountStatus()` (кэш 10 мин)
+2. Статус кабинета форматируется через `formatAdAccountStatus()` и добавляется в system prompt
+3. LLM видит статус кабинета и integrations, сам решает как ответить:
+   - Если `can_run_ads = false` → сообщает о проблеме
+   - Если `can_run_ads = true` → приветствует и предлагает варианты действий
 
-**Когда срабатывает:**
-- Сообщения: `привет`, `салам`, `йо`, `хай`, `как дела`, `?`
-- Intent: `greeting_neutral`
-- Policy: `specialHandler: 'greeting_preflight'`
-
-**Функции:**
-
-| Функция | Описание |
-|---------|----------|
-| `runPreflight({ userAccountId, adAccountId, accessToken, integrations })` | Запуск preflight проверок (кэш 10 мин) |
-| `generateSmartGreetingSuggestions(preflight)` | Генерация контекстных suggestions |
-| `formatGreetingResponse(smartSuggestions)` | Форматирование с UI компонентами |
-| `invalidatePreflightCache(userAccountId, adAccountId)` | Инвалидация кэша |
-
-**Preflight проверки (параллельно):**
-
-| Проверка | Источник |
-|----------|----------|
-| Ad Account Status | `getAdAccountStatus()` — статус FB аккаунта |
-| Last Activity | `direction_metrics_rollup` — последняя активность за 14 дней |
-
-**Кейсы Smart Suggestions:**
-
-| Условие | Текст | Quick Replies |
-|---------|-------|---------------|
-| `fb=false` | "Facebook не подключён" | [Подключить FB, Что подключено?, Что умеет?] |
-| `can_run_ads=false` | "Реклама не крутится: {причина}" | [Подробнее, Проверить платежи, Последние кампании] |
-| `no_activity 14d+` | "Аккаунт ок, но рекламы нет" | [Почему?, Показать кампании, Диагностика] |
-| `has_activity` | "Данные доступны" | [Расходы за неделю, ROI/Лиды (по integrations)] |
-
-**Кэш:**
-```javascript
-const preflightCache = new Map();
-const PREFLIGHT_TTL = 10 * 60 * 1000; // 10 минут
-// key: `${userAccountId}:${adAccountDbId}`
+**Правила в system prompt оркестратора:**
+```
+## Правила ответа на приветствия
+Если пользователь просто поздоровался (привет, салам, хай, как дела, ?):
+1. Проверь статус рекламного кабинета из контекста
+2. Если can_run_ads = false → сообщи о проблеме с кабинетом
+3. Если can_run_ads = true → кратко поприветствуй и предложи варианты
+4. НЕ вызывай инструменты для простого приветствия
 ```
 
-**UI компоненты ответа:**
-- `type: 'alert'` — блок с причиной проблемы (error/warning/info/success)
-- `type: 'actions'` — интерактивные кнопки quick-replies
-
-**Пример ответа:**
-```json
-{
-  "content": "Привет! Вижу проблему с рекламным аккаунтом: нужна оплата",
-  "uiJson": [
-    {
-      "type": "alert",
-      "alertType": "error",
-      "title": "Реклама не крутится",
-      "message": "Проблема с оплатой — проверьте платёжный метод"
-    },
-    {
-      "type": "actions",
-      "title": "Быстрые действия",
-      "items": [
-        { "id": "show_reason", "label": "Подробнее о причине", "icon": "🔍", "payload": { "action": "show_blocking_reason" } },
-        { "id": "check_billing", "label": "Проверить платежи", "icon": "💳", "payload": { "action": "check_billing" } }
-      ],
-      "layout": "horizontal"
-    }
-  ]
-}
-```
-
-**Интеграция в Orchestrator:**
-```javascript
-// orchestrator/index.js — после resolvePolicy()
-if (policy.specialHandler === 'greeting_preflight') {
-  const preflight = await runPreflight({ userAccountId, adAccountId, accessToken, integrations });
-  const smartSuggestions = generateSmartGreetingSuggestions(preflight);
-  const { content, uiJson } = formatGreetingResponse(smartSuggestions);
-
-  yield { type: 'text', content, accumulated: content };
-  yield { type: 'done', content, uiJson, suggestions: smartSuggestions.suggestions };
-}
-```
+**Примечание:** Ранее использовался отдельный `greeting_preflight` handler с `preflightService.js`. Теперь логика перенесена в промпт для упрощения кода
 
 ---
 
@@ -2577,42 +2446,42 @@ HS ∈ [-100; +100] — интегральная оценка эффективн
 
 **Интеграция в orchestrator:**
 ```javascript
-const [specs, notes, summaryContext, snapshot, brainActions] = await Promise.all([
+const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
   memoryStore.getSpecs(...),
   memoryStore.getNotesDigest(...),
   getSummaryContext(...),
-  getBusinessSnapshot(...),
-  getRecentBrainActions(userAccountId, dbAccountId)  // NEW
+  getRecentBrainActions(userAccountId, dbAccountId),
+  getIntegrations(...),
+  getCachedAdAccountStatus(toolContext)  // Кэш 10 мин
 ]);
 
 const enrichedContext = {
   ...context,
-  brainActions  // Передаётся в AdsAgent
+  brainActions,      // История действий Brain
+  integrations,      // fb, crm, roi, whatsapp
+  adAccountStatus    // can_run_ads, status
 };
 ```
 
-### Scoring данные в контексте
+**Примечание:** `getBusinessSnapshot()` убран из параллельной загрузки — агенты получают данные через tools по запросу.
+
+### Scoring данные
 
 **Источник:** `scoring_executions.scoring_output`
 
-`getAdsSnapshot()` теперь возвращает `scoringDetails`:
+Scoring данные доступны через tools AdsAgent (`getDirections`, `getAdSets` и др.). Данные включают:
 
 ```javascript
-{
-  // ... existing aggregates ...
-  scoringDetails: {
-    adsets: [...],           // Full adsets with trends, metrics
-    ready_creatives: [...],   // Creatives with performance data
-    unused_creatives: [...]   // Unused creatives for rotation
-  }
+scoringDetails: {
+  adsets: [...],           // Full adsets with trends, metrics
+  ready_creatives: [...],   // Creatives with performance data
+  unused_creatives: [...]   // Unused creatives for rotation
 }
 ```
 
-**Форматирование для промпта:**
+**Форматирование:**
 ```javascript
-const scoringContext = formatScoringForPrompt(
-  context?.businessSnapshot?.ads?.scoringDetails
-);
+const scoringContext = formatScoringForPrompt(scoringDetails);
 // → "**Ad Sets (5):**\n- Имплантация: spend $50, CPL $25 📈\n..."
 ```
 
@@ -2628,9 +2497,12 @@ AdsAgent теперь учитывает историю Brain:
 | Файл | Изменение |
 |------|-----------|
 | `shared/brainRules.js` | **Создан** — общие правила Brain |
+| `shared/memoryFormat.js` | **Обновлён** — `formatAdAccountStatus()` для greeting |
 | `agents/ads/prompt.js` | **Обновлён** → v2.0, интеграция Brain rules |
-| `contextGatherer.js` | **Обновлён** — `getRecentBrainActions()`, `scoringDetails` |
-| `orchestrator/index.js` | **Обновлён** — загрузка `brainActions` |
+| `contextGatherer.js` | **Обновлён** — `getRecentBrainActions()` |
+| `orchestrator/index.js` | **Обновлён** — `getCachedAdAccountStatus()`, убран `getBusinessSnapshot` |
+| `orchestrator/classifier.js` | **Обновлён** — убран `quickClassify()`, только LLM |
+| `orchestrator/systemPrompt.js` | **Обновлён** — `formatIntegrationsSection()`, правила greeting |
 
 ---
 
@@ -4819,14 +4691,9 @@ export {
   createPlaybookNextSteps
 } from './uiComponents.js';
 
-// Phase 6: Preflight Service (greeting handling)
-export {
-  runPreflight,
-  generateSmartGreetingSuggestions,
-  formatGreetingResponse,
-  invalidatePreflightCache,
-  clearPreflightCache
-} from './preflightService.js';
+// Phase 6: Preflight Service (deprecated - greeting теперь через LLM prompt)
+// preflightService.js сохранён для совместимости, но не используется
+// Greeting обрабатывается через LLM с adAccountStatus в контексте
 
 // Config
 export { HYBRID_CONFIG };
@@ -4847,7 +4714,7 @@ chatAssistant/hybrid/
 ├── tierManager.js          # TierManager class для переходов
 ├── expressionEvaluator.js  # Безопасный eval для условий
 ├── uiComponents.js         # UI components для Web
-├── preflightService.js     # Greeting preflight + smart suggestions (Phase 6)
+├── preflightService.js     # (deprecated) - greeting теперь через LLM prompt
 └── responseTemplates.js    # Шаблоны текстовых ответов для playbooks
 ```
 

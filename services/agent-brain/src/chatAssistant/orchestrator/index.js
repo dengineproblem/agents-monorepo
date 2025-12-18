@@ -17,8 +17,6 @@ import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
 import { unifiedStore } from '../stores/unifiedStore.js';
 import {
-  getBusinessSnapshot,
-  formatSnapshotForPrompt,
   getRecentBrainActions,
   getIntegrations,
   formatIntegrationsForPrompt,
@@ -35,8 +33,50 @@ import {
   tierManager,
   TIERS
 } from '../hybrid/index.js';
-import { runPreflight, generateSmartGreetingSuggestions, formatGreetingResponse } from '../hybrid/preflightService.js';
+// Greeting preflight removed - handled via LLM prompt with adAccountStatus context
 import { createSession, updateTierState } from '../../mcp/sessions.js';
+import { adsHandlers } from '../agents/ads/handlers.js';
+
+// In-memory кэш для статуса рекламного кабинета
+const adAccountStatusCache = new Map();
+const AD_ACCOUNT_STATUS_TTL = 10 * 60 * 1000; // 10 минут
+
+/**
+ * Получить статус рекламного кабинета с кэшированием
+ * @param {Object} toolContext
+ * @returns {Promise<Object>}
+ */
+async function getCachedAdAccountStatus(toolContext) {
+  const { accessToken, adAccountId, userAccountId, adAccountDbId } = toolContext;
+
+  // Если нет FB подключения
+  if (!accessToken || !adAccountId) {
+    return { can_run_ads: false, status: 'NO_FB_CONNECTION', success: false };
+  }
+
+  const cacheKey = `${userAccountId}:${adAccountDbId || adAccountId}`;
+  const cached = adAccountStatusCache.get(cacheKey);
+
+  // Проверяем кэш
+  if (cached && Date.now() - cached.timestamp < AD_ACCOUNT_STATUS_TTL) {
+    logger.debug({ cacheKey }, 'Ad account status cache hit');
+    return cached.data;
+  }
+
+  try {
+    const status = await adsHandlers.getAdAccountStatus({}, { accessToken, adAccountId });
+    adAccountStatusCache.set(cacheKey, { data: status, timestamp: Date.now() });
+    return status;
+  } catch (error) {
+    logger.warn({ error: error.message, adAccountId }, 'getCachedAdAccountStatus failed');
+    return {
+      success: false,
+      status: 'ERROR',
+      can_run_ads: false,
+      error: error.message
+    };
+  }
+}
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
 
@@ -82,42 +122,39 @@ export class Orchestrator {
         };
       }
 
-      // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
+      // 1. Load memory (specs + notes + rolling summary) + ad account status in parallel
       // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
-      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
+      const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
-        getBusinessSnapshot({
-          userAccountId: toolContext.userAccountId,
-          adAccountId: dbAccountId  // UUID for database queries
-        }),
         // Brain actions history (last 3 days) for AdsAgent context
         getRecentBrainActions(toolContext.userAccountId, dbAccountId),
         // Check available integrations (fb, crm, roi, whatsapp)
-        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
+        // Ad account status with caching (10 min TTL)
+        getCachedAdAccountStatus(toolContext)
       ]);
 
       // Определить стек интеграций клиента
       const stack = getIntegrationStack(integrations);
 
-      // Enrich context with memory AND snapshot (snapshot-first pattern)
+      // Enrich context with memory + ad account status
       const enrichedContext = {
         ...context,
         specs,
         notes,
         rollingSummary: summaryContext.summary,
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        // Snapshot-first: pre-loaded business data
-        businessSnapshot: snapshot,
-        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
         brainActions,
+        // Ad account status (can_run_ads, blocking_reasons, etc)
+        adAccountStatus,
         // Available integrations for tool routing
         integrations,
         integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
@@ -128,24 +165,23 @@ export class Orchestrator {
       };
 
       // Track context stats for runsStore
-      const snapshotUsed = snapshot && snapshot.freshness !== 'error' && snapshot.freshness !== 'missing';
       toolContext.contextStats = {
         ...toolContext.contextStats,
         rollingSummaryUsed: summaryContext.used,
-        snapshotUsed,
-        snapshotFreshness: snapshot?.freshness,
+        adAccountStatus: adAccountStatus?.status,
+        canRunAds: adAccountStatus?.can_run_ads,
         integrations,
         stack
       };
 
-      // 2. Classify the request (now has snapshot for better routing)
+      // 2. Classify the request
       const classification = await classifyRequest(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
         classification,
         usingSummary: summaryContext.used,
-        usingSnapshot: snapshotUsed,
+        canRunAds: adAccountStatus?.can_run_ads,
         integrations
       }, 'Request classified');
 
@@ -254,22 +290,19 @@ export class Orchestrator {
         }
       }
 
-      // 1. Load context in parallel (same as processRequest)
+      // 1. Load context in parallel + ad account status
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
-      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
+      const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
-        getBusinessSnapshot({
-          userAccountId: toolContext.userAccountId,
-          adAccountId: dbAccountId
-        }),
         getRecentBrainActions(toolContext.userAccountId, dbAccountId),
-        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
+        getCachedAdAccountStatus(toolContext)
       ]);
 
       // Определить стек интеграций клиента
@@ -281,9 +314,8 @@ export class Orchestrator {
         notes,
         rollingSummary: summaryContext.summary,
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        businessSnapshot: snapshot,
-        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         brainActions,
+        adAccountStatus,
         integrations,
         integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
         // Stack info for personalized responses
@@ -319,49 +351,8 @@ export class Orchestrator {
         dangerousPolicy: policy.dangerousPolicy
       }, 'Hybrid: Policy resolved');
 
-      // 3.5. Handle greeting/neutral with preflight
-      if (policy.specialHandler === 'greeting_preflight') {
-        logger.info({ intent: policy.intent }, 'Hybrid: Handling greeting with preflight');
-
-        const preflight = await runPreflight({
-          userAccountId: toolContext.userAccountId,
-          adAccountId: toolContext.adAccountId,
-          adAccountDbId: toolContext.adAccountDbId,
-          accessToken: toolContext.accessToken,
-          integrations
-        });
-
-        const smartSuggestions = generateSmartGreetingSuggestions(preflight);
-        const { content, uiJson } = formatGreetingResponse(smartSuggestions);
-
-        logger.info({
-          hasFb: integrations.fb,
-          canRunAds: preflight.adAccountStatus?.can_run_ads,
-          hasActivity: preflight.lastActivity?.hasRecentActivity,
-          suggestionsCount: smartSuggestions.suggestions?.length
-        }, 'Hybrid: Greeting preflight completed');
-
-        return {
-          type: 'greeting_response',
-          agent: 'Orchestrator',
-          content,
-          uiJson,
-          suggestions: smartSuggestions.suggestions,
-          preflight: {
-            integrations,
-            adAccountStatus: preflight.adAccountStatus?.status,
-            canRunAds: preflight.adAccountStatus?.can_run_ads,
-            hasRecentActivity: preflight.lastActivity?.hasRecentActivity
-          },
-          classification,
-          policy: {
-            playbookId: policy.playbookId,
-            intent: policy.intent,
-            specialHandler: 'greeting_preflight'
-          },
-          duration: Date.now() - startTime
-        };
-      }
+      // Greeting теперь обрабатывается через LLM с adAccountStatus в контексте
+      // (удалён greeting_preflight блок)
 
       // 4. Handle context-only responses (no tools needed)
       if (policy.useContextOnly) {
@@ -690,22 +681,19 @@ export class Orchestrator {
         }
       }
 
-      // 3. Load context in parallel
+      // 3. Load context in parallel + ad account status
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
-      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
+      const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
-        getBusinessSnapshot({
-          userAccountId: toolContext.userAccountId,
-          adAccountId: dbAccountId
-        }),
         getRecentBrainActions(toolContext.userAccountId, dbAccountId),
-        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
+        getCachedAdAccountStatus(toolContext)
       ]);
 
       // Определить стек интеграций клиента
@@ -717,9 +705,8 @@ export class Orchestrator {
         notes,
         rollingSummary: summaryContext.summary,
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        businessSnapshot: snapshot,
-        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         brainActions,
+        adAccountStatus,
         integrations,
         integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
         // Stack info for personalized responses
@@ -728,11 +715,10 @@ export class Orchestrator {
         stackCapabilities: getStackCapabilities(stack)
       };
 
-      // 4. Get directions count for conditional questions
-      const directionsCount = snapshot?.directions?.length || 0;
+      // 4. Business context for conditional questions
       const businessContext = {
-        directionsCount,
-        integrations
+        integrations,
+        canRunAds: adAccountStatus?.can_run_ads
       };
 
       // 5. Classify and detect intent with playbook
@@ -951,9 +937,8 @@ export class Orchestrator {
   async handleContextOnlyResponse({ message, context, policy, classification, conversationHistory, startTime }) {
     // Build prompt with context
     const systemPrompt = buildOrchestratorPrompt();
-    const contextInfo = policy.contextSource === 'brain_history'
-      ? context.brainActions
-      : context.businessSnapshotFormatted;
+    // Always use brainActions as context source (businessSnapshot removed)
+    const contextInfo = context.brainActions;
 
     const messages = [
       { role: 'system', content: systemPrompt },
@@ -1247,42 +1232,39 @@ export class Orchestrator {
         return;
       }
 
-      // 1. Load memory (specs + notes + rolling summary) AND business snapshot in parallel
+      // 1. Load memory (specs + notes + rolling summary) + ad account status in parallel
       // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
-      const [specs, notes, summaryContext, snapshot, brainActions, integrations] = await Promise.all([
+      const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
         memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
         memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
-        getBusinessSnapshot({
-          userAccountId: toolContext.userAccountId,
-          adAccountId: dbAccountId  // UUID for database queries
-        }),
         // Brain actions history (last 3 days) for AdsAgent context
         getRecentBrainActions(toolContext.userAccountId, dbAccountId),
         // Check available integrations (fb, crm, roi, whatsapp)
-        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken)
+        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
+        // Ad account status with caching (10 min TTL)
+        getCachedAdAccountStatus(toolContext)
       ]);
 
       // Определить стек интеграций клиента
       const stack = getIntegrationStack(integrations);
 
-      // Enrich context with memory AND snapshot (snapshot-first pattern)
+      // Enrich context with memory + ad account status
       const enrichedContext = {
         ...context,
         specs,
         notes,
         rollingSummary: summaryContext.summary,
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        // Snapshot-first: pre-loaded business data
-        businessSnapshot: snapshot,
-        businessSnapshotFormatted: formatSnapshotForPrompt(snapshot),
         // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
         brainActions,
+        // Ad account status (can_run_ads, blocking_reasons, etc)
+        adAccountStatus,
         // Available integrations for tool routing
         integrations,
         integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
@@ -1293,24 +1275,23 @@ export class Orchestrator {
       };
 
       // Track context stats for runsStore
-      const snapshotUsed = snapshot && snapshot.freshness !== 'error' && snapshot.freshness !== 'missing';
       toolContext.contextStats = {
         ...toolContext.contextStats,
         rollingSummaryUsed: summaryContext.used,
-        snapshotUsed,
-        snapshotFreshness: snapshot?.freshness,
+        adAccountStatus: adAccountStatus?.status,
+        canRunAds: adAccountStatus?.can_run_ads,
         integrations,
         stack
       };
 
-      // 2. Classify the request (now has snapshot for better routing)
+      // 2. Classify the request
       const classification = await classifyRequest(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
         classification,
         usingSummary: summaryContext.used,
-        usingSnapshot: snapshotUsed,
+        canRunAds: adAccountStatus?.can_run_ads,
         integrations
       }, 'Request classified for streaming');
 
@@ -1320,47 +1301,8 @@ export class Orchestrator {
         agents: classification.agents
       };
 
-      // Handle greeting intent - return preflight response
-      if (classification.intent === 'greeting_neutral') {
-        logger.info({ intent: 'greeting_neutral' }, 'Streaming: Handling greeting with preflight');
-
-        const preflight = await runPreflight({
-          userAccountId: toolContext.userAccountId,
-          adAccountId: toolContext.adAccountId,
-          adAccountDbId: toolContext.adAccountDbId,
-          accessToken: toolContext.accessToken,
-          integrations
-        });
-
-        const smartSuggestions = generateSmartGreetingSuggestions(preflight);
-        logger.info({ smartSuggestions }, 'Greeting: Generated smart suggestions');
-
-        const { content, uiJson } = formatGreetingResponse(smartSuggestions);
-        logger.info({ content, hasUiJson: !!uiJson }, 'Greeting: Formatted response');
-
-        const textEvent = {
-          type: 'text',
-          content,
-          accumulated: content
-        };
-        logger.info({ textEvent }, 'Greeting: Yielding text event');
-        yield textEvent;
-
-        const doneEvent = {
-          type: 'done',
-          content,
-          uiJson,
-          uiComponents: uiJson,  // For route compatibility
-          suggestions: smartSuggestions.suggestions,
-          classification,
-          duration: Date.now() - startTime
-        };
-        logger.info({ doneEventType: doneEvent.type, hasContent: !!doneEvent.content }, 'Greeting: Yielding done event');
-        yield doneEvent;
-
-        logger.info('Greeting: Flow complete, returning');
-        return;
-      }
+      // Greeting теперь обрабатывается через LLM агента (с adAccountStatus в контексте)
+      // (удалён greeting_preflight блок)
 
       // Yield thinking message based on domain
       const thinkingMessage = getThinkingMessage(classification.domain);

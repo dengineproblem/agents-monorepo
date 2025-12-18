@@ -15,43 +15,7 @@ const openai = new OpenAI({
 });
 
 // Use a faster model for classification
-const CLASSIFIER_MODEL = 'gpt-5-mini';
-
-/**
- * Domain keywords for quick classification
- */
-const DOMAIN_KEYWORDS = {
-  ads: [
-    'кампани', 'адсет', 'бюджет', 'расход', 'spend', 'cpm',
-    'реклам', 'campaign', 'facebook', 'instagram',
-    'impressions', 'clicks', 'конверс', 'направлени',
-    'roi', 'roas', 'охват', 'direction',
-    // ROI/Revenue keywords
-    'окупаемост', 'рентабельност', 'прибыл', 'доход',
-    'сколько заработал', 'revenue', 'сколько потратил',
-    'отбил', 'вернул', 'эффективност рекламы'
-  ],
-  creative: [
-    'креатив', 'видео', 'картинк', 'изображен', 'баннер',
-    'анализ креатив', 'тест креатив', 'лонч', 'запуст креатив',
-    'транскрип', 'скор', 'retention', 'досмотр', 'удержани',
-    'топ креатив', 'лучш креатив', 'худш креатив', 'сравн креатив',
-    'video views', 'cpl', 'ctr', 'метрик креатив'
-  ],
-  whatsapp: [
-    'диалог', 'переписк', 'сообщен', 'whatsapp', 'ватсап', 'чат',
-    'написал', 'ответил', 'переписка', 'message', 'контакт',
-    'анализ диалога', 'история сообщений'
-  ],
-  crm: [
-    'лид', 'воронк', 'этап', 'score', 'горяч', 'тёпл', 'холодн',
-    'funnel', 'lead', 'клиент', 'продаж', 'сделк', 'квалификац',
-    'crm', 'амо', 'amo',
-    // Revenue/выручка keywords
-    'выручк', 'покупк', 'средний чек', 'конверсия в покупку',
-    'сколько купили', 'топ покупател'
-  ]
-};
+const CLASSIFIER_MODEL = 'gpt-4o-mini';
 
 /**
  * Extract user request from formatted message
@@ -61,98 +25,6 @@ const DOMAIN_KEYWORDS = {
 function extractUserRequest(message) {
   const userRequestMatch = message.match(/## Запрос пользователя\s*\n\n(.+)/s);
   return userRequestMatch ? userRequestMatch[1].trim() : message;
-}
-
-/**
- * Check if message is a greeting
- * @param {string} userRequest - User's request text
- * @returns {boolean}
- */
-function isGreeting(userRequest) {
-  const greetingPattern = /^(?:привет|салам|здравствуй|хай|йо|hello|hi|хей|ку|здаров|приветик|хола|добр(?:ый|ое|ого)\s*(?:день|утр|вечер)|как дела|что нового|\?)!?$/i;
-  return greetingPattern.test(userRequest.trim());
-}
-
-/**
- * Quick keyword-based classification
- * @param {string} message - User message
- * @returns {{ domain: string, agents: string[], confidence: number } | null}
- */
-function quickClassify(message) {
-  // Extract just the user's request
-  const userRequest = extractUserRequest(message);
-
-  // Check for greeting FIRST
-  if (isGreeting(userRequest)) {
-    logger.info({ userRequest }, 'Quick classify: detected greeting');
-    return {
-      domain: 'general',
-      agents: [],
-      confidence: 0.95,
-      intent: 'greeting_neutral',
-      intentConfidence: 0.95
-    };
-  }
-
-  // Use user request for keyword matching (not full context)
-  const lower = userRequest.toLowerCase();
-
-  const scores = {
-    ads: 0,
-    creative: 0,
-    whatsapp: 0,
-    crm: 0
-  };
-
-  // Count keyword matches
-  for (const [domain, keywords] of Object.entries(DOMAIN_KEYWORDS)) {
-    for (const keyword of keywords) {
-      if (lower.includes(keyword)) {
-        scores[domain]++;
-      }
-    }
-  }
-
-  // Find domain with highest score
-  const maxScore = Math.max(...Object.values(scores));
-
-  if (maxScore === 0) {
-    return null; // Need LLM classification
-  }
-
-  const topDomains = Object.entries(scores)
-    .filter(([_, score]) => score === maxScore)
-    .map(([domain]) => domain);
-
-  // If only one domain matched, return it
-  if (topDomains.length === 1 && maxScore >= 2) {
-    // Detect intent using PolicyEngine on user request only
-    const intentResult = policyEngine.detectIntent(userRequest);
-
-    return {
-      domain: topDomains[0],
-      agents: topDomains,
-      confidence: Math.min(maxScore * 0.3, 0.9),
-      intent: intentResult.intent,
-      intentConfidence: intentResult.confidence
-    };
-  }
-
-  // Multiple domains or low confidence - need LLM
-  if (topDomains.length > 1) {
-    // Detect intent for mixed requests
-    const intentResult = policyEngine.detectIntent(userRequest);
-
-    return {
-      domain: 'mixed',
-      agents: topDomains,
-      confidence: 0.5,
-      intent: intentResult.intent,
-      intentConfidence: intentResult.confidence
-    };
-  }
-
-  return null;
 }
 
 /**
@@ -297,40 +169,18 @@ async function llmClassify(message, context) {
  * @returns {Promise<{ domain: string, agents: string[], intent: string, instructions?: string }>}
  */
 export async function classifyRequest(message, context = {}) {
-  // Try quick keyword classification first
-  const quickResult = quickClassify(message);
-
-  if (quickResult && quickResult.confidence >= 0.7) {
-    logger.info({
-      message: message.substring(0, 50),
-      domain: quickResult.domain,
-      intent: quickResult.intent,
-      confidence: quickResult.confidence,
-      intentConfidence: quickResult.intentConfidence,
-      method: 'keywords'
-    }, 'Request classified via keywords');
-
-    return {
-      domain: quickResult.domain,
-      agents: quickResult.agents,
-      intent: quickResult.intent,
-      intentConfidence: quickResult.intentConfidence,
-      instructions: ''
-    };
-  }
-
-  // Fall back to LLM classification
-  const llmResult = await llmClassify(message, context);
+  // Use LLM for all classification (domain + intent detection)
+  const result = await llmClassify(message, context);
 
   logger.info({
     message: message.substring(0, 50),
-    domain: llmResult.domain,
-    intent: llmResult.intent,
-    intentConfidence: llmResult.intentConfidence,
-    method: 'llm'
-  }, 'Request classified via LLM');
+    domain: result.domain,
+    agents: result.agents,
+    intent: result.intent,
+    intentConfidence: result.intentConfidence
+  }, 'Request classified');
 
-  return llmResult;
+  return result;
 }
 
 /**
