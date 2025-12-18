@@ -1,64 +1,13 @@
 /**
  * PolicyEngine Tests
- * Tests for detectIntent and resolvePolicy functions
+ * Tests for resolvePolicy function
+ * Note: Intent detection is now handled by LLM in orchestrator/index.js
  */
 
 import { describe, it, expect } from 'vitest';
 import { policyEngine } from '../../src/chatAssistant/hybrid/policyEngine.js';
 
 describe('PolicyEngine', () => {
-  describe('detectIntent', () => {
-    it('detects spend_report intent', () => {
-      const result = policyEngine.detectIntent('покажи расходы за неделю');
-      expect(result.intent).toBe('spend_report');
-      expect(result.domain).toBe('ads');
-      expect(result.confidence).toBeGreaterThan(0);
-    });
-
-    it('detects budget_change intent', () => {
-      const result = policyEngine.detectIntent('увеличь бюджет на 20%');
-      expect(result.intent).toBe('budget_change');
-      expect(result.domain).toBe('ads');
-    });
-
-    it('detects pause_entity intent', () => {
-      const result = policyEngine.detectIntent('останови кампанию Test');
-      expect(result.intent).toBe('pause_entity');
-      expect(result.domain).toBe('ads');
-    });
-
-    it('detects directions_overview intent', () => {
-      const result = policyEngine.detectIntent('покажи направления');
-      expect(result.intent).toBe('directions_overview');
-      expect(result.domain).toBe('ads');
-    });
-
-    it('detects creative intent', () => {
-      const result = policyEngine.detectIntent('покажи топ креативов');
-      // The actual intent may be creative_list or creative_top depending on patterns
-      expect(result.domain).toBe('creative');
-      expect(result.confidence).toBeGreaterThan(0);
-    });
-
-    it('detects leads_list intent', () => {
-      const result = policyEngine.detectIntent('покажи лидов за неделю');
-      expect(result.intent).toBe('leads_list');
-      expect(result.domain).toBe('crm');
-    });
-
-    it('detects dialogs_list intent', () => {
-      const result = policyEngine.detectIntent('покажи диалоги');
-      expect(result.intent).toBe('dialogs_list');
-      expect(result.domain).toBe('whatsapp');
-    });
-
-    it('returns unknown for unrecognized input', () => {
-      const result = policyEngine.detectIntent('abrakadabra xyz');
-      expect(result.intent).toBe('unknown');
-      expect(result.confidence).toBeLessThan(0.5);
-    });
-  });
-
   describe('resolvePolicy', () => {
     it('returns policy with allowedTools for spend_report', () => {
       const policy = policyEngine.resolvePolicy({

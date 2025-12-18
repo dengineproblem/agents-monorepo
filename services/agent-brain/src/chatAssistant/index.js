@@ -27,7 +27,7 @@ import {
   handleStatusCommand
 } from './telegramHandler.js';
 import { createSession, MCP_CONFIG } from '../mcp/index.js';
-import { classifyRequest } from './orchestrator/classifier.js';
+import { detectIntentWithLLM, INTENT_DOMAIN_MAP } from './orchestrator/index.js';
 import { HYBRID_CONFIG } from './hybrid/index.js';
 import { getToolsByAgent } from '../mcp/tools/definitions.js';
 import { formatMCPResponse, needsRepairPass } from '../mcp/responseFormatter.js';
@@ -522,73 +522,69 @@ function shouldRequireApproval(toolName, mode) {
  * @returns {Promise<Object>} Response in same format as orchestrator
  */
 async function processChatViaMCP({ systemPrompt, userPrompt, toolContext, conversationHistory, mode }) {
-  // 1. Classify the request to determine domain and allowed tools
+  // 1. Detect intent using LLM (Single-LLM Architecture)
   let classification;
   let allowedTools = null;
   let allowedDomains = null;
   let isMixedQuery = false;
 
   try {
-    classification = await classifyRequest(userPrompt, {
-      userAccountId: toolContext.userAccountId
-    });
+    // Build minimal context for intent detection
+    const minimalContext = {
+      integrations: toolContext.integrations || {}
+    };
+
+    classification = await detectIntentWithLLM(userPrompt, minimalContext);
 
     // Get allowed tools based on classification
     if (classification.domain !== 'mixed' && classification.domain !== 'unknown') {
       allowedDomains = [classification.domain];
       allowedTools = getAllowedToolsForDomains(allowedDomains);
-    } else if (classification.domain === 'mixed' && classification.agents) {
-      // Phase 3: Enhanced mixed query handling
-      // Limit to max 2 domains for mixed queries
+    } else if (classification.agents && classification.agents.length > 1) {
+      // Mixed query handling
       isMixedQuery = true;
-      const detectedDomains = classification.agents.map(a => a.replace('Agent', '').toLowerCase());
-      allowedDomains = detectedDomains.slice(0, 2); // Max 2 domains
-
-      // Get read-only tools for mixed queries (no writes in mixed mode)
+      allowedDomains = classification.agents.slice(0, 2); // Max 2 domains
       allowedTools = getMixedQueryReadTools(allowedDomains);
 
       logger.info({
-        originalDomains: detectedDomains.length,
+        originalDomains: classification.agents.length,
         limitedDomains: allowedDomains,
         readToolsCount: allowedTools.length
       }, 'Mixed query tool limiting applied');
     }
-    // For 'unknown', allowedTools stays null (all tools allowed)
 
     logger.info({
+      intent: classification.intent,
       domain: classification.domain,
       confidence: classification.confidence,
       isMixedQuery,
       allowedToolsCount: allowedTools?.length || 'all'
-    }, 'MCP classifier result');
+    }, 'MCP intent detection result');
 
-  } catch (classifyError) {
-    logger.warn({ error: classifyError.message }, 'Classification failed, allowing all tools');
-    classification = { domain: 'unknown', confidence: 0 };
+  } catch (detectError) {
+    logger.warn({ error: detectError.message }, 'Intent detection failed, allowing all tools');
+    classification = { intent: 'unknown', domain: 'unknown', confidence: 0 };
   }
 
-  // Handle greeting intent - return preflight response without LLM
-  if (classification.intent === 'greeting_neutral') {
-    const { runPreflight, generateSmartGreetingSuggestions, formatGreetingResponse } = await import('./hybrid/preflightService.js');
-
-    const preflight = await runPreflight({
-      userAccountId: toolContext.userAccountId,
-      adAccountId: toolContext.adAccountId,
-      adAccountDbId: toolContext.adAccountDbId,
-      accessToken: toolContext.accessToken,
-      integrations: toolContext.integrations || {}
-    });
-
-    const smartSuggestions = generateSmartGreetingSuggestions(preflight);
-    const { content, uiJson } = formatGreetingResponse(smartSuggestions);
-
-    logger.info({ intent: 'greeting_neutral', hasAlert: !!smartSuggestions.alert }, 'Greeting preflight response');
+  // Handle context-only responses (greeting, brain_history)
+  if (classification.contextOnlyResponse) {
+    logger.info({ intent: classification.intent }, 'Returning context-only response');
 
     return {
-      type: 'greeting_response',
-      content,
-      uiJson,
-      suggestions: smartSuggestions.suggestions,
+      type: 'context_only_response',
+      content: classification.contextOnlyResponse,
+      classification,
+      mode: 'mcp'
+    };
+  }
+
+  // Handle clarifying questions from LLM
+  if (classification.needsClarification && classification.clarifyingQuestion) {
+    logger.info({ intent: classification.intent }, 'LLM requesting clarification');
+
+    return {
+      type: 'clarifying',
+      content: classification.clarifyingQuestion,
       classification,
       mode: 'mcp'
     };

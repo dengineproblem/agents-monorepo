@@ -4,8 +4,7 @@
  */
 
 import OpenAI from 'openai';
-import { classifyRequest } from './classifier.js';
-import { buildOrchestratorPrompt, buildSynthesisPrompt } from './systemPrompt.js';
+import { buildOrchestratorPrompt, buildSynthesisPrompt, buildUnifiedOrchestratorPrompt, getAllIntents } from './systemPrompt.js';
 import { AdsAgent } from '../agents/ads/index.js';
 import { CreativeAgent } from '../agents/creative/index.js';
 import { WhatsAppAgent } from '../agents/whatsapp/index.js';
@@ -79,10 +78,154 @@ async function getCachedAdAccountStatus(toolContext) {
 }
 
 const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
+const INTENT_MODEL = 'gpt-4o-mini'; // Faster model for intent detection
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+/**
+ * Intent to domain mapping
+ */
+const INTENT_DOMAIN_MAP = {
+  // Greeting
+  greeting_neutral: 'general',
+  // ADS
+  spend_report: 'ads',
+  directions_overview: 'ads',
+  campaigns_overview: 'ads',
+  cpl_analysis: 'ads',
+  roi_analysis: 'ads',
+  brain_history: 'ads',
+  diagnosis_leads: 'ads',
+  pause_entity: 'ads',
+  budget_change: 'ads',
+  resume_entity: 'ads',
+  // CREATIVE
+  creative_list: 'creative',
+  creative_top: 'creative',
+  creative_worst: 'creative',
+  creative_burnout: 'creative',
+  creative_compare: 'creative',
+  creative_analysis: 'creative',
+  launch_creative: 'creative',
+  pause_creative: 'creative',
+  start_test: 'creative',
+  // CRM
+  leads_list: 'crm',
+  funnel_stats: 'crm',
+  revenue_stats: 'crm',
+  lead_details: 'crm',
+  update_lead_stage: 'crm',
+  // WHATSAPP
+  dialogs_list: 'whatsapp',
+  dialog_analysis: 'whatsapp',
+  dialog_search: 'whatsapp',
+  // GENERAL
+  general_question: 'general',
+  unknown: 'unknown'
+};
+
+/**
+ * Detect intent using LLM with structured output
+ * Single LLM call determines intent, which is then used for policy lookup
+ *
+ * @param {string} message - User message
+ * @param {Object} context - Enriched context with adAccountStatus, integrations, brainActions
+ * @returns {Promise<Object>} { intent, domain, agents, confidence, contextOnlyResponse?, needsClarification?, clarifyingQuestion? }
+ */
+async function detectIntentWithLLM(message, context) {
+  const systemPrompt = buildUnifiedOrchestratorPrompt(context);
+
+  // Build JSON schema for structured output
+  const allIntents = getAllIntents();
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: INTENT_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message }
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'intent_detection',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              intent: {
+                type: 'string',
+                enum: allIntents,
+                description: 'Detected intent from user message'
+              },
+              confidence: {
+                type: 'number',
+                description: 'Confidence score 0-1'
+              },
+              context_only_response: {
+                type: 'string',
+                description: 'Full response if no tools needed (greeting, brain_history). Empty string if tools are needed.'
+              },
+              needs_clarification: {
+                type: 'boolean',
+                description: 'True if clarification is needed before proceeding'
+              },
+              clarifying_question: {
+                type: 'string',
+                description: 'Question to ask user if needs_clarification is true. Empty string otherwise.'
+              }
+            },
+            required: ['intent', 'confidence', 'context_only_response', 'needs_clarification', 'clarifying_question'],
+            additionalProperties: false
+          }
+        }
+      },
+      temperature: 0.1,
+      max_completion_tokens: 2000
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content);
+
+    // Map intent to domain and agents
+    const domain = INTENT_DOMAIN_MAP[result.intent] || 'unknown';
+    const agents = domain === 'general' || domain === 'unknown' ? [] : [domain];
+
+    logger.info({
+      message: message.substring(0, 50),
+      intent: result.intent,
+      domain,
+      confidence: result.confidence,
+      hasContextOnlyResponse: !!result.context_only_response,
+      needsClarification: result.needs_clarification
+    }, 'Intent detected via LLM');
+
+    return {
+      intent: result.intent,
+      domain,
+      agents: agents.length > 0 ? agents : ['ads'], // Default to ads if unknown
+      confidence: result.confidence,
+      contextOnlyResponse: result.context_only_response || null,
+      needsClarification: result.needs_clarification,
+      clarifyingQuestion: result.clarifying_question || null
+    };
+
+  } catch (error) {
+    logger.error({ error: error.message }, 'Intent detection failed, falling back to ads');
+
+    // Fallback to ads domain
+    return {
+      intent: 'unknown',
+      domain: 'ads',
+      agents: ['ads'],
+      confidence: 0.1,
+      contextOnlyResponse: null,
+      needsClarification: false,
+      clarifyingQuestion: null
+    };
+  }
+}
 
 export class Orchestrator {
   constructor() {
@@ -174,16 +317,27 @@ export class Orchestrator {
         stack
       };
 
-      // 2. Classify the request
-      const classification = await classifyRequest(message, enrichedContext);
+      // 2. Detect intent using LLM
+      const classification = await detectIntentWithLLM(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
-        classification,
+        intent: classification.intent,
+        domain: classification.domain,
         usingSummary: summaryContext.used,
-        canRunAds: adAccountStatus?.can_run_ads,
-        integrations
+        canRunAds: adAccountStatus?.can_run_ads
       }, 'Request classified');
+
+      // 2.1 Handle context-only response from LLM (greeting, brain_history)
+      if (classification.contextOnlyResponse) {
+        return {
+          agent: 'Orchestrator',
+          content: classification.contextOnlyResponse,
+          executedActions: [],
+          classification,
+          duration: Date.now() - startTime
+        };
+      }
 
       // 3. Route to appropriate agent(s)
       let response;
@@ -324,17 +478,85 @@ export class Orchestrator {
         stackCapabilities: getStackCapabilities(stack)
       };
 
-      // 2. Classify request (now includes intent)
-      const classification = await classifyRequest(message, enrichedContext);
+      // 2. Detect intent using LLM with structured output (Single-LLM Architecture)
+      const classification = await detectIntentWithLLM(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
         domain: classification.domain,
         intent: classification.intent,
-        intentConfidence: classification.intentConfidence
-      }, 'Hybrid: Request classified');
+        confidence: classification.confidence,
+        hasContextOnlyResponse: !!classification.contextOnlyResponse
+      }, 'Hybrid: Intent detected via LLM');
 
-      // 3. Resolve policy based on intent
+      // 2.1 Handle context-only response from LLM (greeting, brain_history)
+      if (classification.contextOnlyResponse) {
+        const duration = Date.now() - startTime;
+
+        logger.info({
+          intent: classification.intent,
+          responseLength: classification.contextOnlyResponse.length
+        }, 'Hybrid: Returning context-only response from LLM');
+
+        return {
+          type: 'response',
+          agent: 'Orchestrator',
+          content: classification.contextOnlyResponse,
+          executedActions: [],
+          classification: {
+            domain: classification.domain,
+            agents: classification.agents,
+            intent: classification.intent
+          },
+          policy: {
+            playbookId: classification.intent,
+            intent: classification.intent,
+            contextOnly: true
+          },
+          duration
+        };
+      }
+
+      // 2.2 Handle LLM-driven clarifying questions
+      if (classification.needsClarification && classification.clarifyingQuestion) {
+        const newClarifyingState = {
+          required: true,
+          questions: [{ text: classification.clarifyingQuestion, field: 'llm_question' }],
+          answers: effectiveClarifyingState?.answers || {},
+          complete: false,
+          intent: classification.intent,
+          originalMessage: effectiveClarifyingState?.originalMessage || message
+        };
+
+        // Persist to DB for refresh/Telegram support
+        if (toolContext.conversationId) {
+          await unifiedStore.setClarifyingState(toolContext.conversationId, newClarifyingState);
+        }
+
+        logger.info({
+          intent: classification.intent,
+          question: classification.clarifyingQuestion.substring(0, 50)
+        }, 'Hybrid: LLM requested clarification');
+
+        return {
+          type: 'clarifying',
+          agent: 'Orchestrator',
+          content: classification.clarifyingQuestion,
+          clarifyingState: newClarifyingState,
+          classification: {
+            domain: classification.domain,
+            agents: classification.agents,
+            intent: classification.intent
+          },
+          policy: {
+            playbookId: classification.intent,
+            intent: classification.intent
+          },
+          duration: Date.now() - startTime
+        };
+      }
+
+      // 3. Resolve policy based on intent (JS lookup from POLICY_DEFINITIONS)
       const policy = policyEngine.resolvePolicy({
         intent: classification.intent,
         domains: classification.agents,
@@ -347,14 +569,10 @@ export class Orchestrator {
         intent: policy.intent,
         playbookId: policy.playbookId,
         allowedTools: policy.allowedTools?.length || 0,
-        clarifyingRequired: policy.clarifyingRequired,
         dangerousPolicy: policy.dangerousPolicy
       }, 'Hybrid: Policy resolved');
 
-      // Greeting теперь обрабатывается через LLM с adAccountStatus в контексте
-      // (удалён greeting_preflight блок)
-
-      // 4. Handle context-only responses (no tools needed)
+      // 4. Handle policy-based context-only responses (legacy fallback)
       if (policy.useContextOnly) {
         return this.handleContextOnlyResponse({
           message,
@@ -366,7 +584,8 @@ export class Orchestrator {
         });
       }
 
-      // 5. Clarifying Gate
+      // 5. Legacy Clarifying Gate (for policies with clarifyingRequired)
+      // Note: Most clarification is now handled by LLM in step 2.2
       const existingAnswers = effectiveClarifyingState?.answers || {};
       const clarifyResult = clarifyingGate.evaluate({
         message,
@@ -398,7 +617,7 @@ export class Orchestrator {
           pendingQuestions: clarifyResult.questions.length,
           answeredCount: Object.keys(clarifyResult.answers).length,
           persistedToDB: !!toolContext.conversationId
-        }, 'Hybrid: Clarifying questions needed');
+        }, 'Hybrid: Policy clarifying questions needed');
 
         return {
           type: 'clarifying',
@@ -721,35 +940,59 @@ export class Orchestrator {
         canRunAds: adAccountStatus?.can_run_ads
       };
 
-      // 5. Classify and detect intent with playbook
-      const classification = await classifyRequest(message, enrichedContext);
-      const intentResult = policyEngine.detectIntentWithPlaybook(message);
+      // 5. Detect intent using LLM
+      const classification = await detectIntentWithLLM(message, enrichedContext);
+
+      // Check for playbook based on intent
+      const playbook = policyEngine.getPlaybookForIntent(classification.intent);
+      const playbookId = playbook?.id || classification.intent;
 
       logger.info({
         message: message.substring(0, 50),
         domain: classification.domain,
-        intent: intentResult.intent,
-        playbookId: intentResult.playbookId,
+        intent: classification.intent,
+        playbookId,
         hasTierState: !!tierState
-      }, 'Tier-based: Request classified');
+      }, 'Tier-based: Request classified via LLM');
+
+      // 5.1 Handle context-only response from LLM (greeting, brain_history)
+      if (classification.contextOnlyResponse) {
+        return {
+          type: 'response',
+          agent: 'Orchestrator',
+          content: classification.contextOnlyResponse,
+          executedActions: [],
+          classification: {
+            domain: classification.domain,
+            agents: classification.agents,
+            intent: classification.intent
+          },
+          policy: {
+            playbookId: classification.intent,
+            intent: classification.intent,
+            contextOnly: true
+          },
+          duration: Date.now() - startTime
+        };
+      }
 
       // 6. Create or continue tier state
-      if (!tierState && intentResult.playbookId) {
-        tierState = tierManager.createInitialState(intentResult.playbookId);
+      if (!tierState && playbookId) {
+        tierState = tierManager.createInitialState(playbookId);
 
         if (toolContext.conversationId) {
           await unifiedStore.setTierState(toolContext.conversationId, tierState);
         }
 
         logger.info({
-          playbookId: intentResult.playbookId,
+          playbookId,
           initialTier: tierState.currentTier
         }, 'Tier-based: Created initial tier state');
       }
 
       // 7. Resolve policy based on current tier
       const currentTier = tierState?.currentTier || TIERS.SNAPSHOT;
-      const playbookId = tierState?.playbookId || intentResult.playbookId || intentResult.intent;
+      const effectivePlaybookId = tierState?.playbookId || playbookId;
 
       const policy = policyEngine.resolveTierPolicy({
         playbookId,
@@ -779,7 +1022,7 @@ export class Orchestrator {
       }
 
       // 9. Clarifying Gate with playbook questions
-      const playbook = playbookRegistry.getPlaybook(playbookId);
+      // playbook already defined from step 5 (policyEngine.getPlaybookForIntent)
       const playbookQuestions = playbook?.clarifyingQuestions || policy.clarifyingQuestions || [];
 
       const clarifyResult = clarifyingGate.evaluateWithPlaybook({
@@ -1284,25 +1527,43 @@ export class Orchestrator {
         stack
       };
 
-      // 2. Classify the request
-      const classification = await classifyRequest(message, enrichedContext);
+      // 2. Detect intent using LLM
+      const classification = await detectIntentWithLLM(message, enrichedContext);
 
       logger.info({
         message: message.substring(0, 50),
-        classification,
+        intent: classification.intent,
+        domain: classification.domain,
         usingSummary: summaryContext.used,
-        canRunAds: adAccountStatus?.can_run_ads,
-        integrations
+        canRunAds: adAccountStatus?.can_run_ads
       }, 'Request classified for streaming');
 
       yield {
         type: 'classification',
         domain: classification.domain,
-        agents: classification.agents
+        agents: classification.agents,
+        intent: classification.intent
       };
 
-      // Greeting теперь обрабатывается через LLM агента (с adAccountStatus в контексте)
-      // (удалён greeting_preflight блок)
+      // 2.1 Handle context-only response from LLM (greeting, brain_history)
+      if (classification.contextOnlyResponse) {
+        yield {
+          type: 'text',
+          content: classification.contextOnlyResponse,
+          accumulated: classification.contextOnlyResponse
+        };
+        yield {
+          type: 'done',
+          agent: 'Orchestrator',
+          content: classification.contextOnlyResponse,
+          executedActions: [],
+          toolCalls: [],
+          domain: classification.domain,
+          classification,
+          duration: Date.now() - startTime
+        };
+        return;
+      }
 
       // Yield thinking message based on domain
       const thinkingMessage = getThinkingMessage(classification.domain);
@@ -1311,7 +1572,7 @@ export class Orchestrator {
         message: thinkingMessage
       };
 
-      // 2. Route to appropriate agent (single agent for streaming)
+      // 3. Route to appropriate agent (single agent for streaming)
       // For multi-agent requests, we use the primary agent
       const primaryAgent = classification.agents[0];
       const agent = this.agents[primaryAgent];
@@ -1517,3 +1778,6 @@ function summarizeToolResult(toolName, result) {
 
 // Export singleton instance
 export const orchestrator = new Orchestrator();
+
+// Export intent detection for use in MCP paths
+export { detectIntentWithLLM, INTENT_DOMAIN_MAP };

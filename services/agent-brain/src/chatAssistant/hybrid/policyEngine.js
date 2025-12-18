@@ -13,255 +13,8 @@ import { logger } from '../../lib/logger.js';
 import { playbookRegistry, getPlaybookWithStackExtensions } from './playbookRegistry.js';
 
 /**
- * Intent patterns - паттерны для определения intent
- * Порядок важен: первый match выигрывает
- */
-const INTENT_PATTERNS = [
-  // === GREETING/NEUTRAL intents (проверяем первыми) ===
-  {
-    intent: 'greeting_neutral',
-    domain: 'general',
-    patterns: [
-      /^(?:привет|салам|здравствуй|хай|йо|hello|hi|хей|ку|здаров|приветик|хола)$/i,
-      /^(?:добр(?:ый|ое|ого)\s*(?:день|утр|вечер))!?$/i,
-      /^(?:как дела|что нового)\??$/i,
-      /^(?:\?|ой|ау|тут|здесь)$/i
-    ]
-  },
-
-  // === WRITE intents ===
-  {
-    intent: 'budget_change',
-    domain: 'ads',
-    patterns: [
-      /(?:измен|увелич|уменьш|поставь?|установ).*(?:бюджет|budget)/i,
-      /бюджет.*(?:\+|-|\d+)/i,
-      /(?:\+|-)\s*\d+\s*%?\s*(?:бюджет|к бюджету)/i
-    ]
-  },
-  {
-    intent: 'pause_entity',
-    domain: 'ads',
-    patterns: [
-      /(?:останов|пауз|стоп|выключ).*(?:кампани|направлени|адсет|campaign|direction|adset)/i,
-      /(?:кампани|направлени|адсет).*(?:на паузу|останов|стоп)/i
-    ]
-  },
-  {
-    intent: 'resume_entity',
-    domain: 'ads',
-    patterns: [
-      /(?:возобнов|включ|запуст|активир).*(?:кампани|направлени|адсет)/i,
-      /(?:кампани|направлени|адсет).*(?:возобнов|включ|запуст)/i
-    ]
-  },
-  {
-    intent: 'launch_creative',
-    domain: 'creative',
-    patterns: [
-      /(?:запуст|лонч|launch).*(?:креатив|видео|creative)/i,
-      /(?:креатив|видео).*(?:в направлени|запуст)/i
-    ]
-  },
-  {
-    intent: 'pause_creative',
-    domain: 'creative',
-    patterns: [
-      /(?:останов|пауз|стоп).*(?:креатив|видео|объявлени)/i,
-      /(?:креатив|видео|объявлени).*(?:на паузу|останов)/i
-    ]
-  },
-  {
-    intent: 'start_test',
-    domain: 'creative',
-    patterns: [
-      /(?:запуст|начн|старт).*(?:тест|a\/b|ab)/i,
-      /(?:тест|a\/b|ab).*(?:запуст|начн|старт)/i
-    ]
-  },
-  {
-    intent: 'update_lead_stage',
-    domain: 'crm',
-    patterns: [
-      /(?:перевед|измен|перемест).*(?:лид|этап|стадию)/i,
-      /(?:лид).*(?:на этап|в стадию|переве)/i
-    ]
-  },
-
-  // === READ intents ===
-  // Ads
-  {
-    intent: 'spend_report',
-    domain: 'ads',
-    patterns: [
-      /(?:расход|spend|потрат|сколько.*потрат)/i,
-      /(?:покажи|дай|выведи).*(?:расход|затрат)/i
-    ]
-  },
-  {
-    intent: 'directions_overview',
-    domain: 'ads',
-    patterns: [
-      /(?:направлени|direction)/i,
-      /(?:какие|активн|список).*направлени/i
-    ]
-  },
-  {
-    intent: 'campaigns_overview',
-    domain: 'ads',
-    patterns: [
-      /(?:кампани|campaign)/i,
-      /(?:какие|активн|список).*кампани/i
-    ]
-  },
-  {
-    intent: 'roi_analysis',
-    domain: 'ads',
-    patterns: [
-      /(?:roi|окупаемост|рентабельност)/i,
-      /(?:топ|лучш).*(?:по roi|по окупаемост)/i,
-      /(?:сколько.*заработал|сколько.*принес)/i
-    ]
-  },
-  {
-    intent: 'brain_history',
-    domain: 'ads',
-    patterns: [
-      /(?:brain|мозг|автопилот).*(?:делал|сделал|вчера)/i,
-      /(?:что.*делал|что.*сделал).*(?:brain|мозг|автопилот)/i
-    ]
-  },
-  {
-    intent: 'cpl_analysis',
-    domain: 'ads',
-    patterns: [
-      /(?:cpl|стоимость.*лид|цена.*лид)/i,
-      /(?:почему.*cpl|cpl.*выро|cpl.*упа)/i
-    ]
-  },
-  {
-    intent: 'diagnosis_leads',
-    domain: 'ads',
-    patterns: [
-      /(?:мало.*клиент|мало.*лид|нет.*лид|почему.*мало)/i,
-      /(?:где.*лид|куда.*делись.*лид)/i
-    ]
-  },
-
-  // Creative
-  {
-    intent: 'creative_list',
-    domain: 'creative',
-    patterns: [
-      /(?:креатив|creative)/i,
-      /(?:какие|покажи|список).*креатив/i
-    ]
-  },
-  {
-    intent: 'creative_top',
-    domain: 'creative',
-    patterns: [
-      /(?:топ|лучш|best).*(?:креатив|видео)/i,
-      /(?:креатив|видео).*(?:топ|лучш)/i
-    ]
-  },
-  {
-    intent: 'creative_worst',
-    domain: 'creative',
-    patterns: [
-      /(?:худш|плох|worst).*(?:креатив|видео)/i,
-      /(?:креатив|видео).*(?:худш|плох)/i
-    ]
-  },
-  {
-    intent: 'creative_burnout',
-    domain: 'creative',
-    patterns: [
-      /(?:выгора|burn|деградир).*(?:креатив|видео)/i,
-      /(?:креатив|видео).*(?:выгора|burn)/i
-    ]
-  },
-  {
-    intent: 'creative_compare',
-    domain: 'creative',
-    patterns: [
-      /(?:сравн|compare).*(?:креатив|видео)/i,
-      /(?:креатив|видео).*(?:vs|против|сравн)/i
-    ]
-  },
-  {
-    intent: 'creative_analysis',
-    domain: 'creative',
-    patterns: [
-      /(?:проанализ|анализ|разбор).*(?:креатив|видео)/i,
-      /(?:что.*с.*креатив|оцени.*креатив)/i
-    ]
-  },
-
-  // CRM
-  {
-    intent: 'leads_list',
-    domain: 'crm',
-    patterns: [
-      /(?:лид|lead)/i,
-      /(?:покажи|дай|список).*лид/i
-    ]
-  },
-  {
-    intent: 'funnel_stats',
-    domain: 'crm',
-    patterns: [
-      /(?:воронк|funnel|этап|конверси)/i,
-      /(?:где.*просадка|где.*теряем)/i
-    ]
-  },
-  {
-    intent: 'revenue_stats',
-    domain: 'crm',
-    patterns: [
-      /(?:выручк|revenue|сколько.*заработал|сколько.*продаж)/i,
-      /(?:средний.*чек|конверсия.*в.*покупку)/i
-    ]
-  },
-
-  // WhatsApp
-  {
-    intent: 'dialogs_list',
-    domain: 'whatsapp',
-    patterns: [
-      /(?:диалог|переписк|чат|whatsapp|ватсап)/i,
-      /(?:последни|покажи).*(?:диалог|переписк|сообщени)/i
-    ]
-  },
-  {
-    intent: 'dialog_analysis',
-    domain: 'whatsapp',
-    patterns: [
-      /(?:проанализ|разбор|анализ).*(?:диалог|переписк)/i,
-      /(?:что.*с.*диалог|оцени.*переписк)/i
-    ]
-  },
-  {
-    intent: 'dialog_search',
-    domain: 'whatsapp',
-    patterns: [
-      /(?:найди.*диалог|поиск.*диалог|где.*говорил)/i,
-      /(?:жаловал|возражал|интересовал)/i
-    ]
-  },
-
-  // Mixed / General
-  {
-    intent: 'general_question',
-    domain: 'general',
-    patterns: [
-      /(?:что.*такое|как.*работает|объясни|расскажи)/i
-    ]
-  }
-];
-
-/**
  * Policy definitions - маппинг intent → policy
+ * Intent detection is now handled by LLM in orchestrator/index.js
  */
 const POLICY_DEFINITIONS = {
   // === ADS WRITE ===
@@ -568,27 +321,10 @@ const POLICY_DEFINITIONS = {
 
 /**
  * PolicyEngine class
+ * Intent detection is now handled by LLM in orchestrator/index.js
+ * This class handles policy resolution based on detected intent
  */
 export class PolicyEngine {
-  /**
-   * Определить intent из сообщения
-   * @param {string} message - Сообщение пользователя
-   * @returns {{ intent: string, domain: string, confidence: number }}
-   */
-  detectIntent(message) {
-    const lower = message.toLowerCase();
-
-    for (const { intent, domain, patterns } of INTENT_PATTERNS) {
-      for (const pattern of patterns) {
-        if (pattern.test(lower)) {
-          return { intent, domain, confidence: 0.8 };
-        }
-      }
-    }
-
-    return { intent: 'unknown', domain: 'unknown', confidence: 0.1 };
-  }
-
   /**
    * Получить policy для intent
    * @param {Object} params
@@ -668,13 +404,6 @@ export class PolicyEngine {
    */
   getAllPolicies() {
     return POLICY_DEFINITIONS;
-  }
-
-  /**
-   * Получить все паттерны intent (для отладки)
-   */
-  getAllIntentPatterns() {
-    return INTENT_PATTERNS;
   }
 
   // ============================================================
@@ -790,22 +519,6 @@ export class PolicyEngine {
    */
   getPlaybooksForDomain(domain) {
     return playbookRegistry.getPlaybooksForDomain(domain);
-  }
-
-  /**
-   * Определить intent и получить playbook за один вызов
-   * @param {string} message - Сообщение пользователя
-   * @returns {{ intent: Object, playbook: Object|null }}
-   */
-  detectIntentWithPlaybook(message) {
-    const intent = this.detectIntent(message);
-    const playbook = playbookRegistry.getPlaybookByIntent(intent.intent);
-
-    return {
-      ...intent,
-      playbook,
-      playbookId: playbook?.id || null
-    };
   }
 }
 

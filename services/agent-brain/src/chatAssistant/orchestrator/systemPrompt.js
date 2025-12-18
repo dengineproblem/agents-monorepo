@@ -158,6 +158,158 @@ ${integrationsSection}
 }
 
 /**
+ * Build unified orchestrator prompt with intent classification
+ * Single LLM handles both classification and response generation
+ * @param {Object} context - Full business context
+ * @returns {string} System prompt with intent rules
+ */
+export function buildUnifiedOrchestratorPrompt(context = {}) {
+  const basePrompt = buildOrchestratorPrompt(context);
+
+  // Format brain actions if available
+  const brainActionsSection = context.brainActions?.length > 0
+    ? formatBrainActionsSection(context.brainActions)
+    : '';
+
+  const intentClassificationRules = `
+
+## Определение Intent
+
+На основе сообщения пользователя определи intent. Доступные intents:
+
+### GREETING (без tools - отвечай из контекста)
+- \`greeting_neutral\`: привет, салам, хай, хей, йо, как дела, добрый день, hello, hi, ку
+
+### ADS READ
+- \`spend_report\`: расходы, потратил, сколько денег, статистика за период, spend
+- \`directions_overview\`: направления, список направлений, какие направления
+- \`campaigns_overview\`: кампании, список кампаний, какие кампании
+- \`cpl_analysis\`: дорогой лид, высокий CPL, почему дорого, стоимость лида
+- \`roi_analysis\`: ROI, окупаемость, рентабельность, сколько заработали
+- \`brain_history\`: что делал brain, мозг, автопилот, история оптимизаций
+
+### ADS WRITE (требуют уточнений!)
+- \`pause_entity\`: останови, поставь на паузу, стоп, выключи кампанию/адсет/направление
+- \`budget_change\`: измени бюджет, увеличь/уменьши бюджет, поставь бюджет
+- \`resume_entity\`: возобнови, включи, запусти кампанию/адсет
+
+### CREATIVE READ
+- \`creative_list\`: креативы, список креативов
+- \`creative_top\`: топ креативов, лучшие креативы
+- \`creative_worst\`: худшие креативы, плохие креативы
+- \`creative_burnout\`: выгорание креатива, risk score, деградация
+- \`creative_analysis\`: проанализируй креатив, что с креативом
+
+### CREATIVE WRITE
+- \`launch_creative\`: запусти креатив, лонч креатива
+- \`pause_creative\`: останови креатив, паузнуть креатив
+- \`start_test\`: запусти тест, A/B тест креативов
+
+### CRM
+- \`leads_list\`: лиды, заявки, список лидов
+- \`funnel_stats\`: воронка, конверсия воронки, где просадка
+- \`lead_details\`: детали лида, информация о лиде
+- \`update_lead_stage\`: переведи лид на этап, измени стадию
+
+### WHATSAPP
+- \`dialogs_list\`: диалоги, переписки, чаты, whatsapp
+- \`dialog_analysis\`: проанализируй диалог, разбор переписки
+- \`dialog_search\`: найди диалог, поиск в переписках
+
+### GENERAL
+- \`general_question\`: что такое, как работает, объясни, расскажи
+- \`unknown\`: если не можешь определить intent
+
+## Правила по intent
+
+| Intent | Действие |
+|--------|----------|
+| greeting_neutral | Отвечай из контекста (adAccountStatus, integrations). НЕ вызывай tools! |
+| brain_history | Отвечай из brainActions контекста ниже. НЕ вызывай tools! |
+| creative_burnout | Отвечай из scoringDetails контекста если есть. НЕ вызывай tools! |
+| spend_report, cpl_analysis | Вызови tools для получения данных |
+| pause_*, budget_*, resume_* | Сначала уточни: какую сущность? какой бюджет? |
+| *_list, *_overview | Вызови соответствующие tools |
+
+## Context-only ответы
+
+Для этих intents НЕ вызывай tools, отвечай из контекста:
+- \`greeting_neutral\` → используй adAccountStatus и integrations
+- \`brain_history\` → используй brainActions ниже
+- \`creative_burnout\` → используй scoringDetails если есть
+
+${brainActionsSection}`;
+
+  return basePrompt + intentClassificationRules;
+}
+
+/**
+ * Format brain actions for context-only responses
+ * @param {Array} brainActions - Recent brain actions
+ * @returns {string} Formatted section
+ */
+function formatBrainActionsSection(brainActions) {
+  if (!brainActions || brainActions.length === 0) {
+    return '\n## Brain Actions\nНет недавних действий автопилота.';
+  }
+
+  const lines = brainActions.map(action => {
+    const date = action.date || 'N/A';
+    const actions = action.actions?.join(', ') || action.summary || 'N/A';
+    return `- ${date}: ${actions}`;
+  });
+
+  return `\n## Brain Actions (история автопилота)\n${lines.join('\n')}`;
+}
+
+/**
+ * Get list of all valid intents for structured output schema
+ * @returns {string[]} Array of intent names
+ */
+export function getAllIntents() {
+  return [
+    // Greeting
+    'greeting_neutral',
+    // ADS READ
+    'spend_report',
+    'directions_overview',
+    'campaigns_overview',
+    'cpl_analysis',
+    'roi_analysis',
+    'brain_history',
+    'diagnosis_leads',
+    // ADS WRITE
+    'pause_entity',
+    'budget_change',
+    'resume_entity',
+    // CREATIVE READ
+    'creative_list',
+    'creative_top',
+    'creative_worst',
+    'creative_burnout',
+    'creative_compare',
+    'creative_analysis',
+    // CREATIVE WRITE
+    'launch_creative',
+    'pause_creative',
+    'start_test',
+    // CRM
+    'leads_list',
+    'funnel_stats',
+    'revenue_stats',
+    'lead_details',
+    'update_lead_stage',
+    // WHATSAPP
+    'dialogs_list',
+    'dialog_analysis',
+    'dialog_search',
+    // GENERAL
+    'general_question',
+    'unknown'
+  ];
+}
+
+/**
  * Build synthesis prompt for combining multi-agent responses
  * @param {Array} agentResponses - Responses from multiple agents
  * @returns {string} Synthesis prompt

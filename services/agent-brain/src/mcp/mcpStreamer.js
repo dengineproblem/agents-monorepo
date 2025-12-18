@@ -17,7 +17,7 @@
  */
 
 import { createSession, MCP_CONFIG } from './index.js';
-import { classifyRequest } from '../chatAssistant/orchestrator/classifier.js';
+import { detectIntentWithLLM, INTENT_DOMAIN_MAP } from '../chatAssistant/orchestrator/index.js';
 import { getToolsByAgent } from './tools/definitions.js';
 import { formatMCPResponse } from './responseFormatter.js';
 import { logger } from '../lib/logger.js';
@@ -64,33 +64,44 @@ export async function* processChatViaMCPStream({
     // 1. Yield thinking event
     yield { type: 'thinking', message: 'Анализирую запрос...' };
 
-    // 2. Classify request
+    // 2. Detect intent using LLM (Single-LLM Architecture)
     let allowedTools = null;
     let allowedDomains = null;
 
     try {
-      classification = await classifyRequest(userPrompt, {
-        userAccountId: toolContext.userAccountId
-      });
+      // Build minimal context for intent detection
+      const minimalContext = {
+        integrations: toolContext.integrations || {}
+      };
+
+      classification = await detectIntentWithLLM(userPrompt, minimalContext);
 
       if (classification.domain !== 'mixed' && classification.domain !== 'unknown') {
         allowedDomains = [classification.domain];
         allowedTools = getAllowedToolsForDomains(allowedDomains);
-      } else if (classification.domain === 'mixed' && classification.agents) {
-        allowedDomains = classification.agents.map(a => a.replace('Agent', '').toLowerCase());
+      } else if (classification.agents && classification.agents.length > 1) {
+        allowedDomains = classification.agents.slice(0, 2);
         allowedTools = getAllowedToolsForDomains(allowedDomains);
       }
 
       // Yield classification event
       yield {
         type: 'classification',
+        intent: classification.intent,
         domain: classification.domain,
         confidence: classification.confidence,
         agents: classification.agents
       };
 
-    } catch (classifyError) {
-      logger.warn({ error: classifyError.message }, 'Classification failed in stream');
+      // Handle context-only responses (greeting, brain_history)
+      if (classification.contextOnlyResponse) {
+        yield { type: 'text', content: classification.contextOnlyResponse, accumulated: classification.contextOnlyResponse };
+        yield { type: 'done', content: classification.contextOnlyResponse, agent: 'MCP', domain: classification.domain };
+        return;
+      }
+
+    } catch (detectError) {
+      logger.warn({ error: detectError.message }, 'Intent detection failed in stream');
       yield { type: 'classification', domain: 'unknown', confidence: 0 };
     }
 

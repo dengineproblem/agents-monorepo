@@ -2,28 +2,40 @@
 
 AI-ассистент для управления Facebook рекламой через Telegram бота.
 
-## Архитектура
+## Архитектура (Single-LLM)
 
 ```
 User Request
      │
      ▼
-┌─────────────────┐
-│   Classifier    │  ← Определяет домен запроса через LLM (GPT-4o-mini)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Orchestrator   │  ← Маршрутизирует к агентам, синтезирует ответы
-└────────┬────────┘
-         │
-    ┌────┴────┬──────────┬──────────┐
-    ▼         ▼          ▼          ▼
-┌───────┐ ┌────────┐ ┌─────────┐ ┌──────┐
-│  Ads  │ │Creative│ │WhatsApp │ │ CRM  │
-│ Agent │ │ Agent  │ │  Agent  │ │Agent │
-└───────┘ └────────┘ └─────────┘ └──────┘
+┌─────────────────────────────────────────────┐
+│            Orchestrator                      │
+│  ┌─────────────────────────────────────┐    │
+│  │ detectIntentWithLLM (GPT-4o-mini)   │    │  ← Structured Output
+│  │ → intent, domain, confidence        │    │
+│  │ → contextOnlyResponse (greeting)    │    │
+│  │ → needsClarification                │    │
+│  └─────────────────┬───────────────────┘    │
+│                    │                         │
+│                    ▼                         │
+│  ┌─────────────────────────────────────┐    │
+│  │ policyEngine.resolvePolicy(intent)  │    │  ← JS Lookup
+│  │ → allowedTools, maxToolCalls        │    │
+│  └─────────────────┬───────────────────┘    │
+│                    │                         │
+│                    ▼                         │
+│        Route to Agent with filtered tools    │
+└────────────────────┬────────────────────────┘
+                     │
+    ┌────────────────┼────────────────┐
+    ▼                ▼                ▼
+┌───────┐      ┌────────┐       ┌──────┐
+│  Ads  │      │Creative│       │ CRM  │
+│ Agent │      │ Agent  │       │Agent │
+└───────┘      └────────┘       └──────┘
 ```
+
+**Single-LLM Architecture:** Один LLM-вызов для определения intent через OpenAI Structured Output. Затем JS lookup политики по intent и передача отфильтрованных tools агенту.
 
 ## Агенты
 
@@ -125,18 +137,53 @@ User Request
 
 **Путь:** `services/agent-brain/src/chatAssistant/orchestrator/`
 
-### Classifier (`classifier.js`)
-Определяет домен запроса через LLM (GPT-4o-mini).
+### Intent Detection (`detectIntentWithLLM`)
 
-**Домены:**
+**Файл:** `orchestrator/index.js`
+
+Определение intent через OpenAI Structured Output (GPT-4o-mini).
+
+**Возвращает:**
+```javascript
+{
+  intent: 'spend_report',        // Тип запроса
+  domain: 'ads',                 // Домен агента
+  agents: ['ads'],               // Список агентов для mixed
+  confidence: 0.95,              // Уверенность 0-1
+  contextOnlyResponse: null,     // Готовый ответ (для greeting)
+  needsClarification: false,     // Нужно уточнение
+  clarifyingQuestion: null       // Вопрос для уточнения
+}
+```
+
+**Домены (INTENT_DOMAIN_MAP):**
 - `ads` — кампании, адсеты, направления, бюджеты
 - `creative` — креативы, видео, retention, тесты
 - `whatsapp` — диалоги, сообщения
 - `crm` — лиды, воронка, квалификация
+- `general` — greeting, brain_history (context-only)
 - `mixed` — запрос требует нескольких агентов
 
+**Context-Only Responses:**
+Для `greeting_neutral` и `brain_history` LLM возвращает готовый ответ без вызова tools.
+
+### Policy Engine (`policyEngine.js`)
+
+**Файл:** `hybrid/policyEngine.js`
+
+JS lookup политики по intent:
+```javascript
+const policy = policyEngine.resolvePolicy({
+  intent: 'spend_report',
+  domains: ['ads'],
+  context,
+  integrations
+});
+// → { allowedTools: ['getSpendReport', 'getDirections'], maxToolCalls: 4, ... }
+```
+
 ### Orchestrator (`index.js`)
-- Маршрутизация к агентам
+- Маршрутизация к агентам на основе intent
 - Параллельное выполнение при `mixed`
 - Синтез ответов от нескольких агентов
 
@@ -230,8 +277,8 @@ User Request
    - `handlers.js` — обработчики
    - `prompt.js` — системный промпт
 3. Зарегистрировать в `orchestrator/index.js`
-4. Добавить домен в LLM classifier prompt (`orchestrator/classifier.js`)
-5. Обновить `getAvailableDomains()`
+4. Добавить intent-ы в `INTENT_DOMAIN_MAP` и `getAllIntents()` (`orchestrator/systemPrompt.js`)
+5. Добавить политики в `POLICY_DEFINITIONS` (`hybrid/policyEngine.js`)
 
 ---
 
@@ -1841,9 +1888,10 @@ http://localhost:3001/assistant
 3. Проверьте логи agent-brain
 
 ### Запросы направляются не тому агенту
-1. Проверьте логи классификатора (`orchestrator/classifier.js`)
-2. Добавьте ключевые слова в `classifier.js`
-3. Используйте более явные формулировки в запросе
+1. Проверьте логи intent detection (`orchestrator/index.js` → `detectIntentWithLLM`)
+2. Убедитесь что intent есть в `INTENT_DOMAIN_MAP` и `getAllIntents()`
+3. Проверьте политику в `POLICY_DEFINITIONS` для этого intent
+4. Используйте более явные формулировки в запросе
 
 ### Отключить многоагентную систему
 ```bash
@@ -2500,9 +2548,10 @@ AdsAgent теперь учитывает историю Brain:
 | `shared/memoryFormat.js` | **Обновлён** — `formatAdAccountStatus()` для greeting |
 | `agents/ads/prompt.js` | **Обновлён** → v2.0, интеграция Brain rules |
 | `contextGatherer.js` | **Обновлён** — `getRecentBrainActions()` |
-| `orchestrator/index.js` | **Обновлён** — `getCachedAdAccountStatus()`, убран `getBusinessSnapshot` |
-| `orchestrator/classifier.js` | **Обновлён** — убран `quickClassify()`, только LLM |
-| `orchestrator/systemPrompt.js` | **Обновлён** — `formatIntegrationsSection()`, правила greeting |
+| `orchestrator/index.js` | **Обновлён** — Single-LLM Architecture: `detectIntentWithLLM()`, `INTENT_DOMAIN_MAP` |
+| `orchestrator/classifier.js` | **Удалён** — заменён на `detectIntentWithLLM` в orchestrator |
+| `orchestrator/systemPrompt.js` | **Обновлён** — `buildUnifiedOrchestratorPrompt()`, `getAllIntents()` |
+| `hybrid/policyEngine.js` | **Упрощён** — убраны `INTENT_PATTERNS` и `detectIntent()`, оставлен только `resolvePolicy()` |
 
 ---
 
@@ -3107,32 +3156,30 @@ export const MCP_CONFIG = {
 
 ## Hybrid MCP Executor
 
-**Архитектура:** Orchestrator контролирует логику, MCP выполняет tools.
+**Архитектура:** Single-LLM — Orchestrator контролирует логику, MCP выполняет tools.
 
 ### Концепция
 
 ```
 User Message
      ↓
-┌─────────────────┐
-│   Classifier    │ → domain + intent
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│  PolicyEngine   │ → allowedTools, clarifying
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│ ClarifyingGate  │ → вопросы (если нужны)
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│   MCP Session   │ → tools filtered by policy
-└────────┬────────┘
-         ↓
-┌─────────────────┐
-│ResponseAssembler│ → sections, entity refs, ui_json
-└─────────────────┘
+┌──────────────────────────────────────────┐
+│        detectIntentWithLLM               │ → intent, domain (Structured Output)
+│        (GPT-4o-mini)                     │ → contextOnlyResponse (для greeting)
+└────────────────────┬─────────────────────┘
+                     ↓
+┌─────────────────────────────────────────┐
+│  policyEngine.resolvePolicy(intent)     │ → allowedTools, maxToolCalls
+│  (JS Lookup POLICY_DEFINITIONS)          │
+└────────────────────┬────────────────────┘
+                     ↓
+┌─────────────────────────────────────────┐
+│   MCP Session with filtered tools       │
+└────────────────────┬────────────────────┘
+                     ↓
+┌─────────────────────────────────────────┐
+│        ResponseAssembler                │ → sections, entity refs, ui_json
+└─────────────────────────────────────────┘
 ```
 
 ### Файлы модуля
@@ -3140,7 +3187,7 @@ User Message
 ```
 chatAssistant/hybrid/
 ├── index.js              # Экспорты + HYBRID_CONFIG
-├── policyEngine.js       # Intent detection + policy resolution
+├── policyEngine.js       # Policy resolution (только resolvePolicy, без detectIntent)
 ├── toolFilter.js         # Фильтрация tools для OpenAI
 ├── clarifyingGate.js     # Уточняющие вопросы
 └── responseAssembler.js  # Сборка финального ответа
@@ -4720,11 +4767,11 @@ chatAssistant/hybrid/
 
 ---
 
-## Hybrid MCP Executor
+## Hybrid MCP Executor (Single-LLM)
 
 **Путь:** `services/agent-brain/src/chatAssistant/hybrid/`
 
-Архитектура где **Orchestrator контролирует**, **MCP выполняет**. Orchestrator определяет какие tools разрешены, MCP только исполняет в рамках ограничений.
+Архитектура где **Orchestrator контролирует**, **MCP выполняет**. Single-LLM определяет intent через Structured Output, затем JS lookup политики.
 
 ### Архитектура
 
@@ -4732,29 +4779,26 @@ chatAssistant/hybrid/
 User Request
      │
      ▼
-┌─────────────────┐
-│   Classifier    │  ← Определяет intent + domain
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Policy Engine  │  ← Intent → allowedTools, maxToolCalls, playbookId
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Clarifying Gate │  ← Детерминированные уточняющие вопросы (period, metric)
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  MCP Executor   │  ← Выполнение tools в рамках policy
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ResponseAssembler│  ← Сборка ответа + nextSteps
-└─────────────────┘
+┌──────────────────────────────────────────┐
+│        detectIntentWithLLM               │  ← OpenAI Structured Output (GPT-4o-mini)
+│        (orchestrator/index.js)           │  → intent, domain, contextOnlyResponse
+└────────────────────┬─────────────────────┘
+                     │
+                     ▼
+┌──────────────────────────────────────────┐
+│  policyEngine.resolvePolicy(intent)      │  ← JS Lookup POLICY_DEFINITIONS
+│  (hybrid/policyEngine.js)                │  → allowedTools, maxToolCalls, playbookId
+└────────────────────┬─────────────────────┘
+                     │
+                     ▼
+┌──────────────────────────────────────────┐
+│        MCP Executor                      │  ← Выполнение tools в рамках policy
+└────────────────────┬─────────────────────┘
+                     │
+                     ▼
+┌──────────────────────────────────────────┐
+│        ResponseAssembler                 │  ← Сборка ответа + nextSteps
+└──────────────────────────────────────────┘
 ```
 
 ### Ключевые компоненты
@@ -4913,11 +4957,11 @@ npm test -- -t "Hybrid"
 
 ```
 1. User: "покажи расходы"
-2. Classifier: domain=ads, intent=spend_report
-3. PolicyEngine: allowedTools=[getSpendReport, getDirections], clarifyingRequired=true
-4. ClarifyingGate: hasPeriodInMessage("покажи расходы") = false → asks for period
-5. User: "за 7 дней"
-6. ClarifyingGate: hasPeriodInMessage("за 7 дней") = true → complete
+2. detectIntentWithLLM: intent=spend_report, domain=ads, needsClarification=true
+3. LLM возвращает clarifyingQuestion: "За какой период показать расходы?"
+4. User: "за 7 дней"
+5. detectIntentWithLLM: intent=spend_report, domain=ads, needsClarification=false
+6. policyEngine.resolvePolicy: allowedTools=[getSpendReport, getDirections]
 7. MCP Executor: calls getSpendReport({ period: '7d' })
 8. ResponseAssembler: formats response + nextSteps
 9. runsStore: recordHybridMetadata({ playbookId, toolCallsUsed, ... })
