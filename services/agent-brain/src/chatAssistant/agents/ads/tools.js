@@ -1,6 +1,6 @@
 /**
  * AdsAgent Tools - Facebook/Instagram Advertising
- * 19 tools: 11 READ + 8 WRITE
+ * 21 tools: 13 READ + 8 WRITE
  */
 
 export const ADS_TOOLS = [
@@ -104,8 +104,8 @@ export const ADS_TOOLS = [
     }
   },
   {
-    name: 'getDirectionDetails',
-    description: 'Получить детальную информацию о направлении включая привязанные адсеты и креативы',
+    name: 'getDirectionCreatives',
+    description: 'Получить список креативов направления с их статусами и метриками',
     parameters: {
       type: 'object',
       properties: {
@@ -226,7 +226,7 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getLeadsEngagementRate',
-    description: 'Получить показатель вовлечённости лидов (2+ сообщения). Используй для оценки качества трафика.',
+    description: 'Получить показатель вовлечённости лидов (2+ сообщения в WhatsApp). Высокий engagement = качественные лиды. Используй для оценки качества трафика из WhatsApp.',
     parameters: {
       type: 'object',
       properties: {
@@ -243,64 +243,69 @@ export const ADS_TOOLS = [
       required: ['period']
     }
   },
+
+  // ============================================================
+  // BRAIN AGENT TOOLS
+  // ============================================================
   {
-    name: 'competitorAnalysis',
-    description: 'Анализ конкурентных объявлений из Facebook Ad Library. Показывает топ-креативы конкурентов и рекомендации.',
+    name: 'getAgentBrainActions',
+    description: 'Получить историю действий Brain Agent: изменения бюджетов, паузы адсетов, запуски креативов. Используй для анализа автоматической оптимизации.',
+    parameters: {
+      type: 'object',
+      properties: {
+        period: {
+          type: 'string',
+          enum: ['last_1d', 'last_3d', 'last_7d'],
+          description: 'Предустановленный период (если не указаны date_from/date_to)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода в формате YYYY-MM-DD'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода в формате YYYY-MM-DD'
+        },
+        limit: {
+          type: 'number',
+          description: 'Максимум действий для возврата (по умолчанию 20)'
+        },
+        action_type: {
+          type: 'string',
+          enum: ['all', 'budget_change', 'pause', 'resume', 'launch'],
+          description: 'Фильтр по типу действия'
+        }
+      }
+    }
+  },
+  {
+    name: 'triggerBrainOptimizationRun',
+    description: '⚠️ DANGEROUS: Запустить принудительный цикл Brain Agent оптимизации ПРЯМО СЕЙЧАС. Агент может изменить бюджеты, остановить или запустить адсеты.',
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления для контекста'
+          description: 'UUID направления для оптимизации (опционально — если не указано, оптимизирует весь аккаунт)'
         },
-        keywords: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Ключевые слова для поиска конкурентов'
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет сделано без выполнения'
+        },
+        reason: {
+          type: 'string',
+          description: 'Причина запуска (для логирования)'
         }
-      },
-      required: ['direction_id']
+      }
     }
   },
 
   // ============================================================
-  // WRITE TOOLS - Campaigns & AdSets
+  // WRITE TOOLS - AdSets & Ads
   // ============================================================
   {
-    name: 'pauseCampaign',
-    description: 'Поставить кампанию на паузу',
-    parameters: {
-      type: 'object',
-      properties: {
-        campaign_id: {
-          type: 'string',
-          description: 'ID кампании для паузы'
-        },
-        reason: {
-          type: 'string',
-          description: 'Причина паузы (для логирования)'
-        }
-      },
-      required: ['campaign_id']
-    }
-  },
-  {
-    name: 'resumeCampaign',
-    description: 'Возобновить приостановленную кампанию',
-    parameters: {
-      type: 'object',
-      properties: {
-        campaign_id: {
-          type: 'string',
-          description: 'ID кампании для возобновления'
-        }
-      },
-      required: ['campaign_id']
-    }
-  },
-  {
     name: 'pauseAdSet',
-    description: 'Поставить адсет на паузу',
+    description: '⚠️ DANGEROUS: Поставить адсет на паузу',
     parameters: {
       type: 'object',
       properties: {
@@ -311,6 +316,10 @@ export const ADS_TOOLS = [
         reason: {
           type: 'string',
           description: 'Причина паузы'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет изменено без выполнения'
         }
       },
       required: ['adset_id']
@@ -331,8 +340,44 @@ export const ADS_TOOLS = [
     }
   },
   {
+    name: 'pauseAd',
+    description: '⚠️ DANGEROUS: Поставить конкретное объявление на паузу',
+    parameters: {
+      type: 'object',
+      properties: {
+        ad_id: {
+          type: 'string',
+          description: 'ID объявления в Facebook'
+        },
+        reason: {
+          type: 'string',
+          description: 'Причина паузы'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет изменено без выполнения'
+        }
+      },
+      required: ['ad_id']
+    }
+  },
+  {
+    name: 'resumeAd',
+    description: 'Возобновить приостановленное объявление',
+    parameters: {
+      type: 'object',
+      properties: {
+        ad_id: {
+          type: 'string',
+          description: 'ID объявления для возобновления'
+        }
+      },
+      required: ['ad_id']
+    }
+  },
+  {
     name: 'updateBudget',
-    description: 'Изменить дневной бюджет адсета. ВНИМАНИЕ: изменение бюджета > 50% требует подтверждения.',
+    description: '⚠️ DANGEROUS: Изменить дневной бюджет адсета. Изменение бюджета > 50% требует подтверждения.',
     parameters: {
       type: 'object',
       properties: {
@@ -343,6 +388,10 @@ export const ADS_TOOLS = [
         new_budget_cents: {
           type: 'number',
           description: 'Новый дневной бюджет в центах (минимум 500, т.е. $5)'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет изменено без выполнения'
         }
       },
       required: ['adset_id', 'new_budget_cents']
@@ -350,11 +399,11 @@ export const ADS_TOOLS = [
   },
 
   // ============================================================
-  // WRITE TOOLS - Directions
+  // WRITE TOOLS - Directions (1 направление = 1 FB кампания)
   // ============================================================
   {
     name: 'updateDirectionBudget',
-    description: 'Изменить суточный бюджет направления. Обновит budget_per_day в настройках направления.',
+    description: '⚠️ DANGEROUS: Изменить суточный бюджет направления.',
     parameters: {
       type: 'object',
       properties: {
@@ -365,6 +414,10 @@ export const ADS_TOOLS = [
         new_budget: {
           type: 'number',
           description: 'Новый суточный бюджет в долларах (например: 50)'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет изменено без выполнения'
         }
       },
       required: ['direction_id', 'new_budget']
@@ -390,7 +443,7 @@ export const ADS_TOOLS = [
   },
   {
     name: 'pauseDirection',
-    description: 'Поставить направление на паузу. Все связанные адсеты будут приостановлены.',
+    description: '⚠️ DANGEROUS: Поставить направление на паузу. Паузит привязанную FB кампанию и все адсеты.',
     parameters: {
       type: 'object',
       properties: {
@@ -401,24 +454,82 @@ export const ADS_TOOLS = [
         reason: {
           type: 'string',
           description: 'Причина паузы (для логирования)'
+        },
+        dry_run: {
+          type: 'boolean',
+          description: 'Preview mode — показать что будет изменено без выполнения'
         }
       },
       required: ['direction_id']
+    }
+  },
+  {
+    name: 'resumeDirection',
+    description: 'Возобновить направление. Включает привязанную FB кампанию.',
+    parameters: {
+      type: 'object',
+      properties: {
+        direction_id: {
+          type: 'string',
+          description: 'UUID направления'
+        }
+      },
+      required: ['direction_id']
+    }
+  },
+
+  // ============================================================
+  // CUSTOM FB API QUERY (LLM-powered)
+  // ============================================================
+  {
+    name: 'customFbQuery',
+    description: 'Выполнить кастомный запрос к Facebook API для нестандартных метрик. LLM строит API запрос, отправляет в FB, при ошибке пробует исправить до 3 раз.',
+    parameters: {
+      type: 'object',
+      properties: {
+        user_request: {
+          type: 'string',
+          description: 'Описание того, что хочет узнать пользователь (на естественном языке)'
+        },
+        entity_type: {
+          type: 'string',
+          enum: ['account', 'campaign', 'adset', 'ad'],
+          description: 'Уровень сущности для запроса (по умолчанию account)'
+        },
+        entity_id: {
+          type: 'string',
+          description: 'ID сущности (campaign_id, adset_id, ad_id). Если не указан — используется ad_account'
+        },
+        period: {
+          type: 'string',
+          description: 'Период для метрик (today, yesterday, last_7d, last_30d или конкретная дата)'
+        }
+      },
+      required: ['user_request']
     }
   }
 ];
 
 // Write tools that require confirmation in 'plan' mode
 export const ADS_WRITE_TOOLS = [
-  'pauseCampaign',
-  'resumeCampaign',
   'pauseAdSet',
   'resumeAdSet',
+  'pauseAd',
+  'resumeAd',
   'updateBudget',
   'updateDirectionBudget',
   'updateDirectionTargetCPL',
-  'pauseDirection'
+  'pauseDirection',
+  'resumeDirection',
+  'triggerBrainOptimizationRun'
 ];
 
 // Dangerous tools that ALWAYS require confirmation
-export const ADS_DANGEROUS_TOOLS = ['updateBudget', 'pauseDirection'];
+export const ADS_DANGEROUS_TOOLS = [
+  'updateBudget',
+  'updateDirectionBudget',
+  'pauseDirection',
+  'pauseAdSet',
+  'pauseAd',
+  'triggerBrainOptimizationRun'
+];

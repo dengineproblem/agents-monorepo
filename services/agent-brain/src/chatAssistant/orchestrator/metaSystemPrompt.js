@@ -29,45 +29,51 @@ export function buildMetaSystemPrompt(context = {}) {
   const integrationsSection = formatIntegrations(context.integrations);
   const userContextSection = formatUserContext(context);
 
+  const directionsSection = formatDirections(context.directions);
+
   return `# AI-ассистент для управления бизнесом
 
 ## Текущая дата
 ${currentDate}
 
 ## Твоя роль
-Ты умный помощник для управления рекламой, лидами и коммуникациями в Facebook/Instagram.
+Ты оркестратор — координируешь специализированных агентов (ads, creative, crm, whatsapp).
+Агенты получают данные и отдают тебе готовые ответы. Ты формализируешь и объединяешь.
 
 ## Как работать с tools
 
-У тебя есть 3 meta-tools для lazy-loading:
+У тебя есть 4 meta-tools:
 
 1. **getAvailableDomains()** — получить список доступных доменов
-   - Вызови первым чтобы понять какие возможности есть
    - Домены: ads (реклама), creative (креативы), crm (лиды), whatsapp (диалоги)
 
 2. **getDomainTools(domain)** — получить tools конкретного домена
-   - Загружает только нужные tools
-   - Показывает параметры и описания
    - DANGEROUS tools помечены ⚠️
 
-3. **executeTool(tool_name, arguments)** — выполнить tool
-   - Передай имя tool и аргументы
-   - Получишь результат или ошибку
+3. **executeTools(tools, user_question)** — ОСНОВНОЙ ИНСТРУМЕНТ
+   - Передай массив tools и вопрос пользователя
+   - Агент домена получит данные + контекст (направления, бюджеты)
+   - Агент вернёт готовый ответ на вопрос
+   - Если несколько доменов — объедини ответы агентов
+
+4. **executeTool(tool_name, arguments)** — [deprecated] для прямого вызова
 
 ### Алгоритм работы:
 
 1. Проанализируй запрос пользователя
 2. Определи нужные домены (может быть несколько!)
 3. Загрузи tools нужных доменов через getDomainTools()
-4. Выполни нужные tools через executeTool()
-5. Сформируй финальный ответ на основе результатов
+4. Вызови **executeTools** с нужными tools и вопросом пользователя
+5. Агенты вернут готовые ответы — объедини их в финальный ответ
 
 ### Важные правила:
 
-- ⚠️ **DANGEROUS tools** требуют подтверждения — ОБЯЗАТЕЛЬНО спроси пользователя перед выполнением!
-- Можешь загружать tools нескольких доменов если запрос комплексный
-- Если один домен недоступен — используй доступные
-- При ошибке tool — сообщи пользователю и предложи альтернативу
+- ⚠️ **DANGEROUS tools** — ОБЯЗАТЕЛЬНО спроси подтверждение перед выполнением!
+- Агенты возвращают готовые ответы — тебе нужно только формализовать
+- При нескольких доменах — объедини ответы логично
+- При ошибке — сообщи пользователю и предложи альтернативу
+
+${directionsSection}
 
 ${adAccountSection}
 
@@ -157,6 +163,38 @@ function formatUserContext(context) {
   }
 
   return `## Контекст пользователя\n${lines.join('\n')}`;
+}
+
+/**
+ * Format directions section
+ * Critical for ads/creative domain agents
+ */
+function formatDirections(directions) {
+  if (!directions || directions.length === 0) {
+    return '';
+  }
+
+  const lines = [
+    '## Направления (рекламные вертикали)',
+    '',
+    '**Важно:** 1 направление = 1 FB кампания. Когда пользователь спрашивает про направление — используй его fb_campaign_id для запросов.',
+    ''
+  ];
+
+  for (const dir of directions) {
+    const status = dir.is_active ? '✅' : '⏸️';
+    const budget = dir.daily_budget_cents ? `$${(dir.daily_budget_cents / 100).toFixed(0)}/день` : 'не задан';
+    const cpl = dir.target_cpl_cents ? `$${(dir.target_cpl_cents / 100).toFixed(2)}` : 'не задан';
+
+    lines.push(`${status} **${dir.name}**`);
+    lines.push(`   - ID: \`${dir.id}\``);
+    lines.push(`   - FB Campaign: \`${dir.fb_campaign_id || 'не привязана'}\``);
+    lines.push(`   - Бюджет: ${budget}`);
+    lines.push(`   - Целевой CPL: ${cpl}`);
+    lines.push('');
+  }
+
+  return lines.join('\n');
 }
 
 export default buildMetaSystemPrompt;

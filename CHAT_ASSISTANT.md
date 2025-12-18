@@ -42,7 +42,7 @@ User Request
 └─────────────────────────────────────────────┘
 ```
 
-**Meta-Tools Architecture:** Один мощный LLM (GPT-5.2 Thinking) с lazy-loading tools через 3 meta-tools. Модель сама решает какие домены загружать.
+**Meta-Tools Architecture:** Один мощный LLM (GPT-5.2 Thinking) с lazy-loading tools через 4 meta-tools. Модель сама решает какие домены загружать.
 
 ### Meta-Tools
 
@@ -50,17 +50,21 @@ User Request
 |------|----------|
 | `getAvailableDomains()` | Список доступных доменов (ads, creative, crm, whatsapp) |
 | `getDomainTools(domain)` | Загрузить tools конкретного домена |
-| `executeTool(name, args)` | Выполнить tool по имени |
+| `executeTool(name, args)` | Выполнить tool по имени (raw data) |
+| `executeTools(tools[])` | Batch execute tools → domain agent обрабатывает → ответ пользователю |
 
 ### Файлы Meta-Tools
 
 | Файл | Описание |
 |------|----------|
-| `metaTools/definitions.js` | 3 meta-tools definitions |
+| `metaTools/definitions.js` | 4 meta-tools definitions (executeTools для domain routing) |
 | `metaTools/formatters.js` | Загрузка и форматирование domain tools |
 | `metaTools/executor.js` | Выполнение tools с валидацией |
+| `metaTools/domainRouter.js` | Роутинг tool calls к domain agents |
+| `metaTools/domainAgents.js` | Domain agents для обработки raw data → ответ |
+| `metaTools/contextGatherer.js` | Сбор контекста пользователя (directions, ad account) |
 | `orchestrator/metaOrchestrator.js` | Tool loop orchestrator |
-| `orchestrator/metaSystemPrompt.js` | System prompt для meta mode |
+| `orchestrator/metaSystemPrompt.js` | System prompt для meta mode (с directions контекстом) |
 | `chatAssistant/config.js` | Feature flags |
 
 ### Конфигурация Meta-Tools
@@ -117,7 +121,7 @@ User Request
 ### AdsAgent — Реклама и Направления
 **Путь:** `services/agent-brain/src/chatAssistant/agents/ads/`
 
-**23 инструмента:**
+**21 инструмент (13 READ + 8 WRITE):**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
@@ -126,24 +130,25 @@ User Request
 | `getAdSets` | READ | Адсеты кампании с метриками |
 | `getSpendReport` | READ | Отчёт по расходам (группировка по дням/кампаниям) |
 | `getDirections` | READ | Направления с агрегированными метриками |
-| `getDirectionDetails` | READ | Детали направления + креативы + FB адсет |
+| `getDirectionCreatives` | READ | Креативы направления со статусами и метриками |
 | `getDirectionMetrics` | READ | Метрики направления по дням |
-| `getROIReport` | READ | Отчёт по ROI креативов (расходы, выручка, ROI%, лиды, конверсии) |
-| `getROIComparison` | READ | Сравнение ROI между креативами или направлениями |
-| `getAgentBrainActions` | READ | История действий Brain Agent за период |
-| `getAdAccountStatus` | READ | Pre-check статуса аккаунта (ACTIVE/PAUSED/DISABLED) |
+| `getAdAccountStatus` | READ | Pre-check статуса аккаунта |
 | `getDirectionInsights` | READ | Метрики направления с compare периодов (delta %) |
 | `getLeadsEngagementRate` | READ | Вовлечённость лидов (% с 2+ сообщениями) |
-| `competitorAnalysis` | READ | Анализ конкурентов (Ad Library) с graceful fallback |
-| `pauseCampaign` | WRITE | Пауза кампании |
-| `resumeCampaign` | WRITE | Возобновление кампании |
+| `getROIReport` | READ | Отчёт по ROI креативов |
+| `getROIComparison` | READ | Сравнение ROI между креативами или направлениями |
+| `getAgentBrainActions` | READ | История действий Brain Agent за период |
 | `pauseAdSet` | WRITE | Пауза адсета |
 | `resumeAdSet` | WRITE | Возобновление адсета |
-| `updateBudget` | WRITE | Изменение бюджета адсета |
-| `updateDirectionBudget` | WRITE | Изменение бюджета направления |
+| `pauseAd` | WRITE | Пауза объявления (dangerous) |
+| `resumeAd` | WRITE | Возобновление объявления |
+| `updateBudget` | WRITE | Изменение бюджета адсета (dangerous) |
+| `pauseDirection` | WRITE | Пауза направления (паузит FB кампанию + все адсеты, dangerous) |
+| `resumeDirection` | WRITE | Возобновление направления |
+| `updateDirectionBudget` | WRITE | Изменение бюджета направления (dangerous) |
 | `updateDirectionTargetCPL` | WRITE | Изменение целевого CPL |
-| `pauseDirection` | WRITE | Пауза направления + FB адсет |
 | `triggerBrainOptimizationRun` | WRITE | Запуск Brain Agent оптимизации (dangerous) |
+| `customFbQuery` | READ | LLM-powered кастомный запрос к FB API (3 retry на ошибку) |
 
 **Файлы:**
 - `index.js` — класс AdsAgent

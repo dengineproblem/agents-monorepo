@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { formatToolsForLLM, loadDomainTools, getDomainDescription } from './formatters.js';
 import { executeToolByName } from './executor.js';
+import { routeToolCallsToDomains } from './domainRouter.js';
 
 /**
  * Domain configurations
@@ -82,16 +83,69 @@ export const META_TOOLS = {
   },
 
   /**
-   * Execute a tool by name
+   * Execute tools and get processed response from domain agent
+   *
+   * Domain agent receives:
+   * - Raw data from tools
+   * - User context (directions, target CPL, etc.)
+   * - User question
+   *
+   * Domain agent returns ready answer, orchestrator may formalize/combine if multiple domains.
+   */
+  executeTools: {
+    name: 'executeTools',
+    description: `Выполнить tools и получить готовый ответ от специализированного агента.
+
+Агент получает:
+- Результаты tools
+- Контекст (направления, бюджеты, целевой CPL)
+- Вопрос пользователя
+
+Агент возвращает готовый ответ. Если несколько доменов — ты объединяешь ответы.
+
+DANGEROUS tools требуют подтверждения — сначала спроси пользователя!`,
+    schema: z.object({
+      tools: z.array(z.object({
+        name: z.string().describe('Имя tool (например: getSpendReport)'),
+        args: z.record(z.unknown()).describe('Аргументы tool')
+      })).describe('Массив tools для выполнения. Можно несколько из одного или разных доменов.'),
+      user_question: z.string().describe('Вопрос пользователя для контекста агента')
+    }),
+    handler: async ({ tools, user_question }, context) => {
+      // Route through domain agents
+      const results = await routeToolCallsToDomains(tools, context, user_question);
+
+      // Format response for orchestrator
+      const domainResponses = {};
+      for (const [domain, result] of Object.entries(results)) {
+        if (result.success) {
+          domainResponses[domain] = result.response;
+        } else {
+          domainResponses[domain] = `Ошибка: ${result.error}`;
+        }
+      }
+
+      return {
+        success: true,
+        responses: domainResponses,
+        domains_called: Object.keys(results),
+        hint: 'Объедини ответы агентов в единый ответ пользователю'
+      };
+    }
+  },
+
+  /**
+   * Execute single tool directly (for simple cases)
+   * @deprecated Use executeTools for better responses
    */
   executeTool: {
     name: 'executeTool',
-    description: 'Выполнить tool по имени с аргументами. Возвращает результат или ошибку. DANGEROUS tools требуют подтверждения — сначала спроси пользователя!',
+    description: '[DEPRECATED - используй executeTools] Выполнить один tool напрямую. Возвращает сырые данные.',
     schema: z.object({
       tool_name: z.string()
-        .describe('Имя tool для выполнения (например: getSpendReport, getCampaigns)'),
+        .describe('Имя tool для выполнения'),
       arguments: z.record(z.unknown())
-        .describe('Аргументы для tool в формате { key: value }')
+        .describe('Аргументы для tool')
     }),
     handler: async ({ tool_name, arguments: args }, context) => {
       return executeToolByName(tool_name, args, context);

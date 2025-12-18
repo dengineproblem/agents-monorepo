@@ -31,18 +31,26 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
       chatHistory,
       businessProfile,
       todayMetrics,
-      activeContexts
+      activeContexts,
+      directions
     ] = await Promise.allSettled([
       getChatHistory(conversationId),
       getBusinessProfile(userAccountId, adAccountId),
       getTodayMetrics(userAccountId, adAccountId),
-      getActiveContexts(userAccountId, adAccountId)
+      getActiveContexts(userAccountId, adAccountId),
+      getDirections(userAccountId, adAccountId)
     ]);
 
     // Add blocks with priorities (higher = more important, kept first)
     // Priority 10: Chat history — most important for continuity
     if (chatHistory.status === 'fulfilled' && chatHistory.value) {
       tokenBudget.addBlock('recentMessages', chatHistory.value, 10);
+    }
+
+    // Priority 9: Directions — critical for ads/creative context
+    // LLM needs to know direction IDs, names, budgets, target CPL
+    if (directions.status === 'fulfilled' && directions.value?.length > 0) {
+      tokenBudget.addBlock('directions', directions.value, 9);
     }
 
     // Priority 8: Today's metrics — current state
@@ -487,6 +495,52 @@ async function getCreativesSnapshot(userAccountId, adAccountId) {
 async function getNotesSnapshot(userAccountId, adAccountId) {
   const { memoryStore } = await import('./stores/memoryStore.js');
   return memoryStore.getNotesDigest(userAccountId, adAccountId, ['ads', 'creative'], 3);
+}
+
+/**
+ * Get directions (advertising verticals) for context
+ * Returns list of directions with their settings (budget, target CPL, campaign ID)
+ * Critical for ads/creative domain agents
+ */
+async function getDirections(userAccountId, adAccountId) {
+  let query = supabase
+    .from('account_directions')
+    .select(`
+      id,
+      name,
+      is_active,
+      daily_budget_cents,
+      target_cpl_cents,
+      fb_campaign_id,
+      objective,
+      created_at
+    `)
+    .eq('user_account_id', userAccountId)
+    .order('is_active', { ascending: false })
+    .order('name', { ascending: true });
+
+  // Filter by ad account for multi-account support
+  if (adAccountId) {
+    query = query.eq('account_id', adAccountId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    logger.warn({ error: error.message }, 'Failed to get directions');
+    return [];
+  }
+
+  // Format for context - include all relevant fields for domain agents
+  return (data || []).map(d => ({
+    id: d.id,
+    name: d.name,
+    is_active: d.is_active,
+    daily_budget_cents: d.daily_budget_cents,
+    target_cpl_cents: d.target_cpl_cents,
+    fb_campaign_id: d.fb_campaign_id,
+    objective: d.objective
+  }));
 }
 
 /**

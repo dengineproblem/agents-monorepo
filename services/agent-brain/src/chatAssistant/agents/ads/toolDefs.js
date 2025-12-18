@@ -83,8 +83,8 @@ export const AdsToolDefs = {
     meta: { timeout: 20000, retryable: true }
   },
 
-  getDirectionDetails: {
-    description: 'Получить детальную информацию о направлении включая привязанные адсеты и креативы',
+  getDirectionCreatives: {
+    description: 'Получить список креативов направления с их статусами и метриками',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления из таблицы directions')
     }),
@@ -121,7 +121,7 @@ export const AdsToolDefs = {
   },
 
   getLeadsEngagementRate: {
-    description: 'Получить показатель вовлечённости лидов (2+ сообщения). Используй для оценки качества трафика.',
+    description: 'Получить показатель вовлечённости лидов (2+ сообщения в WhatsApp). Высокий engagement = качественные лиды. Используй для оценки качества трафика из WhatsApp.',
     schema: z.object({
       direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
       period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']).default('last_7d').describe('Период для анализа')
@@ -129,38 +129,9 @@ export const AdsToolDefs = {
     meta: { timeout: 20000, retryable: true }
   },
 
-  competitorAnalysis: {
-    description: 'Анализ конкурентных объявлений из Facebook Ad Library. Показывает топ-креативы конкурентов и рекомендации.',
-    schema: z.object({
-      direction_id: uuidSchema.describe('UUID направления для контекста'),
-      keywords: z.array(z.string()).optional().describe('Ключевые слова для поиска конкурентов')
-    }),
-    meta: { timeout: 30000, retryable: true }
-  },
-
   // ============================================================
-  // WRITE TOOLS - Campaigns & AdSets
+  // WRITE TOOLS - AdSets & Ads
   // ============================================================
-
-  pauseCampaign: {
-    description: 'Поставить кампанию на паузу. Используй dry_run: true для preview.',
-    schema: z.object({
-      campaign_id: nonEmptyString('campaign_id').describe('ID кампании для паузы'),
-      reason: z.string().optional().describe('Причина паузы (для логирования)'),
-      dry_run: dryRunOption,
-      operation_id: operationIdOption
-    }),
-    meta: { timeout: 15000, retryable: false, dangerous: true }
-  },
-
-  resumeCampaign: {
-    description: 'Возобновить приостановленную кампанию',
-    schema: z.object({
-      campaign_id: nonEmptyString('campaign_id').describe('ID кампании для возобновления'),
-      operation_id: operationIdOption
-    }),
-    meta: { timeout: 15000, retryable: false }
-  },
 
   pauseAdSet: {
     description: 'Поставить адсет на паузу. Используй dry_run: true для preview.',
@@ -182,6 +153,26 @@ export const AdsToolDefs = {
     meta: { timeout: 15000, retryable: false }
   },
 
+  pauseAd: {
+    description: 'Поставить конкретное объявление на паузу. Используй dry_run: true для preview.',
+    schema: z.object({
+      ad_id: nonEmptyString('ad_id').describe('ID объявления в Facebook'),
+      reason: z.string().optional().describe('Причина паузы'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
+    }),
+    meta: { timeout: 15000, retryable: false, dangerous: true }
+  },
+
+  resumeAd: {
+    description: 'Возобновить приостановленное объявление',
+    schema: z.object({
+      ad_id: nonEmptyString('ad_id').describe('ID объявления для возобновления'),
+      operation_id: operationIdOption
+    }),
+    meta: { timeout: 15000, retryable: false }
+  },
+
   updateBudget: {
     description: 'Изменить дневной бюджет адсета. Используй dry_run: true для preview изменений.',
     schema: z.object({
@@ -196,8 +187,28 @@ export const AdsToolDefs = {
   },
 
   // ============================================================
-  // WRITE TOOLS - Directions
+  // WRITE TOOLS - Directions (1 направление = 1 кампания)
   // ============================================================
+
+  pauseDirection: {
+    description: 'Поставить направление на паузу. Паузит привязанную FB кампанию и все адсеты. Используй dry_run: true для preview.',
+    schema: z.object({
+      direction_id: uuidSchema.describe('UUID направления'),
+      reason: z.string().optional().describe('Причина паузы (для логирования)'),
+      dry_run: dryRunOption,
+      operation_id: operationIdOption
+    }),
+    meta: { timeout: 20000, retryable: false, dangerous: true }
+  },
+
+  resumeDirection: {
+    description: 'Возобновить направление. Включает привязанную FB кампанию.',
+    schema: z.object({
+      direction_id: uuidSchema.describe('UUID направления'),
+      operation_id: operationIdOption
+    }),
+    meta: { timeout: 20000, retryable: false }
+  },
 
   updateDirectionBudget: {
     description: 'Изменить суточный бюджет направления. Используй dry_run: true для preview.',
@@ -222,17 +233,6 @@ export const AdsToolDefs = {
       operation_id: operationIdOption
     }),
     meta: { timeout: 15000, retryable: false }
-  },
-
-  pauseDirection: {
-    description: 'Поставить направление на паузу. Используй dry_run: true для preview. Все связанные адсеты будут приостановлены.',
-    schema: z.object({
-      direction_id: uuidSchema.describe('UUID направления'),
-      reason: z.string().optional().describe('Причина паузы (для логирования)'),
-      dry_run: dryRunOption,
-      operation_id: operationIdOption
-    }),
-    meta: { timeout: 20000, retryable: false, dangerous: true }
   },
 
   // ============================================================
@@ -264,9 +264,11 @@ export const AdsToolDefs = {
   // ============================================================
 
   getAgentBrainActions: {
-    description: 'Получить историю действий Brain Agent за период: изменения бюджетов, паузы адсетов, запуски креативов. Используй для анализа автоматической оптимизации.',
+    description: 'Получить историю действий Brain Agent: изменения бюджетов, паузы адсетов, запуски креативов. Используй для анализа автоматической оптимизации.',
     schema: z.object({
-      period: z.enum(['last_1d', 'last_3d', 'last_7d']).default('last_3d').describe('Период для выборки действий'),
+      period: z.enum(['last_1d', 'last_3d', 'last_7d']).optional().describe('Предустановленный период (если не указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода в формате YYYY-MM-DD'),
+      date_to: z.string().optional().describe('Конец периода в формате YYYY-MM-DD'),
       limit: z.number().min(1).max(50).default(20).describe('Максимум действий для возврата'),
       action_type: z.enum(['all', 'budget_change', 'pause', 'resume', 'launch']).default('all').describe('Фильтр по типу действия')
     }),
@@ -281,6 +283,33 @@ export const AdsToolDefs = {
       reason: z.string().optional().describe('Причина запуска (для логирования)')
     }),
     meta: { timeout: 120000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
+  // CUSTOM FB API QUERY (LLM-powered)
+  // ============================================================
+
+  customFbQuery: {
+    description: `Выполнить кастомный запрос к Facebook API для нестандартных метрик.
+
+Используй когда:
+- Пользователь спрашивает метрику, которой нет в стандартных tools
+- Нужен специфичный breakdown или фильтр
+- Требуется комбинация полей, которую не покрывают другие tools
+
+Внутренняя логика:
+1. LLM анализирует запрос пользователя
+2. Строит корректный FB API запрос (fields, date_preset, filtering)
+3. Отправляет запрос к FB API
+4. При ошибке — 3 попытки с исправлением запроса
+5. Возвращает результат или сообщение об ошибке`,
+    schema: z.object({
+      user_request: z.string().describe('Описание того, что хочет узнать пользователь (на естественном языке)'),
+      entity_type: z.enum(['account', 'campaign', 'adset', 'ad']).default('account').describe('Уровень сущности для запроса'),
+      entity_id: z.string().optional().describe('ID сущности (campaign_id, adset_id, ad_id). Если не указан — используется ad_account'),
+      period: periodSchema.optional().describe('Период для метрик (если применимо)')
+    }),
+    meta: { timeout: 60000, retryable: true }
   }
 };
 

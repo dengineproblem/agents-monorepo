@@ -241,81 +241,8 @@ export const adsHandlers = {
   },
 
   // ============================================================
-  // WRITE HANDLERS
+  // WRITE HANDLERS - AdSets & Ads
   // ============================================================
-
-  async pauseCampaign({ campaign_id, reason, dry_run }, { accessToken, userAccountId, adAccountId }) {
-    // Dry-run mode: return preview without executing
-    if (dry_run) {
-      return adsDryRunHandlers.pauseCampaign({ campaign_id }, { accessToken });
-    }
-
-    // Get current status before change
-    let beforeStatus = null;
-    try {
-      const current = await fbGraph('GET', campaign_id, accessToken, { fields: 'status' });
-      beforeStatus = current.status;
-    } catch (e) {
-      // Continue even if we can't get before status
-    }
-
-    // Execute pause
-    await fbGraph('POST', campaign_id, accessToken, { status: 'PAUSED' });
-
-    // Post-check verification
-    const verification = await verifyCampaignStatus(campaign_id, 'PAUSED', accessToken);
-
-    // Log action
-    await supabase.from('agent_logs').insert({
-      ad_account_id: adAccountId,
-      level: 'info',
-      message: `Campaign ${campaign_id} paused via Chat Assistant`,
-      context: {
-        reason,
-        source: 'chat_assistant',
-        agent: 'AdsAgent',
-        verified: verification.verified,
-        before: beforeStatus,
-        after: verification.after
-      }
-    });
-
-    return {
-      success: true,
-      message: `Кампания ${campaign_id} поставлена на паузу`,
-      verification: {
-        verified: verification.verified,
-        before: beforeStatus,
-        after: verification.after,
-        warning: verification.warning
-      }
-    };
-  },
-
-  async resumeCampaign({ campaign_id }, { accessToken }) {
-    // Get current status before change
-    let beforeStatus = null;
-    try {
-      const current = await fbGraph('GET', campaign_id, accessToken, { fields: 'status' });
-      beforeStatus = current.status;
-    } catch (e) { /* ignore */ }
-
-    await fbGraph('POST', campaign_id, accessToken, { status: 'ACTIVE' });
-
-    // Post-check verification
-    const verification = await verifyCampaignStatus(campaign_id, 'ACTIVE', accessToken);
-
-    return {
-      success: true,
-      message: `Кампания ${campaign_id} возобновлена`,
-      verification: {
-        verified: verification.verified,
-        before: beforeStatus,
-        after: verification.after,
-        warning: verification.warning
-      }
-    };
-  },
 
   async pauseAdSet({ adset_id, reason, dry_run }, { accessToken, adAccountId }) {
     // Dry-run mode: return preview without executing
@@ -382,6 +309,109 @@ export const adsHandlers = {
         before: beforeStatus,
         after: verification.after,
         warning: verification.warning
+      }
+    };
+  },
+
+  async pauseAd({ ad_id, reason, dry_run }, { accessToken, adAccountId }) {
+    // Get current status before change
+    let beforeStatus = null;
+    try {
+      const current = await fbGraph('GET', ad_id, accessToken, { fields: 'status,name' });
+      beforeStatus = current.status;
+    } catch (e) { /* ignore */ }
+
+    if (dry_run) {
+      return {
+        success: true,
+        dry_run: true,
+        preview: {
+          ad_id,
+          current_status: beforeStatus,
+          action: 'pause',
+          new_status: 'PAUSED'
+        },
+        warning: 'Объявление будет поставлено на паузу. Используй dry_run: false для выполнения.'
+      };
+    }
+
+    await fbGraph('POST', ad_id, accessToken, { status: 'PAUSED' });
+
+    // Verify status change
+    let afterStatus = null;
+    try {
+      const after = await fbGraph('GET', ad_id, accessToken, { fields: 'status' });
+      afterStatus = after.status;
+    } catch (e) { /* ignore */ }
+
+    const verified = afterStatus === 'PAUSED';
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Ad ${ad_id} paused via Chat Assistant`,
+      context: {
+        reason,
+        source: 'chat_assistant',
+        agent: 'AdsAgent',
+        verified,
+        before: beforeStatus,
+        after: afterStatus
+      }
+    });
+
+    return {
+      success: true,
+      message: `Объявление ${ad_id} поставлено на паузу`,
+      verification: {
+        verified,
+        before: beforeStatus,
+        after: afterStatus,
+        warning: !verified ? 'Статус не подтверждён — проверьте вручную' : null
+      }
+    };
+  },
+
+  async resumeAd({ ad_id }, { accessToken, adAccountId }) {
+    // Get current status before change
+    let beforeStatus = null;
+    try {
+      const current = await fbGraph('GET', ad_id, accessToken, { fields: 'status' });
+      beforeStatus = current.status;
+    } catch (e) { /* ignore */ }
+
+    await fbGraph('POST', ad_id, accessToken, { status: 'ACTIVE' });
+
+    // Verify status change
+    let afterStatus = null;
+    try {
+      const after = await fbGraph('GET', ad_id, accessToken, { fields: 'status' });
+      afterStatus = after.status;
+    } catch (e) { /* ignore */ }
+
+    const verified = afterStatus === 'ACTIVE';
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Ad ${ad_id} resumed via Chat Assistant`,
+      context: {
+        source: 'chat_assistant',
+        agent: 'AdsAgent',
+        verified,
+        before: beforeStatus,
+        after: afterStatus
+      }
+    });
+
+    return {
+      success: true,
+      message: `Объявление ${ad_id} возобновлено`,
+      verification: {
+        verified,
+        before: beforeStatus,
+        after: afterStatus,
+        warning: !verified ? 'Статус не подтверждён — проверьте вручную' : null
       }
     };
   },
@@ -505,70 +535,69 @@ export const adsHandlers = {
     };
   },
 
-  async getDirectionDetails({ direction_id }, { userAccountId, adAccountId, accessToken }) {
-    // Get direction info
-    const { data: direction, error } = await supabase
+  async getDirectionCreatives({ direction_id }, { userAccountId }) {
+    // Get direction name for context
+    const { data: direction, error: dirError } = await supabase
       .from('account_directions')
+      .select('id, name')
+      .eq('id', direction_id)
+      .single();
+
+    if (dirError) {
+      return { success: false, error: dirError.message };
+    }
+
+    // Get creatives linked to this direction with metrics
+    const { data: creatives, error } = await supabase
+      .from('user_creatives')
       .select(`
         id,
         name,
-        is_active,
-        campaign_status,
-        daily_budget_cents,
-        target_cpl_cents,
-        objective,
-        fb_campaign_id,
+        title,
+        status,
+        media_type,
+        risk_score,
+        performance_tier,
         created_at,
         updated_at
       `)
-      .eq('id', direction_id)
-      .single();
+      .eq('direction_id', direction_id)
+      .eq('user_id', userAccountId)
+      .order('created_at', { ascending: false })
+      .limit(50);
 
     if (error) {
       return { success: false, error: error.message };
     }
 
-    // Get creatives linked to this direction
-    const { data: creatives } = await supabase
-      .from('user_creatives')
-      .select(`
-        id,
-        name,
-        status,
-        media_type,
-        created_at
-      `)
-      .eq('direction_id', direction_id)
-      .limit(20);
-
-    // Get campaign info from Facebook if available
-    let campaignInfo = null;
-    if (direction.fb_campaign_id && accessToken) {
-      try {
-        campaignInfo = await fbGraph('GET', direction.fb_campaign_id, accessToken, {
-          fields: 'id,name,status,daily_budget'
-        });
-      } catch (e) {
-        // Ignore FB errors
+    // Count by status
+    const statusCounts = {
+      ready: 0,
+      pending: 0,
+      rejected: 0,
+      archived: 0
+    };
+    for (const c of creatives || []) {
+      if (statusCounts[c.status] !== undefined) {
+        statusCounts[c.status]++;
       }
     }
 
     return {
       success: true,
-      direction: {
-        id: direction.id,
-        name: direction.name,
-        status: direction.is_active ? 'active' : 'paused',
-        campaign_status: direction.campaign_status,
-        budget_per_day: direction.daily_budget_cents / 100,
-        target_cpl: direction.target_cpl_cents / 100,
-        objective: direction.objective,
-        campaign_id: direction.fb_campaign_id,
-        created_at: direction.created_at,
-        updated_at: direction.updated_at,
-        creatives: creatives || [],
-        campaign: campaignInfo
-      }
+      direction_id,
+      direction_name: direction?.name,
+      creatives: (creatives || []).map(c => ({
+        id: c.id,
+        name: c.name || c.title,
+        status: c.status,
+        media_type: c.media_type,
+        risk_score: c.risk_score,
+        performance_tier: c.performance_tier,
+        created_at: c.created_at
+      })),
+      total: creatives?.length || 0,
+      status_counts: statusCounts
     };
   },
 
@@ -829,6 +858,52 @@ export const adsHandlers = {
     return {
       success: true,
       message: `Направление "${direction.name}" поставлено на паузу${fbPaused ? ' (включая FB кампанию)' : ''}`
+    };
+  },
+
+  async resumeDirection({ direction_id }, { adAccountId, accessToken }) {
+    // Get direction with fb_campaign_id
+    const { data: direction, error: fetchError } = await supabase
+      .from('account_directions')
+      .select('id, name, fb_campaign_id')
+      .eq('id', direction_id)
+      .single();
+
+    if (fetchError) {
+      return { success: false, error: fetchError.message };
+    }
+
+    // Update direction status (is_active = true)
+    const { error: updateError } = await supabase
+      .from('account_directions')
+      .update({ is_active: true, campaign_status: 'ACTIVE', updated_at: new Date().toISOString() })
+      .eq('id', direction_id);
+
+    if (updateError) {
+      return { success: false, error: updateError.message };
+    }
+
+    // Resume FB campaign if linked
+    let fbResumed = false;
+    if (direction.fb_campaign_id && accessToken) {
+      try {
+        await fbGraph('POST', direction.fb_campaign_id, accessToken, { status: 'ACTIVE' });
+        fbResumed = true;
+      } catch (e) {
+        // Log but don't fail
+      }
+    }
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Direction resumed: ${direction.name}`,
+      context: { direction_id, fb_resumed: fbResumed, source: 'chat_assistant', agent: 'AdsAgent' }
+    });
+
+    return {
+      success: true,
+      message: `Направление "${direction.name}" возобновлено${fbResumed ? ' (включая FB кампанию)' : ''}`
     };
   },
 
@@ -1316,17 +1391,26 @@ export const adsHandlers = {
    * Get recent Brain Agent actions from brain_executions
    * Shows what the automated optimization has done recently
    */
-  async getAgentBrainActions({ period, limit, action_type }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getAgentBrainActions({ period, date_from, date_to, limit, action_type }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Calculate date range
-    const periodDays = {
-      'last_1d': 1,
-      'last_3d': 3,
-      'last_7d': 7
-    }[period] || 3;
+    // Calculate date range - prefer explicit dates over period
+    let sinceDate, untilDate;
 
-    const sinceDate = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
+    if (date_from) {
+      // Use explicit date range
+      sinceDate = new Date(date_from + 'T00:00:00Z').toISOString();
+      untilDate = date_to ? new Date(date_to + 'T23:59:59Z').toISOString() : new Date().toISOString();
+    } else {
+      // Use preset period
+      const periodDays = {
+        'last_1d': 1,
+        'last_3d': 3,
+        'last_7d': 7
+      }[period] || 3;
+      sinceDate = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
+      untilDate = null; // no upper limit
+    }
 
     // Query brain_executions
     let query = supabase
@@ -1336,6 +1420,11 @@ export const adsHandlers = {
       .gte('created_at', sinceDate)
       .order('created_at', { ascending: false })
       .limit(10); // Max 10 executions, then filter actions
+
+    // Add upper bound if explicit date range
+    if (untilDate) {
+      query = query.lte('created_at', untilDate);
+    }
 
     if (dbAccountId) {
       query = query.eq('account_id', dbAccountId);
@@ -1347,10 +1436,15 @@ export const adsHandlers = {
       return { success: false, error: error.message };
     }
 
+    // Format period for response
+    const periodDescription = date_from
+      ? `${date_from} - ${date_to || 'сегодня'}`
+      : period || 'last_3d';
+
     if (!executions || executions.length === 0) {
       return {
         success: true,
-        period,
+        period: periodDescription,
         actions: [],
         total: 0,
         message: 'Brain Agent не выполнял действий за указанный период'
@@ -1888,99 +1982,189 @@ export const adsHandlers = {
     };
   },
 
+  // ============================================================
+  // CUSTOM FB API QUERY (LLM-powered)
+  // ============================================================
+
   /**
-   * Competitor analysis from Facebook Ad Library
-   * Returns insights about competitor ads (graceful fallback if not configured)
+   * Execute custom Facebook API query using LLM
+   * For non-standard metrics that don't have a dedicated tool
+   *
+   * Flow:
+   * 1. LLM analyzes user_request
+   * 2. LLM builds FB Graph API query (endpoint, fields, params)
+   * 3. Execute query to FB
+   * 4. On error: LLM fixes query, retry (max 3 times)
+   * 5. Return result or final error
    */
-  async competitorAnalysis({ direction_id, keywords }, { userAccountId, adAccountId, adAccountDbId }) {
-    const dbAccountId = adAccountDbId || null;
+  async customFbQuery({ user_request, entity_type, entity_id, period }, { accessToken, adAccountId }) {
+    const openai = await import('openai');
+    const OpenAI = openai.default;
+    const client = new OpenAI();
 
-    // Get direction for context
-    const { data: direction } = await supabase
-      .from('account_directions')
-      .select('id, name')
-      .eq('id', direction_id)
-      .single();
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    const dateRange = period ? getDateRange(period) : null;
 
-    // Check if competitor tracking is configured
-    // For now, return graceful fallback since this requires separate setup
-    const { data: competitorConfig } = await supabase
-      .from('user_settings')
-      .select('competitor_tracking_enabled')
-      .eq('user_account_id', userAccountId)
-      .single();
-
-    if (!competitorConfig?.competitor_tracking_enabled) {
-      return {
-        success: true,
-        status: 'not_configured',
-        message: 'Отслеживание конкурентов не настроено',
-        direction: direction?.name,
-        setup_guide: 'Для включения анализа конкурентов добавьте ключевые слова в настройках или используйте параметр keywords',
-        recommendations: [
-          'Настройте ключевые слова для отслеживания конкурентов',
-          'Используйте Facebook Ad Library напрямую: https://www.facebook.com/ads/library'
-        ]
-      };
+    // Build entity path based on type
+    let basePath;
+    switch (entity_type) {
+      case 'campaign':
+        basePath = entity_id;
+        break;
+      case 'adset':
+        basePath = entity_id;
+        break;
+      case 'ad':
+        basePath = entity_id;
+        break;
+      case 'account':
+      default:
+        basePath = actId;
     }
 
-    // If configured, fetch from competitor_ads table (pre-collected data)
-    let competitorQuery = supabase
-      .from('competitor_ads')
-      .select('*')
-      .eq('user_account_id', userAccountId)
-      .order('created_at', { ascending: false })
-      .limit(20);
+    const systemPrompt = `Ты эксперт по Facebook Marketing API.
 
-    if (dbAccountId) {
-      competitorQuery = competitorQuery.eq('account_id', dbAccountId);
-    }
-    if (direction_id) {
-      competitorQuery = competitorQuery.eq('direction_id', direction_id);
-    }
+Твоя задача: построить корректный запрос к FB Graph API на основе вопроса пользователя.
 
-    const { data: competitorAds } = await competitorQuery;
+## Доступные endpoints и fields:
 
-    if (!competitorAds || competitorAds.length === 0) {
-      return {
-        success: true,
-        status: 'no_data',
-        message: 'Нет данных о конкурентах за последний период',
-        direction: direction?.name,
-        recommendations: ['Проверьте настройки отслеживания', 'Добавьте больше ключевых слов']
-      };
-    }
+### Account level (act_<id>):
+- /insights: spend, impressions, clicks, cpm, cpc, ctr, actions, cost_per_action_type
+- /campaigns: id, name, status, objective, daily_budget
+- /adsets: id, name, status, daily_budget, targeting
+- /ads: id, name, status, creative
 
-    // Group by competitor
-    const byCompetitor = {};
-    for (const ad of competitorAds) {
-      const key = ad.competitor_name || 'Unknown';
-      if (!byCompetitor[key]) {
-        byCompetitor[key] = { ads: [], creativeTypes: new Set(), angles: [] };
+### Campaign/AdSet/Ad level:
+- /insights: те же метрики + date breakdown
+- fields: id, name, status, effective_status, daily_budget, bid_amount
+
+### Breakdowns:
+- age, gender, country, region, device_platform, publisher_platform, placement
+
+### Time ranges:
+- time_range: {"since": "YYYY-MM-DD", "until": "YYYY-MM-DD"}
+- date_preset: today, yesterday, last_7d, last_14d, last_30d, lifetime
+
+## Формат ответа (JSON):
+{
+  "endpoint": "<entity_id>/insights или <entity_id>/campaigns и т.д.",
+  "fields": "spend,impressions,clicks,ctr",
+  "params": {
+    "time_range": {"since": "2024-01-01", "until": "2024-01-07"},
+    "breakdowns": "age,gender",
+    "level": "ad"
+  },
+  "explanation": "Краткое объяснение что запрашиваем"
+}
+
+Отвечай ТОЛЬКО JSON без markdown.`;
+
+    const userPrompt = `Запрос пользователя: "${user_request}"
+
+Базовый путь: ${basePath}
+Тип сущности: ${entity_type}
+${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Период: не указан, используй last_7d'}
+
+Построй FB API запрос для этого вопроса.`;
+
+    const MAX_ATTEMPTS = 3;
+    let lastError = null;
+    let attemptPrompt = userPrompt;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // Step 1: Get query from LLM
+        const completion = await client.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: attemptPrompt }
+          ],
+          temperature: 0.2,
+          max_tokens: 500
+        });
+
+        const llmResponse = completion.choices[0]?.message?.content || '';
+
+        // Parse LLM response
+        let queryPlan;
+        try {
+          // Try to extract JSON from response
+          const jsonMatch = llmResponse.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) {
+            throw new Error('No JSON found in LLM response');
+          }
+          queryPlan = JSON.parse(jsonMatch[0]);
+        } catch (parseError) {
+          logger.warn({ attempt, llmResponse }, 'customFbQuery: failed to parse LLM response');
+          lastError = `Не удалось распознать план запроса: ${parseError.message}`;
+          attemptPrompt = `${userPrompt}\n\nПредыдущая попытка не удалась: ${lastError}\nПопробуй снова, верни только валидный JSON.`;
+          continue;
+        }
+
+        // Step 2: Execute FB API query
+        const params = {
+          fields: queryPlan.fields,
+          ...queryPlan.params
+        };
+
+        // Handle time_range
+        if (params.time_range && typeof params.time_range === 'object') {
+          params.time_range = JSON.stringify(params.time_range);
+        } else if (dateRange && !params.date_preset) {
+          params.time_range = JSON.stringify({ since: dateRange.since, until: dateRange.until });
+        }
+
+        logger.info({
+          attempt,
+          endpoint: queryPlan.endpoint,
+          params,
+          explanation: queryPlan.explanation
+        }, 'customFbQuery: executing FB API request');
+
+        const result = await fbGraph('GET', queryPlan.endpoint, accessToken, params);
+
+        // Success!
+        return {
+          success: true,
+          query: {
+            endpoint: queryPlan.endpoint,
+            fields: queryPlan.fields,
+            params: queryPlan.params,
+            explanation: queryPlan.explanation
+          },
+          data: result.data || result,
+          attempts: attempt,
+          source: 'custom_fb_query'
+        };
+
+      } catch (fbError) {
+        const errorMessage = fbError.message || String(fbError);
+        logger.warn({ attempt, error: errorMessage }, 'customFbQuery: FB API error');
+
+        lastError = errorMessage;
+
+        // Build retry prompt with error context
+        attemptPrompt = `${userPrompt}
+
+ПРЕДЫДУЩАЯ ПОПЫТКА #${attempt} ОШИБКА:
+${errorMessage}
+
+Исправь запрос учитывая эту ошибку. Частые проблемы:
+- Неверный формат time_range (должен быть JSON строка)
+- Недопустимые breakdowns для данного уровня
+- Несуществующие fields
+- Нужен access к ads_read permission`;
       }
-      byCompetitor[key].ads.push(ad);
-      if (ad.creative_type) byCompetitor[key].creativeTypes.add(ad.creative_type);
-      if (ad.angle) byCompetitor[key].angles.push(ad.angle);
     }
 
-    const insights = Object.entries(byCompetitor).map(([name, data]) => ({
-      competitor: name,
-      ad_count: data.ads.length,
-      creative_types: Array.from(data.creativeTypes),
-      top_angles: [...new Set(data.angles)].slice(0, 3)
-    }));
-
+    // All attempts failed
     return {
-      success: true,
-      status: 'success',
-      direction: direction?.name,
-      competitors_found: insights.length,
-      ads_analyzed: competitorAds.length,
-      insights,
-      recommendations: [
-        insights.length > 0 ? `Конкуренты активно используют: ${insights[0].creative_types.join(', ')}` : null,
-        'Проанализируйте успешные форматы конкурентов'
-      ].filter(Boolean)
+      success: false,
+      error: `Не удалось выполнить запрос после ${MAX_ATTEMPTS} попыток`,
+      last_error: lastError,
+      user_request,
+      suggestion: 'Попробуйте переформулировать запрос или использовать стандартные tools (getCampaigns, getSpendReport и т.д.)'
     };
   }
 };
