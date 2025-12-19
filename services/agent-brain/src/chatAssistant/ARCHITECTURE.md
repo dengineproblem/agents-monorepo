@@ -730,3 +730,87 @@ logger.getAllLogs();                        // Get collected logs
 ```env
 ENABLE_LAYER_LOGGING=true    # Enable layer logging (default: true)
 ```
+
+---
+
+## Known Issues (Нерешённые проблемы)
+
+### 1. Квалифицированные лиды из CRM (getSalesQuality)
+
+**Проблема**: Ассистент говорит "0 квалифицированных лидов" несмотря на то что:
+- В БД есть 4 лида с `is_qualified = true`
+- Handler `getSalesQuality` при прямом вызове возвращает корректные данные
+- ROI Analytics в UI показывает 5.3% qualification rate
+
+**Что сделано**:
+- Добавлены `date_from`/`date_to` в Zod схемы toolDefs.js
+- Расширены period enums (`last_6m`, `last_90d`, `last_12m`, `all`)
+- Zod валидация проходит успешно
+
+**Возможные причины**:
+- LLM не передаёт правильный период (по умолчанию `last_7d`, а лиды квалифицированы раньше)
+- LLM не вызывает правильный tool
+- Domain agent неправильно интерпретирует данные
+- Нужна отладка через Debug Logging System
+
+**Как отлаживать**:
+```bash
+# Прямой тест handler
+docker compose exec agent-brain node -e "
+import { crmHandlers } from '/app/src/chatAssistant/agents/crm/handlers.js';
+const result = await crmHandlers.getSalesQuality(
+  { period: 'all' },
+  { userAccountId: 'USER_ID', adAccountDbId: null }
+);
+console.log(JSON.stringify(result, null, 2));
+"
+```
+
+### 2. Квалифицированные лиды из FB (ROI Analytics)
+
+**Проблема**: Расхождение между CRM qualification rate и FB ROI Analytics.
+
+**Объяснение**:
+- **ROI Analytics** считает: `qualified_leads / fb_leads_from_creative * 100`
+- **CRM getSalesQuality** считает: `qualified_leads / total_local_leads * 100`
+
+Это РАЗНЫЕ метрики:
+- ROI показывает эффективность конкретного креатива
+- CRM показывает общую квалификацию по всей базе
+
+### 3. WhatsApp интеграция не видится
+
+**Проблема**: Ассистент говорит "WhatsApp не подключен" хотя интеграция есть.
+
+**Где проверять**:
+- `contextGatherer.js` → `getIntegrations()` → проверяет `whatsapp_integration`
+- `orchestrator/index.js` → `enrichedContext.integrations.whatsapp`
+- `metaSystemPrompt.js` → использует `integrations.whatsapp` для доступности домена
+
+**Как диагностировать**:
+```sql
+SELECT * FROM whatsapp_integration
+WHERE user_account_id = 'USER_ID';
+```
+
+### 4. Статистика лидов с 2+ сообщениями vs WhatsApp интеграция
+
+**Проблема**: Ассистент думает что для получения статистики по лидам с 2+ сообщениями в WhatsApp нужен подключенный к приложению WhatsApp.
+
+**Факт**: Это НЕ связано. Данные о количестве сообщений уже есть в таблице `whatsapp_messages` или `leads.chat_analysis_json`.
+
+**Корень проблемы**: В system prompt или domain availability логике неправильно связаны:
+- `integrations.whatsapp` (подключение Evolution API)
+- Наличие данных о сообщениях в БД (уже есть независимо от интеграции)
+
+**Решение**:
+- Отделить проверку "есть ли данные о сообщениях" от "подключен ли WhatsApp"
+- CRM домен должен иметь доступ к статистике сообщений без проверки WhatsApp интеграции
+- В `agents/crm/handlers.js` уже используются данные из `whatsapp_messages` напрямую
+
+### Общие рекомендации по отладке
+
+1. **Включить Debug Logging** в UI (для admin пользователей)
+2. **Проверить какой tool вызывается** через логи
+3. **Проверить какие параметры передаются** в tool
+4. **Сравнить с прямым вызовом handler**
