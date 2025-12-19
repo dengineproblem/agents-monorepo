@@ -31,6 +31,30 @@ function getSinceDate(period) {
   return d.toISOString();
 }
 
+// Helper: get date range from date_from/date_to or fallback to period
+// Returns { since: ISO string, until: ISO string, periodDescription: string }
+function getDateRangeFromParams({ date_from, date_to, period }) {
+  if (date_from) {
+    // Explicit date range has priority
+    const sinceDate = new Date(date_from + 'T00:00:00Z').toISOString();
+    const untilDate = date_to
+      ? new Date(date_to + 'T23:59:59Z').toISOString()
+      : new Date().toISOString();
+    return {
+      since: sinceDate,
+      until: untilDate,
+      periodDescription: `${date_from} - ${date_to || 'сегодня'}`
+    };
+  }
+  // Fallback to preset period
+  const since = getSinceDate(period || 'last_7d');
+  return {
+    since,
+    until: new Date().toISOString(),
+    periodDescription: period || 'last_7d'
+  };
+}
+
 export const crmHandlers = {
   async getLeads({ interest_level, funnel_stage, min_score, limit, search }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
@@ -176,17 +200,17 @@ export const crmHandlers = {
     };
   },
 
-  async getFunnelStats({ period }, { userAccountId, adAccountDbId }) {
+  async getFunnelStats({ period, date_from, date_to }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
-    const dateRange = getDateRange(period);
+    const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
 
     // Step 1: Get leads with chat_id
     let leadsQuery = supabase
       .from('leads')
       .select('id, chat_id')
       .eq('user_account_id', userAccountId)
-      .gte('created_at', dateRange.since)
-      .lte('created_at', dateRange.until);
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       leadsQuery = leadsQuery.eq('account_id', dbAccountId);
@@ -231,7 +255,7 @@ export const crmHandlers = {
 
     return {
       success: true,
-      period,
+      period: periodDescription,
       total_leads: leads.length,
       by_stage: stages,
       by_temperature: temperatures
@@ -285,38 +309,23 @@ export const crmHandlers = {
   /**
    * Get revenue statistics by leads
    */
-  async getRevenueStats({ period, direction_id }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getRevenueStats({ period, direction_id, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
-
-    // Period to days
-    const periodDays = {
-      'last_7d': 7,
-      'last_30d': 30,
-      'all': null
-    }[period] || null;
-
-    const since = (() => {
-      if (!periodDays) return null;
-      const d = new Date();
-      d.setDate(d.getDate() - periodDays);
-      d.setHours(0, 0, 0, 0);
-      return d.toISOString();
-    })();
+    const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
 
     // Step 1: Get leads
     let leadsQuery = supabase
       .from('leads')
       .select('id, chat_id, name, direction_id, is_qualified, created_at')
-      .eq('user_account_id', userAccountId);
+      .eq('user_account_id', userAccountId)
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       leadsQuery = leadsQuery.eq('account_id', dbAccountId);
     }
     if (direction_id) {
       leadsQuery = leadsQuery.eq('direction_id', direction_id);
-    }
-    if (since) {
-      leadsQuery = leadsQuery.gte('created_at', since);
     }
 
     const { data: leadsData, error: leadsError } = await leadsQuery;
@@ -333,7 +342,7 @@ export const crmHandlers = {
 
     if (leadPhones.length === 0) {
       return {
-        period,
+        period: periodDescription,
         totalLeads,
         qualifiedLeads,
         qualificationRate: 0,
@@ -351,13 +360,12 @@ export const crmHandlers = {
       .from('purchases')
       .select('id, client_phone, amount, created_at')
       .eq('user_account_id', userAccountId)
-      .in('client_phone', leadPhones);
+      .in('client_phone', leadPhones)
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
-    }
-    if (since) {
-      purchasesQuery = purchasesQuery.gte('created_at', since);
     }
 
     const { data: purchasesData, error: purchasesError } = await purchasesQuery;
@@ -408,7 +416,7 @@ export const crmHandlers = {
       });
 
     return {
-      period,
+      period: periodDescription,
       totalLeads,
       qualifiedLeads,
       qualificationRate,
@@ -429,18 +437,19 @@ export const crmHandlers = {
    * getSalesQuality - KPI ladder для анализа качества трафика
    * Возвращает: sales_count, sales_amount, leads_total, qualified_count, qual_rate, conversion_rate
    */
-  async getSalesQuality({ direction_id, period }, { userAccountId, adAccountDbId }) {
+  async getSalesQuality({ direction_id, period, date_from, date_to }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Используем общий хелпер для периодов
-    const since = getSinceDate(period || 'last_7d');
+    // Используем общий хелпер для дат (date_from/date_to имеют приоритет)
+    const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
 
     // Step 1: Get leads
     let leadsQuery = supabase
       .from('leads')
       .select('id, chat_id, name, direction_id, is_qualified, created_at')
       .eq('user_account_id', userAccountId)
-      .gte('created_at', since);
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       leadsQuery = leadsQuery.eq('account_id', dbAccountId);
@@ -475,7 +484,7 @@ export const crmHandlers = {
         conversion_rate: 0,
         conversion_rate_formatted: '0%',
         attribution: 'crm_primary',
-        period
+        period: periodDescription
       };
     }
 
@@ -484,7 +493,8 @@ export const crmHandlers = {
       .select('id, client_phone, amount, created_at')
       .eq('user_account_id', userAccountId)
       .in('client_phone', leadPhones)
-      .gte('created_at', since);
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       purchasesQuery = purchasesQuery.eq('account_id', dbAccountId);
@@ -517,7 +527,7 @@ export const crmHandlers = {
       conversion_rate,
       conversion_rate_formatted: `${conversion_rate}%`,
       attribution: 'crm_primary',
-      period
+      period: periodDescription
     };
   },
 
@@ -721,9 +731,9 @@ export const crmHandlers = {
   /**
    * getAmoCRMKeyStageStats - Statistics by key stages for a direction
    */
-  async getAmoCRMKeyStageStats({ direction_id, period }, { userAccountId, adAccountDbId }) {
+  async getAmoCRMKeyStageStats({ direction_id, period, date_from, date_to }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
-    const since = getSinceDate(period || 'last_7d');
+    const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
 
     // Get direction with key stages
     const { data: direction, error: dirError } = await supabase
@@ -765,7 +775,8 @@ export const crmHandlers = {
       .select('id, reached_key_stage_1, reached_key_stage_2, reached_key_stage_3, is_qualified, created_at')
       .eq('user_account_id', userAccountId)
       .eq('direction_id', direction_id)
-      .gte('created_at', since);
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       leadsQuery = leadsQuery.eq('account_id', dbAccountId);
@@ -837,7 +848,7 @@ export const crmHandlers = {
     return {
       success: true,
       direction: { id: direction.id, name: direction.name },
-      period: period || 'last_7d',
+      period: periodDescription,
       total_leads: totalLeads,
       key_stages: keyStages,
       recommendations
@@ -847,9 +858,9 @@ export const crmHandlers = {
   /**
    * getAmoCRMQualificationStats - Qualification statistics by creatives
    */
-  async getAmoCRMQualificationStats({ direction_id, period }, { userAccountId, adAccountDbId }) {
+  async getAmoCRMQualificationStats({ direction_id, period, date_from, date_to }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
-    const since = getSinceDate(period || 'last_7d');
+    const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
 
     // Get leads with creative_id
     let leadsQuery = supabase
@@ -857,7 +868,8 @@ export const crmHandlers = {
       .select('id, creative_id, is_qualified, amocrm_lead_id')
       .eq('user_account_id', userAccountId)
       .not('amocrm_lead_id', 'is', null)
-      .gte('created_at', since);
+      .gte('created_at', since)
+      .lte('created_at', until);
 
     if (dbAccountId) {
       leadsQuery = leadsQuery.eq('account_id', dbAccountId);
@@ -954,7 +966,7 @@ export const crmHandlers = {
 
     return {
       success: true,
-      period: period || 'last_7d',
+      period: periodDescription,
       creatives: creativeStats,
       total_leads: totalLeads,
       total_qualified: totalQualified,

@@ -41,7 +41,7 @@ export const CrmToolDefs = {
   getFunnelStats: {
     description: 'Статистика воронки продаж за период: количество лидов на каждом этапе, конверсии между этапами (%), распределение по температуре. Используй для оценки эффективности воронки.',
     schema: z.object({
-      period: periodSchema
+      period: periodSchema.default('last_7d').describe('Период для анализа (default: last_7d)')
     }),
     meta: { timeout: 20000, retryable: true }
   },

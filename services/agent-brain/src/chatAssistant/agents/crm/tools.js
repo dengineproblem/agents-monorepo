@@ -60,10 +60,17 @@ export const CRM_TOOLS = [
         period: {
           type: 'string',
           enum: ['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
-          description: 'Период для статистики'
+          description: 'Preset период (игнорируется если указаны date_from/date_to)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода YYYY-MM-DD'
         }
-      },
-      required: ['period']
+      }
     }
   },
   {
@@ -75,14 +82,21 @@ export const CRM_TOOLS = [
         period: {
           type: 'string',
           enum: ['last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
-          description: 'Период для анализа выручки'
+          description: 'Preset период (игнорируется если указаны date_from/date_to)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода YYYY-MM-DD'
         },
         direction_id: {
           type: 'string',
           description: 'UUID направления для фильтрации (опционально)'
         }
-      },
-      required: ['period']
+      }
     }
   },
   {
@@ -98,7 +112,15 @@ export const CRM_TOOLS = [
         period: {
           type: 'string',
           enum: ['last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
-          description: 'Период для анализа (по умолчанию last_7d)'
+          description: 'Preset период (игнорируется если указаны date_from/date_to)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода YYYY-MM-DD'
         }
       }
     }
@@ -184,7 +206,15 @@ export const CRM_TOOLS = [
         period: {
           type: 'string',
           enum: ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
-          description: 'Период для анализа (по умолчанию last_7d)'
+          description: 'Preset период (игнорируется если указаны date_from/date_to)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода YYYY-MM-DD'
         }
       },
       required: ['direction_id']
@@ -203,7 +233,15 @@ export const CRM_TOOLS = [
         period: {
           type: 'string',
           enum: ['last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all'],
-          description: 'Период для анализа (по умолчанию last_7d)'
+          description: 'Preset период (игнорируется если указаны date_from/date_to)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конец периода YYYY-MM-DD'
         }
       }
     }
