@@ -17,10 +17,23 @@
  */
 
 import { createSession, MCP_CONFIG } from './index.js';
-import { detectIntentWithLLM } from '../chatAssistant/orchestrator/index.js';
 import { getToolsByAgent } from './tools/definitions.js';
 import { formatMCPResponse } from './responseFormatter.js';
 import { logger } from '../lib/logger.js';
+
+/**
+ * Stub for detectIntentWithLLM - this file is experimental/legacy
+ * Real intent detection is done via the main orchestrator path
+ */
+async function detectIntentWithLLM(userPrompt, context) {
+  // Return a default classification - this code path is not actively used
+  return {
+    domain: 'unknown',
+    confidence: 0,
+    intent: 'unknown',
+    agents: []
+  };
+}
 
 // Domain to agent mapping
 const DOMAIN_TO_MCP_AGENT = {
