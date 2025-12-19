@@ -7,8 +7,9 @@
 import { Bot, Loader2, CheckCircle2, Sparkles, Database, BarChart3, MessageSquare, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { getToolLabel } from '@/services/assistantApi';
-import type { StreamEvent } from '@/services/assistantApi';
+import { getToolLabel, LAYER_LABELS } from '@/services/assistantApi';
+import type { StreamEvent, StreamEventLayer } from '@/services/assistantApi';
+import type { LayerLog } from './DebugLogsModal';
 
 // Domain icons for classification display
 const DOMAIN_ICONS: Record<string, typeof Bot> = {
@@ -42,6 +43,7 @@ export interface StreamingState {
   text: string;
   tools: ToolExecution[];
   currentTool: string | null;
+  layerLogs: LayerLog[];
 }
 
 interface StreamingMessageProps {
@@ -151,6 +153,7 @@ export function createInitialStreamingState(): StreamingState {
     text: '',
     tools: [],
     currentTool: null,
+    layerLogs: [],
   };
 }
 
@@ -248,6 +251,24 @@ export function updateStreamingState(
         text: `❌ Ошибка: ${event.message}`,
         currentTool: null,
       };
+
+    case 'layer': {
+      const layerEvent = event as StreamEventLayer;
+      const log: LayerLog = {
+        layer: layerEvent.layer,
+        name: layerEvent.name || LAYER_LABELS[layerEvent.layer] || `Layer ${layerEvent.layer}`,
+        status: layerEvent.status,
+        data: layerEvent.data,
+        timestamp: layerEvent.timestamp,
+        duration_ms: layerEvent.duration_ms,
+        error: layerEvent.error,
+        message: layerEvent.message,
+      };
+      return {
+        ...state,
+        layerLogs: [...state.layerLogs, log],
+      };
+    }
 
     default:
       return state;

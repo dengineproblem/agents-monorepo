@@ -6,3 +6,5 @@ export { ModeSelector } from './ModeSelector';
 export { PlanApprovalModal } from './PlanApprovalModal';
 export { StreamingMessage, createInitialStreamingState, updateStreamingState } from './StreamingMessage';
 export type { StreamingState } from './StreamingMessage';
+export { DebugLogsModal } from './DebugLogsModal';
+export type { LayerLog } from './DebugLogsModal';

@@ -12,6 +12,7 @@ import {
 import { MessageBubble } from './MessageBubble';
 import { StreamingMessage, type StreamingState } from './StreamingMessage';
 import type { ChatMessage, Plan, Conversation } from '@/services/assistantApi';
+import type { LayerLog } from './DebugLogsModal';
 
 interface ChatMessagesProps {
   messages: ChatMessage[];
@@ -25,6 +26,9 @@ interface ChatMessagesProps {
   activeConversationId?: string;
   onSelectConversation?: (id: string) => void;
   onNewConversation?: () => void;
+  // Debug logs
+  debugLogsMap?: Map<string, LayerLog[]>;
+  showDebugButton?: boolean;
 }
 
 export function ChatMessages({
@@ -38,6 +42,8 @@ export function ChatMessages({
   activeConversationId,
   onSelectConversation,
   onNewConversation,
+  debugLogsMap,
+  showDebugButton,
 }: ChatMessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -119,6 +125,8 @@ export function ChatMessages({
                 message={message}
                 onApprove={onApprove}
                 onUIAction={onUIAction}
+                debugLogs={debugLogsMap?.get(message.id)}
+                showDebugButton={showDebugButton}
               />
             ))}
 

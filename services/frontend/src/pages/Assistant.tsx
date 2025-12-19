@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { Bug } from 'lucide-react';
 import Header from '../components/Header';
 import { useAppContext } from '../context/AppContext';
+import { isUserAdmin } from '../components/AdminRoute';
+import { Button } from '@/components/ui/button';
 import {
   ChatMessages,
   ChatInput,
@@ -25,6 +28,7 @@ import {
   updateStreamingState,
   type StreamingState,
 } from '../components/assistant/StreamingMessage';
+import type { LayerLog } from '../components/assistant/DebugLogsModal';
 
 const Assistant: React.FC = () => {
   const { currentAdAccountId } = useAppContext();
@@ -54,6 +58,18 @@ const Assistant: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingState, setStreamingState] = useState<StreamingState | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Debug logs
+  const isAdmin = isUserAdmin();
+  const [showDebugLogs, setShowDebugLogs] = useState(() => {
+    return localStorage.getItem('assistant_debug_logs') === 'true';
+  });
+  const [debugLogsMap, setDebugLogsMap] = useState<Map<string, LayerLog[]>>(new Map());
+
+  // Persist debug logs preference
+  useEffect(() => {
+    localStorage.setItem('assistant_debug_logs', String(showDebugLogs));
+  }, [showDebugLogs]);
 
   // Load user account ID
   useEffect(() => {
@@ -162,6 +178,7 @@ const Assistant: React.FC = () => {
           mode,
           userAccountId,
           adAccountId: currentAdAccountId || undefined,
+          debugLayers: isAdmin && showDebugLogs,
         },
         abortController.signal
       );
@@ -206,8 +223,9 @@ const Assistant: React.FC = () => {
 
       // Add final assistant message
       if (finalContent && currentConversationId) {
+        const messageId = `response-${Date.now()}`;
         const assistantMessage: ChatMessage = {
-          id: `response-${Date.now()}`,
+          id: messageId,
           conversation_id: currentConversationId,
           role: 'assistant',
           content: finalContent,
@@ -217,6 +235,18 @@ const Assistant: React.FC = () => {
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
+
+        // Save layer logs for this message (from streaming state)
+        setStreamingState((currentState) => {
+          if (currentState?.layerLogs && currentState.layerLogs.length > 0) {
+            setDebugLogsMap((prevMap) => {
+              const newMap = new Map(prevMap);
+              newMap.set(messageId, currentState.layerLogs);
+              return newMap;
+            });
+          }
+          return currentState;
+        });
       }
 
     } catch (error) {
@@ -350,7 +380,25 @@ const Assistant: React.FC = () => {
           activeConversationId={activeConversationId || undefined}
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
+          debugLogsMap={debugLogsMap}
+          showDebugButton={isAdmin && showDebugLogs}
         />
+
+        {/* Debug logs toggle (admin only) */}
+        {isAdmin && (
+          <div className="absolute top-20 right-4 z-10">
+            <Button
+              variant={showDebugLogs ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setShowDebugLogs(!showDebugLogs)}
+              className="gap-2"
+              title="Toggle debug logs"
+            >
+              <Bug className="h-4 w-4" />
+              {showDebugLogs ? 'Debug ON' : 'Debug OFF'}
+            </Button>
+          </div>
+        )}
 
         {/* Input */}
         <ChatInput

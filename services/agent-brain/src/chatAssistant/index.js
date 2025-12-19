@@ -22,6 +22,8 @@ import {
   handleModeCommand,
   handleStatusCommand
 } from './telegramHandler.js';
+import { LayerLogger, createNoOpLogger } from './shared/layerLogger.js';
+import { ORCHESTRATOR_CONFIG } from './config.js';
 
 const orchestrator = new Orchestrator();
 
@@ -240,6 +242,43 @@ async function getAccessToken(userAccountId, adAccountId) {
 }
 
 /**
+ * Check if layer logging should be enabled for this request
+ * @param {string} userAccountId - User account ID
+ * @param {boolean} requestParam - debugLayers param from request
+ * @returns {Promise<boolean>}
+ */
+async function shouldEnableLayerLogging(userAccountId, requestParam) {
+  // If not requested, check global env flag
+  if (!requestParam && !ORCHESTRATOR_CONFIG.enableLayerLogging) {
+    return false;
+  }
+
+  // If globally enabled via env, allow for all
+  if (ORCHESTRATOR_CONFIG.enableLayerLogging) {
+    return true;
+  }
+
+  // If requested, check if user is admin
+  if (requestParam) {
+    // Check hardcoded admin list
+    if (ORCHESTRATOR_CONFIG.layerLoggingAdminIds.includes(userAccountId)) {
+      return true;
+    }
+
+    // Check is_tech_admin in database
+    const { data } = await supabase
+      .from('user_accounts')
+      .select('is_tech_admin')
+      .eq('id', userAccountId)
+      .single();
+
+    return data?.is_tech_admin === true;
+  }
+
+  return false;
+}
+
+/**
  * Execute a planned action (after user approval)
  */
 export async function executePlanAction({ conversationId, actionIndex, userAccountId, adAccountId }) {
@@ -331,7 +370,7 @@ export function registerChatRoutes(fastify) {
 
   // SSE Streaming endpoint
   fastify.post('/api/brain/chat/stream', async (request, reply) => {
-    const { message, conversationId, mode, userAccountId, adAccountId } = request.body;
+    const { message, conversationId, mode, userAccountId, adAccountId, debugLayers } = request.body;
 
     if (!message || !userAccountId) {
       return reply.code(400).send({ error: 'message and userAccountId are required' });
@@ -350,10 +389,27 @@ export function registerChatRoutes(fastify) {
       reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
+    // Initialize layer logger (will be set up after checking permissions)
+    let layerLogger = createNoOpLogger();
+
     try {
+      // Check if layer logging should be enabled
+      const enableLayers = await shouldEnableLayerLogging(userAccountId, debugLayers);
+      if (enableLayers) {
+        layerLogger = new LayerLogger({
+          enabled: true,
+          emitter: sendEvent
+        });
+      }
+
+      // Layer 1: HTTP Entry
+      layerLogger.start(1, { message: message.substring(0, 100), mode, hasConversationId: !!conversationId });
+
       // Resolve ad account
       const { dbId, fbId } = await resolveAdAccountId(userAccountId, adAccountId);
       const accessToken = await getAccessToken(userAccountId, dbId);
+
+      layerLogger.info(1, 'Ad account resolved', { dbId: dbId?.substring(0, 8), hasFbId: !!fbId });
 
       // Get or create conversation
       const conversation = await getOrCreateConversation({
@@ -373,6 +429,11 @@ export function registerChatRoutes(fastify) {
         adAccountId: dbId,
         conversationId: conversation.id,
         fbAdAccountId: fbId
+      });
+
+      layerLogger.info(1, 'Context gathered', {
+        hasDirections: !!context.directions,
+        recentMessages: context.recentMessages?.length || 0
       });
 
       // Save user message
@@ -397,14 +458,18 @@ export function registerChatRoutes(fastify) {
         userAccountId,
         adAccountId: fbId,
         adAccountDbId: dbId,
-        conversationId: conversation.id
+        conversationId: conversation.id,
+        layerLogger // Pass logger to downstream layers
       };
+
+      layerLogger.end(1, { conversationId: conversation.id });
 
       // Send init event
       sendEvent({
         type: 'init',
         conversationId: conversation.id,
-        mode: mode || 'auto'
+        mode: mode || 'auto',
+        debugLayersEnabled: enableLayers
       });
 
       // Stream via orchestrator
@@ -428,18 +493,26 @@ export function registerChatRoutes(fastify) {
         }
       }
 
+      // Layer 11: Persistence
+      layerLogger.start(11, { conversationId: conversation.id });
+
       // Save assistant response
-      await saveMessage({
+      const savedMessage = await saveMessage({
         conversationId: conversation.id,
         role: 'assistant',
         content: finalContent,
         actionsJson: executedActions,
-        agent: finalAgent
+        agent: finalAgent,
+        debugLogsJson: layerLogger.isEnabled() ? layerLogger.getAllLogs() : null
       });
+
+      layerLogger.end(11, { messageId: savedMessage?.id, logsCount: layerLogger.getAllLogs().length });
 
       reply.raw.end();
 
     } catch (error) {
+      layerLogger.error(1, error, { phase: 'streaming' });
+
       fastify.log.error({ error: error.message }, 'Chat stream error');
       sendEvent({ type: 'error', message: error.message });
 

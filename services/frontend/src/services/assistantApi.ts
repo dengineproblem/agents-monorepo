@@ -74,6 +74,7 @@ export interface SendMessageParams {
   mode?: ChatMode;
   userAccountId: string;
   adAccountId?: string;
+  debugLayers?: boolean;
 }
 
 export interface ExecutePlanParams {
@@ -98,7 +99,8 @@ export type StreamEventType =
   | 'approval_required'
   | 'clarifying'
   | 'done'
-  | 'error';
+  | 'error'
+  | 'layer';
 
 export interface StreamEventInit {
   type: 'init';
@@ -171,6 +173,20 @@ export interface StreamEventError {
   message: string;
 }
 
+export type LayerStatus = 'start' | 'end' | 'error' | 'info';
+
+export interface StreamEventLayer {
+  type: 'layer';
+  layer: number;
+  name: string;
+  status: LayerStatus;
+  data?: Record<string, unknown>;
+  timestamp: number;
+  duration_ms?: number;
+  error?: string;
+  message?: string;
+}
+
 export type StreamEvent =
   | StreamEventInit
   | StreamEventThinking
@@ -181,7 +197,8 @@ export type StreamEvent =
   | StreamEventApprovalRequired
   | StreamEventClarifying
   | StreamEventDone
-  | StreamEventError;
+  | StreamEventError
+  | StreamEventLayer;
 
 // Tool labels for display
 export const TOOL_LABELS: Record<string, string> = {
@@ -220,6 +237,21 @@ export const TOOL_LABELS: Record<string, string> = {
   getDialogs: 'Получаю диалоги',
   getDialogMessages: 'Загружаю сообщения',
   searchDialogSummaries: 'Ищу в диалогах',
+};
+
+// Layer labels for debug display
+export const LAYER_LABELS: Record<number, string> = {
+  1: 'HTTP Entry',
+  2: 'Orchestrator',
+  3: 'Meta Orchestrator',
+  4: 'Meta Tools',
+  5: 'Domain Router',
+  6: 'MCP Bridge',
+  7: 'MCP Executor',
+  8: 'Domain Handlers',
+  9: 'Domain Agents',
+  10: 'Response Assembly',
+  11: 'Persistence',
 };
 
 // API Functions
@@ -320,6 +352,13 @@ export async function* sendMessageStream(
  */
 export function getToolLabel(toolName: string): string {
   return TOOL_LABELS[toolName] || toolName;
+}
+
+/**
+ * Helper to get layer label for display
+ */
+export function getLayerLabel(layer: number): string {
+  return LAYER_LABELS[layer] || `Layer ${layer}`;
 }
 
 /**
@@ -432,6 +471,7 @@ export default {
   sendMessage,
   sendMessageStream,
   getToolLabel,
+  getLayerLabel,
   getConversations,
   getConversationMessages,
   deleteConversation,

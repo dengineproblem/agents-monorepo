@@ -80,12 +80,18 @@ export class Orchestrator {
    */
   async processRequest({ message, context, mode, toolContext, conversationHistory = [] }) {
     const startTime = Date.now();
+    const { layerLogger } = toolContext;
+
+    // Layer 2: Orchestrator start
+    layerLogger?.start(2, { mode, hasHistory: conversationHistory.length > 0 });
 
     try {
       // 0. Check for direct memory commands first
       const memoryCommand = parseMemoryCommand(message);
       if (memoryCommand) {
+        layerLogger?.info(2, 'Memory command detected', { type: memoryCommand.type });
         const result = await this.handleMemoryCommand(memoryCommand, toolContext);
+        layerLogger?.end(2, { memoryCommand: true, type: memoryCommand.type });
         return {
           agent: 'Orchestrator',
           content: result.content,
@@ -96,6 +102,7 @@ export class Orchestrator {
       }
 
       // 1. Gather context in parallel
+      layerLogger?.info(2, 'Gathering context');
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
@@ -112,6 +119,13 @@ export class Orchestrator {
 
       // Determine integration stack
       const stack = getIntegrationStack(integrations);
+
+      layerLogger?.info(2, 'Context gathered', {
+        hasSpecs: specs?.length > 0,
+        hasNotes: notes?.length > 0,
+        hasSummary: !!summaryContext.summary,
+        stack
+      });
 
       // Enrich context
       const enrichedContext = {
@@ -141,6 +155,7 @@ export class Orchestrator {
 
       // 2. Route to meta-tools orchestrator
       logger.info({ mode: 'meta' }, 'Routing to meta-tools orchestrator');
+      layerLogger?.info(2, 'Routing to MetaOrchestrator');
 
       const metaResult = await processWithMetaTools({
         message,
@@ -168,6 +183,11 @@ export class Orchestrator {
         toolCalls: metaResult.executedTools?.length || 0
       }, 'Orchestrator completed');
 
+      layerLogger?.end(2, {
+        iterations: metaResult.iterations,
+        toolCalls: metaResult.executedTools?.length || 0
+      });
+
       return {
         agent: 'MetaOrchestrator',
         content: metaResult.content,
@@ -182,6 +202,7 @@ export class Orchestrator {
       };
 
     } catch (error) {
+      layerLogger?.error(2, error);
       logger.error({ error: error.message }, 'Orchestrator processing failed');
       throw error;
     }
@@ -294,12 +315,18 @@ export class Orchestrator {
    */
   async *processStreamRequest({ message, context, mode, toolContext, conversationHistory = [] }) {
     const startTime = Date.now();
+    const { layerLogger } = toolContext;
+
+    // Layer 2: Orchestrator start
+    layerLogger?.start(2, { mode, streaming: true });
 
     try {
       // 0. Check for direct memory commands first
       const memoryCommand = parseMemoryCommand(message);
       if (memoryCommand) {
+        layerLogger?.info(2, 'Memory command detected', { type: memoryCommand.type });
         const result = await this.handleMemoryCommand(memoryCommand, toolContext);
+        layerLogger?.end(2, { memoryCommand: true });
         yield {
           type: 'text',
           content: result.content,
@@ -319,6 +346,7 @@ export class Orchestrator {
       }
 
       // 1. Gather context
+      layerLogger?.info(2, 'Gathering context');
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
@@ -334,6 +362,8 @@ export class Orchestrator {
       ]);
 
       const stack = getIntegrationStack(integrations);
+
+      layerLogger?.info(2, 'Context gathered', { stack, hasSummary: !!summaryContext.summary });
 
       const enrichedContext = {
         ...context,
@@ -365,6 +395,8 @@ export class Orchestrator {
         message: 'Обрабатываю запрос...'
       };
 
+      layerLogger?.info(2, 'Routing to MetaOrchestrator');
+
       // 2. Process via meta-tools (non-streaming for now)
       const metaResult = await processWithMetaTools({
         message,
@@ -372,6 +404,8 @@ export class Orchestrator {
         conversationHistory,
         toolContext
       });
+
+      layerLogger?.end(2, { iterations: metaResult.iterations });
 
       // Yield content
       yield {
@@ -409,6 +443,7 @@ export class Orchestrator {
       };
 
     } catch (error) {
+      layerLogger?.error(2, error);
       logger.error({ error: error.message }, 'Orchestrator streaming failed');
       yield {
         type: 'error',

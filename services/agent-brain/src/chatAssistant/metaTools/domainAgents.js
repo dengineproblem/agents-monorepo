@@ -31,6 +31,10 @@ const DOMAIN_AGENT_MODEL = process.env.DOMAIN_AGENT_MODEL || 'gpt-4o-mini';
  */
 export async function processDomainResults(domain, toolCalls, rawResults, context, userMessage) {
   const startTime = Date.now();
+  const { layerLogger } = context;
+
+  // Layer 9: Domain Agents start
+  layerLogger?.start(9, { domain, toolsCount: Object.keys(rawResults).length });
 
   // Get domain-specific system prompt
   const systemPrompt = buildDomainSystemPrompt(domain, context);
@@ -40,6 +44,8 @@ export async function processDomainResults(domain, toolCalls, rawResults, contex
 
   // Build user message with context and recommendations
   const userPrompt = buildDomainUserPrompt(userMessage, toolCalls, toolResultsText, context, rawResults);
+
+  layerLogger?.info(9, `LLM call for domain: ${domain}`, { model: DOMAIN_AGENT_MODEL });
 
   try {
     const response = await openai.chat.completions.create({
@@ -62,9 +68,12 @@ export async function processDomainResults(domain, toolCalls, rawResults, contex
       responseLength: content.length
     }, 'Domain agent: processed results');
 
+    layerLogger?.end(9, { domain, responseLength: content.length, latencyMs: latency });
+
     return content;
 
   } catch (error) {
+    layerLogger?.error(9, error, { domain });
     logger.error({ domain, error: error.message }, 'Domain agent: LLM call failed');
     // Fallback: return raw summary
     return formatFallbackResponse(domain, rawResults, userMessage);

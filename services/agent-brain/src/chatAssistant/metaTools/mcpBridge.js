@@ -30,8 +30,13 @@ const USE_MCP_RUNTIME = process.env.USE_MCP_RUNTIME !== 'false';
 export async function executeMCPTool(toolName, args, context) {
   const startTime = Date.now();
   const domain = getDomainForTool(toolName);
+  const { layerLogger } = context;
+
+  // Layer 6: MCP Bridge start
+  layerLogger?.start(6, { toolName, domain });
 
   if (!domain) {
+    layerLogger?.error(6, new Error(`Unknown tool: ${toolName}`));
     return {
       success: false,
       error: `Unknown tool: ${toolName}`,
@@ -57,7 +62,8 @@ export async function executeMCPTool(toolName, args, context) {
           accessToken: ctx.accessToken,
           dangerousPolicy: ctx.dangerousPolicy || 'block',
           conversationId: ctx.conversationId,
-          sessionId: ctx.sessionId
+          sessionId: ctx.sessionId,
+          layerLogger: ctx.layerLogger // Pass to executor
         };
 
         return executeToolWithContext(toolName, finalArgs, mcpContext);
@@ -73,6 +79,8 @@ export async function executeMCPTool(toolName, args, context) {
         domain,
         reason: result.reason
       }, 'MCP tool requires approval');
+
+      layerLogger?.end(6, { toolName, approval_required: true });
 
       return {
         success: false,
@@ -99,6 +107,8 @@ export async function executeMCPTool(toolName, args, context) {
         max: result.meta?.maxToolCalls
       }, 'MCP tool call limit reached');
 
+      layerLogger?.end(6, { toolName, error: 'TOOL_CALL_LIMIT' });
+
       return {
         success: false,
         error: result.message,
@@ -114,6 +124,7 @@ export async function executeMCPTool(toolName, args, context) {
 
     // Handle validation errors
     if (result.error === 'validation_error') {
+      layerLogger?.end(6, { toolName, error: 'VALIDATION_ERROR' });
       return {
         success: false,
         error: result.message,
@@ -135,6 +146,13 @@ export async function executeMCPTool(toolName, args, context) {
       cached: result.already_applied || false
     }, 'MCP tool executed');
 
+    layerLogger?.end(6, {
+      toolName,
+      success: true,
+      cached: result.already_applied || false,
+      latencyMs: latency
+    });
+
     // Return result with metadata
     return {
       ...result,
@@ -150,6 +168,8 @@ export async function executeMCPTool(toolName, args, context) {
   } catch (error) {
     const latency = Date.now() - startTime;
     const isTimeout = error.message?.includes('timeout');
+
+    layerLogger?.error(6, error, { toolName, isTimeout });
 
     logger.error({
       tool: toolName,

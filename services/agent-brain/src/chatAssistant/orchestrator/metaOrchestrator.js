@@ -36,6 +36,10 @@ export async function processWithMetaTools({
   toolContext = {}
 }) {
   const startTime = Date.now();
+  const { layerLogger } = toolContext;
+
+  // Layer 3: Meta Orchestrator start
+  layerLogger?.start(3, { model: MODEL, maxIterations: MAX_ITERATIONS });
 
   // Create MCP session for this request
   const sessionId = createSession({
@@ -51,9 +55,11 @@ export async function processWithMetaTools({
   const enrichedToolContext = {
     ...toolContext,
     sessionId,
-    dangerousPolicy: 'block'
+    dangerousPolicy: 'block',
+    layerLogger // Pass logger to downstream
   };
 
+  layerLogger?.info(3, 'MCP session created', { sessionId: sessionId.substring(0, 8) });
   logger.debug({ sessionId: sessionId.substring(0, 8) }, 'MCP session created for meta orchestrator');
 
   // Build system prompt with context
@@ -99,6 +105,7 @@ export async function processWithMetaTools({
     while (iterations < MAX_ITERATIONS) {
       iterations++;
 
+      layerLogger?.info(3, `LLM iteration ${iterations}`, { iteration: iterations });
       logger.debug({ iteration: iterations, messageCount: messages.length }, 'Meta orchestrator iteration');
 
       const completion = await openai.chat.completions.create({
@@ -119,6 +126,9 @@ export async function processWithMetaTools({
 
       // No tool calls - final response
       if (!assistantMessage.tool_calls?.length) {
+        // Layer 10: Response Assembly
+        layerLogger?.start(10, { hasContent: !!assistantMessage.content });
+
         // Complete run
         if (runId) {
           await runsStore.complete(runId, {
@@ -137,6 +147,9 @@ export async function processWithMetaTools({
           outputTokens: totalOutputTokens,
           latencyMs: latency
         }, 'Meta orchestrator completed');
+
+        layerLogger?.end(10, { contentLength: assistantMessage.content?.length || 0 });
+        layerLogger?.end(3, { iterations, toolCalls: executedTools.length, tokens: totalInputTokens + totalOutputTokens });
 
         return {
           content: assistantMessage.content,
@@ -166,10 +179,14 @@ export async function processWithMetaTools({
             toolArgs = {};
           }
 
+          // Layer 4: Meta Tools
+          layerLogger?.start(4, { toolName, iteration: iterations });
+
           // Find and execute meta-tool
           const metaTool = META_TOOLS[toolName];
 
           if (!metaTool) {
+            layerLogger?.error(4, new Error(`Unknown meta-tool: ${toolName}`));
             return {
               tool_call_id: toolCall.id,
               error: `Unknown meta-tool: ${toolName}`
@@ -203,6 +220,8 @@ export async function processWithMetaTools({
               });
             }
 
+            layerLogger?.end(4, { toolName, success: true, latencyMs: toolLatency });
+
             return {
               tool_call_id: toolCall.id,
               content: JSON.stringify(result)
@@ -230,6 +249,8 @@ export async function processWithMetaTools({
               });
             }
 
+            layerLogger?.error(4, error, { toolName });
+
             return {
               tool_call_id: toolCall.id,
               content: JSON.stringify({
@@ -252,7 +273,11 @@ export async function processWithMetaTools({
     }
 
     // Max iterations reached
+    layerLogger?.info(3, 'Max iterations reached', { iterations: MAX_ITERATIONS });
     logger.warn({ iterations: MAX_ITERATIONS, toolCalls: executedTools.length }, 'Meta orchestrator max iterations reached');
+
+    // Layer 10: Response Assembly (forced)
+    layerLogger?.start(10, { maxIterationsReached: true });
 
     // Get final response without tools
     const finalCompletion = await openai.chat.completions.create({
@@ -275,6 +300,9 @@ export async function processWithMetaTools({
       });
     }
 
+    layerLogger?.end(10, { contentLength: finalCompletion.choices[0].message.content?.length || 0 });
+    layerLogger?.end(3, { iterations, maxIterationsReached: true });
+
     return {
       content: finalCompletion.choices[0].message.content,
       executedTools,
@@ -289,6 +317,7 @@ export async function processWithMetaTools({
     };
 
   } catch (error) {
+    layerLogger?.error(3, error, { iterations });
     logger.error({ error: error.message, iterations }, 'Meta orchestrator failed');
 
     // Record failure
@@ -303,6 +332,7 @@ export async function processWithMetaTools({
   } finally {
     // Cleanup MCP session
     deleteSession(sessionId);
+    layerLogger?.info(3, 'MCP session cleaned up', { sessionId: sessionId.substring(0, 8) });
     logger.debug({ sessionId: sessionId.substring(0, 8) }, 'MCP session cleaned up');
   }
 }

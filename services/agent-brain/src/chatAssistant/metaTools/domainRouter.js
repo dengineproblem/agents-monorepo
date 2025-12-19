@@ -20,9 +20,16 @@ import { logger } from '../../lib/logger.js';
  */
 export async function routeToolCallsToDomains(toolCalls, context, userMessage = '') {
   const startTime = Date.now();
+  const { layerLogger } = context;
 
   // 1. Group tool calls by domain
   const byDomain = groupByDomain(toolCalls);
+
+  // Layer 5: Domain Router start
+  layerLogger?.start(5, {
+    domains: Object.keys(byDomain),
+    toolCount: toolCalls.length
+  });
 
   logger.info({
     domains: Object.keys(byDomain),
@@ -33,6 +40,11 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
 
   // 2. Execute tools for each domain in parallel
   const domainPromises = Object.entries(byDomain).map(async ([domain, domainCalls]) => {
+    layerLogger?.info(5, `Processing domain: ${domain}`, {
+      domain,
+      tools: domainCalls.map(c => c.name)
+    });
+
     try {
       // Execute all tools for this domain
       const rawResults = await executeToolsForDomain(domainCalls, context);
@@ -46,6 +58,8 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
         userMessage
       );
 
+      layerLogger?.info(5, `Domain ${domain} completed`, { success: true });
+
       return {
         domain,
         success: true,
@@ -55,6 +69,7 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
       };
 
     } catch (error) {
+      layerLogger?.info(5, `Domain ${domain} failed`, { error: error.message });
       logger.error({ domain, error: error.message }, 'Domain router: domain processing failed');
       return {
         domain,
@@ -76,6 +91,12 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
   }
 
   const totalLatency = Date.now() - startTime;
+
+  layerLogger?.end(5, {
+    domainsProcessed: Object.keys(combined),
+    successCount: domainResults.filter(r => r.success).length
+  });
+
   logger.info({
     domains: Object.keys(combined),
     totalLatency,

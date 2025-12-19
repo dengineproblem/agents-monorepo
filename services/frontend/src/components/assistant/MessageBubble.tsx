@@ -1,19 +1,32 @@
-import { User, Bot, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { useState } from 'react';
+import { User, Bot, CheckCircle, XCircle, Clock, Bug } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ChatMessage, ExecutedAction, Plan } from '@/services/assistantApi';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { UIComponent } from './UIComponent';
+import { DebugLogsModal, type LayerLog } from './DebugLogsModal';
+import { Button } from '@/components/ui/button';
 
 interface MessageBubbleProps {
   message: ChatMessage;
   onApprove?: (plan: Plan) => void;
   onUIAction?: (action: string, params: Record<string, unknown>) => void;
+  debugLogs?: LayerLog[];
+  showDebugButton?: boolean;
 }
 
-export function MessageBubble({ message, onApprove, onUIAction }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  onApprove,
+  onUIAction,
+  debugLogs,
+  showDebugButton,
+}: MessageBubbleProps) {
+  const [showDebugModal, setShowDebugModal] = useState(false);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const uiComponents = message.ui_json;
+  const hasDebugLogs = debugLogs && debugLogs.length > 0;
 
   return (
     <div
@@ -76,14 +89,36 @@ export function MessageBubble({ message, onApprove, onUIAction }: MessageBubbleP
           <PlanPreview plan={message.plan_json} onApprove={onApprove} />
         )}
 
-        {/* Timestamp */}
-        <p className="text-[10px] opacity-50 mt-2">
-          {new Date(message.created_at).toLocaleTimeString('ru-RU', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </p>
+        {/* Timestamp and Debug Button */}
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-[10px] opacity-50">
+            {new Date(message.created_at).toLocaleTimeString('ru-RU', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </p>
+          {showDebugButton && hasDebugLogs && !isUser && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground"
+              onClick={() => setShowDebugModal(true)}
+            >
+              <Bug className="h-3 w-3 mr-1" />
+              Logs ({debugLogs.length})
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* Debug Logs Modal */}
+      {hasDebugLogs && (
+        <DebugLogsModal
+          logs={debugLogs}
+          open={showDebugModal}
+          onClose={() => setShowDebugModal(false)}
+        />
+      )}
 
       {/* User avatar */}
       {isUser && (

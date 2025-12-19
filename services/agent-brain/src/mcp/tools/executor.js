@@ -24,9 +24,15 @@ import { incrementToolCalls, incrementToolCallsAsync } from '../sessions.js';
  * @returns {Promise<Object>} Tool result or approval_required response
  */
 export async function executeToolWithContext(name, args, context) {
+  const { layerLogger } = context;
+
+  // Layer 7: MCP Executor start
+  layerLogger?.start(7, { toolName: name });
+
   const tool = getToolByName(name);
 
   if (!tool) {
+    layerLogger?.error(7, new Error(`Tool not found: ${name}`));
     throw new Error(`Tool not found: ${name}`);
   }
 
@@ -37,6 +43,7 @@ export async function executeToolWithContext(name, args, context) {
       : incrementToolCalls(context.sessionId);
 
     if (!limitCheck.allowed) {
+      layerLogger?.end(7, { toolName: name, error: 'TOOL_CALL_LIMIT' });
       return {
         success: false,
         error: 'tool_call_limit_reached',
@@ -56,6 +63,7 @@ export async function executeToolWithContext(name, args, context) {
   // Phase 2: Validate arguments against Zod schema
   const validation = validateToolArgs(name, args);
   if (!validation.valid) {
+    layerLogger?.end(7, { toolName: name, error: 'VALIDATION_ERROR' });
     return {
       success: false,
       error: 'validation_error',
@@ -66,13 +74,17 @@ export async function executeToolWithContext(name, args, context) {
   // Use coerced args (with defaults applied)
   const validatedArgs = validation.coerced || args;
 
+  layerLogger?.info(7, 'Validation passed', { toolName: name });
+
   // Hybrid C: Check if dangerous tool requires approval
   if (isDangerousTool(name)) {
     const dangerousPolicy = context.dangerousPolicy || 'block';
 
+    layerLogger?.info(7, 'Dangerous tool detected', { toolName: name, policy: dangerousPolicy });
+
     if (dangerousPolicy === 'block') {
       // Return approval_required instead of executing
-      // The calling code (processChatViaMCP) will create pending plan
+      layerLogger?.end(7, { toolName: name, approval_required: true });
       return {
         approval_required: true,
         tool: name,
@@ -87,6 +99,9 @@ export async function executeToolWithContext(name, args, context) {
     // dangerousPolicy === 'allow' - proceed with execution
   }
 
+  // Layer 8: Domain Handler start
+  layerLogger?.start(8, { handler: name, timeout });
+
   // Build tool context (matches existing agent handler signature)
   const toolContext = {
     userAccountId: context.userAccountId,
@@ -94,15 +109,24 @@ export async function executeToolWithContext(name, args, context) {
     accessToken: context.accessToken
   };
 
-  // Execute with timeout (using validated args with defaults)
-  const result = await Promise.race([
-    handler(validatedArgs, toolContext),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`Tool timeout after ${timeout}ms`)), timeout)
-    )
-  ]);
+  try {
+    // Execute with timeout (using validated args with defaults)
+    const result = await Promise.race([
+      handler(validatedArgs, toolContext),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Tool timeout after ${timeout}ms`)), timeout)
+      )
+    ]);
 
-  return result;
+    layerLogger?.end(8, { handler: name, success: result?.success !== false });
+    layerLogger?.end(7, { toolName: name, success: true });
+
+    return result;
+  } catch (error) {
+    layerLogger?.error(8, error, { handler: name });
+    layerLogger?.end(7, { toolName: name, error: error.message });
+    throw error;
+  }
 }
 
 /**

@@ -659,3 +659,74 @@ Direct commands (handled before LLM):
 - `запомни: ...` — Save note
 - `забудь: ...` — Delete note
 - `заметки` — List all notes
+
+## Debug Logging System
+
+Система детального логирования всех 11 слоёв обработки запроса.
+
+### Доступ
+- **Development**: всегда включено
+- **Production**: только для admin пользователей (`is_tech_admin: true`)
+
+### Включение в UI
+1. Frontend отправляет `debugLayers: true` в API
+2. Backend создаёт `LayerLogger` с emitter
+3. Events отправляются через SSE как `type: 'layer'`
+4. Frontend собирает логи в `StreamingState.layerLogs`
+5. Логи отображаются в `DebugLogsModal` по кнопке на сообщении
+
+### Layer Event Format
+```typescript
+{
+  type: 'layer',
+  layer: 3,                    // 1-11
+  name: 'Meta Orchestrator',   // Human-readable name
+  status: 'start' | 'end' | 'error' | 'info',
+  data?: {                     // Context data
+    model: 'gpt-5.2',
+    sessionId: 'abc123',
+    iterations: 3
+  },
+  timestamp: 1703001234567,    // Unix ms
+  duration_ms?: 1234,          // Only for 'end' status
+  error?: string,              // Only for 'error' status
+  message?: string             // Optional message
+}
+```
+
+### LayerLogger API
+```javascript
+// shared/layerLogger.js
+const logger = new LayerLogger({ emitter, enabled: true });
+
+logger.start(3, { model: 'gpt-5.2' });     // Layer start
+logger.end(3, { iterations: 5 });           // Layer end (calculates duration)
+logger.error(3, error, { context: '...' }); // Layer error
+logger.info(3, 'Processing', { data });     // Info message
+logger.getAllLogs();                        // Get collected logs
+```
+
+### Layers Instrumentation
+| Layer | File | Что логируется |
+|-------|------|----------------|
+| 1 | `index.js` | HTTP entry, request params |
+| 2 | `orchestrator/index.js` | Context gathering, memory commands |
+| 3 | `orchestrator/metaOrchestrator.js` | MCP session, tool loop iterations |
+| 4 | `metaTools/definitions.js` | Meta tool calls |
+| 5 | `metaTools/domainRouter.js` | Domain grouping |
+| 6 | `metaTools/mcpBridge.js` | MCP execution |
+| 7 | `mcp/tools/executor.js` | Tool validation, limits |
+| 8 | `agents/*/handlers.js` | Handler execution |
+| 9 | `metaTools/domainAgents.js` | Agent processing |
+| 10 | `metaOrchestrator.js` | Response assembly |
+| 11 | `index.js` | Persistence |
+
+### Frontend Components
+- **DebugLogsModal** — Модальное окно с Timeline и By Layer views
+- **StreamingMessage** — Собирает layer events в state
+- **MessageBubble** — Кнопка "Logs (N)" для открытия модала
+
+### Конфигурация
+```env
+ENABLE_LAYER_LOGGING=true    # Enable layer logging (default: true)
+```
