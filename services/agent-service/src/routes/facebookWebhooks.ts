@@ -5,12 +5,16 @@ import { createLogger } from '../lib/logger.js';
 import { supabase } from '../lib/supabase.js';
 import { updateOnboardingStage } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
+import { eventLogger } from '../lib/eventLogger.js';
 
 const log = createLogger({ module: 'facebookWebhooks' });
 
 const FB_APP_SECRET = process.env.FB_APP_SECRET || '';
 const FB_APP_ID = process.env.FB_APP_ID || '1441781603583445';
 const FB_REDIRECT_URI = process.env.FB_REDIRECT_URI || 'https://performanteaiagency.com/profile';
+const FB_WEBHOOK_VERIFY_TOKEN = process.env.FB_WEBHOOK_VERIFY_TOKEN || 'performante_leadgen_webhook_2024';
+const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 
 // Telegram notifications for manual Facebook connections
 const TELEGRAM_BOT_TOKEN = process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
@@ -44,8 +48,304 @@ async function sendTelegramNotification(text: string): Promise<void> {
   }
 }
 
+/**
+ * Retrieve lead data from Facebook Lead Forms API
+ *
+ * @param leadgenId - The leadgen_id from the webhook
+ * @param accessToken - Page Access Token with leads_retrieval permission
+ * @returns Lead data with field_data containing form fields
+ */
+async function retrieveLeadData(leadgenId: string, accessToken: string): Promise<{
+  id: string;
+  ad_id?: string;
+  form_id?: string;
+  created_time?: string;
+  field_data?: Array<{ name: string; values: string[] }>;
+} | null> {
+  try {
+    const url = `https://graph.facebook.com/${FB_API_VERSION}/${leadgenId}?fields=id,ad_id,form_id,created_time,field_data&access_token=${accessToken}`;
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok || data.error) {
+      log.error({ error: data.error, leadgenId }, 'Failed to retrieve lead data from Facebook');
+      return null;
+    }
+
+    log.info({ leadgenId, hasFieldData: !!data.field_data }, 'Retrieved lead data from Facebook');
+    return data;
+  } catch (error) {
+    log.error({ error, leadgenId }, 'Error retrieving lead data');
+    return null;
+  }
+}
+
+/**
+ * Extract field value from lead field_data
+ */
+function extractFieldValue(fieldData: Array<{ name: string; values: string[] }>, fieldNames: string[]): string | null {
+  for (const name of fieldNames) {
+    const field = fieldData.find(f => f.name.toLowerCase() === name.toLowerCase());
+    if (field && field.values && field.values.length > 0) {
+      return field.values[0];
+    }
+  }
+  return null;
+}
+
+/**
+ * Normalize phone number (remove spaces, dashes, etc.)
+ */
+function normalizePhone(phone: string | null): string | null {
+  if (!phone) return null;
+  // Remove all non-digit characters except leading +
+  let normalized = phone.replace(/[^\d+]/g, '');
+  // If starts with 8, replace with 7 (Kazakhstan/Russia)
+  if (normalized.startsWith('8') && normalized.length === 11) {
+    normalized = '7' + normalized.substring(1);
+  }
+  return normalized;
+}
+
 export default async function facebookWebhooks(app: FastifyInstance) {
-  
+
+  /**
+   * Facebook Webhook Verification (GET)
+   *
+   * Facebook calls this endpoint to verify webhook subscription.
+   * Must respond with hub.challenge if hub.verify_token matches.
+   */
+  app.get('/facebook/webhook', async (req, res) => {
+    const query = req.query as {
+      'hub.mode'?: string;
+      'hub.verify_token'?: string;
+      'hub.challenge'?: string;
+    };
+
+    const mode = query['hub.mode'];
+    const token = query['hub.verify_token'];
+    const challenge = query['hub.challenge'];
+
+    log.info({ mode, hasToken: !!token, hasChallenge: !!challenge }, 'Facebook webhook verification request');
+
+    if (mode === 'subscribe' && token === FB_WEBHOOK_VERIFY_TOKEN) {
+      log.info('Webhook verification successful');
+      return res.status(200).send(challenge);
+    }
+
+    log.warn({ mode, token }, 'Webhook verification failed - invalid token');
+    return res.status(403).send('Forbidden');
+  });
+
+  /**
+   * Facebook Webhook Handler (POST)
+   *
+   * Handles leadgen events from Facebook Lead Forms.
+   * When a user submits a lead form, Facebook sends a webhook with leadgen_id.
+   * We then retrieve the lead data and create a lead in our database.
+   */
+  app.post('/facebook/webhook', async (req, res) => {
+    try {
+      const body = req.body as any;
+
+      log.info({
+        object: body?.object,
+        entryCount: body?.entry?.length
+      }, 'Received Facebook webhook');
+
+      // Verify this is a page webhook
+      if (body.object !== 'page') {
+        log.warn({ object: body.object }, 'Not a page webhook, ignoring');
+        return res.status(200).send('EVENT_RECEIVED');
+      }
+
+      // Process each entry
+      for (const entry of body.entry || []) {
+        const pageId = entry.id;
+
+        // Process each change (leadgen event)
+        for (const change of entry.changes || []) {
+          if (change.field !== 'leadgen') {
+            log.debug({ field: change.field }, 'Not a leadgen event, skipping');
+            continue;
+          }
+
+          const leadgenData = change.value;
+          const { leadgen_id, ad_id, form_id, page_id, adgroup_id } = leadgenData;
+
+          log.info({
+            leadgen_id,
+            ad_id,
+            form_id,
+            page_id: page_id || pageId,
+            adgroup_id
+          }, 'Processing leadgen event');
+
+          // Find user_account by page_id
+          const { data: userAccount, error: userError } = await supabase
+            .from('user_accounts')
+            .select('id, access_token, page_id')
+            .eq('page_id', page_id || pageId)
+            .maybeSingle();
+
+          if (userError || !userAccount) {
+            log.warn({ pageId: page_id || pageId }, 'User account not found for page_id');
+            continue;
+          }
+
+          const userAccountId = userAccount.id;
+          const accessToken = userAccount.access_token;
+
+          if (!accessToken) {
+            log.error({ userAccountId, pageId }, 'No access token for user account');
+            continue;
+          }
+
+          // Retrieve lead data from Facebook
+          const leadData = await retrieveLeadData(leadgen_id, accessToken);
+
+          if (!leadData || !leadData.field_data) {
+            log.error({ leadgen_id, userAccountId }, 'Failed to retrieve lead data');
+            continue;
+          }
+
+          // Extract fields from lead form
+          const fieldData = leadData.field_data;
+          const name = extractFieldValue(fieldData, ['full_name', 'name', 'first_name', 'имя', 'фио']);
+          const phone = normalizePhone(extractFieldValue(fieldData, ['phone_number', 'phone', 'телефон', 'номер телефона']));
+          const email = extractFieldValue(fieldData, ['email', 'email_address', 'почта', 'e-mail']);
+
+          if (!name && !phone) {
+            log.warn({ leadgen_id, fieldData }, 'Lead has no name or phone');
+            continue;
+          }
+
+          // Check for duplicate lead (same leadgen_id)
+          const { data: existingLead } = await supabase
+            .from('leads')
+            .select('id')
+            .eq('leadgen_id', leadgen_id)
+            .maybeSingle();
+
+          if (existingLead) {
+            log.info({ leadgen_id, existingLeadId: existingLead.id }, 'Duplicate leadgen_id, skipping');
+            continue;
+          }
+
+          // Resolve creative_id and direction_id from ad_id
+          let creativeId: string | null = null;
+          let directionId: string | null = null;
+          let accountId: string | null = null;
+
+          if (ad_id) {
+            const resolved = await resolveCreativeAndDirection(
+              ad_id,
+              null,
+              userAccountId,
+              null, // accountId for multi-account (resolved below)
+              app
+            );
+            creativeId = resolved.creativeId;
+            directionId = resolved.directionId;
+
+            // Get account_id from direction for multi-account support
+            if (directionId) {
+              const { data: direction } = await supabase
+                .from('account_directions')
+                .select('account_id')
+                .eq('id', directionId)
+                .maybeSingle();
+              accountId = direction?.account_id || null;
+            }
+
+            log.info({
+              ad_id,
+              creativeId,
+              directionId,
+              accountId
+            }, 'Resolved creative from lead form ad_id');
+          }
+
+          // Create lead in database
+          const { data: lead, error: insertError } = await supabase
+            .from('leads')
+            .insert({
+              user_account_id: userAccountId,
+              account_id: accountId,
+
+              // Lead form fields
+              name: name || 'Lead Form',
+              phone: phone || null,
+              email: email || null,
+              source_type: 'lead_form',
+
+              // Facebook tracking
+              source_id: ad_id || null,
+              creative_id: creativeId,
+              direction_id: directionId,
+              leadgen_id: leadgen_id,
+
+              // UTM for analytics compatibility
+              utm_source: 'facebook_lead_form',
+              utm_campaign: form_id || null,
+
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .select('id')
+            .single();
+
+          if (insertError || !lead) {
+            log.error({ error: insertError, leadgen_id }, 'Failed to insert lead');
+            continue;
+          }
+
+          log.info({
+            leadId: lead.id,
+            leadgen_id,
+            ad_id,
+            name,
+            phone,
+            creativeId,
+            directionId
+          }, 'Lead form lead created successfully');
+
+          // Log business event
+          await eventLogger.logBusinessEvent(
+            userAccountId,
+            'lead_received',
+            {
+              leadId: lead.id,
+              source: 'facebook_lead_form',
+              directionId,
+              creativeId,
+              leadgen_id
+            }
+          );
+        }
+      }
+
+      // Always respond 200 to Facebook
+      return res.status(200).send('EVENT_RECEIVED');
+
+    } catch (error: any) {
+      log.error({ error }, 'Error processing Facebook webhook');
+
+      logErrorToAdmin({
+        error_type: 'webhook',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'facebook_leadgen_webhook',
+        endpoint: '/facebook/webhook',
+        severity: 'critical'
+      }).catch(() => {});
+
+      // Always respond 200 to prevent Facebook from retrying
+      return res.status(200).send('EVENT_RECEIVED');
+    }
+  });
+
   /**
    * Facebook OAuth - Exchange code for access token
    * 
