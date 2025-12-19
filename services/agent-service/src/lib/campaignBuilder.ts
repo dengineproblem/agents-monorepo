@@ -1915,6 +1915,8 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
       return 'LINK_CLICKS';
     case 'site_leads':
       return 'OFFSITE_CONVERSIONS';
+    case 'lead_forms':
+      return 'LEAD_GENERATION';
     default:
       return 'CONVERSATIONS';
   }
@@ -1930,6 +1932,8 @@ export function getBillingEvent(objective: CampaignObjective): string {
     case 'instagram_traffic':
       return 'IMPRESSIONS';
     case 'site_leads':
+      return 'IMPRESSIONS';
+    case 'lead_forms':
       return 'IMPRESSIONS';
     default:
       return 'IMPRESSIONS';
@@ -2009,6 +2013,11 @@ export async function createAdSetInCampaign(params: {
   // Для Site Leads (OFFSITE_CONVERSIONS) добавляем destination_type
   if (optimization_goal === 'OFFSITE_CONVERSIONS') {
     body.destination_type = 'WEBSITE';
+  }
+
+  // Для Lead Forms (LEAD_GENERATION) - форма открывается в рекламе
+  if (optimization_goal === 'LEAD_GENERATION') {
+    body.destination_type = 'ON_AD';
   }
 
   if (promoted_object) {

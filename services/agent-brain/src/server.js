@@ -673,11 +673,14 @@ function computeLeadsFromActions(stat) {
       siteLeads = sumInt(siteLeads, v);
     }
   }
-  // ВАЖНО: Считаем только messagingLeads + siteLeads (БЕЗ formLeads)
-  // потому что offsite_conversion.fb_pixel_lead и lead - это ОДНИ И ТЕ ЖЕ лиды!
-  // Facebook возвращает пиксельные лиды как offsite_conversion.fb_pixel_lead,
-  // а также дублирует их в action_type "lead"
-  const leads = messagingLeads + siteLeads;
+  // Считаем все типы лидов:
+  // - messagingLeads: WhatsApp/Instagram conversations
+  // - siteLeads: offsite_conversion.fb_pixel_lead (пиксельные лиды)
+  // - formLeads: action_type 'lead' (Facebook Lead Forms / Instant Forms)
+  // Они НЕ дублируются если objective правильно настроен:
+  // - site_leads кампании: только siteLeads
+  // - lead_forms кампании: только formLeads
+  const leads = messagingLeads + siteLeads + formLeads;
   return { messagingLeads, qualityLeads, siteLeads, formLeads, leads };
 }
 
