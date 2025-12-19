@@ -17,7 +17,7 @@
  */
 
 import { createSession, MCP_CONFIG } from './index.js';
-import { detectIntentWithLLM, INTENT_DOMAIN_MAP } from '../chatAssistant/orchestrator/index.js';
+import { detectIntentWithLLM } from '../chatAssistant/orchestrator/index.js';
 import { getToolsByAgent } from './tools/definitions.js';
 import { formatMCPResponse } from './responseFormatter.js';
 import { logger } from '../lib/logger.js';
