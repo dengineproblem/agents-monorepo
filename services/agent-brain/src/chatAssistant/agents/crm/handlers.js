@@ -1,11 +1,30 @@
 /**
- * CRMAgent Handlers - Leads & Funnel
+ * CRMAgent Handlers - Leads, Funnel & amoCRM
  * Tool execution handlers for CRM operations
  */
 
 import { supabase } from '../../../lib/supabaseClient.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
+
+// Helper: get period days
+function getPeriodDays(period) {
+  return {
+    'last_3d': 3,
+    'last_7d': 7,
+    'last_14d': 14,
+    'last_30d': 30
+  }[period] || 7;
+}
+
+// Helper: get since date from period
+function getSinceDate(period) {
+  const days = getPeriodDays(period);
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
 
 export const crmHandlers = {
   async getLeads({ interest_level, funnel_stage, min_score, limit, search }, { userAccountId, adAccountDbId }) {
@@ -506,6 +525,547 @@ export const crmHandlers = {
       conversion_rate_formatted: `${conversion_rate}%`,
       attribution: 'crm_primary',
       period
+    };
+  },
+
+  // ============================================================
+  // AMOCRM HANDLERS
+  // ============================================================
+
+  /**
+   * getAmoCRMStatus - Check amoCRM connection status
+   */
+  async getAmoCRMStatus({}, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Check in ad_accounts first (multi-account mode), then user_accounts (legacy)
+    let tokenData = null;
+
+    if (dbAccountId) {
+      const { data } = await supabase
+        .from('ad_accounts')
+        .select('amocrm_subdomain, amocrm_access_token, amocrm_token_expires_at')
+        .eq('id', dbAccountId)
+        .maybeSingle();
+      tokenData = data;
+    }
+
+    if (!tokenData?.amocrm_access_token) {
+      const { data } = await supabase
+        .from('user_accounts')
+        .select('amocrm_subdomain, amocrm_access_token, amocrm_token_expires_at')
+        .eq('id', userAccountId)
+        .maybeSingle();
+      tokenData = data;
+    }
+
+    if (!tokenData?.amocrm_access_token) {
+      return {
+        success: true,
+        connected: false,
+        subdomain: null,
+        tokenValid: false,
+        message: 'amoCRM не подключён. Подключите в настройках профиля.'
+      };
+    }
+
+    const expiresAt = tokenData.amocrm_token_expires_at ? new Date(tokenData.amocrm_token_expires_at) : null;
+    const now = new Date();
+    const tokenValid = expiresAt ? expiresAt > now : false;
+    const expiresIn = expiresAt ? Math.round((expiresAt - now) / 1000 / 60) : null; // minutes
+
+    return {
+      success: true,
+      connected: true,
+      subdomain: tokenData.amocrm_subdomain,
+      tokenValid,
+      expiresAt: tokenData.amocrm_token_expires_at,
+      expiresInMinutes: expiresIn,
+      message: tokenValid
+        ? `amoCRM подключён (${tokenData.amocrm_subdomain}.amocrm.ru)`
+        : 'Токен amoCRM истёк. Требуется переподключение.'
+    };
+  },
+
+  /**
+   * getAmoCRMPipelines - Get amoCRM pipelines and stages
+   */
+  async getAmoCRMPipelines({ include_qualified_only }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    let query = supabase
+      .from('amocrm_pipeline_stages')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .order('pipeline_id')
+      .order('sort_order');
+
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    }
+
+    if (include_qualified_only) {
+      query = query.eq('is_qualified_stage', true);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      return { success: false, error: `Ошибка загрузки воронок: ${error.message}` };
+    }
+
+    if (!data || data.length === 0) {
+      return {
+        success: true,
+        pipelines: [],
+        total_stages: 0,
+        message: 'Воронки не найдены. Выполните синхронизацию через настройки amoCRM.'
+      };
+    }
+
+    // Group by pipeline
+    const pipelinesMap = new Map();
+    for (const stage of data) {
+      if (!pipelinesMap.has(stage.pipeline_id)) {
+        pipelinesMap.set(stage.pipeline_id, {
+          pipeline_id: stage.pipeline_id,
+          pipeline_name: stage.pipeline_name,
+          stages: []
+        });
+      }
+      pipelinesMap.get(stage.pipeline_id).stages.push({
+        status_id: stage.status_id,
+        status_name: stage.status_name,
+        status_color: stage.status_color,
+        is_qualified_stage: stage.is_qualified_stage,
+        sort_order: stage.sort_order
+      });
+    }
+
+    const pipelines = [...pipelinesMap.values()];
+
+    return {
+      success: true,
+      pipelines,
+      total_pipelines: pipelines.length,
+      total_stages: data.length,
+      qualified_stages: data.filter(s => s.is_qualified_stage).length
+    };
+  },
+
+  /**
+   * syncAmoCRMLeads - Sync lead statuses from amoCRM
+   * This is a WRITE operation that may take up to 30 seconds
+   */
+  async syncAmoCRMLeads({ direction_id, limit }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+    const syncLimit = limit || 100;
+
+    // Get leads that have amocrm_lead_id
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, name, phone, chat_id, amocrm_lead_id, current_status_id, is_qualified')
+      .eq('user_account_id', userAccountId)
+      .not('amocrm_lead_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(syncLimit);
+
+    if (dbAccountId) {
+      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      leadsQuery = leadsQuery.eq('direction_id', direction_id);
+    }
+
+    const { data: leads, error: leadsError } = await leadsQuery;
+
+    if (leadsError) {
+      return { success: false, error: `Ошибка загрузки лидов: ${leadsError.message}` };
+    }
+
+    if (!leads || leads.length === 0) {
+      return {
+        success: true,
+        total: 0,
+        synced: 0,
+        message: 'Нет лидов с привязкой к amoCRM для синхронизации'
+      };
+    }
+
+    // Get qualified stages for checking
+    const { data: qualifiedStages } = await supabase
+      .from('amocrm_pipeline_stages')
+      .select('pipeline_id, status_id')
+      .eq('user_account_id', userAccountId)
+      .eq('is_qualified_stage', true);
+
+    const qualifiedSet = new Set(
+      (qualifiedStages || []).map(s => `${s.pipeline_id}:${s.status_id}`)
+    );
+
+    // Note: Full sync requires amoCRM API call which is handled by agent-service
+    // Here we just return current state and suggest using the API endpoint
+    const qualifiedCount = leads.filter(l => l.is_qualified).length;
+    const withStatusCount = leads.filter(l => l.current_status_id).length;
+
+    return {
+      success: true,
+      total: leads.length,
+      with_status: withStatusCount,
+      qualified: qualifiedCount,
+      qualified_stages_configured: qualifiedStages?.length || 0,
+      message: `Найдено ${leads.length} лидов с amoCRM. ${qualifiedCount} квалифицированных.`,
+      hint: 'Для полной синхронизации используйте API: POST /api/amocrm/sync-leads',
+      summary: {
+        total_leads: leads.length,
+        with_amocrm_status: withStatusCount,
+        qualified: qualifiedCount,
+        qualification_rate: leads.length > 0 ? Math.round((qualifiedCount / leads.length) * 100) : 0
+      }
+    };
+  },
+
+  /**
+   * getAmoCRMKeyStageStats - Statistics by key stages for a direction
+   */
+  async getAmoCRMKeyStageStats({ direction_id, period }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+    const since = getSinceDate(period || 'last_7d');
+
+    // Get direction with key stages
+    const { data: direction, error: dirError } = await supabase
+      .from('account_directions')
+      .select(`
+        id, name,
+        key_stage_1_pipeline_id, key_stage_1_status_id,
+        key_stage_2_pipeline_id, key_stage_2_status_id,
+        key_stage_3_pipeline_id, key_stage_3_status_id
+      `)
+      .eq('id', direction_id)
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    if (dirError || !direction) {
+      return { success: false, error: 'Направление не найдено' };
+    }
+
+    // Get stage names from amocrm_pipeline_stages
+    const stageIds = [
+      { pipeline: direction.key_stage_1_pipeline_id, status: direction.key_stage_1_status_id },
+      { pipeline: direction.key_stage_2_pipeline_id, status: direction.key_stage_2_status_id },
+      { pipeline: direction.key_stage_3_pipeline_id, status: direction.key_stage_3_status_id }
+    ].filter(s => s.pipeline && s.status);
+
+    const { data: stageNames } = await supabase
+      .from('amocrm_pipeline_stages')
+      .select('pipeline_id, status_id, pipeline_name, status_name, status_color')
+      .eq('user_account_id', userAccountId);
+
+    const stageNameMap = new Map();
+    for (const s of stageNames || []) {
+      stageNameMap.set(`${s.pipeline_id}:${s.status_id}`, s);
+    }
+
+    // Get leads for this direction
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, reached_key_stage_1, reached_key_stage_2, reached_key_stage_3, is_qualified, created_at')
+      .eq('user_account_id', userAccountId)
+      .eq('direction_id', direction_id)
+      .gte('created_at', since);
+
+    if (dbAccountId) {
+      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: leads, error: leadsError } = await leadsQuery;
+
+    if (leadsError) {
+      return { success: false, error: `Ошибка загрузки лидов: ${leadsError.message}` };
+    }
+
+    const totalLeads = leads?.length || 0;
+
+    // Calculate stats for each key stage
+    const keyStages = [];
+    const recommendations = [];
+
+    for (let i = 1; i <= 3; i++) {
+      const pipelineId = direction[`key_stage_${i}_pipeline_id`];
+      const statusId = direction[`key_stage_${i}_status_id`];
+
+      if (!pipelineId || !statusId) continue;
+
+      const stageInfo = stageNameMap.get(`${pipelineId}:${statusId}`);
+      const reachedCount = leads?.filter(l => l[`reached_key_stage_${i}`] === true).length || 0;
+      const rate = totalLeads > 0 ? Math.round((reachedCount / totalLeads) * 100) : 0;
+
+      keyStages.push({
+        index: i,
+        pipeline_id: pipelineId,
+        status_id: statusId,
+        pipeline_name: stageInfo?.pipeline_name || 'Unknown',
+        status_name: stageInfo?.status_name || 'Unknown',
+        status_color: stageInfo?.status_color,
+        reached_count: reachedCount,
+        total_leads: totalLeads,
+        rate,
+        rate_formatted: `${rate}%`
+      });
+
+      // Generate recommendations
+      if (rate > 40) {
+        recommendations.push({
+          type: 'high_conversion',
+          stage_index: i,
+          reason: `Высокая конверсия в "${stageInfo?.status_name}": ${rate}%`,
+          action_label: 'Можно масштабировать трафик'
+        });
+      } else if (rate < 10 && totalLeads > 20) {
+        recommendations.push({
+          type: 'low_conversion',
+          stage_index: i,
+          reason: `Низкая конверсия в "${stageInfo?.status_name}": ${rate}%`,
+          action_label: 'Проверить качество трафика или воронку'
+        });
+      }
+    }
+
+    if (keyStages.length === 0) {
+      return {
+        success: true,
+        direction: { id: direction.id, name: direction.name },
+        key_stages: [],
+        total_leads: totalLeads,
+        message: 'Ключевые этапы не настроены для этого направления'
+      };
+    }
+
+    return {
+      success: true,
+      direction: { id: direction.id, name: direction.name },
+      period: period || 'last_7d',
+      total_leads: totalLeads,
+      key_stages: keyStages,
+      recommendations
+    };
+  },
+
+  /**
+   * getAmoCRMQualificationStats - Qualification statistics by creatives
+   */
+  async getAmoCRMQualificationStats({ direction_id, period }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+    const since = getSinceDate(period || 'last_7d');
+
+    // Get leads with creative_id
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id, creative_id, is_qualified, amocrm_lead_id')
+      .eq('user_account_id', userAccountId)
+      .not('amocrm_lead_id', 'is', null)
+      .gte('created_at', since);
+
+    if (dbAccountId) {
+      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
+    }
+    if (direction_id) {
+      leadsQuery = leadsQuery.eq('direction_id', direction_id);
+    }
+
+    const { data: leads, error: leadsError } = await leadsQuery;
+
+    if (leadsError) {
+      return { success: false, error: `Ошибка загрузки лидов: ${leadsError.message}` };
+    }
+
+    if (!leads || leads.length === 0) {
+      return {
+        success: true,
+        creatives: [],
+        total_leads: 0,
+        total_qualified: 0,
+        overall_rate: 0,
+        message: 'Нет лидов с amoCRM за указанный период'
+      };
+    }
+
+    // Get creative names
+    const creativeIds = [...new Set(leads.map(l => l.creative_id).filter(Boolean))];
+    const { data: creatives } = await supabase
+      .from('user_creatives')
+      .select('id, name')
+      .in('id', creativeIds);
+
+    const creativeNameMap = new Map();
+    for (const c of creatives || []) {
+      creativeNameMap.set(c.id, c.name);
+    }
+
+    // Group by creative
+    const statsMap = new Map();
+    for (const lead of leads) {
+      const cid = lead.creative_id || 'unknown';
+      if (!statsMap.has(cid)) {
+        statsMap.set(cid, { total: 0, qualified: 0 });
+      }
+      statsMap.get(cid).total++;
+      if (lead.is_qualified) {
+        statsMap.get(cid).qualified++;
+      }
+    }
+
+    // Build result with recommendations
+    const creativeStats = [];
+    const recommendations = [];
+
+    for (const [cid, stats] of statsMap) {
+      const rate = stats.total > 0 ? Math.round((stats.qualified / stats.total) * 100) : 0;
+      const creativeName = creativeNameMap.get(cid) || (cid === 'unknown' ? 'Без креатива' : cid);
+
+      creativeStats.push({
+        creative_id: cid,
+        creative_name: creativeName,
+        total_leads: stats.total,
+        qualified_leads: stats.qualified,
+        qualification_rate: rate,
+        qualification_rate_formatted: `${rate}%`
+      });
+
+      // Generate recommendations
+      if (rate < 15 && stats.total > 10) {
+        recommendations.push({
+          type: 'review_creative',
+          entity_id: cid,
+          creative_name: creativeName,
+          reason: `Квалификация ${rate}% при ${stats.total} лидах`,
+          action_label: 'Проверить таргетинг или креатив'
+        });
+      } else if (rate > 50 && stats.total >= 5) {
+        recommendations.push({
+          type: 'scale_creative',
+          entity_id: cid,
+          creative_name: creativeName,
+          reason: `Высокая квалификация ${rate}%`,
+          action_label: 'Масштабировать'
+        });
+      }
+    }
+
+    // Sort by total leads desc
+    creativeStats.sort((a, b) => b.total_leads - a.total_leads);
+
+    const totalLeads = leads.length;
+    const totalQualified = leads.filter(l => l.is_qualified).length;
+    const overallRate = totalLeads > 0 ? Math.round((totalQualified / totalLeads) * 100) : 0;
+
+    return {
+      success: true,
+      period: period || 'last_7d',
+      creatives: creativeStats,
+      total_leads: totalLeads,
+      total_qualified: totalQualified,
+      overall_rate: overallRate,
+      overall_rate_formatted: `${overallRate}%`,
+      recommendations
+    };
+  },
+
+  /**
+   * getAmoCRMLeadHistory - Get lead status change history in amoCRM
+   */
+  async getAmoCRMLeadHistory({ lead_id }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // Get lead first
+    let leadQuery = supabase
+      .from('leads')
+      .select('id, name, phone, amocrm_lead_id, current_status_id, current_pipeline_id, is_qualified')
+      .eq('id', lead_id)
+      .eq('user_account_id', userAccountId);
+
+    if (dbAccountId) {
+      leadQuery = leadQuery.eq('account_id', dbAccountId);
+    }
+
+    const { data: lead, error: leadError } = await leadQuery.maybeSingle();
+
+    if (leadError || !lead) {
+      return { success: false, error: 'Лид не найден' };
+    }
+
+    if (!lead.amocrm_lead_id) {
+      return {
+        success: true,
+        lead: { id: lead.id, name: lead.name, phone: lead.phone },
+        history: [],
+        message: 'Лид не связан с amoCRM'
+      };
+    }
+
+    // Get history
+    const { data: history, error: histError } = await supabase
+      .from('amocrm_lead_status_history')
+      .select('*')
+      .eq('lead_id', lead.id)
+      .order('changed_at', { ascending: false });
+
+    if (histError) {
+      return { success: false, error: `Ошибка загрузки истории: ${histError.message}` };
+    }
+
+    // Get stage names
+    const { data: stages } = await supabase
+      .from('amocrm_pipeline_stages')
+      .select('pipeline_id, status_id, pipeline_name, status_name')
+      .eq('user_account_id', userAccountId);
+
+    const stageMap = new Map();
+    for (const s of stages || []) {
+      stageMap.set(`${s.pipeline_id}:${s.status_id}`, s);
+    }
+
+    // Format history
+    const formattedHistory = (history || []).map(h => {
+      const fromStage = stageMap.get(`${h.from_pipeline_id}:${h.from_status_id}`);
+      const toStage = stageMap.get(`${h.to_pipeline_id}:${h.to_status_id}`);
+
+      return {
+        id: h.id,
+        changed_at: h.changed_at,
+        from: {
+          pipeline_id: h.from_pipeline_id,
+          status_id: h.from_status_id,
+          pipeline_name: fromStage?.pipeline_name || null,
+          status_name: fromStage?.status_name || null
+        },
+        to: {
+          pipeline_id: h.to_pipeline_id,
+          status_id: h.to_status_id,
+          pipeline_name: toStage?.pipeline_name || null,
+          status_name: toStage?.status_name || null
+        }
+      };
+    });
+
+    // Current status
+    const currentStage = stageMap.get(`${lead.current_pipeline_id}:${lead.current_status_id}`);
+
+    return {
+      success: true,
+      lead: {
+        id: lead.id,
+        name: lead.name,
+        phone: lead.phone,
+        amocrm_lead_id: lead.amocrm_lead_id,
+        is_qualified: lead.is_qualified,
+        current_status: currentStage ? {
+          pipeline_name: currentStage.pipeline_name,
+          status_name: currentStage.status_name
+        } : null
+      },
+      history: formattedHistory,
+      total_changes: formattedHistory.length
     };
   }
 };

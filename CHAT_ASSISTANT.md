@@ -61,11 +61,41 @@ User Request
 | `metaTools/formatters.js` | Загрузка и форматирование domain tools |
 | `metaTools/executor.js` | Выполнение tools с валидацией |
 | `metaTools/domainRouter.js` | Роутинг tool calls к domain agents |
-| `metaTools/domainAgents.js` | Domain agents для обработки raw data → ответ |
+| `metaTools/domainAgents.js` | Domain agents (gpt-4o-mini) для обработки raw data + recommendations → ответ |
 | `metaTools/contextGatherer.js` | Сбор контекста пользователя (directions, ad account) |
 | `orchestrator/metaOrchestrator.js` | Tool loop orchestrator |
 | `orchestrator/metaSystemPrompt.js` | System prompt для meta mode (с directions контекстом) |
 | `chatAssistant/config.js` | Feature flags |
+
+### Domain Agent Flow
+
+```
+Handler.execute(args, context)
+       │
+       ▼
+{success, data, recommendations}  ← Handlers возвращают recommendations
+       │
+       ▼
+┌─────────────────────────────────────────────┐
+│     Domain Agent (gpt-4o-mini)              │
+│  - Получает raw data + recommendations      │
+│  - Форматирует ответ с инсайтами           │
+│  - Использует domain-specific context       │
+└─────────────────────────────────────────────┘
+       │
+       ▼
+Готовый ответ для пользователя
+```
+
+**Recommendations структура:**
+```javascript
+{
+  type: 'scale_creative' | 'review_creative' | 'high_conversion' | 'low_qualification',
+  entity_id: 'uuid',
+  reason: 'Квалификация 65% при 20 лидах',
+  action_label: 'Масштабировать бюджет'
+}
+```
 
 ### Конфигурация Meta-Tools
 
@@ -232,19 +262,29 @@ User Request
 
 ---
 
-### CRMAgent — Лиды
+### CRMAgent — Лиды и amoCRM
 **Путь:** `services/agent-brain/src/chatAssistant/agents/crm/`
 
-**6 инструментов:**
+**12 инструментов (10 READ + 2 WRITE):**
 
 | Tool | Тип | Описание |
 |------|-----|----------|
-| `getLeads` | READ | Список лидов с фильтрами (температура, этап, score) |
-| `getLeadDetails` | READ | Детали лида (контакты, анализ диалога) |
-| `getFunnelStats` | READ | Статистика воронки продаж |
-| `getRevenueStats` | READ | Статистика выручки (сумма, ср. чек, конверсия, топ покупателей) |
-| `getSalesQuality` | READ | KPI ladder: продажи, qual_rate, конверсия |
-| `updateLeadStage` | WRITE | Изменение этапа воронки |
+| `getLeads` | READ | Список лидов с фильтрацией. Возвращает: name, phone, score (0-100), interest_level, funnel_stage, creative_id, direction_id, created_at |
+| `getLeadDetails` | READ | Полная карточка лида: контакты, этап воронки, score, temperature, источник, история WhatsApp, AI-анализ |
+| `getFunnelStats` | READ | Статистика воронки: лиды на каждом этапе, конверсии (%), распределение по температуре |
+| `getRevenueStats` | READ | Статистика выручки: total_revenue, sales_count, avg_check, revenue_by_direction |
+| `getSalesQuality` | READ | KPI ladder: total_leads, qualified_leads, sales_count, revenue, qualification_rate, CPL ladder |
+| `updateLeadStage` | WRITE | Изменить этап воронки. Обновляет БД, записывает в историю. НЕ синхронизирует с amoCRM |
+| `getAmoCRMStatus` | READ | Статус amoCRM: connected, subdomain, tokenValid, expiresAt. ОБЯЗАТЕЛЬНО перед другими amoCRM tools |
+| `getAmoCRMPipelines` | READ | Воронки и этапы amoCRM: pipelines[{id, name, stages[{id, name, sort, is_qualified}]}] |
+| `syncAmoCRMLeads` | WRITE ⚠️ | DANGEROUS: Синхронизация статусов из amoCRM. Обновляет current_status, is_qualified, reached_key_stage_1/2/3. 30+ сек |
+| `getAmoCRMKeyStageStats` | READ | Конверсия в key_stage_1/2/3: total_leads, reached_count, conversion_rate (%). Требует direction_id |
+| `getAmoCRMQualificationStats` | READ | Квалификация по креативам: qualified_count, qualification_rate (%). Включает recommendations |
+| `getAmoCRMLeadHistory` | READ | История переходов лида в amoCRM: все смены статусов с датами, время на каждом этапе |
+
+**Preflight check:** Перед выполнением amoCRM tools автоматически проверяется подключение.
+
+**Domain Agent Flow:** Handlers возвращают `{data, recommendations}` → Domain Agent (gpt-4o-mini) форматирует ответ с инсайтами.
 
 ---
 
@@ -332,6 +372,12 @@ const policy = policyEngine.resolvePolicy({
 | "Последние диалоги" | WhatsAppAgent | getDialogs |
 | "Лиды за сегодня" | CRMAgent | getLeads |
 | "Какая выручка за месяц?" | CRMAgent | getRevenueStats |
+| "Подключён ли амо?" | CRMAgent | getAmoCRMStatus |
+| "Воронки в amoCRM" | CRMAgent | getAmoCRMPipelines |
+| "Сколько квалифицированных лидов?" | CRMAgent | getAmoCRMQualificationStats |
+| "Статистика по ключевым этапам" | CRMAgent | getAmoCRMKeyStageStats |
+| "История лида в амо" | CRMAgent | getAmoCRMLeadHistory |
+| "Синхронизируй лиды с амо" | CRMAgent | syncAmoCRMLeads |
 
 ---
 
@@ -837,6 +883,10 @@ searchDialogSummaries({ query, tags, limit })
 | WhatsAppAgent | `analyzeDialog` | Возражения, интересы, боли клиента |
 | CRMAgent | `getFunnelStats` | Высокий отвал на этапе, много холодных лидов |
 | CRMAgent | `getLeadDetails` | Причины потери лидов |
+| CRMAgent | `getSalesQuality` | Низкая квалификация, высокий CPL ladder |
+| CRMAgent | `getAmoCRMQualificationStats` | Низкая/высокая квалификация по креативам (recommendations) |
+| CRMAgent | `getAmoCRMKeyStageStats` | Высокая/низкая конверсия в ключевые этапы |
+| CRMAgent | `syncAmoCRMLeads` | Ошибки синхронизации amoCRM |
 
 **Реализация в BaseAgent:**
 ```javascript
@@ -1316,7 +1366,7 @@ async pauseCampaign({ campaign_id }, { accessToken }) {
 |-------|--------|------|
 | AdsAgent | `ads-v2.2` | `ads/prompt.js` |
 | CreativeAgent | `creative-v1.0` | `creative/prompt.js` |
-| CRMAgent | `crm-v1.0` | `crm/prompt.js` |
+| CRMAgent | `crm-v2.0` | `crm/prompt.js` |
 | WhatsAppAgent | `whatsapp-v1.0` | `whatsapp/prompt.js` |
 
 **Интеграция:**

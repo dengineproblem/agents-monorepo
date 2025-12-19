@@ -9,19 +9,30 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'getCampaigns',
-    description: 'Получить список кампаний с метриками (расходы, лиды, CPL, CTR) за указанный период',
+    description: `Получить список FB кампаний с метриками за период.
+
+ВОЗВРАЩАЕТ:
+- campaigns[]: id, name, status, objective, daily_budget ($/день), spend ($), leads, cpl ($), impressions, clicks
+- total: общее количество кампаний
+- period: указанный период
+
+ИСПОЛЬЗУЙ когда нужно:
+- Узнать общую картину по рекламным кампаниям
+- Найти кампании с высоким/низким CPL
+- Проверить статусы (ACTIVE/PAUSED) кампаний
+- Получить расходы по всем кампаниям`,
     parameters: {
       type: 'object',
       properties: {
         period: {
           type: 'string',
           enum: ['today', 'yesterday', 'last_7d', 'last_30d'],
-          description: 'Период для метрик'
+          description: 'Период для метрик. today/yesterday - за 1 день, last_7d/last_30d - за неделю/месяц'
         },
         status: {
           type: 'string',
           enum: ['ACTIVE', 'PAUSED', 'all'],
-          description: 'Фильтр по статусу кампаний'
+          description: 'Фильтр по статусу. all - все кампании включая остановленные'
         }
       },
       required: ['period']
@@ -29,13 +40,24 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getCampaignDetails',
-    description: 'Получить детальную информацию о кампании включая адсеты и объявления',
+    description: `Получить СТРУКТУРУ кампании: адсеты и объявления внутри.
+
+ВОЗВРАЩАЕТ:
+- campaign: id, name, status, objective, daily_budget, created_time
+- campaign.adsets[]: id, name, status, daily_budget - все адсеты кампании
+- campaign.ads[]: id, name, status, creative_id - все объявления кампании
+
+ИСПОЛЬЗУЙ когда нужно:
+- Увидеть иерархию: кампания → адсеты → объявления
+- Узнать сколько адсетов/объявлений в кампании
+- Найти конкретный адсет или объявление по имени
+- НЕ возвращает метрики (spend, leads) - для метрик используй getCampaigns или getAdSets`,
     parameters: {
       type: 'object',
       properties: {
         campaign_id: {
           type: 'string',
-          description: 'ID кампании в Facebook'
+          description: 'ID кампании в Facebook (числовой, например 120212345678901234)'
         }
       },
       required: ['campaign_id']
@@ -43,18 +65,27 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getAdSets',
-    description: 'Получить список адсетов кампании с метриками',
+    description: `Получить адсеты конкретной кампании С МЕТРИКАМИ.
+
+ВОЗВРАЩАЕТ:
+- adsets[]: id, name, status, daily_budget ($/день), spend ($), leads, cpl ($)
+
+ИСПОЛЬЗУЙ когда нужно:
+- Сравнить эффективность адсетов внутри одной кампании
+- Найти адсеты с плохим CPL для оптимизации
+- Узнать распределение бюджета между адсетами
+- Нужен campaign_id - сначала используй getCampaigns чтобы его получить`,
     parameters: {
       type: 'object',
       properties: {
         campaign_id: {
           type: 'string',
-          description: 'ID кампании'
+          description: 'ID кампании в Facebook. Получи через getCampaigns'
         },
         period: {
           type: 'string',
           enum: ['today', 'yesterday', 'last_7d', 'last_30d'],
-          description: 'Период для метрик'
+          description: 'Период для метрик (по умолчанию last_7d)'
         }
       },
       required: ['campaign_id']
@@ -62,7 +93,20 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getSpendReport',
-    description: 'Получить отчёт по расходам за период с разбивкой по кампаниям или дням',
+    description: `Отчёт по расходам с разбивкой по дням или кампаниям.
+
+ВОЗВРАЩАЕТ:
+- data[]: объекты с метриками (spend, leads, impressions, clicks)
+  - При group_by='day': date, spend, leads, messagingLeads, siteLeads
+  - При group_by='campaign': campaign_id, campaign_name, spend, leads
+- totals: spend, leads, messagingLeads, siteLeads, cpl (агрегат)
+- period: указанный период
+
+ИСПОЛЬЗУЙ когда нужно:
+- Узнать динамику расходов по дням (group_by='day')
+- Сравнить расходы между кампаниями (group_by='campaign')
+- Получить общий расход за период (totals.spend)
+- Разделить лиды по типу: WhatsApp (messagingLeads) vs сайт (siteLeads)`,
     parameters: {
       type: 'object',
       properties: {
@@ -74,7 +118,7 @@ export const ADS_TOOLS = [
         group_by: {
           type: 'string',
           enum: ['campaign', 'day'],
-          description: 'Группировка данных'
+          description: 'Группировка: day - по дням, campaign - по кампаниям (по умолчанию day)'
         }
       },
       required: ['period']
@@ -86,32 +130,56 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'getDirections',
-    description: 'Получить список направлений (рекламных вертикалей) с метриками за период',
+    description: `Получить список НАПРАВЛЕНИЙ (наших внутренних рекламных вертикалей).
+
+ВАЖНО: 1 направление = 1 FB кампания. Направление - это наша бизнес-сущность.
+
+ВОЗВРАЩАЕТ:
+- directions[]: id (UUID), name, status (is_active), campaign_status (FB), budget_per_day ($), target_cpl ($), objective, campaign_id (FB), created_at
+- total: количество направлений
+
+ИСПОЛЬЗУЙ когда нужно:
+- Узнать какие рекламные направления есть у пользователя
+- Получить UUID направления для других tools (getDirectionCreatives, getDirectionMetrics)
+- Проверить связь направления с FB кампанией (campaign_id)
+- Узнать целевой CPL (target_cpl) для оценки эффективности`,
     parameters: {
       type: 'object',
       properties: {
         status: {
           type: 'string',
           enum: ['active', 'paused', 'all'],
-          description: 'Фильтр по статусу направлений'
+          description: 'Фильтр: active - только активные, paused - на паузе, all - все'
         },
         period: {
           type: 'string',
           enum: ['today', 'yesterday', 'last_7d', 'last_30d'],
-          description: 'Период для метрик'
+          description: 'Период для метрик (сейчас не используется, зарезервировано)'
         }
       }
     }
   },
   {
     name: 'getDirectionCreatives',
-    description: 'Получить список креативов направления с их статусами и метриками',
+    description: `Получить КРЕАТИВЫ направления (изображения/видео для рекламы).
+
+ВОЗВРАЩАЕТ:
+- creatives[]: id (UUID), name, status (ready/pending/rejected/archived), media_type (video/image), risk_score, performance_tier, created_at
+- total: количество креативов
+- status_counts: { ready, pending, rejected, archived } - разбивка по статусам
+- direction_id, direction_name: информация о направлении
+
+ИСПОЛЬЗУЙ когда нужно:
+- Узнать какие креативы есть для запуска
+- Найти готовые креативы (status='ready') для createAdSet
+- Проверить сколько креативов отклонено (rejected)
+- Оценить "риск" креатива (risk_score) перед запуском`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления из таблицы directions'
+          description: 'UUID направления. Получи через getDirections'
         }
       },
       required: ['direction_id']
@@ -119,18 +187,29 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getDirectionMetrics',
-    description: 'Получить метрики направления с разбивкой по дням за период',
+    description: `Получить ЕЖЕДНЕВНЫЕ метрики направления за период.
+
+ВОЗВРАЩАЕТ:
+- daily[]: date, spend, leads, impressions, clicks, cpl, ctr, cpm, active_creatives, active_ads, spend_delta (%), leads_delta (%), cpl_delta (%)
+- totals: spend, leads, impressions, clicks, cpl, ctr - агрегированные за период
+- source: 'rollup' (из предрасчитанной таблицы) или 'fallback_aggregation'
+
+ИСПОЛЬЗУЙ когда нужно:
+- Увидеть динамику метрик направления по дням
+- Оценить тренды: растёт CPL или падает (delta поля)
+- Проанализировать активность: сколько креативов/объявлений крутилось каждый день
+- Это основной источник для анализа эффективности направления`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления'
+          description: 'UUID направления. Получи через getDirections'
         },
         period: {
           type: 'string',
           enum: ['7d', '14d', '30d'],
-          description: 'Период для метрик'
+          description: 'Период: 7d - неделя, 14d - 2 недели, 30d - месяц'
         }
       },
       required: ['direction_id']
@@ -142,14 +221,32 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'getROIReport',
-    description: 'Получить отчёт по ROI (окупаемости) креативов за период. Показывает расходы, выручку, ROI%, лиды и конверсии',
+    description: `Получить ROI (окупаемость) креативов: расходы vs выручка с продаж.
+
+ИСТОЧНИК ДАННЫХ:
+- Расходы: из creative_metrics_history (spend по креативам)
+- Выручка: из purchases (покупки привязанные к креативам через лиды)
+- Курс: USD/KZT для конвертации
+
+ВОЗВРАЩАЕТ:
+- totalSpend, totalRevenue, totalROI (%) - общие показатели
+- totalLeads, totalConversions, conversionRate (%) - воронка
+- campaigns[]: id, name, media_type, spend, revenue, roi, leads, conversions
+- topPerformers[]: топ креативы по ROI
+- worstPerformers[]: худшие креативы
+- recommendations[]: автоматические рекомендации (type, entity_id, reason, action_label)
+
+ИСПОЛЬЗУЙ когда нужно:
+- Оценить финансовую эффективность рекламы
+- Найти самые прибыльные и убыточные креативы
+- Получить рекомендации по оптимизации бюджетов`,
     parameters: {
       type: 'object',
       properties: {
         period: {
           type: 'string',
           enum: ['last_7d', 'last_30d', 'last_90d', 'all'],
-          description: 'Период для анализа ROI'
+          description: 'Период: all - за всё время (рекомендуется для ROI)'
         },
         direction_id: {
           type: 'string',
@@ -166,23 +263,37 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getROIComparison',
-    description: 'Сравнить ROI между креативами или направлениями. Показывает топ N по окупаемости. По умолчанию за всё время.',
+    description: `Сравнение ROI между сущностями (креативами или направлениями).
+
+ВОЗВРАЩАЕТ:
+- items[]: id, name, spend, revenue, roi (%), leads - отсортированные по ROI desc
+- period: период сравнения
+- compare_by: тип группировки
+
+РЕЖИМЫ:
+- compare_by='creative': ROI каждого креатива отдельно
+- compare_by='direction': ROI агрегированный по направлениям
+
+ИСПОЛЬЗУЙ когда нужно:
+- Найти ТОП креативы по окупаемости для масштабирования
+- Сравнить эффективность направлений между собой
+- Определить куда перераспределить бюджет`,
     parameters: {
       type: 'object',
       properties: {
         period: {
           type: 'string',
           enum: ['all', 'last_7d', 'last_30d', 'last_90d'],
-          description: 'Период для сравнения (по умолчанию all - за всё время)'
+          description: 'Период сравнения. all - за всё время (лучше для ROI)'
         },
         compare_by: {
           type: 'string',
           enum: ['creative', 'direction'],
-          description: 'Группировка: по креативам или по направлениям'
+          description: 'Группировка: creative - по креативам, direction - по направлениям'
         },
         top_n: {
           type: 'number',
-          description: 'Количество топ позиций для вывода (по умолчанию 5)'
+          description: 'Сколько позиций вернуть (по умолчанию 5)'
         }
       },
       required: ['compare_by']
@@ -194,7 +305,20 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'getAdAccountStatus',
-    description: 'Проверить статус рекламного аккаунта: может ли крутить рекламу, причины блокировки, лимиты. Используй как pre-check перед анализом.',
+    description: `Проверить СТАТУС рекламного аккаунта Facebook.
+
+ВОЗВРАЩАЕТ:
+- status: ACTIVE, DISABLED, PAYMENT_REQUIRED, REVIEW, ERROR
+- can_run_ads: boolean - может ли аккаунт запускать рекламу
+- blocking_reasons[]: { code, message } - причины блокировки (ACCOUNT_DISABLED, BILLING, REVIEW, SPEND_LIMIT)
+- limits: { spend_cap, amount_spent, currency } - лимиты расхода
+- account: { id, name } - данные аккаунта
+
+ИСПОЛЬЗУЙ как PRE-CHECK перед:
+- Созданием адсетов/объявлений
+- Изменением бюджетов
+- Любыми write-операциями
+- Диагностикой почему реклама не крутится`,
     parameters: {
       type: 'object',
       properties: {}
@@ -202,13 +326,25 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getDirectionInsights',
-    description: 'Получить метрики направления с сравнением vs предыдущий период. Включает CPL, CTR, CPM, CPC и delta.',
+    description: `Аналитика направления С СРАВНЕНИЕМ vs предыдущий период.
+
+ВОЗВРАЩАЕТ:
+- current: spend, leads, impressions, clicks, cpl, ctr, cpm, cpc - текущий период
+- previous: те же метрики за предыдущий период (если compare='previous_same')
+- delta: spend_pct, leads_pct, cpl_pct, ctr_pct, cpm_pct - изменение в %
+- analysis: { target_cpl, cpl_vs_target_pct, cpl_status (normal/high/low), is_small_sample }
+
+ИСПОЛЬЗУЙ когда нужно:
+- Понять тренд: стало лучше или хуже vs прошлый период
+- Сравнить CPL с целевым показателем (target_cpl)
+- Получить готовую аналитику с delta-показателями
+- ОТЛИЧИЕ от getDirectionMetrics: здесь агрегат + сравнение, там - по дням`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления'
+          description: 'UUID направления. Получи через getDirections'
         },
         period: {
           type: 'string',
@@ -218,7 +354,7 @@ export const ADS_TOOLS = [
         compare: {
           type: 'string',
           enum: ['previous_same', 'previous_7d'],
-          description: 'Сравнить с предыдущим периодом той же длины'
+          description: 'previous_same - сравнить с таким же периодом до текущего'
         }
       },
       required: ['direction_id']
@@ -226,13 +362,29 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getLeadsEngagementRate',
-    description: 'Получить показатель вовлечённости лидов (2+ сообщения в WhatsApp). Высокий engagement = качественные лиды. Используй для оценки качества трафика из WhatsApp.',
+    description: `Качество лидов: сколько % написали 2+ сообщения в WhatsApp.
+
+ЛОГИКА:
+- Берём лиды за период из таблицы leads
+- Сопоставляем с dialogs по chat_id
+- Считаем у скольких messages_count >= 2
+
+ВОЗВРАЩАЕТ:
+- leads_total: всего лидов за период
+- leads_with_2plus_msgs: лидов с 2+ сообщениями
+- engagement_rate: % вовлечённости (leads_with_2plus_msgs / leads_total * 100)
+
+ИСПОЛЬЗУЙ когда нужно:
+- Оценить КАЧЕСТВО трафика из WhatsApp-кампаний
+- Сравнить engagement разных направлений
+- Высокий engagement = лиды реально заинтересованы
+- Низкий engagement = возможно бот-трафик или плохой таргетинг`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления для фильтрации (опционально)'
+          description: 'UUID направления (опционально - без него по всему аккаунту)'
         },
         period: {
           type: 'string',
@@ -249,52 +401,83 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'getAgentBrainActions',
-    description: 'Получить историю действий Brain Agent: изменения бюджетов, паузы адсетов, запуски креативов. Используй для анализа автоматической оптимизации.',
+    description: `История действий Brain Agent (автоматической оптимизации).
+
+ИСТОЧНИК: таблица brain_executions - логи всех запусков Brain Agent
+
+ВОЗВРАЩАЕТ:
+- actions[]: id, name, type (budget_change/pause/resume/launch), action_label, details: { old_budget, new_budget, reason, score, metrics }, executed_at, execution_id, execution_mode, status
+- total: общее количество действий
+- summary: { budget_changes, pauses, resumes, launches } - сводка по типам
+- executions_count: количество запусков Brain Agent
+
+ИСПОЛЬЗУЙ когда нужно:
+- Узнать что делал Brain Agent автоматически
+- Проверить какие бюджеты менялись и почему (reason)
+- Найти паузы/возобновления адсетов
+- Проанализировать эффективность автооптимизации`,
     parameters: {
       type: 'object',
       properties: {
         period: {
           type: 'string',
           enum: ['last_1d', 'last_3d', 'last_7d'],
-          description: 'Предустановленный период (если не указаны date_from/date_to)'
+          description: 'Preset период (игнорируется если указаны date_from/date_to)'
         },
         date_from: {
           type: 'string',
-          description: 'Начало периода в формате YYYY-MM-DD'
+          description: 'Начало периода YYYY-MM-DD (приоритет над period)'
         },
         date_to: {
           type: 'string',
-          description: 'Конец периода в формате YYYY-MM-DD'
+          description: 'Конец периода YYYY-MM-DD'
         },
         limit: {
           type: 'number',
-          description: 'Максимум действий для возврата (по умолчанию 20)'
+          description: 'Макс. действий в ответе (по умолчанию 20)'
         },
         action_type: {
           type: 'string',
           enum: ['all', 'budget_change', 'pause', 'resume', 'launch'],
-          description: 'Фильтр по типу действия'
+          description: 'Фильтр по типу: budget_change, pause, resume, launch или all'
         }
       }
     }
   },
   {
     name: 'triggerBrainOptimizationRun',
-    description: '⚠️ DANGEROUS: Запустить принудительный цикл Brain Agent оптимизации ПРЯМО СЕЙЧАС. Агент может изменить бюджеты, остановить или запустить адсеты.',
+    description: `⚠️ DANGEROUS: Запустить Brain Agent для анализа и оптимизации СЕЙЧАС.
+
+РЕЖИМЫ:
+1. dry_run=true: показать что БУДЕТ оптимизировано (preview)
+2. dry_run=false или не указан: INTERACTIVE MODE - генерирует proposals без автовыполнения
+
+INTERACTIVE MODE ВОЗВРАЩАЕТ:
+- mode: 'interactive'
+- proposals[]: предложения Brain Agent
+  - Каждый proposal: { type, entity_type, entity_id, entity_name, action, reason, metrics, current_value, proposed_value }
+- context: данные использованные для анализа
+- instructions: как выполнить предложенные действия
+
+ПОСЛЕ ПОЛУЧЕНИЯ proposals:
+- LLM анализирует предложения и объясняет пользователю
+- Для выполнения использует: pauseAdSet, updateBudget, createAdSet и т.д.
+
+НЕ ВЫПОЛНЯЕТ действия автоматически - только предлагает!`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления для оптимизации (опционально — если не указано, оптимизирует весь аккаунт)'
+          description: 'UUID направления (опционально - без него анализирует весь аккаунт)'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет сделано без выполнения'
+          description: 'true = только preview, false/не указан = interactive mode с proposals'
         },
         reason: {
           type: 'string',
-          description: 'Причина запуска (для логирования)'
+          description: 'Причина запуска для логов'
         }
       }
     }
@@ -305,21 +488,38 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'pauseAdSet',
-    description: '⚠️ DANGEROUS: Поставить адсет на паузу',
+    description: `⚠️ DANGEROUS: Поставить адсет на паузу (status → PAUSED).
+
+ВЫПОЛНЯЕТ: FB Graph API POST /{adset_id} с status=PAUSED
+
+ВОЗВРАЩАЕТ:
+- verification: { verified, before, after, warning }
+  - verified: true если статус успешно изменён
+  - before/after: статус до и после
+  - warning: если статус не подтверждён
+
+dry_run=true ВОЗВРАЩАЕТ:
+- preview: { adset_id, current_status, action, new_status }
+- warning: что будет сделано
+
+ИСПОЛЬЗУЙ когда:
+- Адсет показывает плохие метрики (высокий CPL)
+- Нужно остановить трату бюджета
+- Brain Agent рекомендовал паузу`,
     parameters: {
       type: 'object',
       properties: {
         adset_id: {
           type: 'string',
-          description: 'ID адсета для паузы'
+          description: 'FB ID адсета (числовой). Получи через getAdSets или getCampaignDetails'
         },
         reason: {
           type: 'string',
-          description: 'Причина паузы'
+          description: 'Причина паузы для логов (рекомендуется указать)'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет изменено без выполнения'
+          description: 'true = только показать что будет сделано'
         }
       },
       required: ['adset_id']
@@ -327,13 +527,25 @@ export const ADS_TOOLS = [
   },
   {
     name: 'resumeAdSet',
-    description: 'Возобновить приостановленный адсет',
+    description: `Возобновить адсет (status → ACTIVE).
+
+ВЫПОЛНЯЕТ: FB Graph API POST /{adset_id} с status=ACTIVE
+
+ВОЗВРАЩАЕТ:
+- verification: { verified, before, after, warning }
+  - verified: true если статус успешно изменён на ACTIVE
+  - before/after: статус до и после
+
+ИСПОЛЬЗУЙ когда:
+- Нужно включить ранее остановленный адсет
+- Brain Agent рекомендовал возобновить
+- После исправления проблем с креативами/таргетингом`,
     parameters: {
       type: 'object',
       properties: {
         adset_id: {
           type: 'string',
-          description: 'ID адсета для возобновления'
+          description: 'FB ID адсета. Получи через getAdSets или getCampaignDetails'
         }
       },
       required: ['adset_id']
@@ -341,21 +553,35 @@ export const ADS_TOOLS = [
   },
   {
     name: 'pauseAd',
-    description: '⚠️ DANGEROUS: Поставить конкретное объявление на паузу',
+    description: `⚠️ DANGEROUS: Поставить ОБЪЯВЛЕНИЕ (ad) на паузу.
+
+ОТЛИЧИЕ от pauseAdSet:
+- pauseAdSet останавливает весь адсет (все объявления внутри)
+- pauseAd останавливает ОДНО конкретное объявление
+
+ВЫПОЛНЯЕТ: FB Graph API POST /{ad_id} с status=PAUSED
+
+ВОЗВРАЩАЕТ:
+- verification: { verified, before, after, warning }
+
+ИСПОЛЬЗУЙ когда:
+- Нужно остановить конкретный креатив внутри адсета
+- Объявление отклонено Facebook (rejected)
+- Креатив показывает плохие метрики, но адсет в целом ОК`,
     parameters: {
       type: 'object',
       properties: {
         ad_id: {
           type: 'string',
-          description: 'ID объявления в Facebook'
+          description: 'FB ID объявления. Получи через getCampaignDetails'
         },
         reason: {
           type: 'string',
-          description: 'Причина паузы'
+          description: 'Причина паузы для логов'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет изменено без выполнения'
+          description: 'true = только preview'
         }
       },
       required: ['ad_id']
@@ -363,13 +589,22 @@ export const ADS_TOOLS = [
   },
   {
     name: 'resumeAd',
-    description: 'Возобновить приостановленное объявление',
+    description: `Возобновить объявление (status → ACTIVE).
+
+ВЫПОЛНЯЕТ: FB Graph API POST /{ad_id} с status=ACTIVE
+
+ВОЗВРАЩАЕТ:
+- verification: { verified, before, after, warning }
+
+ИСПОЛЬЗУЙ когда:
+- Нужно включить ранее остановленное объявление
+- После исправления проблем с креативом`,
     parameters: {
       type: 'object',
       properties: {
         ad_id: {
           type: 'string',
-          description: 'ID объявления для возобновления'
+          description: 'FB ID объявления. Получи через getCampaignDetails'
         }
       },
       required: ['ad_id']
@@ -377,21 +612,39 @@ export const ADS_TOOLS = [
   },
   {
     name: 'updateBudget',
-    description: '⚠️ DANGEROUS: Изменить дневной бюджет адсета. Изменение бюджета > 50% требует подтверждения.',
+    description: `⚠️ DANGEROUS: Изменить дневной бюджет АДСЕТА.
+
+ВЫПОЛНЯЕТ: FB Graph API POST /{adset_id} с daily_budget=new_budget_cents
+
+ОГРАНИЧЕНИЯ:
+- Минимум: 500 центов ($5)
+- Изменение > 50% от текущего выдаёт warning
+
+ВОЗВРАЩАЕТ:
+- verification: { verified, before ($X.XX), after ($X.XX), warning }
+
+dry_run=true ВОЗВРАЩАЕТ:
+- preview: { adset_id, current_budget, new_budget, change_percent }
+- warnings: если изменение > 50%
+
+ИСПОЛЬЗУЙ когда:
+- Brain Agent рекомендовал изменить бюджет
+- Нужно масштабировать успешный адсет
+- Нужно снизить расходы на неэффективный адсет`,
     parameters: {
       type: 'object',
       properties: {
         adset_id: {
           type: 'string',
-          description: 'ID адсета'
+          description: 'FB ID адсета'
         },
         new_budget_cents: {
           type: 'number',
-          description: 'Новый дневной бюджет в центах (минимум 500, т.е. $5)'
+          description: 'Новый бюджет в ЦЕНТАХ (1000 = $10, минимум 500 = $5)'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет изменено без выполнения'
+          description: 'true = только preview с расчётом изменения'
         }
       },
       required: ['adset_id', 'new_budget_cents']
@@ -399,30 +652,52 @@ export const ADS_TOOLS = [
   },
   {
     name: 'createAdSet',
-    description: '⚠️ DANGEROUS: Создать новый адсет в кампании направления. Использует настройки таргетинга из direction settings. Автоматически создаёт объявления для указанных креативов.',
+    description: `⚠️ DANGEROUS: Создать НОВЫЙ адсет с объявлениями в кампании направления.
+
+ЛОГИКА:
+1. Берёт campaign_id из direction.fb_campaign_id
+2. Берёт таргетинг из default_ad_settings (cities, gender, objective)
+3. Создаёт адсет через FB Graph API
+4. Для каждого креатива создаёт объявление внутри адсета
+5. Сохраняет маппинг в ad_creative_mapping для трекинга лидов
+
+ВОЗВРАЩАЕТ:
+- adset_id: FB ID созданного адсета
+- adset_name: название
+- daily_budget: бюджет в $
+- ads_created: количество объявлений
+- ads[]: { ad_id, name, creative_id, creative_title }
+
+dry_run=true ВОЗВРАЩАЕТ:
+- preview: { campaign_id, direction_id, adset_name, daily_budget, targeting, creatives[] }
+
+ТРЕБОВАНИЯ:
+- У направления должен быть fb_campaign_id
+- Должны быть настроены default_ad_settings
+- Креативы должны быть status='ready'`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления (для получения campaign_id и настроек таргетинга)'
+          description: 'UUID направления. Получи через getDirections'
         },
         creative_ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Массив UUID креативов для запуска в адсете'
+          description: 'UUID креативов. Получи через getDirectionCreatives (только status=ready)'
         },
         daily_budget_cents: {
           type: 'number',
-          description: 'Дневной бюджет адсета в центах (если не указан — используется default из настроек направления)'
+          description: 'Бюджет в центах (опционально - по умолчанию из настроек направления)'
         },
         adset_name: {
           type: 'string',
-          description: 'Название адсета (опционально — генерируется автоматически)'
+          description: 'Название (опционально - генерируется как "Direction - YYYY-MM-DD")'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет создано без выполнения'
+          description: 'true = только preview'
         }
       },
       required: ['direction_id', 'creative_ids']
@@ -430,25 +705,46 @@ export const ADS_TOOLS = [
   },
   {
     name: 'createAd',
-    description: '⚠️ DANGEROUS: Создать объявление в существующем адсете с указанным креативом.',
+    description: `⚠️ DANGEROUS: Создать ОДНО объявление в существующем адсете.
+
+ОТЛИЧИЕ от createAdSet:
+- createAdSet создаёт адсет + все объявления сразу
+- createAd добавляет объявление в УЖЕ существующий адсет
+
+ЛОГИКА:
+1. Проверяет креатив (status='ready')
+2. Определяет objective адсета (через optimization_goal)
+3. Выбирает нужный fb_creative_id (whatsapp/instagram_traffic/site_leads)
+4. Создаёт объявление через FB Graph API
+5. Сохраняет маппинг в ad_creative_mapping
+
+ВОЗВРАЩАЕТ:
+- ad_id: FB ID созданного объявления
+- ad_name: название
+- adset_id, adset_name: родительский адсет
+- creative_id, creative_title: использованный креатив
+
+ИСПОЛЬЗУЙ когда:
+- Нужно добавить новый креатив в работающий адсет
+- После создания нового креатива`,
     parameters: {
       type: 'object',
       properties: {
         adset_id: {
           type: 'string',
-          description: 'ID адсета в Facebook'
+          description: 'FB ID адсета. Получи через getAdSets или getCampaignDetails'
         },
         creative_id: {
           type: 'string',
-          description: 'UUID креатива из таблицы creatives'
+          description: 'UUID креатива. Получи через getDirectionCreatives (status=ready)'
         },
         ad_name: {
           type: 'string',
-          description: 'Название объявления (опционально — генерируется автоматически)'
+          description: 'Название (опционально - генерируется как "Ad - {creative_title}")'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет создано без выполнения'
+          description: 'true = только preview'
         }
       },
       required: ['adset_id', 'creative_id']
@@ -460,21 +756,34 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'updateDirectionBudget',
-    description: '⚠️ DANGEROUS: Изменить суточный бюджет направления.',
+    description: `⚠️ DANGEROUS: Изменить бюджет НАПРАВЛЕНИЯ (и связанной FB кампании).
+
+ВЫПОЛНЯЕТ:
+1. Обновляет daily_budget_cents в таблице account_directions
+2. Обновляет daily_budget в FB кампании через Graph API
+
+ВОЗВРАЩАЕТ:
+- direction: { id, name, old_budget, new_budget }
+- campaign: { id, budget_updated }
+- verification: { db_updated, fb_updated }
+
+ИСПОЛЬЗУЙ когда:
+- Нужно изменить бюджет на уровне направления (а не адсета)
+- Это влияет на ВСЕ адсеты внутри кампании направления`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления'
+          description: 'UUID направления. Получи через getDirections'
         },
         new_budget: {
           type: 'number',
-          description: 'Новый суточный бюджет в долларах (например: 50)'
+          description: 'Новый бюджет в ДОЛЛАРАХ (50 = $50/день)'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет изменено без выполнения'
+          description: 'true = только preview'
         }
       },
       required: ['direction_id', 'new_budget']
@@ -482,17 +791,29 @@ export const ADS_TOOLS = [
   },
   {
     name: 'updateDirectionTargetCPL',
-    description: 'Изменить целевой CPL направления. Используется для автоматической оптимизации.',
+    description: `Изменить целевой CPL направления (только в БД, не в FB).
+
+ВЫПОЛНЯЕТ: UPDATE account_directions SET target_cpl_cents = X
+
+ЗАЧЕМ target_cpl:
+- Brain Agent использует для оценки эффективности адсетов
+- getDirectionInsights сравнивает текущий CPL с целевым
+- Влияет на рекомендации по оптимизации
+
+ВОЗВРАЩАЕТ:
+- direction: { id, name, old_target_cpl, new_target_cpl }
+
+НЕ DANGEROUS: изменяет только настройку в БД, не влияет на FB`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления'
+          description: 'UUID направления. Получи через getDirections'
         },
         target_cpl: {
           type: 'number',
-          description: 'Новый целевой CPL в долларах (например: 15.50)'
+          description: 'Целевой CPL в ДОЛЛАРАХ (15.50 = $15.50 за лид)'
         }
       },
       required: ['direction_id', 'target_cpl']
@@ -500,21 +821,37 @@ export const ADS_TOOLS = [
   },
   {
     name: 'pauseDirection',
-    description: '⚠️ DANGEROUS: Поставить направление на паузу. Паузит привязанную FB кампанию и все адсеты.',
+    description: `⚠️ DANGEROUS: Поставить НАПРАВЛЕНИЕ на паузу (останавливает FB кампанию).
+
+ВЫПОЛНЯЕТ:
+1. UPDATE account_directions SET is_active = false
+2. FB Graph API POST /{campaign_id} с status=PAUSED
+
+ВАЖНО: Останавливает ВСЮ кампанию со ВСЕМИ адсетами внутри!
+
+ВОЗВРАЩАЕТ:
+- direction: { id, name, is_active: false }
+- campaign: { id, status: 'PAUSED' }
+- verification: { db_updated, fb_updated }
+
+ИСПОЛЬЗУЙ когда:
+- Нужно полностью остановить рекламу по направлению
+- Проблемы с качеством лидов
+- Бюджет исчерпан`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления'
+          description: 'UUID направления. Получи через getDirections'
         },
         reason: {
           type: 'string',
-          description: 'Причина паузы (для логирования)'
+          description: 'Причина паузы для логов'
         },
         dry_run: {
           type: 'boolean',
-          description: 'Preview mode — показать что будет изменено без выполнения'
+          description: 'true = только preview'
         }
       },
       required: ['direction_id']
@@ -522,13 +859,26 @@ export const ADS_TOOLS = [
   },
   {
     name: 'resumeDirection',
-    description: 'Возобновить направление. Включает привязанную FB кампанию.',
+    description: `Возобновить НАПРАВЛЕНИЕ (включает FB кампанию).
+
+ВЫПОЛНЯЕТ:
+1. UPDATE account_directions SET is_active = true
+2. FB Graph API POST /{campaign_id} с status=ACTIVE
+
+ВОЗВРАЩАЕТ:
+- direction: { id, name, is_active: true }
+- campaign: { id, status: 'ACTIVE' }
+- verification: { db_updated, fb_updated }
+
+ИСПОЛЬЗУЙ когда:
+- Нужно возобновить ранее остановленное направление
+- После решения проблем`,
     parameters: {
       type: 'object',
       properties: {
         direction_id: {
           type: 'string',
-          description: 'UUID направления'
+          description: 'UUID направления. Получи через getDirections'
         }
       },
       required: ['direction_id']
@@ -540,26 +890,47 @@ export const ADS_TOOLS = [
   // ============================================================
   {
     name: 'customFbQuery',
-    description: 'Выполнить кастомный запрос к Facebook API для нестандартных метрик. LLM строит API запрос, отправляет в FB, при ошибке пробует исправить до 3 раз.',
+    description: `Кастомный запрос к FB API через LLM (для нестандартных метрик).
+
+КАК РАБОТАЕТ:
+1. LLM (gpt-4o-mini) анализирует user_request
+2. LLM строит FB Graph API запрос (endpoint, fields, params)
+3. Выполняем запрос к FB
+4. При ошибке: LLM исправляет запрос, retry (до 3 раз)
+
+ВОЗВРАЩАЕТ:
+- query: { endpoint, fields, params, explanation }
+- data: результат FB API
+- attempts: сколько попыток потребовалось
+
+ДОСТУПНЫЕ endpoints:
+- /insights: spend, impressions, clicks, cpm, cpc, ctr, actions
+- /campaigns, /adsets, /ads: структура аккаунта
+- breakdowns: age, gender, country, device_platform, placement
+
+ИСПОЛЬЗУЙ когда:
+- Нужны метрики которых нет в других tools
+- Нестандартные разбивки (по возрасту, полу, устройствам)
+- Специфичные FB API запросы`,
     parameters: {
       type: 'object',
       properties: {
         user_request: {
           type: 'string',
-          description: 'Описание того, что хочет узнать пользователь (на естественном языке)'
+          description: 'Что нужно узнать на естественном языке (например: "разбивка по возрасту за неделю")'
         },
         entity_type: {
           type: 'string',
           enum: ['account', 'campaign', 'adset', 'ad'],
-          description: 'Уровень сущности для запроса (по умолчанию account)'
+          description: 'Уровень: account (весь аккаунт), campaign, adset или ad'
         },
         entity_id: {
           type: 'string',
-          description: 'ID сущности (campaign_id, adset_id, ad_id). Если не указан — используется ad_account'
+          description: 'ID сущности (если не account). Получи через getCampaigns/getAdSets'
         },
         period: {
           type: 'string',
-          description: 'Период для метрик (today, yesterday, last_7d, last_30d или конкретная дата)'
+          description: 'Период: today, yesterday, last_7d, last_30d или дата YYYY-MM-DD'
         }
       },
       required: ['user_request']

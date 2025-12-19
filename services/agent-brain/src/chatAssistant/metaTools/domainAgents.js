@@ -38,8 +38,8 @@ export async function processDomainResults(domain, toolCalls, rawResults, contex
   // Format tool results for LLM
   const toolResultsText = formatToolResults(rawResults);
 
-  // Build user message with context
-  const userPrompt = buildDomainUserPrompt(userMessage, toolCalls, toolResultsText, context);
+  // Build user message with context and recommendations
+  const userPrompt = buildDomainUserPrompt(userMessage, toolCalls, toolResultsText, context, rawResults);
 
   try {
     const response = await openai.chat.completions.create({
@@ -165,11 +165,35 @@ const DOMAIN_CONTEXT_BUILDERS = {
     const parts = ['\n## Контекст воронки'];
 
     if (context.directions?.length > 0) {
-      parts.push('\n### Источники лидов (направления):');
+      parts.push('\n### Направления (источники лидов):');
       for (const dir of context.directions) {
-        parts.push(`- ${dir.name}`);
+        parts.push(`- **${dir.name}** (ID: ${dir.id})`);
+        if (dir.key_stage_1_status_id) parts.push('  - Ключевые этапы настроены');
       }
     }
+
+    // amoCRM integration context
+    if (context.integrations?.crm) {
+      parts.push('\n### amoCRM интеграция');
+      parts.push('- amoCRM подключён');
+      parts.push('- Доступна статистика квалификации');
+      parts.push('- Доступна история статусов лидов');
+    }
+
+    parts.push('\n### Температура лидов');
+    parts.push('- 🔥 **Hot**: score 70-100, готов к сделке');
+    parts.push('- ⚡ **Warm**: score 40-69, есть интерес');
+    parts.push('- ❄️ **Cold**: score 0-39, требует прогрева');
+
+    parts.push('\n### Квалификация (amoCRM)');
+    parts.push('- `is_qualified` — лид прошёл квалификационный этап');
+    parts.push('- `reached_key_stage_1/2/3` — достиг ключевого этапа (навсегда)');
+
+    parts.push('\n### Формат ответа');
+    parts.push('- Используй 🔥⚡❄️ для температуры');
+    parts.push('- Показывай qualification_rate в %');
+    parts.push('- **ВАЖНО**: используй `recommendations` из данных для инсайтов');
+    parts.push('- Группируй по креативам/направлениям если есть');
 
     return parts.join('\n');
   },
@@ -182,7 +206,7 @@ const DOMAIN_CONTEXT_BUILDERS = {
 /**
  * Build user prompt for domain agent
  */
-function buildDomainUserPrompt(userMessage, toolCalls, toolResultsText, context) {
+function buildDomainUserPrompt(userMessage, toolCalls, toolResultsText, context, rawResults) {
   const parts = [];
 
   // Original question
@@ -199,12 +223,47 @@ function buildDomainUserPrompt(userMessage, toolCalls, toolResultsText, context)
   parts.push('\n## Полученные данные');
   parts.push(toolResultsText);
 
+  // Extract recommendations from tool results
+  const recommendations = extractRecommendations(rawResults);
+  if (recommendations.length > 0) {
+    parts.push('\n## 🎯 Рекомендации из анализа (ИСПОЛЬЗУЙ ИХ!)');
+    for (const rec of recommendations) {
+      const icon = rec.type === 'scale_creative' || rec.type === 'high_conversion' ? '✅' : '⚠️';
+      parts.push(`- ${icon} **${rec.reason}** → ${rec.action_label}`);
+    }
+  }
+
   // Instructions
   parts.push('\n---');
   parts.push('Проанализируй данные и ответь на вопрос пользователя.');
+  parts.push('Если есть рекомендации выше — обязательно включи их в ответ.');
   parts.push('Если данных недостаточно — укажи что ещё нужно запросить.');
 
   return parts.join('\n');
+}
+
+/**
+ * Extract recommendations from raw tool results
+ */
+function extractRecommendations(rawResults) {
+  const recommendations = [];
+
+  for (const [toolName, data] of Object.entries(rawResults || {})) {
+    const result = data?.result;
+    if (!result) continue;
+
+    // Direct recommendations array
+    if (Array.isArray(result.recommendations)) {
+      recommendations.push(...result.recommendations);
+    }
+
+    // Nested in data
+    if (result.data?.recommendations) {
+      recommendations.push(...result.data.recommendations);
+    }
+  }
+
+  return recommendations;
 }
 
 /**

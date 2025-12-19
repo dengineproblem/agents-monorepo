@@ -4,7 +4,7 @@
  */
 
 import { BaseAgent } from '../BaseAgent.js';
-import { CRM_TOOLS, CRM_WRITE_TOOLS } from './tools.js';
+import { CRM_TOOLS, CRM_WRITE_TOOLS, CRM_DANGEROUS_TOOLS, AMOCRM_TOOLS } from './tools.js';
 import { crmHandlers } from './handlers.js';
 import { buildCRMPrompt, PROMPT_VERSION } from './prompt.js';
 
@@ -82,13 +82,97 @@ export class CRMAgent extends BaseAgent {
       }
     }
 
+    // amoCRM: Capture from getAmoCRMQualificationStats - low qualification creatives
+    if (toolName === 'getAmoCRMQualificationStats' && result.creatives) {
+      const lowQualCreatives = result.creatives.filter(c => c.rate < 20 && c.total >= 5);
+      if (lowQualCreatives.length > 0) {
+        notes.push({
+          text: `Низкая квалификация (${lowQualCreatives.length} креативов < 20%)`,
+          source: { type: 'tool', ref: 'getAmoCRMQualificationStats' },
+          importance: 0.8
+        });
+      }
+
+      const highQualCreatives = result.creatives.filter(c => c.rate > 50 && c.total >= 5);
+      if (highQualCreatives.length > 0) {
+        notes.push({
+          text: `Высокая квалификация: ${highQualCreatives.map(c => c.name || c.id).join(', ')}`,
+          source: { type: 'tool', ref: 'getAmoCRMQualificationStats' },
+          importance: 0.7
+        });
+      }
+    }
+
+    // amoCRM: Capture from getAmoCRMKeyStageStats - funnel health
+    if (toolName === 'getAmoCRMKeyStageStats' && result.key_stages) {
+      for (const stage of result.key_stages) {
+        if (stage.rate > 40) {
+          notes.push({
+            text: `Высокая конверсия в "${stage.name}": ${stage.rate}%`,
+            source: { type: 'tool', ref: 'getAmoCRMKeyStageStats' },
+            importance: 0.7
+          });
+        }
+        if (stage.rate < 10 && stage.total_leads > 10) {
+          notes.push({
+            text: `Низкая конверсия в "${stage.name}": ${stage.rate}% — узкое место воронки`,
+            source: { type: 'tool', ref: 'getAmoCRMKeyStageStats' },
+            importance: 0.8
+          });
+        }
+      }
+    }
+
+    // amoCRM: Capture from syncAmoCRMLeads - sync issues
+    if (toolName === 'syncAmoCRMLeads' && result.errors && result.errors > 0) {
+      notes.push({
+        text: `Ошибки синхронизации amoCRM: ${result.errors} из ${result.total}`,
+        source: { type: 'tool', ref: 'syncAmoCRMLeads' },
+        importance: 0.9
+      });
+    }
+
     return notes;
+  }
+
+  /**
+   * Execute tool with preflight check for amoCRM tools
+   */
+  async executeTool(toolName, args, context) {
+    // Preflight check для amoCRM tools (кроме getAmoCRMStatus)
+    if (AMOCRM_TOOLS.includes(toolName) && toolName !== 'getAmoCRMStatus') {
+      const status = await this.handlers.getAmoCRMStatus({}, context);
+
+      if (!status.connected) {
+        return {
+          success: false,
+          error: 'amoCRM не подключён. Подключите интеграцию в настройках.',
+          amocrm_status: status
+        };
+      }
+
+      if (!status.tokenValid) {
+        return {
+          success: false,
+          error: 'Токен amoCRM истёк. Требуется переподключение.',
+          amocrm_status: status
+        };
+      }
+    }
+
+    // Call parent executeTool
+    return super.executeTool(toolName, args, context);
   }
 
   /**
    * Check if tool requires approval based on mode
    */
   shouldRequireApproval(toolName, mode) {
+    // Dangerous tools ALWAYS require approval
+    if (CRM_DANGEROUS_TOOLS.includes(toolName)) {
+      return true;
+    }
+
     // In 'plan' or 'ask' mode, write operations need approval
     if (mode === 'plan' || mode === 'ask') {
       return CRM_WRITE_TOOLS.includes(toolName);
