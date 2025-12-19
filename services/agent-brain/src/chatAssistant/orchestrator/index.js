@@ -1,20 +1,19 @@
 /**
- * Orchestrator - Coordinates specialized agents
- * Routes requests and combines responses
+ * Orchestrator - Routes user requests through Meta-Tools architecture
+ *
+ * Flow:
+ * 1. User message → Orchestrator
+ * 2. Memory command check
+ * 3. Context gathering (integrations, ad account status)
+ * 4. Route to MetaOrchestrator (processWithMetaTools)
+ * 5. MetaOrchestrator → Domain tools → Domain agents → Response
  */
 
-import OpenAI from 'openai';
-import { buildOrchestratorPrompt, buildSynthesisPrompt, buildUnifiedOrchestratorPrompt, getAllIntents } from './systemPrompt.js';
-import { AdsAgent } from '../agents/ads/index.js';
-import { CreativeAgent } from '../agents/creative/index.js';
-import { WhatsAppAgent } from '../agents/whatsapp/index.js';
-import { CRMAgent } from '../agents/crm/index.js';
 import { memoryStore } from '../stores/memoryStore.js';
 import { runsStore } from '../stores/runsStore.js';
 import { parseMemoryCommand, memoryHandlers, inferDomain } from './memoryTools.js';
 import { logger } from '../../lib/logger.js';
 import { maybeUpdateRollingSummary, getSummaryContext, formatSummaryForPrompt } from '../shared/summaryGenerator.js';
-import { unifiedStore } from '../stores/unifiedStore.js';
 import {
   getRecentBrainActions,
   getIntegrations,
@@ -23,35 +22,23 @@ import {
   getStackDescription,
   getStackCapabilities
 } from '../contextGatherer.js';
-// Hybrid MCP imports
-import {
-  policyEngine,
-  clarifyingGate,
-  filterToolsForOpenAI,
-  playbookRegistry,
-  tierManager,
-  TIERS
-} from '../hybrid/index.js';
-// Greeting preflight removed - handled via LLM prompt with adAccountStatus context
-import { createSession, updateTierState } from '../../mcp/sessions.js';
 import { adsHandlers } from '../agents/ads/handlers.js';
 // Meta-tools orchestrator
 import { processWithMetaTools } from './metaOrchestrator.js';
-import { selectOrchestratorMode, ORCHESTRATOR_CONFIG } from '../config.js';
 
-// In-memory кэш для статуса рекламного кабинета
+// In-memory cache for ad account status
 const adAccountStatusCache = new Map();
-const AD_ACCOUNT_STATUS_TTL = 10 * 60 * 1000; // 10 минут
+const AD_ACCOUNT_STATUS_TTL = 10 * 60 * 1000; // 10 minutes
 
 /**
- * Получить статус рекламного кабинета с кэшированием
+ * Get ad account status with caching
  * @param {Object} toolContext
  * @returns {Promise<Object>}
  */
 async function getCachedAdAccountStatus(toolContext) {
   const { accessToken, adAccountId, userAccountId, adAccountDbId } = toolContext;
 
-  // Если нет FB подключения
+  // No FB connection
   if (!accessToken || !adAccountId) {
     return { can_run_ads: false, status: 'NO_FB_CONNECTION', success: false };
   }
@@ -59,7 +46,7 @@ async function getCachedAdAccountStatus(toolContext) {
   const cacheKey = `${userAccountId}:${adAccountDbId || adAccountId}`;
   const cached = adAccountStatusCache.get(cacheKey);
 
-  // Проверяем кэш
+  // Check cache
   if (cached && Date.now() - cached.timestamp < AD_ACCOUNT_STATUS_TTL) {
     logger.debug({ cacheKey }, 'Ad account status cache hit');
     return cached.data;
@@ -80,167 +67,7 @@ async function getCachedAdAccountStatus(toolContext) {
   }
 }
 
-const MODEL = process.env.CHAT_ASSISTANT_MODEL || 'gpt-5.2';
-const INTENT_MODEL = 'gpt-4o-mini'; // Faster model for intent detection
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
-/**
- * Intent to domain mapping
- */
-const INTENT_DOMAIN_MAP = {
-  // Greeting
-  greeting_neutral: 'general',
-  // ADS
-  spend_report: 'ads',
-  directions_overview: 'ads',
-  campaigns_overview: 'ads',
-  cpl_analysis: 'ads',
-  roi_analysis: 'ads',
-  brain_history: 'ads',
-  diagnosis_leads: 'ads',
-  pause_entity: 'ads',
-  budget_change: 'ads',
-  resume_entity: 'ads',
-  // CREATIVE
-  creative_list: 'creative',
-  creative_top: 'creative',
-  creative_worst: 'creative',
-  creative_burnout: 'creative',
-  creative_compare: 'creative',
-  creative_analysis: 'creative',
-  launch_creative: 'creative',
-  pause_creative: 'creative',
-  start_test: 'creative',
-  // CRM
-  leads_list: 'crm',
-  funnel_stats: 'crm',
-  revenue_stats: 'crm',
-  lead_details: 'crm',
-  update_lead_stage: 'crm',
-  // WHATSAPP
-  dialogs_list: 'whatsapp',
-  dialog_analysis: 'whatsapp',
-  dialog_search: 'whatsapp',
-  // GENERAL
-  general_question: 'general',
-  unknown: 'unknown'
-};
-
-/**
- * Detect intent using LLM with structured output
- * Single LLM call determines intent, which is then used for policy lookup
- *
- * @param {string} message - User message
- * @param {Object} context - Enriched context with adAccountStatus, integrations, brainActions
- * @returns {Promise<Object>} { intent, domain, agents, confidence, contextOnlyResponse?, needsClarification?, clarifyingQuestion? }
- */
-async function detectIntentWithLLM(message, context) {
-  const systemPrompt = buildUnifiedOrchestratorPrompt(context);
-
-  // Build JSON schema for structured output
-  const allIntents = getAllIntents();
-
-  try {
-    const completion = await openai.chat.completions.create({
-      model: INTENT_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: message }
-      ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'intent_detection',
-          strict: true,
-          schema: {
-            type: 'object',
-            properties: {
-              intent: {
-                type: 'string',
-                enum: allIntents,
-                description: 'Detected intent from user message'
-              },
-              confidence: {
-                type: 'number',
-                description: 'Confidence score 0-1'
-              },
-              context_only_response: {
-                type: 'string',
-                description: 'Full response if no tools needed (greeting, brain_history). Empty string if tools are needed.'
-              },
-              needs_clarification: {
-                type: 'boolean',
-                description: 'True if clarification is needed before proceeding'
-              },
-              clarifying_question: {
-                type: 'string',
-                description: 'Question to ask user if needs_clarification is true. Empty string otherwise.'
-              }
-            },
-            required: ['intent', 'confidence', 'context_only_response', 'needs_clarification', 'clarifying_question'],
-            additionalProperties: false
-          }
-        }
-      },
-      temperature: 0.1,
-      max_completion_tokens: 2000
-    });
-
-    const result = JSON.parse(completion.choices[0].message.content);
-
-    // Map intent to domain and agents
-    const domain = INTENT_DOMAIN_MAP[result.intent] || 'unknown';
-    const agents = domain === 'general' || domain === 'unknown' ? [] : [domain];
-
-    logger.info({
-      message: message.substring(0, 50),
-      intent: result.intent,
-      domain,
-      confidence: result.confidence,
-      hasContextOnlyResponse: !!result.context_only_response,
-      needsClarification: result.needs_clarification
-    }, 'Intent detected via LLM');
-
-    return {
-      intent: result.intent,
-      domain,
-      agents: agents.length > 0 ? agents : ['ads'], // Default to ads if unknown
-      confidence: result.confidence,
-      contextOnlyResponse: result.context_only_response || null,
-      needsClarification: result.needs_clarification,
-      clarifyingQuestion: result.clarifying_question || null
-    };
-
-  } catch (error) {
-    logger.error({ error: error.message }, 'Intent detection failed, falling back to ads');
-
-    // Fallback to ads domain
-    return {
-      intent: 'unknown',
-      domain: 'ads',
-      agents: ['ads'],
-      confidence: 0.1,
-      contextOnlyResponse: null,
-      needsClarification: false,
-      clarifyingQuestion: null
-    };
-  }
-}
-
 export class Orchestrator {
-  constructor() {
-    // Initialize all agents
-    this.agents = {
-      ads: new AdsAgent(),
-      creative: new CreativeAgent(),
-      whatsapp: new WhatsAppAgent(),
-      crm: new CRMAgent()
-    };
-  }
-
   /**
    * Process a user request
    * @param {Object} params
@@ -268,47 +95,7 @@ export class Orchestrator {
         };
       }
 
-      // 0.1 Route to meta-tools orchestrator if enabled
-      const orchestratorMode = selectOrchestratorMode(toolContext);
-      if (orchestratorMode === 'meta') {
-        logger.info({ mode: 'meta' }, 'Routing to meta-tools orchestrator');
-
-        // Gather minimal context for meta-tools
-        const dbAccountId = toolContext.adAccountDbId || null;
-        const hasFbToken = Boolean(toolContext.accessToken);
-
-        const [integrations, adAccountStatus] = await Promise.all([
-          getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
-          getCachedAdAccountStatus(toolContext)
-        ]);
-
-        const metaResult = await processWithMetaTools({
-          message,
-          context: {
-            ...context,
-            integrations,
-            adAccountStatus
-          },
-          conversationHistory,
-          toolContext
-        });
-
-        return {
-          agent: 'MetaOrchestrator',
-          content: metaResult.content,
-          executedActions: metaResult.executedTools || [],
-          classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
-          duration: Date.now() - startTime,
-          metadata: {
-            iterations: metaResult.iterations,
-            tokens: metaResult.tokens,
-            orchestratorMode: 'meta'
-          }
-        };
-      }
-
-      // 1. Load memory (specs + notes + rolling summary) + ad account status in parallel
-      // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
+      // 1. Gather context in parallel
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
@@ -318,38 +105,31 @@ export class Orchestrator {
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
-        // Brain actions history (last 3 days) for AdsAgent context
         getRecentBrainActions(toolContext.userAccountId, dbAccountId),
-        // Check available integrations (fb, crm, roi, whatsapp)
         getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
-        // Ad account status with caching (10 min TTL)
         getCachedAdAccountStatus(toolContext)
       ]);
 
-      // Определить стек интеграций клиента
+      // Determine integration stack
       const stack = getIntegrationStack(integrations);
 
-      // Enrich context with memory + ad account status
+      // Enrich context
       const enrichedContext = {
         ...context,
         specs,
         notes,
         rollingSummary: summaryContext.summary,
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
         brainActions,
-        // Ad account status (can_run_ads, blocking_reasons, etc)
         adAccountStatus,
-        // Available integrations for tool routing
         integrations,
         integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
-        // Stack info for personalized responses
         stack,
         stackDescription: getStackDescription(stack),
         stackCapabilities: getStackCapabilities(stack)
       };
 
-      // Track context stats for runsStore
+      // Track context stats
       toolContext.contextStats = {
         ...toolContext.contextStats,
         rollingSummaryUsed: summaryContext.used,
@@ -359,53 +139,19 @@ export class Orchestrator {
         stack
       };
 
-      // 2. Detect intent using LLM
-      const classification = await detectIntentWithLLM(message, enrichedContext);
+      // 2. Route to meta-tools orchestrator
+      logger.info({ mode: 'meta' }, 'Routing to meta-tools orchestrator');
 
-      logger.info({
-        message: message.substring(0, 50),
-        intent: classification.intent,
-        domain: classification.domain,
-        usingSummary: summaryContext.used,
-        canRunAds: adAccountStatus?.can_run_ads
-      }, 'Request classified');
-
-      // 2.1 Handle context-only response from LLM (greeting, brain_history)
-      if (classification.contextOnlyResponse) {
-        return {
-          agent: 'Orchestrator',
-          content: classification.contextOnlyResponse,
-          executedActions: [],
-          classification,
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 3. Route to appropriate agent(s)
-      let response;
-
-      if (classification.agents.length === 1) {
-        // Single agent - delegate directly
-        response = await this.delegateToAgent(
-          classification.agents[0],
-          { message, context: enrichedContext, mode, toolContext, conversationHistory }
-        );
-      } else {
-        // Multiple agents - coordinate
-        response = await this.coordinateAgents(
-          classification.agents,
-          { message, context: enrichedContext, mode, toolContext, conversationHistory }
-        );
-      }
+      const metaResult = await processWithMetaTools({
+        message,
+        context: enrichedContext,
+        conversationHistory,
+        toolContext
+      });
 
       const duration = Date.now() - startTime;
-      logger.info({
-        duration,
-        agents: classification.agents,
-        domain: classification.domain
-      }, 'Orchestrator processed request');
 
-      // Update rolling summary if needed (async, don't wait)
+      // Update rolling summary if needed (async)
       if (toolContext.conversationId && conversationHistory.length > 0) {
         maybeUpdateRollingSummary(
           toolContext.conversationId,
@@ -416,10 +162,23 @@ export class Orchestrator {
         });
       }
 
+      logger.info({
+        duration,
+        iterations: metaResult.iterations,
+        toolCalls: metaResult.executedTools?.length || 0
+      }, 'Orchestrator completed');
+
       return {
-        ...response,
-        classification,
-        duration
+        agent: 'MetaOrchestrator',
+        content: metaResult.content,
+        executedActions: metaResult.executedTools || [],
+        classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
+        duration,
+        metadata: {
+          iterations: metaResult.iterations,
+          tokens: metaResult.tokens,
+          runId: metaResult.runId
+        }
       };
 
     } catch (error) {
@@ -427,960 +186,6 @@ export class Orchestrator {
       throw error;
     }
   }
-
-  // ============================================================
-  // HYBRID MCP FLOW
-  // ============================================================
-
-  /**
-   * Process request with Hybrid MCP flow
-   * Orchestrator controls, MCP executes
-   *
-   * @param {Object} params
-   * @param {string} params.message - User message
-   * @param {Object} params.context - Business context
-   * @param {string} params.mode - 'auto' | 'plan' | 'ask'
-   * @param {Object} params.toolContext - Context for tool execution
-   * @param {Array} params.conversationHistory - Previous messages
-   * @param {Object} params.clarifyingState - Existing clarifying state (for follow-up)
-   * @returns {Promise<Object>} Response
-   */
-  async processHybridRequest({ message, context, mode, toolContext, conversationHistory = [], clarifyingState = null }) {
-    const startTime = Date.now();
-
-    try {
-      // 0. Reuse-or-create runId for tracing
-      const runId = toolContext?.runId ?? await runsStore.create({
-        conversationId: toolContext.conversationId,
-        userAccountId: toolContext.userAccountId,
-        model: MODEL,
-        agent: 'Orchestrator',
-        domain: 'hybrid',
-        userMessage: message?.substring(0, 200)
-      });
-      toolContext.runId = runId?.id || runId;
-
-      // 0.1 Check for direct memory commands first
-      const memoryCommand = parseMemoryCommand(message);
-      if (memoryCommand) {
-        const result = await this.handleMemoryCommand(memoryCommand, toolContext);
-        return {
-          type: 'response',
-          agent: 'Orchestrator',
-          content: result.content,
-          executedActions: result.executedActions || [],
-          classification: { domain: 'memory', agents: [], intent: 'memory' },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 0.5 Load clarifyingState from DB (persistence for refresh/Telegram)
-      let effectiveClarifyingState = clarifyingState;
-      if (!effectiveClarifyingState && toolContext.conversationId) {
-        effectiveClarifyingState = await unifiedStore.getClarifyingState(toolContext.conversationId);
-        if (effectiveClarifyingState) {
-          logger.debug({
-            conversationId: toolContext.conversationId,
-            answersCount: Object.keys(effectiveClarifyingState.answers || {}).length
-          }, 'Hybrid: Loaded clarifying state from DB');
-        }
-      }
-
-      // 1. Load context in parallel + ad account status
-      const dbAccountId = toolContext.adAccountDbId || null;
-      const hasFbToken = Boolean(toolContext.accessToken);
-
-      const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
-        memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
-        memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
-        toolContext.conversationId
-          ? getSummaryContext(toolContext.conversationId)
-          : Promise.resolve({ summary: '', used: false }),
-        getRecentBrainActions(toolContext.userAccountId, dbAccountId),
-        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
-        getCachedAdAccountStatus(toolContext)
-      ]);
-
-      // Определить стек интеграций клиента
-      const stack = getIntegrationStack(integrations);
-
-      const enrichedContext = {
-        ...context,
-        specs,
-        notes,
-        rollingSummary: summaryContext.summary,
-        rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        brainActions,
-        adAccountStatus,
-        integrations,
-        integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
-        // Stack info for personalized responses
-        stack,
-        stackDescription: getStackDescription(stack),
-        stackCapabilities: getStackCapabilities(stack)
-      };
-
-      // 2. Detect intent using LLM with structured output (Single-LLM Architecture)
-      const classification = await detectIntentWithLLM(message, enrichedContext);
-
-      logger.info({
-        message: message.substring(0, 50),
-        domain: classification.domain,
-        intent: classification.intent,
-        confidence: classification.confidence,
-        hasContextOnlyResponse: !!classification.contextOnlyResponse
-      }, 'Hybrid: Intent detected via LLM');
-
-      // 2.1 Handle context-only response from LLM (greeting, brain_history)
-      if (classification.contextOnlyResponse) {
-        const duration = Date.now() - startTime;
-
-        logger.info({
-          intent: classification.intent,
-          responseLength: classification.contextOnlyResponse.length
-        }, 'Hybrid: Returning context-only response from LLM');
-
-        return {
-          type: 'response',
-          agent: 'Orchestrator',
-          content: classification.contextOnlyResponse,
-          executedActions: [],
-          classification: {
-            domain: classification.domain,
-            agents: classification.agents,
-            intent: classification.intent
-          },
-          policy: {
-            playbookId: classification.intent,
-            intent: classification.intent,
-            contextOnly: true
-          },
-          duration
-        };
-      }
-
-      // 2.2 Handle LLM-driven clarifying questions
-      if (classification.needsClarification && classification.clarifyingQuestion) {
-        const newClarifyingState = {
-          required: true,
-          questions: [{ text: classification.clarifyingQuestion, field: 'llm_question' }],
-          answers: effectiveClarifyingState?.answers || {},
-          complete: false,
-          intent: classification.intent,
-          originalMessage: effectiveClarifyingState?.originalMessage || message
-        };
-
-        // Persist to DB for refresh/Telegram support
-        if (toolContext.conversationId) {
-          await unifiedStore.setClarifyingState(toolContext.conversationId, newClarifyingState);
-        }
-
-        logger.info({
-          intent: classification.intent,
-          question: classification.clarifyingQuestion.substring(0, 50)
-        }, 'Hybrid: LLM requested clarification');
-
-        return {
-          type: 'clarifying',
-          agent: 'Orchestrator',
-          content: classification.clarifyingQuestion,
-          clarifyingState: newClarifyingState,
-          classification: {
-            domain: classification.domain,
-            agents: classification.agents,
-            intent: classification.intent
-          },
-          policy: {
-            playbookId: classification.intent,
-            intent: classification.intent
-          },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 3. Resolve policy based on intent (JS lookup from POLICY_DEFINITIONS)
-      const policy = policyEngine.resolvePolicy({
-        intent: classification.intent,
-        domains: classification.agents,
-        context: enrichedContext,
-        integrations,
-        stack
-      });
-
-      logger.info({
-        intent: policy.intent,
-        playbookId: policy.playbookId,
-        allowedTools: policy.allowedTools?.length || 0,
-        dangerousPolicy: policy.dangerousPolicy
-      }, 'Hybrid: Policy resolved');
-
-      // 4. Handle policy-based context-only responses (legacy fallback)
-      if (policy.useContextOnly) {
-        return this.handleContextOnlyResponse({
-          message,
-          context: enrichedContext,
-          policy,
-          classification,
-          conversationHistory,
-          startTime
-        });
-      }
-
-      // 5. Legacy Clarifying Gate (for policies with clarifyingRequired)
-      // Note: Most clarification is now handled by LLM in step 2.2
-      const existingAnswers = effectiveClarifyingState?.answers || {};
-      const clarifyResult = clarifyingGate.evaluate({
-        message,
-        policy,
-        context: { recentMessages: conversationHistory },
-        existingAnswers
-      });
-
-      if (clarifyResult.needsClarifying) {
-        // Store state for follow-up
-        const newClarifyingState = {
-          required: true,
-          questions: clarifyResult.questions,
-          answers: clarifyResult.answers,
-          complete: false,
-          policy,
-          originalMessage: effectiveClarifyingState?.originalMessage || message
-        };
-
-        // Persist to DB for refresh/Telegram support
-        if (toolContext.conversationId) {
-          await unifiedStore.setClarifyingState(toolContext.conversationId, newClarifyingState);
-        }
-
-        const clarifyingContent = clarifyResult.formatForUser();
-
-        logger.info({
-          intent: policy.intent,
-          pendingQuestions: clarifyResult.questions.length,
-          answeredCount: Object.keys(clarifyResult.answers).length,
-          persistedToDB: !!toolContext.conversationId
-        }, 'Hybrid: Policy clarifying questions needed');
-
-        return {
-          type: 'clarifying',
-          agent: 'Orchestrator',
-          content: clarifyingContent,
-          clarifyingState: newClarifyingState,
-          classification,
-          policy: {
-            playbookId: policy.playbookId,
-            intent: policy.intent
-          },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 6. Create MCP session with policy restrictions
-      const sessionId = createSession({
-        userAccountId: toolContext.userAccountId,
-        adAccountId: toolContext.adAccountId,
-        accessToken: toolContext.accessToken,
-        conversationId: toolContext.conversationId,
-        allowedDomains: classification.agents,
-        allowedTools: policy.allowedTools,
-        mode: policy.clarifyingRequired ? 'plan' : mode,
-        dangerousPolicy: policy.dangerousPolicy,
-        integrations,
-        clarifyingState: {
-          required: false,
-          complete: true,
-          answers: clarifyResult.answers
-        },
-        policyMetadata: {
-          playbookId: policy.playbookId,
-          intent: policy.intent,
-          maxToolCalls: policy.maxToolCalls,
-          toolCallCount: 0
-        }
-      });
-
-      logger.info({
-        sessionId,
-        allowedTools: policy.allowedTools,
-        clarifyingAnswers: clarifyResult.answers
-      }, 'Hybrid: MCP session created');
-
-      // 7. Get agent and filter tools
-      const primaryAgent = classification.agents[0];
-      const agent = this.agents[primaryAgent];
-
-      if (!agent) {
-        throw new Error(`Unknown agent: ${primaryAgent}`);
-      }
-
-      // Filter tools based on policy
-      const allTools = agent.getTools ? agent.getTools() : [];
-      const filteredTools = filterToolsForOpenAI(allTools, policy);
-
-      logger.info({
-        agent: primaryAgent,
-        totalTools: allTools.length,
-        filteredTools: filteredTools.length
-      }, 'Hybrid: Tools filtered');
-
-      // 8. Execute via agent with filtered tools
-      // Pass sessionId and filteredTools to agent
-      const response = await agent.process({
-        message,
-        context: enrichedContext,
-        mode,
-        toolContext: {
-          ...toolContext,
-          sessionId,
-          filteredTools,
-          policy,
-          clarifyingAnswers: clarifyResult.answers
-        },
-        conversationHistory
-      });
-
-      // 8.1 Handle tool limit reached with partial response
-      if (response.error === 'tool_call_limit_reached') {
-        const partialData = response.executedActions || [];
-
-        // Record error in runs
-        await runsStore.recordHybridError(toolContext.runId, {
-          type: 'limit_reached',
-          tool: response.lastTool,
-          message: `Tool limit ${policy.maxToolCalls} reached`,
-          meta: { toolCallsUsed: partialData.length }
-        });
-
-        // Build partial response with collected data
-        const partialContent = partialData.length > 0
-          ? assemblePartialResponse(partialData, {
-              disclaimer: `⚠️ Достигнут лимит вызовов (${policy.maxToolCalls}). Показываю собранные данные:`
-            })
-          : 'Не удалось собрать данные в рамках лимита.';
-
-        return {
-          type: 'limit_reached',
-          agent: 'Orchestrator',
-          content: partialContent,
-          partialData,
-          nextSteps: getContextualNextSteps(policy, partialData),
-          classification,
-          policy: { playbookId: policy.playbookId, intent: policy.intent },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 9. Check for approval_required
-      if (response.approvalRequired) {
-        // Create pending plan for dangerous action
-        const planId = await unifiedStore.createPendingPlan(toolContext.conversationId, {
-          steps: response.pendingSteps || [{ action: response.blockedTool, params: response.blockedArgs }],
-          summary: `Требуется подтверждение: ${response.blockedTool}`
-        });
-
-        return {
-          type: 'approval_required',
-          agent: 'Orchestrator',
-          content: response.content || `Для выполнения ${response.blockedTool} требуется подтверждение.`,
-          planId,
-          blockedTool: response.blockedTool,
-          classification,
-          policy: {
-            playbookId: policy.playbookId,
-            intent: policy.intent
-          },
-          duration: Date.now() - startTime
-        };
-      }
-
-      const duration = Date.now() - startTime;
-
-      // Clear clarifying state after successful execution
-      if (toolContext.conversationId) {
-        await unifiedStore.clearClarifyingState(toolContext.conversationId);
-      }
-
-      // Update rolling summary if needed
-      if (toolContext.conversationId && conversationHistory.length > 0) {
-        maybeUpdateRollingSummary(
-          toolContext.conversationId,
-          conversationHistory,
-          toolContext.contextStats
-        ).catch(err => {
-          logger.warn({ error: err.message }, 'Failed to update rolling summary');
-        });
-      }
-
-      // Record hybrid metadata for tracing
-      await runsStore.recordHybridMetadata(toolContext.runId, {
-        sessionId,
-        allowedTools: policy.allowedTools,
-        playbookId: policy.playbookId,
-        intent: policy.intent,
-        maxToolCalls: policy.maxToolCalls,
-        toolCallsUsed: response.executedActions?.length || 0,
-        clarifyingAnswers: clarifyResult.answers
-      });
-
-      await runsStore.complete(toolContext.runId, {
-        latencyMs: duration,
-        inputTokens: response.usage?.prompt_tokens,
-        outputTokens: response.usage?.completion_tokens
-      });
-
-      // Log completion with all relevant data
-      logger.info({
-        duration,
-        runId: toolContext.runId,
-        agents: classification.agents,
-        domain: classification.domain,
-        playbookId: policy.playbookId,
-        intent: policy.intent,
-        toolsUsed: response.executedActions?.length || 0,
-        nextStepsCount: response.nextSteps?.length || 0,
-        clarifyingAnswersCount: Object.keys(clarifyResult.answers || {}).length
-      }, 'Hybrid: Request completed');
-
-      return {
-        type: 'response',
-        ...response,
-        classification,
-        policy: {
-          playbookId: policy.playbookId,
-          intent: policy.intent,
-          toolsUsed: response.executedActions?.length || 0
-        },
-        duration
-      };
-
-    } catch (error) {
-      // Record failure in runs
-      if (toolContext?.runId) {
-        await runsStore.fail(toolContext.runId, {
-          latencyMs: Date.now() - startTime,
-          errorMessage: error.message,
-          errorCode: error.code
-        }).catch(() => {}); // Don't fail on tracing error
-      }
-      logger.error({ error: error.message }, 'Hybrid processing failed');
-      throw error;
-    }
-  }
-
-  // ============================================================
-  // TIER-BASED HYBRID FLOW (Playbook Registry)
-  // ============================================================
-
-  /**
-   * Process request with tier-based playbook flow
-   * Supports progressive disclosure: snapshot → drilldown → actions
-   *
-   * @param {Object} params
-   * @param {string} params.message - User message
-   * @param {Object} params.context - Business context
-   * @param {string} params.mode - 'auto' | 'plan' | 'ask'
-   * @param {Object} params.toolContext - Context for tool execution
-   * @param {Array} params.conversationHistory - Previous messages
-   * @param {Object} params.pendingNextStep - Selected next step (for tier transition)
-   * @returns {Promise<Object>} Response with nextSteps menu
-   */
-  async processHybridRequestWithTiers({
-    message,
-    context,
-    mode,
-    toolContext,
-    conversationHistory = [],
-    pendingNextStep = null
-  }) {
-    const startTime = Date.now();
-
-    try {
-      // 0. Check for direct memory commands first
-      const memoryCommand = parseMemoryCommand(message);
-      if (memoryCommand) {
-        const result = await this.handleMemoryCommand(memoryCommand, toolContext);
-        return {
-          type: 'response',
-          agent: 'Orchestrator',
-          content: result.content,
-          executedActions: result.executedActions || [],
-          classification: { domain: 'memory', agents: [], intent: 'memory' },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 1. Load tier state from DB
-      let tierState = null;
-      if (toolContext.conversationId) {
-        tierState = await unifiedStore.getTierState(toolContext.conversationId);
-      }
-
-      // 2. Handle pending next step (tier transition)
-      if (pendingNextStep && tierState) {
-        const { allowed, reason } = tierManager.canTransitionTo(
-          tierState,
-          pendingNextStep.targetTier,
-          { user_chose_drilldown: true }
-        );
-
-        if (allowed) {
-          tierState = tierManager.transitionTo(tierState, pendingNextStep.targetTier, {
-            reason: 'user_request',
-            triggeredBy: pendingNextStep.id
-          });
-
-          // Persist updated tier state
-          if (toolContext.conversationId) {
-            await unifiedStore.setTierState(toolContext.conversationId, tierState);
-          }
-
-          logger.info({
-            playbookId: tierState.playbookId,
-            newTier: tierState.currentTier,
-            triggeredBy: pendingNextStep.id
-          }, 'Tier transition via nextStep');
-        }
-      }
-
-      // 3. Load context in parallel + ad account status
-      const dbAccountId = toolContext.adAccountDbId || null;
-      const hasFbToken = Boolean(toolContext.accessToken);
-
-      const [specs, notes, summaryContext, brainActions, integrations, adAccountStatus] = await Promise.all([
-        memoryStore.getSpecs(toolContext.userAccountId, dbAccountId),
-        memoryStore.getNotesDigest(toolContext.userAccountId, dbAccountId),
-        toolContext.conversationId
-          ? getSummaryContext(toolContext.conversationId)
-          : Promise.resolve({ summary: '', used: false }),
-        getRecentBrainActions(toolContext.userAccountId, dbAccountId),
-        getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
-        getCachedAdAccountStatus(toolContext)
-      ]);
-
-      // Определить стек интеграций клиента
-      const stack = getIntegrationStack(integrations);
-
-      const enrichedContext = {
-        ...context,
-        specs,
-        notes,
-        rollingSummary: summaryContext.summary,
-        rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        brainActions,
-        adAccountStatus,
-        integrations,
-        integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
-        // Stack info for personalized responses
-        stack,
-        stackDescription: getStackDescription(stack),
-        stackCapabilities: getStackCapabilities(stack)
-      };
-
-      // 4. Business context for conditional questions
-      const businessContext = {
-        integrations,
-        canRunAds: adAccountStatus?.can_run_ads
-      };
-
-      // 5. Detect intent using LLM
-      const classification = await detectIntentWithLLM(message, enrichedContext);
-
-      // Check for playbook based on intent
-      const playbook = policyEngine.getPlaybookForIntent(classification.intent);
-      const playbookId = playbook?.id || classification.intent;
-
-      logger.info({
-        message: message.substring(0, 50),
-        domain: classification.domain,
-        intent: classification.intent,
-        playbookId,
-        hasTierState: !!tierState
-      }, 'Tier-based: Request classified via LLM');
-
-      // 5.1 Handle context-only response from LLM (greeting, brain_history)
-      if (classification.contextOnlyResponse) {
-        return {
-          type: 'response',
-          agent: 'Orchestrator',
-          content: classification.contextOnlyResponse,
-          executedActions: [],
-          classification: {
-            domain: classification.domain,
-            agents: classification.agents,
-            intent: classification.intent
-          },
-          policy: {
-            playbookId: classification.intent,
-            intent: classification.intent,
-            contextOnly: true
-          },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 6. Create or continue tier state
-      if (!tierState && playbookId) {
-        tierState = tierManager.createInitialState(playbookId);
-
-        if (toolContext.conversationId) {
-          await unifiedStore.setTierState(toolContext.conversationId, tierState);
-        }
-
-        logger.info({
-          playbookId,
-          initialTier: tierState.currentTier
-        }, 'Tier-based: Created initial tier state');
-      }
-
-      // 7. Resolve policy based on current tier
-      const currentTier = tierState?.currentTier || TIERS.SNAPSHOT;
-      const effectivePlaybookId = tierState?.playbookId || playbookId;
-
-      const policy = policyEngine.resolveTierPolicy({
-        playbookId,
-        tier: currentTier,
-        context: enrichedContext,
-        integrations,
-        stack
-      });
-
-      logger.info({
-        playbookId,
-        tier: currentTier,
-        allowedTools: policy.allowedTools?.length || 0,
-        fromPlaybook: policy.fromPlaybook
-      }, 'Tier-based: Policy resolved');
-
-      // 8. Handle context-only responses
-      if (policy.useContextOnly) {
-        return this.handleContextOnlyResponse({
-          message,
-          context: enrichedContext,
-          policy,
-          classification,
-          conversationHistory,
-          startTime
-        });
-      }
-
-      // 9. Clarifying Gate with playbook questions
-      // playbook already defined from step 5 (policyEngine.getPlaybookForIntent)
-      const playbookQuestions = playbook?.clarifyingQuestions || policy.clarifyingQuestions || [];
-
-      const clarifyResult = clarifyingGate.evaluateWithPlaybook({
-        message,
-        questions: playbookQuestions,
-        businessContext,
-        existingAnswers: {}
-      });
-
-      if (clarifyResult.needsClarifying) {
-        logger.info({
-          playbookId,
-          pendingQuestions: clarifyResult.questions.length,
-          uiComponents: clarifyResult.uiComponents.length
-        }, 'Tier-based: Clarifying questions needed');
-
-        return {
-          type: 'clarifying',
-          agent: 'Orchestrator',
-          content: clarifyResult.formatForUser(),
-          clarifyingState: {
-            required: true,
-            questions: clarifyResult.questions,
-            answers: clarifyResult.answers,
-            complete: false
-          },
-          uiComponents: clarifyResult.uiComponents,
-          classification,
-          policy: { playbookId, tier: currentTier },
-          duration: Date.now() - startTime
-        };
-      }
-
-      // 10. Create MCP session with tier-based policy
-      const sessionId = createSession({
-        userAccountId: toolContext.userAccountId,
-        adAccountId: toolContext.adAccountId,
-        accessToken: toolContext.accessToken,
-        conversationId: toolContext.conversationId,
-        allowedDomains: classification.agents,
-        allowedTools: policy.allowedTools,
-        mode,
-        dangerousPolicy: policy.dangerousPolicy,
-        integrations,
-        tierState,
-        policyMetadata: {
-          playbookId,
-          intent: policy.intent,
-          tier: currentTier,
-          maxToolCalls: policy.maxToolCalls,
-          toolCallCount: 0
-        }
-      });
-
-      // 11. Execute via agent
-      const primaryAgent = classification.agents[0];
-      const agent = this.agents[primaryAgent];
-
-      if (!agent) {
-        throw new Error(`Unknown agent: ${primaryAgent}`);
-      }
-
-      const allTools = agent.getTools ? agent.getTools() : [];
-      const filteredTools = filterToolsForOpenAI(allTools, policy);
-
-      const response = await agent.process({
-        message,
-        context: enrichedContext,
-        mode,
-        toolContext: {
-          ...toolContext,
-          sessionId,
-          filteredTools,
-          policy,
-          clarifyingAnswers: clarifyResult.answers
-        },
-        conversationHistory
-      });
-
-      // 12. Save snapshot data for tier
-      if (currentTier === TIERS.SNAPSHOT && response.executedActions?.length > 0) {
-        const snapshotData = this.extractSnapshotData(response);
-        tierState = tierManager.saveSnapshotData(tierState, snapshotData);
-
-        if (toolContext.conversationId) {
-          await unifiedStore.setTierState(toolContext.conversationId, tierState);
-        }
-      }
-
-      // 13. Evaluate enter conditions for auto-escalation
-      const autoEscalation = tierManager.checkAutoEscalation(tierState, {
-        ...tierState?.snapshotData,
-        ...businessContext
-      });
-
-      // 14. Get available next steps
-      const nextSteps = tierManager.getAvailableNextSteps(tierState, businessContext);
-
-      const duration = Date.now() - startTime;
-
-      // Clear clarifying state after success
-      if (toolContext.conversationId) {
-        await unifiedStore.clearClarifyingState(toolContext.conversationId);
-      }
-
-      return {
-        type: 'response',
-        ...response,
-        classification,
-        policy: {
-          playbookId,
-          tier: currentTier,
-          toolsUsed: response.executedActions?.length || 0
-        },
-        tierState: {
-          playbookId: tierState?.playbookId,
-          currentTier: tierState?.currentTier,
-          completedTiers: tierState?.completedTiers
-        },
-        nextSteps: nextSteps.length > 0 ? nextSteps : null,
-        autoEscalation: autoEscalation.shouldEscalate ? autoEscalation : null,
-        duration
-      };
-
-    } catch (error) {
-      logger.error({ error: error.message }, 'Tier-based processing failed');
-      throw error;
-    }
-  }
-
-  /**
-   * Extract data from response for snapshot tier
-   * @private
-   */
-  extractSnapshotData(response) {
-    const data = {};
-
-    // Extract metrics from tool results
-    for (const action of response.executedActions || []) {
-      if (action.result && typeof action.result === 'object') {
-        if (action.result.spend !== undefined) data.spend = action.result.spend;
-        if (action.result.leads !== undefined) data.leads = action.result.leads;
-        if (action.result.cpl !== undefined) data.cpl = action.result.cpl;
-        if (action.result.impressions !== undefined) data.impressions = action.result.impressions;
-        if (action.result.directions) data.directionsCount = action.result.directions.length;
-      }
-    }
-
-    return data;
-  }
-
-  /**
-   * Handle context-only responses (no tool calls needed)
-   */
-  async handleContextOnlyResponse({ message, context, policy, classification, conversationHistory, startTime }) {
-    // Build prompt with context
-    const systemPrompt = buildOrchestratorPrompt();
-    // Always use brainActions as context source (businessSnapshot removed)
-    const contextInfo = context.brainActions;
-
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      ...conversationHistory.slice(-10),
-      { role: 'user', content: message }
-    ];
-
-    // Add context as system message
-    if (contextInfo) {
-      messages.splice(1, 0, {
-        role: 'system',
-        content: `Контекст для ответа:\n${JSON.stringify(contextInfo, null, 2)}`
-      });
-    }
-
-    try {
-      const completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages,
-        temperature: 0.7
-      });
-
-      return {
-        type: 'response',
-        agent: 'Orchestrator',
-        content: completion.choices[0].message.content,
-        executedActions: [],
-        classification,
-        policy: {
-          playbookId: policy.playbookId,
-          intent: policy.intent,
-          contextOnly: true
-        },
-        duration: Date.now() - startTime
-      };
-    } catch (error) {
-      logger.error({ error: error.message }, 'Context-only response failed');
-      throw error;
-    }
-  }
-
-  /**
-   * Delegate request to a single agent
-   */
-  async delegateToAgent(agentName, params) {
-    const agent = this.agents[agentName];
-
-    if (!agent) {
-      throw new Error(`Unknown agent: ${agentName}`);
-    }
-
-    logger.info({ agent: agentName }, 'Delegating to agent');
-
-    return await agent.process(params);
-  }
-
-  /**
-   * Coordinate multiple agents and synthesize responses
-   */
-  async coordinateAgents(agentNames, params) {
-    const { message, context, mode, toolContext, conversationHistory } = params;
-
-    logger.info({ agents: agentNames }, 'Coordinating multiple agents');
-
-    // Execute agents in parallel
-    const agentPromises = agentNames.map(name =>
-      this.delegateToAgent(name, { message, context, mode, toolContext, conversationHistory })
-        .then(response => ({ name, response }))
-        .catch(error => ({ name, error: error.message }))
-    );
-
-    const results = await Promise.all(agentPromises);
-
-    // Collect successful responses
-    const successfulResponses = results
-      .filter(r => r.response && !r.error)
-      .map(r => ({
-        agent: r.name,
-        content: r.response.content,
-        executedActions: r.response.executedActions || []
-      }));
-
-    if (successfulResponses.length === 0) {
-      throw new Error('All agents failed to respond');
-    }
-
-    // If only one succeeded, return it directly
-    if (successfulResponses.length === 1) {
-      return {
-        agent: 'Orchestrator',
-        delegatedTo: successfulResponses[0].agent,
-        content: successfulResponses[0].content,
-        executedActions: successfulResponses[0].executedActions,
-        toolCalls: []
-      };
-    }
-
-    // Synthesize multiple responses
-    const synthesizedContent = await this.synthesizeResponses(successfulResponses);
-
-    // Combine all executed actions
-    const allActions = successfulResponses.flatMap(r => r.executedActions);
-
-    return {
-      agent: 'Orchestrator',
-      delegatedTo: agentNames,
-      content: synthesizedContent,
-      executedActions: allActions,
-      toolCalls: [],
-      agentResponses: successfulResponses
-    };
-  }
-
-  /**
-   * Synthesize responses from multiple agents into one coherent response
-   */
-  async synthesizeResponses(agentResponses) {
-    const synthesisPrompt = buildSynthesisPrompt(agentResponses);
-
-    try {
-      const completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages: [
-          { role: 'system', content: buildOrchestratorPrompt() },
-          { role: 'user', content: synthesisPrompt }
-        ],
-        temperature: 0.7
-      });
-
-      return completion.choices[0].message.content;
-    } catch (error) {
-      logger.error({ error: error.message }, 'Response synthesis failed');
-
-      // Fallback: concatenate responses
-      return agentResponses
-        .map(r => `**${r.agent}:**\n${r.content}`)
-        .join('\n\n---\n\n');
-    }
-  }
-
-  /**
-   * Get available agents
-   */
-  getAgents() {
-    return Object.keys(this.agents);
-  }
-
-  /**
-   * Get agent by name
-   */
-  getAgent(name) {
-    return this.agents[name];
-  }
-
-  // ============================================================
-  // MEMORY COMMAND HANDLING
-  // ============================================================
 
   /**
    * Handle direct memory commands
@@ -1483,13 +288,9 @@ export class Orchestrator {
     }
   }
 
-  // ============================================================
-  // STREAMING METHODS
-  // ============================================================
-
   /**
    * Process request with streaming
-   * @yields {Object} Stream events from agent: text, tool_start, tool_result, approval_required, done
+   * @yields {Object} Stream events
    */
   async *processStreamRequest({ message, context, mode, toolContext, conversationHistory = [] }) {
     const startTime = Date.now();
@@ -1517,8 +318,7 @@ export class Orchestrator {
         return;
       }
 
-      // 1. Load memory (specs + notes + rolling summary) + ad account status in parallel
-      // Use adAccountDbId (UUID) for database queries, adAccountId (fbId) for FB API
+      // 1. Gather context
       const dbAccountId = toolContext.adAccountDbId || null;
       const hasFbToken = Boolean(toolContext.accessToken);
 
@@ -1528,38 +328,28 @@ export class Orchestrator {
         toolContext.conversationId
           ? getSummaryContext(toolContext.conversationId)
           : Promise.resolve({ summary: '', used: false }),
-        // Brain actions history (last 3 days) for AdsAgent context
         getRecentBrainActions(toolContext.userAccountId, dbAccountId),
-        // Check available integrations (fb, crm, roi, whatsapp)
         getIntegrations(toolContext.userAccountId, dbAccountId, hasFbToken),
-        // Ad account status with caching (10 min TTL)
         getCachedAdAccountStatus(toolContext)
       ]);
 
-      // Определить стек интеграций клиента
       const stack = getIntegrationStack(integrations);
 
-      // Enrich context with memory + ad account status
       const enrichedContext = {
         ...context,
         specs,
         notes,
         rollingSummary: summaryContext.summary,
         rollingSummaryFormatted: formatSummaryForPrompt(summaryContext.summary),
-        // Brain agent actions history (for AdsAgent to avoid conflicting recommendations)
         brainActions,
-        // Ad account status (can_run_ads, blocking_reasons, etc)
         adAccountStatus,
-        // Available integrations for tool routing
         integrations,
         integrationsFormatted: formatIntegrationsForPrompt(integrations, stack),
-        // Stack info for personalized responses
         stack,
         stackDescription: getStackDescription(stack),
         stackCapabilities: getStackCapabilities(stack)
       };
 
-      // Track context stats for runsStore
       toolContext.contextStats = {
         ...toolContext.contextStats,
         rollingSummaryUsed: summaryContext.used,
@@ -1569,103 +359,57 @@ export class Orchestrator {
         stack
       };
 
-      // 2. Detect intent using LLM
-      const classification = await detectIntentWithLLM(message, enrichedContext);
-
-      logger.info({
-        message: message.substring(0, 50),
-        intent: classification.intent,
-        domain: classification.domain,
-        usingSummary: summaryContext.used,
-        canRunAds: adAccountStatus?.can_run_ads
-      }, 'Request classified for streaming');
-
-      yield {
-        type: 'classification',
-        domain: classification.domain,
-        agents: classification.agents,
-        intent: classification.intent
-      };
-
-      // 2.1 Handle context-only response from LLM (greeting, brain_history)
-      if (classification.contextOnlyResponse) {
-        yield {
-          type: 'text',
-          content: classification.contextOnlyResponse,
-          accumulated: classification.contextOnlyResponse
-        };
-        yield {
-          type: 'done',
-          agent: 'Orchestrator',
-          content: classification.contextOnlyResponse,
-          executedActions: [],
-          toolCalls: [],
-          domain: classification.domain,
-          classification,
-          duration: Date.now() - startTime
-        };
-        return;
-      }
-
-      // Yield thinking message based on domain
-      const thinkingMessage = getThinkingMessage(classification.domain);
+      // Yield thinking message
       yield {
         type: 'thinking',
-        message: thinkingMessage
+        message: 'Обрабатываю запрос...'
       };
 
-      // 3. Route to appropriate agent (single agent for streaming)
-      // For multi-agent requests, we use the primary agent
-      const primaryAgent = classification.agents[0];
-      const agent = this.agents[primaryAgent];
-
-      if (!agent) {
-        yield {
-          type: 'error',
-          error: `Unknown agent: ${primaryAgent}`
-        };
-        return;
-      }
-
-      logger.info({ agent: primaryAgent }, 'Streaming via agent');
-
-      // 3. Stream through the agent
-      for await (const event of agent.processStreamLoop({
+      // 2. Process via meta-tools (non-streaming for now)
+      const metaResult = await processWithMetaTools({
         message,
         context: enrichedContext,
-        mode,
-        toolContext,
-        conversationHistory
-      })) {
-        // Add classification info to done event
-        if (event.type === 'done') {
-          const duration = Date.now() - startTime;
+        conversationHistory,
+        toolContext
+      });
 
-          // Update rolling summary if needed (async, don't wait)
-          if (toolContext.conversationId && conversationHistory.length > 0) {
-            maybeUpdateRollingSummary(
-              toolContext.conversationId,
-              conversationHistory,
-              toolContext.contextStats
-            ).catch(err => {
-              logger.warn({ error: err.message }, 'Failed to update rolling summary after streaming');
-            });
-          }
+      // Yield content
+      yield {
+        type: 'text',
+        content: metaResult.content,
+        accumulated: metaResult.content
+      };
 
-          yield {
-            ...event,
-            domain: classification.domain,
-            classification,
-            duration
-          };
-        } else {
-          yield event;
-        }
+      const duration = Date.now() - startTime;
+
+      // Update rolling summary
+      if (toolContext.conversationId && conversationHistory.length > 0) {
+        maybeUpdateRollingSummary(
+          toolContext.conversationId,
+          conversationHistory,
+          toolContext.contextStats
+        ).catch(err => {
+          logger.warn({ error: err.message }, 'Failed to update rolling summary');
+        });
       }
+
+      yield {
+        type: 'done',
+        agent: 'MetaOrchestrator',
+        content: metaResult.content,
+        executedActions: metaResult.executedTools || [],
+        toolCalls: [],
+        domain: 'meta',
+        classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
+        duration,
+        metadata: {
+          iterations: metaResult.iterations,
+          tokens: metaResult.tokens
+        }
+      };
 
     } catch (error) {
       logger.error({ error: error.message }, 'Orchestrator streaming failed');
-
       yield {
         type: 'error',
         error: error.message
@@ -1674,7 +418,7 @@ export class Orchestrator {
   }
 
   /**
-   * Process streaming request with callback (convenience method)
+   * Process streaming request with callback
    */
   async processStreamWithCallback({ message, context, mode, toolContext, conversationHistory = [] }, onEvent) {
     let finalResult = null;
@@ -1711,115 +455,5 @@ export class Orchestrator {
   }
 }
 
-/**
- * Get thinking message based on domain
- * Provides user-friendly feedback about what the assistant is doing
- */
-function getThinkingMessage(domain) {
-  const messages = {
-    ads: 'Смотрю статистику рекламы...',
-    creative: 'Анализирую креативы...',
-    crm: 'Проверяю лидов...',
-    whatsapp: 'Ищу диалоги...',
-    memory: 'Проверяю заметки...',
-    mixed: 'Собираю данные из нескольких источников...'
-  };
-  return messages[domain] || 'Обрабатываю запрос...';
-}
-
-/**
- * Get contextual next steps based on policy and partial data
- * @param {Object} policy - Current policy with playbookId
- * @param {Array} partialData - Executed actions so far
- * @returns {Array} Next step suggestions
- */
-function getContextualNextSteps(policy, partialData) {
-  const steps = [
-    { text: 'Сузить период (3d / 7d)', action: 'narrow_period', icon: '📅' }
-  ];
-
-  if (policy.playbookId?.includes('lead')) {
-    steps.push({ text: 'Проверить качество лидов', action: 'check_quality', icon: '🔍' });
-  }
-  if (policy.playbookId?.includes('creative')) {
-    steps.push({ text: 'Провалиться в креативы', action: 'drilldown_creatives', icon: '🎨' });
-  }
-  if (partialData?.some(d => d.tool === 'getDirections')) {
-    steps.push({ text: 'Детали направления', action: 'drilldown_direction', icon: '📊' });
-  }
-  if (policy.playbookId?.includes('spend') || policy.playbookId?.includes('expensive')) {
-    steps.push({ text: 'Сравнить с прошлым периодом', action: 'compare_periods', icon: '📈' });
-  }
-
-  return steps.slice(0, 3); // Max 3 next steps
-}
-
-/**
- * Assemble partial response from executed actions
- * @param {Array} executedActions - Results of executed tools
- * @param {Object} options - { disclaimer }
- * @returns {string} Formatted partial content
- */
-function assemblePartialResponse(executedActions, { disclaimer = '' } = {}) {
-  if (!executedActions?.length) {
-    return disclaimer || 'Данные не собраны.';
-  }
-
-  const sections = [];
-
-  if (disclaimer) {
-    sections.push(disclaimer);
-  }
-
-  for (const action of executedActions) {
-    if (action.result?.success !== false) {
-      const toolName = action.tool || action.name;
-      const summary = summarizeToolResult(toolName, action.result);
-      if (summary) {
-        sections.push(summary);
-      }
-    }
-  }
-
-  return sections.join('\n\n') || 'Частичные данные недоступны.';
-}
-
-/**
- * Summarize tool result for partial response
- * @param {string} toolName
- * @param {Object} result
- * @returns {string|null}
- */
-function summarizeToolResult(toolName, result) {
-  if (!result) return null;
-
-  // Summarize based on tool type
-  if (toolName === 'getSpendReport' && result.totals) {
-    const spend = result.totals.spend || 0;
-    const leads = result.totals.leads || 0;
-    const cpl = leads > 0 ? Math.round(spend / leads) : 0;
-    return `📊 **Расход**: ${spend.toLocaleString('ru-RU')}₽, лидов: ${leads}${cpl > 0 ? `, CPL: ${cpl}₽` : ''}`;
-  }
-  if (toolName === 'getDirections' && result.directions) {
-    const active = result.directions.filter(d => d.is_active).length;
-    return `📁 **Направлений**: ${result.directions.length} (активных: ${active})`;
-  }
-  if (toolName === 'getCampaigns' && result.campaigns) {
-    const active = result.campaigns.filter(c => c.status === 'ACTIVE').length;
-    return `📢 **Кампаний**: ${result.campaigns.length} (активных: ${active})`;
-  }
-  if (toolName === 'getLeads' && result.leads) {
-    return `👥 **Лидов**: ${result.leads.length}`;
-  }
-  if (toolName === 'getCreatives' && result.creatives) {
-    return `🎨 **Креативов**: ${result.creatives.length}`;
-  }
-
-  return null;
-}
-
 // Export singleton instance
 export const orchestrator = new Orchestrator();
-
-// Export intent detection for use in MCP paths
-export { detectIntentWithLLM, INTENT_DOMAIN_MAP };
