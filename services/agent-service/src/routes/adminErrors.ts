@@ -205,16 +205,23 @@ export default async function adminErrorsRoutes(app: FastifyInstance) {
       const { id } = req.params as { id: string };
       const adminId = req.headers['x-user-id'] as string;
 
+      // Проверяем что adminId это валидный UUID
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const resolvedBy = adminId && uuidRegex.test(adminId) ? adminId : null;
+
       const { error } = await supabase
         .from('error_logs')
         .update({
           is_resolved: true,
           resolved_at: new Date().toISOString(),
-          resolved_by: adminId || null,
+          resolved_by: resolvedBy,
         })
         .eq('id', id);
 
-      if (error) throw error;
+      if (error) {
+        log.error({ supabaseError: error }, 'Supabase error resolving');
+        throw error;
+      }
 
       return res.send({ success: true });
     } catch (err: any) {

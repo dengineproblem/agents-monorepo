@@ -361,8 +361,8 @@ export default async function adminChatRoutes(app: FastifyInstance) {
         }
       }
 
-      // Загружаем usernames одним запросом
-      const userIds = Array.from(userMap.keys());
+      // Загружаем usernames одним запросом (фильтруем null)
+      const userIds = Array.from(userMap.keys()).filter((id): id is string => id != null);
       const { data: usersData } = await supabase
         .from('user_accounts')
         .select('id, username, telegram_id')

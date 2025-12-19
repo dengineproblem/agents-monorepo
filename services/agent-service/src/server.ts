@@ -74,7 +74,7 @@ app.register(cors, {
   origin: true,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization", "x-user-id"]
 });
 // Поддержка application/x-www-form-urlencoded (для Tilda webhook)
 app.register(formbody);

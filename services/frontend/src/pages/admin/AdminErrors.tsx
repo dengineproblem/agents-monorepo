@@ -164,6 +164,7 @@ const AdminErrors: React.FC = () => {
           'Content-Type': 'application/json',
           'x-user-id': currentUser.id,
         },
+        body: JSON.stringify({}),
       });
 
       if (res.ok) {
