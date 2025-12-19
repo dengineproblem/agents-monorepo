@@ -13,7 +13,12 @@ function getPeriodDays(period) {
     'last_3d': 3,
     'last_7d': 7,
     'last_14d': 14,
-    'last_30d': 30
+    'last_30d': 30,
+    'last_90d': 90,
+    'last_6m': 180,
+    'last_12m': 365,
+    'last_year': 365,
+    'all': 3650 // ~10 лет - достаточно для "все время"
   }[period] || 7;
 }
 
@@ -427,20 +432,8 @@ export const crmHandlers = {
   async getSalesQuality({ direction_id, period }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Period to days
-    const periodDays = {
-      'last_3d': 3,
-      'last_7d': 7,
-      'last_14d': 14,
-      'last_30d': 30
-    }[period] || 7;
-
-    const since = (() => {
-      const d = new Date();
-      d.setDate(d.getDate() - periodDays);
-      d.setHours(0, 0, 0, 0);
-      return d.toISOString();
-    })();
+    // Используем общий хелпер для периодов
+    const since = getSinceDate(period || 'last_7d');
 
     // Step 1: Get leads
     let leadsQuery = supabase

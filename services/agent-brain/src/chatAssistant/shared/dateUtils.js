@@ -74,12 +74,37 @@ export function getDateRange(period) {
       since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
       until = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
       break;
+    case 'last_3d':
+      since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3);
+      until = now;
+      break;
     case 'last_7d':
       since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
       until = now;
       break;
+    case 'last_14d':
+      since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 14);
+      until = now;
+      break;
     case 'last_30d':
       since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+      until = now;
+      break;
+    case 'last_90d':
+      since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 90);
+      until = now;
+      break;
+    case 'last_6m':
+      since = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+      until = now;
+      break;
+    case 'last_12m':
+    case 'last_year':
+      since = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      until = now;
+      break;
+    case 'all':
+      since = new Date(2020, 0, 1); // Достаточно далёкая дата
       until = now;
       break;
     default:
@@ -129,11 +154,29 @@ export function parsePeriod(text) {
   if (lower.includes('вчера') || lower.includes('yesterday')) {
     return 'yesterday';
   }
+  if (lower.includes('3 дн') || lower.match(/три\s*дн/)) {
+    return 'last_3d';
+  }
   if (lower.includes('недел') || lower.includes('7 дн') || lower.includes('week')) {
     return 'last_7d';
   }
-  if (lower.includes('месяц') || lower.includes('30 дн') || lower.includes('month')) {
+  if (lower.includes('14 дн') || lower.includes('две недел') || lower.includes('2 недел')) {
+    return 'last_14d';
+  }
+  if (lower.match(/месяц[^е]|30 дн/) || lower.includes('month')) {
     return 'last_30d';
+  }
+  if (lower.includes('90 дн') || lower.includes('квартал') || lower.includes('3 месяц') || lower.includes('три месяц')) {
+    return 'last_90d';
+  }
+  if (lower.includes('6 месяц') || lower.includes('шесть месяц') || lower.includes('полгод') || lower.includes('пол год')) {
+    return 'last_6m';
+  }
+  if (lower.includes('год') || lower.includes('12 месяц') || lower.includes('year')) {
+    return 'last_12m';
+  }
+  if (lower.includes('все время') || lower.includes('всё время') || lower.includes('all time') || lower.includes('за всё') || lower.includes('за все')) {
+    return 'all';
   }
 
   // Try to parse specific date from the text
