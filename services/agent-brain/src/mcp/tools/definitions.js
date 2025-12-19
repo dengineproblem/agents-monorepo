@@ -108,7 +108,8 @@ export const creativeTools = [
 ];
 
 /**
- * Ads Agent Tools (9 READ + 8 WRITE)
+ * Ads Agent Tools
+ * Only includes tools that have both toolDef and handler defined
  */
 export const adsTools = [
   // READ tools - Campaigns & AdSets
@@ -118,14 +119,11 @@ export const adsTools = [
   createMCPTool('getSpendReport', AdsToolDefs.getSpendReport, adsHandlers.getSpendReport, 'ads'),
   // READ tools - Directions
   createMCPTool('getDirections', AdsToolDefs.getDirections, adsHandlers.getDirections, 'ads'),
-  createMCPTool('getDirectionDetails', AdsToolDefs.getDirectionDetails, adsHandlers.getDirectionDetails, 'ads'),
   createMCPTool('getDirectionMetrics', AdsToolDefs.getDirectionMetrics, adsHandlers.getDirectionMetrics, 'ads'),
   // READ tools - ROI Reports
   createMCPTool('getROIReport', AdsToolDefs.getROIReport, adsHandlers.getROIReport, 'ads'),
   createMCPTool('getROIComparison', AdsToolDefs.getROIComparison, adsHandlers.getROIComparison, 'ads'),
-  // WRITE tools - Campaigns & AdSets
-  createMCPTool('pauseCampaign', AdsToolDefs.pauseCampaign, adsHandlers.pauseCampaign, 'ads'),
-  createMCPTool('resumeCampaign', AdsToolDefs.resumeCampaign, adsHandlers.resumeCampaign, 'ads'),
+  // WRITE tools - AdSets
   createMCPTool('pauseAdSet', AdsToolDefs.pauseAdSet, adsHandlers.pauseAdSet, 'ads'),
   createMCPTool('resumeAdSet', AdsToolDefs.resumeAdSet, adsHandlers.resumeAdSet, 'ads'),
   createMCPTool('updateBudget', AdsToolDefs.updateBudget, adsHandlers.updateBudget, 'ads'),
