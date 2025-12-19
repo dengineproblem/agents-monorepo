@@ -2312,103 +2312,107 @@ export const adsHandlers = {
   },
 
   /**
-   * Get leads engagement rate (2+ messages)
-   * Quality metric for lead quality assessment
+   * Get leads engagement rate (2+ messages) from Facebook API
+   * Uses onsite_conversion.messaging_user_depth_2_message_send action type
+   * Same logic as dashboard SummaryStats.tsx
    */
-  async getLeadsEngagementRate({ direction_id, period = 'last_7d' }, { userAccountId, adAccountId, adAccountDbId }) {
-    const dbAccountId = adAccountDbId || null;
+  async getLeadsEngagementRate({ direction_id, period = 'last_7d' }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
+    const dateRange = getDateRange(period);
 
-    const periodDays = {
-      'last_3d': 3,
-      'last_7d': 7,
-      'last_14d': 14,
-      'last_30d': 30
-    }[period] || 7;
-
-    const since = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000).toISOString();
-
-    // Get leads for the period
-    let leadsQuery = supabase
-      .from('leads')
-      .select('id, chat_id')
-      .eq('user_account_id', userAccountId)
-      .gte('created_at', since);
-
-    if (dbAccountId) {
-      leadsQuery = leadsQuery.eq('account_id', dbAccountId);
-    }
+    // If direction_id specified, get campaigns for that direction
+    let campaignFilter = null;
     if (direction_id) {
-      leadsQuery = leadsQuery.eq('direction_id', direction_id);
-    }
+      const { data: directionCampaigns } = await supabase
+        .from('direction_campaigns')
+        .select('campaign_id')
+        .eq('direction_id', direction_id);
 
-    const { data: leads, error: leadsError } = await leadsQuery;
-
-    if (leadsError) {
-      return { success: false, error: leadsError.message };
-    }
-
-    const totalLeads = leads?.length || 0;
-
-    if (totalLeads === 0) {
-      return {
-        success: true,
-        period,
-        leads_total: 0,
-        leads_with_2plus_msgs: 0,
-        engagement_rate: 0,
-        source: 'no_leads'
-      };
-    }
-
-    // Get chat_ids
-    const chatIds = leads.map(l => l.chat_id).filter(Boolean);
-
-    if (chatIds.length === 0) {
-      return {
-        success: true,
-        period,
-        leads_total: totalLeads,
-        leads_with_2plus_msgs: 0,
-        engagement_rate: 0,
-        source: 'no_chat_ids'
-      };
-    }
-
-    // Count messages per chat from dialogs table
-    let dialogsQuery = supabase
-      .from('dialogs')
-      .select('id, phone, messages_count')
-      .eq('user_account_id', userAccountId)
-      .in('phone', chatIds);
-
-    if (dbAccountId) {
-      dialogsQuery = dialogsQuery.eq('account_id', dbAccountId);
-    }
-
-    const { data: dialogs } = await dialogsQuery;
-
-    // Count leads with 2+ messages
-    let leadsWithEngagement = 0;
-    const engagedChatIds = new Set();
-
-    for (const dialog of dialogs || []) {
-      if ((dialog.messages_count || 0) >= 2) {
-        engagedChatIds.add(dialog.phone);
+      if (directionCampaigns && directionCampaigns.length > 0) {
+        campaignFilter = directionCampaigns.map(dc => dc.campaign_id);
       }
     }
 
-    leadsWithEngagement = leads.filter(l => engagedChatIds.has(l.chat_id)).length;
+    try {
+      // Normalize adAccountId
+      const accountId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
-    const engagementRate = totalLeads > 0 ? (leadsWithEngagement / totalLeads) * 100 : 0;
+      // Request insights from Facebook API
+      const params = {
+        level: 'campaign',
+        fields: 'campaign_id,campaign_name,actions',
+        time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
+        action_breakdowns: 'action_type',
+        limit: '500'
+      };
 
-    return {
-      success: true,
-      period,
-      leads_total: totalLeads,
-      leads_with_2plus_msgs: leadsWithEngagement,
-      engagement_rate: engagementRate.toFixed(1),
-      source: 'dialogs'
-    };
+      // Add campaign filter if direction specified
+      if (campaignFilter && campaignFilter.length > 0) {
+        params.filtering = JSON.stringify([{
+          field: 'campaign.id',
+          operator: 'IN',
+          value: campaignFilter
+        }]);
+      }
+
+      const response = await fbGraph('GET', `${accountId}/insights`, accessToken, params);
+
+      if (!response.data || response.data.length === 0) {
+        return {
+          success: true,
+          period,
+          date_range: dateRange,
+          messaging_leads: 0,
+          quality_leads: 0,
+          engagement_rate: 0,
+          source: 'facebook_api',
+          note: 'No campaign data for period'
+        };
+      }
+
+      // Parse Facebook actions - same logic as dashboard
+      let totalMessagingLeads = 0;
+      let totalQualityLeads = 0;
+
+      for (const stat of response.data) {
+        if (stat.actions && Array.isArray(stat.actions)) {
+          for (const action of stat.actions) {
+            // Total messaging connections (all leads who started a conversation)
+            if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+              totalMessagingLeads += parseInt(action.value || '0', 10);
+            }
+            // Quality leads (2+ messages sent by user)
+            else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
+              totalQualityLeads += parseInt(action.value || '0', 10);
+            }
+          }
+        }
+      }
+
+      // Calculate engagement rate (quality / messaging * 100)
+      const engagementRate = totalMessagingLeads > 0
+        ? (totalQualityLeads / totalMessagingLeads) * 100
+        : 0;
+
+      return {
+        success: true,
+        period,
+        date_range: dateRange,
+        messaging_leads: totalMessagingLeads,
+        quality_leads: totalQualityLeads,
+        engagement_rate: parseFloat(engagementRate.toFixed(1)),
+        source: 'facebook_api',
+        direction_id: direction_id || null,
+        campaigns_count: response.data.length
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message, direction_id, period }, 'getLeadsEngagementRate failed');
+      return {
+        success: false,
+        error: error.message,
+        source: 'facebook_api'
+      };
+    }
   },
 
   // ============================================================

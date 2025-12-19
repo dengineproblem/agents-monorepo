@@ -10,6 +10,16 @@ import {
   Info,
   Layers,
   List,
+  Inbox,
+  Brain,
+  Cpu,
+  Wrench,
+  GitBranch,
+  Link,
+  Cog,
+  Database,
+  MessageSquare,
+  Save,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,8 +36,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import type { StreamEventLayer, LayerStatus } from '@/services/assistantApi';
-import { LAYER_LABELS } from '@/services/assistantApi';
+import type { LayerStatus } from '@/services/assistantApi';
 
 export interface LayerLog {
   layer: number;
@@ -46,11 +55,266 @@ interface DebugLogsModalProps {
   onClose: () => void;
 }
 
+// Иконки для каждого слоя
+const LAYER_ICONS: Record<number, typeof Inbox> = {
+  1: Inbox,
+  2: Brain,
+  3: Cpu,
+  4: Wrench,
+  5: GitBranch,
+  6: Link,
+  7: Cog,
+  8: Database,
+  9: MessageSquare,
+  10: MessageSquare,
+  11: Save,
+};
+
+// Русские названия слоёв
+const LAYER_NAMES_RU: Record<number, string> = {
+  1: 'Входящий запрос',
+  2: 'Оркестратор',
+  3: 'Мета-оркестратор',
+  4: 'Мета-инструменты',
+  5: 'Маршрутизатор доменов',
+  6: 'MCP мост',
+  7: 'MCP исполнитель',
+  8: 'Обработчики доменов',
+  9: 'Доменные агенты',
+  10: 'Сборка ответа',
+  11: 'Сохранение',
+};
+
+/**
+ * Генерирует понятное описание на русском языке
+ */
+function getHumanReadableDescription(log: LayerLog): string {
+  const { layer, status, data, message } = log;
+
+  // Layer 1: HTTP Entry
+  if (layer === 1) {
+    if (status === 'start') {
+      const msg = data?.message as string;
+      return `📥 Получен запрос: "${msg?.substring(0, 50)}${msg && msg.length > 50 ? '...' : ''}"`;
+    }
+    if (status === 'info' && message?.includes('Ad account')) {
+      return `✅ Рекламный аккаунт найден`;
+    }
+    if (status === 'info' && message?.includes('Context')) {
+      return `📋 Контекст собран (${data?.recentMessages || 0} сообщений в истории)`;
+    }
+    if (status === 'end') {
+      return `✅ Запрос принят, conversationId: ${(data?.conversationId as string)?.substring(0, 8)}...`;
+    }
+  }
+
+  // Layer 2: Orchestrator
+  if (layer === 2) {
+    if (status === 'start') {
+      return `🎯 Оркестратор начал обработку (режим: ${data?.mode || 'auto'})`;
+    }
+    if (status === 'info') {
+      if (message?.includes('Memory command')) {
+        return `📝 Обнаружена команда памяти: ${data?.type}`;
+      }
+      if (message?.includes('Routing')) {
+        return `➡️ Направляю запрос в мета-оркестратор`;
+      }
+      if (message?.includes('context')) {
+        return `📋 Собираю контекст пользователя`;
+      }
+    }
+    if (status === 'end') {
+      return `✅ Оркестратор завершил обработку`;
+    }
+  }
+
+  // Layer 3: Meta Orchestrator
+  if (layer === 3) {
+    if (status === 'start') {
+      return `🤖 Мета-оркестратор запущен (модель: ${data?.model || 'gpt-4o'})`;
+    }
+    if (status === 'info') {
+      if (message?.includes('MCP session')) {
+        return `🔗 Создана MCP сессия: ${(data?.sessionId as string)?.substring(0, 8)}...`;
+      }
+      if (message?.includes('LLM iteration')) {
+        const iteration = data?.iteration || message?.match(/\d+/)?.[0];
+        return `💭 LLM думает (итерация ${iteration})`;
+      }
+      if (message?.includes('Max iterations')) {
+        return `⚠️ Достигнут лимит итераций`;
+      }
+      if (message?.includes('cleaned up')) {
+        return `🧹 MCP сессия очищена`;
+      }
+    }
+    if (status === 'end') {
+      return `✅ Мета-оркестратор завершил (${data?.iterations || 0} итераций, ${data?.toolCalls || 0} вызовов инструментов)`;
+    }
+  }
+
+  // Layer 4: Meta Tools
+  if (layer === 4) {
+    const toolName = data?.toolName as string;
+    if (status === 'start') {
+      if (toolName === 'executeTools') {
+        return `🛠️ Вызываю инструменты для выполнения задач`;
+      }
+      if (toolName === 'askClarifyingQuestion') {
+        return `❓ Задаю уточняющий вопрос`;
+      }
+      if (toolName === 'respondToUser') {
+        return `💬 Формирую ответ пользователю`;
+      }
+      return `🔧 Вызов мета-инструмента: ${toolName}`;
+    }
+    if (status === 'end') {
+      return `✅ Мета-инструмент ${toolName} выполнен (${data?.latencyMs || 0}мс)`;
+    }
+    if (status === 'error') {
+      return `❌ Ошибка мета-инструмента: ${toolName}`;
+    }
+  }
+
+  // Layer 5: Domain Router
+  if (layer === 5) {
+    if (status === 'start') {
+      const domains = data?.domains as string[];
+      return `📊 Группирую задачи по доменам: ${domains?.join(', ') || '...'}`;
+    }
+    if (status === 'info') {
+      if (message?.includes('Processing domain')) {
+        const domain = data?.domain as string;
+        const tools = data?.tools as string[];
+        return `🔄 Обрабатываю домен "${domain}": ${tools?.join(', ')}`;
+      }
+      if (message?.includes('completed')) {
+        return `✅ Домен ${data?.domain} обработан`;
+      }
+      if (message?.includes('failed')) {
+        return `❌ Ошибка домена ${data?.domain}: ${data?.error}`;
+      }
+    }
+    if (status === 'end') {
+      return `✅ Маршрутизация завершена (${(data?.domainsProcessed as string[])?.length || 0} доменов)`;
+    }
+  }
+
+  // Layer 6: MCP Bridge
+  if (layer === 6) {
+    const toolName = data?.toolName as string;
+    if (status === 'start') {
+      return `🔗 Выполняю инструмент через MCP: ${toolName}`;
+    }
+    if (status === 'end') {
+      if (data?.approval_required) {
+        return `⚠️ Инструмент ${toolName} требует подтверждения`;
+      }
+      if (data?.cached) {
+        return `💾 Результат ${toolName} взят из кэша`;
+      }
+      return `✅ Инструмент ${toolName} выполнен (${data?.latencyMs || 0}мс)`;
+    }
+    if (status === 'error') {
+      return `❌ Ошибка MCP: ${toolName}`;
+    }
+  }
+
+  // Layer 7: MCP Executor
+  if (layer === 7) {
+    const toolName = data?.toolName as string;
+    if (status === 'start') {
+      return `⚙️ Запускаю исполнитель: ${toolName}`;
+    }
+    if (status === 'info') {
+      if (message?.includes('Validation passed')) {
+        return `✅ Валидация ${toolName} пройдена`;
+      }
+      if (message?.includes('Dangerous tool')) {
+        return `⚠️ Обнаружен опасный инструмент: ${toolName}`;
+      }
+    }
+    if (status === 'end') {
+      if (data?.error === 'TOOL_CALL_LIMIT') {
+        return `🚫 Превышен лимит вызовов инструментов`;
+      }
+      if (data?.error === 'VALIDATION_ERROR') {
+        return `❌ Ошибка валидации параметров`;
+      }
+      return `✅ Исполнитель ${toolName} завершён`;
+    }
+    if (status === 'error') {
+      return `❌ Ошибка исполнителя: ${log.error}`;
+    }
+  }
+
+  // Layer 8: Domain Handlers
+  if (layer === 8) {
+    const handler = data?.handler as string;
+    if (status === 'start') {
+      return `🔨 Запускаю обработчик: ${handler}`;
+    }
+    if (status === 'end') {
+      return `✅ Обработчик ${handler} завершён`;
+    }
+    if (status === 'error') {
+      return `❌ Ошибка обработчика: ${handler}`;
+    }
+  }
+
+  // Layer 9: Domain Agents
+  if (layer === 9) {
+    const domain = data?.domain as string;
+    if (status === 'start') {
+      return `🧠 Доменный агент "${domain}" анализирует данные`;
+    }
+    if (status === 'info' && message?.includes('LLM call')) {
+      return `💭 Агент "${domain}" обращается к LLM (${data?.model})`;
+    }
+    if (status === 'end') {
+      return `✅ Агент "${domain}" сформировал ответ (${data?.responseLength || 0} символов)`;
+    }
+    if (status === 'error') {
+      return `❌ Ошибка агента "${domain}"`;
+    }
+  }
+
+  // Layer 10: Response Assembly
+  if (layer === 10) {
+    if (status === 'start') {
+      return `📝 Собираю финальный ответ`;
+    }
+    if (status === 'end') {
+      return `✅ Ответ сформирован (${data?.contentLength || 0} символов)`;
+    }
+  }
+
+  // Layer 11: Persistence
+  if (layer === 11) {
+    if (status === 'start') {
+      return `💾 Сохраняю в базу данных`;
+    }
+    if (status === 'end') {
+      return `✅ Сохранено (${data?.logsCount || 0} логов)`;
+    }
+  }
+
+  // Default fallback
+  if (status === 'error') {
+    return `❌ Ошибка: ${log.error || 'Неизвестная ошибка'}`;
+  }
+  if (message) {
+    return message;
+  }
+  return `${LAYER_NAMES_RU[layer] || log.name} - ${status}`;
+}
+
 const STATUS_CONFIG: Record<LayerStatus, { icon: typeof Play; color: string; label: string }> = {
-  start: { icon: Play, color: 'text-blue-500', label: 'Start' },
-  end: { icon: CheckCircle2, color: 'text-green-500', label: 'End' },
-  error: { icon: AlertCircle, color: 'text-red-500', label: 'Error' },
-  info: { icon: Info, color: 'text-gray-500', label: 'Info' },
+  start: { icon: Play, color: 'text-blue-500', label: 'Старт' },
+  end: { icon: CheckCircle2, color: 'text-green-500', label: 'Готово' },
+  error: { icon: AlertCircle, color: 'text-red-500', label: 'Ошибка' },
+  info: { icon: Info, color: 'text-gray-500', label: 'Инфо' },
 };
 
 export function DebugLogsModal({ logs, open, onClose }: DebugLogsModalProps) {
@@ -82,14 +346,14 @@ export function DebugLogsModal({ logs, open, onClose }: DebugLogsModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Bug className="h-5 w-5 text-orange-500" />
-            Debug Logs
+            Логи обработки запроса
             <Badge variant="secondary" className="ml-2">
-              {logs.length} events
+              {logs.length} событий
             </Badge>
             {totalDuration > 0 && (
               <Badge variant="outline" className="ml-1">
                 <Clock className="h-3 w-3 mr-1" />
-                {totalDuration}ms
+                {(totalDuration / 1000).toFixed(2)}с
               </Badge>
             )}
           </DialogTitle>
@@ -99,11 +363,11 @@ export function DebugLogsModal({ logs, open, onClose }: DebugLogsModalProps) {
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="timeline" className="flex items-center gap-2">
               <List className="h-4 w-4" />
-              Timeline
+              Хронология
             </TabsTrigger>
             <TabsTrigger value="layers" className="flex items-center gap-2">
               <Layers className="h-4 w-4" />
-              By Layer
+              По слоям
             </TabsTrigger>
           </TabsList>
 
@@ -112,7 +376,7 @@ export function DebugLogsModal({ logs, open, onClose }: DebugLogsModalProps) {
               <div className="space-y-2 pr-4">
                 {logs.length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
-                    No logs available
+                    Нет логов
                   </div>
                 ) : (
                   logs.map((log, idx) => (
@@ -128,7 +392,7 @@ export function DebugLogsModal({ logs, open, onClose }: DebugLogsModalProps) {
               <div className="space-y-3 pr-4">
                 {Object.keys(logsByLayer).length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
-                    No logs available
+                    Нет логов
                   </div>
                 ) : (
                   Object.entries(logsByLayer)
@@ -153,8 +417,9 @@ export function DebugLogsModal({ logs, open, onClose }: DebugLogsModalProps) {
 function LogEntry({ log, showLayer = false }: { log: LayerLog; showLayer?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const config = STATUS_CONFIG[log.status];
-  const Icon = config.icon;
+  const LayerIcon = LAYER_ICONS[log.layer] || Info;
   const hasData = log.data && Object.keys(log.data).length > 0;
+  const description = getHumanReadableDescription(log);
 
   return (
     <div
@@ -165,51 +430,45 @@ function LogEntry({ log, showLayer = false }: { log: LayerLog; showLayer?: boole
       }`}
     >
       <div className="flex items-start gap-3">
-        <Icon className={`h-4 w-4 mt-0.5 ${config.color}`} />
+        <LayerIcon className={`h-4 w-4 mt-0.5 ${config.color}`} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Понятное описание */}
+          <p className="text-sm font-medium">{description}</p>
+
+          {/* Badges с layer и временем */}
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             {showLayer && (
               <Badge variant="outline" className="text-xs">
-                L{log.layer}
+                Слой {log.layer}: {LAYER_NAMES_RU[log.layer]}
               </Badge>
             )}
-            <span className="font-medium text-sm">{log.name}</span>
-            <Badge
-              variant={log.status === 'error' ? 'destructive' : 'secondary'}
-              className="text-xs"
-            >
-              {config.label}
-            </Badge>
-            {log.duration_ms !== undefined && (
-              <Badge variant="outline" className="text-xs">
+            {log.duration_ms !== undefined && log.duration_ms > 0 && (
+              <Badge variant="secondary" className="text-xs">
                 <Clock className="h-3 w-3 mr-1" />
-                {log.duration_ms}ms
+                {log.duration_ms}мс
               </Badge>
             )}
           </div>
-
-          {log.message && (
-            <p className="text-sm text-muted-foreground mt-1">{log.message}</p>
-          )}
 
           {log.error && (
             <p className="text-sm text-red-600 dark:text-red-400 mt-1">{log.error}</p>
           )}
 
+          {/* Кнопка "Подробнее" для технических данных */}
           {hasData && (
             <Collapsible open={expanded} onOpenChange={setExpanded}>
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 px-2 mt-1 text-xs"
+                  className="h-6 px-2 mt-1 text-xs text-muted-foreground"
                 >
                   {expanded ? (
                     <ChevronDown className="h-3 w-3 mr-1" />
                   ) : (
                     <ChevronRight className="h-3 w-3 mr-1" />
                   )}
-                  Data
+                  Подробнее
                 </Button>
               </CollapsibleTrigger>
               <CollapsibleContent>
@@ -234,6 +493,7 @@ function LayerGroup({ layer, logs }: { layer: number; logs: LayerLog[] }) {
   const totalDuration = logs
     .filter((l) => l.duration_ms !== undefined)
     .reduce((sum, l) => sum + (l.duration_ms || 0), 0);
+  const LayerIcon = LAYER_ICONS[layer] || Info;
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -250,16 +510,17 @@ function LayerGroup({ layer, logs }: { layer: number; logs: LayerLog[] }) {
             ) : (
               <ChevronRight className="h-4 w-4" />
             )}
-            <Badge variant="outline">L{layer}</Badge>
-            <span className="font-medium">{LAYER_LABELS[layer] || `Layer ${layer}`}</span>
+            <LayerIcon className="h-4 w-4" />
+            <Badge variant="outline">{layer}</Badge>
+            <span className="font-medium">{LAYER_NAMES_RU[layer] || `Слой ${layer}`}</span>
             <div className="flex-1" />
             <Badge variant="secondary" className="text-xs">
-              {logs.length} events
+              {logs.length} событий
             </Badge>
             {totalDuration > 0 && (
               <Badge variant="outline" className="text-xs">
                 <Clock className="h-3 w-3 mr-1" />
-                {totalDuration}ms
+                {totalDuration}мс
               </Badge>
             )}
             {hasError && (
@@ -285,7 +546,6 @@ function formatTimestamp(ts: number): string {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    fractionalSecondDigits: 3,
   });
 }
 

@@ -137,7 +137,7 @@ export function formatDomainNotes(notes) {
  */
 export function formatAdAccountStatus(adAccountStatus) {
   if (!adAccountStatus) {
-    return '**Статус рекламного кабинета:** неизвестен';
+    return '### 🚨 КРИТИЧНО: Рекламный кабинет\n**Статус:** неизвестен\n**ВАЖНО:** Сначала сообщи пользователю, что не удалось проверить статус кабинета!';
   }
 
   const lines = [];
@@ -145,17 +145,22 @@ export function formatAdAccountStatus(adAccountStatus) {
   // Status
   const statusMap = {
     'ACTIVE': '✅ Активен',
-    'DISABLED': '❌ Заблокирован',
-    'PAYMENT_REQUIRED': '💳 Требуется оплата',
+    'DISABLED': '🚨 ЗАБЛОКИРОВАН',
+    'PAYMENT_REQUIRED': '🚨 ТРЕБУЕТСЯ ОПЛАТА (задолженность)',
     'REVIEW': '⏳ На проверке',
-    'ERROR': '⚠️ Ошибка проверки',
+    'ERROR': '⚠️ Ошибка проверки статуса',
     'NO_FB_CONNECTION': '🔗 Facebook не подключён'
   };
   const statusText = statusMap[adAccountStatus.status] || adAccountStatus.status;
   lines.push(`**Статус:** ${statusText}`);
 
-  // Can run ads
-  lines.push(`**Может крутить рекламу:** ${adAccountStatus.can_run_ads ? 'да' : 'нет'}`);
+  // Can run ads - make this VERY prominent if false
+  if (adAccountStatus.can_run_ads) {
+    lines.push(`**Может крутить рекламу:** ✅ да`);
+  } else {
+    lines.push(`**Может крутить рекламу:** ❌ НЕТ`);
+    lines.push(`**⚠️ ВАЖНО:** Реклама НЕ крутится! Сначала сообщи пользователю об этой проблеме!`);
+  }
 
   // Blocking reasons
   if (adAccountStatus.blocking_reasons?.length > 0) {
@@ -163,7 +168,7 @@ export function formatAdAccountStatus(adAccountStatus) {
       .slice(0, 3)
       .map(r => r.message || r.code)
       .join(', ');
-    lines.push(`**Причины блокировки:** ${reasons}`);
+    lines.push(`**Причины:** ${reasons}`);
   }
 
   // Limits
@@ -175,5 +180,10 @@ export function formatAdAccountStatus(adAccountStatus) {
     }
   }
 
-  return `### Рекламный кабинет\n${lines.join('\n')}`;
+  // Header depends on status
+  const header = adAccountStatus.can_run_ads
+    ? '### Рекламный кабинет'
+    : '### 🚨 КРИТИЧНО: Рекламный кабинет';
+
+  return `${header}\n${lines.join('\n')}`;
 }

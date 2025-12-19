@@ -27,13 +27,15 @@ const MAX_ITERATIONS = 10;
  * @param {Object} params.context - Business context
  * @param {Array} params.conversationHistory - Previous messages
  * @param {Object} params.toolContext - Context for tool execution
+ * @param {Function} params.onToolEvent - Callback for tool events (optional)
  * @returns {Promise<Object>} Response with content and metadata
  */
 export async function processWithMetaTools({
   message,
   context,
   conversationHistory = [],
-  toolContext = {}
+  toolContext = {},
+  onToolEvent = null
 }) {
   const startTime = Date.now();
   const { layerLogger } = toolContext;
@@ -56,7 +58,8 @@ export async function processWithMetaTools({
     ...toolContext,
     sessionId,
     dangerousPolicy: 'block',
-    layerLogger // Pass logger to downstream
+    layerLogger, // Pass logger to downstream
+    onToolEvent // Pass tool event callback for streaming
   };
 
   layerLogger?.info(3, 'MCP session created', { sessionId: sessionId.substring(0, 8) });
@@ -195,6 +198,9 @@ export async function processWithMetaTools({
 
           const toolStartTime = Date.now();
 
+          // Emit tool_start event for streaming UI
+          onToolEvent?.({ type: 'tool_start', name: toolName, args: toolArgs });
+
           try {
             const result = await metaTool.handler(toolArgs, {
               ...enrichedToolContext,
@@ -204,9 +210,9 @@ export async function processWithMetaTools({
             const toolLatency = Date.now() - toolStartTime;
 
             executedTools.push({
-              name: toolName,
+              tool: toolName,  // Frontend expects 'tool', not 'name'
               args: toolArgs,
-              success: true,
+              result: 'success',  // Frontend expects 'result' string, not 'success' boolean
               latencyMs: toolLatency
             });
 
@@ -222,6 +228,9 @@ export async function processWithMetaTools({
 
             layerLogger?.end(4, { toolName, success: true, latencyMs: toolLatency });
 
+            // Emit tool_result event for streaming UI
+            onToolEvent?.({ type: 'tool_result', name: toolName, success: true, duration: toolLatency });
+
             return {
               tool_call_id: toolCall.id,
               content: JSON.stringify(result)
@@ -231,10 +240,10 @@ export async function processWithMetaTools({
             const toolLatency = Date.now() - toolStartTime;
 
             executedTools.push({
-              name: toolName,
+              tool: toolName,  // Frontend expects 'tool', not 'name'
               args: toolArgs,
-              success: false,
-              error: error.message,
+              result: 'failed',  // Frontend expects 'result' string, not 'success' boolean
+              message: error.message,  // Frontend expects 'message' for errors
               latencyMs: toolLatency
             });
 
@@ -250,6 +259,9 @@ export async function processWithMetaTools({
             }
 
             layerLogger?.error(4, error, { toolName });
+
+            // Emit tool_result event for streaming UI (failure)
+            onToolEvent?.({ type: 'tool_result', name: toolName, success: false, error: error.message, duration: toolLatency });
 
             return {
               tool_call_id: toolCall.id,

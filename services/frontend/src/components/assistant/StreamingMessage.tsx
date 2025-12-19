@@ -4,7 +4,7 @@
  * Shows thinking status, tool execution progress, and text as it arrives
  */
 
-import { Bot, Loader2, CheckCircle2, Sparkles, Database, BarChart3, MessageSquare, Users } from 'lucide-react';
+import { Bot, Loader2, CheckCircle2, XCircle, Sparkles, Database, BarChart3, MessageSquare, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { getToolLabel, LAYER_LABELS } from '@/services/assistantApi';
@@ -30,9 +30,10 @@ const DOMAIN_LABELS: Record<string, string> = {
 
 interface ToolExecution {
   name: string;
-  status: 'running' | 'completed';
+  status: 'running' | 'completed' | 'failed';
   startTime: number;
   duration?: number;
+  error?: string;
 }
 
 export interface StreamingState {
@@ -117,6 +118,7 @@ export function StreamingMessage({ state }: StreamingMessageProps) {
 
 function ToolProgressItem({ tool }: { tool: ToolExecution }) {
   const isRunning = tool.status === 'running';
+  const isFailed = tool.status === 'failed';
   const label = getToolLabel(tool.name);
 
   return (
@@ -124,10 +126,14 @@ function ToolProgressItem({ tool }: { tool: ToolExecution }) {
       'flex items-center gap-2 text-xs px-2 py-1 rounded',
       isRunning
         ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400'
+        : isFailed
+        ? 'bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400'
         : 'bg-green-50 text-green-600 dark:bg-green-950/50 dark:text-green-400'
     )}>
       {isRunning ? (
         <Loader2 className="h-3 w-3 animate-spin" />
+      ) : isFailed ? (
+        <XCircle className="h-3 w-3" />
       ) : (
         <CheckCircle2 className="h-3 w-3" />
       )}
@@ -218,8 +224,9 @@ export function updateStreamingState(
           t.name === event.name && t.status === 'running'
             ? {
                 ...t,
-                status: 'completed' as const,
-                duration: Date.now() - t.startTime,
+                status: event.success ? 'completed' as const : 'failed' as const,
+                duration: event.duration || (Date.now() - t.startTime),
+                error: event.error,
               }
             : t
         ),

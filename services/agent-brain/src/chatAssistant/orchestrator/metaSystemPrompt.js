@@ -125,32 +125,46 @@ ${userContextSection}
 
 /**
  * Format integrations section
+ * ВАЖНО: Явно указываем что НЕ подключено, чтобы LLM не пытался использовать недоступные инструменты
  */
 function formatIntegrations(integrations) {
   if (!integrations) return '';
 
-  const lines = ['## Доступные интеграции'];
+  const lines = ['## Статус интеграций'];
 
+  // Facebook Ads
   if (integrations.fb) {
     lines.push('✅ Facebook Ads подключён — можешь работать с рекламой и креативами');
   } else {
-    lines.push('❌ Facebook Ads не подключён');
+    lines.push('❌ Facebook Ads НЕ подключён — НЕ используй инструменты рекламы');
   }
 
-  if (integrations.crm) {
-    lines.push('✅ CRM интеграция активна — можешь работать с лидами');
-  }
-
+  // WhatsApp
   if (integrations.whatsapp) {
     lines.push('✅ WhatsApp подключён — можешь анализировать диалоги');
+  } else {
+    lines.push('❌ WhatsApp НЕ подключён — НЕ используй getDialogs, analyzeDialog и другие WhatsApp инструменты');
   }
 
+  // AmoCRM
+  if (integrations.amocrm) {
+    lines.push('✅ AmoCRM подключён — можешь использовать getAmoCRM* инструменты');
+  } else {
+    lines.push('❌ AmoCRM НЕ подключён — НЕ используй getAmoCRMStatus, getAmoCRMPipelines, getSalesQuality и другие AmoCRM инструменты');
+  }
+
+  // CRM (leads data)
+  if (integrations.crm) {
+    lines.push('✅ Данные о лидах есть — можешь использовать getLeads, getLeadDetails, getFunnelStats');
+  } else {
+    lines.push('❌ Данных о лидах нет — getLeads вернёт пустой результат');
+  }
+
+  // ROI
   if (integrations.roi) {
-    lines.push('✅ ROI tracking активен — данные о продажах доступны');
-  }
-
-  if (lines.length === 1) {
-    return '';
+    lines.push('✅ ROI tracking активен — данные о продажах доступны для getROIReport');
+  } else {
+    lines.push('❌ ROI tracking НЕ активен — нет данных о продажах');
   }
 
   return lines.join('\n');

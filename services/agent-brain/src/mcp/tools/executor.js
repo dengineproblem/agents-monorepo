@@ -9,6 +9,7 @@
 
 import { getToolByName, isDangerousTool } from './definitions.js';
 import { incrementToolCalls, incrementToolCallsAsync } from '../sessions.js';
+import { logger } from '../../lib/logger.js';
 
 /**
  * Execute a tool with user context
@@ -63,6 +64,13 @@ export async function executeToolWithContext(name, args, context) {
   // Phase 2: Validate arguments against Zod schema
   const validation = validateToolArgs(name, args);
   if (!validation.valid) {
+    // Detailed logging for debugging
+    logger.warn({
+      tool: name,
+      receivedArgs: args,
+      errors: validation.errors
+    }, 'Tool validation failed');
+
     layerLogger?.end(7, { toolName: name, error: 'VALIDATION_ERROR' });
     return {
       success: false,

@@ -134,7 +134,9 @@ export interface StreamEventToolStart {
 export interface StreamEventToolResult {
   type: 'tool_result';
   name: string;
-  result: unknown;
+  success: boolean;
+  duration?: number;
+  error?: string;
 }
 
 export interface StreamEventApprovalRequired {

@@ -459,8 +459,8 @@ export function incrementToolCalls(sessionId) {
     return { allowed: false, used: 0, max: 0, error: 'session_not_found' };
   }
 
-  // Get max from policyMetadata or default to 5
-  const maxToolCalls = session.policyMetadata?.maxToolCalls || 5;
+  // Get max from policyMetadata or default to 20 (enough for complex queries)
+  const maxToolCalls = session.policyMetadata?.maxToolCalls || 20;
 
   // Initialize counter if not exists
   if (!session.policyMetadata) {
@@ -497,7 +497,7 @@ export async function incrementToolCallsAsync(sessionId) {
     return { allowed: false, used: 0, max: 0, error: 'session_not_found' };
   }
 
-  const maxToolCalls = session.policyMetadata?.maxToolCalls || 5;
+  const maxToolCalls = session.policyMetadata?.maxToolCalls || 20;
 
   // Initialize or increment counter
   if (!session.policyMetadata) {
@@ -541,7 +541,7 @@ export function getToolCallStats(sessionId) {
 
   return {
     used: session.policyMetadata?.toolCallCount || 0,
-    max: session.policyMetadata?.maxToolCalls || 5
+    max: session.policyMetadata?.maxToolCalls || 20
   };
 }
 
@@ -558,7 +558,7 @@ export async function getToolCallStatsAsync(sessionId) {
 
   return {
     used: session.policyMetadata?.toolCallCount || 0,
-    max: session.policyMetadata?.maxToolCalls || 5
+    max: session.policyMetadata?.maxToolCalls || 20
   };
 }
 

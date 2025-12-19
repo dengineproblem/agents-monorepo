@@ -26,6 +26,7 @@ services:
       - HOSTNAME=agent-brain-prod
       - OPENAI_MAX_RETRIES=3
       - HYBRID_ENABLED=true
+      - ENABLE_LAYER_LOGGING=true
     ports:
       - "7080:7080"
     restart: unless-stopped

@@ -477,11 +477,17 @@ export function registerChatRoutes(fastify) {
       let finalAgent = '';
       let executedActions = [];
 
+      // Pass sendEvent as callback for real-time tool events
+      const toolContextWithEvents = {
+        ...toolContext,
+        onToolEvent: sendEvent  // Will be called directly when tools execute
+      };
+
       for await (const event of orchestrator.processStreamRequest({
         message,
         context,
         mode: mode || 'auto',
-        toolContext,
+        toolContext: toolContextWithEvents,
         conversationHistory
       })) {
         sendEvent(event);

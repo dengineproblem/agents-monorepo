@@ -38,7 +38,7 @@ export const AdsToolDefs = {
   getCampaigns: {
     description: 'Получить список кампаний с метриками (расходы, лиды, CPL, CTR) за указанный период',
     schema: z.object({
-      period: periodSchema.describe('Период для метрик'),
+      period: periodSchema.default('last_7d').describe('Период для метрик (default: last_7d)'),
       status: campaignStatusSchema.optional().describe('Фильтр по статусу кампаний')
     }),
     meta: { timeout: 25000, retryable: true }
@@ -64,7 +64,7 @@ export const AdsToolDefs = {
   getSpendReport: {
     description: 'Получить отчёт по расходам за период с разбивкой по кампаниям или дням',
     schema: z.object({
-      period: periodSchema.describe('Период отчёта'),
+      period: periodSchema.default('last_7d').describe('Период отчёта (default: last_7d)'),
       group_by: groupBySchema.optional().describe('Группировка данных')
     }),
     meta: { timeout: 25000, retryable: true }

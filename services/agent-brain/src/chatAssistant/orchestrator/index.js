@@ -397,12 +397,14 @@ export class Orchestrator {
 
       layerLogger?.info(2, 'Routing to MetaOrchestrator');
 
-      // 2. Process via meta-tools (non-streaming for now)
+      // 2. Process via meta-tools
+      // Tool events are sent directly via toolContext.onToolEvent (passed from route handler)
       const metaResult = await processWithMetaTools({
         message,
         context: enrichedContext,
         conversationHistory,
-        toolContext
+        toolContext,
+        onToolEvent: toolContext.onToolEvent  // Use callback from toolContext for real-time streaming
       });
 
       layerLogger?.end(2, { iterations: metaResult.iterations });

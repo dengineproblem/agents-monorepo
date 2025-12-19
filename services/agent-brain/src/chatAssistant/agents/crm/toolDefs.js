@@ -8,9 +8,9 @@ import { z } from 'zod';
 
 // Common schemas
 const nonEmptyString = (field) => z.string().min(1, `${field} is required`);
-const periodSchema = z.enum(['today', 'yesterday', 'last_7d', 'last_30d']);
-const extendedPeriodSchema = z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']);
-const amoPeriodSchema = z.enum(['last_7d', 'last_14d', 'last_30d']);
+const periodSchema = z.enum(['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all']);
+const extendedPeriodSchema = z.enum(['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all']);
+const amoPeriodSchema = z.enum(['last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all']);
 const uuidSchema = z.string().uuid('Invalid UUID format');
 
 export const CrmToolDefs = {
@@ -41,7 +41,9 @@ export const CrmToolDefs = {
   getFunnelStats: {
     description: 'Статистика воронки продаж за период: количество лидов на каждом этапе, конверсии между этапами (%), распределение по температуре. Используй для оценки эффективности воронки.',
     schema: z.object({
-      period: periodSchema.default('last_7d').describe('Период для анализа (default: last_7d)')
+      period: periodSchema.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -50,7 +52,9 @@ export const CrmToolDefs = {
     description: 'KPI ladder для оценки качества лидов: total_leads, qualified_leads, sales_count, revenue, avg_check, qualification_rate, CPL ladder (cost per qualified lead). Ключевой инструмент для анализа ROI рекламы.',
     schema: z.object({
       direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
-      period: extendedPeriodSchema.default('last_7d').describe('Период для анализа')
+      period: extendedPeriodSchema.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 25000, retryable: true }
   },
@@ -100,7 +104,9 @@ export const CrmToolDefs = {
     description: 'Конверсия в ключевые этапы направления: key_stage_1/2/3 с названиями, total_leads, reached_count, conversion_rate (%). Показывает глубину прохождения воронки. Требует direction_id.',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
-      period: amoPeriodSchema.default('last_7d').describe('Период для анализа')
+      period: amoPeriodSchema.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -109,7 +115,9 @@ export const CrmToolDefs = {
     description: 'Статистика квалификации по креативам: creative_id, name, total_leads, qualified_count, qualification_rate (%). Включает recommendations для масштабирования/оптимизации. Ключевой для оценки качества трафика.',
     schema: z.object({
       direction_id: uuidSchema.optional().describe('UUID направления'),
-      period: amoPeriodSchema.default('last_7d').describe('Период для анализа')
+      period: amoPeriodSchema.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },

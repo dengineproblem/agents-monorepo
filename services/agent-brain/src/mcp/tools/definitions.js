@@ -73,19 +73,27 @@ export const whatsappTools = [
 ];
 
 /**
- * CRM Agent Tools (3 READ + 1 WRITE)
+ * CRM Agent Tools (11 READ + 1 WRITE)
  */
 export const crmTools = [
   // READ tools
   createMCPTool('getLeads', CrmToolDefs.getLeads, crmHandlers.getLeads, 'crm'),
   createMCPTool('getLeadDetails', CrmToolDefs.getLeadDetails, crmHandlers.getLeadDetails, 'crm'),
   createMCPTool('getFunnelStats', CrmToolDefs.getFunnelStats, crmHandlers.getFunnelStats, 'crm'),
+  createMCPTool('getSalesQuality', CrmToolDefs.getSalesQuality, crmHandlers.getSalesQuality, 'crm'),
+  // AmoCRM tools
+  createMCPTool('getAmoCRMStatus', CrmToolDefs.getAmoCRMStatus, crmHandlers.getAmoCRMStatus, 'crm'),
+  createMCPTool('getAmoCRMPipelines', CrmToolDefs.getAmoCRMPipelines, crmHandlers.getAmoCRMPipelines, 'crm'),
+  createMCPTool('syncAmoCRMLeads', CrmToolDefs.syncAmoCRMLeads, crmHandlers.syncAmoCRMLeads, 'crm'),
+  createMCPTool('getAmoCRMKeyStageStats', CrmToolDefs.getAmoCRMKeyStageStats, crmHandlers.getAmoCRMKeyStageStats, 'crm'),
+  createMCPTool('getAmoCRMQualificationStats', CrmToolDefs.getAmoCRMQualificationStats, crmHandlers.getAmoCRMQualificationStats, 'crm'),
+  createMCPTool('getAmoCRMLeadHistory', CrmToolDefs.getAmoCRMLeadHistory, crmHandlers.getAmoCRMLeadHistory, 'crm'),
   // WRITE tools
   createMCPTool('updateLeadStage', CrmToolDefs.updateLeadStage, crmHandlers.updateLeadStage, 'crm')
 ];
 
 /**
- * Creative Agent Tools (10 READ + 5 WRITE)
+ * Creative Agent Tools (10 READ + 6 WRITE)
  */
 export const creativeTools = [
   // READ tools
@@ -104,12 +112,13 @@ export const creativeTools = [
   createMCPTool('launchCreative', CreativeToolDefs.launchCreative, creativeHandlers.launchCreative, 'creative'),
   createMCPTool('pauseCreative', CreativeToolDefs.pauseCreative, creativeHandlers.pauseCreative, 'creative'),
   createMCPTool('startCreativeTest', CreativeToolDefs.startCreativeTest, creativeHandlers.startCreativeTest, 'creative'),
-  createMCPTool('stopCreativeTest', CreativeToolDefs.stopCreativeTest, creativeHandlers.stopCreativeTest, 'creative')
+  createMCPTool('stopCreativeTest', CreativeToolDefs.stopCreativeTest, creativeHandlers.stopCreativeTest, 'creative'),
+  createMCPTool('generateCreatives', CreativeToolDefs.generateCreatives, creativeHandlers.generateCreatives, 'creative')
 ];
 
 /**
- * Ads Agent Tools
- * Only includes tools that have both toolDef and handler defined
+ * Ads Agent Tools (24 tools)
+ * All tools from toolDefs with handlers
  */
 export const adsTools = [
   // READ tools - Campaigns & AdSets
@@ -119,23 +128,37 @@ export const adsTools = [
   createMCPTool('getSpendReport', AdsToolDefs.getSpendReport, adsHandlers.getSpendReport, 'ads'),
   // READ tools - Directions
   createMCPTool('getDirections', AdsToolDefs.getDirections, adsHandlers.getDirections, 'ads'),
+  createMCPTool('getDirectionCreatives', AdsToolDefs.getDirectionCreatives, adsHandlers.getDirectionCreatives, 'ads'),
   createMCPTool('getDirectionMetrics', AdsToolDefs.getDirectionMetrics, adsHandlers.getDirectionMetrics, 'ads'),
+  createMCPTool('getDirectionInsights', AdsToolDefs.getDirectionInsights, adsHandlers.getDirectionInsights, 'ads'),
   // READ tools - ROI Reports
   createMCPTool('getROIReport', AdsToolDefs.getROIReport, adsHandlers.getROIReport, 'ads'),
   createMCPTool('getROIComparison', AdsToolDefs.getROIComparison, adsHandlers.getROIComparison, 'ads'),
+  // READ tools - Lead Quality
+  createMCPTool('getLeadsEngagementRate', AdsToolDefs.getLeadsEngagementRate, adsHandlers.getLeadsEngagementRate, 'ads'),
+  // READ tools - Account & Actions
+  createMCPTool('getAdAccountStatus', AdsToolDefs.getAdAccountStatus, adsHandlers.getAdAccountStatus, 'ads'),
+  createMCPTool('getAgentBrainActions', AdsToolDefs.getAgentBrainActions, adsHandlers.getAgentBrainActions, 'ads'),
   // WRITE tools - AdSets
   createMCPTool('pauseAdSet', AdsToolDefs.pauseAdSet, adsHandlers.pauseAdSet, 'ads'),
   createMCPTool('resumeAdSet', AdsToolDefs.resumeAdSet, adsHandlers.resumeAdSet, 'ads'),
   createMCPTool('updateBudget', AdsToolDefs.updateBudget, adsHandlers.updateBudget, 'ads'),
+  // WRITE tools - Ads
+  createMCPTool('pauseAd', AdsToolDefs.pauseAd, adsHandlers.pauseAd, 'ads'),
+  createMCPTool('resumeAd', AdsToolDefs.resumeAd, adsHandlers.resumeAd, 'ads'),
   // WRITE tools - Directions
   createMCPTool('updateDirectionBudget', AdsToolDefs.updateDirectionBudget, adsHandlers.updateDirectionBudget, 'ads'),
   createMCPTool('updateDirectionTargetCPL', AdsToolDefs.updateDirectionTargetCPL, adsHandlers.updateDirectionTargetCPL, 'ads'),
-  createMCPTool('pauseDirection', AdsToolDefs.pauseDirection, adsHandlers.pauseDirection, 'ads')
+  createMCPTool('pauseDirection', AdsToolDefs.pauseDirection, adsHandlers.pauseDirection, 'ads'),
+  createMCPTool('resumeDirection', AdsToolDefs.resumeDirection, adsHandlers.resumeDirection, 'ads'),
+  // Advanced tools
+  createMCPTool('triggerBrainOptimizationRun', AdsToolDefs.triggerBrainOptimizationRun, adsHandlers.triggerBrainOptimizationRun, 'ads'),
+  createMCPTool('customFbQuery', AdsToolDefs.customFbQuery, adsHandlers.customFbQuery, 'ads')
 ];
 
 /**
- * All MCP tools - Phase 4 complete
- * WhatsApp (4) + CRM (4) + Creative (15) + Ads (17) = 40 tools
+ * All MCP tools - Complete
+ * WhatsApp (4) + CRM (12) + Creative (16) + Ads (24) = 56 tools
  */
 export const allMCPTools = [
   ...whatsappTools,

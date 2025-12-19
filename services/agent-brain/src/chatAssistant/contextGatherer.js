@@ -805,7 +805,7 @@ export async function getRecentBrainActions(userAccountId, adAccountId) {
  */
 export async function getIntegrations(userAccountId, adAccountId, hasFbToken = false) {
   try {
-    const [leadsResult, purchasesResult, waResult] = await Promise.allSettled([
+    const [leadsResult, purchasesResult, waResult, amoAdAccountResult, amoUserAccountResult] = await Promise.allSettled([
       // Check CRM: has any leads?
       supabase
         .from('leads')
@@ -818,13 +818,26 @@ export async function getIntegrations(userAccountId, adAccountId, hasFbToken = f
         .select('id', { count: 'exact', head: true })
         .eq('user_account_id', userAccountId)
         .limit(1),
-      // Check WhatsApp: has evolution_api configured?
+      // Check WhatsApp: has active WhatsApp phone numbers?
       supabase
-        .from('integrations')
-        .select('id')
+        .from('whatsapp_phone_numbers')
+        .select('id', { count: 'exact', head: true })
         .eq('user_account_id', userAccountId)
-        .eq('type', 'evolution_api')
         .eq('is_active', true)
+        .limit(1),
+      // Check AmoCRM in ad_accounts (multi-account mode)
+      adAccountId
+        ? supabase
+            .from('ad_accounts')
+            .select('amocrm_access_token')
+            .eq('id', adAccountId)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      // Check AmoCRM in user_accounts (legacy mode)
+      supabase
+        .from('user_accounts')
+        .select('amocrm_access_token')
+        .eq('id', userAccountId)
         .maybeSingle()
     ]);
 
@@ -835,13 +848,21 @@ export async function getIntegrations(userAccountId, adAccountId, hasFbToken = f
       (purchasesResult.value?.count > 0 || purchasesResult.value?.data?.length > 0);
 
     const hasWhatsApp = waResult.status === 'fulfilled' &&
-      waResult.value?.data !== null;
+      (waResult.value?.count > 0 || waResult.value?.data?.length > 0);
+
+    // AmoCRM: check ad_accounts first, then fallback to user_accounts
+    const amoInAdAccount = amoAdAccountResult.status === 'fulfilled' &&
+      amoAdAccountResult.value?.data?.amocrm_access_token;
+    const amoInUserAccount = amoUserAccountResult.status === 'fulfilled' &&
+      amoUserAccountResult.value?.data?.amocrm_access_token;
+    const hasAmoCRM = !!(amoInAdAccount || amoInUserAccount);
 
     return {
       fb: hasFbToken,           // Facebook Ads connected
       crm: hasCRM,              // Has leads data
       roi: hasROI,              // Has purchases (for ROI calc)
-      whatsapp: hasWhatsApp     // WhatsApp integration active
+      whatsapp: hasWhatsApp,    // WhatsApp integration active
+      amocrm: hasAmoCRM         // AmoCRM integration active
     };
 
   } catch (error) {
@@ -850,7 +871,8 @@ export async function getIntegrations(userAccountId, adAccountId, hasFbToken = f
       fb: hasFbToken,
       crm: false,
       roi: false,
-      whatsapp: false
+      whatsapp: false,
+      amocrm: false
     };
   }
 }

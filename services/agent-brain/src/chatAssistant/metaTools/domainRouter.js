@@ -40,14 +40,29 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
 
   // 2. Execute tools for each domain in parallel
   const domainPromises = Object.entries(byDomain).map(async ([domain, domainCalls]) => {
+    const toolNames = domainCalls.map(c => c.name);
+    logger.info({ domain, tools: toolNames }, 'Domain router: executing tools');
+
     layerLogger?.info(5, `Processing domain: ${domain}`, {
       domain,
-      tools: domainCalls.map(c => c.name)
+      tools: toolNames
     });
 
     try {
       // Execute all tools for this domain
       const rawResults = await executeToolsForDomain(domainCalls, context);
+
+      // Log results summary for debugging
+      const resultsSummary = {};
+      for (const [toolName, data] of Object.entries(rawResults)) {
+        resultsSummary[toolName] = {
+          hasResult: !!data?.result,
+          success: data?.result?.success,
+          error: data?.result?.error || data?.result?.message,
+          dataKeys: data?.result ? Object.keys(data.result) : []
+        };
+      }
+      logger.info({ domain, results: resultsSummary }, 'Domain router: tool results');
 
       // Pass raw results to domain agent for processing
       const processedResponse = await processDomainResults(
@@ -135,11 +150,33 @@ function groupByDomain(toolCalls) {
  */
 async function executeToolsForDomain(toolCalls, context) {
   const results = {};
+  const { onToolEvent } = context;
 
   // Execute tools in parallel within domain (via MCP bridge)
   const promises = toolCalls.map(async (call) => {
-    const result = await executeToolAdaptive(call.name, call.args, context);
-    return { name: call.name, args: call.args, result };
+    const startTime = Date.now();
+    // Ensure args is always an object (GPT sometimes sends undefined or null)
+    const safeArgs = call.args ?? {};
+
+    // Emit tool_start event for streaming UI
+    onToolEvent?.({ type: 'tool_start', name: call.name, args: safeArgs });
+
+    try {
+      const result = await executeToolAdaptive(call.name, safeArgs, context);
+      const duration = Date.now() - startTime;
+
+      // Emit tool_result event for streaming UI
+      onToolEvent?.({ type: 'tool_result', name: call.name, success: true, duration });
+
+      return { name: call.name, args: safeArgs, result };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+
+      // Emit tool_result event for streaming UI (error)
+      onToolEvent?.({ type: 'tool_result', name: call.name, success: false, error: error.message, duration });
+
+      throw error;
+    }
   });
 
   const executed = await Promise.all(promises);
