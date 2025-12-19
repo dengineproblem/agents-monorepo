@@ -210,21 +210,7 @@ function zodToJsonSchema(zodSchema) {
   const required = [];
 
   for (const [key, value] of Object.entries(shape)) {
-    const prop = {
-      type: getZodType(value)
-    };
-
-    // Add description if exists
-    if (value._def.description) {
-      prop.description = value._def.description;
-    }
-
-    // Add enum if exists
-    if (value._def.typeName === 'ZodEnum') {
-      prop.enum = value._def.values;
-    }
-
-    properties[key] = prop;
+    properties[key] = zodTypeToJsonSchema(value);
 
     // Check if required
     if (!value.isOptional()) {
@@ -240,30 +226,80 @@ function zodToJsonSchema(zodSchema) {
 }
 
 /**
- * Get JSON Schema type from Zod type
+ * Convert a single Zod type to JSON Schema
+ * @param {z.ZodType} zodType
+ * @returns {Object} JSON Schema for this type
  */
-function getZodType(zodType) {
+function zodTypeToJsonSchema(zodType) {
   const typeName = zodType._def.typeName;
+  const result = {};
+
+  // Add description if exists
+  if (zodType._def.description) {
+    result.description = zodType._def.description;
+  }
 
   switch (typeName) {
     case 'ZodString':
-      return 'string';
+      result.type = 'string';
+      break;
+
     case 'ZodNumber':
-      return 'number';
+      result.type = 'number';
+      break;
+
     case 'ZodBoolean':
-      return 'boolean';
-    case 'ZodArray':
-      return 'array';
-    case 'ZodObject':
-    case 'ZodRecord':
-      return 'object';
+      result.type = 'boolean';
+      break;
+
     case 'ZodEnum':
-      return 'string';
+      result.type = 'string';
+      result.enum = zodType._def.values;
+      break;
+
+    case 'ZodArray': {
+      result.type = 'array';
+      // Get the inner type schema for items
+      const innerType = zodType._def.type;
+      result.items = zodTypeToJsonSchema(innerType);
+      break;
+    }
+
+    case 'ZodObject': {
+      result.type = 'object';
+      const shape = zodType.shape;
+      result.properties = {};
+      result.required = [];
+
+      for (const [key, value] of Object.entries(shape)) {
+        result.properties[key] = zodTypeToJsonSchema(value);
+        if (!value.isOptional()) {
+          result.required.push(key);
+        }
+      }
+      break;
+    }
+
+    case 'ZodRecord':
+      result.type = 'object';
+      result.additionalProperties = true;
+      break;
+
     case 'ZodOptional':
-      return getZodType(zodType._def.innerType);
+      return zodTypeToJsonSchema(zodType._def.innerType);
+
+    case 'ZodUnknown':
+    case 'ZodAny':
+      // For unknown/any, use object with additionalProperties
+      result.type = 'object';
+      result.additionalProperties = true;
+      break;
+
     default:
-      return 'string';
+      result.type = 'string';
   }
+
+  return result;
 }
 
 export default META_TOOLS;
