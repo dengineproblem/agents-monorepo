@@ -1,6 +1,6 @@
 // Типы данных для направлений бизнеса
 
-export type DirectionObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads';
+export type DirectionObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
 
 export interface Direction {
   id: string;
@@ -43,6 +43,8 @@ export interface CreateDirectionPayload {
     site_url?: string;
     pixel_id?: string;
     utm_tag?: string;
+    // Lead Forms специфичные
+    lead_form_id?: string;
   };
 }
 
@@ -73,6 +75,8 @@ export interface DefaultAdSettings {
   site_url: string | null;
   pixel_id: string | null;
   utm_tag: string | null;
+  // Lead Forms специфичные
+  lead_form_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +94,7 @@ export interface CreateDefaultSettingsInput {
   site_url?: string;
   pixel_id?: string;
   utm_tag?: string;
+  lead_form_id?: string;
 }
 
 export interface UpdateDefaultSettingsInput {
@@ -103,6 +108,7 @@ export interface UpdateDefaultSettingsInput {
   site_url?: string;
   pixel_id?: string;
   utm_tag?: string;
+  lead_form_id?: string;
 }
 
 // Маппинг objective в читаемые названия
@@ -110,11 +116,13 @@ export const OBJECTIVE_LABELS: Record<DirectionObjective, string> = {
   whatsapp: 'WhatsApp',
   instagram_traffic: 'Instagram Traffic',
   site_leads: 'Site Leads',
+  lead_forms: 'Lead Forms',
 };
 
 export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
   whatsapp: 'WhatsApp (переписки)',
   instagram_traffic: 'Instagram Traffic (переходы)',
   site_leads: 'Site Leads (заявки на сайте)',
+  lead_forms: 'Lead Forms (лидформы Facebook)',
 };
 

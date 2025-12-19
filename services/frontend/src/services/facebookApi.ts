@@ -549,8 +549,85 @@ const getCurrentDailySpend = async () => {
   return total / 100;
 };
 
+// Получить page_id из текущей конфигурации (для Lead Forms)
+const getCurrentPageId = async (): Promise<string | null> => {
+  const storedUser = localStorage.getItem('user');
+
+  if (storedUser) {
+    try {
+      const userData = JSON.parse(storedUser);
+
+      // Проверяем мультиаккаунтный режим
+      const storedAdAccounts = localStorage.getItem('adAccounts');
+      const storedMultiAccountEnabled = localStorage.getItem('multiAccountEnabled');
+
+      if (storedMultiAccountEnabled === 'true' && storedAdAccounts) {
+        const adAccounts = JSON.parse(storedAdAccounts);
+        const currentAdAccountId = localStorage.getItem('currentAdAccountId');
+        const currentAcc = adAccounts.find((a: any) => a.id === currentAdAccountId);
+
+        if (currentAcc && currentAcc.page_id) {
+          return currentAcc.page_id;
+        }
+      }
+
+      // Legacy режим
+      if (userData && userData.page_id) {
+        return userData.page_id;
+      }
+    } catch (error) {
+      console.error('Ошибка при чтении page_id из localStorage:', error);
+    }
+  }
+
+  return null;
+};
+
 // Facebook API сервис
 export const facebookApi = {
+  // Получить список лидформ для текущей страницы Facebook
+  getLeadForms: async (): Promise<Array<{ id: string; name: string; status: string }>> => {
+    if (!await hasValidConfig()) {
+      return [];
+    }
+
+    const pageId = await getCurrentPageId();
+    if (!pageId) {
+      console.warn('Page ID не найден для загрузки лидформ');
+      return [];
+    }
+
+    try {
+      // Lead forms запрашиваются по page_id, не по ad_account_id
+      const endpoint = `${pageId}/leadgen_forms`;
+      const params = {
+        fields: 'id,name,status',
+        limit: '100'
+      };
+      const response = await fetchFromFacebookAPI(endpoint, params);
+      const forms = (response.data || []).map((f: any) => ({
+        id: String(f.id),
+        name: f.name || f.id,
+        status: f.status || 'ACTIVE'
+      }));
+
+      console.log(`Получено лидформ: ${forms.length}`);
+
+      if (forms.length === 0) {
+        console.info('На странице не найдено лидформ');
+      }
+
+      return forms;
+    } catch (e) {
+      console.error('Не удалось получить список лидформ:', e);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      if (!errorMessage.includes('Empty response') && !errorMessage.includes('data')) {
+        toastT.error('failedToLoadLeadForms');
+      }
+      return [];
+    }
+  },
+
   // Получить список пикселей для текущего рекламного кабинета
   getPixels: async (): Promise<Array<{ id: string; name: string }>> => {
     if (!await hasValidConfig()) {
