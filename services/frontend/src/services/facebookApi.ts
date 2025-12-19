@@ -408,8 +408,8 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
             else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
               siteLeads += parseInt(action.value || "0", 10);
             }
-            // Facebook Lead Forms
-            else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+            // Facebook Lead Forms (Instant Forms)
+            else if (action.action_type === 'lead') {
               leadFormLeads = parseInt(action.value || "0", 10);
             }
           }
