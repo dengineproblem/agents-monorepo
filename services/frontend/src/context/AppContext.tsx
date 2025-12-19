@@ -27,7 +27,7 @@ interface AppContextType {
   updateOptimization: (optimizationType: string) => Promise<void>;
   businessId: string | null;
   checkBusinessId: () => Promise<boolean>;
-  currentCampaignGoal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | null;
+  currentCampaignGoal?: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | null;
   platform: 'instagram' | 'tiktok';
   setPlatform: (p: 'instagram' | 'tiktok') => void;
   tiktokConnected: boolean;
@@ -58,7 +58,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [aiAutopilotLoading, setAiAutopilotLoading] = useState(false);
   const [optimization, setOptimization] = useState('lead_cost');
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [currentCampaignGoal, setCurrentCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads' | null>(null);
+  const [currentCampaignGoal, setCurrentCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | null>(null);
   const [userTarif, setUserTarif] = useState<string | null>(null);
   const [platform, setPlatform] = useState<'instagram' | 'tiktok'>('instagram');
   const [tiktokConnected, setTiktokConnected] = useState<boolean>(false);

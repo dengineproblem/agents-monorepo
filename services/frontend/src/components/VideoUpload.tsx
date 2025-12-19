@@ -138,7 +138,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [ageMax, setAgeMax] = useState<number | ''>(65); // максимальный возраст
   const [selectedGender, setSelectedGender] = useState<'all' | 'male' | 'female'>('all');
   const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.'); // Вопрос клиента
-  const [campaignGoal, setCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads'>('whatsapp'); // Цель объявления
+  const [campaignGoal, setCampaignGoal] = useState<'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms'>('whatsapp'); // Цель объявления
   const [siteUrl, setSiteUrl] = useState<string>('');
   const [pixelId, setPixelId] = useState<string>('');
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
@@ -502,7 +502,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       }
     };
 
-    const updateCurrentCampaignGoal = async (goal: 'whatsapp' | 'instagram_traffic' | 'site_leads') => {
+    const updateCurrentCampaignGoal = async (goal: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms') => {
       try {
         const storedUser = localStorage.getItem('user');
         const localUserData = storedUser ? JSON.parse(storedUser) : {};
@@ -1773,7 +1773,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                                 name="campaignGoal"
                                 value={option.value}
                                 checked={campaignGoal === option.value}
-                                onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads')}
+                                onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms')}
                                 disabled={isUploading}
                                 className="cursor-pointer"
                               />
@@ -2436,7 +2436,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                           name="campaignGoalImage"
                           value={option.value}
                           checked={campaignGoal === option.value}
-                          onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads')}
+                          onChange={(e) => setCampaignGoal(e.target.value as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms')}
                           disabled={isUploading}
                           className="cursor-pointer"
                         />

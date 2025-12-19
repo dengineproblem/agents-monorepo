@@ -176,6 +176,11 @@ export async function workflowCreateAdSetInDirection(
       fb_objective = 'OUTCOME_LEADS';
       optimization_goal = 'OFFSITE_CONVERSIONS';
       break;
+    case 'lead_forms':
+      fb_objective = 'OUTCOME_LEADS';
+      optimization_goal = 'LEAD_GENERATION';
+      destination_type = 'ON_AD';
+      break;
     default:
       throw new Error(`Unknown objective: ${direction.objective}`);
   }
@@ -197,6 +202,9 @@ export async function workflowCreateAdSetInDirection(
           break;
         case 'site_leads':
           fb_creative_id = creative.fb_creative_id_site_leads;
+          break;
+        case 'lead_forms':
+          fb_creative_id = creative.fb_creative_id_lead_forms;
           break;
       }
     }
@@ -387,8 +395,8 @@ export async function workflowCreateAdSetInDirection(
         pixel_id: String(direction.pixel_id || defaultSettings.pixel_id),
         custom_event_type: 'LEAD'
       };
-      
-      log.info({ 
+
+      log.info({
         pixel_id: direction.pixel_id || defaultSettings.pixel_id,
         source: direction.pixel_id ? 'direction' : 'defaultSettings'
       }, 'Using pixel_id for site_leads');
@@ -397,12 +405,42 @@ export async function workflowCreateAdSetInDirection(
       adsetBody.promoted_object = {
         custom_event_type: 'LEAD'
       };
-      
-      log.warn({ 
+
+      log.warn({
         directionId: direction.id,
-        directionName: direction.name 
+        directionName: direction.name
       }, 'Creating site_leads adset without pixel_id - tracking will be limited');
     }
+  }
+
+  // Для Lead Forms добавляем destination_type ON_AD и promoted_object с lead_gen_form_id
+  if (direction.objective === 'lead_forms') {
+    adsetBody.destination_type = 'ON_AD';
+
+    const leadFormId = defaultSettings?.lead_form_id;
+    if (!leadFormId) {
+      throw new Error(
+        `Cannot create lead_forms adset for direction "${direction.name}": lead_form_id not configured. ` +
+        `Please select a lead form in direction settings.`
+      );
+    }
+
+    if (!userAccount?.page_id) {
+      throw new Error(
+        `Cannot create lead_forms adset for direction "${direction.name}": page_id not configured for user account ${user_account_id}. ` +
+        `Please connect Facebook Page in settings.`
+      );
+    }
+
+    adsetBody.promoted_object = {
+      page_id: String(userAccount.page_id),
+      lead_gen_form_id: String(leadFormId)
+    };
+
+    log.info({
+      page_id: userAccount.page_id,
+      lead_form_id: leadFormId
+    }, 'Using lead_form for lead_forms objective');
   }
 
   // ===================================================
