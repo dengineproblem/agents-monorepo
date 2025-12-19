@@ -258,7 +258,39 @@ User Request
 ### WhatsAppAgent — Диалоги
 **Путь:** `services/agent-brain/src/chatAssistant/agents/whatsapp/`
 
-Работа с WhatsApp диалогами и сообщениями.
+**4 инструмента (все READ):**
+
+| Tool | Тип | Описание |
+|------|-----|----------|
+| `getDialogs` | READ | Список диалогов с лидами. Возвращает: имя, телефон, interest_level (hot/warm/cold), score (0-100), funnel_stage, message_count, last_message_at, summary |
+| `getDialogMessages` | READ | История сообщений диалога. Возвращает: text, sender (client/bot), type (text/image/audio), timestamp |
+| `analyzeDialog` | READ | AI-анализ диалога (gpt-4o). Возвращает: interest_level, score, funnel_stage, key_interests, objections, buying_signals, next_action |
+| `searchDialogSummaries` | READ | Полнотекстовый поиск по резюме диалогов (FTS русский). Фильтрация по тегам. Возвращает: phone, name, summary, tags, score, funnel_stage |
+
+**Температура лидов (interest_level):**
+- 🔥 **hot**: score 70-100, готов к покупке, обсуждает детали
+- ⚡ **warm**: score 40-69, есть интерес, нужна работа
+- ❄️ **cold**: score 0-39, слабый интерес
+
+**Этапы воронки (funnel_stage):**
+- `new` — новый контакт
+- `qualified` — квалифицирован
+- `interested` — проявил интерес
+- `objection` — есть возражения
+- `scheduled` — записан на приём
+
+**Entity Linking:**
+При выводе списков диалоги получают refs: [dl1], [dl2], [dl3]...
+Пользователь может ссылаться: "покажи переписку dl2", "проанализируй dl1"
+
+**Domain Agent Flow:** Handlers возвращают raw data → Domain Agent (gpt-4o-mini) форматирует с контекстом (температура, этапы, рекомендации).
+
+**Файлы:**
+- `index.js` — класс WhatsAppAgent
+- `tools.js` — определения инструментов (OpenAI format)
+- `toolDefs.js` — Zod schemas для валидации
+- `handlers.js` — реализация обработчиков
+- `prompt.js` — системный промпт v2.0 с tool routing
 
 ---
 
@@ -1367,7 +1399,7 @@ async pauseCampaign({ campaign_id }, { accessToken }) {
 | AdsAgent | `ads-v2.2` | `ads/prompt.js` |
 | CreativeAgent | `creative-v1.0` | `creative/prompt.js` |
 | CRMAgent | `crm-v2.0` | `crm/prompt.js` |
-| WhatsAppAgent | `whatsapp-v1.0` | `whatsapp/prompt.js` |
+| WhatsAppAgent | `whatsapp-v2.0` | `whatsapp/prompt.js` |
 
 **Интеграция:**
 ```javascript

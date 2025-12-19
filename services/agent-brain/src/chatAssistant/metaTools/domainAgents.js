@@ -199,7 +199,53 @@ const DOMAIN_CONTEXT_BUILDERS = {
   },
 
   whatsapp: (context) => {
-    return '\n## Контекст\nАнализируй диалоги с учётом бизнес-контекста клиента.';
+    const parts = ['\n## Контекст WhatsApp'];
+
+    // Dialogs context
+    if (context.activeDialogs) {
+      parts.push(`\n### Статистика диалогов`);
+      parts.push(`- Активных за 24ч: ${context.activeDialogs || 0}`);
+      parts.push(`- Всего диалогов: ${context.totalDialogs || 0}`);
+    }
+
+    // Directions context (source of leads)
+    if (context.directions?.length > 0) {
+      parts.push('\n### Направления (источники лидов):');
+      for (const dir of context.directions) {
+        parts.push(`- **${dir.name}** (ID: ${dir.id})`);
+      }
+    }
+
+    // Temperature legend
+    parts.push('\n### Температура лидов (interest_level)');
+    parts.push('- 🔥 **hot**: score 70-100, готов к покупке, обсуждает детали');
+    parts.push('- ⚡ **warm**: score 40-69, есть интерес, нужна работа');
+    parts.push('- ❄️ **cold**: score 0-39, слабый интерес');
+
+    // Funnel stages
+    parts.push('\n### Этапы воронки (funnel_stage)');
+    parts.push('- `new` — новый контакт');
+    parts.push('- `qualified` — квалифицирован');
+    parts.push('- `interested` — проявил интерес');
+    parts.push('- `objection` — есть возражения');
+    parts.push('- `scheduled` — записан на приём');
+
+    // Analysis fields
+    parts.push('\n### Поля анализа диалога');
+    parts.push('- `key_interests` — что интересует клиента');
+    parts.push('- `objections` — выявленные возражения');
+    parts.push('- `buying_signals` — сигналы готовности к покупке');
+    parts.push('- `next_action` — рекомендуемое следующее действие');
+
+    // Formatting rules
+    parts.push('\n### Формат ответа');
+    parts.push('- Маскируй телефоны: 79001234567 → +7***4567');
+    parts.push('- Используй [dl1], [dl2] для refs на диалоги');
+    parts.push('- Группируй по температуре: hot → warm → cold');
+    parts.push('- Добавляй эмодзи 🔥⚡❄️ для наглядности');
+    parts.push('- Выделяй возражения и сигналы покупки');
+
+    return parts.join('\n');
   }
 };
 

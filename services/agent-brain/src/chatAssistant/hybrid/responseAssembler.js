@@ -25,7 +25,8 @@ const ENTITY_PREFIXES = {
   direction: 'd',
   creative: 'cr',
   lead: 'l',
-  adset: 'as'
+  adset: 'as',
+  dialog: 'dl'
 };
 
 /**
@@ -54,6 +55,21 @@ export const NEXT_STEP_RULES = {
   lead_search: [
     { condition: 'hasResults', text: 'Показать детали лида', action: 'getLeadDetails' },
     { condition: 'default', text: 'Найти похожих лидов', action: 'findSimilarLeads' }
+  ],
+  // WhatsApp playbooks
+  dialogs_list: [
+    { condition: 'hasHotLeads', text: 'Посмотреть горячих лидов', action: 'getHotDialogs' },
+    { condition: 'hasInactive', text: 'Реактивировать неактивных', action: 'getInactiveDialogs' },
+    { condition: 'default', text: 'Проанализировать диалог', action: 'analyzeDialog' }
+  ],
+  dialog_analysis: [
+    { condition: 'hasObjections', text: 'Показать возражения', action: 'showObjections' },
+    { condition: 'isHotLead', text: 'Посмотреть переписку', action: 'getDialogMessages' },
+    { condition: 'default', text: 'Найти похожие диалоги', action: 'searchSimilar' }
+  ],
+  dialog_search: [
+    { condition: 'hasResults', text: 'Посмотреть переписку', action: 'getDialogMessages' },
+    { condition: 'default', text: 'Уточнить поиск', action: 'refineSearch' }
   ]
 };
 
@@ -299,7 +315,12 @@ export class ResponseAssembler {
       hasResults: toolResults.length > 0,
       highSpend: false,
       lowROI: false,
-      hasLowPerformers: false
+      hasLowPerformers: false,
+      // WhatsApp context
+      hasHotLeads: false,
+      hasInactive: false,
+      hasObjections: false,
+      isHotLead: false
     };
 
     // Analyze tool results
@@ -323,6 +344,32 @@ export class ResponseAssembler {
       // Check for low performers
       if (data.lowPerformers && data.lowPerformers.length > 0) {
         context.hasLowPerformers = true;
+      }
+
+      // WhatsApp: Check for hot leads in dialogs
+      if (data.dialogs) {
+        const hotDialogs = data.dialogs.filter(d => d.interest_level === 'hot');
+        if (hotDialogs.length > 0) {
+          context.hasHotLeads = true;
+        }
+        const inactiveDialogs = data.dialogs.filter(d => {
+          const lastMsg = new Date(d.last_message_at);
+          const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          return lastMsg < dayAgo;
+        });
+        if (inactiveDialogs.length > 0) {
+          context.hasInactive = true;
+        }
+      }
+
+      // WhatsApp: Check for objections in analysis
+      if (data.analysis) {
+        if (data.analysis.objections && data.analysis.objections.length > 0) {
+          context.hasObjections = true;
+        }
+        if (data.analysis.interest_level === 'hot') {
+          context.isHotLead = true;
+        }
       }
     }
 
@@ -384,6 +431,52 @@ export class ResponseAssembler {
             title: c.name,
             metric: c.cpl ? `CPL: ${c.cpl}₽` : `CTR: ${c.ctr}%`,
             thumbnail: c.thumbnail
+          }))
+        });
+      }
+
+      // WhatsApp: Table for dialogs list
+      if (result.tool === 'getDialogs' && data.dialogs) {
+        components.push({
+          type: 'table',
+          title: 'WhatsApp диалоги',
+          columns: ['Контакт', 'Интерес', 'Score', 'Этап', 'Последнее сообщение'],
+          rows: data.dialogs.slice(0, 10).map(d => [
+            d.lead_name || d.contact_phone,
+            d.interest_level || '-',
+            d.score || '-',
+            d.funnel_stage || '-',
+            d.last_message_at ? new Date(d.last_message_at).toLocaleDateString('ru') : '-'
+          ])
+        });
+      }
+
+      // WhatsApp: Card for dialog analysis
+      if (result.tool === 'analyzeDialog' && data.analysis) {
+        components.push({
+          type: 'card',
+          title: 'Анализ диалога',
+          fields: [
+            { label: 'Уровень интереса', value: data.analysis.interest_level || '-' },
+            { label: 'Score', value: data.analysis.score || '-' },
+            { label: 'Этап воронки', value: data.analysis.funnel_stage || '-' },
+            { label: 'Ключевые интересы', value: (data.analysis.key_interests || []).join(', ') || '-' },
+            { label: 'Возражения', value: (data.analysis.objections || []).join(', ') || 'Нет' },
+            { label: 'Рекомендация', value: data.analysis.next_action || '-' }
+          ]
+        });
+      }
+
+      // WhatsApp: Search results
+      if (result.tool === 'searchDialogSummaries' && data.dialogs) {
+        components.push({
+          type: 'list',
+          title: `Найдено диалогов: ${data.total}`,
+          items: data.dialogs.slice(0, 10).map(d => ({
+            title: d.contact_name || d.contact_phone,
+            subtitle: d.summary ? d.summary.substring(0, 100) + '...' : '',
+            tags: d.tags || [],
+            meta: `Score: ${d.score || '-'} | ${d.interest_level || '-'}`
           }))
         });
       }

@@ -649,6 +649,188 @@ export const PLAYBOOKS = {
       }
     ],
     enterConditions: {}
+  },
+
+  // ============================================
+  // 11. DIALOGS LIST - "покажи диалоги"
+  // ============================================
+  dialogs_list: {
+    id: 'dialogs_list',
+    name: 'Список WhatsApp диалогов',
+    intents: ['dialogs_list', 'show_dialogs', 'whatsapp_dialogs', 'active_dialogs'],
+    domain: 'whatsapp',
+    tiers: {
+      snapshot: {
+        tools: ['getDialogs'],
+        maxToolCalls: 2,
+        dangerousPolicy: 'block'
+      },
+      drilldown: {
+        tools: ['getDialogMessages', 'analyzeDialog'],
+        maxToolCalls: 4,
+        dangerousPolicy: 'block',
+        enterIf: ['user_chose_drilldown']
+      }
+    },
+    clarifyingQuestions: [
+      {
+        field: 'status',
+        type: 'choice',
+        text: 'Какие диалоги показать?',
+        options: [
+          { value: 'active', label: 'Активные (за 24ч)' },
+          { value: 'inactive', label: 'Неактивные' },
+          { value: 'all', label: 'Все' }
+        ],
+        default: 'active',
+        askIf: 'status_not_in_message'
+      }
+    ],
+    nextSteps: [
+      {
+        id: 'drilldown_dialog',
+        label: 'Посмотреть переписку',
+        targetTier: 'drilldown',
+        icon: '💬'
+      },
+      {
+        id: 'analyze_dialog',
+        label: 'Проанализировать диалог',
+        targetTier: 'drilldown',
+        icon: '🔍'
+      },
+      {
+        id: 'search_dialogs',
+        label: 'Поиск по диалогам',
+        icon: '🔎',
+        targetPlaybook: 'dialog_search'
+      }
+    ],
+    enterConditions: {
+      hasHotLeads: { expression: 'hotLeadsCount > 0' },
+      hasInactiveDialogs: { expression: 'inactiveCount > 5' }
+    }
+  },
+
+  // ============================================
+  // 12. DIALOG ANALYSIS - "проанализируй диалог"
+  // ============================================
+  dialog_analysis: {
+    id: 'dialog_analysis',
+    name: 'Анализ WhatsApp диалога',
+    intents: ['dialog_analysis', 'analyze_dialog', 'dialog_insights', 'what_client_wants'],
+    domain: 'whatsapp',
+    tiers: {
+      snapshot: {
+        tools: ['getDialogs', 'analyzeDialog'],
+        maxToolCalls: 3,
+        dangerousPolicy: 'block'
+      },
+      drilldown: {
+        tools: ['getDialogMessages', 'searchDialogSummaries'],
+        maxToolCalls: 4,
+        dangerousPolicy: 'block',
+        enterIf: ['user_chose_drilldown']
+      }
+    },
+    clarifyingQuestions: [
+      {
+        field: 'phone',
+        type: 'phone',
+        text: 'Какой диалог проанализировать? (номер телефона)',
+        alwaysAsk: true
+      }
+    ],
+    nextSteps: [
+      {
+        id: 'view_messages',
+        label: 'Посмотреть переписку',
+        targetTier: 'drilldown',
+        icon: '💬'
+      },
+      {
+        id: 'find_similar',
+        label: 'Найти похожие диалоги',
+        targetTier: 'drilldown',
+        icon: '🔎'
+      },
+      {
+        id: 'all_dialogs',
+        label: 'Все диалоги',
+        icon: '📋',
+        targetPlaybook: 'dialogs_list'
+      }
+    ],
+    enterConditions: {
+      hasObjections: { expression: 'objections.length > 0' },
+      isHotLead: { expression: 'interest_level == "hot"' }
+    }
+  },
+
+  // ============================================
+  // 13. DIALOG SEARCH - "найди в диалогах"
+  // ============================================
+  dialog_search: {
+    id: 'dialog_search',
+    name: 'Поиск по WhatsApp диалогам',
+    intents: ['dialog_search', 'search_dialogs', 'find_in_dialogs', 'who_asked_about'],
+    domain: 'whatsapp',
+    tiers: {
+      snapshot: {
+        tools: ['searchDialogSummaries'],
+        maxToolCalls: 2,
+        dangerousPolicy: 'block'
+      },
+      drilldown: {
+        tools: ['getDialogMessages', 'analyzeDialog', 'getDialogs'],
+        maxToolCalls: 4,
+        dangerousPolicy: 'block',
+        enterIf: ['user_chose_drilldown']
+      }
+    },
+    clarifyingQuestions: [
+      {
+        field: 'query',
+        type: 'text',
+        text: 'Что искать в диалогах?',
+        alwaysAsk: true
+      },
+      {
+        field: 'tags',
+        type: 'multi_choice',
+        text: 'Фильтр по тегам (опционально)',
+        options: [
+          { value: 'hot', label: '🔥 Горячие' },
+          { value: 'возражение:цена', label: '💰 Возражение: цена' },
+          { value: 'возражение:время', label: '⏰ Возражение: время' },
+          { value: 'qualified', label: '✅ Квалифицированные' }
+        ],
+        askIf: 'tags_not_in_message'
+      }
+    ],
+    nextSteps: [
+      {
+        id: 'view_dialog',
+        label: 'Посмотреть диалог',
+        targetTier: 'drilldown',
+        icon: '💬'
+      },
+      {
+        id: 'analyze_found',
+        label: 'Проанализировать найденные',
+        targetTier: 'drilldown',
+        icon: '🔍'
+      },
+      {
+        id: 'new_search',
+        label: 'Новый поиск',
+        icon: '🔎',
+        targetPlaybook: 'dialog_search'
+      }
+    ],
+    enterConditions: {
+      hasResults: { expression: 'resultsCount > 0' }
+    }
   }
 };
 
