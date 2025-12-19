@@ -449,6 +449,49 @@ export async function createWebsiteLeadsCreative(
 }
 
 /**
+ * Создает Lead Form видео креатив
+ * Для Facebook Instant Forms (lead_gen_form_id)
+ */
+export async function createLeadFormVideoCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    leadFormId: string;
+    thumbnailHash?: string;
+  }
+): Promise<{ id: string }> {
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: {
+      type: "SIGN_UP",
+      value: {
+        lead_gen_form_id: params.leadFormId
+      }
+    }
+  };
+
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  }
+
+  const payload: any = {
+    name: "Lead Form Video Creative",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      video_data: videoData
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
  * Создает Lookalike Audience 3% от seed аудитории
  * @param adAccountId - ID рекламного аккаунта (без act_ префикса)
  * @param seedAudienceId - ID исходной Custom Audience (например, IG Engagers 365d)
@@ -631,6 +674,42 @@ export async function createWebsiteLeadsImageCreative(
           type: "SIGN_UP",
           value: {
             link: params.siteUrl
+          }
+        }
+      }
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создает Lead Form креатив с изображением
+ * Для Facebook Instant Forms (lead_gen_form_id)
+ */
+export async function createLeadFormImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    leadFormId: string;
+  }
+): Promise<{ id: string }> {
+  const payload: any = {
+    name: "Lead Form Image Creative",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      link_data: {
+        image_hash: params.imageHash,
+        message: params.message,
+        call_to_action: {
+          type: "SIGN_UP",
+          value: {
+            lead_gen_form_id: params.leadFormId
           }
         }
       }

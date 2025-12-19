@@ -8,7 +8,7 @@ import { createLogger } from './logger.js';
 
 const log = createLogger({ module: 'settingsHelpers' });
 
-export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads';
+export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
 
 /**
  * Получить настройки таргетинга для направления

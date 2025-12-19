@@ -557,7 +557,8 @@ export const adsHandlers = {
     const objectiveMap = {
       whatsapp: { optimization_goal: 'CONVERSATIONS', billing_event: 'IMPRESSIONS', destination_type: 'WHATSAPP' },
       instagram_traffic: { optimization_goal: 'LINK_CLICKS', billing_event: 'IMPRESSIONS', destination_type: 'INSTAGRAM_PROFILE' },
-      site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' }
+      site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' },
+      lead_forms: { optimization_goal: 'LEAD_GENERATION', billing_event: 'IMPRESSIONS', destination_type: 'ON_AD' }
     };
     const objectiveSettings = objectiveMap[direction.objective] || objectiveMap.whatsapp;
 
@@ -571,6 +572,11 @@ export const adsHandlers = {
       promoted_object = { custom_event_type: 'LEAD' };
       if (direction.pixel_id || settings.pixel_id) {
         promoted_object.pixel_id = String(direction.pixel_id || settings.pixel_id);
+      }
+    } else if (direction.objective === 'lead_forms') {
+      promoted_object = { page_id: pageId };
+      if (settings.lead_form_id) {
+        promoted_object.lead_gen_form_id = settings.lead_form_id;
       }
     }
 
@@ -630,6 +636,7 @@ export const adsHandlers = {
     for (const creative of creatives) {
       const creativeIdField = direction.objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
         : direction.objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
+        : direction.objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
         : 'fb_creative_id_site_leads';
 
       const fbCreativeId = creative[creativeIdField];
@@ -727,13 +734,15 @@ export const adsHandlers = {
     const goalToObjective = {
       'CONVERSATIONS': 'whatsapp',
       'LINK_CLICKS': 'instagram_traffic',
-      'OFFSITE_CONVERSIONS': 'site_leads'
+      'OFFSITE_CONVERSIONS': 'site_leads',
+      'LEAD_GENERATION': 'lead_forms'
     };
     const objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
 
     // Get appropriate FB creative ID
     const creativeIdField = objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
       : objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
+      : objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
       : 'fb_creative_id_site_leads';
 
     const fbCreativeId = creative[creativeIdField];

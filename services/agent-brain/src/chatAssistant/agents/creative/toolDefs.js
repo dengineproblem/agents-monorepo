@@ -150,7 +150,7 @@ export const CreativeToolDefs = {
     description: 'Запустить A/B тест креатива. Используй dry_run: true для preview. (~$20 бюджет)',
     schema: z.object({
       creative_id: uuidSchema,
-      objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']).optional(),
+      objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms']).optional(),
       dry_run: dryRunOption,
       operation_id: operationIdOption
     }),
