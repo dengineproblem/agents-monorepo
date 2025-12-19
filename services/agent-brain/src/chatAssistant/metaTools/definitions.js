@@ -9,7 +9,7 @@
 
 import { z } from 'zod';
 import { formatToolsForLLM, loadDomainTools, getDomainDescription } from './formatters.js';
-import { executeToolByName } from './executor.js';
+import { executeToolAdaptive } from './mcpBridge.js';
 import { routeToolCallsToDomains } from './domainRouter.js';
 
 /**
@@ -148,7 +148,7 @@ DANGEROUS tools требуют подтверждения — сначала с�
         .describe('Аргументы для tool')
     }),
     handler: async ({ tool_name, arguments: args }, context) => {
-      return executeToolByName(tool_name, args, context);
+      return executeToolAdaptive(tool_name, args, context);
     }
   }
 };

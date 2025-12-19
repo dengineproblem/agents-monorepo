@@ -10,6 +10,7 @@ import { META_TOOLS, getMetaToolsForOpenAI } from '../metaTools/definitions.js';
 import { buildMetaSystemPrompt } from './metaSystemPrompt.js';
 import { runsStore } from '../stores/runsStore.js';
 import { logger } from '../../lib/logger.js';
+import { createSession, deleteSession } from '../../mcp/sessions.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -35,6 +36,25 @@ export async function processWithMetaTools({
   toolContext = {}
 }) {
   const startTime = Date.now();
+
+  // Create MCP session for this request
+  const sessionId = createSession({
+    userAccountId: toolContext.userAccountId,
+    adAccountId: toolContext.adAccountId,
+    accessToken: toolContext.accessToken,
+    conversationId: toolContext.conversationId,
+    dangerousPolicy: 'block',
+    integrations: context?.integrations
+  });
+
+  // Enrich toolContext with sessionId for MCP bridge
+  const enrichedToolContext = {
+    ...toolContext,
+    sessionId,
+    dangerousPolicy: 'block'
+  };
+
+  logger.debug({ sessionId: sessionId.substring(0, 8) }, 'MCP session created for meta orchestrator');
 
   // Build system prompt with context
   const systemPrompt = buildMetaSystemPrompt(context);
@@ -160,7 +180,7 @@ export async function processWithMetaTools({
 
           try {
             const result = await metaTool.handler(toolArgs, {
-              ...toolContext,
+              ...enrichedToolContext,
               integrations: context?.integrations
             });
 
@@ -280,6 +300,10 @@ export async function processWithMetaTools({
     }
 
     throw error;
+  } finally {
+    // Cleanup MCP session
+    deleteSession(sessionId);
+    logger.debug({ sessionId: sessionId.substring(0, 8) }, 'MCP session cleaned up');
   }
 }
 

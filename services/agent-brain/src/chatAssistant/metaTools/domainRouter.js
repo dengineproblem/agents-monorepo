@@ -5,7 +5,7 @@
  * Domain Agent обрабатывает raw data и возвращает промежуточный ответ для оркестратора.
  */
 
-import { executeToolByName } from './executor.js';
+import { executeToolAdaptive } from './mcpBridge.js';
 import { getDomainForTool } from './formatters.js';
 import { processDomainResults } from './domainAgents.js';
 import { logger } from '../../lib/logger.js';
@@ -115,9 +115,9 @@ function groupByDomain(toolCalls) {
 async function executeToolsForDomain(toolCalls, context) {
   const results = {};
 
-  // Execute tools in parallel within domain
+  // Execute tools in parallel within domain (via MCP bridge)
   const promises = toolCalls.map(async (call) => {
-    const result = await executeToolByName(call.name, call.args, context);
+    const result = await executeToolAdaptive(call.name, call.args, context);
     return { name: call.name, args: call.args, result };
   });
 
