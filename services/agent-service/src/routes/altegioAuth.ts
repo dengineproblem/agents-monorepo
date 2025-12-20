@@ -18,6 +18,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import {
   saveAltegioCredentials,
+  saveAltegioCredentialsToAdAccount,
   removeAltegioCredentials,
   getAltegioCredentials,
   validateAltegioConnection,
@@ -35,9 +36,10 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
   /**
    * GET /altegio/connect
    * Returns HTML page for connecting Altegio
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.get('/altegio/connect', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
+    const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
 
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
@@ -50,8 +52,8 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
       });
     }
 
-    // Check if already connected
-    const credentials = await getAltegioCredentials(userAccountId);
+    // Check if already connected (pass accountId for multi-account mode)
+    const credentials = await getAltegioCredentials(userAccountId, accountId);
     const isConnected = credentials !== null;
 
     // Return HTML form
@@ -219,6 +221,7 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
 
     <form id="connectForm">
       <input type="hidden" name="userAccountId" value="${userAccountId}">
+      <input type="hidden" name="accountId" value="${accountId || ''}">
 
       <div class="form-group">
         <label for="companyId">ID компании</label>
@@ -275,10 +278,12 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
       e.preventDefault();
 
       const formData = new FormData(form);
+      const accountIdValue = formData.get('accountId');
       const data = {
         userAccountId: formData.get('userAccountId'),
         companyId: parseInt(formData.get('companyId')),
         userToken: formData.get('userToken'),
+        accountId: accountIdValue || undefined,
       };
 
       // Skip if token is placeholder
@@ -311,9 +316,12 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
       if (!confirm('Вы уверены, что хотите отключить Altegio?')) return;
 
       const userAccountId = document.querySelector('input[name="userAccountId"]').value;
+      const accountId = document.querySelector('input[name="accountId"]').value;
+      let url = '/api/altegio/disconnect?userAccountId=' + userAccountId;
+      if (accountId) url += '&accountId=' + accountId;
 
       try {
-        const response = await fetch('/api/altegio/disconnect?userAccountId=' + userAccountId, {
+        const response = await fetch(url, {
           method: 'DELETE',
         });
 
@@ -339,12 +347,14 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
   /**
    * POST /altegio/connect
    * Connects Altegio with provided credentials
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.post('/altegio/connect', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId, companyId, userToken } = request.body as {
+    const { userAccountId, companyId, userToken, accountId } = request.body as {
       userAccountId: string;
       companyId: number;
       userToken: string;
+      accountId?: string;
     };
 
     if (!userAccountId || !companyId || !userToken) {
@@ -360,18 +370,37 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
       });
     }
 
+    // Check if multi-account mode
+    const { data: userAccountCheck } = await supabase
+      .from('user_accounts')
+      .select('multi_account_enabled')
+      .eq('id', userAccountId)
+      .single();
+
+    const isMultiAccountMode = userAccountCheck?.multi_account_enabled && accountId;
+
     try {
       // Validate connection by fetching company info
       const client = createAltegioClient(getPartnerToken(), userToken);
       const company = await client.getCompany(companyId);
 
-      // Save credentials
-      const saved = await saveAltegioCredentials(
-        userAccountId,
-        companyId,
-        userToken,
-        company.title || company.public_title
-      );
+      // Save credentials to appropriate table
+      let saved: boolean;
+      if (isMultiAccountMode) {
+        saved = await saveAltegioCredentialsToAdAccount(
+          accountId!,
+          companyId,
+          userToken,
+          company.title || company.public_title
+        );
+      } else {
+        saved = await saveAltegioCredentials(
+          userAccountId,
+          companyId,
+          userToken,
+          company.title || company.public_title
+        );
+      }
 
       if (!saved) {
         return reply.status(500).send({ error: 'Failed to save credentials' });
@@ -380,8 +409,10 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
       app.log.info({
         msg: 'Altegio connected',
         userAccountId,
+        accountId,
         companyId,
         companyName: company.title,
+        mode: isMultiAccountMode ? 'multi-account' : 'legacy',
       });
 
       return reply.send({
@@ -394,6 +425,7 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
         msg: 'Failed to connect Altegio',
         error: error.message,
         userAccountId,
+        accountId,
         companyId,
       });
 
@@ -406,15 +438,16 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
   /**
    * GET /altegio/status
    * Returns Altegio connection status
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.get('/altegio/status', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
+    const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
 
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
     }
 
-    const credentials = await getAltegioCredentials(userAccountId);
+    const credentials = await getAltegioCredentials(userAccountId, accountId);
 
     if (!credentials) {
       return reply.send({
@@ -423,21 +456,41 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
     }
 
     // Optionally validate the connection
-    const validation = await validateAltegioConnection(userAccountId);
+    const validation = await validateAltegioConnection(userAccountId, accountId);
 
-    // Get connection timestamp
-    const { data: account } = await supabase
+    // Check if multi-account mode
+    const { data: userAccountCheck } = await supabase
       .from('user_accounts')
-      .select('altegio_connected_at')
+      .select('multi_account_enabled')
       .eq('id', userAccountId)
       .single();
+
+    const isMultiAccountMode = userAccountCheck?.multi_account_enabled && accountId;
+
+    // Get connection timestamp from appropriate table
+    let connectedAt: string | null = null;
+    if (isMultiAccountMode) {
+      const { data: adAccount } = await supabase
+        .from('ad_accounts')
+        .select('altegio_connected_at')
+        .eq('id', accountId)
+        .single();
+      connectedAt = adAccount?.altegio_connected_at;
+    } else {
+      const { data: account } = await supabase
+        .from('user_accounts')
+        .select('altegio_connected_at')
+        .eq('id', userAccountId)
+        .single();
+      connectedAt = account?.altegio_connected_at;
+    }
 
     return reply.send({
       connected: true,
       valid: validation.valid,
       companyId: credentials.companyId,
       companyName: credentials.companyName,
-      connectedAt: account?.altegio_connected_at,
+      connectedAt,
       error: validation.error,
     });
   });
@@ -445,15 +498,16 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
   /**
    * DELETE /altegio/disconnect
    * Disconnects Altegio
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.delete('/altegio/disconnect', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId } = request.query as { userAccountId?: string };
+    const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };
 
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
     }
 
-    const removed = await removeAltegioCredentials(userAccountId);
+    const removed = await removeAltegioCredentials(userAccountId, accountId);
 
     if (!removed) {
       return reply.status(500).send({ error: 'Failed to disconnect' });
@@ -462,6 +516,8 @@ export async function altegioAuthRoutes(app: FastifyInstance) {
     app.log.info({
       msg: 'Altegio disconnected',
       userAccountId,
+      accountId,
+      mode: accountId ? 'multi-account' : 'legacy',
     });
 
     return reply.send({ success: true });

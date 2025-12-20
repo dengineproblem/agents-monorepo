@@ -102,9 +102,9 @@ export interface AltegioCompany {
 /**
  * Get Altegio connection status
  */
-export async function getAltegioStatus(userAccountId: string): Promise<AltegioStatus> {
+export async function getAltegioStatus(userAccountId: string, accountId?: string): Promise<AltegioStatus> {
   const response = await apiClient.get(`/altegio/status`, {
-    params: { userAccountId },
+    params: { userAccountId, accountId },
   });
   return response.data;
 }
@@ -115,12 +115,14 @@ export async function getAltegioStatus(userAccountId: string): Promise<AltegioSt
 export async function connectAltegio(
   userAccountId: string,
   companyId: number,
-  userToken: string
+  userToken: string,
+  accountId?: string
 ): Promise<{ success: boolean; companyId: number; companyName?: string }> {
   const response = await apiClient.post('/altegio/connect', {
     userAccountId,
     companyId,
     userToken,
+    accountId,
   });
   return response.data;
 }
@@ -128,9 +130,9 @@ export async function connectAltegio(
 /**
  * Disconnect Altegio
  */
-export async function disconnectAltegio(userAccountId: string): Promise<{ success: boolean }> {
+export async function disconnectAltegio(userAccountId: string, accountId?: string): Promise<{ success: boolean }> {
   const response = await apiClient.delete('/altegio/disconnect', {
-    params: { userAccountId },
+    params: { userAccountId, accountId },
   });
   return response.data;
 }
@@ -138,9 +140,9 @@ export async function disconnectAltegio(userAccountId: string): Promise<{ succes
 /**
  * Get connected Altegio company info
  */
-export async function getAltegioCompany(userAccountId: string): Promise<AltegioCompany> {
+export async function getAltegioCompany(userAccountId: string, accountId?: string): Promise<AltegioCompany> {
   const response = await apiClient.get('/altegio/company', {
-    params: { userAccountId },
+    params: { userAccountId, accountId },
   });
   return response.data;
 }
@@ -155,10 +157,12 @@ export async function getAltegioCompany(userAccountId: string): Promise<AltegioC
 export async function syncAltegioRecords(
   userAccountId: string,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  accountId?: string
 ): Promise<SyncRecordsResult> {
   const response = await apiClient.post('/altegio/sync-records', {
     userAccountId,
+    accountId,
     startDate,
     endDate,
   });
@@ -171,10 +175,12 @@ export async function syncAltegioRecords(
 export async function syncAltegioTransactions(
   userAccountId: string,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  accountId?: string
 ): Promise<SyncTransactionsResult> {
   const response = await apiClient.post('/altegio/sync-transactions', {
     userAccountId,
+    accountId,
     startDate,
     endDate,
   });
@@ -187,7 +193,8 @@ export async function syncAltegioTransactions(
 export async function syncAltegioAll(
   userAccountId: string,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  accountId?: string
 ): Promise<{
   success: boolean;
   records: SyncRecordsResult;
@@ -195,6 +202,7 @@ export async function syncAltegioAll(
 }> {
   const response = await apiClient.post('/altegio/sync-all', {
     userAccountId,
+    accountId,
     startDate,
     endDate,
   });
@@ -282,16 +290,20 @@ export async function getAltegioStats(
 /**
  * Get URL for Altegio connect page
  */
-export function getAltegioConnectUrl(userAccountId: string): string {
+export function getAltegioConnectUrl(userAccountId: string, accountId?: string): string {
   const baseUrl = import.meta.env.VITE_API_URL || '';
-  return `${baseUrl}/altegio/connect?userAccountId=${userAccountId}`;
+  let url = `${baseUrl}/altegio/connect?userAccountId=${userAccountId}`;
+  if (accountId) {
+    url += `&accountId=${accountId}`;
+  }
+  return url;
 }
 
 /**
  * Open Altegio connect page in new window
  */
-export function openAltegioConnect(userAccountId: string): Window | null {
-  const url = getAltegioConnectUrl(userAccountId);
+export function openAltegioConnect(userAccountId: string, accountId?: string): Window | null {
+  const url = getAltegioConnectUrl(userAccountId, accountId);
   return window.open(url, 'altegio-connect', 'width=500,height=700');
 }
 

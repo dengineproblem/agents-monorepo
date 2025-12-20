@@ -196,7 +196,24 @@ CREATE INDEX IF NOT EXISTS idx_altegio_sync_user_created ON altegio_sync_log(use
 CREATE INDEX IF NOT EXISTS idx_altegio_sync_type ON altegio_sync_log(sync_type, created_at DESC);
 
 -- ============================================================================
--- 7. Row Level Security (RLS) Policies
+-- 7. Add Altegio fields to ad_accounts (for multi-account mode)
+-- ============================================================================
+
+ALTER TABLE ad_accounts
+  ADD COLUMN IF NOT EXISTS altegio_company_id INTEGER,
+  ADD COLUMN IF NOT EXISTS altegio_partner_token TEXT,
+  ADD COLUMN IF NOT EXISTS altegio_user_token TEXT,
+  ADD COLUMN IF NOT EXISTS altegio_company_name TEXT,
+  ADD COLUMN IF NOT EXISTS altegio_connected_at TIMESTAMPTZ;
+
+COMMENT ON COLUMN ad_accounts.altegio_company_id IS 'Altegio company (salon) ID for multi-account mode';
+COMMENT ON COLUMN ad_accounts.altegio_partner_token IS 'Partner API token from Altegio Marketplace';
+COMMENT ON COLUMN ad_accounts.altegio_user_token IS 'User token for authenticated API methods';
+COMMENT ON COLUMN ad_accounts.altegio_company_name IS 'Company name in Altegio';
+COMMENT ON COLUMN ad_accounts.altegio_connected_at IS 'Timestamp when Altegio was connected';
+
+-- ============================================================================
+-- 8. Row Level Security (RLS) Policies
 -- ============================================================================
 
 -- Enable RLS on new tables
@@ -232,7 +249,7 @@ CREATE POLICY "Service role has full access to altegio_sync_log"
   USING (auth.role() = 'service_role');
 
 -- ============================================================================
--- 8. Update triggers for updated_at
+-- 9. Update triggers for updated_at
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION update_altegio_records_updated_at()
@@ -249,7 +266,7 @@ CREATE TRIGGER altegio_records_updated_at
   EXECUTE FUNCTION update_altegio_records_updated_at();
 
 -- ============================================================================
--- 9. Grant permissions
+-- 10. Grant permissions
 -- ============================================================================
 
 GRANT SELECT ON altegio_records TO authenticated;

@@ -23,10 +23,12 @@ export async function altegioApiRoutes(app: FastifyInstance) {
    * POST /altegio/sync-records
    * Manually sync records (appointments) from Altegio
    * This will find and qualify leads based on appointments
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.post('/altegio/sync-records', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId, startDate, endDate } = request.body as {
+    const { userAccountId, accountId, startDate, endDate } = request.body as {
       userAccountId: string;
+      accountId?: string;
       startDate?: string;
       endDate?: string;
     };
@@ -36,7 +38,7 @@ export async function altegioApiRoutes(app: FastifyInstance) {
     }
 
     try {
-      const result = await syncRecordsFromAltegio(userAccountId, app, startDate, endDate);
+      const result = await syncRecordsFromAltegio(userAccountId, app, startDate, endDate, accountId);
 
       return reply.send({
         success: true,
@@ -47,6 +49,7 @@ export async function altegioApiRoutes(app: FastifyInstance) {
         msg: 'Failed to sync Altegio records',
         error: error.message,
         userAccountId,
+        accountId,
       });
 
       return reply.status(500).send({
@@ -59,10 +62,12 @@ export async function altegioApiRoutes(app: FastifyInstance) {
    * POST /altegio/sync-transactions
    * Manually sync financial transactions from Altegio
    * This will update sales data for ROI calculation
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.post('/altegio/sync-transactions', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId, startDate, endDate } = request.body as {
+    const { userAccountId, accountId, startDate, endDate } = request.body as {
       userAccountId: string;
+      accountId?: string;
       startDate?: string;
       endDate?: string;
     };
@@ -72,7 +77,7 @@ export async function altegioApiRoutes(app: FastifyInstance) {
     }
 
     try {
-      const result = await syncTransactionsFromAltegio(userAccountId, app, startDate, endDate);
+      const result = await syncTransactionsFromAltegio(userAccountId, app, startDate, endDate, accountId);
 
       return reply.send({
         success: true,
@@ -83,6 +88,7 @@ export async function altegioApiRoutes(app: FastifyInstance) {
         msg: 'Failed to sync Altegio transactions',
         error: error.message,
         userAccountId,
+        accountId,
       });
 
       return reply.status(500).send({
@@ -94,10 +100,12 @@ export async function altegioApiRoutes(app: FastifyInstance) {
   /**
    * POST /altegio/sync-all
    * Sync both records and transactions
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.post('/altegio/sync-all', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId, startDate, endDate } = request.body as {
+    const { userAccountId, accountId, startDate, endDate } = request.body as {
       userAccountId: string;
+      accountId?: string;
       startDate?: string;
       endDate?: string;
     };
@@ -108,8 +116,8 @@ export async function altegioApiRoutes(app: FastifyInstance) {
 
     try {
       const [recordsResult, transactionsResult] = await Promise.all([
-        syncRecordsFromAltegio(userAccountId, app, startDate, endDate),
-        syncTransactionsFromAltegio(userAccountId, app, startDate, endDate),
+        syncRecordsFromAltegio(userAccountId, app, startDate, endDate, accountId),
+        syncTransactionsFromAltegio(userAccountId, app, startDate, endDate, accountId),
       ]);
 
       return reply.send({
@@ -122,6 +130,7 @@ export async function altegioApiRoutes(app: FastifyInstance) {
         msg: 'Failed to sync Altegio data',
         error: error.message,
         userAccountId,
+        accountId,
       });
 
       return reply.status(500).send({
@@ -349,15 +358,16 @@ export async function altegioApiRoutes(app: FastifyInstance) {
   /**
    * GET /altegio/company
    * Get connected Altegio company info
+   * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
    */
   app.get('/altegio/company', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userAccountId } = request.query as { userAccountId: string };
+    const { userAccountId, accountId } = request.query as { userAccountId: string; accountId?: string };
 
     if (!userAccountId) {
       return reply.status(400).send({ error: 'userAccountId is required' });
     }
 
-    const altegioResult = await getAltegioClient(userAccountId);
+    const altegioResult = await getAltegioClient(userAccountId, accountId);
 
     if (!altegioResult) {
       return reply.status(404).send({ error: 'Altegio not connected' });

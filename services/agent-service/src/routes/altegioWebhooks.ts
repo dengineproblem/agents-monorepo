@@ -29,6 +29,7 @@ import {
 
 interface WebhookQueryParams {
   user_id?: string;
+  account_id?: string; // For multi-account mode
 }
 
 // ============================================================================
@@ -189,20 +190,22 @@ async function logSyncOperation(
 async function handleRecordCreated(
   userAccountId: string,
   payload: AltegioWebhookPayload,
-  app: FastifyInstance
+  app: FastifyInstance,
+  accountId?: string
 ): Promise<void> {
   const recordId = payload.resource_id;
 
   app.log.info({
     msg: 'Altegio record created webhook',
     userAccountId,
+    accountId,
     recordId,
     companyId: payload.company_id,
   });
 
   try {
     // Get Altegio client
-    const altegioResult = await getAltegioClient(userAccountId);
+    const altegioResult = await getAltegioClient(userAccountId, accountId);
     if (!altegioResult) {
       throw new Error('Altegio not connected');
     }
@@ -290,18 +293,20 @@ async function handleRecordCreated(
 async function handleRecordUpdated(
   userAccountId: string,
   payload: AltegioWebhookPayload,
-  app: FastifyInstance
+  app: FastifyInstance,
+  accountId?: string
 ): Promise<void> {
   const recordId = payload.resource_id;
 
   app.log.info({
     msg: 'Altegio record updated webhook',
     userAccountId,
+    accountId,
     recordId,
   });
 
   try {
-    const altegioResult = await getAltegioClient(userAccountId);
+    const altegioResult = await getAltegioClient(userAccountId, accountId);
     if (!altegioResult) {
       throw new Error('Altegio not connected');
     }
@@ -350,18 +355,20 @@ async function handleRecordUpdated(
 async function handleTransactionCreated(
   userAccountId: string,
   payload: AltegioWebhookPayload,
-  app: FastifyInstance
+  app: FastifyInstance,
+  accountId?: string
 ): Promise<void> {
   const transactionId = payload.resource_id;
 
   app.log.info({
     msg: 'Altegio transaction created webhook',
     userAccountId,
+    accountId,
     transactionId,
   });
 
   try {
-    const altegioResult = await getAltegioClient(userAccountId);
+    const altegioResult = await getAltegioClient(userAccountId, accountId);
     if (!altegioResult) {
       throw new Error('Altegio not connected');
     }
@@ -494,9 +501,10 @@ export async function altegioWebhooksRoutes(app: FastifyInstance) {
   /**
    * POST /webhooks/altegio
    * Main webhook endpoint for Altegio events
+   * Supports both legacy mode (user_id) and multi-account mode (account_id)
    */
   app.post('/webhooks/altegio', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { user_id: userAccountId } = request.query as WebhookQueryParams;
+    const { user_id: userAccountId, account_id: accountId } = request.query as WebhookQueryParams;
 
     if (!userAccountId) {
       app.log.warn('Altegio webhook received without user_id');
@@ -508,6 +516,7 @@ export async function altegioWebhooksRoutes(app: FastifyInstance) {
     app.log.info({
       msg: 'Altegio webhook received',
       userAccountId,
+      accountId,
       resource: payload.resource,
       status: payload.status,
       resourceId: payload.resource_id,
@@ -525,14 +534,14 @@ export async function altegioWebhooksRoutes(app: FastifyInstance) {
 
         if (resource === 'record') {
           if (status === 'create') {
-            await handleRecordCreated(userAccountId, payload, app);
+            await handleRecordCreated(userAccountId, payload, app, accountId);
           } else if (status === 'update') {
-            await handleRecordUpdated(userAccountId, payload, app);
+            await handleRecordUpdated(userAccountId, payload, app, accountId);
           }
           // 'delete' status can be handled if needed
         } else if (resource === 'finances_operation' || resource === 'goods_transaction') {
           if (status === 'create') {
-            await handleTransactionCreated(userAccountId, payload, app);
+            await handleTransactionCreated(userAccountId, payload, app, accountId);
           }
         } else if (resource === 'client') {
           // Client webhooks can be handled if needed

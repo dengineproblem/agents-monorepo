@@ -98,12 +98,14 @@ function getDateRange(startDate?: string, endDate?: string): { start: string; en
 /**
  * Sync records (appointments) from Altegio
  * Finds leads by phone and qualifies them based on appointments
+ * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
  */
 export async function syncRecordsFromAltegio(
   userAccountId: string,
   app: FastifyInstance,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  accountId?: string
 ): Promise<SyncRecordsResult> {
   const result: SyncRecordsResult = {
     total: 0,
@@ -116,12 +118,13 @@ export async function syncRecordsFromAltegio(
   app.log.info({
     msg: 'Starting Altegio records sync',
     userAccountId,
+    accountId,
     startDate,
     endDate,
   });
 
   // Get Altegio client
-  const altegioResult = await getAltegioClient(userAccountId);
+  const altegioResult = await getAltegioClient(userAccountId, accountId);
   if (!altegioResult) {
     throw new Error('Altegio not connected');
   }
@@ -269,12 +272,14 @@ export async function syncRecordsFromAltegio(
 /**
  * Sync financial transactions from Altegio
  * Creates/updates sales records for ROI calculation
+ * Supports both legacy mode (userAccountId) and multi-account mode (accountId)
  */
 export async function syncTransactionsFromAltegio(
   userAccountId: string,
   app: FastifyInstance,
   startDate?: string,
-  endDate?: string
+  endDate?: string,
+  accountId?: string
 ): Promise<SyncTransactionsResult> {
   const result: SyncTransactionsResult = {
     total: 0,
@@ -287,12 +292,13 @@ export async function syncTransactionsFromAltegio(
   app.log.info({
     msg: 'Starting Altegio transactions sync',
     userAccountId,
+    accountId,
     startDate,
     endDate,
   });
 
   // Get Altegio client
-  const altegioResult = await getAltegioClient(userAccountId);
+  const altegioResult = await getAltegioClient(userAccountId, accountId);
   if (!altegioResult) {
     throw new Error('Altegio not connected');
   }
