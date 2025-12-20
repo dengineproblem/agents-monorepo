@@ -22,7 +22,15 @@ import {
 } from '../services/adInsightsSync.js';
 import { normalizeAllResults, ensureClickFamily } from '../services/resultNormalizer.js';
 import { processAdAccount, getAnomalies, updateAnomalyStatus, getAnomalySummary } from '../services/anomalyDetector.js';
-import { runQuantileAnalysis, predictBurnout, predictAllAds, computeCorrelations } from '../services/burnoutAnalyzer.js';
+import {
+  runQuantileAnalysis,
+  predictBurnout,
+  predictAllAds,
+  computeCorrelations,
+  predictRecovery,
+  predictAllRecovery,
+  analyzeDecayRecovery
+} from '../services/burnoutAnalyzer.js';
 import {
   runYearlyAudit,
   analyzeCreativeLifecycle,
@@ -740,6 +748,137 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ error, adminId, accountId, adId }, 'Ad prediction failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // RECOVERY PREDICTIONS (Admin Only) - Iteration 2
+  // ============================================================================
+
+  /**
+   * GET /admin/ad-insights/:accountId/recovery/predictions
+   * Предсказания recovery для всех degraded/burned ads
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      recoveryLevel?: string;
+      limit?: number;
+    };
+  }>('/admin/ad-insights/:accountId/recovery/predictions', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { recoveryLevel, limit = 50 } = request.query;
+
+    try {
+      let predictions = await predictAllRecovery(accountId);
+
+      // Фильтруем по recovery level если указан
+      if (recoveryLevel) {
+        predictions = predictions.filter(p => p.recoveryLevel === recoveryLevel);
+      }
+
+      // Лимит
+      predictions = predictions.slice(0, limit);
+
+      return reply.send({
+        success: true,
+        count: predictions.length,
+        predictions,
+        summary: {
+          total: predictions.length,
+          byLevel: {
+            very_likely: predictions.filter(p => p.recoveryLevel === 'very_likely').length,
+            likely: predictions.filter(p => p.recoveryLevel === 'likely').length,
+            possible: predictions.filter(p => p.recoveryLevel === 'possible').length,
+            unlikely: predictions.filter(p => p.recoveryLevel === 'unlikely').length,
+          },
+          byStatus: {
+            burned_out: predictions.filter(p => p.currentStatus === 'burned_out').length,
+            degraded: predictions.filter(p => p.currentStatus === 'degraded').length,
+          },
+        },
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Recovery predictions failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/recovery/predict/:adId
+   * Предсказание recovery для конкретного ad
+   */
+  fastify.get<{
+    Params: SyncParams & { adId: string };
+    Querystring: { weekStart?: string };
+  }>('/admin/ad-insights/:accountId/recovery/predict/:adId', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId, adId } = request.params;
+    const { weekStart } = request.query;
+
+    try {
+      let targetWeek = weekStart;
+
+      if (!targetWeek) {
+        const { data: latest } = await supabase
+          .from('ad_weekly_features')
+          .select('week_start_date')
+          .eq('ad_account_id', accountId)
+          .eq('fb_ad_id', adId)
+          .order('week_start_date', { ascending: false })
+          .limit(1)
+          .single();
+
+        targetWeek = latest?.week_start_date;
+      }
+
+      if (!targetWeek) {
+        return reply.status(404).send({ error: 'No data found for this ad' });
+      }
+
+      const prediction = await predictRecovery(accountId, adId, targetWeek);
+
+      if (!prediction) {
+        return reply.status(404).send({ error: 'Unable to generate recovery prediction' });
+      }
+
+      return reply.send({
+        success: true,
+        prediction,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId, adId }, 'Recovery prediction failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/decay-recovery
+   * Комбинированный анализ decay и recovery
+   */
+  fastify.get<{
+    Params: SyncParams;
+  }>('/admin/ad-insights/:accountId/decay-recovery', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+
+    try {
+      const analysis = await analyzeDecayRecovery(accountId);
+
+      return reply.send({
+        success: true,
+        ...analysis,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Decay/Recovery analysis failed');
       return reply.status(500).send({ error: error.message });
     }
   });

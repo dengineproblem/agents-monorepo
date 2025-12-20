@@ -604,3 +604,308 @@ function pearsonCorrelation(pairs: [number, number][]): number {
   if (denominator === 0) return 0;
   return numerator / denominator;
 }
+
+// ============================================================================
+// RECOVERY PREDICTOR (Iteration 2)
+// ============================================================================
+
+/**
+ * Пороги для recovery prediction
+ */
+const CPR_RECOVERY_THRESHOLD = -15;  // -15% снижение CPR = recovery
+
+/**
+ * Веса для recovery предиктора (обратные decay)
+ */
+const RECOVERY_WEIGHTS: Record<string, number> = {
+  freq_delta_t: -0.20,       // снижение частоты → recovery
+  ctr_delta_t: 0.25,         // рост CTR → recovery
+  cpc_delta_t: -0.15,        // снижение CPC → recovery
+  freq_slope_t: -0.15,       // негативный тренд частоты → recovery
+  ctr_slope_t: 0.20,         // позитивный тренд CTR → recovery
+  reach_growth_t: 0.15,      // рост охвата → recovery
+  spend_change_t: -0.05,     // снижение бюджета может помочь recovery
+  quality_score: 0.10,       // высокий quality → recovery
+  engagement_score: 0.10,    // высокий engagement → recovery
+};
+
+interface RecoveryPrediction {
+  fbAdId: string;
+  weekStartDate: string;
+  recoveryScore: number;  // 0-1, вероятность recovery
+  recoveryLevel: 'unlikely' | 'possible' | 'likely' | 'very_likely';
+  topSignals: {
+    metric: string;
+    value: number;
+    contribution: number;
+    signal: string;
+  }[];
+  predictedCprChange1w: number;
+  predictedCprChange2w: number;
+  confidence: number;
+  currentStatus: 'healthy' | 'degraded' | 'burned_out';
+}
+
+/**
+ * Определяет текущий статус ad (healthy, degraded, burned_out)
+ */
+function determineAdStatus(features: any): 'healthy' | 'degraded' | 'burned_out' {
+  const cprDelta = features.cpr_delta_pct;
+  const ctrDelta = features.ctr_delta_pct;
+  const freqDelta = features.freq_delta_pct;
+
+  // Burned out: высокий CPR delta + падение CTR + рост частоты
+  if (cprDelta && cprDelta > 30 && ctrDelta && ctrDelta < -20) {
+    return 'burned_out';
+  }
+
+  // Degraded: умеренные проблемы
+  if (
+    (cprDelta && cprDelta > 15) ||
+    (ctrDelta && ctrDelta < -10) ||
+    (freqDelta && freqDelta > 30)
+  ) {
+    return 'degraded';
+  }
+
+  return 'healthy';
+}
+
+/**
+ * Предсказывает вероятность recovery для ad в плохом состоянии
+ */
+export async function predictRecovery(
+  adAccountId: string,
+  fbAdId: string,
+  weekStartDate: string
+): Promise<RecoveryPrediction | null> {
+  // Получаем features
+  const { data: features, error } = await supabase
+    .from('ad_weekly_features')
+    .select('*')
+    .eq('ad_account_id', adAccountId)
+    .eq('fb_ad_id', fbAdId)
+    .eq('week_start_date', weekStartDate)
+    .single();
+
+  if (error || !features) {
+    return null;
+  }
+
+  if (!features.min_results_met || features.weeks_with_data < 4) {
+    return null;
+  }
+
+  const currentStatus = determineAdStatus(features);
+
+  // Вычисляем recovery score
+  let recoveryScore = 0;
+  const signals: RecoveryPrediction['topSignals'] = [];
+
+  for (const [metric, weight] of Object.entries(RECOVERY_WEIGHTS)) {
+    const value = features[metric as keyof typeof features] as number | null;
+
+    if (value === null || value === undefined) continue;
+
+    // Нормализуем значение
+    const normalizedValue = metric.includes('score') ? value / 2 : value / 100;
+    const contribution = normalizedValue * weight;
+    recoveryScore += contribution;
+
+    // Определяем signal
+    let signal = '';
+    if (metric === 'freq_delta_t' && value < -10) {
+      signal = `Частота снизилась на ${Math.abs(value).toFixed(0)}%`;
+    } else if (metric === 'ctr_delta_t' && value > 10) {
+      signal = `CTR вырос на ${value.toFixed(0)}%`;
+    } else if (metric === 'cpc_delta_t' && value < -10) {
+      signal = `CPC снизился на ${Math.abs(value).toFixed(0)}%`;
+    } else if (metric === 'ctr_slope_t' && value > 0.05) {
+      signal = `CTR растёт последние 4 недели`;
+    } else if (metric === 'reach_growth_t' && value > 15) {
+      signal = `Охват вырос на ${value.toFixed(0)}%`;
+    } else if (metric === 'quality_score' && value > 0) {
+      signal = `Quality ranking выше среднего`;
+    } else if (metric === 'engagement_score' && value > 0) {
+      signal = `Engagement ranking выше среднего`;
+    }
+
+    if (signal) {
+      signals.push({
+        metric,
+        value,
+        contribution: Math.abs(contribution),
+        signal,
+      });
+    }
+  }
+
+  // Нормализуем recovery score в 0-1
+  recoveryScore = Math.max(0, Math.min(1, (recoveryScore + 0.3) / 0.6));
+
+  // Если ad в хорошем состоянии, recovery не имеет смысла
+  if (currentStatus === 'healthy') {
+    recoveryScore = 0;
+  }
+
+  // Сортируем signals по contribution
+  signals.sort((a, b) => b.contribution - a.contribution);
+
+  // Определяем recovery level
+  let recoveryLevel: RecoveryPrediction['recoveryLevel'] = 'unlikely';
+  if (recoveryScore >= 0.7) recoveryLevel = 'very_likely';
+  else if (recoveryScore >= 0.5) recoveryLevel = 'likely';
+  else if (recoveryScore >= 0.3) recoveryLevel = 'possible';
+
+  // Предсказываем изменение CPR (отрицательное = снижение)
+  const predictedCprChange1w = -recoveryScore * 15;
+  const predictedCprChange2w = -recoveryScore * 25;
+
+  const confidence = Math.min(1, features.weeks_with_data / 8);
+
+  return {
+    fbAdId,
+    weekStartDate,
+    recoveryScore,
+    recoveryLevel,
+    topSignals: signals.slice(0, 5),
+    predictedCprChange1w,
+    predictedCprChange2w,
+    confidence,
+    currentStatus,
+  };
+}
+
+/**
+ * Recovery predictions для всех ads в плохом состоянии
+ */
+export async function predictAllRecovery(adAccountId: string): Promise<RecoveryPrediction[]> {
+  log.info({ adAccountId }, 'Predicting recovery for degraded/burned ads');
+
+  // Получаем последнюю неделю для каждого ad
+  const { data: latestWeeks, error } = await supabase
+    .from('ad_weekly_features')
+    .select('fb_ad_id, week_start_date')
+    .eq('ad_account_id', adAccountId)
+    .eq('min_results_met', true)
+    .order('week_start_date', { ascending: false });
+
+  if (error) {
+    log.error({ error, adAccountId }, 'Failed to fetch latest weeks for recovery');
+    throw error;
+  }
+
+  // Группируем и берём последнюю неделю для каждого ad
+  const latestByAd = new Map<string, string>();
+  for (const row of latestWeeks || []) {
+    if (!latestByAd.has(row.fb_ad_id)) {
+      latestByAd.set(row.fb_ad_id, row.week_start_date);
+    }
+  }
+
+  const predictions: RecoveryPrediction[] = [];
+
+  for (const [fbAdId, weekStartDate] of latestByAd) {
+    const prediction = await predictRecovery(adAccountId, fbAdId, weekStartDate);
+    // Включаем только ads в плохом состоянии
+    if (prediction && prediction.currentStatus !== 'healthy') {
+      predictions.push(prediction);
+    }
+  }
+
+  // Сортируем по recovery score (высокий → более вероятно recovery)
+  predictions.sort((a, b) => b.recoveryScore - a.recoveryScore);
+
+  log.info({
+    adAccountId,
+    predictionsCount: predictions.length,
+    likelyRecovery: predictions.filter(p => p.recoveryLevel === 'likely' || p.recoveryLevel === 'very_likely').length
+  }, 'Recovery predictions completed');
+
+  // Сохраняем в lag_dependency_stats
+  await savePredictions(adAccountId, predictions);
+
+  return predictions;
+}
+
+/**
+ * Сохраняет predictions в lag_dependency_stats
+ */
+async function savePredictions(adAccountId: string, predictions: RecoveryPrediction[]) {
+  for (const prediction of predictions) {
+    const { error } = await supabase
+      .from('lag_dependency_stats')
+      .upsert({
+        ad_account_id: adAccountId,
+        result_family: 'all',  // recovery не привязан к конкретному family
+        metric_name: 'recovery_score',
+        prediction_type: 'recovery',
+        avg_cpr_growth_when_triggered: prediction.predictedCprChange2w,
+        trigger_frequency: prediction.recoveryScore,
+        predictive_power: prediction.confidence,
+        recommended_threshold: 0.5,
+        time_lag_weeks: 2,
+        sample_size: 1,
+        computed_at: new Date().toISOString(),
+      }, {
+        onConflict: 'ad_account_id,result_family,metric_name',
+      });
+
+    if (error) {
+      log.error({ error, adAccountId, fbAdId: prediction.fbAdId }, 'Failed to save recovery prediction');
+    }
+  }
+}
+
+/**
+ * Комбинированный анализ: decay + recovery
+ */
+export async function analyzeDecayRecovery(adAccountId: string): Promise<{
+  decay: {
+    highRiskAds: PredictionResult[];
+    totalCount: number;
+  };
+  recovery: {
+    likelyRecoveryAds: RecoveryPrediction[];
+    totalDegradedCount: number;
+  };
+  recommendations: string[];
+}> {
+  log.info({ adAccountId }, 'Running combined decay/recovery analysis');
+
+  // Decay predictions
+  const decayPredictions = await predictAllAds(adAccountId);
+  const highRiskAds = decayPredictions.filter(p => p.riskLevel === 'high' || p.riskLevel === 'critical');
+
+  // Recovery predictions
+  const recoveryPredictions = await predictAllRecovery(adAccountId);
+  const likelyRecoveryAds = recoveryPredictions.filter(p => p.recoveryLevel === 'likely' || p.recoveryLevel === 'very_likely');
+
+  // Generate recommendations
+  const recommendations: string[] = [];
+
+  if (highRiskAds.length > 0) {
+    recommendations.push(`${highRiskAds.length} объявлений с высоким риском выгорания. Рассмотрите ротацию креативов.`);
+  }
+
+  if (likelyRecoveryAds.length > 0) {
+    recommendations.push(`${likelyRecoveryAds.length} объявлений показывают признаки восстановления. Можно увеличить бюджет.`);
+  }
+
+  const burnedOutCount = recoveryPredictions.filter(p => p.currentStatus === 'burned_out').length;
+  if (burnedOutCount > 0) {
+    recommendations.push(`${burnedOutCount} объявлений полностью выгорели. Рекомендуется замена.`);
+  }
+
+  return {
+    decay: {
+      highRiskAds,
+      totalCount: decayPredictions.length,
+    },
+    recovery: {
+      likelyRecoveryAds,
+      totalDegradedCount: recoveryPredictions.length,
+    },
+    recommendations,
+  };
+}
