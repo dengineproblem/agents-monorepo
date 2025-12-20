@@ -73,7 +73,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [pixels, setPixels] = useState<Array<{ id: string; name: string }>>([]);
   const [isLoadingPixels, setIsLoadingPixels] = useState(false);
   const [utmTag, setUtmTag] = useState(DEFAULT_UTM);
-  
+
+  // Lead Forms специфичные
+  const [leadFormId, setLeadFormId] = useState('');
+  const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
+  const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -99,6 +104,30 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       }
     };
     loadPixels();
+  }, [objective]);
+
+  // Загрузка лидформ при выборе цели "Lead Forms"
+  useEffect(() => {
+    const loadLeadForms = async () => {
+      if (objective !== 'lead_forms') {
+        // Сброс лидформ при переключении на другую цель
+        setLeadForms([]);
+        setLeadFormId('');
+        return;
+      }
+      setIsLoadingLeadForms(true);
+      try {
+        const list = await facebookApi.getLeadForms();
+        console.log('Загружены лидформы:', list);
+        setLeadForms(Array.isArray(list) ? list : []);
+      } catch (e) {
+        console.error('Ошибка загрузки лидформ:', e);
+        setLeadForms([]);
+      } finally {
+        setIsLoadingLeadForms(false);
+      }
+    };
+    loadLeadForms();
   }, [objective]);
 
   const handleCitySelection = (cityId: string) => {
@@ -180,6 +209,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       return;
     }
 
+    if (objective === 'lead_forms' && !leadFormId) {
+      setError('Выберите лидформу');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -198,6 +232,9 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           site_url: siteUrl.trim(),
           pixel_id: pixelId || null,
           utm_tag: utmTag.trim() || DEFAULT_UTM,
+        }),
+        ...(objective === 'lead_forms' && {
+          lead_form_id: leadFormId,
         }),
       };
 
@@ -236,6 +273,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setSiteUrl('');
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
+    setLeadFormId('');
   };
 
   return (
@@ -311,6 +349,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   <RadioGroupItem value="site_leads" id="obj-site" />
                   <Label htmlFor="obj-site" className="font-normal cursor-pointer">
                     {OBJECTIVE_DESCRIPTIONS.site_leads}
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="lead_forms" id="obj-lead-forms" />
+                  <Label htmlFor="obj-lead-forms" className="font-normal cursor-pointer">
+                    {OBJECTIVE_DESCRIPTIONS.lead_forms}
                   </Label>
                 </div>
               </RadioGroup>
@@ -681,6 +725,56 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                 <p className="text-xs text-muted-foreground">
                   Используйте переменные: {'{'}{'{'} campaign.name {'}'}{'}' }, {'{'}{'{'}  adset.name {'}'}{'}'}, {'{'}{'{'}  ad.name {'}'}{'}'}
                 </p>
+              </div>
+            </div>
+          )}
+
+          {objective === 'lead_forms' && (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">📋 Лидформы Facebook</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="lead-form-id">
+                  Лидформа <span className="text-red-500">*</span>
+                </Label>
+                <Select
+                  value={leadFormId || 'none'}
+                  onValueChange={(value) => setLeadFormId(value === 'none' ? '' : value)}
+                  disabled={isSubmitting || isLoadingLeadForms}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={
+                      isLoadingLeadForms
+                        ? 'Загрузка...'
+                        : leadForms.length === 0
+                          ? 'Нет доступных лидформ'
+                          : 'Выберите лидформу'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none" disabled>Выберите лидформу</SelectItem>
+                    {leadForms.length === 0 && !isLoadingLeadForms && (
+                      <SelectItem value="no-forms" disabled>
+                        Лидформы не найдены на странице Facebook
+                      </SelectItem>
+                    )}
+                    {leadForms.map((form) => (
+                      <SelectItem key={form.id} value={form.id}>
+                        {form.name} ({form.status})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {leadForms.length === 0 && !isLoadingLeadForms && (
+                  <p className="text-xs text-muted-foreground">
+                    На вашей Facebook странице не найдено лидформ. Создайте лидформу в Facebook Ads Manager.
+                  </p>
+                )}
+                {leadForms.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Выберите лидформу, которая будет использоваться для сбора заявок
+                  </p>
+                )}
               </div>
             </div>
           )}

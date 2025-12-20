@@ -449,6 +449,49 @@ export async function createWebsiteLeadsCreative(
 }
 
 /**
+ * Создает Lead Form видео креатив
+ * Для Facebook Instant Forms (lead_gen_form_id)
+ */
+export async function createLeadFormVideoCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    leadFormId: string;
+    thumbnailHash?: string;
+  }
+): Promise<{ id: string }> {
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: {
+      type: "SIGN_UP",
+      value: {
+        lead_gen_form_id: params.leadFormId
+      }
+    }
+  };
+
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  }
+
+  const payload: any = {
+    name: "Lead Form Video Creative",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      video_data: videoData
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
  * Создает Lookalike Audience 3% от seed аудитории
  * @param adAccountId - ID рекламного аккаунта (без act_ префикса)
  * @param seedAudienceId - ID исходной Custom Audience (например, IG Engagers 365d)
@@ -631,6 +674,42 @@ export async function createWebsiteLeadsImageCreative(
           type: "SIGN_UP",
           value: {
             link: params.siteUrl
+          }
+        }
+      }
+    }
+  };
+
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создает Lead Form креатив с изображением
+ * Для Facebook Instant Forms (lead_gen_form_id)
+ */
+export async function createLeadFormImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    leadFormId: string;
+  }
+): Promise<{ id: string }> {
+  const payload: any = {
+    name: "Lead Form Image Creative",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      link_data: {
+        image_hash: params.imageHash,
+        message: params.message,
+        call_to_action: {
+          type: "SIGN_UP",
+          value: {
+            lead_gen_form_id: params.leadFormId
           }
         }
       }
@@ -987,6 +1066,58 @@ export async function createWebsiteLeadsCarouselCreative(
   };
 
   log.debug({ adAccountId, cardsCount: params.cards.length }, 'Creating Website Leads carousel creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создаёт Lead Form carousel creative
+ * Каждая карточка открывает лид форму
+ */
+export async function createLeadFormCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId: string;
+    message: string;
+    leadFormId: string;
+  }
+): Promise<{ id: string }> {
+  const childAttachments = params.cards.map((card) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50),
+    description: card.text,
+    call_to_action: {
+      type: "SIGN_UP",
+      value: {
+        lead_gen_form_id: params.leadFormId
+      }
+    }
+  }));
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      message: params.message,
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: {
+          lead_gen_form_id: params.leadFormId
+        }
+      }
+    }
+  };
+
+  const payload: any = {
+    name: "Lead Form Carousel Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length, leadFormId: params.leadFormId }, 'Creating Lead Form carousel creative');
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 

@@ -9,7 +9,8 @@ import {
   uploadImage,
   createWhatsAppImageCreative,
   createInstagramImageCreative,
-  createWebsiteLeadsImageCreative
+  createWebsiteLeadsImageCreative,
+  createLeadFormImageCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -209,7 +210,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         let clientQuestion = body.client_question || 'Здравствуйте! Хочу узнать об этом подробнее.';
         let siteUrl = body.site_url || null;
         let utm = body.utm || null;
-        let objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' = 'whatsapp'; // default
+        let leadFormId: string | null = null;
+        let objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp'; // default
 
         if (body.direction_id) {
           // Загружаем direction для получения objective
@@ -220,7 +222,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             .maybeSingle();
 
           if (direction?.objective) {
-            objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads';
+            objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
             app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
           }
 
@@ -236,6 +238,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             clientQuestion = defaultSettings.client_question || clientQuestion;
             siteUrl = defaultSettings.site_url || siteUrl;
             utm = defaultSettings.utm_tag || utm;
+            leadFormId = defaultSettings.lead_form_id || leadFormId;
 
             app.log.info({
               direction_id: body.direction_id,
@@ -293,6 +296,19 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             utm: utm || undefined
           });
           fbCreativeId = websiteCreative.id;
+        } else if (objective === 'lead_forms') {
+          if (!leadFormId) {
+            app.log.error('lead_forms objective requires lead_form_id in direction settings');
+            throw new Error('lead_form_id is required for lead_forms objective');
+          }
+          const leadFormCreative = await createLeadFormImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+            imageHash: fbImage.hash,
+            pageId: pageId,
+            instagramId: instagramId,
+            message: description,
+            leadFormId: leadFormId
+          });
+          fbCreativeId = leadFormCreative.id;
         }
 
         app.log.info(`Creative created with ID: ${fbCreativeId}, updating record...`);
@@ -305,7 +321,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
+          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
+          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
         };
 
         const { error: updateError } = await supabase
@@ -470,7 +487,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads';
+      const objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
       app.log.info({ objective }, 'Direction objective loaded');
 
       // 4. Загружаем настройки из default_ad_settings
@@ -484,6 +501,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать подробнее.';
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
+      const leadFormId = defaultSettings?.lead_form_id || null;
 
       // 5. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -613,6 +631,21 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           utm: utm || undefined
         });
         fbCreativeId = result.id;
+      } else if (objective === 'lead_forms') {
+        if (!leadFormId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'lead_form_id is required for lead_forms objective. Please configure it in direction settings.'
+          });
+        }
+        const result = await createLeadFormImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          imageHash: fbImage.hash,
+          pageId: pageId,
+          instagramId: instagramId,
+          message: description,
+          leadFormId: leadFormId
+        });
+        fbCreativeId = result.id;
       } else {
         return reply.status(400).send({
           success: false,
@@ -642,7 +675,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
+          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
+          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
         })
         .select()
         .single();

@@ -18,14 +18,15 @@ const log = createLogger({ module: 'campaignBuilder' });
 // TYPES
 // ========================================
 
-export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads';
+export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
 
 // Конвертация lowercase objective в формат для LLM
-export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Instagram' | 'SiteLeads' {
+export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Instagram' | 'SiteLeads' | 'LeadForms' {
   const mapping = {
     whatsapp: 'WhatsApp' as const,
     instagram_traffic: 'Instagram' as const,
     site_leads: 'SiteLeads' as const,
+    lead_forms: 'LeadForms' as const,
   };
   return mapping[objective];
 }
@@ -36,6 +37,7 @@ export type AvailableCreative = {
   fb_creative_id_whatsapp: string | null;
   fb_creative_id_instagram_traffic: string | null;
   fb_creative_id_site_leads: string | null;
+  fb_creative_id_lead_forms: string | null;
   created_at: string;
   // Scoring data (если есть)
   risk_score?: number;
@@ -986,6 +988,9 @@ export async function getAvailableCreatives(
       case 'site_leads':
         fbCreativeId = creative.fb_creative_id_site_leads;
         break;
+      case 'lead_forms':
+        fbCreativeId = creative.fb_creative_id_lead_forms;
+        break;
     }
 
     const score = scores?.find((s) => s.creative_id === fbCreativeId);
@@ -998,6 +1003,7 @@ export async function getAvailableCreatives(
       fb_creative_id_whatsapp: creative.fb_creative_id_whatsapp,
       fb_creative_id_instagram_traffic: creative.fb_creative_id_instagram_traffic,
       fb_creative_id_site_leads: creative.fb_creative_id_site_leads,
+      fb_creative_id_lead_forms: creative.fb_creative_id_lead_forms,
       created_at: creative.created_at,
       // Scoring data
       risk_score: score?.risk_score,
@@ -1915,6 +1921,8 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
       return 'LINK_CLICKS';
     case 'site_leads':
       return 'OFFSITE_CONVERSIONS';
+    case 'lead_forms':
+      return 'LEAD_GENERATION';
     default:
       return 'CONVERSATIONS';
   }
@@ -1930,6 +1938,8 @@ export function getBillingEvent(objective: CampaignObjective): string {
     case 'instagram_traffic':
       return 'IMPRESSIONS';
     case 'site_leads':
+      return 'IMPRESSIONS';
+    case 'lead_forms':
       return 'IMPRESSIONS';
     default:
       return 'IMPRESSIONS';
@@ -2009,6 +2019,11 @@ export async function createAdSetInCampaign(params: {
   // Для Site Leads (OFFSITE_CONVERSIONS) добавляем destination_type
   if (optimization_goal === 'OFFSITE_CONVERSIONS') {
     body.destination_type = 'WEBSITE';
+  }
+
+  // Для Lead Forms (LEAD_GENERATION) - форма открывается в рекламе
+  if (optimization_goal === 'LEAD_GENERATION') {
+    body.destination_type = 'ON_AD';
   }
 
   if (promoted_object) {
@@ -2104,6 +2119,8 @@ export function getCreativeIdForObjective(creative: AvailableCreative, objective
       return creative.fb_creative_id_instagram_traffic;
     case 'site_leads':
       return creative.fb_creative_id_site_leads;
+    case 'lead_forms':
+      return creative.fb_creative_id_lead_forms;
     default:
       return null;
   }

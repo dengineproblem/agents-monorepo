@@ -7,7 +7,7 @@ import {
 } from '../lib/defaultSettings.js';
 import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
 
-type ObjectiveType = 'WhatsApp' | 'Instagram' | 'SiteLeads';
+type ObjectiveType = 'WhatsApp' | 'Instagram' | 'SiteLeads' | 'LeadForms';
 
 type CreateCampaignParams = {
   user_creative_ids: string[]; // МАССИВ креативов для создания нескольких ads в одном adset
@@ -123,6 +123,10 @@ export async function workflowCreateCampaignWithCreative(
       break;
     case 'SiteLeads':
       fb_objective = 'OUTCOME_LEADS';
+      optimization_goal = 'OFFSITE_CONVERSIONS';
+      break;
+    case 'LeadForms':
+      fb_objective = 'OUTCOME_LEADS';
       optimization_goal = 'LEAD_GENERATION';
       break;
     default:
@@ -142,6 +146,9 @@ export async function workflowCreateCampaignWithCreative(
         break;
       case 'SiteLeads':
         fb_creative_id = creative.fb_creative_id_site_leads;
+        break;
+      case 'LeadForms':
+        fb_creative_id = creative.fb_creative_id_lead_forms;
         break;
     }
 
@@ -206,6 +213,7 @@ export async function workflowCreateCampaignWithCreative(
     if (objective === 'WhatsApp') campaignGoal = 'whatsapp';
     else if (objective === 'Instagram') campaignGoal = 'instagram_traffic';
     else if (objective === 'SiteLeads') campaignGoal = 'site_leads';
+    else if (objective === 'LeadForms') campaignGoal = 'lead_forms';
 
     try {
       defaultSettings = await getDefaultAdSettingsWithFallback(user_account_id, campaignGoal);
@@ -272,6 +280,15 @@ export async function workflowCreateCampaignWithCreative(
     adsetBody.promoted_object = {
       page_id: String(page_id),
       ...(context.whatsapp_phone_number && { whatsapp_phone_number: context.whatsapp_phone_number })
+    };
+  }
+
+  // Для LeadForms добавляем destination_type ON_AD и promoted_object с lead_gen_form_id
+  if (objective === 'LeadForms' && page_id && defaultSettings?.lead_form_id) {
+    adsetBody.destination_type = 'ON_AD';
+    adsetBody.promoted_object = {
+      page_id: String(page_id),
+      lead_gen_form_id: String(defaultSettings.lead_form_id)
     };
   }
 

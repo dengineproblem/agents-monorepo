@@ -15,7 +15,7 @@ const CreateDirectionSchema = z.object({
   userAccountId: z.string().uuid(),
   accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
   name: z.string().min(2).max(100),
-  objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']),
+  objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms']),
   daily_budget_cents: z.number().int().min(500), // минимум $5
   target_cpl_cents: z.number().int().min(50), // минимум $0.50
   whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
@@ -34,6 +34,8 @@ const CreateDirectionSchema = z.object({
     site_url: z.string().url().optional(),
     pixel_id: z.string().optional(),
     utm_tag: z.string().optional(),
+    // Lead Forms specific
+    lead_form_id: z.string().optional(),
   }).optional(),
 });
 
@@ -59,7 +61,7 @@ async function createFacebookCampaign(
   adAccountId: string,
   accessToken: string,
   directionName: string,
-  objective: 'whatsapp' | 'instagram_traffic' | 'site_leads'
+  objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms'
 ): Promise<{ campaign_id: string; status: string }> {
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -79,6 +81,10 @@ async function createFacebookCampaign(
     case 'site_leads':
       fbObjective = 'OUTCOME_LEADS';
       objectiveReadable = 'Site Leads';
+      break;
+    case 'lead_forms':
+      fbObjective = 'OUTCOME_LEADS';
+      objectiveReadable = 'Lead Forms';
       break;
     default:
       throw new Error(`Unknown objective: ${objective}`);
@@ -537,6 +543,7 @@ export async function directionsRoutes(app: FastifyInstance) {
             site_url: input.default_settings.site_url,
             pixel_id: input.default_settings.pixel_id,
             utm_tag: input.default_settings.utm_tag,
+            lead_form_id: input.default_settings.lead_form_id,
           })
           .select()
           .single();

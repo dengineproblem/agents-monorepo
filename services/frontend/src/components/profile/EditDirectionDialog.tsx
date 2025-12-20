@@ -233,6 +233,8 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       return;
     }
 
+    // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
+
     setIsSubmitting(true);
     setError(null);
 

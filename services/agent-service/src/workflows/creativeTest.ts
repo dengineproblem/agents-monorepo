@@ -233,6 +233,22 @@ export async function workflowStartCreativeTest(
       }
       break;
 
+    case 'lead_forms':
+      fb_objective = 'OUTCOME_LEADS';
+      optimization_goal = 'LEAD_GENERATION';
+      destination_type = 'ON_AD';
+
+      if (defaultSettings?.lead_form_id) {
+        promoted_object = {
+          page_id: String(page_id),
+          lead_gen_form_id: defaultSettings.lead_form_id
+        };
+        log.info({ lead_form_id: defaultSettings.lead_form_id }, 'Using lead_form_id for lead_forms');
+      } else {
+        throw new Error('No lead_form_id found in default settings for lead_forms objective');
+      }
+      break;
+
     default:
       throw new Error(`Unsupported objective for creative test: ${direction.objective}`);
   }
@@ -481,6 +497,11 @@ export async function fetchCreativeTestInsights(
     const offsite_leads = actions.find((a: any) => a.action_type === 'offsite_conversion.fb_pixel_lead')?.value || 0;
     leads = offsite_leads;
     baseLog.debug({ ad_id, objective, offsite_leads, leads }, 'Site leads extracted from insights');
+  } else if (objective === 'lead_forms') {
+    // Для lead_forms используем action_type: 'lead'
+    const form_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
+    leads = form_leads;
+    baseLog.debug({ ad_id, objective, form_leads, leads }, 'Lead form leads extracted from insights');
   } else if (objective === 'whatsapp') {
     // Для WhatsApp используем messaging connection
     const messaging_connection = actions.find((a: any) => a.action_type === 'onsite_conversion.total_messaging_connection')?.value || 0;

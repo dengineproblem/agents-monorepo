@@ -48,8 +48,10 @@ export const adsHandlers = {
       // Count leads from ALL sources like dashboard:
       // - messaging leads (WhatsApp/Instagram conversations)
       // - site leads (pixel events)
+      // - lead form leads (Facebook Instant Forms)
       let messagingLeads = 0;
       let siteLeads = 0;
+      let leadFormLeads = 0;
 
       if (insights.actions && Array.isArray(insights.actions)) {
         for (const action of insights.actions) {
@@ -59,11 +61,14 @@ export const adsHandlers = {
             siteLeads = parseInt(action.value || '0', 10);
           } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
             siteLeads += parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'lead') {
+            // Facebook Lead Forms (Instant Forms)
+            leadFormLeads = parseInt(action.value || '0', 10);
           }
         }
       }
 
-      const leads = messagingLeads + siteLeads;
+      const leads = messagingLeads + siteLeads + leadFormLeads;
 
       return {
         id: c.id,
@@ -128,6 +133,7 @@ export const adsHandlers = {
       // Count leads from ALL sources like dashboard:
       let messagingLeads = 0;
       let siteLeads = 0;
+      let leadFormLeads = 0;
 
       if (insights.actions && Array.isArray(insights.actions)) {
         for (const action of insights.actions) {
@@ -137,11 +143,14 @@ export const adsHandlers = {
             siteLeads = parseInt(action.value || '0', 10);
           } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
             siteLeads += parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'lead') {
+            // Facebook Lead Forms (Instant Forms)
+            leadFormLeads = parseInt(action.value || '0', 10);
           }
         }
       }
 
-      const leads = messagingLeads + siteLeads;
+      const leads = messagingLeads + siteLeads + leadFormLeads;
 
       return {
         id: a.id,
@@ -182,8 +191,10 @@ export const adsHandlers = {
       // - messaging leads (WhatsApp conversations)
       // - site leads (pixel events)
       // - custom conversions
+      // - lead form leads (Facebook Instant Forms)
       let messagingLeads = 0;
       let siteLeads = 0;
+      let leadFormLeads = 0;
 
       // Debug: log all action types for this row
       if (row.actions) {
@@ -204,10 +215,14 @@ export const adsHandlers = {
           else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
             siteLeads += parseInt(action.value || '0', 10);
           }
+          // Facebook Lead Forms (Instant Forms)
+          else if (action.action_type === 'lead') {
+            leadFormLeads = parseInt(action.value || '0', 10);
+          }
         }
       }
 
-      const totalLeads = messagingLeads + siteLeads;
+      const totalLeads = messagingLeads + siteLeads + leadFormLeads;
 
       return {
         date: row.date_start,
@@ -215,6 +230,7 @@ export const adsHandlers = {
         leads: totalLeads,
         messagingLeads,
         siteLeads,
+        leadFormLeads,
         impressions: parseInt(row.impressions || 0),
         clicks: parseInt(row.clicks || 0)
       };
@@ -224,6 +240,7 @@ export const adsHandlers = {
     const totalLeads = data.reduce((sum, d) => sum + d.leads, 0);
     const totalMessagingLeads = data.reduce((sum, d) => sum + d.messagingLeads, 0);
     const totalSiteLeads = data.reduce((sum, d) => sum + d.siteLeads, 0);
+    const totalLeadFormLeads = data.reduce((sum, d) => sum + d.leadFormLeads, 0);
 
     return {
       success: true,
@@ -235,6 +252,7 @@ export const adsHandlers = {
         leads: totalLeads,
         messagingLeads: totalMessagingLeads,
         siteLeads: totalSiteLeads,
+        leadFormLeads: totalLeadFormLeads,
         cpl: totalLeads > 0 ? (totalSpend / totalLeads).toFixed(2) : null
       }
     };
@@ -539,7 +557,8 @@ export const adsHandlers = {
     const objectiveMap = {
       whatsapp: { optimization_goal: 'CONVERSATIONS', billing_event: 'IMPRESSIONS', destination_type: 'WHATSAPP' },
       instagram_traffic: { optimization_goal: 'LINK_CLICKS', billing_event: 'IMPRESSIONS', destination_type: 'INSTAGRAM_PROFILE' },
-      site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' }
+      site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' },
+      lead_forms: { optimization_goal: 'LEAD_GENERATION', billing_event: 'IMPRESSIONS', destination_type: 'ON_AD' }
     };
     const objectiveSettings = objectiveMap[direction.objective] || objectiveMap.whatsapp;
 
@@ -553,6 +572,11 @@ export const adsHandlers = {
       promoted_object = { custom_event_type: 'LEAD' };
       if (direction.pixel_id || settings.pixel_id) {
         promoted_object.pixel_id = String(direction.pixel_id || settings.pixel_id);
+      }
+    } else if (direction.objective === 'lead_forms') {
+      promoted_object = { page_id: pageId };
+      if (settings.lead_form_id) {
+        promoted_object.lead_gen_form_id = settings.lead_form_id;
       }
     }
 
@@ -612,6 +636,7 @@ export const adsHandlers = {
     for (const creative of creatives) {
       const creativeIdField = direction.objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
         : direction.objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
+        : direction.objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
         : 'fb_creative_id_site_leads';
 
       const fbCreativeId = creative[creativeIdField];
@@ -709,13 +734,15 @@ export const adsHandlers = {
     const goalToObjective = {
       'CONVERSATIONS': 'whatsapp',
       'LINK_CLICKS': 'instagram_traffic',
-      'OFFSITE_CONVERSIONS': 'site_leads'
+      'OFFSITE_CONVERSIONS': 'site_leads',
+      'LEAD_GENERATION': 'lead_forms'
     };
     const objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
 
     // Get appropriate FB creative ID
     const creativeIdField = objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
       : objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
+      : objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
       : 'fb_creative_id_site_leads';
 
     const fbCreativeId = creative[creativeIdField];

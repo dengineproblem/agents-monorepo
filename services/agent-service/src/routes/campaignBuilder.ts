@@ -445,6 +445,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 ...(defaultSettings?.pixel_id && { pixel_id: defaultSettings.pixel_id }),
                 custom_event_type: 'LEAD'
               };
+            } else if (direction.objective === 'lead_forms') {
+              // Для Lead Forms используем page_id и lead_gen_form_id
+              promoted_object = {
+                page_id: credentials.fbPageId,
+                lead_gen_form_id: defaultSettings?.lead_form_id
+              };
             }
 
             // Создаём Ad Set в существующей кампании или используем pre-created
@@ -805,6 +811,12 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               custom_event_type: 'LEAD'
             };
           }
+        } else if (direction.objective === 'lead_forms') {
+          // Для Lead Forms используем page_id и lead_gen_form_id
+          promoted_object = {
+            page_id: credentials.fbPageId,
+            lead_gen_form_id: defaultSettings?.lead_form_id
+          };
         }
 
         // Создаём Ad Set или используем pre-created

@@ -9,7 +9,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const CreateDefaultSettingsSchema = z.object({
   direction_id: z.string().uuid(),
-  campaign_goal: z.enum(['whatsapp', 'instagram_traffic', 'site_leads']),
+  campaign_goal: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms']),
   cities: z.array(z.string()).optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
@@ -23,6 +23,8 @@ const CreateDefaultSettingsSchema = z.object({
   site_url: z.string().url().optional(),
   pixel_id: z.string().optional(),
   utm_tag: z.string().optional(),
+  // Lead Forms specific
+  lead_form_id: z.string().optional(),
 });
 
 const UpdateDefaultSettingsSchema = z.object({

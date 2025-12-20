@@ -5,7 +5,8 @@ import {
   uploadImage,
   createWhatsAppCarouselCreative,
   createInstagramCarouselCreative,
-  createWebsiteLeadsCarouselCreative
+  createWebsiteLeadsCarouselCreative,
+  createLeadFormCarouselCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -90,7 +91,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads';
+      const objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
       app.log.info({ objective }, 'Direction objective');
 
       // 3. Загружаем настройки из default_ad_settings
@@ -104,6 +105,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать подробнее.';
       const siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
+      const leadFormId = defaultSettings?.lead_form_id || null;
 
       // 4. Проверяем флаг мультиаккаунтности и загружаем FB credentials
       const { data: userAccount, error: userError } = await supabase
@@ -263,6 +265,21 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           utm: utm || undefined
         });
         fbCreativeId = result.id;
+      } else if (objective === 'lead_forms') {
+        if (!leadFormId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'lead_form_id is required for lead_forms objective. Please configure it in direction settings.'
+          });
+        }
+        const result = await createLeadFormCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          cards: cardParams,
+          pageId: pageId,
+          instagramId: instagramId,
+          message: description,
+          leadFormId: leadFormId
+        });
+        fbCreativeId = result.id;
       } else {
         return reply.status(400).send({
           success: false,
@@ -291,7 +308,8 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           // Старые поля для обратной совместимости (deprecated)
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
+          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
+          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
         })
         .select()
         .single();

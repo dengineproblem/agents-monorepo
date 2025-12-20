@@ -391,6 +391,7 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
         // Используем ту же логику подсчёта лидов, что и на главном дашборде (getCampaignStats)
         let messagingLeads = 0;
         let siteLeads = 0;
+        let leadFormLeads = 0;
 
         if (stat.actions && Array.isArray(stat.actions)) {
           for (const action of stat.actions) {
@@ -407,11 +408,15 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
             else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
               siteLeads += parseInt(action.value || "0", 10);
             }
+            // Facebook Lead Forms (Instant Forms)
+            else if (action.action_type === 'lead') {
+              leadFormLeads = parseInt(action.value || "0", 10);
+            }
           }
         }
 
-        // Итог: только переписки + лиды сайта (без Facebook Lead Forms) — как на дашборде
-        const leads = messagingLeads + siteLeads;
+        // Итог: переписки + лиды сайта + лидформы
+        const leads = messagingLeads + siteLeads + leadFormLeads;
 
         const spend = parseFloat(stat.spend || "0");
         const cpl = leads > 0 ? spend / leads : 0;
@@ -549,8 +554,85 @@ const getCurrentDailySpend = async () => {
   return total / 100;
 };
 
+// Получить page_id из текущей конфигурации (для Lead Forms)
+const getCurrentPageId = async (): Promise<string | null> => {
+  const storedUser = localStorage.getItem('user');
+
+  if (storedUser) {
+    try {
+      const userData = JSON.parse(storedUser);
+
+      // Проверяем мультиаккаунтный режим
+      const storedAdAccounts = localStorage.getItem('adAccounts');
+      const storedMultiAccountEnabled = localStorage.getItem('multiAccountEnabled');
+
+      if (storedMultiAccountEnabled === 'true' && storedAdAccounts) {
+        const adAccounts = JSON.parse(storedAdAccounts);
+        const currentAdAccountId = localStorage.getItem('currentAdAccountId');
+        const currentAcc = adAccounts.find((a: any) => a.id === currentAdAccountId);
+
+        if (currentAcc && currentAcc.page_id) {
+          return currentAcc.page_id;
+        }
+      }
+
+      // Legacy режим
+      if (userData && userData.page_id) {
+        return userData.page_id;
+      }
+    } catch (error) {
+      console.error('Ошибка при чтении page_id из localStorage:', error);
+    }
+  }
+
+  return null;
+};
+
 // Facebook API сервис
 export const facebookApi = {
+  // Получить список лидформ для текущей страницы Facebook
+  getLeadForms: async (): Promise<Array<{ id: string; name: string; status: string }>> => {
+    if (!await hasValidConfig()) {
+      return [];
+    }
+
+    const pageId = await getCurrentPageId();
+    if (!pageId) {
+      console.warn('Page ID не найден для загрузки лидформ');
+      return [];
+    }
+
+    try {
+      // Lead forms запрашиваются по page_id, не по ad_account_id
+      const endpoint = `${pageId}/leadgen_forms`;
+      const params = {
+        fields: 'id,name,status',
+        limit: '100'
+      };
+      const response = await fetchFromFacebookAPI(endpoint, params);
+      const forms = (response.data || []).map((f: any) => ({
+        id: String(f.id),
+        name: f.name || f.id,
+        status: f.status || 'ACTIVE'
+      }));
+
+      console.log(`Получено лидформ: ${forms.length}`);
+
+      if (forms.length === 0) {
+        console.info('На странице не найдено лидформ');
+      }
+
+      return forms;
+    } catch (e) {
+      console.error('Не удалось получить список лидформ:', e);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      if (!errorMessage.includes('Empty response') && !errorMessage.includes('data')) {
+        toastT.error('failedToLoadLeadForms');
+      }
+      return [];
+    }
+  },
+
   // Получить список пикселей для текущего рекламного кабинета
   getPixels: async (): Promise<Array<{ id: string; name: string }>> => {
     if (!await hasValidConfig()) {
@@ -688,10 +770,9 @@ export const facebookApi = {
           let qualityLeads = 0;
           let messagingLeads = 0;
           let siteLeads = 0;
-          
+          let leadFormLeads = 0;
+
           if (stat.actions && Array.isArray(stat.actions)) {
-            const leadValues: number[] = [];
-            
             for (const action of stat.actions) {
               // Общие лиды (messaging_connection)
               if (action.action_type === 'onsite_conversion.total_messaging_connection') {
@@ -710,12 +791,14 @@ export const facebookApi = {
               else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
                 siteLeads += parseInt(action.value || "0", 10);
               }
+              // Facebook Lead Forms
+              else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+                leadFormLeads = parseInt(action.value || "0", 10);
+              }
             }
-            
-            // Итог: только переписки + лиды сайта (без Facebook Lead Forms)
-            leads = messagingLeads + siteLeads;
-            
-            // Без fallback к общим lead action_type, чтобы не учитывать FB Lead Forms
+
+            // Итог: переписки + лиды сайта + лидформы
+            leads = messagingLeads + siteLeads + leadFormLeads;
           }
           
           // Расчёт производных метрик
@@ -922,6 +1005,7 @@ export const facebookApi = {
           const clicks = parseInt(row.clicks, 10) || 0;
           let messagingLeads = 0;
           let siteLeads = 0;
+          let leadFormLeads = 0;
           if (row.actions && Array.isArray(row.actions)) {
             for (const action of row.actions) {
               if (action.action_type === 'onsite_conversion.total_messaging_connection') {
@@ -936,12 +1020,16 @@ export const facebookApi = {
               else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
                 siteLeads += parseInt(action.value || '0', 10);
               }
+              // Facebook Lead Forms
+              else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+                leadFormLeads = parseInt(action.value || '0', 10);
+              }
             }
           }
           totalSpend += spend;
           totalImpr += impressions;
           totalClicks += clicks;
-          totalLeads += (messagingLeads + siteLeads);
+          totalLeads += (messagingLeads + siteLeads + leadFormLeads);
         }
       }
     } catch (e) {
@@ -998,40 +1086,44 @@ export const facebookApi = {
         return (response.data || [])
           .filter((stat: any) => stat.campaign_id === campaignId)
           .map((stat: any) => {
-            let leads = 0;
+            let messagingLeads = 0;
+            let siteLeads = 0;
+            let leadFormLeads = 0;
             let qualityLeads = 0;
-            
+
             if (stat.actions && Array.isArray(stat.actions)) {
-              const leadValues: number[] = [];
-              
               for (const action of stat.actions) {
                 // Общие лиды (messaging_connection)
                 if (action.action_type === 'onsite_conversion.total_messaging_connection') {
-                  leads = parseInt(action.value || "0", 10);
+                  messagingLeads = parseInt(action.value || "0", 10);
                 }
                 // Качественные лиды (≥2 сообщения)
                 else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
                   qualityLeads = parseInt(action.value || "0", 10);
                 }
-                // Fallback к старому методу если нет новых action_type
-                else if (LEAD_ACTION_TYPES.includes(action.action_type)) {
-                  leadValues.push(parseInt(action.value || "0", 10));
+                // Лиды с сайта
+                else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+                  siteLeads = parseInt(action.value || "0", 10);
+                }
+                // Кастомные конверсии пикселя
+                else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+                  siteLeads += parseInt(action.value || "0", 10);
+                }
+                // Facebook Lead Forms
+                else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+                  leadFormLeads = parseInt(action.value || "0", 10);
                 }
               }
-              
-              // Если не нашли новые action_type, используем старый метод
-              if (leads === 0 && leadValues.length > 0) {
-                leads = Math.max(...leadValues);
-              }
             }
-            
+
+            const leads = messagingLeads + siteLeads + leadFormLeads;
             const spend = parseFloat(stat.spend) || 0;
             const impressions = parseInt(stat.impressions, 10) || 0;
             const clicks = parseInt(stat.clicks, 10) || 0;
             const ctr = impressions > 0 ? (clicks / impressions) * 100 : 0;
             const cpl = leads > 0 ? spend / leads : 0;
-            const qualityRate = leads > 0 ? (qualityLeads / leads) * 100 : 0;
-            
+            const qualityRate = messagingLeads > 0 ? (qualityLeads / messagingLeads) * 100 : 0;
+
             return {
               campaign_id: stat.campaign_id,
               campaign_name: stat.campaign_name,

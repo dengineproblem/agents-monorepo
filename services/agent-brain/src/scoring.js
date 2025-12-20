@@ -521,6 +521,19 @@ function calculateMultiPeriodTrends(dailyData, actionsData = [], campaignObjecti
           all_action_types: allActionTypes
         }
       };
+    } else if (objective === 'lead_forms') {
+      // Lead Forms метрики (Facebook Instant Forms)
+      const formLeadsTotal = extractActionValue(actions, 'lead');
+      const totalSpend = last7d?.spend || 0;
+      const costPerLead = formLeadsTotal > 0 ? totalSpend / formLeadsTotal : 0;
+
+      objectiveMetrics = {
+        lead_forms_metrics: {
+          form_leads: formLeadsTotal,
+          cost_per_lead: costPerLead.toFixed(2),
+          all_action_types: allActionTypes
+        }
+      };
     }
 
     result.push({
