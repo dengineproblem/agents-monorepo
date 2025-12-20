@@ -362,23 +362,17 @@ export const ADS_TOOLS = [
   },
   {
     name: 'getLeadsEngagementRate',
-    description: `Качество лидов: сколько % написали 2+ сообщения в WhatsApp.
-
-ЛОГИКА:
-- Берём лиды за период из таблицы leads
-- Сопоставляем с dialogs по chat_id
-- Считаем у скольких messages_count >= 2
+    description: `Качество лидов: сколько % отправили 2+ сообщения. Использует FB метрику onsite_conversion.messaging_user_depth_2_message_send.
 
 ВОЗВРАЩАЕТ:
-- leads_total: всего лидов за период
-- leads_with_2plus_msgs: лидов с 2+ сообщениями
-- engagement_rate: % вовлечённости (leads_with_2plus_msgs / leads_total * 100)
+- leads_total: всего лидов за период (FB метрика messaging_first_reply)
+- leads_with_2plus_msgs: лидов с 2+ сообщениями (FB метрика messaging_user_depth_2_message_send)
+- engagement_rate: % вовлечённости
 
-ИСПОЛЬЗУЙ когда нужно:
-- Оценить КАЧЕСТВО трафика из WhatsApp-кампаний
-- Сравнить engagement разных направлений
-- Высокий engagement = лиды реально заинтересованы
-- Низкий engagement = возможно бот-трафик или плохой таргетинг`,
+ИСПОЛЬЗУЙ для расчёта QCPL (качественный CPL):
+- QCPL = spend / leads_with_2plus_msgs
+- Высокий engagement = качественные лиды
+- Это чисто FB запрос, WhatsApp интеграция НЕ нужна`,
     parameters: {
       type: 'object',
       properties: {

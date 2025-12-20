@@ -443,10 +443,29 @@ export const crmHandlers = {
     // Используем общий хелпер для дат (date_from/date_to имеют приоритет)
     const { since, until, periodDescription } = getDateRangeFromParams({ date_from, date_to, period });
 
+    // Step 0: Если указан direction_id, загружаем креативы этого направления
+    // (как ROI Analytics, чтобы найти лидов через creative_id)
+    let creativeIds = [];
+    if (direction_id) {
+      let creativesQuery = supabase
+        .from('user_creatives')
+        .select('id')
+        .eq('user_id', userAccountId)
+        .eq('direction_id', direction_id)
+        .eq('status', 'ready');
+
+      if (dbAccountId) {
+        creativesQuery = creativesQuery.eq('account_id', dbAccountId);
+      }
+
+      const { data: creativesData } = await creativesQuery;
+      creativeIds = creativesData?.map(c => c.id) || [];
+    }
+
     // Step 1: Get leads
     let leadsQuery = supabase
       .from('leads')
-      .select('id, chat_id, name, direction_id, is_qualified, created_at')
+      .select('id, chat_id, name, direction_id, is_qualified, created_at, creative_id')
       .eq('user_account_id', userAccountId)
       .gte('created_at', since)
       .lte('created_at', until);
@@ -454,7 +473,13 @@ export const crmHandlers = {
     if (dbAccountId) {
       leadsQuery = leadsQuery.eq('account_id', dbAccountId);
     }
-    if (direction_id) {
+
+    // Фильтруем по creative_id вместо direction_id (как ROI Analytics)
+    // Это находит лидов пришедших с креативов данного направления
+    if (creativeIds.length > 0) {
+      leadsQuery = leadsQuery.in('creative_id', creativeIds);
+    } else if (direction_id) {
+      // Fallback: если нет креативов, фильтруем по direction_id лида
       leadsQuery = leadsQuery.eq('direction_id', direction_id);
     }
 
@@ -467,6 +492,26 @@ export const crmHandlers = {
     const leads = leadsData || [];
     const leads_total = leads.length;
     const qualified_count = leads.filter(l => l.is_qualified === true).length;
+
+    // DEBUG: логируем данные для отладки
+    console.log('[getSalesQuality] DEBUG:', JSON.stringify({
+      input_direction_id: direction_id || 'NOT_PROVIDED',
+      input_period: period || 'NOT_PROVIDED (default: last_7d)',
+      since,
+      until,
+      userAccountId,
+      creativeIds_count: creativeIds.length,
+      creativeIds_sample: creativeIds.slice(0, 3),
+      leads_total,
+      qualified_count,
+      sample_leads: leads.slice(0, 3).map(l => ({
+        id: l.id,
+        is_qualified: l.is_qualified,
+        creative_id: l.creative_id,
+        direction_id: l.direction_id,
+        created_at: l.created_at
+      }))
+    }));
 
     // Step 2: Get purchases linked to leads
     const leadPhones = leads.map(l => l.chat_id).filter(Boolean);

@@ -9,7 +9,7 @@ import { z } from 'zod';
 // Common schemas
 const uuidSchema = z.string().uuid('Invalid UUID format');
 const nonEmptyString = (field) => z.string().min(1, `${field} is required`);
-const periodSchema = z.enum(['7d', '14d', '30d', 'all']);
+const extendedPeriodEnum = z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all', '7d', '14d', '30d']);
 
 // Common WRITE tool options
 const dryRunOption = z.boolean().optional().describe('Preview mode — show what will change without executing');
@@ -43,7 +43,9 @@ export const CreativeToolDefs = {
     description: 'Получить детальные метрики креатива с разбивкой по дням, включая video retention',
     schema: z.object({
       creative_id: uuidSchema,
-      period: periodSchema.optional()
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 25000, retryable: true }
   },
@@ -61,7 +63,10 @@ export const CreativeToolDefs = {
     schema: z.object({
       metric: z.enum(['cpl', 'leads', 'ctr', 'score']),
       direction_id: uuidSchema.optional(),
-      limit: z.number().min(1).max(20).optional()
+      limit: z.number().min(1).max(20).optional(),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -71,7 +76,10 @@ export const CreativeToolDefs = {
     schema: z.object({
       threshold_cpl: z.number().min(0).optional(),
       direction_id: uuidSchema.optional(),
-      limit: z.number().min(1).max(20).optional()
+      limit: z.number().min(1).max(20).optional(),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -80,7 +88,9 @@ export const CreativeToolDefs = {
     description: 'Сравнить метрики двух или более креативов за выбранный период',
     schema: z.object({
       creative_ids: z.array(uuidSchema).min(2, 'Need at least 2 creatives to compare').max(5, 'Maximum 5 creatives'),
-      period: z.enum(['7d', '14d', '30d']).optional()
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 25000, retryable: true }
   },

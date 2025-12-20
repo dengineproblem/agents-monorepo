@@ -96,10 +96,13 @@ export const META_TOOLS = {
     name: 'executeTools',
     description: `Выполнить tools и получить готовый ответ от специализированного агента.
 
-Агент получает:
-- Результаты tools
-- Контекст (направления, бюджеты, целевой CPL)
-- Вопрос пользователя
+⚠️ КРИТИЧНО: Каждый tool ДОЛЖЕН иметь args с параметрами!
+
+Примеры правильного вызова:
+- { "name": "getSalesQuality", "args": { "direction_id": "uuid-here", "date_from": "2024-06-20", "date_to": "2024-12-20" } }
+- { "name": "getSpendReport", "args": { "date_from": "2024-12-01", "date_to": "2024-12-20" } }
+
+НЕ ПЕРЕДАВАЙ параметры в user_question — передавай их в args каждого tool!
 
 Агент возвращает готовый ответ. Если несколько доменов — ты объединяешь ответы.
 
@@ -107,11 +110,15 @@ DANGEROUS tools требуют подтверждения — сначала с�
     schema: z.object({
       tools: z.array(z.object({
         name: z.string().describe('Имя tool (например: getSpendReport)'),
-        args: z.record(z.unknown()).describe('Аргументы tool')
-      })).describe('Массив tools для выполнения. Можно несколько из одного или разных доменов.'),
-      user_question: z.string().describe('Вопрос пользователя для контекста агента')
+        args: z.record(z.unknown()).describe('ОБЯЗАТЕЛЬНО! Аргументы tool: direction_id, date_from, date_to, period и др. НЕ оставляй пустым!')
+      })).describe('Массив tools. Каждый tool ДОЛЖЕН иметь args с параметрами (direction_id, date_from, date_to).'),
+      user_question: z.string().describe('Краткий вопрос пользователя для контекста (БЕЗ параметров — они в args)')
     }),
     handler: async ({ tools, user_question }, context) => {
+      // DEBUG: Log incoming tool calls from LLM
+      console.log('[executeTools] LLM tool calls:', JSON.stringify(tools, null, 2));
+      console.log('[executeTools] User question:', user_question);
+
       // Route through domain agents
       const results = await routeToolCallsToDomains(tools, context, user_question);
 

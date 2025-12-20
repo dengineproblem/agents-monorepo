@@ -7,6 +7,20 @@ import { fbGraph } from '../../shared/fbGraph.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import { adsDryRunHandlers } from '../../shared/dryRunHandlers.js';
+
+/**
+ * Get date range with date_from/date_to support
+ * date_from/date_to have priority over period
+ */
+function getDateRangeWithDates({ date_from, date_to, period }) {
+  if (date_from) {
+    return {
+      since: date_from,
+      until: date_to || new Date().toISOString().split('T')[0]
+    };
+  }
+  return getDateRange(period || 'last_7d');
+}
 import {
   verifyCampaignStatus,
   verifyAdSetStatus,
@@ -22,8 +36,8 @@ export const adsHandlers = {
   // READ HANDLERS
   // ============================================================
 
-  async getCampaigns({ period, status }, { accessToken, adAccountId }) {
-    const dateRange = getDateRange(period);
+  async getCampaigns({ period, date_from, date_to, status }, { accessToken, adAccountId }) {
+    const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 
     const fields = 'id,name,status,objective,daily_budget,lifetime_budget,insights.date_preset(today){spend,impressions,clicks,actions}';
 
@@ -117,8 +131,8 @@ export const adsHandlers = {
     };
   },
 
-  async getAdSets({ campaign_id, period }, { accessToken }) {
-    const dateRange = getDateRange(period || 'last_7d');
+  async getAdSets({ campaign_id, period, date_from, date_to }, { accessToken }) {
+    const dateRange = getDateRangeWithDates({ date_from, date_to, period });
     const fields = 'id,name,status,daily_budget,targeting,insights.date_preset(today){spend,impressions,clicks,actions}';
 
     const result = await fbGraph('GET', `${campaign_id}/adsets`, accessToken, {
@@ -166,8 +180,8 @@ export const adsHandlers = {
     return { success: true, adsets };
   },
 
-  async getSpendReport({ period, group_by }, { accessToken, adAccountId }) {
-    const dateRange = getDateRange(period);
+  async getSpendReport({ period, date_from, date_to, group_by }, { accessToken, adAccountId }) {
+    const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 
     // Log for debugging
     console.log('[getSpendReport] period:', period, '-> dateRange:', dateRange);
@@ -827,7 +841,8 @@ export const adsHandlers = {
   // DIRECTIONS HANDLERS
   // ============================================================
 
-  async getDirections({ status, period }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getDirections({ status, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId }) {
+    // Note: period/date_from/date_to not used yet - directions don't have time-based metrics
     // Get directions for this user account
     // Note: account_directions uses user_account_id, not ad_account_id
     const dbAccountId = adAccountDbId || null;
@@ -958,10 +973,19 @@ export const adsHandlers = {
     };
   },
 
-  async getDirectionMetrics({ direction_id, period }, { adAccountId, userAccountId, adAccountDbId }) {
+  async getDirectionMetrics({ direction_id, period, date_from, date_to }, { adAccountId, userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
-    const days = { '7d': 7, '14d': 14, '30d': 30 }[period] || 7;
-    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    // Support date_from/date_to with priority over period
+    let startDate, endDate;
+    if (date_from) {
+      startDate = date_from;
+      endDate = date_to || new Date().toISOString().split('T')[0];
+    } else {
+      const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90, '6m': 180, '12m': 365 }[period] || 7;
+      startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      endDate = new Date().toISOString().split('T')[0];
+    }
 
     // 1. Пробуем получить из rollup (быстро)
     let rollupQuery = supabase
@@ -1273,24 +1297,38 @@ export const adsHandlers = {
    * Logic adapted from salesApi.getROIData()
    * Enhanced with recommendations, top/worst performers
    */
-  async getROIReport({ period, direction_id, media_type, group_by }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getROIReport({ period, date_from, date_to, direction_id, media_type, group_by }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Period to days
-    const periodDays = {
-      'last_7d': 7,
-      'last_30d': 30,
-      'last_90d': 90,
-      'all': null
-    }[period] || null;
+    // Support date_from/date_to with priority over period
+    let since, until;
+    if (date_from) {
+      since = date_from;
+      until = date_to || new Date().toISOString().split('T')[0];
+    } else {
+      // Period to days
+      const periodDays = {
+        'today': 1,
+        'yesterday': 1,
+        'last_3d': 3,
+        'last_7d': 7,
+        'last_14d': 14,
+        'last_30d': 30,
+        'last_90d': 90,
+        'last_6m': 180,
+        'last_12m': 365,
+        'all': null
+      }[period] || null;
 
-    const since = (() => {
-      if (!periodDays) return null;
-      const d = new Date();
-      d.setDate(d.getDate() - periodDays);
-      d.setHours(0, 0, 0, 0);
-      return d.toISOString().split('T')[0];
-    })();
+      since = (() => {
+        if (!periodDays) return null;
+        const d = new Date();
+        d.setDate(d.getDate() - periodDays);
+        d.setHours(0, 0, 0, 0);
+        return d.toISOString().split('T')[0];
+      })();
+      until = new Date().toISOString().split('T')[0];
+    }
 
     // USD to KZT rate from DB (cached, updated daily by cron)
     const usdToKztRate = await getUsdToKzt();
@@ -1565,24 +1603,38 @@ export const adsHandlers = {
   /**
    * Compare ROI between creatives or directions
    */
-  async getROIComparison({ period = 'all', compare_by, top_n = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getROIComparison({ period, date_from, date_to, compare_by, top_n = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Period to days (null = all time)
-    const periodDays = {
-      'last_7d': 7,
-      'last_30d': 30,
-      'last_90d': 90,
-      'all': null
-    }[period] || null;
+    // Support date_from/date_to with priority over period
+    let since, until;
+    if (date_from) {
+      since = date_from;
+      until = date_to || new Date().toISOString().split('T')[0];
+    } else {
+      // Period to days (null = all time)
+      const periodDays = {
+        'today': 1,
+        'yesterday': 1,
+        'last_3d': 3,
+        'last_7d': 7,
+        'last_14d': 14,
+        'last_30d': 30,
+        'last_90d': 90,
+        'last_6m': 180,
+        'last_12m': 365,
+        'all': null
+      }[period || 'all'] || null;
 
-    const since = (() => {
-      if (!periodDays) return null; // all time - no filter
-      const d = new Date();
-      d.setDate(d.getDate() - periodDays);
-      d.setHours(0, 0, 0, 0);
-      return d.toISOString().split('T')[0];
-    })();
+      since = (() => {
+        if (!periodDays) return null; // all time - no filter
+        const d = new Date();
+        d.setDate(d.getDate() - periodDays);
+        d.setHours(0, 0, 0, 0);
+        return d.toISOString().split('T')[0];
+      })();
+      until = new Date().toISOString().split('T')[0];
+    }
 
     // USD to KZT rate from DB (cached, updated daily by cron)
     const usdToKztRate = await getUsdToKzt();
@@ -2157,20 +2209,35 @@ export const adsHandlers = {
    * Get direction insights with period comparison
    * Returns current metrics + delta vs previous period
    */
-  async getDirectionInsights({ direction_id, period = 'last_3d', compare }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getDirectionInsights({ direction_id, period, date_from, date_to, compare }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Parse period
-    const periodDays = {
-      'last_3d': 3,
-      'last_7d': 7,
-      'last_14d': 14,
-      'last_30d': 30
-    }[period] || 3;
-
+    // Support date_from/date_to with priority over period
+    let currentStart, currentEnd, periodDays;
     const now = new Date();
-    const currentEnd = now.toISOString().split('T')[0];
-    const currentStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    if (date_from) {
+      currentStart = date_from;
+      currentEnd = date_to || now.toISOString().split('T')[0];
+      // Calculate days for comparison period
+      periodDays = Math.ceil((new Date(currentEnd) - new Date(currentStart)) / (24 * 60 * 60 * 1000));
+    } else {
+      // Parse period
+      periodDays = {
+        'today': 1,
+        'yesterday': 1,
+        'last_3d': 3,
+        'last_7d': 7,
+        'last_14d': 14,
+        'last_30d': 30,
+        'last_90d': 90,
+        'last_6m': 180,
+        'last_12m': 365
+      }[period || 'last_3d'] || 3;
+
+      currentEnd = now.toISOString().split('T')[0];
+      currentStart = new Date(now.getTime() - periodDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    }
 
     // Get direction info including target CPL
     const { data: direction } = await supabase
@@ -2316,8 +2383,17 @@ export const adsHandlers = {
    * Uses onsite_conversion.messaging_user_depth_2_message_send action type
    * Same logic as dashboard SummaryStats.tsx
    */
-  async getLeadsEngagementRate({ direction_id, period = 'last_7d' }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
-    const dateRange = getDateRange(period);
+  async getLeadsEngagementRate({ direction_id, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
+    // Support date_from/date_to with priority over period
+    let dateRange;
+    if (date_from) {
+      dateRange = {
+        since: date_from,
+        until: date_to || new Date().toISOString().split('T')[0]
+      };
+    } else {
+      dateRange = getDateRange(period || 'last_7d');
+    }
 
     // If direction_id specified, get campaigns for that direction
     let campaignFilter = null;

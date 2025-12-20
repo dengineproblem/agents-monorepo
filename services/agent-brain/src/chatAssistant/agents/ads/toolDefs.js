@@ -12,11 +12,13 @@
 import { z } from 'zod';
 
 // Common schemas
+// Extended period enum for all tools
+const extendedPeriodEnum = z.enum(['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all']);
 // Period can be preset (today, yesterday, etc.) or specific date (30 ноября, 2024-11-30, 30.11.2024)
 const periodSchema = z.string().describe('Период: today, yesterday, last_7d, last_30d или конкретная дата (30 ноября, 2024-11-30)');
 const campaignStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'all']);
 const directionStatusSchema = z.enum(['active', 'paused', 'all']);
-const directionPeriodSchema = z.enum(['7d', '14d', '30d']);
+const directionPeriodSchema = z.enum(['7d', '14d', '30d', '90d', '6m', '12m']);
 const groupBySchema = z.enum(['campaign', 'day']);
 
 // UUID validation with custom message
@@ -38,7 +40,9 @@ export const AdsToolDefs = {
   getCampaigns: {
     description: 'Получить список кампаний с метриками (расходы, лиды, CPL, CTR) за указанный период',
     schema: z.object({
-      period: periodSchema.default('last_7d').describe('Период для метрик (default: last_7d)'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
       status: campaignStatusSchema.optional().describe('Фильтр по статусу кампаний')
     }),
     meta: { timeout: 25000, retryable: true }
@@ -56,7 +60,9 @@ export const AdsToolDefs = {
     description: 'Получить список адсетов кампании с метриками',
     schema: z.object({
       campaign_id: nonEmptyString('campaign_id').describe('ID кампании'),
-      period: periodSchema.optional().describe('Период для метрик')
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -64,7 +70,9 @@ export const AdsToolDefs = {
   getSpendReport: {
     description: 'Получить отчёт по расходам за период с разбивкой по кампаниям или дням',
     schema: z.object({
-      period: periodSchema.default('last_7d').describe('Период отчёта (default: last_7d)'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
       group_by: groupBySchema.optional().describe('Группировка данных')
     }),
     meta: { timeout: 25000, retryable: true }
@@ -78,7 +86,9 @@ export const AdsToolDefs = {
     description: 'Получить список направлений (рекламных вертикалей) с метриками за период',
     schema: z.object({
       status: directionStatusSchema.optional().describe('Фильтр по статусу направлений'),
-      period: periodSchema.optional().describe('Период для метрик')
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -95,7 +105,9 @@ export const AdsToolDefs = {
     description: 'Получить метрики направления с разбивкой по дням за период',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
-      period: directionPeriodSchema.optional().describe('Период для метрик')
+      period: directionPeriodSchema.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -114,19 +126,23 @@ export const AdsToolDefs = {
     description: 'Получить метрики направления с сравнением vs предыдущий период. Включает CPL, CTR, CPM, CPC и delta.',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
-      period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']).default('last_3d').describe('Период для метрик'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
       compare: z.enum(['previous_same', 'previous_7d']).optional().describe('Сравнить с предыдущим периодом')
     }),
     meta: { timeout: 25000, retryable: true }
   },
 
   getLeadsEngagementRate: {
-    description: 'Получить показатель вовлечённости лидов (2+ сообщения в WhatsApp). Высокий engagement = качественные лиды. Используй для оценки качества трафика из WhatsApp.',
+    description: 'Получить показатель вовлечённости лидов (2+ сообщения). Использует FB метрику onsite_conversion.messaging_user_depth_2_message_send. Высокий engagement = качественные лиды. ИСПОЛЬЗУЙ ДЛЯ ПОДСЧЁТА QCPL (качественных лидов) ПО FACEBOOK.',
     schema: z.object({
       direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
-      period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d']).default('last_7d').describe('Период для анализа')
+      period: z.enum(['last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all']).optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
-    meta: { timeout: 20000, retryable: true }
+    meta: { timeout: 30000, retryable: true }
   },
 
   // ============================================================
@@ -242,7 +258,9 @@ export const AdsToolDefs = {
   getROIReport: {
     description: 'Получить отчёт по ROI креативов: расходы, выручка, ROI%, лиды, конверсии. Включает топ/худших и рекомендации.',
     schema: z.object({
-      period: z.enum(['last_7d', 'last_30d', 'last_90d', 'all']).default('last_7d').describe('Период для расчёта ROI'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
       direction_id: uuidSchema.optional().describe('UUID направления для фильтрации'),
       media_type: z.enum(['video', 'image']).optional().describe('Фильтр по типу медиа')
     }),
@@ -252,7 +270,9 @@ export const AdsToolDefs = {
   getROIComparison: {
     description: 'Сравнить ROI между креативами или направлениями. Возвращает топ N по ROI.',
     schema: z.object({
-      period: z.enum(['last_7d', 'last_30d', 'last_90d', 'all']).default('all').describe('Период для сравнения'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
       compare_by: z.enum(['creative', 'direction']).default('creative').describe('По чему сравнивать'),
       top_n: z.number().min(1).max(20).default(5).describe('Количество топ элементов для вывода')
     }),

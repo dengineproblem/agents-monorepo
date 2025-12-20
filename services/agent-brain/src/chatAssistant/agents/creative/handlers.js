@@ -10,6 +10,63 @@ import { creativeDryRunHandlers } from '../../shared/dryRunHandlers.js';
 import { verifyAdStatus } from '../../shared/postCheck.js';
 import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
 
+/**
+ * Helper: Convert date_from/date_to or period to days limit for RPC
+ * Returns days limit and optional date filter for post-filtering
+ */
+function getCreativeDateFilter({ date_from, date_to, period }) {
+  const today = new Date().toISOString().split('T')[0];
+
+  if (date_from) {
+    // Calculate days from date_from to today (RPC counts back from today)
+    const fromDate = new Date(date_from);
+    const toDate = new Date(date_to || today);
+    const todayDate = new Date(today);
+
+    // Days from date_from to today — we fetch all, then filter
+    const daysToFetch = Math.ceil((todayDate - fromDate) / (1000 * 60 * 60 * 24)) + 1;
+
+    return {
+      daysLimit: Math.max(daysToFetch, 7), // min 7 days to ensure data
+      dateFrom: date_from,
+      dateTo: date_to || today
+    };
+  }
+
+  // Parse period preset
+  const periodDays = {
+    'last_3d': 3, '3d': 3,
+    'last_7d': 7, '7d': 7,
+    'last_14d': 14, '14d': 14,
+    'last_30d': 30, '30d': 30,
+    'last_90d': 90, '90d': 90,
+    'last_6m': 180, '6m': 180,
+    'last_12m': 365, '12m': 365,
+    'all': 730
+  };
+
+  const days = periodDays[period] || 30;
+
+  return {
+    daysLimit: days,
+    dateFrom: null,
+    dateTo: null
+  };
+}
+
+/**
+ * Filter RPC results by date range if specified
+ */
+function filterByDateRange(data, dateFrom, dateTo) {
+  if (!dateFrom || !data) return data;
+
+  return data.filter(row => {
+    const rowDate = row.date || row.report_date;
+    if (!rowDate) return true;
+    return rowDate >= dateFrom && rowDate <= dateTo;
+  });
+}
+
 export const creativeHandlers = {
   // ============================================================
   // READ HANDLERS
@@ -160,24 +217,29 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeMetrics({ creative_id, period = '30d' }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getCreativeMetrics({ creative_id, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId }) {
     // Use adAccountDbId (UUID) for database queries
     const dbAccountId = adAccountDbId || null;
-    const days = parseInt(period) || 30;
+
+    // Get date filter (supports date_from/date_to or period preset)
+    const dateFilter = getCreativeDateFilter({ date_from, date_to, period });
 
     const { data, error } = await supabase.rpc('get_creative_aggregated_metrics', {
       p_user_creative_id: creative_id,
       p_user_account_id: userAccountId,
       p_account_id: dbAccountId,
-      p_days_limit: days
+      p_days_limit: dateFilter.daysLimit
     });
 
     if (error) {
       return { success: false, error: error.message };
     }
 
+    // Filter by date range if date_from/date_to specified
+    const filteredData = filterByDateRange(data, dateFilter.dateFrom, dateFilter.dateTo);
+
     // Calculate totals
-    const totals = (data || []).reduce((acc, day) => ({
+    const totals = (filteredData || []).reduce((acc, day) => ({
       impressions: acc.impressions + (day.total_impressions || 0),
       reach: acc.reach + (day.total_reach || 0),
       clicks: acc.clicks + (day.total_clicks || 0),
@@ -203,11 +265,16 @@ export const creativeHandlers = {
       '95%': ((totals.video_views_95 / totals.video_views) * 100).toFixed(1)
     } : null;
 
+    // Build period info for response
+    const periodInfo = date_from
+      ? { date_from, date_to: date_to || new Date().toISOString().split('T')[0] }
+      : { period: period || 'last_30d' };
+
     return {
       success: true,
       creative_id,
-      period,
-      daily: data || [],
+      ...periodInfo,
+      daily: filteredData || [],
       totals: {
         impressions: totals.impressions,
         reach: totals.reach,
@@ -265,7 +332,7 @@ export const creativeHandlers = {
     };
   },
 
-  async getTopCreatives({ metric, direction_id, limit = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getTopCreatives({ metric, direction_id, limit = 5, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId }) {
     // Get all creatives first
     const result = await creativeHandlers.getCreatives(
       { direction_id, status: 'active', limit: 50 },
@@ -274,13 +341,40 @@ export const creativeHandlers = {
 
     if (!result.success) return result;
 
+    // If custom period specified, enrich with metrics for that period
+    let creatives = result.creatives;
+    if (date_from || (period && period !== 'last_30d' && period !== '30d')) {
+      // Fetch metrics for each creative with specified period
+      creatives = await Promise.all(creatives.map(async (creative) => {
+        const metricsResult = await creativeHandlers.getCreativeMetrics(
+          { creative_id: creative.id, period, date_from, date_to },
+          { userAccountId, adAccountId, adAccountDbId }
+        );
+        if (metricsResult.success) {
+          return {
+            ...creative,
+            metrics: {
+              impressions: metricsResult.totals.impressions,
+              leads: metricsResult.totals.leads,
+              spend: metricsResult.totals.spend,
+              cpl: metricsResult.calculated.cpl
+            }
+          };
+        }
+        return { ...creative, metrics: creative.metrics_30d };
+      }));
+    } else {
+      // Use default 30d metrics
+      creatives = creatives.map(c => ({ ...c, metrics: c.metrics_30d }));
+    }
+
     // Filter creatives with metrics
-    let creatives = result.creatives.filter(c => c.metrics_30d.leads > 0 || c.metrics_30d.impressions > 0);
+    creatives = creatives.filter(c => c.metrics.leads > 0 || c.metrics.impressions > 0);
 
     // Sort by metric
     creatives.sort((a, b) => {
-      const ma = a.metrics_30d;
-      const mb = b.metrics_30d;
+      const ma = a.metrics;
+      const mb = b.metrics;
       switch (metric) {
         case 'cpl':
           // Lower CPL is better
@@ -296,14 +390,20 @@ export const creativeHandlers = {
       }
     });
 
+    // Build period info for response
+    const periodInfo = date_from
+      ? { date_from, date_to: date_to || new Date().toISOString().split('T')[0] }
+      : { period: period || 'last_30d' };
+
     return {
       success: true,
       metric,
+      ...periodInfo,
       top_creatives: creatives.slice(0, limit)
     };
   },
 
-  async getWorstCreatives({ threshold_cpl, direction_id, limit = 5 }, { userAccountId, adAccountId, adAccountDbId }) {
+  async getWorstCreatives({ threshold_cpl, direction_id, limit = 5, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId }) {
     const result = await creativeHandlers.getCreatives(
       { direction_id, status: 'active', limit: 50 },
       { userAccountId, adAccountId, adAccountDbId }
@@ -311,28 +411,61 @@ export const creativeHandlers = {
 
     if (!result.success) return result;
 
+    // If custom period specified, enrich with metrics for that period
+    let creatives = result.creatives;
+    if (date_from || (period && period !== 'last_30d' && period !== '30d')) {
+      // Fetch metrics for each creative with specified period
+      creatives = await Promise.all(creatives.map(async (creative) => {
+        const metricsResult = await creativeHandlers.getCreativeMetrics(
+          { creative_id: creative.id, period, date_from, date_to },
+          { userAccountId, adAccountId, adAccountDbId }
+        );
+        if (metricsResult.success) {
+          return {
+            ...creative,
+            metrics: {
+              impressions: metricsResult.totals.impressions,
+              leads: metricsResult.totals.leads,
+              spend: metricsResult.totals.spend,
+              cpl: metricsResult.calculated.cpl
+            }
+          };
+        }
+        return { ...creative, metrics: creative.metrics_30d };
+      }));
+    } else {
+      // Use default 30d metrics
+      creatives = creatives.map(c => ({ ...c, metrics: c.metrics_30d }));
+    }
+
     // Filter by CPL threshold if provided
-    let creatives = result.creatives.filter(c => {
-      if (!c.metrics_30d.cpl) return false;
+    creatives = creatives.filter(c => {
+      if (!c.metrics.cpl) return false;
       if (threshold_cpl) {
-        return parseFloat(c.metrics_30d.cpl) > threshold_cpl;
+        return parseFloat(c.metrics.cpl) > threshold_cpl;
       }
       return true;
     });
 
     // Sort by CPL descending (worst first)
     creatives.sort((a, b) => {
-      return parseFloat(b.metrics_30d.cpl || 0) - parseFloat(a.metrics_30d.cpl || 0);
+      return parseFloat(b.metrics.cpl || 0) - parseFloat(a.metrics.cpl || 0);
     });
+
+    // Build period info for response
+    const periodInfo = date_from
+      ? { date_from, date_to: date_to || new Date().toISOString().split('T')[0] }
+      : { period: period || 'last_30d' };
 
     return {
       success: true,
       threshold_cpl,
+      ...periodInfo,
       worst_creatives: creatives.slice(0, limit)
     };
   },
 
-  async compareCreatives({ creative_ids, period = '30d' }, { userAccountId, adAccountId, adAccountDbId }) {
+  async compareCreatives({ creative_ids, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId }) {
     if (!creative_ids || creative_ids.length < 2) {
       return { success: false, error: 'Нужно минимум 2 креатива для сравнения' };
     }
@@ -344,7 +477,7 @@ export const creativeHandlers = {
     const comparisons = await Promise.all(creative_ids.map(async (id) => {
       const [details, metrics] = await Promise.all([
         creativeHandlers.getCreativeDetails({ creative_id: id }, { userAccountId, adAccountId, adAccountDbId }),
-        creativeHandlers.getCreativeMetrics({ creative_id: id, period }, { userAccountId, adAccountId, adAccountDbId })
+        creativeHandlers.getCreativeMetrics({ creative_id: id, period, date_from, date_to }, { userAccountId, adAccountId, adAccountDbId })
       ]);
 
       return {
@@ -358,9 +491,14 @@ export const creativeHandlers = {
       };
     }));
 
+    // Build period info for response
+    const periodInfo = date_from
+      ? { date_from, date_to: date_to || new Date().toISOString().split('T')[0] }
+      : { period: period || 'last_30d' };
+
     return {
       success: true,
-      period,
+      ...periodInfo,
       comparison: comparisons
     };
   },
