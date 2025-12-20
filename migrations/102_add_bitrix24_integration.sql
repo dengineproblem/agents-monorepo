@@ -113,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_bitrix24_pipeline_entity ON bitrix24_pipeline_sta
 CREATE TABLE IF NOT EXISTS bitrix24_status_history (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_account_id UUID NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
-  lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
+  lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
 
   -- Bitrix24 entity IDs
   bitrix24_lead_id BIGINT,
@@ -146,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_bitrix24_status_history_changed ON bitrix24_statu
 CREATE TABLE IF NOT EXISTS bitrix24_sync_log (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_account_id UUID NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,
-  lead_id UUID REFERENCES leads(id) ON DELETE CASCADE,
+  lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
   sale_id UUID REFERENCES sales(id) ON DELETE CASCADE,
 
   -- Bitrix24 entity IDs
