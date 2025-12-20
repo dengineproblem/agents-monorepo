@@ -32,11 +32,12 @@ const Sidebar: React.FC = () => {
       label: t('menu.videos'),
       icon: <Video className="h-5 w-5" />,
     },
-    {
-      path: '/assistant',
-      label: 'AI Chat',
-      icon: <MessageSquare className="h-5 w-5" />,
-    },
+    // TODO: enable after agent-brain deploy
+    // {
+    //   path: '/assistant',
+    //   label: 'AI Chat',
+    //   icon: <MessageSquare className="h-5 w-5" />,
+    // },
     {
       path: '/profile',
       label: t('menu.profile'),
