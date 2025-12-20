@@ -19,6 +19,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Activity,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -74,6 +75,11 @@ const menuItems: MenuItem[] = [
     path: '/admin/errors',
     label: 'Ошибки',
     icon: AlertTriangle,
+  },
+  {
+    path: '/admin/ad-insights',
+    label: 'Ad Insights',
+    icon: Activity,
   },
   {
     path: '/admin/settings',

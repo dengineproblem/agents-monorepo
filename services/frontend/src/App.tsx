@@ -42,6 +42,7 @@ import {
   AdminLeads,
   AdminErrors,
   AdminSettings,
+  AdminAdInsights,
 } from './pages/admin';
 import { LanguageProvider, useTranslation } from './i18n/LanguageContext';
 import { FEATURES } from './config/appReview';
@@ -294,6 +295,7 @@ const AppRoutes = () => {
                 <Route path="errors" element={<AdminErrors />} />
                 <Route path="settings" element={<AdminSettings />} />
                 <Route path="analytics" element={<AdminAnalytics />} />
+                <Route path="ad-insights" element={<AdminAdInsights />} />
               </Route>
             </Routes>
           ) : isNoSidebarRoute ? (
