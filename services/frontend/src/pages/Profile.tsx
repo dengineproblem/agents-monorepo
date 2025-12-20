@@ -20,6 +20,15 @@ import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionC
 import { TildaConnectionCard, TildaInstructionsDialog } from '@/components/profile/TildaConnectionCard';
 // TEMPORARILY HIDDEN: import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
 import { AmoCRMQualificationFieldModal } from '@/components/amocrm/AmoCRMQualificationFieldModal';
+import { Bitrix24QualificationFieldModal } from '@/components/bitrix24/Bitrix24QualificationFieldModal';
+import {
+  getBitrix24Status,
+  disconnectBitrix24,
+  openBitrix24ConnectWindow,
+  onBitrix24Connected,
+  syncBitrix24Leads,
+  type Bitrix24Status,
+} from '@/services/bitrix24Api';
 import { FEATURES, APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
@@ -165,6 +174,14 @@ const Profile: React.FC = () => {
   const [amocrmKeyStagesModal, setAmocrmKeyStagesModal] = useState(false);
   const [amocrmQualificationModal, setAmocrmQualificationModal] = useState(false);
   const [amocrmQualificationFieldName, setAmocrmQualificationFieldName] = useState<string | null>(null);
+
+  // Bitrix24 Integration
+  const [bitrix24Connected, setBitrix24Connected] = useState(false);
+  const [bitrix24Domain, setBitrix24Domain] = useState('');
+  const [bitrix24EntityType, setBitrix24EntityType] = useState<'lead' | 'deal' | 'both'>('lead');
+  const [bitrix24Modal, setBitrix24Modal] = useState(false);
+  const [bitrix24QualificationModal, setBitrix24QualificationModal] = useState(false);
+  const [isSyncingBitrix24, setIsSyncingBitrix24] = useState(false);
 
   // Facebook Manual Connect Modal
   const [facebookManualModal, setFacebookManualModal] = useState(false);
@@ -366,6 +383,43 @@ const Profile: React.FC = () => {
     };
 
     loadAmoCRMStatus();
+  }, [user?.id]);
+
+  // Load Bitrix24 status
+  useEffect(() => {
+    const loadBitrix24Status = async () => {
+      if (!user?.id) return;
+
+      try {
+        const status = await getBitrix24Status(user.id);
+        console.log('Bitrix24 status loaded:', status);
+        setBitrix24Connected(status.connected);
+        setBitrix24Domain(status.domain || '');
+        setBitrix24EntityType(status.entityType || 'lead');
+      } catch (error) {
+        console.error('Failed to load Bitrix24 status:', error);
+      }
+    };
+
+    loadBitrix24Status();
+  }, [user?.id]);
+
+  // Listen for Bitrix24 connection success
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const cleanup = onBitrix24Connected((data) => {
+      console.log('Bitrix24 connected:', data);
+      setBitrix24Connected(true);
+      setBitrix24Domain(data.domain);
+      setBitrix24EntityType(data.entityType as 'lead' | 'deal' | 'both');
+      // Open qualification modal after connection
+      setTimeout(() => {
+        setBitrix24QualificationModal(true);
+      }, 500);
+    });
+
+    return cleanup;
   }, [user?.id]);
 
   // Handle AmoCRM OAuth callback - open qualification modal after connection
@@ -950,6 +1004,56 @@ const Profile: React.FC = () => {
     }
   };
 
+  // Bitrix24 handlers
+  const handleBitrix24Connect = () => {
+    console.log('[Profile] handleBitrix24Connect called, bitrix24Connected:', bitrix24Connected);
+    if (bitrix24Connected) {
+      console.log('[Profile] Opening Bitrix24 management modal');
+      setBitrix24Modal(true);
+    } else {
+      console.log('[Profile] Opening Bitrix24 connect window');
+      if (user?.id) {
+        openBitrix24ConnectWindow(user.id);
+      }
+    }
+  };
+
+  const handleBitrix24Disconnect = async () => {
+    if (!user?.id) return;
+
+    try {
+      await disconnectBitrix24(user.id);
+      setBitrix24Connected(false);
+      setBitrix24Domain('');
+      toast.success('Bitrix24 отключен');
+      setBitrix24Modal(false);
+    } catch (error) {
+      console.error('Error disconnecting Bitrix24:', error);
+      toast.error('Ошибка при отключении Bitrix24');
+    }
+  };
+
+  const handleBitrix24Sync = async () => {
+    if (!user?.id) return;
+
+    setIsSyncingBitrix24(true);
+    try {
+      toast.info('Синхронизация запущена...');
+      const result = await syncBitrix24Leads(user.id, bitrix24EntityType === 'both' ? undefined : bitrix24EntityType);
+
+      if (result.success) {
+        toast.success(`Синхронизировано: обновлено ${result.updated} записей`);
+      } else {
+        toast.error('Ошибка синхронизации');
+      }
+    } catch (error) {
+      console.error('Error syncing Bitrix24:', error);
+      toast.error('Ошибка синхронизации');
+    } finally {
+      setIsSyncingBitrix24(false);
+    }
+  };
+
   // === Флаги подключений для ConnectionsGrid ===
   // Для мультиаккаунтного режима проверяем текущий ad_account
   const currentAdAccount = multiAccountEnabled && contextAdAccounts?.length > 0
@@ -1231,6 +1335,12 @@ const Profile: React.FC = () => {
                 connected: amocrmConnected,
                 onClick: handleAmoCRMConnect,
                 badge: amocrmConnected && amocrmWebhookActive ? 'Webhook' : undefined,
+              },
+              {
+                id: 'bitrix24',
+                title: 'Bitrix24',
+                connected: bitrix24Connected,
+                onClick: handleBitrix24Connect,
               },
               ...(FEATURES.SHOW_DIRECTIONS ? [{
                 id: 'tilda' as const,
@@ -1914,6 +2024,75 @@ const Profile: React.FC = () => {
                 .then(res => res.json())
                 .then(data => setAmocrmQualificationFieldName(data.fieldName || null))
                 .catch(err => console.error('Failed to reload qualification field:', err));
+            }}
+          />
+        )}
+
+        {/* Bitrix24 Management Modal */}
+        <Dialog open={bitrix24Modal} onOpenChange={setBitrix24Modal}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Bitrix24 подключен</DialogTitle>
+              <DialogDescription>
+                Портал: {bitrix24Domain}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-4">
+              <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full bg-green-500" />
+                  <span className="text-sm">
+                    Режим: {bitrix24EntityType === 'both' ? 'Лиды и Сделки' : bitrix24EntityType === 'lead' ? 'Лиды' : 'Сделки'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Qualification Field Configuration */}
+              <Button
+                onClick={() => {
+                  setBitrix24Modal(false);
+                  setBitrix24QualificationModal(true);
+                }}
+                variant="default"
+                className="w-full"
+              >
+                Настроить квалификацию
+              </Button>
+
+              <Button
+                onClick={handleBitrix24Sync}
+                variant="outline"
+                className="w-full"
+                disabled={isSyncingBitrix24}
+              >
+                {isSyncingBitrix24 ? 'Синхронизация...' : 'Синхронизировать данные вручную'}
+              </Button>
+
+              <Button
+                onClick={handleBitrix24Disconnect}
+                variant="destructive"
+                className="w-full"
+              >
+                Отключить Bitrix24
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bitrix24 Qualification Field Modal */}
+        {user?.id && (
+          <Bitrix24QualificationFieldModal
+            isOpen={bitrix24QualificationModal}
+            onClose={() => setBitrix24QualificationModal(false)}
+            userAccountId={user.id}
+            entityType={bitrix24EntityType}
+            onSave={() => {
+              // Reload Bitrix24 status after save
+              getBitrix24Status(user.id)
+                .then(status => {
+                  setBitrix24EntityType(status.entityType || 'lead');
+                })
+                .catch(err => console.error('Failed to reload Bitrix24 status:', err));
             }}
           />
         )}
