@@ -329,7 +329,7 @@ export async function getBitrix24Status(userAccountId: string): Promise<{
 }> {
   const { data: userAccount } = await supabase
     .from('user_accounts')
-    .select('bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_member_id, bitrix24_entity_type, bitrix24_connected_at')
+    .select('id, bitrix24_domain, bitrix24_access_token, bitrix24_refresh_token, bitrix24_token_expires_at, bitrix24_member_id, bitrix24_user_id, bitrix24_entity_type, bitrix24_qualification_fields, bitrix24_connected_at')
     .eq('id', userAccountId)
     .single();
 

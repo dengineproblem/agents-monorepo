@@ -886,6 +886,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           fb_creative_id_whatsapp: c.fb_creative_id_whatsapp,
           fb_creative_id_instagram_traffic: c.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: c.fb_creative_id_site_leads,
+          fb_creative_id_lead_forms: c.fb_creative_id_lead_forms,
           created_at: c.created_at,
         }));
 

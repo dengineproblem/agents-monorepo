@@ -33,7 +33,10 @@ export interface DefaultAdSettings {
   site_url?: string;
   pixel_id?: string;
   utm_tag?: string;
-  
+
+  // Lead Forms
+  lead_form_id?: string;
+
   created_at: string;
   updated_at: string;
 }

@@ -96,7 +96,7 @@ export default async function bitrix24WebhooksRoutes(app: FastifyInstance) {
             action: 'bitrix24_webhook_process',
             endpoint: '/webhooks/bitrix24',
             severity: 'warning',
-            additional_context: { event, entityId }
+            request_data: { event, entityId }
           }).catch(() => {});
         }
       });

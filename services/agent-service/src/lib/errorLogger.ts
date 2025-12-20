@@ -17,6 +17,7 @@ const log = createLogger({ module: 'errorLogger' });
 export type ErrorType =
   | 'facebook'
   | 'amocrm'
+  | 'bitrix24'
   | 'evolution'
   | 'creative_generation'
   | 'scoring'
