@@ -161,10 +161,8 @@ const AdminErrors: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/admin/errors/${errorId}/resolve`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': currentUser.id,
+          'x-user-id': currentUser.id || '',
         },
-        body: JSON.stringify({}),
       });
 
       if (res.ok) {
