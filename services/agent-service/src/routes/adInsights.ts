@@ -1,8 +1,13 @@
 /**
- * AD INSIGHTS API ROUTES
+ * AD INSIGHTS API ROUTES (Admin Only)
  *
- * Endpoints для синхронизации insights, просмотра аномалий
- * и анализа зависимостей выгорания
+ * Внутренний сервис для анализа Meta Ads:
+ * - Синхронизация weekly insights
+ * - Нормализация результатов по семействам
+ * - Детекция аномалий CPR
+ * - Анализ зависимостей выгорания
+ *
+ * ВАЖНО: Доступ только для tech_admin!
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -14,6 +19,52 @@ import { supabase } from '../lib/supabaseClient.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger({ module: 'adInsightsRoutes' });
+
+// ============================================================================
+// AUTH HELPERS
+// ============================================================================
+
+/**
+ * Проверяет, является ли пользователь техадмином
+ */
+async function isTechAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('user_accounts')
+    .select('is_tech_admin')
+    .eq('id', userId)
+    .single();
+
+  if (error || !data) return false;
+  return data.is_tech_admin === true;
+}
+
+/**
+ * Middleware: проверка доступа tech_admin
+ */
+async function requireTechAdmin(
+  request: FastifyRequest,
+  reply: FastifyReply
+): Promise<string | null> {
+  const userId = request.headers['x-user-id'] as string;
+
+  if (!userId) {
+    reply.code(401).send({ error: 'Authentication required' });
+    return null;
+  }
+
+  const isAdmin = await isTechAdmin(userId);
+  if (!isAdmin) {
+    log.warn({ userId }, 'Non-admin attempted to access ad insights');
+    reply.code(403).send({ error: 'Access denied. Tech admin only.' });
+    return null;
+  }
+
+  return userId;
+}
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 interface SyncParams {
   accountId: string;
@@ -36,23 +87,30 @@ interface UpdateAnomalyBody {
   notes?: string;
 }
 
+// ============================================================================
+// ROUTES
+// ============================================================================
+
 export default async function adInsightsRoutes(fastify: FastifyInstance) {
   // ============================================================================
-  // SYNC ENDPOINTS
+  // SYNC ENDPOINTS (Admin Only)
   // ============================================================================
 
   /**
-   * POST /ad-insights/:accountId/sync
+   * POST /admin/ad-insights/:accountId/sync
    * Полная синхронизация: справочники + weekly insights + нормализация + аномалии
    */
   fastify.post<{
     Params: SyncParams;
     Querystring: SyncQuery;
-  }>('/ad-insights/:accountId/sync', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/sync', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { months = 12 } = request.query;
 
-    log.info({ accountId, months }, 'Starting full sync');
+    log.info({ adminId, accountId, months }, 'Admin starting full sync');
 
     try {
       // 1. Проверяем что аккаунт существует
@@ -82,6 +140,8 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       // 5. Детектируем аномалии
       const anomalyResult = await processAdAccount(accountId);
 
+      log.info({ adminId, accountId, syncResult, anomalyResult }, 'Full sync completed');
+
       return reply.send({
         success: true,
         sync: syncResult,
@@ -93,7 +153,7 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         anomalies: anomalyResult,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Sync failed');
+      log.error({ error, adminId, accountId }, 'Sync failed');
       return reply.status(500).send({
         error: 'Sync failed',
         message: error.message,
@@ -102,12 +162,15 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
   });
 
   /**
-   * POST /ad-insights/:accountId/sync/catalogs
+   * POST /admin/ad-insights/:accountId/sync/catalogs
    * Синхронизация только справочников (campaigns, adsets, ads)
    */
   fastify.post<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/sync/catalogs', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/sync/catalogs', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -127,6 +190,8 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       const adsets = await syncAdsets(accountId, account.fb_access_token, cleanFbAccountId);
       const ads = await syncAds(accountId, account.fb_access_token, cleanFbAccountId);
 
+      log.info({ adminId, accountId, campaigns, adsets, ads }, 'Catalogs synced');
+
       return reply.send({
         success: true,
         campaigns,
@@ -134,19 +199,22 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         ads,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Catalog sync failed');
+      log.error({ error, adminId, accountId }, 'Catalog sync failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * POST /ad-insights/:accountId/sync/insights
+   * POST /admin/ad-insights/:accountId/sync/insights
    * Синхронизация только weekly insights
    */
   fastify.post<{
     Params: SyncParams;
     Querystring: SyncQuery;
-  }>('/ad-insights/:accountId/sync/insights', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/sync/insights', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { months = 12 } = request.query;
 
@@ -164,23 +232,28 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
       const result = await syncWeeklyInsights(accountId, account.fb_access_token, cleanFbAccountId, months);
 
+      log.info({ adminId, accountId, months, result }, 'Insights synced');
+
       return reply.send({
         success: true,
         ...result,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Insights sync failed');
+      log.error({ error, adminId, accountId }, 'Insights sync failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * POST /ad-insights/:accountId/normalize
+   * POST /admin/ad-insights/:accountId/normalize
    * Нормализация результатов по семействам
    */
   fastify.post<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/normalize', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/normalize', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -194,18 +267,21 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         clicksAdded,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Normalization failed');
+      log.error({ error, adminId, accountId }, 'Normalization failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * POST /ad-insights/:accountId/detect-anomalies
+   * POST /admin/ad-insights/:accountId/detect-anomalies
    * Детекция аномалий
    */
   fastify.post<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/detect-anomalies', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/detect-anomalies', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -216,23 +292,26 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         ...result,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Anomaly detection failed');
+      log.error({ error, adminId, accountId }, 'Anomaly detection failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   // ============================================================================
-  // ANOMALIES ENDPOINTS
+  // ANOMALIES ENDPOINTS (Admin Only)
   // ============================================================================
 
   /**
-   * GET /ad-insights/:accountId/anomalies
+   * GET /admin/ad-insights/:accountId/anomalies
    * Получить список аномалий
    */
   fastify.get<{
     Params: SyncParams;
     Querystring: AnomaliesQuery;
-  }>('/ad-insights/:accountId/anomalies', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/anomalies', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { status, type, minScore, limit = 50, offset = 0 } = request.query;
 
@@ -251,18 +330,21 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         anomalies,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Failed to fetch anomalies');
+      log.error({ error, adminId, accountId }, 'Failed to fetch anomalies');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * GET /ad-insights/:accountId/anomalies/summary
+   * GET /admin/ad-insights/:accountId/anomalies/summary
    * Summary аномалий
    */
   fastify.get<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/anomalies/summary', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/anomalies/summary', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -273,41 +355,46 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         ...summary,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Failed to fetch anomaly summary');
+      log.error({ error, adminId, accountId }, 'Failed to fetch anomaly summary');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * PATCH /ad-insights/anomalies/:anomalyId
+   * PATCH /admin/ad-insights/anomalies/:anomalyId
    * Обновить статус аномалии
    */
   fastify.patch<{
     Params: { anomalyId: string };
     Body: UpdateAnomalyBody;
-  }>('/ad-insights/anomalies/:anomalyId', async (request, reply) => {
+  }>('/admin/ad-insights/anomalies/:anomalyId', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { anomalyId } = request.params;
     const { status, notes } = request.body;
 
     try {
-      await updateAnomalyStatus(anomalyId, status, undefined, notes);
+      await updateAnomalyStatus(anomalyId, status, adminId, notes);
+
+      log.info({ adminId, anomalyId, status }, 'Anomaly status updated');
 
       return reply.send({
         success: true,
         message: `Anomaly status updated to ${status}`,
       });
     } catch (error: any) {
-      log.error({ error, anomalyId }, 'Failed to update anomaly');
+      log.error({ error, adminId, anomalyId }, 'Failed to update anomaly');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   // ============================================================================
-  // DATA ENDPOINTS
+  // DATA ENDPOINTS (Admin Only)
   // ============================================================================
 
   /**
-   * GET /ad-insights/:accountId/weekly
+   * GET /admin/ad-insights/:accountId/weekly
    * Получить weekly insights
    */
   fastify.get<{
@@ -317,7 +404,10 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       weekStart?: string;
       limit?: number;
     };
-  }>('/ad-insights/:accountId/weekly', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/weekly', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { adId, weekStart, limit = 100 } = request.query;
 
@@ -346,13 +436,13 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         data,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Failed to fetch weekly insights');
+      log.error({ error, adminId, accountId }, 'Failed to fetch weekly insights');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * GET /ad-insights/:accountId/results
+   * GET /admin/ad-insights/:accountId/results
    * Получить нормализованные результаты по семействам
    */
   fastify.get<{
@@ -362,7 +452,10 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       family?: string;
       limit?: number;
     };
-  }>('/ad-insights/:accountId/results', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/results', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { adId, family, limit = 100 } = request.query;
 
@@ -391,13 +484,13 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         data,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Failed to fetch results');
+      log.error({ error, adminId, accountId }, 'Failed to fetch results');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * GET /ad-insights/:accountId/features
+   * GET /admin/ad-insights/:accountId/features
    * Получить вычисленные features
    */
   fastify.get<{
@@ -406,7 +499,10 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       adId?: string;
       limit?: number;
     };
-  }>('/ad-insights/:accountId/features', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/features', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { adId, limit = 100 } = request.query;
 
@@ -432,22 +528,25 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         data,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Failed to fetch features');
+      log.error({ error, adminId, accountId }, 'Failed to fetch features');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   // ============================================================================
-  // RATE LIMIT STATUS
+  // RATE LIMIT STATUS (Admin Only)
   // ============================================================================
 
   /**
-   * GET /ad-insights/:accountId/rate-limit
+   * GET /admin/ad-insights/:accountId/rate-limit
    * Получить состояние rate limit
    */
   fastify.get<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/rate-limit', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/rate-limit', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -470,22 +569,25 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         lastRequest: data?.last_request_at,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Failed to fetch rate limit state');
+      log.error({ error, adminId, accountId }, 'Failed to fetch rate limit state');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   // ============================================================================
-  // BURNOUT ANALYSIS ENDPOINTS
+  // BURNOUT ANALYSIS ENDPOINTS (Admin Only)
   // ============================================================================
 
   /**
-   * GET /ad-insights/:accountId/burnout/quantiles
+   * GET /admin/ad-insights/:accountId/burnout/quantiles
    * Квантильный анализ: как метрики влияют на CPR через 1-2 недели
    */
   fastify.get<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/burnout/quantiles', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/burnout/quantiles', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -497,18 +599,21 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         insights,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Quantile analysis failed');
+      log.error({ error, adminId, accountId }, 'Quantile analysis failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * GET /ad-insights/:accountId/burnout/correlations
+   * GET /admin/ad-insights/:accountId/burnout/correlations
    * Корреляции метрик с будущим CPR
    */
   fastify.get<{
     Params: SyncParams;
-  }>('/ad-insights/:accountId/burnout/correlations', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/burnout/correlations', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
 
     try {
@@ -519,13 +624,13 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         correlations,
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Correlation analysis failed');
+      log.error({ error, adminId, accountId }, 'Correlation analysis failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * GET /ad-insights/:accountId/burnout/predictions
+   * GET /admin/ad-insights/:accountId/burnout/predictions
    * Предсказания выгорания для всех активных ads
    */
   fastify.get<{
@@ -534,7 +639,10 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       riskLevel?: string;
       limit?: number;
     };
-  }>('/ad-insights/:accountId/burnout/predictions', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/burnout/predictions', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId } = request.params;
     const { riskLevel, limit = 50 } = request.query;
 
@@ -564,19 +672,22 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         },
       });
     } catch (error: any) {
-      log.error({ error, accountId }, 'Predictions failed');
+      log.error({ error, adminId, accountId }, 'Predictions failed');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
-   * GET /ad-insights/:accountId/burnout/predict/:adId
+   * GET /admin/ad-insights/:accountId/burnout/predict/:adId
    * Предсказание выгорания для конкретного ad
    */
   fastify.get<{
     Params: SyncParams & { adId: string };
     Querystring: { weekStart?: string };
-  }>('/ad-insights/:accountId/burnout/predict/:adId', async (request, reply) => {
+  }>('/admin/ad-insights/:accountId/burnout/predict/:adId', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
     const { accountId, adId } = request.params;
     const { weekStart } = request.query;
 
@@ -612,7 +723,46 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         prediction,
       });
     } catch (error: any) {
-      log.error({ error, accountId, adId }, 'Ad prediction failed');
+      log.error({ error, adminId, accountId, adId }, 'Ad prediction failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // AD ACCOUNTS LIST (Admin Only)
+  // ============================================================================
+
+  /**
+   * GET /admin/ad-insights/accounts
+   * Список всех ad accounts для админки
+   */
+  fastify.get('/admin/ad-insights/accounts', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('ad_accounts')
+        .select(`
+          id,
+          fb_ad_account_id,
+          connection_status,
+          user_account_id,
+          created_at,
+          updated_at,
+          user_accounts!inner(email, name)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      return reply.send({
+        success: true,
+        count: data?.length || 0,
+        accounts: data,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId }, 'Failed to fetch ad accounts');
       return reply.status(500).send({ error: error.message });
     }
   });
