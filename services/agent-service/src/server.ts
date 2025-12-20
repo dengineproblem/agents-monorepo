@@ -47,6 +47,7 @@ import adminLeadsRoutes from './routes/adminLeads.js';
 import adminErrorsRoutes from './routes/adminErrors.js';
 import adminNotificationsRoutes from './routes/adminNotifications.js';
 import adminSettingsRoutes from './routes/adminSettings.js';
+import adInsightsRoutes from './routes/adInsights.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
@@ -127,6 +128,7 @@ app.register(adminLeadsRoutes);
 app.register(adminErrorsRoutes);
 app.register(adminNotificationsRoutes);
 app.register(adminSettingsRoutes);
+app.register(adInsightsRoutes);
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
