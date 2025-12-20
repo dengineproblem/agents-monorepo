@@ -59,7 +59,7 @@ const autoLaunchRequestSchema = {
   properties: {
     user_account_id: { type: 'string', format: 'uuid' },
     userId: { type: 'string', format: 'uuid' }, // Алиас для обратной совместимости
-    objective: { type: 'string', enum: ['whatsapp', 'instagram_traffic', 'site_leads'] },
+    objective: { type: 'string', enum: ['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms'] },
     campaign_name: { type: 'string' },
     requested_budget_cents: { type: 'number', minimum: 500 }, // Минимум $5
     additional_context: { type: 'string' },
@@ -446,10 +446,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 custom_event_type: 'LEAD'
               };
             } else if (direction.objective === 'lead_forms') {
-              // Для Lead Forms используем page_id и lead_gen_form_id
+              // Для Lead Forms используем только page_id
+              // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе
               promoted_object = {
-                page_id: credentials.fbPageId,
-                lead_gen_form_id: defaultSettings?.lead_form_id
+                page_id: credentials.fbPageId
               };
             }
 
@@ -812,10 +812,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             };
           }
         } else if (direction.objective === 'lead_forms') {
-          // Для Lead Forms используем page_id и lead_gen_form_id
+          // Для Lead Forms используем только page_id
+          // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
           promoted_object = {
-            page_id: credentials.fbPageId,
-            lead_gen_form_id: defaultSettings?.lead_form_id
+            page_id: credentials.fbPageId
           };
         }
 

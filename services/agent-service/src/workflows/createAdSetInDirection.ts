@@ -432,15 +432,15 @@ export async function workflowCreateAdSetInDirection(
       );
     }
 
+    // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
     adsetBody.promoted_object = {
-      page_id: String(userAccount.page_id),
-      lead_gen_form_id: String(leadFormId)
+      page_id: String(userAccount.page_id)
     };
 
     log.info({
       page_id: userAccount.page_id,
       lead_form_id: leadFormId
-    }, 'Using lead_form for lead_forms objective');
+    }, 'Using lead_form for lead_forms objective (form_id in creative CTA)');
   }
 
   // ===================================================

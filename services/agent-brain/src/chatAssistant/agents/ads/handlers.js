@@ -532,7 +532,7 @@ export const adsHandlers = {
     // 3. Get creatives
     const { data: creatives, error: creativesError } = await supabase
       .from('user_creatives')
-      .select('id, title, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads')
+      .select('id, title, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms')
       .in('id', creative_ids)
       .eq('user_id', userAccountId)
       .eq('status', 'ready');
@@ -588,10 +588,8 @@ export const adsHandlers = {
         promoted_object.pixel_id = String(direction.pixel_id || settings.pixel_id);
       }
     } else if (direction.objective === 'lead_forms') {
+      // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
       promoted_object = { page_id: pageId };
-      if (settings.lead_form_id) {
-        promoted_object.lead_gen_form_id = settings.lead_form_id;
-      }
     }
 
     const finalBudget = daily_budget_cents || direction.daily_budget_cents || 500;
@@ -726,7 +724,7 @@ export const adsHandlers = {
     // 1. Get creative
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
-      .select('id, title, direction_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads')
+      .select('id, title, direction_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms')
       .eq('id', creative_id)
       .eq('user_id', userAccountId)
       .eq('status', 'ready')

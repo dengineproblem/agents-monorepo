@@ -863,7 +863,7 @@ async function getActiveCreatives(supabase, userAccountId) {
   // Также включаем креативы БЕЗ направления (legacy)
   const { data: legacyCreatives, error: legacyError } = await supabase
     .from('user_creatives')
-    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, is_active, status, created_at, direction_id')
+    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, is_active, status, created_at, direction_id')
     .eq('user_id', userAccountId)
     .eq('is_active', true)
     .eq('status', 'ready')

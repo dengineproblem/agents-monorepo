@@ -238,15 +238,14 @@ export async function workflowStartCreativeTest(
       optimization_goal = 'LEAD_GENERATION';
       destination_type = 'ON_AD';
 
-      if (defaultSettings?.lead_form_id) {
-        promoted_object = {
-          page_id: String(page_id),
-          lead_gen_form_id: defaultSettings.lead_form_id
-        };
-        log.info({ lead_form_id: defaultSettings.lead_form_id }, 'Using lead_form_id for lead_forms');
-      } else {
+      if (!defaultSettings?.lead_form_id) {
         throw new Error('No lead_form_id found in default settings for lead_forms objective');
       }
+      // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
+      promoted_object = {
+        page_id: String(page_id)
+      };
+      log.info({ lead_form_id: defaultSettings.lead_form_id }, 'Using lead_form_id for lead_forms (in creative CTA)');
       break;
 
     default:

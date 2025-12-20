@@ -587,6 +587,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           connection_status: computedStatus as 'pending' | 'connected' | 'error',
           ad_account_id: acc.fb_ad_account_id,  // Бэкенд возвращает fb_ad_account_id
           access_token: acc.fb_access_token,    // Бэкенд возвращает fb_access_token
+          page_id: acc.fb_page_id,              // Бэкенд возвращает fb_page_id (для Lead Forms)
           page_picture_url: acc.page_picture_url,  // Аватар страницы
         };
       });

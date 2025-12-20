@@ -69,7 +69,8 @@ export const creativesApi = {
     let query = supabase
       .from('user_creatives')
       .select('*')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .neq('status', 'failed'); // Исключаем failed креативы из списка
 
     // Фильтрация по account_id для мультиаккаунтности
     if (accountId) {

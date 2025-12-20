@@ -283,12 +283,12 @@ export async function workflowCreateCampaignWithCreative(
     };
   }
 
-  // Для LeadForms добавляем destination_type ON_AD и promoted_object с lead_gen_form_id
+  // Для LeadForms добавляем destination_type ON_AD и promoted_object с page_id
+  // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
   if (objective === 'LeadForms' && page_id && defaultSettings?.lead_form_id) {
     adsetBody.destination_type = 'ON_AD';
     adsetBody.promoted_object = {
-      page_id: String(page_id),
-      lead_gen_form_id: String(defaultSettings.lead_form_id)
+      page_id: String(page_id)
     };
   }
 

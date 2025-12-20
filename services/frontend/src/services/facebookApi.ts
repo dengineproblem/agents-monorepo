@@ -603,14 +603,62 @@ export const facebookApi = {
     }
 
     try {
-      // Lead forms запрашиваются по page_id, не по ad_account_id
-      const endpoint = `${pageId}/leadgen_forms`;
-      const params = {
-        fields: 'id,name,status',
-        limit: '100'
-      };
-      const response = await fetchFromFacebookAPI(endpoint, params);
-      const forms = (response.data || []).map((f: any) => ({
+      const FB_API_CONFIG = await getCurrentUserConfig();
+
+      // Получаем все страницы через /me/accounts с пагинацией
+      console.log('Запрашиваем Page Access Token для страницы:', pageId);
+
+      let allPages: any[] = [];
+      let nextUrl: string | null = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/me/accounts?access_token=${encodeURIComponent(FB_API_CONFIG.access_token)}&fields=id,name,access_token&limit=100`;
+
+      while (nextUrl) {
+        const response = await fetch(nextUrl);
+        const data = await response.json();
+
+        if (data.error) {
+          console.error('Ошибка получения списка страниц:', data.error);
+          break;
+        }
+
+        if (data.data) {
+          allPages = allPages.concat(data.data);
+        }
+
+        // Проверяем есть ли следующая страница
+        nextUrl = data.paging?.next || null;
+      }
+
+      console.log(`Всего страниц получено: ${allPages.length}`);
+
+      let accessTokenToUse = FB_API_CONFIG.access_token; // По умолчанию используем User Token
+
+      if (allPages.length > 0) {
+        const page = allPages.find((p: any) => p.id === pageId);
+        if (page?.access_token) {
+          accessTokenToUse = page.access_token;
+          console.log('Используем Page Access Token для:', page.name);
+        } else {
+          console.log('Page не найден в /me/accounts, пробуем с User Access Token напрямую');
+        }
+      } else {
+        console.log('Нет доступных страниц, пробуем с User Access Token напрямую');
+      }
+
+      // Запрашиваем лидформы
+      const formsUrl = new URL(`${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${pageId}/leadgen_forms`);
+      formsUrl.searchParams.append('access_token', accessTokenToUse);
+      formsUrl.searchParams.append('fields', 'id,name,status');
+      formsUrl.searchParams.append('limit', '100');
+
+      const formsResponse = await fetch(formsUrl.toString());
+      const formsData = await formsResponse.json();
+
+      if (formsData.error) {
+        console.error('Ошибка получения лидформ:', formsData.error);
+        throw new Error(formsData.error.message);
+      }
+
+      const forms = (formsData.data || []).map((f: any) => ({
         id: String(f.id),
         name: f.name || f.id,
         status: f.status || 'ACTIVE'
