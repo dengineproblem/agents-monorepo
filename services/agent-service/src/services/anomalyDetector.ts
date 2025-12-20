@@ -55,6 +55,9 @@ interface WeeklyData {
   reach: number;
   result_count: number;
   cpr: number | null;
+  quality_rank_score: number | null;
+  engagement_rank_score: number | null;
+  conversion_rank_score: number | null;
 }
 
 interface FeatureSet {
@@ -86,6 +89,15 @@ interface FeatureSet {
   spend_change_pct: number | null;
   weeks_with_data: number;
   min_results_met: boolean;
+  // Ranking scores (Iteration 2)
+  quality_score: number | null;
+  engagement_score: number | null;
+  conversion_score: number | null;
+  relevance_health: number | null;
+  quality_drop: number | null;
+  engagement_drop: number | null;
+  conversion_drop: number | null;
+  relevance_drop: number | null;
 }
 
 interface Anomaly {
@@ -187,7 +199,7 @@ async function computeFeatures(
   // Получаем данные за последние 12 недель (текущая + 11 предыдущих)
   const { data: insights, error } = await supabase
     .from('meta_insights_weekly')
-    .select('week_start_date, spend, frequency, ctr, cpc, cpm, reach')
+    .select('week_start_date, spend, frequency, ctr, cpc, cpm, reach, quality_rank_score, engagement_rank_score, conversion_rank_score')
     .eq('ad_account_id', adAccountId)
     .eq('fb_ad_id', fbAdId)
     .lte('week_start_date', weekStartDate)
@@ -222,6 +234,9 @@ async function computeFeatures(
       reach: parseInt(i.reach as any) || 0,
       result_count: result?.result_count || 0,
       cpr: result?.cpr ? parseFloat(result.cpr as any) : null,
+      quality_rank_score: (i as any).quality_rank_score ?? null,
+      engagement_rank_score: (i as any).engagement_rank_score ?? null,
+      conversion_rank_score: (i as any).conversion_rank_score ?? null,
     };
   });
 
@@ -286,6 +301,48 @@ async function computeFeatures(
   const minResults = getMinResults(primaryFamily, config);
   const min_results_met = current.result_count >= minResults;
 
+  // Ranking scores (Iteration 2)
+  const quality_score = current.quality_rank_score;
+  const engagement_score = current.engagement_rank_score;
+  const conversion_score = current.conversion_rank_score;
+
+  // Relevance health (сумма трёх scores, null если все null)
+  const relevance_health = (quality_score !== null || engagement_score !== null || conversion_score !== null)
+    ? (quality_score ?? 0) + (engagement_score ?? 0) + (conversion_score ?? 0)
+    : null;
+
+  // Baseline rankings (медианы за baseline period)
+  const baselineQuality = baselineWeeks
+    .map(w => w.quality_rank_score)
+    .filter((v): v is number => v !== null);
+  const baselineEngagement = baselineWeeks
+    .map(w => w.engagement_rank_score)
+    .filter((v): v is number => v !== null);
+  const baselineConversion = baselineWeeks
+    .map(w => w.conversion_rank_score)
+    .filter((v): v is number => v !== null);
+
+  const baseline_quality = baselineQuality.length > 0 ? median(baselineQuality) : null;
+  const baseline_engagement = baselineEngagement.length > 0 ? median(baselineEngagement) : null;
+  const baseline_conversion = baselineConversion.length > 0 ? median(baselineConversion) : null;
+  const baseline_relevance = (baseline_quality !== null || baseline_engagement !== null || baseline_conversion !== null)
+    ? (baseline_quality ?? 0) + (baseline_engagement ?? 0) + (baseline_conversion ?? 0)
+    : null;
+
+  // Drops (delta vs baseline, отрицательное = падение)
+  const quality_drop = quality_score !== null && baseline_quality !== null
+    ? quality_score - baseline_quality
+    : null;
+  const engagement_drop = engagement_score !== null && baseline_engagement !== null
+    ? engagement_score - baseline_engagement
+    : null;
+  const conversion_drop = conversion_score !== null && baseline_conversion !== null
+    ? conversion_score - baseline_conversion
+    : null;
+  const relevance_drop = relevance_health !== null && baseline_relevance !== null
+    ? relevance_health - baseline_relevance
+    : null;
+
   return {
     spend: current.spend,
     frequency: current.frequency,
@@ -315,6 +372,15 @@ async function computeFeatures(
     spend_change_pct,
     weeks_with_data,
     min_results_met,
+    // Ranking scores (Iteration 2)
+    quality_score,
+    engagement_score,
+    conversion_score,
+    relevance_health,
+    quality_drop,
+    engagement_drop,
+    conversion_drop,
+    relevance_drop,
   };
 }
 
