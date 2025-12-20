@@ -11,10 +11,26 @@
  */
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { fullSync, syncWeeklyInsights, syncCampaigns, syncAdsets, syncAds } from '../services/adInsightsSync.js';
+import {
+  fullSync,
+  syncWeeklyInsights,
+  syncWeeklyInsightsCampaign,
+  syncWeeklyInsightsAdset,
+  syncCampaigns,
+  syncAdsets,
+  syncAds
+} from '../services/adInsightsSync.js';
 import { normalizeAllResults, ensureClickFamily } from '../services/resultNormalizer.js';
 import { processAdAccount, getAnomalies, updateAnomalyStatus, getAnomalySummary } from '../services/anomalyDetector.js';
 import { runQuantileAnalysis, predictBurnout, predictAllAds, computeCorrelations } from '../services/burnoutAnalyzer.js';
+import {
+  runYearlyAudit,
+  analyzeCreativeLifecycle,
+  findWaste,
+  analyzeResponseCurve,
+  analyzeGoalDrift
+} from '../services/yearlyAnalyzer.js';
+import { analyzeTrackingHealth, getTrackingIssuesHistory } from '../services/trackingHealth.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { createLogger } from '../lib/logger.js';
 
@@ -763,6 +779,415 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ error, adminId }, 'Failed to fetch ad accounts');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // CAMPAIGN/ADSET LEVEL SYNC (Admin Only)
+  // ============================================================================
+
+  /**
+   * POST /admin/ad-insights/:accountId/sync/campaigns
+   * Синхронизация campaign-level insights
+   */
+  fastify.post<{
+    Params: SyncParams;
+    Querystring: SyncQuery;
+  }>('/admin/ad-insights/:accountId/sync/campaigns', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { months = 12 } = request.query;
+
+    try {
+      const { data: account } = await supabase
+        .from('ad_accounts')
+        .select('fb_ad_account_id, fb_access_token')
+        .eq('id', accountId)
+        .single();
+
+      if (!account?.fb_access_token) {
+        return reply.status(400).send({ error: 'No access token' });
+      }
+
+      const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
+      const result = await syncWeeklyInsightsCampaign(accountId, account.fb_access_token, cleanFbAccountId, months);
+
+      log.info({ adminId, accountId, result }, 'Campaign insights synced');
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Campaign insights sync failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /admin/ad-insights/:accountId/sync/adsets
+   * Синхронизация adset-level insights
+   */
+  fastify.post<{
+    Params: SyncParams;
+    Querystring: SyncQuery;
+  }>('/admin/ad-insights/:accountId/sync/adsets', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { months = 12 } = request.query;
+
+    try {
+      const { data: account } = await supabase
+        .from('ad_accounts')
+        .select('fb_ad_account_id, fb_access_token')
+        .eq('id', accountId)
+        .single();
+
+      if (!account?.fb_access_token) {
+        return reply.status(400).send({ error: 'No access token' });
+      }
+
+      const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
+      const result = await syncWeeklyInsightsAdset(accountId, account.fb_access_token, cleanFbAccountId, months);
+
+      log.info({ adminId, accountId, result }, 'Adset insights synced');
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Adset insights sync failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // YEARLY ANALYSIS ENDPOINTS (Admin Only)
+  // ============================================================================
+
+  /**
+   * GET /admin/ad-insights/:accountId/yearly/audit
+   * Годовой аудит (Pareto, waste, stability)
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      family?: string;
+      periodStart?: string;
+      periodEnd?: string;
+    };
+  }>('/admin/ad-insights/:accountId/yearly/audit', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { family = 'messages', periodStart, periodEnd } = request.query;
+
+    try {
+      const result = await runYearlyAudit(accountId, family, periodStart, periodEnd);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Yearly audit failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/yearly/creatives
+   * Creative Lifecycle Report
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      family?: string;
+      periodStart?: string;
+      periodEnd?: string;
+    };
+  }>('/admin/ad-insights/:accountId/yearly/creatives', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { family = 'messages', periodStart, periodEnd } = request.query;
+
+    try {
+      const result = await analyzeCreativeLifecycle(accountId, family, periodStart, periodEnd);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Creative lifecycle analysis failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/yearly/waste
+   * Waste Finder
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      family?: string;
+      periodStart?: string;
+      periodEnd?: string;
+    };
+  }>('/admin/ad-insights/:accountId/yearly/waste', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { family = 'messages', periodStart, periodEnd } = request.query;
+
+    try {
+      const result = await findWaste(accountId, family, periodStart, periodEnd);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Waste finder failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/response-curve
+   * Response Curve Analysis
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      family?: string;
+      level?: 'account' | 'campaign' | 'adset';
+      entityId?: string;
+      periodStart?: string;
+      periodEnd?: string;
+    };
+  }>('/admin/ad-insights/:accountId/response-curve', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { family = 'messages', level = 'account', entityId, periodStart, periodEnd } = request.query;
+
+    try {
+      const result = await analyzeResponseCurve(accountId, family, level, entityId, periodStart, periodEnd);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Response curve analysis failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/goal-drift
+   * Goal Drift Analysis
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      periodType?: 'month' | 'quarter';
+    };
+  }>('/admin/ad-insights/:accountId/goal-drift', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { periodType = 'month' } = request.query;
+
+    try {
+      const result = await analyzeGoalDrift(accountId, periodType);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Goal drift analysis failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // TRACKING HEALTH ENDPOINTS (Admin Only)
+  // ============================================================================
+
+  /**
+   * GET /admin/ad-insights/:accountId/tracking-health
+   * Анализ проблем с трекингом
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      periodStart?: string;
+      periodEnd?: string;
+    };
+  }>('/admin/ad-insights/:accountId/tracking-health', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { periodStart, periodEnd } = request.query;
+
+    try {
+      const result = await analyzeTrackingHealth(accountId, periodStart, periodEnd);
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Tracking health analysis failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/tracking-health/history
+   * История проблем с трекингом
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: { limit?: number };
+  }>('/admin/ad-insights/:accountId/tracking-health/history', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { limit = 50 } = request.query;
+
+    try {
+      const issues = await getTrackingIssuesHistory(accountId, limit);
+
+      return reply.send({
+        success: true,
+        count: issues.length,
+        issues,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Failed to fetch tracking health history');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ============================================================================
+  // CAMPAIGN/ADSET DATA ENDPOINTS (Admin Only)
+  // ============================================================================
+
+  /**
+   * GET /admin/ad-insights/:accountId/weekly/campaigns
+   * Получить campaign-level weekly insights
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      campaignId?: string;
+      weekStart?: string;
+      limit?: number;
+    };
+  }>('/admin/ad-insights/:accountId/weekly/campaigns', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { campaignId, weekStart, limit = 100 } = request.query;
+
+    try {
+      let query = supabase
+        .from('meta_insights_weekly_campaign')
+        .select('*')
+        .eq('ad_account_id', accountId)
+        .order('week_start_date', { ascending: false })
+        .limit(limit);
+
+      if (campaignId) {
+        query = query.eq('fb_campaign_id', campaignId);
+      }
+      if (weekStart) {
+        query = query.eq('week_start_date', weekStart);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return reply.send({
+        success: true,
+        count: data?.length || 0,
+        data,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Failed to fetch campaign insights');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/:accountId/weekly/adsets
+   * Получить adset-level weekly insights
+   */
+  fastify.get<{
+    Params: SyncParams;
+    Querystring: {
+      adsetId?: string;
+      campaignId?: string;
+      weekStart?: string;
+      limit?: number;
+    };
+  }>('/admin/ad-insights/:accountId/weekly/adsets', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { adsetId, campaignId, weekStart, limit = 100 } = request.query;
+
+    try {
+      let query = supabase
+        .from('meta_insights_weekly_adset')
+        .select('*')
+        .eq('ad_account_id', accountId)
+        .order('week_start_date', { ascending: false })
+        .limit(limit);
+
+      if (adsetId) {
+        query = query.eq('fb_adset_id', adsetId);
+      }
+      if (campaignId) {
+        query = query.eq('fb_campaign_id', campaignId);
+      }
+      if (weekStart) {
+        query = query.eq('week_start_date', weekStart);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      return reply.send({
+        success: true,
+        count: data?.length || 0,
+        data,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Failed to fetch adset insights');
       return reply.status(500).send({ error: error.message });
     }
   });

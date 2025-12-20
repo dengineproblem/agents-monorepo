@@ -3,6 +3,8 @@
  *
  * Синхронизация weekly insights из Facebook Marketing API
  * с поддержкой async jobs и rate limiting
+ *
+ * Iteration 2: Campaign/Adset level + Rankings
  */
 
 import { graph } from '../adapters/facebook.js';
@@ -11,6 +13,26 @@ import { createLogger } from '../lib/logger.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
 
 const log = createLogger({ module: 'adInsightsSync' });
+
+// ============================================================================
+// RANKING SCORE CONVERSION
+// ============================================================================
+
+/**
+ * Конвертирует ranking в числовой score
+ * ABOVE_AVERAGE → +2, AVERAGE → 0, BELOW_AVERAGE_10 → -1, BELOW_AVERAGE_20 → -2, BELOW_AVERAGE_35 → -3
+ */
+function rankingToScore(ranking: string | null | undefined): number | null {
+  if (!ranking) return null;
+
+  const upper = ranking.toUpperCase();
+  if (upper.includes('ABOVE')) return 2;
+  if (upper === 'AVERAGE') return 0;
+  if (upper.includes('BELOW') && upper.includes('35')) return -3;
+  if (upper.includes('BELOW') && upper.includes('20')) return -2;
+  if (upper.includes('BELOW')) return -1;
+  return 0;
+}
 
 // Константы
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
@@ -560,9 +582,13 @@ export async function syncWeeklyInsights(
       video_p75_watched: row.video_p75_watched_actions?.[0]?.value || 0,
       video_p95_watched: row.video_p95_watched_actions?.[0]?.value || 0,
       video_avg_time_watched_sec: row.video_avg_time_watched_actions?.[0]?.value || 0,
+      // Rankings (raw + normalized scores)
       quality_ranking: row.quality_ranking,
       engagement_rate_ranking: row.engagement_rate_ranking,
       conversion_rate_ranking: row.conversion_rate_ranking,
+      quality_rank_score: rankingToScore(row.quality_ranking),
+      engagement_rank_score: rankingToScore(row.engagement_rate_ranking),
+      conversion_rank_score: rankingToScore(row.conversion_rate_ranking),
       attribution_window: '7d_click_1d_view',
       synced_at: new Date().toISOString(),
     };
@@ -588,18 +614,267 @@ export async function syncWeeklyInsights(
 }
 
 // ============================================================================
+// CAMPAIGN/ADSET LEVEL WEEKLY INSIGHTS
+// ============================================================================
+
+/**
+ * Синхронизирует weekly insights на уровне campaign
+ */
+export async function syncWeeklyInsightsCampaign(
+  adAccountId: string,
+  accessToken: string,
+  fbAdAccountId: string,
+  months: number = 12
+): Promise<{ inserted: number }> {
+  log.info({ adAccountId, fbAdAccountId, months }, 'Starting campaign-level insights sync');
+
+  const canProceed = await checkRateLimit(adAccountId);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  const timeRange = getDateRange(months);
+
+  const fields = [
+    'campaign_id',
+    'campaign_name',
+    'spend',
+    'impressions',
+    'reach',
+    'frequency',
+    'cpm',
+    'ctr',
+    'cpc',
+    'clicks',
+    'actions',
+    'cost_per_action_type',
+    'quality_ranking',
+    'engagement_rate_ranking',
+    'conversion_rate_ranking',
+  ].join(',');
+
+  // Используем async job для campaign level
+  const result = await graph('POST', `act_${fbAdAccountId}/insights`, accessToken, {
+    level: 'campaign',
+    time_increment: 7,
+    time_range: JSON.stringify(timeRange),
+    fields,
+    action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+  });
+
+  const reportRunId = result.report_run_id;
+  if (!reportRunId) {
+    throw new Error('No report_run_id in response for campaign insights');
+  }
+
+  // Poll for completion
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+    const jobStatus = await pollAsyncJobStatus(accessToken, reportRunId);
+    status = jobStatus.status;
+
+    if (status === 'Job Failed') {
+      throw new Error('Async campaign insights job failed');
+    }
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') {
+    throw new Error(`Async campaign job timeout after ${pollCount} polls`);
+  }
+
+  const results = await fetchAsyncJobResults(accessToken, reportRunId);
+  log.info({ adAccountId, resultsCount: results.length }, 'Fetched campaign insights');
+
+  let inserted = 0;
+
+  for (const row of results) {
+    const weekStart = getWeekStart(row.date_start);
+
+    const insight = {
+      ad_account_id: adAccountId,
+      fb_campaign_id: row.campaign_id,
+      week_start_date: weekStart,
+      spend: parseFloat(row.spend) || 0,
+      impressions: parseInt(row.impressions) || 0,
+      reach: parseInt(row.reach) || 0,
+      frequency: parseFloat(row.frequency) || 0,
+      cpm: parseFloat(row.cpm) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      cpc: parseFloat(row.cpc) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      link_clicks: extractLinkClicks(row.actions),
+      actions_json: row.actions || [],
+      cost_per_action_type_json: row.cost_per_action_type || [],
+      quality_ranking: row.quality_ranking,
+      engagement_rate_ranking: row.engagement_rate_ranking,
+      conversion_rate_ranking: row.conversion_rate_ranking,
+      attribution_window: '7d_click_1d_view',
+      synced_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('meta_insights_weekly_campaign')
+      .upsert(insight, {
+        onConflict: 'ad_account_id,fb_campaign_id,week_start_date',
+        ignoreDuplicates: false
+      });
+
+    if (error) {
+      log.error({ error, campaignId: row.campaign_id, weekStart }, 'Failed to upsert campaign insight');
+    } else {
+      inserted++;
+    }
+  }
+
+  log.info({ adAccountId, inserted }, 'Campaign-level insights synced');
+  return { inserted };
+}
+
+/**
+ * Синхронизирует weekly insights на уровне adset
+ */
+export async function syncWeeklyInsightsAdset(
+  adAccountId: string,
+  accessToken: string,
+  fbAdAccountId: string,
+  months: number = 12
+): Promise<{ inserted: number }> {
+  log.info({ adAccountId, fbAdAccountId, months }, 'Starting adset-level insights sync');
+
+  const canProceed = await checkRateLimit(adAccountId);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  const timeRange = getDateRange(months);
+
+  const fields = [
+    'adset_id',
+    'adset_name',
+    'campaign_id',
+    'spend',
+    'impressions',
+    'reach',
+    'frequency',
+    'cpm',
+    'ctr',
+    'cpc',
+    'clicks',
+    'actions',
+    'cost_per_action_type',
+    'quality_ranking',
+    'engagement_rate_ranking',
+    'conversion_rate_ranking',
+  ].join(',');
+
+  const result = await graph('POST', `act_${fbAdAccountId}/insights`, accessToken, {
+    level: 'adset',
+    time_increment: 7,
+    time_range: JSON.stringify(timeRange),
+    fields,
+    action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+  });
+
+  const reportRunId = result.report_run_id;
+  if (!reportRunId) {
+    throw new Error('No report_run_id in response for adset insights');
+  }
+
+  // Poll for completion
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+    const jobStatus = await pollAsyncJobStatus(accessToken, reportRunId);
+    status = jobStatus.status;
+
+    if (status === 'Job Failed') {
+      throw new Error('Async adset insights job failed');
+    }
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') {
+    throw new Error(`Async adset job timeout after ${pollCount} polls`);
+  }
+
+  const results = await fetchAsyncJobResults(accessToken, reportRunId);
+  log.info({ adAccountId, resultsCount: results.length }, 'Fetched adset insights');
+
+  let inserted = 0;
+
+  for (const row of results) {
+    const weekStart = getWeekStart(row.date_start);
+
+    const insight = {
+      ad_account_id: adAccountId,
+      fb_adset_id: row.adset_id,
+      fb_campaign_id: row.campaign_id,
+      week_start_date: weekStart,
+      spend: parseFloat(row.spend) || 0,
+      impressions: parseInt(row.impressions) || 0,
+      reach: parseInt(row.reach) || 0,
+      frequency: parseFloat(row.frequency) || 0,
+      cpm: parseFloat(row.cpm) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      cpc: parseFloat(row.cpc) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      link_clicks: extractLinkClicks(row.actions),
+      actions_json: row.actions || [],
+      cost_per_action_type_json: row.cost_per_action_type || [],
+      quality_ranking: row.quality_ranking,
+      engagement_rate_ranking: row.engagement_rate_ranking,
+      conversion_rate_ranking: row.conversion_rate_ranking,
+      attribution_window: '7d_click_1d_view',
+      synced_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('meta_insights_weekly_adset')
+      .upsert(insight, {
+        onConflict: 'ad_account_id,fb_adset_id,week_start_date',
+        ignoreDuplicates: false
+      });
+
+    if (error) {
+      log.error({ error, adsetId: row.adset_id, weekStart }, 'Failed to upsert adset insight');
+    } else {
+      inserted++;
+    }
+  }
+
+  log.info({ adAccountId, inserted }, 'Adset-level insights synced');
+  return { inserted };
+}
+
+// ============================================================================
 // FULL SYNC ORCHESTRATOR
 // ============================================================================
 
 /**
- * Полная синхронизация ad account (справочники + insights)
+ * Полная синхронизация ad account (справочники + insights на всех уровнях)
  */
-export async function fullSync(adAccountUuid: string): Promise<{
+export async function fullSync(adAccountUuid: string, options?: {
+  syncCampaignInsights?: boolean;
+  syncAdsetInsights?: boolean;
+}): Promise<{
   campaigns: number;
   adsets: number;
   ads: number;
   insights: { inserted: number; updated: number };
+  campaignInsights?: { inserted: number };
+  adsetInsights?: { inserted: number };
 }> {
+  const {
+    syncCampaignInsights = true,
+    syncAdsetInsights = true,
+  } = options || {};
+
   // 1. Получаем credentials
   const { data: adAccount, error } = await supabase
     .from('ad_accounts')
@@ -627,18 +902,40 @@ export async function fullSync(adAccountUuid: string): Promise<{
   const adsets = await syncAdsets(adAccountUuid, fb_access_token, cleanFbAccountId);
   const ads = await syncAds(adAccountUuid, fb_access_token, cleanFbAccountId);
 
-  // 3. Синхронизируем insights
+  // 3. Синхронизируем ad-level insights
   const insights = await syncWeeklyInsights(adAccountUuid, fb_access_token, cleanFbAccountId, 12);
+
+  // 4. Синхронизируем campaign-level insights (опционально)
+  let campaignInsights: { inserted: number } | undefined;
+  if (syncCampaignInsights) {
+    try {
+      campaignInsights = await syncWeeklyInsightsCampaign(adAccountUuid, fb_access_token, cleanFbAccountId, 12);
+    } catch (err: any) {
+      log.error({ error: err, adAccountUuid }, 'Failed to sync campaign insights');
+    }
+  }
+
+  // 5. Синхронизируем adset-level insights (опционально)
+  let adsetInsights: { inserted: number } | undefined;
+  if (syncAdsetInsights) {
+    try {
+      adsetInsights = await syncWeeklyInsightsAdset(adAccountUuid, fb_access_token, cleanFbAccountId, 12);
+    } catch (err: any) {
+      log.error({ error: err, adAccountUuid }, 'Failed to sync adset insights');
+    }
+  }
 
   log.info({
     adAccountUuid,
     campaigns,
     adsets,
     ads,
-    insights
+    insights,
+    campaignInsights,
+    adsetInsights,
   }, 'Full sync completed');
 
-  return { campaigns, adsets, ads, insights };
+  return { campaigns, adsets, ads, insights, campaignInsights, adsetInsights };
 }
 
 /**
