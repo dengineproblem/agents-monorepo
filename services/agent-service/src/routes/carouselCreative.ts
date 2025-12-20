@@ -5,7 +5,8 @@ import {
   uploadImage,
   createWhatsAppCarouselCreative,
   createInstagramCarouselCreative,
-  createWebsiteLeadsCarouselCreative
+  createWebsiteLeadsCarouselCreative,
+  createLeadFormCarouselCreative
 } from '../adapters/facebook.js';
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -265,11 +266,20 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
         fbCreativeId = result.id;
       } else if (objective === 'lead_forms') {
-        // TODO: Implement lead forms carousel creative
-        return reply.status(400).send({
-          success: false,
-          error: 'Carousel creatives are not yet supported for lead_forms objective. Please use image or video creatives.'
+        if (!leadFormId) {
+          return reply.status(400).send({
+            success: false,
+            error: 'lead_form_id is required for lead_forms objective. Please configure it in direction settings.'
+          });
+        }
+        const result = await createLeadFormCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
+          cards: cardParams,
+          pageId: pageId,
+          instagramId: instagramId,
+          message: description,
+          leadFormId: leadFormId
         });
+        fbCreativeId = result.id;
       } else {
         return reply.status(400).send({
           success: false,
@@ -296,10 +306,10 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           // Данные карусели для отображения миниатюр и текстов
           carousel_data: carouselData,
           // Старые поля для обратной совместимости (deprecated)
-          // Note: lead_forms карусели не поддерживаются - возвращаем ошибку раньше
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
+          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
+          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
         })
         .select()
         .single();

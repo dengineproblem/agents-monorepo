@@ -1069,6 +1069,58 @@ export async function createWebsiteLeadsCarouselCreative(
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 
+/**
+ * Создаёт Lead Form carousel creative
+ * Каждая карточка открывает лид форму
+ */
+export async function createLeadFormCarouselCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    cards: CarouselCardParams[];
+    pageId: string;
+    instagramId: string;
+    message: string;
+    leadFormId: string;
+  }
+): Promise<{ id: string }> {
+  const childAttachments = params.cards.map((card) => ({
+    image_hash: card.imageHash,
+    name: card.text.substring(0, 50),
+    description: card.text,
+    call_to_action: {
+      type: "SIGN_UP",
+      value: {
+        lead_gen_form_id: params.leadFormId
+      }
+    }
+  }));
+
+  const objectStorySpec = {
+    page_id: params.pageId,
+    instagram_user_id: params.instagramId,
+    link_data: {
+      message: params.message,
+      multi_share_optimized: true,
+      child_attachments: childAttachments,
+      call_to_action: {
+        type: "SIGN_UP",
+        value: {
+          lead_gen_form_id: params.leadFormId
+        }
+      }
+    }
+  };
+
+  const payload: any = {
+    name: "Lead Form Carousel Creative",
+    object_story_spec: JSON.stringify(objectStorySpec)
+  };
+
+  log.debug({ adAccountId, cardsCount: params.cards.length, leadFormId: params.leadFormId }, 'Creating Lead Form carousel creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
 export async function createLookalikeAudience(
   adAccountId: string,
   seedAudienceId: string,
