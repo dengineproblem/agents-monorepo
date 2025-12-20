@@ -296,10 +296,10 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           // Данные карусели для отображения миниатюр и текстов
           carousel_data: carouselData,
           // Старые поля для обратной совместимости (deprecated)
+          // Note: lead_forms карусели не поддерживаются - возвращаем ошибку раньше
           ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
-          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
-          ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })
+          ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId })
         })
         .select()
         .single();
