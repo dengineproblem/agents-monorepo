@@ -2138,8 +2138,9 @@ export async function createAdsInAdSet(params: {
   userId?: string;
   directionId?: string | null;
   campaignId?: string;
+  accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }) {
-  const { adsetId, adAccountId, creatives, accessToken, objective, userId, directionId, campaignId } = params;
+  const { adsetId, adAccountId, creatives, accessToken, objective, userId, directionId, campaignId, accountId } = params;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -2158,7 +2159,8 @@ export async function createAdsInAdSet(params: {
         availableCreativeIds: {
           whatsapp: creative.fb_creative_id_whatsapp,
           instagram_traffic: creative.fb_creative_id_instagram_traffic,
-          site_leads: creative.fb_creative_id_site_leads
+          site_leads: creative.fb_creative_id_site_leads,
+          lead_forms: creative.fb_creative_id_lead_forms
         }
       }, 'No Facebook creative ID for creative');
       continue;
@@ -2236,6 +2238,7 @@ export async function createAdsInAdSet(params: {
           user_creative_id: creative.user_creative_id,
           direction_id: directionId || null,
           user_id: userId,
+          account_id: accountId || null,  // UUID для мультиаккаунтности
           adset_id: adsetId,
           campaign_id: campaignId,
           fb_creative_id: creativeId,

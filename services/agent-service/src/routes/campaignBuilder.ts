@@ -543,6 +543,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               userId: user_account_id,
               directionId: direction.id,
               campaignId: direction.fb_campaign_id,
+              accountId: account_id, // UUID из ad_accounts для мультиаккаунтности
             });
 
             log.info({ directionId: direction.id, adsetId, adsCount: ads.length, userAccountId: user_account_id }, 'Ads created for direction');
@@ -899,6 +900,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           userId: user_account_id,
           directionId: direction.id,
           campaignId: direction.fb_campaign_id,
+          accountId: account_id, // UUID из ad_accounts для мультиаккаунтности
         });
 
         log.info({ adsCount: ads.length }, 'Manual launch ads created');

@@ -56,7 +56,7 @@ const menuItems = [
     path: '/assistant',
     label: 'AI Chat',
     icon: MessageSquare,
-    show: false, // TODO: enable after agent-brain deploy
+    show: true,
     tourId: 'sidebar-assistant',
   },
   {

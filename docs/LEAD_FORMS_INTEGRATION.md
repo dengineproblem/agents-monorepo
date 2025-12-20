@@ -109,7 +109,9 @@ Facebook Lead Form → Webhook (POST /facebook/webhook)
 | Файл | Описание |
 |------|----------|
 | `migrations/102_add_lead_forms_objective.sql` | lead_form_id в default_ad_settings |
-| `migrations/103_add_leadgen_id_to_leads.sql` | **НОВОЕ**: leadgen_id в leads |
+| `migrations/103_add_leadgen_id_to_leads.sql` | leadgen_id в leads |
+| `migrations/104_add_fb_creative_id_lead_forms.sql` | fb_creative_id_lead_forms в user_creatives |
+| `migrations/105_add_fb_page_access_token.sql` | fb_page_access_token в user_accounts и ad_accounts |
 
 ## Детали реализации
 
@@ -150,7 +152,31 @@ Facebook отправляет webhook когда пользователь зап
 }
 ```
 
-### 3. Lead Retrieval API
+### 3. Page Access Token
+
+Для получения данных лида требуется **Page Access Token** (не User Access Token).
+
+**Автоматическое получение:**
+- При OAuth подключении (`/facebook/save-selection`) → получаем через `/me/accounts`
+- При обновлении `fb_access_token` для ad_accounts → автоматически получаем Page Token
+- Сохраняется в поле `fb_page_access_token` (user_accounts и ad_accounts)
+
+**Логика в webhook:**
+```typescript
+// Приоритет: Page Access Token > User Access Token
+const tokenForLeadData = pageAccessToken || userAccessToken;
+const leadData = await retrieveLeadData(leadgen_id, tokenForLeadData);
+```
+
+**Подписка на leadgen события:**
+```typescript
+// Автоматически при сохранении OAuth данных
+POST /{page_id}/subscribed_apps
+  ?subscribed_fields=leadgen
+  &access_token={page_access_token}
+```
+
+### 4. Lead Retrieval API
 
 Получение данных лида по leadgen_id:
 
@@ -172,7 +198,7 @@ GET https://graph.facebook.com/v20.0/{leadgen_id}
 }
 ```
 
-### 4. Маппинг с креативами
+### 5. Маппинг с креативами
 
 ```
 ad_id (из webhook) → ad_creative_mapping → creative_id + direction_id
@@ -180,7 +206,7 @@ ad_id (из webhook) → ad_creative_mapping → creative_id + direction_id
 
 Таблица `ad_creative_mapping` заполняется при создании объявлений через платформу.
 
-### 5. Структура лида в БД
+### 6. Структура лида в БД
 
 ```sql
 INSERT INTO leads (
@@ -207,6 +233,8 @@ INSERT INTO leads (
 # На production Supabase
 psql -h YOUR_SUPABASE_HOST -U postgres -d postgres -f migrations/102_add_lead_forms_objective.sql
 psql -h YOUR_SUPABASE_HOST -U postgres -d postgres -f migrations/103_add_leadgen_id_to_leads.sql
+psql -h YOUR_SUPABASE_HOST -U postgres -d postgres -f migrations/104_add_fb_creative_id_lead_forms.sql
+psql -h YOUR_SUPABASE_HOST -U postgres -d postgres -f migrations/105_add_fb_page_access_token.sql
 ```
 
 Или через Supabase Dashboard → SQL Editor.
@@ -376,6 +404,13 @@ LIMIT 20;
 - [ROI_CALCULATOR.md](./ROI_CALCULATOR.md) - ROI аналитика (если есть)
 
 ## Changelog
+
+### v1.1.0 (2024-12)
+- Добавлена поддержка Page Access Token для Lead Forms API
+- Автоматическое получение и сохранение fb_page_access_token
+- Автоматическая подписка страницы на leadgen события
+- Миграции 104 (fb_creative_id_lead_forms) и 105 (fb_page_access_token)
+- Вынесены общие Facebook функции в lib/facebookHelpers.ts
 
 ### v1.0.0 (2024-12)
 - Добавлена поддержка lead_forms objective во всех workflows

@@ -7,6 +7,7 @@ import { updateOnboardingStage } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { eventLogger } from '../lib/eventLogger.js';
+import { getPageAccessToken, subscribePageToLeadgen } from '../lib/facebookHelpers.js';
 
 const log = createLogger({ module: 'facebookWebhooks' });
 
@@ -182,28 +183,57 @@ export default async function facebookWebhooks(app: FastifyInstance) {
             adgroup_id
           }, 'Processing leadgen event');
 
-          // Find user_account by page_id
-          const { data: userAccount, error: userError } = await supabase
-            .from('user_accounts')
-            .select('id, access_token, page_id')
-            .eq('page_id', page_id || pageId)
+          // Find account by page_id (multi-account first, then legacy)
+          const targetPageId = page_id || pageId;
+          let userAccountId: string;
+          let pageAccessToken: string | null = null;
+          let userAccessToken: string;
+          let adAccountId: string | null = null;
+
+          // 1. Try ad_accounts (multi-account support)
+          const { data: adAccount } = await supabase
+            .from('ad_accounts')
+            .select('id, user_account_id, fb_access_token, fb_page_access_token')
+            .eq('fb_page_id', targetPageId)
+            .eq('is_active', true)
             .maybeSingle();
 
-          if (userError || !userAccount) {
-            log.warn({ pageId: page_id || pageId }, 'User account not found for page_id');
-            continue;
+          if (adAccount?.fb_access_token) {
+            userAccountId = adAccount.user_account_id;
+            userAccessToken = adAccount.fb_access_token;
+            pageAccessToken = adAccount.fb_page_access_token || null;
+            adAccountId = adAccount.id;
+            log.info({ pageId: targetPageId, adAccountId, hasPageToken: !!pageAccessToken }, 'Found ad_account for leadgen');
+          } else {
+            // 2. Fallback to user_accounts (legacy)
+            const { data: userAccount, error: userError } = await supabase
+              .from('user_accounts')
+              .select('id, access_token, page_id, fb_page_access_token')
+              .eq('page_id', targetPageId)
+              .maybeSingle();
+
+            if (userError || !userAccount) {
+              log.warn({ pageId: targetPageId }, 'User account not found for page_id');
+              continue;
+            }
+
+            userAccountId = userAccount.id;
+            userAccessToken = userAccount.access_token;
+            pageAccessToken = userAccount.fb_page_access_token || null;
+            log.info({ pageId: targetPageId, userAccountId, hasPageToken: !!pageAccessToken }, 'Found user_account (legacy) for leadgen');
           }
 
-          const userAccountId = userAccount.id;
-          const accessToken = userAccount.access_token;
+          // Prefer Page Access Token for lead data retrieval (has leads_retrieval permission)
+          // Fall back to User Access Token if Page Token not available
+          const tokenForLeadData = pageAccessToken || userAccessToken;
 
-          if (!accessToken) {
-            log.error({ userAccountId, pageId }, 'No access token for user account');
+          if (!tokenForLeadData) {
+            log.error({ userAccountId, pageId: targetPageId }, 'No access token for account');
             continue;
           }
 
           // Retrieve lead data from Facebook
-          const leadData = await retrieveLeadData(leadgen_id, accessToken);
+          const leadData = await retrieveLeadData(leadgen_id, tokenForLeadData);
 
           if (!leadData || !leadData.field_data) {
             log.error({ leadgen_id, userAccountId }, 'Failed to retrieve lead data');
@@ -236,21 +266,22 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           // Resolve creative_id and direction_id from ad_id
           let creativeId: string | null = null;
           let directionId: string | null = null;
-          let accountId: string | null = null;
+          // Use adAccountId from ad_accounts lookup, or resolve from direction
+          let accountId: string | null = adAccountId;
 
           if (ad_id) {
             const resolved = await resolveCreativeAndDirection(
               ad_id,
               null,
               userAccountId,
-              null, // accountId for multi-account (resolved below)
+              adAccountId, // Pass adAccountId for multi-account
               app
             );
             creativeId = resolved.creativeId;
             directionId = resolved.directionId;
 
-            // Get account_id from direction for multi-account support
-            if (directionId) {
+            // If no adAccountId from lookup, try to get from direction
+            if (!accountId && directionId) {
               const { data: direction } = await supabase
                 .from('account_directions')
                 .select('account_id')
@@ -547,6 +578,14 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         });
       }
 
+      // Get Page Access Token for Lead Forms API
+      const pageAccessToken = await getPageAccessToken(page_id, access_token);
+      if (pageAccessToken) {
+        log.info({ pageId: page_id }, 'Successfully obtained Page Access Token');
+      } else {
+        log.warn({ pageId: page_id }, 'Could not obtain Page Access Token - Lead Forms may not work');
+      }
+
       // Update user with selected data
       const { error: updateError } = await freshSupabase
         .from('user_accounts')
@@ -555,6 +594,7 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           ad_account_id,
           page_id,
           instagram_id: instagram_id || null,
+          fb_page_access_token: pageAccessToken || null,
           updated_at: new Date().toISOString()
         })
         .eq('id', existingUser.id);
@@ -571,8 +611,16 @@ export default async function facebookWebhooks(app: FastifyInstance) {
         username,
         saved_page_id: page_id,
         saved_ad_account_id: ad_account_id,
-        saved_instagram_id: instagram_id
+        saved_instagram_id: instagram_id,
+        hasPageAccessToken: !!pageAccessToken
       }, 'Successfully saved Facebook selection to database');
+
+      // Subscribe page to leadgen webhook (for Lead Forms) - use Page Access Token
+      if (pageAccessToken) {
+        subscribePageToLeadgen(page_id, pageAccessToken).catch(err => {
+          log.warn({ err, pageId: page_id }, 'Failed to subscribe page to leadgen webhook');
+        });
+      }
 
       // Обновляем этап онбординга: Facebook подключается (ожидает подтверждения)
       updateOnboardingStage(existingUser.id, 'fb_pending', 'Facebook данные сохранены, ожидает подтверждения').catch(err => {

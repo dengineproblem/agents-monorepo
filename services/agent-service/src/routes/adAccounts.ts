@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { getPagePictureUrl } from '../adapters/facebook.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { getPageAccessToken } from '../lib/facebookHelpers.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -60,6 +61,7 @@ const UpdateAdAccountSchema = z.object({
   fb_page_id: z.string().nullable().optional(),
   fb_instagram_id: z.string().nullable().optional(),
   fb_instagram_username: z.string().nullable().optional(),
+  fb_access_token: z.string().nullable().optional(),  // User Access Token
   fb_business_id: z.string().nullable().optional(),
   ig_seed_audience_id: z.string().nullable().optional(),
 
@@ -375,8 +377,23 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       if (validated.fb_page_id !== undefined) dbData.page_id = validated.fb_page_id;
       if (validated.fb_instagram_id !== undefined) dbData.instagram_id = validated.fb_instagram_id;
       if (validated.fb_instagram_username !== undefined) dbData.instagram_username = validated.fb_instagram_username;
+      if (validated.fb_access_token !== undefined) dbData.access_token = validated.fb_access_token;
       if (validated.fb_business_id !== undefined) dbData.business_id = validated.fb_business_id;
       if (validated.ig_seed_audience_id !== undefined) dbData.ig_seed_audience_id = validated.ig_seed_audience_id;
+
+      // If access_token is being updated and we have page_id, try to get Page Access Token
+      if (validated.fb_access_token && (validated.fb_page_id || dbData.page_id)) {
+        const pageId = validated.fb_page_id || dbData.page_id as string;
+        try {
+          const pageToken = await getPageAccessToken(pageId, validated.fb_access_token);
+          if (pageToken) {
+            dbData.page_access_token = pageToken;
+            log.info({ adAccountId, pageId }, 'Obtained Page Access Token for ad account');
+          }
+        } catch (err) {
+          log.warn({ err, adAccountId }, 'Failed to get Page Access Token');
+        }
+      }
 
       // TikTok
       if (validated.tiktok_account_id !== undefined) dbData.tiktok_account_id = validated.tiktok_account_id;
