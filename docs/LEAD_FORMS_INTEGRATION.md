@@ -70,9 +70,9 @@ Facebook Lead Form → Webhook (POST /facebook/webhook)
 |------|-----------|
 | `src/routes/image.ts` | Создание image creative для lead_forms |
 | `src/routes/video.ts` | Создание video creative для lead_forms |
-| `src/routes/carouselCreative.ts` | Временная заглушка (не поддерживается) |
+| `src/routes/carouselCreative.ts` | Создание carousel creative для lead_forms |
 | `src/routes/actions.ts` | Выбор fb_creative_id_lead_forms |
-| `src/adapters/facebook.ts` | `createLeadFormImageCreative()`, `createLeadFormVideoCreative()` |
+| `src/adapters/facebook.ts` | `createLeadFormImageCreative()`, `createLeadFormVideoCreative()`, `createLeadFormCarouselCreative()` |
 
 #### Workflows
 | Файл | Изменения |
@@ -112,6 +112,39 @@ Facebook Lead Form → Webhook (POST /facebook/webhook)
 | `migrations/103_add_leadgen_id_to_leads.sql` | **НОВОЕ**: leadgen_id в leads |
 
 ## Детали реализации
+
+### Поддерживаемые типы креативов
+
+Lead Forms поддерживает все типы креативов:
+
+| Тип | Функция | Описание |
+|-----|---------|----------|
+| Image | `createLeadFormImageCreative()` | Одиночное изображение с кнопкой SIGN_UP |
+| Video | `createLeadFormVideoCreative()` | Видео с кнопкой SIGN_UP |
+| Carousel | `createLeadFormCarouselCreative()` | Карусель из нескольких карточек |
+
+Все креативы используют:
+- `call_to_action.type: "SIGN_UP"`
+- `call_to_action.value.lead_gen_form_id: leadFormId`
+
+#### Carousel Creative
+
+```typescript
+// services/agent-service/src/adapters/facebook.ts
+
+createLeadFormCarouselCreative(adAccountId, token, {
+  cards: [
+    { imageHash: "hash1", text: "Карточка 1" },
+    { imageHash: "hash2", text: "Карточка 2" }
+  ],
+  pageId: "page_id",
+  instagramId: "instagram_id",
+  message: "Описание объявления",
+  leadFormId: "lead_form_id"
+})
+```
+
+Каждая карточка карусели ведёт на одну и ту же лид форму (ограничение Facebook API).
 
 ### 1. Webhook верификация (GET /facebook/webhook)
 
