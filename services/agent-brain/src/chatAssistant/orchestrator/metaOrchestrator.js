@@ -102,6 +102,7 @@ export async function processWithMetaTools({
   let iterations = 0;
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let extractedPlan = null; // Plan extracted from tool results (e.g., triggerBrainOptimizationRun)
 
   try {
     // Tool call loop
@@ -163,7 +164,8 @@ export async function processWithMetaTools({
             output: totalOutputTokens
           },
           latencyMs: latency,
-          runId
+          runId,
+          plan: extractedPlan // Plan from tool like triggerBrainOptimizationRun
         };
       }
 
@@ -208,6 +210,13 @@ export async function processWithMetaTools({
             });
 
             const toolLatency = Date.now() - toolStartTime;
+
+            // Extract plan from tool result if present (e.g., from triggerBrainOptimizationRun)
+            if (result?.plan && !extractedPlan) {
+              extractedPlan = result.plan;
+              logger.info({ toolName, hasSteps: result.plan.steps?.length || 0 }, 'Plan extracted from tool result');
+              layerLogger?.info(4, 'Plan extracted', { toolName, steps: result.plan.steps?.length || 0 });
+            }
 
             executedTools.push({
               tool: toolName,  // Frontend expects 'tool', not 'name'
@@ -335,7 +344,8 @@ export async function processWithMetaTools({
         output: totalOutputTokens
       },
       latencyMs: Date.now() - startTime,
-      runId
+      runId,
+      plan: extractedPlan // Plan from tool like triggerBrainOptimizationRun
     };
 
   } catch (error) {

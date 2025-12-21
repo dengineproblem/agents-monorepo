@@ -2036,6 +2036,30 @@ export const adsHandlers = {
         }
       });
 
+      // Transform proposals to Plan format for frontend
+      const plan = result.proposals?.length > 0 ? {
+        description: `Brain Agent предлагает ${result.proposals.length} действий для оптимизации на основе сегодняшних данных`,
+        steps: result.proposals.map(p => ({
+          action: p.action,
+          params: {
+            entity_type: p.entity_type,
+            entity_id: p.entity_id,
+            entity_name: p.entity_name,
+            direction_id: p.direction_id,
+            ...p.suggested_action_params
+          },
+          description: p.reason,
+          priority: p.priority,
+          health_score: p.health_score,
+          hs_class: p.hs_class,
+          metrics: p.metrics
+        })),
+        requires_approval: true,
+        estimated_impact: result.summary
+          ? `Сегодня: $${result.summary.today_total_spend} расход, ${result.summary.today_total_leads} лидов. Анализ ${result.summary.total_adsets_analyzed} адсетов.`
+          : 'Оптимизация бюджетов на основе Health Score'
+      } : null;
+
       // Return proposals for user confirmation
       return {
         success: true,
@@ -2044,9 +2068,12 @@ export const adsHandlers = {
           ? `Brain Agent предлагает ${result.proposals.length} действий для оптимизации`
           : 'Brain Agent не нашёл действий для оптимизации на данный момент',
         proposals: result.proposals || [],
+        plan,  // Plan в формате frontend
+        summary: result.summary,
+        adset_analysis: result.adset_analysis,
         context: result.context,
         instructions: result.proposals?.length > 0
-          ? 'Для выполнения действий используй соответствующие tools: pauseAdSet, updateBudget, createAdSet и т.д.'
+          ? 'Подтвердите план для выполнения действий.'
           : null
       };
 

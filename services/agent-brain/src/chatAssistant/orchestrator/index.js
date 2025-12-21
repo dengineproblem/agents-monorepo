@@ -438,6 +438,7 @@ export class Orchestrator {
         domain: 'meta',
         classification: { domain: 'meta', agents: ['MetaOrchestrator'] },
         duration,
+        plan: metaResult.plan || null, // Plan from mini-AgentBrain (triggerBrainOptimizationRun)
         metadata: {
           iterations: metaResult.iterations,
           tokens: metaResult.tokens
