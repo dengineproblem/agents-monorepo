@@ -5,6 +5,7 @@ import { textsRoutes } from './routes/texts';
 import { imageRoutes } from './routes/image';
 import carouselRoutes from './routes/carousel';
 import { textCreativesRoutes } from './routes/textCreatives';
+import galleryRoutes from './routes/gallery';
 import { initializeOpenAI } from './services/openai'; // OpenAI для текстов
 import { initializeGeminiImageAPI } from './services/gemini-image'; // Gemini для изображений
 
@@ -40,6 +41,7 @@ app.register(textsRoutes);
 app.register(imageRoutes);
 app.register(carouselRoutes);
 app.register(textCreativesRoutes);
+app.register(galleryRoutes);
 
 // Root endpoint
 app.get('/', async (request, reply) => {
@@ -68,6 +70,15 @@ app.get('/', async (request, reply) => {
       textCreatives: [
         'POST /generate-text-creative',
         'POST /edit-text-creative'
+      ],
+      gallery: [
+        'GET /gallery/creatives',
+        'GET /gallery/texts',
+        'GET /history/creatives',
+        'GET /history/texts',
+        'POST /drafts/save',
+        'PUT /drafts/update',
+        'DELETE /drafts/:id'
       ],
       health: [
         'GET /health'
