@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 
-const FB_CLIENT_ID = '690472653668355';
-const FB_REDIRECT_URI = 'https://ad-dash-telegram-bot.lovable.app/'; // основной redirect_uri
+// SECURITY: Значения загружаются из env переменных
+const FB_CLIENT_ID = import.meta.env.VITE_FB_CLIENT_ID || '';
+const FB_REDIRECT_URI = import.meta.env.VITE_FB_REDIRECT_URI || 'https://ad-dash-telegram-bot.lovable.app/';
 const FB_SCOPE = 'ads_read,ads_management,business_management,pages_show_list,instagram_basic';
 const FB_AUTH_URL = `https://www.facebook.com/v15.0/dialog/oauth?client_id=${FB_CLIENT_ID}&redirect_uri=${encodeURIComponent(FB_REDIRECT_URI)}&scope=${FB_SCOPE}&response_type=code`;
-const WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/token';
+const WEBHOOK_URL = import.meta.env.VITE_SIGNUP_WEBHOOK_URL || '';
 
 const Signup: React.FC = () => {
   const [username, setUsername] = useState('');
@@ -20,30 +20,22 @@ const Signup: React.FC = () => {
   const telegram_id = params.get('telegram_id');
   const code = params.get('code');
 
-  // После возврата с Facebook OAuth — отправляем code, telegram_id, username, password, phone на n8n
+  // После возврата с Facebook OAuth — отправляем code, telegram_id, username, phone на n8n
+  // SECURITY: Пароль НЕ отправляется на внешний webhook
   useEffect(() => {
     if (!code || !telegram_id) return;
-    // Получаем данные из localStorage
+    // Получаем данные из localStorage (без пароля!)
     const username = localStorage.getItem('signup_username') || '';
-    const password = localStorage.getItem('signup_password') || '';
     const phone = localStorage.getItem('signup_phone') || '';
     const sendToWebhook = async () => {
       setLoading(true);
       setError(null);
       // Проверка на пустые поля
-      if (!username || !password || !phone) {
-        setError('Ошибка: не все данные заполнены. username: ' + username + ', password: ' + password + ', phone: ' + phone);
+      if (!username || !phone) {
+        setError('Ошибка: не все данные заполнены');
         setLoading(false);
         return;
       }
-      // Логируем отправляемые данные для отладки
-      console.log('Отправка на n8n:', {
-        code,
-        telegram_id,
-        username,
-        password,
-        phone
-      });
       try {
         await fetch(WEBHOOK_URL, {
           method: 'POST',
@@ -52,14 +44,13 @@ const Signup: React.FC = () => {
             code,
             telegram_id,
             username,
-            password,
             phone
+            // SECURITY: password removed - should be handled server-side only
           })
         });
         setSuccess(true);
         // Очищаем localStorage после успешной отправки
         localStorage.removeItem('signup_username');
-        localStorage.removeItem('signup_password');
         localStorage.removeItem('signup_phone');
       } catch (err) {
         setError('Ошибка при отправке данных на n8n: ' + (err instanceof Error ? err.message : String(err)));
@@ -70,20 +61,21 @@ const Signup: React.FC = () => {
   }, [code, telegram_id]);
 
   // Сохраняем значения в localStorage при каждом изменении поля
+  // SECURITY: Пароль НЕ сохраняется в localStorage
   const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setUsername(e.target.value);
     localStorage.setItem('signup_username', e.target.value);
   };
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPassword(e.target.value);
-    localStorage.setItem('signup_password', e.target.value);
+    // SECURITY: password NOT stored in localStorage
   };
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPhone(e.target.value);
     localStorage.setItem('signup_phone', e.target.value);
   };
 
-  // Сохраняем логин/пароль/телефон в localStorage при вводе и перед OAuth
+  // Сохраняем логин/телефон в localStorage перед OAuth (пароль НЕ сохраняем)
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -96,10 +88,10 @@ const Signup: React.FC = () => {
       return;
     }
     setLoading(true);
-    // Сохраняем данные в localStorage
+    // Сохраняем данные в localStorage (без пароля!)
     localStorage.setItem('signup_username', username);
-    localStorage.setItem('signup_password', password);
     localStorage.setItem('signup_phone', phone);
+    // SECURITY: password NOT stored in localStorage
     setLoading(false);
     // Переход на Facebook OAuth
     window.location.href = FB_AUTH_URL;
@@ -118,10 +110,6 @@ const Signup: React.FC = () => {
 
   // Если есть code — показываем прогресс отправки на n8n
   if (code) {
-    // Для отладки: выводим значения из localStorage
-    const debugUsername = localStorage.getItem('signup_username') || '';
-    const debugPassword = localStorage.getItem('signup_password') || '';
-    const debugPhone = localStorage.getItem('signup_phone') || '';
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="bg-card p-6 rounded shadow-md w-full max-w-sm flex flex-col gap-4 items-center">
@@ -129,7 +117,6 @@ const Signup: React.FC = () => {
           {loading && <div>Отправка данных...</div>}
           {success && <div className="text-green-600 text-sm">Данные успешно отправлены, регистрация продолжается...</div>}
           {error && <div className="text-red-600 text-sm">{error}</div>}
-          <div className="text-xs text-gray-500 mt-2">DEBUG:<br/>username: {debugUsername}<br/>password: {debugPassword}<br/>phone: {debugPhone}</div>
         </div>
       </div>
     );

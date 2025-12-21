@@ -630,17 +630,34 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       app.log.info({ videoUrl: videoUrl.substring(0, 100) + '...' }, 'Got video URL, downloading...');
 
       // Скачиваем видео
+      // SECURITY: Используем fetch вместо curl exec для предотвращения command injection
       videoPath = path.join('/var/tmp', `retranscribe_${randomUUID()}.mp4`);
 
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      const execAsync = promisify(exec);
-
       try {
-        await execAsync(
-          `curl -sL -o "${videoPath}" --connect-timeout 30 --max-time 300 "${videoUrl}"`,
-          { timeout: 310000 }
-        );
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 300000); // 5 min timeout
+
+        const response = await fetch(videoUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; VideoDownloader/1.0)'
+          }
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          throw new Error(`Failed to download video: HTTP ${response.status}`);
+        }
+
+        if (!response.body) {
+          throw new Error('No response body');
+        }
+
+        // Stream video to disk using pipeline
+        const { Readable } = await import('stream');
+        const nodeStream = Readable.fromWeb(response.body as any);
+        await pipeline(nodeStream, createWriteStream(videoPath));
 
         const stats = await fs.stat(videoPath);
         if (stats.size === 0) {
