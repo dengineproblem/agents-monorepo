@@ -1226,5 +1226,177 @@ export const creativeHandlers = {
         error: 'Сервис генерации временно недоступен'
       };
     }
+  },
+
+  // ============================================================
+  // TEXT ELEMENT GENERATION (for image creative flow)
+  // Flow: generateOffer → generateBullets → generateProfits → generateCta → generateCreatives
+  // ============================================================
+
+  /**
+   * generateOffer - Генерация заголовка/оффера для креатива
+   */
+  async generateOffer({ prompt, existing_bullets, existing_profits, existing_cta }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return {
+        success: false,
+        error: 'Сервис генерации не подключен'
+      };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-offer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_bullets: existing_bullets || '',
+          existing_benefits: existing_profits || '',
+          existing_cta: existing_cta || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации оффера' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        offer: result.offer,
+        message: 'Оффер сгенерирован. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate offer');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
+  },
+
+  /**
+   * generateBullets - Генерация буллетов/преимуществ
+   */
+  async generateBullets({ prompt, existing_offer, existing_profits, existing_cta }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return { success: false, error: 'Сервис генерации не подключен' };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-bullets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_offer: existing_offer || '',
+          existing_benefits: existing_profits || '',
+          existing_cta: existing_cta || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации буллетов' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        bullets: result.bullets,
+        message: 'Буллеты сгенерированы. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate bullets');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
+  },
+
+  /**
+   * generateProfits - Генерация выгод для клиента
+   */
+  async generateProfits({ prompt, existing_offer, existing_bullets, existing_cta }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return { success: false, error: 'Сервис генерации не подключен' };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-profits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_offer: existing_offer || '',
+          existing_bullets: existing_bullets || '',
+          existing_cta: existing_cta || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации выгод' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        profits: result.profits,
+        message: 'Выгоды сгенерированы. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate profits');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
+  },
+
+  /**
+   * generateCta - Генерация призыва к действию (CTA)
+   */
+  async generateCta({ prompt, existing_offer, existing_bullets, existing_profits }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return { success: false, error: 'Сервис генерации не подключен' };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-cta`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_offer: existing_offer || '',
+          existing_bullets: existing_bullets || '',
+          existing_benefits: existing_profits || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации CTA' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        cta: result.cta,
+        message: 'CTA сгенерирован. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate cta');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
   }
 };

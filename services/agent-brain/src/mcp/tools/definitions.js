@@ -93,7 +93,7 @@ export const crmTools = [
 ];
 
 /**
- * Creative Agent Tools (10 READ + 9 WRITE)
+ * Creative Agent Tools (10 READ + 13 WRITE)
  */
 export const creativeTools = [
   // READ tools
@@ -107,17 +107,24 @@ export const creativeTools = [
   createMCPTool('getCreativeScores', CreativeToolDefs.getCreativeScores, creativeHandlers.getCreativeScores, 'creative'),
   createMCPTool('getCreativeTests', CreativeToolDefs.getCreativeTests, creativeHandlers.getCreativeTests, 'creative'),
   createMCPTool('getCreativeTranscript', CreativeToolDefs.getCreativeTranscript, creativeHandlers.getCreativeTranscript, 'creative'),
-  // WRITE tools
+  // WRITE tools - creative management
   createMCPTool('triggerCreativeAnalysis', CreativeToolDefs.triggerCreativeAnalysis, creativeHandlers.triggerCreativeAnalysis, 'creative'),
   createMCPTool('launchCreative', CreativeToolDefs.launchCreative, creativeHandlers.launchCreative, 'creative'),
   createMCPTool('pauseCreative', CreativeToolDefs.pauseCreative, creativeHandlers.pauseCreative, 'creative'),
   createMCPTool('startCreativeTest', CreativeToolDefs.startCreativeTest, creativeHandlers.startCreativeTest, 'creative'),
   createMCPTool('stopCreativeTest', CreativeToolDefs.stopCreativeTest, creativeHandlers.stopCreativeTest, 'creative'),
-  // Generation tools
+  // Text generation tools (for image creative flow)
+  createMCPTool('generateOffer', CreativeToolDefs.generateOffer, creativeHandlers.generateOffer, 'creative'),
+  createMCPTool('generateBullets', CreativeToolDefs.generateBullets, creativeHandlers.generateBullets, 'creative'),
+  createMCPTool('generateProfits', CreativeToolDefs.generateProfits, creativeHandlers.generateProfits, 'creative'),
+  createMCPTool('generateCta', CreativeToolDefs.generateCta, creativeHandlers.generateCta, 'creative'),
+  // Image generation tools
   createMCPTool('generateCreatives', CreativeToolDefs.generateCreatives, creativeHandlers.generateCreatives, 'creative'),
+  // Carousel tools
+  createMCPTool('generateCarouselTexts', CreativeToolDefs.generateCarouselTexts, creativeHandlers.generateCarouselTexts, 'creative'),
   createMCPTool('generateCarousel', CreativeToolDefs.generateCarousel, creativeHandlers.generateCarousel, 'creative'),
-  createMCPTool('generateTextCreative', CreativeToolDefs.generateTextCreative, creativeHandlers.generateTextCreative, 'creative'),
-  createMCPTool('generateCarouselTexts', CreativeToolDefs.generateCarouselTexts, creativeHandlers.generateCarouselTexts, 'creative')
+  // Text creative tool
+  createMCPTool('generateTextCreative', CreativeToolDefs.generateTextCreative, creativeHandlers.generateTextCreative, 'creative')
 ];
 
 /**
@@ -162,7 +169,7 @@ export const adsTools = [
 
 /**
  * All MCP tools - Complete
- * WhatsApp (4) + CRM (12) + Creative (19) + Ads (24) = 59 tools
+ * WhatsApp (4) + CRM (12) + Creative (23) + Ads (24) = 63 tools
  */
 export const allMCPTools = [
   ...whatsappTools,
