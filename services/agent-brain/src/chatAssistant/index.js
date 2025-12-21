@@ -503,6 +503,7 @@ export function registerChatRoutes(fastify) {
       let finalContent = '';
       let finalAgent = '';
       let executedActions = [];
+      let finalPlan = null; // Plan from mini-AgentBrain
 
       // Pass sendEvent as callback for real-time tool events
       const toolContextWithEvents = {
@@ -523,18 +524,20 @@ export function registerChatRoutes(fastify) {
           finalContent = event.content;
           finalAgent = event.agent;
           executedActions = event.executedActions || [];
+          finalPlan = event.plan || null; // Extract plan from done event
         }
       }
 
       // Layer 11: Persistence
       layerLogger.start(11, { conversationId: conversation.id });
 
-      // Save assistant response
+      // Save assistant response with plan (if any)
       const savedMessage = await saveMessage({
         conversationId: conversation.id,
         role: 'assistant',
         content: finalContent,
         actionsJson: executedActions,
+        planJson: finalPlan, // Plan from mini-AgentBrain for user approval
         agent: finalAgent,
         debugLogsJson: layerLogger.isEnabled() ? layerLogger.getAllLogs() : null
       });

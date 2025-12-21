@@ -183,6 +183,7 @@ const Assistant: React.FC = () => {
       let finalContent = '';
       let finalExecutedActions: ChatMessage['actions_json'] = [];
       let finalUiJson: ChatMessage['ui_json'] = undefined;
+      let finalPlan: Plan | null = null;
 
       // Stream the response
       const stream = sendMessageStream(
@@ -231,6 +232,10 @@ const Assistant: React.FC = () => {
             finalContent = event.content;
             finalExecutedActions = event.executedActions || [];
             finalUiJson = event.uiJson || event.uiComponents;
+            // Extract plan from mini-AgentBrain if present
+            if (event.plan) {
+              finalPlan = event.plan;
+            }
             break;
 
           case 'error':
@@ -248,11 +253,18 @@ const Assistant: React.FC = () => {
           role: 'assistant',
           content: finalContent,
           actions_json: finalExecutedActions,
+          plan_json: finalPlan,
           ui_json: finalUiJson,
           created_at: new Date().toISOString(),
         };
 
         setMessages((prev) => [...prev, assistantMessage]);
+
+        // Auto-open plan approval modal if plan was returned
+        if (finalPlan && finalPlan.requires_approval) {
+          setPendingPlan(finalPlan);
+          setPlanModalOpen(true);
+        }
 
         // Save layer logs for this message (from streaming state)
         setStreamingState((currentState) => {

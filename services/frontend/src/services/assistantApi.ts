@@ -167,6 +167,7 @@ export interface StreamEventDone {
     agents: string[];
   };
   duration: number;
+  plan?: Plan | null; // Plan from mini-AgentBrain for user approval
   uiComponents?: UIComponentData[];
 }
 

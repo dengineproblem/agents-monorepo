@@ -14,6 +14,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { logger } from './lib/logger.js';
 import { logScoringError } from './lib/errorLogger.js';
+import {
+  HS_CLASSES,
+  BUDGET_LIMITS,
+  TIMEFRAME_WEIGHTS,
+  TODAY_COMPENSATION,
+  VOLUME_THRESHOLDS
+} from './chatAssistant/shared/brainRules.js';
 
 const FB_API_VERSION = 'v23.0';
 
@@ -1706,17 +1713,24 @@ export async function runScoringAgent(userAccount, options = {}) {
 }
 
 /**
- * Interactive Brain Mode
+ * Interactive Brain Mode (ENHANCED)
  *
- * Собирает данные с фокусом на TODAY и генерирует proposals без выполнения
- * Proposals возвращаются для подтверждения пользователем через Chat Assistant
+ * Собирает данные с фокусом на TODAY и генерирует proposals без выполнения.
+ * Использует ту же логику Health Score что и основной Brain Agent.
+ * Proposals возвращаются для подтверждения пользователем через Chat Assistant.
+ *
+ * КЛЮЧЕВЫЕ ОТЛИЧИЯ ОТ АВТОМАТИЧЕСКОГО BRAIN:
+ * 1. ФОКУС НА СЕГОДНЯ — анализирует realtime данные за сегодня
+ * 2. ИСПОЛЬЗУЕТ ПОСЛЕДНИЙ ОТЧЁТ BRAIN — берёт исторические данные из scoring_executions
+ * 3. TODAY-КОМПЕНСАЦИЯ — если сегодня лучше вчера, смягчает негативные решения
+ * 4. НЕ ВЫПОЛНЯЕТ — только предлагает, ждёт подтверждения пользователя
  *
  * @param {Object} userAccount - данные пользователя (ad_account_id, access_token, id)
  * @param {Object} options - опции
  * @param {string} options.directionId - UUID направления (опционально, для фильтрации)
  * @param {Object} options.supabase - Supabase client
  * @param {Object} options.logger - logger instance
- * @returns {Object} - { proposals: [...], context: {...} }
+ * @returns {Object} - { proposals: [...], context: {...}, summary: {...} }
  */
 export async function runInteractiveBrain(userAccount, options = {}) {
   const startTime = Date.now();
@@ -1739,8 +1753,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     log.info({ where: 'interactive_brain', phase: 'fetching_today_data' });
 
-    // Получаем данные за сегодня из FB API
-    const [todayData, yesterdayActions] = await Promise.all([
+    // Получаем данные за сегодня и вчера из FB API
+    const [todayData, yesterdayData] = await Promise.all([
       fetchAdsetsActions(ad_account_id, access_token, 'today'),
       fetchAdsetsActions(ad_account_id, access_token, 'yesterday')
     ]);
@@ -1749,16 +1763,16 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       where: 'interactive_brain',
       phase: 'today_data_fetched',
       today_rows: todayData.length,
-      yesterday_rows: yesterdayActions.length
+      yesterday_rows: yesterdayData.length
     });
 
     // ========================================
-    // ЧАСТЬ 2: ЗАГРУЗКА ИСТОРИЧЕСКИХ ДАННЫХ
+    // ЧАСТЬ 2: ЗАГРУЗКА ПОСЛЕДНЕГО ОТЧЁТА BRAIN
     // ========================================
 
-    log.info({ where: 'interactive_brain', phase: 'loading_historical' });
+    log.info({ where: 'interactive_brain', phase: 'loading_brain_report' });
 
-    // Получаем последний успешный scoring_output
+    // Получаем последний успешный scoring_output (отчёт основного Brain)
     const { data: lastExecution } = await supabase
       .from('scoring_executions')
       .select('scoring_output, completed_at')
@@ -1768,13 +1782,18 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       .limit(1)
       .single();
 
-    const historicalData = lastExecution?.scoring_output || null;
+    const brainReport = lastExecution?.scoring_output || null;
+    const brainReportAge = lastExecution?.completed_at
+      ? Math.round((Date.now() - new Date(lastExecution.completed_at).getTime()) / 1000 / 60 / 60)
+      : null;
 
     log.info({
       where: 'interactive_brain',
-      phase: 'historical_loaded',
-      has_historical: !!historicalData,
-      historical_adsets: historicalData?.adsets?.length || 0
+      phase: 'brain_report_loaded',
+      has_report: !!brainReport,
+      report_age_hours: brainReportAge,
+      adsets_in_report: brainReport?.adsets?.length || 0,
+      unused_creatives: brainReport?.unused_creatives?.length || 0
     });
 
     // ========================================
@@ -1783,7 +1802,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     let directionsQuery = supabase
       .from('account_directions')
-      .select('id, name, fb_campaign_id, objective, daily_budget_cents, target_cpl_cents, is_active')
+      .select('id, name, fb_campaign_id, objective, daily_budget_cents, target_cpl_cents, is_active, created_at')
       .eq('user_account_id', userAccountId)
       .eq('is_active', true);
 
@@ -1793,25 +1812,39 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     const { data: directions } = await directionsQuery;
 
+    // Загружаем последние действия Brain для защиты от дёрготни
+    const { data: recentActions } = await supabase
+      .from('brain_executions')
+      .select('proposals_json, completed_at')
+      .eq('user_account_id', userAccountId)
+      .in('status', ['proposals_generated', 'executed'])
+      .order('completed_at', { ascending: false })
+      .limit(3);
+
     // ========================================
-    // ЧАСТЬ 4: АНАЛИЗ И ГЕНЕРАЦИЯ PROPOSALS
+    // ЧАСТЬ 4: АНАЛИЗ С HEALTH SCORE
     // ========================================
 
-    log.info({ where: 'interactive_brain', phase: 'generating_proposals' });
+    log.info({ where: 'interactive_brain', phase: 'calculating_health_scores' });
 
     const proposals = [];
+    const adsetAnalysis = [];
 
-    // Анализируем каждый активный adset
     for (const todayAdset of todayData) {
-      const yesterdayAdset = yesterdayActions.find(a => a.adset_id === todayAdset.adset_id);
-      const historicalAdset = historicalData?.adsets?.find(a => a.adset_id === todayAdset.adset_id);
-
-      // Получаем direction для этого adset
+      const yesterdayAdset = yesterdayData.find(a => a.adset_id === todayAdset.adset_id);
+      const brainAdset = brainReport?.adsets?.find(a => a.adset_id === todayAdset.adset_id);
       const direction = directions?.find(d => d.fb_campaign_id === todayAdset.campaign_id);
 
+      // ========================================
+      // МЕТРИКИ
+      // ========================================
       const todaySpend = parseFloat(todayAdset.spend || 0);
       const todayLeads = parseInt(todayAdset.leads || 0);
+      const todayImpressions = parseInt(todayAdset.impressions || 0);
+      const todayClicks = parseInt(todayAdset.clicks || 0);
       const todayCPL = todayLeads > 0 ? todaySpend / todayLeads : null;
+      const todayCTR = todayImpressions > 0 ? (todayClicks / todayImpressions * 100) : null;
+      const todayCPM = todayImpressions > 0 ? (todaySpend / todayImpressions * 1000) : null;
 
       const yesterdaySpend = parseFloat(yesterdayAdset?.spend || 0);
       const yesterdayLeads = parseInt(yesterdayAdset?.leads || 0);
@@ -1819,85 +1852,246 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
       const targetCPL = direction?.target_cpl_cents ? direction.target_cpl_cents / 100 : null;
 
-      // ========================================
-      // ПРАВИЛА ГЕНЕРАЦИИ PROPOSALS
-      // ========================================
+      // Метрики из последнего отчёта Brain (7 дней)
+      const hist7d = brainAdset?.metrics_last_7d || {};
+      const histCPL = hist7d.leads > 0 ? hist7d.spend / hist7d.leads : null;
+      const histCTR = hist7d.ctr || null;
+      const histCPM = hist7d.cpm || null;
+      const histFrequency = hist7d.frequency || 0;
 
-      // 1. HIGH CPL TODAY → предложить паузу или снижение бюджета
-      if (todayCPL && targetCPL && todayCPL > targetCPL * 1.5) {
-        proposals.push({
-          action: 'pauseAdSet',
-          entity_type: 'adset',
-          entity_id: todayAdset.adset_id,
-          entity_name: todayAdset.adset_name,
-          direction_id: direction?.id,
-          direction_name: direction?.name,
-          reason: `CPL сегодня ($${todayCPL.toFixed(2)}) превышает target ($${targetCPL.toFixed(2)}) на ${((todayCPL / targetCPL - 1) * 100).toFixed(0)}%`,
-          confidence: 0.8,
-          metrics: {
-            today_spend: todaySpend,
-            today_leads: todayLeads,
-            today_cpl: todayCPL,
-            target_cpl: targetCPL
-          }
-        });
+      // ========================================
+      // HEALTH SCORE CALCULATION (синхронизировано с brainRules.js)
+      // ========================================
+      let healthScore = 0;
+      const hsBreakdown = [];
+
+      // 1. CPL GAP к TARGET (вес 45)
+      if (todayCPL && targetCPL) {
+        const cplRatio = todayCPL / targetCPL;
+        if (cplRatio <= 0.7) {
+          healthScore += 45;
+          hsBreakdown.push({ factor: 'cpl_gap', value: 45, reason: `CPL ${((1 - cplRatio) * 100).toFixed(0)}% ниже target` });
+        } else if (cplRatio <= 0.9) {
+          healthScore += 30;
+          hsBreakdown.push({ factor: 'cpl_gap', value: 30, reason: `CPL ${((1 - cplRatio) * 100).toFixed(0)}% ниже target` });
+        } else if (cplRatio <= 1.1) {
+          healthScore += 10;
+          hsBreakdown.push({ factor: 'cpl_gap', value: 10, reason: 'CPL в пределах ±10% от target' });
+        } else if (cplRatio <= 1.3) {
+          healthScore -= 30;
+          hsBreakdown.push({ factor: 'cpl_gap', value: -30, reason: `CPL ${((cplRatio - 1) * 100).toFixed(0)}% выше target` });
+        } else {
+          healthScore -= 45;
+          hsBreakdown.push({ factor: 'cpl_gap', value: -45, reason: `CPL ${((cplRatio - 1) * 100).toFixed(0)}% выше target` });
+        }
       }
 
-      // 2. GOOD CPL + много расхода → предложить увеличить бюджет
-      else if (todayCPL && targetCPL && todayCPL < targetCPL * 0.8 && todaySpend > 10) {
+      // 2. ТРЕНДЫ (вес до 15) — сегодня vs вчера
+      if (todayCPL && yesterdayCPL) {
+        const trendRatio = todayCPL / yesterdayCPL;
+        if (trendRatio <= 0.8) {
+          healthScore += 15;
+          hsBreakdown.push({ factor: 'trend', value: 15, reason: `CPL улучшился на ${((1 - trendRatio) * 100).toFixed(0)}% vs вчера` });
+        } else if (trendRatio >= 1.2) {
+          healthScore -= 15;
+          hsBreakdown.push({ factor: 'trend', value: -15, reason: `CPL ухудшился на ${((trendRatio - 1) * 100).toFixed(0)}% vs вчера` });
+        }
+      }
+
+      // 3. ДИАГНОСТИКА (до -30)
+      // CTR слишком низкий
+      if (todayCTR !== null && todayCTR < 1) {
+        healthScore -= 8;
+        hsBreakdown.push({ factor: 'low_ctr', value: -8, reason: `CTR ${todayCTR.toFixed(2)}% < 1% (слабый креатив)` });
+      }
+
+      // CPM слишком высокий (vs история)
+      if (todayCPM && histCPM && todayCPM > histCPM * 1.3) {
+        healthScore -= 12;
+        hsBreakdown.push({ factor: 'high_cpm', value: -12, reason: `CPM $${todayCPM.toFixed(2)} на 30%+ выше средней` });
+      }
+
+      // Frequency высокая (выгорание)
+      if (histFrequency > 2) {
+        healthScore -= 10;
+        hsBreakdown.push({ factor: 'high_frequency', value: -10, reason: `Frequency ${histFrequency.toFixed(1)} > 2 (выгорание)` });
+      }
+
+      // 4. ОБЪЁМ ДАННЫХ (множитель доверия)
+      let volumeMultiplier = 1.0;
+      if (todayImpressions < VOLUME_THRESHOLDS.TODAY_MIN_IMPRESSIONS) {
+        volumeMultiplier = 0.6;
+        hsBreakdown.push({ factor: 'low_volume', value: null, reason: `Мало данных (${todayImpressions} impr), доверие 60%` });
+      } else if (todayImpressions < VOLUME_THRESHOLDS.MIN_IMPRESSIONS) {
+        volumeMultiplier = 0.8;
+      }
+
+      // 5. TODAY-КОМПЕНСАЦИЯ (КЛЮЧЕВОЕ для мини-brain!)
+      // Если сегодня CPL значительно лучше вчера — компенсируем негатив
+      let todayCompensation = 0;
+      if (todayCPL && yesterdayCPL && todayImpressions >= VOLUME_THRESHOLDS.TODAY_MIN_IMPRESSIONS) {
+        const improvementRatio = todayCPL / yesterdayCPL;
+
+        if (improvementRatio <= TODAY_COMPENSATION.FULL) {
+          // CPL в 2+ раза лучше вчера → ПОЛНАЯ компенсация штрафов
+          const negativePart = hsBreakdown.filter(h => h.value < 0).reduce((sum, h) => sum + h.value, 0);
+          todayCompensation = Math.abs(negativePart);
+          hsBreakdown.push({
+            factor: 'today_compensation',
+            value: todayCompensation,
+            reason: `СЕГОДНЯ CPL в ${(1 / improvementRatio).toFixed(1)}x лучше вчера! Полная компенсация.`
+          });
+        } else if (improvementRatio <= TODAY_COMPENSATION.PARTIAL) {
+          // На 30%+ лучше → 60% компенсация
+          const negativePart = hsBreakdown.filter(h => h.value < 0).reduce((sum, h) => sum + h.value, 0);
+          todayCompensation = Math.abs(negativePart) * 0.6;
+          hsBreakdown.push({
+            factor: 'today_compensation',
+            value: Math.round(todayCompensation),
+            reason: `Сегодня CPL на ${((1 - improvementRatio) * 100).toFixed(0)}% лучше вчера (60% компенсация)`
+          });
+        } else if (improvementRatio <= TODAY_COMPENSATION.SLIGHT) {
+          // Небольшое улучшение → +5 бонус
+          todayCompensation = 5;
+          hsBreakdown.push({ factor: 'today_compensation', value: 5, reason: 'Небольшое улучшение CPL сегодня' });
+        }
+        healthScore += todayCompensation;
+      }
+
+      // Применяем множитель доверия
+      healthScore = Math.round(healthScore * volumeMultiplier);
+
+      // Ограничиваем диапазон [-100, +100]
+      healthScore = Math.max(-100, Math.min(100, healthScore));
+
+      // ========================================
+      // ОПРЕДЕЛЕНИЕ КЛАССА HS
+      // ========================================
+      let hsClass;
+      if (healthScore >= HS_CLASSES.VERY_GOOD) hsClass = 'very_good';
+      else if (healthScore >= HS_CLASSES.GOOD) hsClass = 'good';
+      else if (healthScore >= HS_CLASSES.NEUTRAL_LOW) hsClass = 'neutral';
+      else if (healthScore >= HS_CLASSES.SLIGHTLY_BAD) hsClass = 'slightly_bad';
+      else hsClass = 'bad';
+
+      // Сохраняем анализ
+      adsetAnalysis.push({
+        adset_id: todayAdset.adset_id,
+        adset_name: todayAdset.adset_name,
+        direction_name: direction?.name,
+        health_score: healthScore,
+        hs_class: hsClass,
+        hs_breakdown: hsBreakdown,
+        metrics: {
+          today: { spend: todaySpend, leads: todayLeads, cpl: todayCPL, ctr: todayCTR, impressions: todayImpressions },
+          yesterday: { spend: yesterdaySpend, leads: yesterdayLeads, cpl: yesterdayCPL },
+          target_cpl: targetCPL,
+          hist_7d: hist7d
+        }
+      });
+
+      // ========================================
+      // ГЕНЕРАЦИЯ PROPOSALS по классу HS
+      // ========================================
+
+      // Защита от дёрготни: проверяем недавние действия
+      const recentActionOnAdset = recentActions?.some(ra =>
+        ra.proposals_json?.some(p => p.entity_id === todayAdset.adset_id)
+      );
+
+      if (hsClass === 'very_good' && !recentActionOnAdset) {
+        // Масштабировать +10..+30% (используем MAX из brainRules)
+        const increasePercent = Math.min(BUDGET_LIMITS.MAX_INCREASE_PCT, 20);
         proposals.push({
           action: 'updateBudget',
+          priority: 'high',
           entity_type: 'adset',
           entity_id: todayAdset.adset_id,
           entity_name: todayAdset.adset_name,
           direction_id: direction?.id,
           direction_name: direction?.name,
-          reason: `Хороший CPL ($${todayCPL.toFixed(2)}) ниже target ($${targetCPL.toFixed(2)}) на ${((1 - todayCPL / targetCPL) * 100).toFixed(0)}%. Можно масштабировать.`,
+          health_score: healthScore,
+          hs_class: hsClass,
+          reason: `Отличные результаты! HS=${healthScore} (${hsClass}). CPL сегодня $${todayCPL?.toFixed(2) || '?'} при target $${targetCPL?.toFixed(2) || '?'}. Рекомендую масштабировать.`,
+          confidence: 0.85,
+          suggested_action_params: {
+            increase_percent: increasePercent,
+            max_budget_cents: BUDGET_LIMITS.MAX_CENTS
+          },
+          metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+        });
+      }
+      else if (hsClass === 'bad') {
+        // CPL критически высокий → пауза или сильное снижение
+        const cplMultiple = todayCPL && targetCPL ? todayCPL / targetCPL : null;
+
+        if (cplMultiple && cplMultiple > 3) {
+          proposals.push({
+            action: 'pauseAdSet',
+            priority: 'critical',
+            entity_type: 'adset',
+            entity_id: todayAdset.adset_id,
+            entity_name: todayAdset.adset_name,
+            direction_id: direction?.id,
+            direction_name: direction?.name,
+            health_score: healthScore,
+            hs_class: hsClass,
+            reason: `КРИТИЧНО! HS=${healthScore}. CPL $${todayCPL?.toFixed(2)} превышает target в ${cplMultiple.toFixed(1)}x раз. Рекомендую паузу.`,
+            confidence: 0.9,
+            metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+          });
+        } else {
+          proposals.push({
+            action: 'updateBudget',
+            priority: 'high',
+            entity_type: 'adset',
+            entity_id: todayAdset.adset_id,
+            entity_name: todayAdset.adset_name,
+            direction_id: direction?.id,
+            direction_name: direction?.name,
+            health_score: healthScore,
+            hs_class: hsClass,
+            reason: `Плохие результаты. HS=${healthScore}. CPL $${todayCPL?.toFixed(2)} выше target. Рекомендую снизить бюджет на 50%.`,
+            confidence: 0.8,
+            suggested_action_params: {
+              decrease_percent: BUDGET_LIMITS.MAX_DECREASE_PCT,
+              min_budget_cents: BUDGET_LIMITS.MIN_CENTS
+            },
+            metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+          });
+        }
+      }
+      else if (hsClass === 'slightly_bad' && !recentActionOnAdset) {
+        // Снижать -20..-50%
+        proposals.push({
+          action: 'updateBudget',
+          priority: 'medium',
+          entity_type: 'adset',
+          entity_id: todayAdset.adset_id,
+          entity_name: todayAdset.adset_name,
+          direction_id: direction?.id,
+          direction_name: direction?.name,
+          health_score: healthScore,
+          hs_class: hsClass,
+          reason: `Результаты ниже нормы. HS=${healthScore}. Рекомендую снизить бюджет на 20-30%.`,
           confidence: 0.7,
           suggested_action_params: {
-            increase_percent: 20
+            decrease_percent: 25,
+            min_budget_cents: BUDGET_LIMITS.MIN_CENTS
           },
-          metrics: {
-            today_spend: todaySpend,
-            today_leads: todayLeads,
-            today_cpl: todayCPL,
-            target_cpl: targetCPL
-          }
+          metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
         });
       }
-
-      // 3. DROPPING CTR trend → предупреждение
-      const historicalCTR = historicalAdset?.metrics_last_7d?.ctr;
-      const todayCTR = todayAdset.clicks && todayAdset.impressions
-        ? (todayAdset.clicks / todayAdset.impressions * 100)
-        : null;
-
-      if (historicalCTR && todayCTR && todayCTR < historicalCTR * 0.7) {
-        proposals.push({
-          action: 'review',
-          entity_type: 'adset',
-          entity_id: todayAdset.adset_id,
-          entity_name: todayAdset.adset_name,
-          direction_id: direction?.id,
-          direction_name: direction?.name,
-          reason: `CTR упал с ${historicalCTR.toFixed(2)}% до ${todayCTR.toFixed(2)}% (-${((1 - todayCTR / historicalCTR) * 100).toFixed(0)}%). Возможно, аудитория устала.`,
-          confidence: 0.6,
-          metrics: {
-            historical_ctr: historicalCTR,
-            today_ctr: todayCTR
-          }
-        });
-      }
+      // good и neutral — не предлагаем изменений (наблюдаем)
     }
 
     // ========================================
-    // ЧАСТЬ 5: АНАЛИЗ НЕИСПОЛЬЗОВАННЫХ КРЕАТИВОВ
+    // ЧАСТЬ 5: АНАЛИЗ НЕИСПОЛЬЗОВАННЫХ КРЕАТИВОВ (из отчёта Brain)
     // ========================================
 
-    if (historicalData?.unused_creatives?.length > 0) {
-      // Группируем по direction для более умных рекомендаций
+    if (brainReport?.unused_creatives?.length > 0) {
       const byDirection = {};
-      for (const uc of historicalData.unused_creatives) {
+      for (const uc of brainReport.unused_creatives) {
         const dirId = uc.direction_id || 'no_direction';
         if (!byDirection[dirId]) byDirection[dirId] = [];
         byDirection[dirId].push(uc);
@@ -1909,14 +2103,16 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
           proposals.push({
             action: 'createAdSet',
+            priority: 'medium',
             entity_type: 'direction',
             entity_id: dirId,
             entity_name: direction?.name || 'Unknown',
-            reason: `${creatives.length} неиспользованных креативов готовы к запуску`,
+            reason: `${creatives.length} неиспользованных креативов готовы к запуску. Рекомендую протестировать.`,
             confidence: 0.75,
             suggested_action_params: {
               creative_ids: creatives.slice(0, 5).map(c => c.id),
-              creative_titles: creatives.slice(0, 5).map(c => c.title)
+              creative_titles: creatives.slice(0, 5).map(c => c.title),
+              recommended_budget_cents: BUDGET_LIMITS.NEW_ADSET_MIN
             }
           });
         }
@@ -1924,10 +2120,63 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     }
 
     // ========================================
-    // ЧАСТЬ 6: СОХРАНЕНИЕ И ВОЗВРАТ
+    // ЧАСТЬ 6: HIGH RISK ИЗ ОТЧЁТА BRAIN
     // ========================================
 
+    if (brainReport?.ready_creatives) {
+      for (const creative of brainReport.ready_creatives) {
+        if (creative.risk_score && creative.risk_score >= 70) {
+          // Уже не добавляем proposal если adset уже в списке
+          const alreadyHasProposal = proposals.some(p =>
+            p.entity_type === 'creative' && p.entity_id === creative.id
+          );
+
+          if (!alreadyHasProposal) {
+            proposals.push({
+              action: 'review',
+              priority: 'low',
+              entity_type: 'creative',
+              entity_id: creative.id,
+              entity_name: creative.title || creative.name,
+              reason: `High risk score (${creative.risk_score}/100) по данным последнего анализа Brain. Рекомендую проверить креатив.`,
+              confidence: 0.6,
+              metrics: { risk_score: creative.risk_score, roi_data: creative.roi_data }
+            });
+          }
+        }
+      }
+    }
+
+    // ========================================
+    // ЧАСТЬ 7: СОРТИРОВКА И ВОЗВРАТ
+    // ========================================
+
+    // Сортируем proposals по приоритету
+    const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    proposals.sort((a, b) => (priorityOrder[a.priority] || 3) - (priorityOrder[b.priority] || 3));
+
     const duration = Date.now() - startTime;
+
+    // Summary статистика
+    const summary = {
+      total_adsets_analyzed: adsetAnalysis.length,
+      by_hs_class: {
+        very_good: adsetAnalysis.filter(a => a.hs_class === 'very_good').length,
+        good: adsetAnalysis.filter(a => a.hs_class === 'good').length,
+        neutral: adsetAnalysis.filter(a => a.hs_class === 'neutral').length,
+        slightly_bad: adsetAnalysis.filter(a => a.hs_class === 'slightly_bad').length,
+        bad: adsetAnalysis.filter(a => a.hs_class === 'bad').length
+      },
+      proposals_by_action: {
+        pauseAdSet: proposals.filter(p => p.action === 'pauseAdSet').length,
+        updateBudget: proposals.filter(p => p.action === 'updateBudget').length,
+        createAdSet: proposals.filter(p => p.action === 'createAdSet').length,
+        review: proposals.filter(p => p.action === 'review').length
+      },
+      brain_report_age_hours: brainReportAge,
+      today_total_spend: todayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
+      today_total_leads: todayData.reduce((sum, a) => sum + parseInt(a.leads || 0), 0)
+    };
 
     // Сохраняем запуск для аудита
     await supabase.from('brain_executions').insert({
@@ -1946,6 +2195,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       where: 'interactive_brain',
       phase: 'complete',
       proposals_count: proposals.length,
+      summary,
       duration
     });
 
@@ -1953,12 +2203,16 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       success: true,
       mode: 'interactive',
       proposals,
+      adset_analysis: adsetAnalysis,
+      summary,
       context: {
         today_adsets: todayData.length,
-        yesterday_adsets: yesterdayActions.length,
-        historical_available: !!historicalData,
+        yesterday_adsets: yesterdayData.length,
+        brain_report_available: !!brainReport,
+        brain_report_age_hours: brainReportAge,
         directions_count: directions?.length || 0,
-        generated_at: new Date().toISOString()
+        generated_at: new Date().toISOString(),
+        focus: 'TODAY — все решения основаны на сегодняшних данных с учётом истории'
       }
     };
 
