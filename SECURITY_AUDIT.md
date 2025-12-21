@@ -14,18 +14,92 @@
 | Backend | 5 | 4 | 3 |
 | Database | 4 | 3 | 2 |
 
-**ТОП-10 проблем (по критичности):**
+**ТОП-15 проблем (по критичности):**
 
-1. **Telegram Bot Token** в коде: `8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM`
-2. **Telegram Admin Chat ID** в коде: `-5079020326`
-3. **Пароль отправляется на внешний webhook** (n8n) в открытом виде!
-4. **Пароли в localStorage** + DEBUG вывод на экран
-5. **Admin endpoints без авторизации** - любой может получить список users
-6. **x-user-id header spoofing** - нет верификации, легко подделать
-7. **RLS политики с USING(true)** - открывают 8 таблиц всем
-8. **CORS: origin: true** на 4 сервисах
-9. **TikTok App ID** hardcoded: `7527489318093668353`
-10. **Потенциальный injection** через .or() в adminUsers.ts
+1. **🔴 ТОКЕНЫ В GIT ИСТОРИИ!** docker-compose.yml с токенами закоммичен!
+2. **Telegram Bot Token** в docker-compose.yml (строки 20, 24, 61, 62)
+3. **Telegram Admin Chat ID** в docker-compose.yml (строки 21, 25)
+4. **Command Injection** в video.ts:641 - curl с непроверенным URL
+5. **Пароль отправляется на внешний webhook** (n8n) в открытом виде!
+6. **Пароли в localStorage** + DEBUG вывод на экран
+7. **Admin endpoints без авторизации** - любой может получить список users
+8. **x-user-id header spoofing** - нет верификации, легко подделать
+9. **RLS политики с USING(true)** - открывают 8 таблиц всем
+10. **CORS: origin: true** на 4 сервисах
+11. **TikTok App ID** hardcoded в 3 файлах (Dashboard.tsx, Profile.tsx, tiktokOAuth.ts)
+12. **Потенциальный injection** через .or() в adminUsers.ts
+13. **Grafana default password** в docker-compose.yml:244
+14. **FB credentials** hardcoded в нескольких файлах
+15. **Supabase anon key** виден в исходниках (менее критично)
+
+---
+
+## PHASE 0: НЕМЕДЛЕННЫЕ ДЕЙСТВИЯ
+
+### 0.1 🔴 ТОКЕНЫ В GIT ИСТОРИИ - КРИТИЧНО!
+
+**Проблема:** `docker-compose.yml` с реальными токенами закоммичен в git!
+
+```yaml
+# docker-compose.yml - ВСЁ ЭТО В GIT ИСТОРИИ!
+- LOG_ALERT_TELEGRAM_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM  # строка 20
+- LOG_ALERT_TELEGRAM_CHAT_ID=-5079020326  # строка 21
+- MONITORING_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM  # строка 24
+- TELEGRAM_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM  # строка 62
+- GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}  # строка 244, default пароль!
+```
+
+**Это означает:** Даже после удаления, токены остаются в истории git навсегда!
+
+**Действия:**
+1. **НЕМЕДЛЕННО** ротировать все Telegram токены через @BotFather
+2. Исправить docker-compose.yml - убрать все hardcoded значения:
+
+```yaml
+# ПРАВИЛЬНО - использовать только переменные без defaults
+environment:
+  - LOG_ALERT_TELEGRAM_BOT_TOKEN=${LOG_ALERT_TELEGRAM_BOT_TOKEN}
+  - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+  - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}  # Без default!
+```
+
+3. Если репозиторий публичный - считать ВСЕ токены скомпрометированными
+
+---
+
+### 0.2 Command Injection в video.ts
+
+**Файл:** `services/agent-service/src/routes/video.ts:641`
+
+```typescript
+// ОПАСНО! videoUrl может содержать shell injection
+await execAsync(
+  `curl -sL -o "${videoPath}" --connect-timeout 30 --max-time 300 "${videoUrl}"`,
+  { timeout: 310000 }
+);
+```
+
+Если `videoUrl` содержит `"; rm -rf / #`, произойдёт выполнение произвольных команд!
+
+**Исправление:**
+```typescript
+import { spawn } from 'child_process';
+
+// Безопасный вариант - аргументы передаются отдельно
+const child = spawn('curl', [
+  '-sL', '-o', videoPath,
+  '--connect-timeout', '30',
+  '--max-time', '300',
+  videoUrl  // Передаётся как отдельный аргумент, не интерпретируется shell
+]);
+
+// Или использовать fetch/axios вместо curl:
+import fs from 'fs';
+import { pipeline } from 'stream/promises';
+
+const response = await fetch(videoUrl);
+await pipeline(response.body, fs.createWriteStream(videoPath));
+```
 
 ---
 
@@ -604,9 +678,13 @@ export function decrypt(text: string): string {
 
 ## Чеклист для проверки
 
-### Критические (СЕГОДНЯ!)
-- [ ] Ротировать Telegram Bot Token (скомпрометирован!)
+### PHASE 0: НЕМЕДЛЕННО (прямо сейчас!)
+- [ ] **Ротировать Telegram Bot Token** через @BotFather - токен в git истории!
+- [ ] Исправить docker-compose.yml - убрать hardcoded токены
+- [ ] Исправить Command Injection в video.ts:641 (spawn вместо exec)
 - [ ] Удалить password из webhook в Signup.tsx:51-57
+
+### Критические (СЕГОДНЯ!)
 - [ ] Удалить пароли из localStorage в Signup.tsx
 - [ ] Удалить DEBUG блок из Signup.tsx:132
 - [ ] Добавить adminAuthMiddleware для /admin/* routes
