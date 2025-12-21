@@ -1,5 +1,5 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { supabase } from '../supabaseClient.js';
+import { supabase } from '../lib/supabaseClient.js';
 
 /**
  * SECURITY: Middleware для проверки прав техадмина
