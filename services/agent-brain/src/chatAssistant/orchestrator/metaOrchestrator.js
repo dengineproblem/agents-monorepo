@@ -216,6 +216,16 @@ export async function processWithMetaTools({
               latencyMs: toolLatency
             });
 
+            // If this was executeTools, also add the nested domain tools
+            if (toolName === 'executeTools' && result?.tools_executed) {
+              for (const nestedTool of result.tools_executed) {
+                executedTools.push({
+                  tool: nestedTool,
+                  result: 'success'
+                });
+              }
+            }
+
             // Record tool execution
             if (runId) {
               await runsStore.recordToolExecution(runId, {

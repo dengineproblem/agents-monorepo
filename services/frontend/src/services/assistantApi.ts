@@ -204,22 +204,43 @@ export type StreamEvent =
 
 // Tool labels for display
 export const TOOL_LABELS: Record<string, string> = {
+  // Meta Tools (оркестрация)
+  getAvailableDomains: 'Определяю доступные модули',
+  getDomainTools: 'Загружаю инструменты',
+  executeTools: 'Выполняю запросы',
+  executeTool: 'Выполняю запрос',
+
+  // Ads - кампании и адсеты
   getCampaigns: 'Получаю кампании',
   getCampaignDetails: 'Загружаю детали кампании',
   getAdSets: 'Получаю адсеты',
   getSpendReport: 'Формирую отчёт по расходам',
-  getDirections: 'Получаю направления',
-  getDirectionDetails: 'Загружаю детали направления',
-  getDirectionMetrics: 'Получаю метрики направления',
-  getROIReport: 'Формирую отчёт по ROI',
-  getROIComparison: 'Сравниваю ROI',
+  getAdAccountStatus: 'Проверяю статус аккаунта',
   pauseCampaign: 'Останавливаю кампанию',
   resumeCampaign: 'Запускаю кампанию',
   pauseAdSet: 'Останавливаю адсет',
   resumeAdSet: 'Запускаю адсет',
+  pauseAd: 'Останавливаю объявление',
+  resumeAd: 'Запускаю объявление',
   updateBudget: 'Обновляю бюджет',
+
+  // Ads - направления
+  getDirections: 'Получаю направления',
+  getDirectionDetails: 'Загружаю детали направления',
+  getDirectionMetrics: 'Получаю метрики направления',
+  getDirectionCreatives: 'Получаю креативы направления',
+  getDirectionInsights: 'Анализирую направление',
+  getLeadsEngagementRate: 'Считаю вовлечённость лидов',
   updateDirectionBudget: 'Обновляю бюджет направления',
+  updateDirectionTargetCPL: 'Обновляю целевой CPL',
   pauseDirection: 'Останавливаю направление',
+  resumeDirection: 'Запускаю направление',
+
+  // Ads - ROI
+  getROIReport: 'Формирую отчёт по ROI',
+  getROIComparison: 'Сравниваю ROI',
+
+  // Креативы
   getCreatives: 'Получаю креативы',
   getCreativeDetails: 'Загружаю детали креатива',
   getCreativeMetrics: 'Получаю метрики креатива',
@@ -231,13 +252,24 @@ export const TOOL_LABELS: Record<string, string> = {
   pauseCreative: 'Останавливаю креатив',
   startCreativeTest: 'Запускаю A/B тест',
   stopCreativeTest: 'Останавливаю тест',
+
+  // CRM - лиды
   getLeads: 'Получаю лидов',
   getLeadDetails: 'Загружаю детали лида',
   getFunnelStats: 'Формирую статистику воронки',
+  getSalesQuality: 'Анализирую качество продаж',
   getRevenueStats: 'Формирую статистику выручки',
   updateLeadStage: 'Обновляю этап лида',
+
+  // CRM - amoCRM
+  getAmoCRMStatus: 'Проверяю подключение amoCRM',
+  getAmoCRMPipelines: 'Получаю воронки amoCRM',
+  syncAmoCRMLeads: 'Синхронизирую лидов из amoCRM',
+
+  // WhatsApp
   getDialogs: 'Получаю диалоги',
   getDialogMessages: 'Загружаю сообщения',
+  analyzeDialog: 'Анализирую диалог',
   searchDialogSummaries: 'Ищу в диалогах',
 };
 

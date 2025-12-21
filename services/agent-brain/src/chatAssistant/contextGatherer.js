@@ -32,16 +32,23 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
       businessProfile,
       todayMetrics,
       activeContexts,
-      directions
+      directions,
+      adAccountPrompts
     ] = await Promise.allSettled([
       getChatHistory(conversationId),
       getBusinessProfile(userAccountId, adAccountId),
       getTodayMetrics(userAccountId, adAccountId),
       getActiveContexts(userAccountId, adAccountId),
-      getDirections(userAccountId, adAccountId)
+      getDirections(userAccountId, adAccountId),
+      getAdAccountPrompts(userAccountId, adAccountId)
     ]);
 
     // Add blocks with priorities (higher = more important, kept first)
+    // Priority 11: Business instructions from ad_account prompts — highest priority
+    if (adAccountPrompts.status === 'fulfilled' && adAccountPrompts.value) {
+      tokenBudget.addBlock('businessInstructions', adAccountPrompts.value, 11);
+    }
+
     // Priority 10: Chat history — most important for continuity
     if (chatHistory.status === 'fulfilled' && chatHistory.value) {
       tokenBudget.addBlock('recentMessages', chatHistory.value, 10);
@@ -541,6 +548,39 @@ async function getDirections(userAccountId, adAccountId) {
     fb_campaign_id: d.fb_campaign_id,
     objective: d.objective
   }));
+}
+
+/**
+ * Get prompts from ad_accounts table for personalized instructions
+ * Returns prompt1-prompt4 for business-specific context
+ */
+async function getAdAccountPrompts(userAccountId, adAccountId) {
+  if (!adAccountId) return null;
+
+  const { data, error } = await supabase
+    .from('ad_accounts')
+    .select('id, name, prompt1, prompt2, prompt3, prompt4')
+    .eq('user_account_id', userAccountId)
+    .eq('id', adAccountId)
+    .maybeSingle();
+
+  if (error) {
+    logger.warn({ error: error.message }, 'Failed to get ad account prompts');
+    return null;
+  }
+
+  if (!data) return null;
+
+  // Return only if at least prompt1 exists
+  if (!data.prompt1) return null;
+
+  return {
+    accountName: data.name,
+    prompt1: data.prompt1,
+    prompt2: data.prompt2,
+    prompt3: data.prompt3,
+    prompt4: data.prompt4
+  };
 }
 
 /**

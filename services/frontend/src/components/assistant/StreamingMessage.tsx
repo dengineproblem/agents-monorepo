@@ -4,12 +4,23 @@
  * Shows thinking status, tool execution progress, and text as it arrives
  */
 
+import { useState, useEffect } from 'react';
 import { Bot, Loader2, CheckCircle2, XCircle, Sparkles, Database, BarChart3, MessageSquare, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { getToolLabel, LAYER_LABELS } from '@/services/assistantApi';
 import type { StreamEvent, StreamEventLayer } from '@/services/assistantApi';
 import type { LayerLog } from './DebugLogsModal';
+
+// Сменяющиеся фразы для состояния "думаю"
+const THINKING_PHRASES = [
+  'Анализирую запрос...',
+  'Изучаю контекст...',
+  'Подбираю инструменты...',
+  'Обрабатываю данные...',
+  'Готовлю ответ...',
+  'Собираю информацию...',
+];
 
 // Domain icons for classification display
 const DOMAIN_ICONS: Record<string, typeof Bot> = {
@@ -55,6 +66,29 @@ export function StreamingMessage({ state }: StreamingMessageProps) {
   const DomainIcon = state.domain ? DOMAIN_ICONS[state.domain] || Bot : Bot;
   const domainLabel = state.domain ? DOMAIN_LABELS[state.domain] || state.domain : '';
 
+  // Сменяющиеся фразы когда нет конкретного сообщения
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const isThinking = state.phase === 'init' || state.phase === 'thinking' || state.phase === 'classifying';
+
+  useEffect(() => {
+    if (!isThinking || state.thinkingMessage) return;
+
+    const interval = setInterval(() => {
+      setPhraseIndex((prev) => (prev + 1) % THINKING_PHRASES.length);
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isThinking, state.thinkingMessage]);
+
+  // Сбрасываем индекс при новом запросе
+  useEffect(() => {
+    if (state.phase === 'init') {
+      setPhraseIndex(0);
+    }
+  }, [state.phase]);
+
+  const displayMessage = state.thinkingMessage || THINKING_PHRASES[phraseIndex];
+
   return (
     <div className="flex gap-3 p-4 justify-start">
       {/* Avatar */}
@@ -65,10 +99,10 @@ export function StreamingMessage({ state }: StreamingMessageProps) {
       {/* Content */}
       <div className="max-w-[80%] rounded-lg p-3 bg-muted min-w-[200px]">
         {/* Thinking/Classification Status */}
-        {(state.phase === 'init' || state.phase === 'thinking' || state.phase === 'classifying') && (
+        {isThinking && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>{state.thinkingMessage || 'Обрабатываю запрос...'}</span>
+            <span>{displayMessage}</span>
           </div>
         )}
 

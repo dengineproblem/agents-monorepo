@@ -124,11 +124,17 @@ DANGEROUS tools требуют подтверждения — сначала с�
 
       // Format response for orchestrator
       const domainResponses = {};
+      const allToolsExecuted = [];
+
       for (const [domain, result] of Object.entries(results)) {
         if (result.success) {
           domainResponses[domain] = result.response;
         } else {
           domainResponses[domain] = `Ошибка: ${result.error}`;
+        }
+        // Collect all executed tools from all domains
+        if (result.toolsExecuted) {
+          allToolsExecuted.push(...result.toolsExecuted);
         }
       }
 
@@ -136,6 +142,7 @@ DANGEROUS tools требуют подтверждения — сначала с�
         success: true,
         responses: domainResponses,
         domains_called: Object.keys(results),
+        tools_executed: allToolsExecuted, // For tracking in executedTools
         hint: 'Объедини ответы агентов в единый ответ пользователю'
       };
     }

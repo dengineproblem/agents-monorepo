@@ -31,7 +31,7 @@ import {
 import type { LayerLog } from '../components/assistant/DebugLogsModal';
 
 const Assistant: React.FC = () => {
-  const { currentAdAccountId } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
 
   // User account ID from localStorage
   const [userAccountId, setUserAccountId] = useState<string | null>(null);
@@ -42,6 +42,7 @@ const Assistant: React.FC = () => {
 
   // Current conversation
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null); // Синхронный доступ для race condition
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
 
@@ -107,10 +108,16 @@ const Assistant: React.FC = () => {
   // Reset active conversation when ad account changes
   useEffect(() => {
     setActiveConversationId(null);
+    activeConversationIdRef.current = null; // Синхронизируем ref
     setMessages([]);
     setPendingPlan(null);
     setPlanModalOpen(false);
   }, [currentAdAccountId]);
+
+  // Синхронизируем ref с state (для случаев когда state меняется извне)
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
 
   // Load messages for active conversation
   const loadMessages = useCallback(async () => {
@@ -142,6 +149,12 @@ const Assistant: React.FC = () => {
       return;
     }
 
+    // Валидация: для multi-account режима требуется выбранный аккаунт
+    if (multiAccountEnabled && !currentAdAccountId) {
+      toast.error('Выберите рекламный аккаунт');
+      return;
+    }
+
     // Cancel any existing stream
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -165,7 +178,8 @@ const Assistant: React.FC = () => {
       };
       setMessages((prev) => [...prev, tempUserMessage]);
 
-      let currentConversationId = activeConversationId;
+      // Используем ref для синхронного доступа (избегаем race condition)
+      let currentConversationId = activeConversationIdRef.current;
       let finalContent = '';
       let finalExecutedActions: ChatMessage['actions_json'] = [];
       let finalUiJson: ChatMessage['ui_json'] = undefined;
@@ -174,7 +188,7 @@ const Assistant: React.FC = () => {
       const stream = sendMessageStream(
         {
           message,
-          conversationId: activeConversationId || undefined,
+          conversationId: activeConversationIdRef.current || undefined,
           mode,
           userAccountId,
           adAccountId: currentAdAccountId || undefined,
@@ -194,8 +208,12 @@ const Assistant: React.FC = () => {
         // Handle specific events
         switch (event.type) {
           case 'init':
-            if (!currentConversationId) {
+            // Проверяем ref (синхронно) вместо state (async)
+            if (!activeConversationIdRef.current) {
+              // Синхронно обновляем ref и локальную переменную
+              activeConversationIdRef.current = event.conversationId;
               currentConversationId = event.conversationId;
+              // Async обновляем state для UI
               setActiveConversationId(event.conversationId);
               // Update temp message with real conversation ID
               setMessages((prev) =>
@@ -268,6 +286,7 @@ const Assistant: React.FC = () => {
 
   // Handle selecting a conversation
   const handleSelectConversation = (id: string) => {
+    activeConversationIdRef.current = id; // Синхронно
     setActiveConversationId(id);
     setPendingPlan(null);
     setPlanModalOpen(false);
@@ -275,6 +294,7 @@ const Assistant: React.FC = () => {
 
   // Handle creating a new conversation
   const handleNewConversation = () => {
+    activeConversationIdRef.current = null; // Синхронно
     setActiveConversationId(null);
     setMessages([]);
     setPendingPlan(null);
@@ -290,6 +310,7 @@ const Assistant: React.FC = () => {
       setConversations((prev) => prev.filter((c) => c.id !== id));
 
       if (activeConversationId === id) {
+        activeConversationIdRef.current = null; // Синхронно
         setActiveConversationId(null);
         setMessages([]);
       }

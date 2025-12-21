@@ -28,8 +28,8 @@ export function buildMetaSystemPrompt(context = {}) {
 
   const integrationsSection = formatIntegrations(context.integrations);
   const userContextSection = formatUserContext(context);
-
   const directionsSection = formatDirections(context.directions);
+  const businessInstructionsSection = formatBusinessInstructions(context.businessInstructions);
 
   return `# AI-ассистент для управления бизнесом
 
@@ -40,6 +40,8 @@ ${currentDate}
 Ты AI-оркестратор системы Performante — платформы для ROI-ориентированного управления рекламой.
 Координируешь специализированных агентов (ads, creative, crm, whatsapp).
 Агенты получают данные и отдают тебе готовые ответы. Ты формализируешь и объединяешь.
+
+${businessInstructionsSection}
 
 ## Главные принципы (ЗАПОМНИ!)
 1. **ROI — главная метрика.** Если ROI недоступен, используй QCPL (качественный лид)
@@ -214,6 +216,51 @@ function formatUserContext(context) {
   }
 
   return `## Контекст пользователя\n${lines.join('\n')}`;
+}
+
+/**
+ * Format business instructions from ad_account prompts
+ * Highest priority context - user's custom instructions for the AI
+ */
+function formatBusinessInstructions(instructions) {
+  if (!instructions?.prompt1) return '';
+
+  const lines = [
+    '## Контекст бизнеса (ОБЯЗАТЕЛЬНО УЧИТЫВАЙ!)',
+    ''
+  ];
+
+  // Add account name if available
+  if (instructions.accountName) {
+    lines.push(`**Аккаунт:** ${instructions.accountName}`);
+    lines.push('');
+  }
+
+  // Main instructions (prompt1 - always present if instructions exist)
+  lines.push('### Инструкции от владельца:');
+  lines.push(instructions.prompt1);
+  lines.push('');
+
+  // Additional prompts if present
+  if (instructions.prompt2) {
+    lines.push('### Дополнительно:');
+    lines.push(instructions.prompt2);
+    lines.push('');
+  }
+
+  if (instructions.prompt3) {
+    lines.push('### Примечания:');
+    lines.push(instructions.prompt3);
+    lines.push('');
+  }
+
+  if (instructions.prompt4) {
+    lines.push('### Особенности:');
+    lines.push(instructions.prompt4);
+    lines.push('');
+  }
+
+  return lines.join('\n');
 }
 
 /**

@@ -376,6 +376,17 @@ export function registerChatRoutes(fastify) {
       return reply.code(400).send({ error: 'message and userAccountId are required' });
     }
 
+    // Проверяем multi-account режим - требуем adAccountId
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select('multi_account_enabled')
+      .eq('id', userAccountId)
+      .single();
+
+    if (userAccount?.multi_account_enabled && !adAccountId) {
+      return reply.code(400).send({ error: 'adAccountId required for multi-account mode' });
+    }
+
     // Set SSE headers
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
