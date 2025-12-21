@@ -64,49 +64,9 @@ export async function conversationReportsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * GET /conversation-reports/:id
-   * Get a specific conversation report
-   */
-  app.get('/conversation-reports/:id', async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      const { userAccountId } = request.query as { userAccountId?: string };
-
-      if (!userAccountId) {
-        return reply.status(400).send({ error: 'userAccountId is required' });
-      }
-
-      const { data, error } = await supabase
-        .from('conversation_reports')
-        .select('*')
-        .eq('id', id)
-        .eq('user_account_id', userAccountId)
-        .single();
-
-      if (error) {
-        throw error;
-      }
-
-      if (!data) {
-        return reply.status(404).send({ error: 'Report not found' });
-      }
-
-      return reply.send({
-        success: true,
-        report: data,
-      });
-    } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to fetch report');
-      return reply.status(500).send({
-        error: 'Failed to fetch report',
-        message: error.message
-      });
-    }
-  });
-
-  /**
    * GET /conversation-reports/latest
    * Get the latest conversation report for a user
+   * NOTE: This route MUST be defined BEFORE /:id to avoid being captured
    */
   app.get('/conversation-reports/latest', async (request, reply) => {
     try {
@@ -142,81 +102,9 @@ export async function conversationReportsRoutes(app: FastifyInstance) {
   });
 
   /**
-   * POST /conversation-reports/generate
-   * Generate a new conversation report for a user
-   */
-  app.post('/conversation-reports/generate', async (request, reply) => {
-    try {
-      const body = GenerateReportSchema.parse(request.body);
-      const { userAccountId, date } = body;
-
-      app.log.info({ userAccountId, date }, 'Generating conversation report');
-
-      const reportDate = date ? new Date(date) : undefined;
-      const result = await generateConversationReport({
-        userAccountId,
-        date: reportDate
-      });
-
-      if (!result.success) {
-        return reply.status(400).send({
-          success: false,
-          error: result.error
-        });
-      }
-
-      return reply.send({
-        success: true,
-        report: result.report,
-      });
-    } catch (error: any) {
-      if (error instanceof z.ZodError) {
-        return reply.status(400).send({
-          error: 'Validation error',
-          details: error.errors
-        });
-      }
-
-      app.log.error({ error: error.message }, 'Failed to generate report');
-      return reply.status(500).send({
-        error: 'Failed to generate report',
-        message: error.message
-      });
-    }
-  });
-
-  /**
-   * POST /conversation-reports/generate-all
-   * Generate conversation reports for all users (admin endpoint)
-   */
-  app.post('/conversation-reports/generate-all', async (request, reply) => {
-    try {
-      const { date, adminKey } = request.body as { date?: string; adminKey?: string };
-
-      // Basic admin key check
-      const expectedKey = process.env.ADMIN_API_KEY;
-      if (expectedKey && adminKey !== expectedKey) {
-        return reply.status(403).send({ error: 'Forbidden' });
-      }
-
-      app.log.info({ date }, 'Generating all conversation reports');
-
-      const reportDate = date ? new Date(date) : undefined;
-      const result = await generateAllConversationReports(reportDate);
-
-      return reply.send(result);
-    } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to generate all reports');
-      return reply.status(500).send({
-        error: 'Failed to generate reports',
-        message: error.message
-      });
-    }
-  });
-
-  /**
    * GET /conversation-reports/stats
    * Get aggregated stats from recent reports
+   * NOTE: This route MUST be defined BEFORE /:id to avoid being captured
    */
   app.get('/conversation-reports/stats', async (request, reply) => {
     try {
@@ -296,6 +184,121 @@ export async function conversationReportsRoutes(app: FastifyInstance) {
       app.log.error({ error: error.message }, 'Failed to fetch report stats');
       return reply.status(500).send({
         error: 'Failed to fetch stats',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /conversation-reports/:id
+   * Get a specific conversation report
+   * NOTE: This route MUST be defined AFTER /latest and /stats
+   */
+  app.get('/conversation-reports/:id', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const { userAccountId } = request.query as { userAccountId?: string };
+
+      if (!userAccountId) {
+        return reply.status(400).send({ error: 'userAccountId is required' });
+      }
+
+      const { data, error } = await supabase
+        .from('conversation_reports')
+        .select('*')
+        .eq('id', id)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data) {
+        return reply.status(404).send({ error: 'Report not found' });
+      }
+
+      return reply.send({
+        success: true,
+        report: data,
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to fetch report');
+      return reply.status(500).send({
+        error: 'Failed to fetch report',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /conversation-reports/generate
+   * Generate a new conversation report for a user
+   */
+  app.post('/conversation-reports/generate', async (request, reply) => {
+    try {
+      const body = GenerateReportSchema.parse(request.body);
+      const { userAccountId, date } = body;
+
+      app.log.info({ userAccountId, date }, 'Generating conversation report');
+
+      const reportDate = date ? new Date(date) : undefined;
+      const result = await generateConversationReport({
+        userAccountId,
+        date: reportDate
+      });
+
+      if (!result.success) {
+        return reply.status(400).send({
+          success: false,
+          error: result.error
+        });
+      }
+
+      return reply.send({
+        success: true,
+        report: result.report,
+      });
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({
+          error: 'Validation error',
+          details: error.errors
+        });
+      }
+
+      app.log.error({ error: error.message }, 'Failed to generate report');
+      return reply.status(500).send({
+        error: 'Failed to generate report',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * POST /conversation-reports/generate-all
+   * Generate conversation reports for all users (admin endpoint)
+   */
+  app.post('/conversation-reports/generate-all', async (request, reply) => {
+    try {
+      const { date, adminKey } = request.body as { date?: string; adminKey?: string };
+
+      // Basic admin key check
+      const expectedKey = process.env.ADMIN_API_KEY;
+      if (expectedKey && adminKey !== expectedKey) {
+        return reply.status(403).send({ error: 'Forbidden' });
+      }
+
+      app.log.info({ date }, 'Generating all conversation reports');
+
+      const reportDate = date ? new Date(date) : undefined;
+      const result = await generateAllConversationReports(reportDate);
+
+      return reply.send(result);
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to generate all reports');
+      return reply.status(500).send({
+        error: 'Failed to generate reports',
         message: error.message
       });
     }

@@ -106,7 +106,8 @@ export function useConversationReports(options: UseConversationReportsOptions) {
       fetchLatestReport();
       fetchStats();
     }
-  }, [autoFetch, userAccountId, fetchReports, fetchLatestReport, fetchStats]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFetch, userAccountId]);
 
   return {
     // Данные
