@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen, MessageSquare, FileText } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -58,6 +58,13 @@ const menuItems = [
     icon: MessageSquare,
     show: true,
     tourId: 'sidebar-assistant',
+  },
+  {
+    path: '/conversation-reports',
+    label: 'Отчёты переписок',
+    icon: FileText,
+    show: true,
+    tourId: 'sidebar-conversation-reports',
   },
   {
     path: '/profile',

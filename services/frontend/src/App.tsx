@@ -33,6 +33,7 @@ import AdminAnalytics from './pages/AdminAnalytics';
 import AdminOnboarding from './pages/AdminOnboarding';
 import AdminRoute from './components/AdminRoute';
 import Assistant from './pages/Assistant';
+import ConversationReports from './pages/ConversationReports';
 import { AdminLayout } from './components/admin';
 import {
   AdminDashboard,
@@ -327,6 +328,7 @@ const AppRoutes = () => {
                       <Route path="/knowledge-base/:chapterId" element={<KnowledgeBase />} />
                       <Route path="/knowledge-base/:chapterId/:sectionId" element={<KnowledgeBase />} />
                       <Route path="/assistant" element={<Assistant />} />
+                      <Route path="/conversation-reports" element={<ConversationReports />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </SidebarAwareContent>
