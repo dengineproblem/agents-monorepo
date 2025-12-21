@@ -836,10 +836,13 @@ export const creativeHandlers = {
     };
   },
 
-  async startCreativeTest({ creative_id, objective = 'whatsapp', dry_run }, { userAccountId, adAccountId }) {
+  async startCreativeTest({ creative_id, objective = 'whatsapp', dry_run }, { userAccountId, adAccountId, adAccountDbId }) {
+    // Use adAccountDbId (UUID) for database, adAccountId (Facebook ID) for API calls
+    const dbAccountId = adAccountDbId || null;
+
     // Dry-run mode: return preview without executing
     if (dry_run) {
-      return creativeDryRunHandlers.startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId });
+      return creativeDryRunHandlers.startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId, adAccountDbId });
     }
 
     // Check if test already running
@@ -860,7 +863,7 @@ export const creativeHandlers = {
       .insert({
         user_creative_id: creative_id,
         user_id: userAccountId,
-        account_id: adAccountId,
+        account_id: dbAccountId,  // UUID from ad_accounts table
         objective,
         status: 'pending',
         test_budget_cents: 2000,

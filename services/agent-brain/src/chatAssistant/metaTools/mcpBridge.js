@@ -59,6 +59,7 @@ export async function executeMCPTool(toolName, args, context) {
         const mcpContext = {
           userAccountId: ctx.userAccountId,
           adAccountId: ctx.adAccountId,
+          adAccountDbId: ctx.adAccountDbId,  // UUID for database queries
           accessToken: ctx.accessToken,
           dangerousPolicy: ctx.dangerousPolicy || 'block',
           conversationId: ctx.conversationId,

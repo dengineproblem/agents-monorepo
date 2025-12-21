@@ -223,6 +223,7 @@ async function getStore() {
  * @param {Object} context - User context
  * @param {string} context.userAccountId - User account ID (UUID)
  * @param {string} context.adAccountId - Facebook Ad Account ID
+ * @param {string} [context.adAccountDbId] - UUID from ad_accounts table for database queries
  * @param {string} context.accessToken - Facebook Access Token
  * @param {string} [context.conversationId] - Current conversation ID
  * @param {string[]} [context.allowedDomains] - Allowed domains from classifier (ads, creative, crm, whatsapp)
@@ -238,6 +239,7 @@ async function getStore() {
 export function createSession({
   userAccountId,
   adAccountId,
+  adAccountDbId = null,  // UUID from ad_accounts table
   accessToken,
   conversationId,
   // Hybrid C extensions
@@ -259,6 +261,7 @@ export function createSession({
     // Core context
     userAccountId,
     adAccountId,
+    adAccountDbId,  // UUID for database queries
     accessToken,
     conversationId,
     // Hybrid C extensions
@@ -309,6 +312,7 @@ export function getSession(sessionId) {
     return {
       userAccountId: session.userAccountId,
       adAccountId: session.adAccountId,
+      adAccountDbId: session.adAccountDbId,  // UUID for database queries
       accessToken: session.accessToken,
       conversationId: session.conversationId,
       allowedDomains: session.allowedDomains,
@@ -344,6 +348,7 @@ export async function getSessionAsync(sessionId) {
   return {
     userAccountId: session.userAccountId,
     adAccountId: session.adAccountId,
+    adAccountDbId: session.adAccountDbId,  // UUID for database queries
     accessToken: session.accessToken,
     conversationId: session.conversationId,
     allowedDomains: session.allowedDomains,
