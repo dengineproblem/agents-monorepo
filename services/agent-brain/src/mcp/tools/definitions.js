@@ -93,7 +93,7 @@ export const crmTools = [
 ];
 
 /**
- * Creative Agent Tools (10 READ + 6 WRITE)
+ * Creative Agent Tools (10 READ + 9 WRITE)
  */
 export const creativeTools = [
   // READ tools
@@ -113,7 +113,11 @@ export const creativeTools = [
   createMCPTool('pauseCreative', CreativeToolDefs.pauseCreative, creativeHandlers.pauseCreative, 'creative'),
   createMCPTool('startCreativeTest', CreativeToolDefs.startCreativeTest, creativeHandlers.startCreativeTest, 'creative'),
   createMCPTool('stopCreativeTest', CreativeToolDefs.stopCreativeTest, creativeHandlers.stopCreativeTest, 'creative'),
-  createMCPTool('generateCreatives', CreativeToolDefs.generateCreatives, creativeHandlers.generateCreatives, 'creative')
+  // Generation tools
+  createMCPTool('generateCreatives', CreativeToolDefs.generateCreatives, creativeHandlers.generateCreatives, 'creative'),
+  createMCPTool('generateCarousel', CreativeToolDefs.generateCarousel, creativeHandlers.generateCarousel, 'creative'),
+  createMCPTool('generateTextCreative', CreativeToolDefs.generateTextCreative, creativeHandlers.generateTextCreative, 'creative'),
+  createMCPTool('generateCarouselTexts', CreativeToolDefs.generateCarouselTexts, creativeHandlers.generateCarouselTexts, 'creative')
 ];
 
 /**
@@ -158,7 +162,7 @@ export const adsTools = [
 
 /**
  * All MCP tools - Complete
- * WhatsApp (4) + CRM (12) + Creative (16) + Ads (24) = 56 tools
+ * WhatsApp (4) + CRM (12) + Creative (19) + Ads (24) = 59 tools
  */
 export const allMCPTools = [
   ...whatsappTools,

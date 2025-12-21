@@ -10,6 +10,8 @@ export const DANGEROUS_TOOLS = [
   'pauseCreative',
   'startCreativeTest',
   'generateCreatives',
+  'generateCarousel',
+  'generateTextCreative',
   // Ads tools
   'pauseCampaign',
   'resumeCampaign',

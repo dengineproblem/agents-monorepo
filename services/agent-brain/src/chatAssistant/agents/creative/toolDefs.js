@@ -177,14 +177,48 @@ export const CreativeToolDefs = {
   },
 
   generateCreatives: {
-    description: 'Запустить генерацию новых креативов для направления. Graceful fallback если сервис не подключен.',
+    description: 'Сгенерировать картинку-креатив с текстом (offer, bullets, profits). Для картинок 1080x1920.',
     schema: z.object({
-      direction_id: uuidSchema.describe('UUID направления для генерации'),
-      offer_hints: z.array(z.string()).optional().describe('Подсказки по офферу'),
-      angles: z.array(z.string()).optional().describe('Рекламные углы/подходы'),
-      count: z.number().min(1).max(10).default(3).describe('Количество креативов для генерации')
+      offer: z.string().optional().describe('Главный оффер/заголовок'),
+      bullets: z.string().optional().describe('Буллеты/преимущества'),
+      profits: z.string().optional().describe('Выгоды для клиента'),
+      cta: z.string().optional().describe('Call to action'),
+      direction_id: uuidSchema.optional().describe('UUID направления (опционально)'),
+      style_id: z.string().optional().describe('ID стиля: modern_performance, clean_minimal, bold_dark, etc.'),
+      style_prompt: z.string().optional().describe('Кастомный промпт для freestyle стиля'),
+      reference_image: z.string().optional().describe('Base64 референсного изображения')
     }),
-    meta: { timeout: 30000, retryable: false, dangerous: true }
+    meta: { timeout: 120000, retryable: false, dangerous: true }
+  },
+
+  generateCarousel: {
+    description: 'Сгенерировать карусель из 2-10 карточек с изображениями.',
+    schema: z.object({
+      carousel_texts: z.array(z.string()).min(2).max(10).describe('Массив текстов для каждой карточки (2-10 штук)'),
+      visual_style: z.string().optional().describe('Визуальный стиль: clean_minimal, modern_performance, bold_dark'),
+      style_prompt: z.string().optional().describe('Кастомный промпт для freestyle стиля'),
+      direction_id: uuidSchema.optional().describe('UUID направления')
+    }),
+    meta: { timeout: 300000, retryable: false, dangerous: true }
+  },
+
+  generateTextCreative: {
+    description: 'Сгенерировать текстовый креатив: сценарий для Reels, пост Telegram, оффер и т.д.',
+    schema: z.object({
+      text_type: z.enum(['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'])
+        .describe('Тип текста: storytelling (сторителлинг), direct_offer (прямой оффер), expert_video (экспертное видео), telegram_post, threads_post, reference'),
+      user_prompt: z.string().optional().describe('Дополнительные инструкции для генерации')
+    }),
+    meta: { timeout: 60000, retryable: false, dangerous: true }
+  },
+
+  generateCarouselTexts: {
+    description: 'Сгенерировать тексты для карусели перед генерацией изображений.',
+    schema: z.object({
+      carousel_idea: z.string().optional().describe('Идея/тема карусели'),
+      cards_count: z.number().min(2).max(10).describe('Количество карточек (2-10)')
+    }),
+    meta: { timeout: 60000, retryable: false, dangerous: false }
   }
 };
 
@@ -195,10 +229,13 @@ export const CREATIVE_WRITE_TOOLS = [
   'pauseCreative',
   'startCreativeTest',
   'stopCreativeTest',
-  'generateCreatives'
+  'generateCreatives',
+  'generateCarousel',
+  'generateTextCreative',
+  'generateCarouselTexts'
 ];
 
 // Dangerous tools that ALWAYS require confirmation
-export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest', 'pauseCreative', 'generateCreatives'];
+export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest', 'pauseCreative', 'generateCreatives', 'generateCarousel', 'generateTextCreative'];
 
 export default CreativeToolDefs;
