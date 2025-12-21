@@ -52,6 +52,15 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
       // Execute all tools for this domain
       const rawResults = await executeToolsForDomain(domainCalls, context);
 
+      // Extract plan from raw results if any tool returned it (e.g., triggerBrainOptimizationRun)
+      let extractedPlan = null;
+      for (const [toolName, data] of Object.entries(rawResults)) {
+        if (data?.result?.plan && !extractedPlan) {
+          extractedPlan = data.result.plan;
+          logger.info({ domain, toolName, stepsCount: data.result.plan.steps?.length || 0 }, 'Domain router: plan extracted from tool result');
+        }
+      }
+
       // Log results summary for debugging
       const resultsSummary = {};
       for (const [toolName, data] of Object.entries(rawResults)) {
@@ -73,13 +82,14 @@ export async function routeToolCallsToDomains(toolCalls, context, userMessage = 
         userMessage
       );
 
-      layerLogger?.info(5, `Domain ${domain} completed`, { success: true });
+      layerLogger?.info(5, `Domain ${domain} completed`, { success: true, hasPlan: !!extractedPlan });
 
       return {
         domain,
         success: true,
         response: processedResponse,
         toolsExecuted: domainCalls.map(c => c.name),
+        plan: extractedPlan, // Pass plan from tool results (e.g., triggerBrainOptimizationRun)
         latency_ms: Date.now() - startTime
       };
 

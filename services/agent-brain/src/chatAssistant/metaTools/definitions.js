@@ -125,10 +125,16 @@ DANGEROUS tools требуют подтверждения — сначала с�
       // Format response for orchestrator
       const domainResponses = {};
       const allToolsExecuted = [];
+      let extractedPlan = null; // Plan from tools like triggerBrainOptimizationRun
 
       for (const [domain, result] of Object.entries(results)) {
         if (result.success) {
           domainResponses[domain] = result.response;
+          // Extract plan if domain returned one (e.g., from triggerBrainOptimizationRun)
+          if (result.plan && !extractedPlan) {
+            extractedPlan = result.plan;
+            console.log('[executeTools] Plan extracted from domain:', domain);
+          }
         } else {
           domainResponses[domain] = `Ошибка: ${result.error}`;
         }
@@ -143,6 +149,7 @@ DANGEROUS tools требуют подтверждения — сначала с�
         responses: domainResponses,
         domains_called: Object.keys(results),
         tools_executed: allToolsExecuted, // For tracking in executedTools
+        plan: extractedPlan, // Plan from mini-AgentBrain (triggerBrainOptimizationRun)
         hint: 'Объедини ответы агентов в единый ответ пользователю'
       };
     }
