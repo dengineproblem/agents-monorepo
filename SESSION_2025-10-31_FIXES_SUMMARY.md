@@ -79,7 +79,7 @@ CRON_ENABLED=false
 {
   "where":"sendToMonitoringBot",
   "phase":"before_send",
-  "botToken":"8147295667***",
+  "botToken":"8584683514***",
   "chatId":"313145981",
   "reportLength":2345,
   "hostname":"agent-brain-prod"

@@ -12,13 +12,13 @@
 
 Было:
 ```js
-const MONITORING_BOT_TOKEN = '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
+const MONITORING_BOT_TOKEN = '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
 const MONITORING_CHAT_ID = '313145981';
 ```
 
 Стало:
 ```js
-const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
+const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
 const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '313145981';
 ```
 
@@ -35,7 +35,7 @@ const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '313145981';
 
 ```yaml
 environment:
-  - MONITORING_BOT_TOKEN=8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE
+  - MONITORING_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM
   - MONITORING_CHAT_ID=313145981
   - HOSTNAME=agent-brain-prod
   - CRON_ENABLED=false  # ⚠️ Временно отключен для тестирования
@@ -129,7 +129,7 @@ docker-compose logs -f agent-brain | grep -E "sendToMonitoringBot|processUser|pr
   "userId":"...",
   "username":"...",
   "chatId":"313145981",
-  "botToken":"8147295667***",
+  "botToken":"8584683514***",
   "reportLength":2345,
   "environment":"production",
   "hostname":"agent-brain-prod"

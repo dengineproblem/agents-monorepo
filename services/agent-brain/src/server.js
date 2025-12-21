@@ -16,7 +16,7 @@ import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
 import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
-const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8147295667:AAGEhSOkR5yvF72oW6rwb7dzMxKx9gHlcWE';
+const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
 const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '313145981,280192618')
   .split(',')
   .map(id => id.trim())
