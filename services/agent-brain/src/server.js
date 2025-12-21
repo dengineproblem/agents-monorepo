@@ -17,7 +17,7 @@ import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 
 // Мониторинговый бот для администратора (получает копии всех отчётов)
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
-const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '313145981,280192618')
+const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '-5079020326')
   .split(',')
   .map(id => id.trim())
   .filter(Boolean);
@@ -41,7 +41,8 @@ fastify.addHook('onRequest', (request, _reply, done) => {
   done();
 });
 
-startLogAlertsWorker(fastify.log).catch((err) => fastify.log.error({ err }, 'Log alerts worker crashed'));
+// ОТКЛЮЧЕНО: ошибки теперь отправляются через errorLogger в agent-service
+// startLogAlertsWorker(fastify.log).catch((err) => fastify.log.error({ err }, 'Log alerts worker crashed'));
 
 async function responsesCreate(payload) {
   // Строго фильтруем параметры, чтобы не уехать с max_tokens/max_output_tokens

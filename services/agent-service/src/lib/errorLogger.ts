@@ -13,6 +13,10 @@ import OpenAI from 'openai';
 
 const log = createLogger({ module: 'errorLogger' });
 
+// Telegram для отправки ошибок в группу
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
+const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID || '-5079020326';
+
 // Типы ошибок
 export type ErrorType =
   | 'facebook'
@@ -114,6 +118,72 @@ ${error.raw_error.substring(0, 1000)}
 }
 
 /**
+ * Отправка ошибки в Telegram группу
+ */
+async function sendErrorToTelegram(params: {
+  error_type: string;
+  error_code?: string;
+  action?: string;
+  endpoint?: string;
+  severity: string;
+  explanation: string;
+  solution: string;
+  username?: string;
+  user_account_id?: string;
+}): Promise<void> {
+  try {
+    // Эмодзи по severity
+    const severityEmoji = params.severity === 'critical' ? '🔴' : params.severity === 'warning' ? '🟡' : '🔵';
+
+    // Эмодзи по типу ошибки
+    const typeEmojis: Record<string, string> = {
+      facebook: '📘',
+      amocrm: '🔷',
+      bitrix24: '🟦',
+      evolution: '💬',
+      creative_generation: '🎨',
+      scoring: '📊',
+      webhook: '🔗',
+      cron: '⏰',
+      api: '🌐',
+      frontend: '🖥️',
+    };
+    const typeEmoji = typeEmojis[params.error_type] || '❗';
+
+    const message = `${severityEmoji} <b>Ошибка: ${params.error_type}</b> ${typeEmoji}
+
+${params.username ? `👤 Пользователь: ${params.username}` : ''}${params.user_account_id ? `\n🆔 ID: <code>${params.user_account_id}</code>` : ''}
+${params.action ? `📍 Действие: ${params.action}` : ''}
+${params.endpoint ? `🔗 Endpoint: ${params.endpoint}` : ''}
+${params.error_code ? `📟 Код: ${params.error_code}` : ''}
+
+💡 <b>Расшифровка:</b>
+${params.explanation}
+
+🔧 <b>Решение:</b>
+${params.solution}`;
+
+    const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_ADMIN_CHAT_ID,
+        text: message,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      log.warn({ status: response.status, body }, 'Failed to send error to Telegram');
+    }
+  } catch (err) {
+    log.warn({ error: String(err) }, 'Error sending to Telegram');
+  }
+}
+
+/**
  * Логирование ошибки в таблицу error_logs
  *
  * Использование:
@@ -149,6 +219,17 @@ export async function logErrorToAdmin(params: LogErrorParams): Promise<void> {
   } = params;
 
   try {
+    // Получаем username пользователя если есть user_account_id
+    let username: string | undefined;
+    if (user_account_id) {
+      const { data: userData } = await supabase
+        .from('user_accounts')
+        .select('username')
+        .eq('id', user_account_id)
+        .single();
+      username = userData?.username;
+    }
+
     // Генерируем LLM объяснение
     const { explanation, solution } = await generateErrorExplanation({
       error_type,
@@ -183,6 +264,19 @@ export async function logErrorToAdmin(params: LogErrorParams): Promise<void> {
       return;
     }
 
+    // Отправляем в Telegram группу
+    sendErrorToTelegram({
+      error_type,
+      error_code,
+      action,
+      endpoint,
+      severity,
+      explanation,
+      solution,
+      username,
+      user_account_id,
+    }).catch(() => {}); // fire-and-forget
+
     // Для critical ошибок создаём admin notification
     if (severity === 'critical' && insertedError?.id) {
       try {
@@ -203,7 +297,8 @@ export async function logErrorToAdmin(params: LogErrorParams): Promise<void> {
       errorId: insertedError?.id,
       type: error_type,
       severity,
-      user_account_id
+      user_account_id,
+      telegramSent: true
     }, 'Error logged to admin');
 
   } catch (err) {

@@ -13,13 +13,13 @@
 Было:
 ```js
 const MONITORING_BOT_TOKEN = '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
-const MONITORING_CHAT_ID = '313145981';
+const MONITORING_CHAT_ID = '-5079020326';
 ```
 
 Стало:
 ```js
 const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
-const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '313145981';
+const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '-5079020326';
 ```
 
 ### 2. ✅ Улучшено логирование в sendToMonitoringBot
@@ -36,7 +36,7 @@ const MONITORING_CHAT_ID = process.env.MONITORING_CHAT_ID || '313145981';
 ```yaml
 environment:
   - MONITORING_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM
-  - MONITORING_CHAT_ID=313145981
+  - MONITORING_CHAT_ID=-5079020326
   - HOSTNAME=agent-brain-prod
   - CRON_ENABLED=false  # ⚠️ Временно отключен для тестирования
 ```
@@ -128,7 +128,7 @@ docker-compose logs -f agent-brain | grep -E "sendToMonitoringBot|processUser|pr
   "phase":"before_send",
   "userId":"...",
   "username":"...",
-  "chatId":"313145981",
+  "chatId":"-5079020326",
   "botToken":"8584683514***",
   "reportLength":2345,
   "environment":"production",
@@ -161,7 +161,7 @@ docker-compose logs agent-brain | grep '"where":"sendToMonitoringBot"' | grep '"
 
 ### Шаг 6: Проверить в Telegram
 
-Зайдите в чат с мониторинг-ботом (313145981) и убедитесь, что:
+Зайдите в чат с мониторинг-ботом (-5079020326) и убедитесь, что:
 - Пришло столько же сообщений, сколько `success:true` в логах
 - Каждое сообщение начинается с "📊 ОТЧЁТ КЛИЕНТА"
 

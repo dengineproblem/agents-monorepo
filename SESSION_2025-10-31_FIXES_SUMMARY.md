@@ -80,7 +80,7 @@ CRON_ENABLED=false
   "where":"sendToMonitoringBot",
   "phase":"before_send",
   "botToken":"8584683514***",
-  "chatId":"313145981",
+  "chatId":"-5079020326",
   "reportLength":2345,
   "hostname":"agent-brain-prod"
 }
@@ -116,7 +116,7 @@ docker-compose logs -f agent-brain | grep -E "sendToMonitoringBot|responsesCreat
 ```
 
 ### 4. Проверить в Telegram
-- Зайти в чат с мониторинг-ботом (313145981)
+- Зайти в чат с мониторинг-ботом (-5079020326)
 - Убедиться что количество сообщений = количество `success:true` в логах
 
 ---

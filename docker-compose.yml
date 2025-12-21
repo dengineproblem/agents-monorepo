@@ -17,12 +17,12 @@ services:
       - AGENT_SERVICE_URL=http://agent-service:8082
       - CRON_ENABLED=true
       - CRON_SCHEDULE=0 8 * * *
-      - LOG_ALERT_TELEGRAM_BOT_TOKEN=7892027011:AAESp4liXox67dJptKeMxNZRaBx7ecK3QJg
-      - LOG_ALERT_TELEGRAM_CHAT_ID=313145981
+      - LOG_ALERT_TELEGRAM_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM
+      - LOG_ALERT_TELEGRAM_CHAT_ID=-5079020326
       - LOKI_URL=http://loki:3100
       - LOG_ALERT_LOKI_ENVIRONMENT=development
       - MONITORING_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM
-      - MONITORING_CHAT_ID=313145981
+      - MONITORING_CHAT_ID=-5079020326
       - HOSTNAME=agent-brain-prod
       - OPENAI_MAX_RETRIES=3
       - HYBRID_ENABLED=true
@@ -58,7 +58,8 @@ services:
       - ANALYZER_URL=http://creative-analyzer:7081
       - CHATBOT_SERVICE_URL=http://chatbot-service:8083
       - CREATIVE_GENERATION_SERVICE_URL=http://creative-generation-service:8085
-      - LOG_ALERT_TELEGRAM_BOT_TOKEN=7892027011:AAESp4liXox67dJptKeMxNZRaBx7ecK3QJg
+      - LOG_ALERT_TELEGRAM_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM
+      - TELEGRAM_BOT_TOKEN=8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM
     ports:
       - "8082:8082"
     restart: unless-stopped

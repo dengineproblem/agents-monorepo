@@ -18,7 +18,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const log = createLogger({ module: 'telegramWebhook' });
 
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '7263071246:AAFC4r0v5NzTNoZjO-wYPf2_-PAg7SwNXBc';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // =====================================================
