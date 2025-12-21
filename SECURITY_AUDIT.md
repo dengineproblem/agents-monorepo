@@ -1,7 +1,8 @@
 # Security Audit Report & Remediation Guide
 
 > **Дата аудита:** 21.12.2024
-> **Критических проблем:** 12 | **Высоких:** 8 | **Средних:** 6
+> **Обновлено:** Дополнительная проверка
+> **Критических проблем:** 15 | **Высоких:** 11 | **Средних:** 8
 
 ---
 
@@ -9,16 +10,22 @@
 
 | Область | Критичные | Высокие | Средние |
 |---------|-----------|---------|---------|
-| Frontend | 5 | 3 | 2 |
-| Backend | 4 | 3 | 2 |
-| Database | 3 | 2 | 2 |
+| Frontend | 6 | 4 | 3 |
+| Backend | 5 | 4 | 3 |
+| Database | 4 | 3 | 2 |
 
-**Главные проблемы:**
-1. Hardcoded Telegram Bot Token в коде (активный!)
-2. Пароли хранятся в localStorage в открытом виде
-3. Admin endpoints без авторизации
-4. RLS политики с `USING(true)` - открывают доступ всем
-5. CORS: `origin: true` разрешает любой домен
+**ТОП-10 проблем (по критичности):**
+
+1. **Telegram Bot Token** в коде: `8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM`
+2. **Telegram Admin Chat ID** в коде: `-5079020326`
+3. **Пароль отправляется на внешний webhook** (n8n) в открытом виде!
+4. **Пароли в localStorage** + DEBUG вывод на экран
+5. **Admin endpoints без авторизации** - любой может получить список users
+6. **x-user-id header spoofing** - нет верификации, легко подделать
+7. **RLS политики с USING(true)** - открывают 8 таблиц всем
+8. **CORS: origin: true** на 4 сервисах
+9. **TikTok App ID** hardcoded: `7527489318093668353`
+10. **Потенциальный injection** через .or() в adminUsers.ts
 
 ---
 
@@ -43,9 +50,44 @@
 
 Эти нужно считать скомпрометированными и обновить в Facebook Developer Console.
 
+**TikTok App ID** тоже в коде (`agent-service/src/routes/tiktokOAuth.ts:9`):
+```typescript
+const TIKTOK_APP_ID = process.env.TIKTOK_APP_ID || '7527489318093668353';
+```
+
 ---
 
-### 1.2 Удаление console.log из production
+### 1.2 КРИТИЧНО: Пароль отправляется на внешний сервис
+
+**Файл:** `services/frontend/src/pages/Signup.tsx:48-57`
+
+```typescript
+// ПАРОЛЬ ОТПРАВЛЯЕТСЯ В ОТКРЫТОМ ВИДЕ НА N8N WEBHOOK!
+await fetch(WEBHOOK_URL, {
+  method: 'POST',
+  body: JSON.stringify({
+    code,
+    telegram_id,
+    username,
+    password,  // <-- ПАРОЛЬ!
+    phone
+  })
+});
+```
+
+**URL:** `https://n8n.performanteaiagency.com/webhook/token`
+
+**Проблемы:**
+- Пароль передаётся в JSON без шифрования
+- HTTP запрос может быть перехвачен (MITM)
+- N8n логирует все входящие данные - пароль в логах!
+- Нет необходимости отправлять пароль на webhook
+
+**Исправление:** Удалить password из webhook payload. Пароль должен обрабатываться только на бэкенде с хешированием.
+
+---
+
+### 1.4 Удаление console.log из production
 
 **Проблема:** 100+ console.log выводят sensitive данные в DevTools
 
@@ -76,7 +118,7 @@ export default defineConfig({
 
 ---
 
-### 1.3 Удаление паролей из localStorage
+### 1.5 Удаление паролей из localStorage
 
 **Проблема:** `services/frontend/src/pages/Signup.tsx:27-29`
 ```typescript
@@ -106,7 +148,7 @@ const [formData, setFormData] = useState({
 
 ---
 
-### 1.4 Авторизация для Admin endpoints
+### 1.6 Авторизация для Admin endpoints
 
 **Проблема:** Все `/admin/*` endpoints доступны без авторизации
 
@@ -154,7 +196,7 @@ app.get('/admin/users', { preHandler: adminAuthMiddleware }, async (req, res) =>
 
 ---
 
-### 1.5 Исправление CORS
+### 1.7 Исправление CORS
 
 **Проблема:** `origin: true` разрешает запросы с любого домена
 
@@ -177,6 +219,74 @@ app.register(cors, {
 - `services/chatbot-service/src/server.ts:56-61`
 - `services/crm-backend/src/server.ts:24-29`
 - `services/creative-generation-service/src/server.ts:33-35`
+
+---
+
+### 1.8 x-user-id Header Spoofing
+
+**Проблема:** Аутентификация через `x-user-id` header легко подделать
+
+**Найдено 13+ мест использования:**
+```typescript
+// Любой может подделать этот заголовок!
+const userId = request.headers['x-user-id'] as string;
+const adminId = req.headers['x-user-id'] as string;
+```
+
+**Файлы:**
+- `agent-service/src/routes/adminChat.ts:114`
+- `agent-service/src/routes/impersonation.ts:84, 159, 310`
+- `agent-service/src/routes/notifications.ts:38, 97, 140, 182, 235`
+- `agent-service/src/routes/adminErrors.ts:206`
+- `agent-service/src/routes/onboarding.ts:411, 469`
+
+**Исправление:** Заменить на JWT токены или session cookies:
+
+```typescript
+// middleware/auth.ts
+import jwt from 'jsonwebtoken';
+
+export async function authMiddleware(request: FastifyRequest, reply: FastifyReply) {
+  const token = request.headers.authorization?.replace('Bearer ', '');
+
+  if (!token) {
+    return reply.status(401).send({ error: 'No token provided' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    request.userId = decoded.userId;
+  } catch {
+    return reply.status(401).send({ error: 'Invalid token' });
+  }
+}
+```
+
+---
+
+### 1.9 Потенциальный Injection в adminUsers.ts
+
+**Файл:** `services/agent-service/src/routes/adminUsers.ts:43`
+
+```typescript
+// Интерполяция search в .or() - потенциально опасно!
+countQuery = countQuery.or(`username.ilike.%${search}%,telegram_id.ilike.%${search}%`);
+```
+
+Если `search` содержит специальные символы (`,`, `.`, `%`), это может нарушить логику запроса.
+
+**Исправление:**
+```typescript
+// Экранировать специальные символы
+const sanitizedSearch = search.replace(/[%_,.\(\)]/g, '');
+
+// Или использовать отдельные фильтры
+if (search) {
+  countQuery = countQuery.or(
+    `username.ilike.%${sanitizedSearch}%,telegram_id.ilike.%${sanitizedSearch}%`
+  );
+}
+```
 
 ---
 
@@ -494,25 +604,35 @@ export function decrypt(text: string): string {
 
 ## Чеклист для проверки
 
-### Критические (сегодня)
-- [ ] Ротировать Telegram Bot Token
-- [ ] Добавить `esbuild.drop: ['console']` в vite.config.ts
+### Критические (СЕГОДНЯ!)
+- [ ] Ротировать Telegram Bot Token (скомпрометирован!)
+- [ ] Удалить password из webhook в Signup.tsx:51-57
 - [ ] Удалить пароли из localStorage в Signup.tsx
-- [ ] Удалить DEBUG блок из Signup.tsx
-- [ ] Добавить adminAuthMiddleware
+- [ ] Удалить DEBUG блок из Signup.tsx:132
+- [ ] Добавить adminAuthMiddleware для /admin/* routes
+- [ ] Добавить `esbuild.drop: ['console']` в vite.config.ts
 
 ### Высокие (эта неделя)
-- [ ] Исправить CORS на всех сервисах
-- [ ] Применить миграцию 110_fix_rls_policies.sql
-- [ ] Добавить rate limiting
+- [ ] Исправить CORS на всех 4 сервисах (origin: true -> whitelist)
+- [ ] Применить миграцию 106_fix_rls_security_policies.sql
+- [ ] Заменить x-user-id header на JWT токены
+- [ ] Добавить rate limiting (@fastify/rate-limit)
 - [ ] Добавить проверку владельца в adAccounts.ts
-- [ ] Убрать все hardcoded credentials
+- [ ] Убрать все hardcoded credentials:
+  - [ ] FB_APP_ID из FacebookConnect.tsx
+  - [ ] FB_CLIENT_ID из Signup.tsx
+  - [ ] PARTNER_ID из FacebookManualConnectModal.tsx
+  - [ ] TIKTOK_APP_ID из tiktokOAuth.ts
+  - [ ] TELEGRAM_BOT_TOKEN из errorLogger.ts, telegramWebhook.ts
+  - [ ] TELEGRAM_ADMIN_CHAT_ID из errorLogger.ts
 
 ### Средние (этот спринт)
-- [ ] Исправить XSS (innerHTML -> React)
-- [ ] Добавить HMAC верификацию webhooks
+- [ ] Исправить XSS (innerHTML -> React) в 3 файлах
+- [ ] Добавить HMAC верификацию webhooks (Facebook, AmoCRM, Bitrix24)
 - [ ] Удалить temp_original_salesApi.ts
-- [ ] Настроить шифрование токенов
+- [ ] Санитизировать search в adminUsers.ts:43
+- [ ] Настроить шифрование токенов в БД
+- [ ] Добавить JSON.parse error handling для localStorage
 
 ---
 
