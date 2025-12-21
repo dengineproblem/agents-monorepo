@@ -27,13 +27,41 @@ const fastify = Fastify({
   genReqId: () => randomUUID()
 });
 
-// CORS для Frontend
+// SECURITY: CORS whitelist - разрешаем только известные домены
+const ALLOWED_ORIGINS = [
+  // Production
+  'https://app.performanteaiagency.com',
+  'https://performanteaiagency.com',
+  'https://www.performanteaiagency.com',
+  'https://agents.performanteaiagency.com',
+  'https://crm.performanteaiagency.com',
+  'https://brain2.performanteaiagency.com',
+  // Development
+  'http://localhost:3001',
+  'http://localhost:3002',
+  'http://localhost:3003',
+  'http://localhost:8082',
+  'http://localhost:7080'
+];
+
 await fastify.register(cors, {
-  origin: true, // В продакшене можно ограничить конкретными доменами
+  origin: (origin, cb) => {
+    // Разрешаем запросы без origin (server-to-server, curl, etc)
+    if (!origin) {
+      cb(null, true);
+      return;
+    }
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      cb(null, true);
+    } else {
+      fastify.log.warn({ origin }, 'CORS: blocked request from unknown origin');
+      cb(new Error('CORS: origin not allowed'), false);
+    }
+  },
   credentials: true,
-  preflight: true, // Автоматически отвечать на OPTIONS запросы
+  preflight: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id']
 });
 
 fastify.addHook('onRequest', (request, _reply, done) => {

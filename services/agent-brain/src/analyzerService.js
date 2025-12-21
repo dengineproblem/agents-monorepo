@@ -14,9 +14,25 @@ import { logErrorToAdmin, logCreativeAnalysisError } from './lib/errorLogger.js'
 
 const fastify = Fastify({ logger: true });
 
-// CORS для фронтенда
+// SECURITY: CORS whitelist - разрешаем только известные домены
+const ALLOWED_ORIGINS = [
+  'https://app.performanteaiagency.com',
+  'https://performanteaiagency.com',
+  'https://agents.performanteaiagency.com',
+  'https://brain2.performanteaiagency.com',
+  'http://localhost:3001',
+  'http://localhost:7081'
+];
+
 await fastify.register(cors, {
-  origin: true, // Разрешить все origin (или укажи конкретный домен)
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      cb(null, true);
+    } else {
+      fastify.log.warn({ origin }, 'CORS: blocked request from unknown origin');
+      cb(new Error('CORS: origin not allowed'), false);
+    }
+  },
   credentials: true
 });
 

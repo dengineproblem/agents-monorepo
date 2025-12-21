@@ -47,6 +47,7 @@ import adminLeadsRoutes from './routes/adminLeads.js';
 import adminErrorsRoutes from './routes/adminErrors.js';
 import adminNotificationsRoutes from './routes/adminNotifications.js';
 import adminSettingsRoutes from './routes/adminSettings.js';
+import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
@@ -73,8 +74,38 @@ app.addHook('onRequest', (request, _reply, done) => {
 const PORT = Number(process.env.PORT || 8082);
 
 app.get('/health', async () => ({ ok: true }));
+
+// SECURITY: CORS whitelist - разрешаем только известные домены
+const ALLOWED_ORIGINS = [
+  // Production
+  'https://app.performanteaiagency.com',
+  'https://performanteaiagency.com',
+  'https://www.performanteaiagency.com',
+  'https://agents.performanteaiagency.com',
+  'https://crm.performanteaiagency.com',
+  'https://brain2.performanteaiagency.com',
+  // Development
+  'http://localhost:3001',
+  'http://localhost:3002',
+  'http://localhost:3003',
+  'http://localhost:8082',
+  'http://localhost:7080'
+];
+
 app.register(cors, {
-  origin: true,
+  origin: (origin, cb) => {
+    // Разрешаем запросы без origin (server-to-server, curl, etc)
+    if (!origin) {
+      cb(null, true);
+      return;
+    }
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      cb(null, true);
+    } else {
+      app.log.warn({ origin }, 'CORS: blocked request from unknown origin');
+      cb(new Error('CORS: origin not allowed'), false);
+    }
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "x-user-id"]
@@ -119,14 +150,21 @@ app.register(onboardingRoutes);
 app.register(notificationsRoutes);
 app.register(impersonationRoutes);
 app.register(telegramWebhook);
-app.register(adminChatRoutes);
-app.register(adminStatsRoutes);
-app.register(adminUsersRoutes);
-app.register(adminAdsRoutes);
-app.register(adminLeadsRoutes);
-app.register(adminErrorsRoutes);
-app.register(adminNotificationsRoutes);
-app.register(adminSettingsRoutes);
+
+// SECURITY: Admin routes с обязательной проверкой is_tech_admin
+app.register(async (adminApp) => {
+  // Применяем middleware ко всем роутам в этом контексте
+  adminApp.addHook('preHandler', requireTechAdmin);
+
+  adminApp.register(adminChatRoutes);
+  adminApp.register(adminStatsRoutes);
+  adminApp.register(adminUsersRoutes);
+  adminApp.register(adminAdsRoutes);
+  adminApp.register(adminLeadsRoutes);
+  adminApp.register(adminErrorsRoutes);
+  adminApp.register(adminNotificationsRoutes);
+  adminApp.register(adminSettingsRoutes);
+});
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);

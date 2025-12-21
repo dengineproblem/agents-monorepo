@@ -25,6 +25,15 @@ import {
 import { LayerLogger, createNoOpLogger } from './shared/layerLogger.js';
 import { ORCHESTRATOR_CONFIG } from './config.js';
 
+// SECURITY: Allowed origins for CORS
+const ALLOWED_ORIGINS = [
+  'https://app.performanteaiagency.com',
+  'https://performanteaiagency.com',
+  'https://agents.performanteaiagency.com',
+  'http://localhost:3001',
+  'http://localhost:3002'
+];
+
 const orchestrator = new Orchestrator();
 
 /**
@@ -388,11 +397,18 @@ export function registerChatRoutes(fastify) {
     }
 
     // Set SSE headers
+    // SECURITY: Validate origin against whitelist
+    const requestOrigin = request.headers.origin;
+    const allowedOrigin = ALLOWED_ORIGINS.includes(requestOrigin)
+      ? requestOrigin
+      : 'https://app.performanteaiagency.com';
+
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': allowedOrigin,
+      'Access-Control-Allow-Credentials': 'true',
       'X-Accel-Buffering': 'no'
     });
 
