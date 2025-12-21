@@ -45,5 +45,33 @@ CREATE POLICY "Users can view their own or public creatives"
 CREATE INDEX IF NOT EXISTS idx_text_gen_history_type_gallery
 ON text_generation_history(text_type, created_at DESC);
 
+-- Enable RLS on text_generation_history if not enabled
+ALTER TABLE text_generation_history ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies to recreate them
+DROP POLICY IF EXISTS "Users can view their own text generations" ON text_generation_history;
+DROP POLICY IF EXISTS "Users can view all text generations" ON text_generation_history;
+DROP POLICY IF EXISTS "Users can insert their own text generations" ON text_generation_history;
+
+-- Policy: All authenticated users can view all text generations (for gallery)
+CREATE POLICY "Users can view all text generations"
+    ON text_generation_history
+    FOR SELECT
+    TO authenticated
+    USING (true);
+
+-- Policy: Users can only insert their own text generations
+CREATE POLICY "Users can insert their own text generations"
+    ON text_generation_history
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+-- Add 'reference' type to text_type check constraint if not exists
+-- First drop the old constraint, then add new one with 'reference' included
+ALTER TABLE text_generation_history DROP CONSTRAINT IF EXISTS text_generation_history_text_type_check;
+ALTER TABLE text_generation_history ADD CONSTRAINT text_generation_history_text_type_check
+    CHECK (text_type IN ('storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'));
+
 -- Comments
 COMMENT ON COLUMN generated_creatives.is_draft IS 'True if creative is a draft (not published to Facebook), can be edited later';
