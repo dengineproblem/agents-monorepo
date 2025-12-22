@@ -404,12 +404,13 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
             else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
               siteLeads = parseInt(action.value || "0", 10);
             }
-            // Кастомные конверсии пикселя (берем все custom как лиды сайта)
-            else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-              siteLeads += parseInt(action.value || "0", 10);
+            // Кастомные конверсии пикселя (берем все custom как лиды сайта) - ТОЛЬКО если нет fb_pixel_lead
+            else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+              siteLeads = parseInt(action.value || "0", 10);
             }
-            // Facebook Lead Forms (Instant Forms)
-            else if (action.action_type === 'lead') {
+            // Facebook Lead Forms - ТОЛЬКО onsite_conversion.lead_grouped
+            // НЕ считаем 'lead' - это агрегат который дублирует pixel_lead для site кампаний
+            else if (action.action_type === 'onsite_conversion.lead_grouped') {
               leadFormLeads = parseInt(action.value || "0", 10);
             }
           }
@@ -821,6 +822,8 @@ export const facebookApi = {
           let leadFormLeads = 0;
 
           if (stat.actions && Array.isArray(stat.actions)) {
+            let hasPixelLead = false;
+
             for (const action of stat.actions) {
               // Общие лиды (messaging_connection)
               if (action.action_type === 'onsite_conversion.total_messaging_connection') {
@@ -830,17 +833,18 @@ export const facebookApi = {
               else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
                 qualityLeads = parseInt(action.value || "0", 10);
               }
-              // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
-              // чтобы избежать дублирования с onsite_web_lead
+              // Лиды с сайта - fb_pixel_lead имеет приоритет
               else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
                 siteLeads = parseInt(action.value || "0", 10);
+                hasPixelLead = true;
               }
-              // Кастомные конверсии пикселя (берем все custom как лиды сайта)
-              else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-                siteLeads += parseInt(action.value || "0", 10);
+              // Кастомные конверсии - ТОЛЬКО если нет fb_pixel_lead (избегаем дублирования)
+              else if (!hasPixelLead && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+                siteLeads = parseInt(action.value || "0", 10);
               }
-              // Facebook Lead Forms
-              else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+              // Facebook Lead Forms - ТОЛЬКО onsite_conversion.lead_grouped (настоящие лидформы)
+              // НЕ считаем 'lead' - это агрегат который дублирует pixel_lead для site кампаний
+              else if (action.action_type === 'onsite_conversion.lead_grouped') {
                 leadFormLeads = parseInt(action.value || "0", 10);
               }
             }
@@ -1064,12 +1068,13 @@ export const facebookApi = {
               else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
                 siteLeads = parseInt(action.value || '0', 10);
               }
-              // Кастомные конверсии пикселя
-              else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-                siteLeads += parseInt(action.value || '0', 10);
+              // Кастомные конверсии пикселя - ТОЛЬКО если нет fb_pixel_lead
+              else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+                siteLeads = parseInt(action.value || '0', 10);
               }
-              // Facebook Lead Forms
-              else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+              // Facebook Lead Forms - ТОЛЬКО onsite_conversion.lead_grouped
+              // НЕ считаем 'lead' - это агрегат который дублирует pixel_lead для site кампаний
+              else if (action.action_type === 'onsite_conversion.lead_grouped') {
                 leadFormLeads = parseInt(action.value || '0', 10);
               }
             }
@@ -1153,12 +1158,13 @@ export const facebookApi = {
                 else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
                   siteLeads = parseInt(action.value || "0", 10);
                 }
-                // Кастомные конверсии пикселя
-                else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-                  siteLeads += parseInt(action.value || "0", 10);
+                // Кастомные конверсии пикселя - ТОЛЬКО если нет fb_pixel_lead
+                else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+                  siteLeads = parseInt(action.value || "0", 10);
                 }
-                // Facebook Lead Forms
-                else if (action.action_type === 'lead' || action.action_type === 'onsite_conversion.lead_grouped') {
+                // Facebook Lead Forms - ТОЛЬКО onsite_conversion.lead_grouped
+                // НЕ считаем 'lead' - это агрегат который дублирует pixel_lead для site кампаний
+                else if (action.action_type === 'onsite_conversion.lead_grouped') {
                   leadFormLeads = parseInt(action.value || "0", 10);
                 }
               }

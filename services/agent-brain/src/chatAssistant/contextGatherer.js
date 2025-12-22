@@ -668,7 +668,18 @@ export async function getOrCreateConversation({ userAccountId, adAccountId, conv
   if (conversationId) {
     const existing = await unifiedStore.getById(conversationId);
     if (existing && existing.user_account_id === userAccountId) {
-      return existing;
+      // CRITICAL: Validate ad_account_id match to prevent cross-account data mixing
+      // If user switched accounts, we must NOT reuse conversation from different account
+      if (adAccountId && existing.ad_account_id && existing.ad_account_id !== adAccountId) {
+        logger.warn({
+          conversationId,
+          existingAdAccountId: existing.ad_account_id,
+          requestedAdAccountId: adAccountId
+        }, 'Conversation ad_account_id mismatch - creating new conversation');
+        // Fall through to create new conversation for the correct account
+      } else {
+        return existing;
+      }
     }
   }
 
