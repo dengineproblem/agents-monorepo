@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { translateError } from '@/utils/errorTranslations';
 import { Bug } from 'lucide-react';
 import Header from '../components/Header';
 import { useAppContext } from '../context/AppContext';
@@ -239,7 +240,7 @@ const Assistant: React.FC = () => {
             break;
 
           case 'error':
-            toast.error(event.message || 'Ошибка при обработке');
+            toast.error(translateError(event.message, 'Ошибка при обработке'));
             break;
         }
       }

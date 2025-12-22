@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { facebookApi, type Adset } from '../services/facebookApi';
 import { useTranslation } from '../i18n/LanguageContext';
 import { toast } from 'sonner';
+import { translateError } from '@/utils/errorTranslations';
 import { REQUIRE_CONFIRMATION } from '../config/appReview';
 
 interface EditAdsetDialogProps {
@@ -69,7 +70,7 @@ const EditAdsetDialog: React.FC<EditAdsetDialogProps> = ({
 
     } catch (error: any) {
       console.error('Ошибка при сохранении ad set:', error);
-      toast.error(error.message || 'Не удалось сохранить изменения');
+      toast.error(translateError(error, 'Не удалось сохранить изменения'));
     } finally {
       setSaving(false);
     }

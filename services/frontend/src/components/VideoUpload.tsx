@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { translateError } from '@/utils/errorTranslations';
 import { Upload, Video, ChevronDown, DollarSign, Rocket, Loader2 } from 'lucide-react';
 import { useAppContext } from '@/context/AppContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -418,11 +419,11 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setManualLaunchBudget(10);
         setManualStartMode('now'); // Сбрасываем на "Сейчас"
       } else {
-        toast.error(result.error || 'Ошибка запуска рекламы');
+        toast.error(translateError(result.error, 'Ошибка запуска рекламы'));
       }
     } catch (error: any) {
       console.error('Ошибка запуска рекламы:', error);
-      toast.error(error.message || 'Ошибка запуска рекламы');
+      toast.error(translateError(error, 'Ошибка запуска рекламы'));
     } finally {
       setManualLaunchLoading(false);
     }
@@ -1068,7 +1069,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       
     } catch (error) {
       console.error('Ошибка при загрузке видео:', error);
-      toast.error('Ошибка при загрузке видео: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'));
+      toast.error(translateError(error, 'Ошибка при загрузке видео'));
       setIsUploading(false);
       setProgress(0);
     }
@@ -1448,7 +1449,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       performUpload(form, webhookUrl, 0, 'image');
     } catch (error) {
       console.error('Ошибка при загрузке изображения:', error);
-      toast.error('Ошибка при загрузке изображения: ' + (error instanceof Error ? error.message : 'Неизвестная ошибка'));
+      toast.error(translateError(error, 'Ошибка при загрузке изображения'));
       setIsUploading(false);
       setProgress(0);
     }

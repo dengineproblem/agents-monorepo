@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
+import { translateError } from '@/utils/errorTranslations';
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 import { API_BASE_URL } from '@/config/api';
@@ -160,7 +161,7 @@ const FacebookConnect: React.FC<FacebookConnectProps> = ({ onConnected }) => {
 
     } catch (error) {
       console.error('Error connecting Facebook:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to connect Facebook account';
+      const errorMessage = translateError(error, 'Не удалось подключить Facebook');
       setError(errorMessage);
       toast.error(errorMessage);
       setIsLoading(false);

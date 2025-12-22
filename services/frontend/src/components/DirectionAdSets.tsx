@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { translateError } from '@/utils/errorTranslations';
 import { Plus, RefreshCw, Unlink, ChevronDown, ChevronUp, X } from 'lucide-react';
 
 // Используем API_BASE_URL из config/api.ts (уже содержит /api в конце)
@@ -65,7 +66,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       setAdsets(data.adsets || []);
     } catch (error) {
       console.error('Error fetching ad sets:', error);
-      toast.error('Failed to load ad sets');
+      toast.error('Не удалось загрузить ad sets');
     } finally {
       setIsLoading(false);
     }
@@ -118,7 +119,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
           successCount++;
         } catch (error: any) {
           console.error(`Error linking ad set ${fbAdSetId}:`, error);
-          toast.error(error.message || `Ошибка при привязке ${fbAdSetId}`);
+          toast.error(translateError(error, `Ошибка при привязке ${fbAdSetId}`));
           failCount++;
         }
       }
@@ -134,7 +135,7 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
       fetchAdSets();
     } catch (error: any) {
       console.error('Error linking ad sets:', error);
-      toast.error(error.message || 'Ошибка при привязке ad sets');
+      toast.error(translateError(error, 'Ошибка при привязке ad sets'));
     } finally {
       setIsLinking(false);
     }
@@ -205,11 +206,11 @@ export function DirectionAdSets({ directionId, userAccountId }: DirectionAdSetsP
         throw new Error('Failed to sync ad sets');
       }
 
-      toast.success(`Synced ${data.synced_count} ad sets successfully`);
+      toast.success(`Синхронизировано ad sets: ${data.synced_count}`);
       fetchAdSets();
     } catch (error) {
       console.error('Error syncing ad sets:', error);
-      toast.error('Failed to sync ad sets');
+      toast.error('Не удалось синхронизировать ad sets');
     } finally {
       setIsSyncing(false);
     }

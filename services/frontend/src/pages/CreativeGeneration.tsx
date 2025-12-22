@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import Header from '@/components/Header';
 import PageHero from '@/components/common/PageHero';
 import { toast } from 'sonner';
+import { translateError } from '@/utils/errorTranslations';
 import { API_BASE_URL } from '@/config/api';
 import { supabase } from '@/integrations/supabase/client';
 import { useDirections } from '@/hooks/useDirections';
@@ -434,7 +435,7 @@ const CreativeGeneration = () => {
       }
     } catch (error: any) {
       console.error(`Error generating ${type}:`, error);
-      toast.error(error.message || `Ошибка генерации ${getTypeLabel(type).toLowerCase()}`);
+      toast.error(translateError(error, `Ошибка генерации ${getTypeLabel(type).toLowerCase()}`));
     } finally {
       setLoading(prev => ({ ...prev, [type]: false }));
     }
@@ -714,7 +715,7 @@ const CreativeGeneration = () => {
       }
     } catch (error: any) {
       console.error('Error generating creative:', error);
-      toast.error(error.message || 'Ошибка генерации креатива');
+      toast.error(translateError(error, 'Ошибка генерации креатива'));
     } finally {
       setLoading(prev => ({ ...prev, image: false }));
     }
@@ -882,7 +883,7 @@ const CreativeGeneration = () => {
       setSelectedDirectionId('');
     } catch (error: any) {
       console.error('Ошибка при создании креатива:', error);
-      toast.error(error.message || 'Ошибка создания креатива', { id: 'upscale-create' });
+      toast.error(translateError(error, 'Ошибка создания креатива'), { id: 'upscale-create' });
     } finally {
       setIsCreatingCreative(false);
     }
