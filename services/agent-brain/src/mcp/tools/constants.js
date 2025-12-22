@@ -9,14 +9,19 @@ export const DANGEROUS_TOOLS = [
   'launchCreative',
   'pauseCreative',
   'startCreativeTest',
+  'generateCreatives',
+  'generateCarousel',
+  'generateTextCreative',
   // Ads tools
   'pauseCampaign',
   'resumeCampaign',
   'pauseAdSet',
   'resumeAdSet',
+  'pauseAd',
   'updateBudget',
   'updateDirectionBudget',
-  'pauseDirection'
+  'pauseDirection',
+  'triggerBrainOptimizationRun'  // Brain Agent - can change budgets, pause/resume adsets
 ];
 
 /**

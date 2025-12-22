@@ -667,10 +667,10 @@ export const creativeHandlers = {
     }
   },
 
-  async launchCreative({ creative_id, direction_id, dry_run }, { userAccountId, adAccountId, accessToken }) {
+  async launchCreative({ creative_id, direction_id, dry_run }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
     // Dry-run mode: return preview without executing
     if (dry_run) {
-      return creativeDryRunHandlers.launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId });
+      return creativeDryRunHandlers.launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId, adAccountDbId });
     }
 
     // Get creative details
@@ -771,10 +771,10 @@ export const creativeHandlers = {
     }
   },
 
-  async pauseCreative({ creative_id, reason, dry_run }, { userAccountId, accessToken, adAccountId }) {
+  async pauseCreative({ creative_id, reason, dry_run }, { userAccountId, accessToken, adAccountId, adAccountDbId }) {
     // Dry-run mode: return preview without executing
     if (dry_run) {
-      return creativeDryRunHandlers.pauseCreative({ creative_id }, { userAccountId, adAccountId });
+      return creativeDryRunHandlers.pauseCreative({ creative_id }, { userAccountId, adAccountId, adAccountDbId });
     }
 
     // Get all ads for this creative
@@ -836,10 +836,13 @@ export const creativeHandlers = {
     };
   },
 
-  async startCreativeTest({ creative_id, objective = 'whatsapp', dry_run }, { userAccountId, adAccountId }) {
+  async startCreativeTest({ creative_id, objective = 'whatsapp', dry_run }, { userAccountId, adAccountId, adAccountDbId }) {
+    // Use adAccountDbId (UUID) for database, adAccountId (Facebook ID) for API calls
+    const dbAccountId = adAccountDbId || null;
+
     // Dry-run mode: return preview without executing
     if (dry_run) {
-      return creativeDryRunHandlers.startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId });
+      return creativeDryRunHandlers.startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId, adAccountDbId });
     }
 
     // Check if test already running
@@ -860,7 +863,7 @@ export const creativeHandlers = {
       .insert({
         user_creative_id: creative_id,
         user_id: userAccountId,
-        account_id: adAccountId,
+        account_id: dbAccountId,  // UUID from ad_accounts table
         objective,
         status: 'pending',
         test_budget_cents: 2000,
@@ -917,22 +920,21 @@ export const creativeHandlers = {
   },
 
   /**
-   * generateCreatives - Генерация новых креативов на основе направления
-   * Graceful fallback если сервис генерации не подключен
+   * generateCreatives - Генерация креатива-картинки (single image)
+   * Вызывает /generate-creative endpoint Creative Generation Service
    */
-  async generateCreatives({ direction_id, offer_hints, angles, count = 3 }, { userAccountId, adAccountDbId }) {
+  async generateCreatives({ offer, bullets, profits, cta, direction_id, style_id, style_prompt, reference_image }, { userAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
     // Check if creative generation service is configured
     const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
 
     if (!creativeServiceUrl) {
-      // Graceful fallback
       return {
         success: true,
         status: 'not_configured',
         message: 'Сервис генерации креативов не подключен',
-        setup_guide: 'Для автоматической генерации креативов необходимо подключить Creative Generation Service. Обратитесь к администратору.',
+        setup_guide: 'Для автоматической генерации креативов необходимо подключить Creative Generation Service.',
         recommendations: [
           'Вы можете загрузить креативы вручную через интерфейс',
           'Или использовать существующие креативы из библиотеки'
@@ -940,85 +942,461 @@ export const creativeHandlers = {
       };
     }
 
-    // Get direction details for context
-    const { data: direction, error: dirError } = await supabase
-      .from('account_directions')
-      .select('id, name, description, objective, target_audience')
-      .eq('id', direction_id)
-      .eq('user_account_id', userAccountId)
-      .single();
-
-    if (dirError || !direction) {
-      return { success: false, error: 'Направление не найдено' };
-    }
-
     try {
-      // Call creative generation service
-      const response = await fetch(`${creativeServiceUrl}/api/generate`, {
+      const response = await fetch(`${creativeServiceUrl}/generate-creative`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          direction_id,
-          direction_name: direction.name,
-          direction_description: direction.description,
-          objective: direction.objective,
-          target_audience: direction.target_audience,
-          offer_hints: offer_hints || [],
-          angles: angles || [],
-          count,
-          user_account_id: userAccountId,
-          account_id: dbAccountId
+          user_id: userAccountId,
+          account_id: dbAccountId,
+          offer: offer || '',
+          bullets: bullets || '',
+          profits: profits || '',
+          cta: cta || '',
+          direction_id: direction_id || null,
+          style_id: style_id || 'modern_performance',
+          style_prompt: style_prompt || null,
+          reference_image: reference_image || null
         })
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        logger.error({ status: response.status, error: errorData }, 'Creative generation failed');
+        logger.error({ status: response.status, error: errorData }, 'Image creative generation failed');
 
         return {
-          success: true,
-          status: 'error',
-          message: 'Ошибка генерации креативов',
-          error_details: errorData.message || 'Сервис временно недоступен'
+          success: false,
+          error: errorData.error || 'Ошибка генерации креатива',
+          error_details: errorData.details
         };
       }
 
       const result = await response.json();
 
-      // Log the generation request
+      // Log the generation
       await supabase.from('agent_logs').insert({
         ad_account_id: dbAccountId,
         level: 'info',
-        message: `Creative generation requested for direction ${direction.name}`,
+        message: `Image creative generated via Chat Assistant`,
         context: {
-          direction_id,
-          count,
-          job_id: result.job_id,
+          creative_id: result.creative_id,
+          style_id: style_id || 'modern_performance',
           source: 'CreativeAgent'
         }
-      });
+      }).catch(() => {});
 
       return {
         success: true,
-        status: result.status || 'queued',
-        job_id: result.job_id,
-        creatives_count: count,
-        estimated_time_sec: result.estimated_time_sec || 120,
-        message: `Запущена генерация ${count} креативов для направления "${direction.name}"`
+        creative_id: result.creative_id,
+        image_url: result.image_url,
+        generations_remaining: result.generations_remaining,
+        message: 'Креатив успешно сгенерирован'
       };
 
     } catch (error) {
       logger.error({ error: error.message }, 'Failed to call creative generation service');
 
       return {
-        success: true,
-        status: 'service_unavailable',
-        message: 'Сервис генерации временно недоступен',
-        recommendations: [
-          'Попробуйте позже',
-          'Или загрузите креативы вручную'
-        ]
+        success: false,
+        error: 'Сервис генерации временно недоступен',
+        recommendations: ['Попробуйте позже', 'Или загрузите креативы вручную']
       };
+    }
+  },
+
+  /**
+   * generateCarousel - Генерация карусели (2-10 карточек)
+   * Вызывает /generate-carousel endpoint Creative Generation Service
+   */
+  async generateCarousel({ carousel_texts, visual_style, style_prompt, direction_id }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return {
+        success: true,
+        status: 'not_configured',
+        message: 'Сервис генерации креативов не подключен',
+        setup_guide: 'Для генерации каруселей необходимо подключить Creative Generation Service.'
+      };
+    }
+
+    if (!carousel_texts || carousel_texts.length < 2 || carousel_texts.length > 10) {
+      return {
+        success: false,
+        error: 'Для карусели нужно от 2 до 10 текстов карточек'
+      };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-carousel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          account_id: dbAccountId,
+          carousel_texts,
+          visual_style: visual_style || 'clean_minimal',
+          style_prompt: style_prompt || null,
+          direction_id: direction_id || null
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        logger.error({ status: response.status, error: errorData }, 'Carousel generation failed');
+
+        return {
+          success: false,
+          error: errorData.error || 'Ошибка генерации карусели'
+        };
+      }
+
+      const result = await response.json();
+
+      // Log the generation
+      await supabase.from('agent_logs').insert({
+        ad_account_id: dbAccountId,
+        level: 'info',
+        message: `Carousel (${carousel_texts.length} cards) generated via Chat Assistant`,
+        context: {
+          carousel_id: result.carousel_id,
+          cards_count: carousel_texts.length,
+          source: 'CreativeAgent'
+        }
+      }).catch(() => {});
+
+      return {
+        success: true,
+        carousel_id: result.carousel_id,
+        carousel_data: result.carousel_data,
+        generations_remaining: result.generations_remaining,
+        message: `Карусель из ${carousel_texts.length} карточек успешно сгенерирована`
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate carousel');
+
+      return {
+        success: false,
+        error: 'Сервис генерации временно недоступен'
+      };
+    }
+  },
+
+  /**
+   * generateTextCreative - Генерация текстового креатива
+   * Вызывает /generate-text-creative endpoint Creative Generation Service
+   */
+  async generateTextCreative({ text_type, user_prompt }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return {
+        success: true,
+        status: 'not_configured',
+        message: 'Сервис генерации креативов не подключен',
+        setup_guide: 'Для генерации текстовых креативов необходимо подключить Creative Generation Service.'
+      };
+    }
+
+    const validTypes = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
+    if (!validTypes.includes(text_type)) {
+      return {
+        success: false,
+        error: `Неверный тип текста. Доступные: ${validTypes.join(', ')}`
+      };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-text-creative`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          text_type,
+          user_prompt: user_prompt || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        logger.error({ status: response.status, error: errorData }, 'Text creative generation failed');
+
+        return {
+          success: false,
+          error: errorData.error || 'Ошибка генерации текста'
+        };
+      }
+
+      const result = await response.json();
+
+      // Log the generation
+      await supabase.from('agent_logs').insert({
+        ad_account_id: dbAccountId,
+        level: 'info',
+        message: `Text creative (${text_type}) generated via Chat Assistant`,
+        context: {
+          text_type,
+          generation_id: result.generation_id,
+          source: 'CreativeAgent'
+        }
+      }).catch(() => {});
+
+      return {
+        success: true,
+        text: result.text,
+        generation_id: result.generation_id,
+        text_type,
+        message: `Текстовый креатив "${text_type}" успешно сгенерирован`
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate text creative');
+
+      return {
+        success: false,
+        error: 'Сервис генерации временно недоступен'
+      };
+    }
+  },
+
+  /**
+   * generateCarouselTexts - Генерация текстов для карусели
+   * Вызывает /generate-carousel-texts endpoint для получения текстов карточек
+   */
+  async generateCarouselTexts({ carousel_idea, cards_count }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return {
+        success: true,
+        status: 'not_configured',
+        message: 'Сервис генерации креативов не подключен'
+      };
+    }
+
+    if (!cards_count || cards_count < 2 || cards_count > 10) {
+      return {
+        success: false,
+        error: 'Количество карточек должно быть от 2 до 10'
+      };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-carousel-texts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          account_id: dbAccountId,
+          carousel_idea: carousel_idea || '',
+          cards_count
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        logger.error({ status: response.status, error: errorData }, 'Carousel texts generation failed');
+
+        return {
+          success: false,
+          error: errorData.error || 'Ошибка генерации текстов'
+        };
+      }
+
+      const result = await response.json();
+
+      return {
+        success: true,
+        texts: result.texts,
+        message: `Сгенерировано ${result.texts?.length || 0} текстов для карусели`
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate carousel texts');
+
+      return {
+        success: false,
+        error: 'Сервис генерации временно недоступен'
+      };
+    }
+  },
+
+  // ============================================================
+  // TEXT ELEMENT GENERATION (for image creative flow)
+  // Flow: generateOffer → generateBullets → generateProfits → generateCta → generateCreatives
+  // ============================================================
+
+  /**
+   * generateOffer - Генерация заголовка/оффера для креатива
+   */
+  async generateOffer({ prompt, existing_bullets, existing_profits, existing_cta }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return {
+        success: false,
+        error: 'Сервис генерации не подключен'
+      };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-offer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_bullets: existing_bullets || '',
+          existing_benefits: existing_profits || '',
+          existing_cta: existing_cta || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации оффера' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        offer: result.offer,
+        message: 'Оффер сгенерирован. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate offer');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
+  },
+
+  /**
+   * generateBullets - Генерация буллетов/преимуществ
+   */
+  async generateBullets({ prompt, existing_offer, existing_profits, existing_cta }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return { success: false, error: 'Сервис генерации не подключен' };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-bullets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_offer: existing_offer || '',
+          existing_benefits: existing_profits || '',
+          existing_cta: existing_cta || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации буллетов' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        bullets: result.bullets,
+        message: 'Буллеты сгенерированы. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate bullets');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
+  },
+
+  /**
+   * generateProfits - Генерация выгод для клиента
+   */
+  async generateProfits({ prompt, existing_offer, existing_bullets, existing_cta }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return { success: false, error: 'Сервис генерации не подключен' };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-profits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_offer: existing_offer || '',
+          existing_bullets: existing_bullets || '',
+          existing_cta: existing_cta || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации выгод' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        profits: result.profits,
+        message: 'Выгоды сгенерированы. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate profits');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
+    }
+  },
+
+  /**
+   * generateCta - Генерация призыва к действию (CTA)
+   */
+  async generateCta({ prompt, existing_offer, existing_bullets, existing_profits }, { userAccountId }) {
+    const creativeServiceUrl = process.env.CREATIVE_GENERATION_URL;
+
+    if (!creativeServiceUrl) {
+      return { success: false, error: 'Сервис генерации не подключен' };
+    }
+
+    try {
+      const response = await fetch(`${creativeServiceUrl}/generate-cta`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userAccountId,
+          prompt: prompt || '',
+          existing_offer: existing_offer || '',
+          existing_bullets: existing_bullets || '',
+          existing_benefits: existing_profits || ''
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return { success: false, error: errorData.error || 'Ошибка генерации CTA' };
+      }
+
+      const result = await response.json();
+      return {
+        success: true,
+        cta: result.cta,
+        message: 'CTA сгенерирован. Можете отредактировать или перегенерировать.'
+      };
+
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to generate cta');
+      return { success: false, error: 'Сервис генерации временно недоступен' };
     }
   }
 };

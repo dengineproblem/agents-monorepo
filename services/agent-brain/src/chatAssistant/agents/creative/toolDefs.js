@@ -176,15 +176,107 @@ export const CreativeToolDefs = {
     meta: { timeout: 20000, retryable: false, dangerous: false }
   },
 
-  generateCreatives: {
-    description: 'Запустить генерацию новых креативов для направления. Graceful fallback если сервис не подключен.',
+  // ============================================================
+  // IMAGE CREATIVE GENERATION
+  // Flow: generateOffer → generateBullets → generateProfits → generateCta → generateCreatives
+  // ============================================================
+
+  generateOffer: {
+    description: 'ШАГ 1: Сгенерировать заголовок/оффер для креатива. После генерации пользователь может отредактировать или перегенерировать.',
     schema: z.object({
-      direction_id: uuidSchema.describe('UUID направления для генерации'),
-      offer_hints: z.array(z.string()).optional().describe('Подсказки по офферу'),
-      angles: z.array(z.string()).optional().describe('Рекламные углы/подходы'),
-      count: z.number().min(1).max(10).default(3).describe('Количество креативов для генерации')
+      prompt: z.string().optional().describe('Контекст/пожелания для генерации оффера'),
+      existing_bullets: z.string().optional().describe('Уже сгенерированные буллеты (если есть)'),
+      existing_profits: z.string().optional().describe('Уже сгенерированные выгоды (если есть)'),
+      existing_cta: z.string().optional().describe('Уже сгенерированный CTA (если есть)')
     }),
-    meta: { timeout: 30000, retryable: false, dangerous: true }
+    meta: { timeout: 30000, retryable: true, dangerous: false }
+  },
+
+  generateBullets: {
+    description: 'ШАГ 2: Сгенерировать буллеты/преимущества для креатива. Учитывает уже созданный оффер.',
+    schema: z.object({
+      prompt: z.string().optional().describe('Контекст/пожелания для генерации буллетов'),
+      existing_offer: z.string().optional().describe('Уже сгенерированный оффер'),
+      existing_profits: z.string().optional().describe('Уже сгенерированные выгоды (если есть)'),
+      existing_cta: z.string().optional().describe('Уже сгенерированный CTA (если есть)')
+    }),
+    meta: { timeout: 30000, retryable: true, dangerous: false }
+  },
+
+  generateProfits: {
+    description: 'ШАГ 3: Сгенерировать выгоды для клиента. Учитывает оффер и буллеты.',
+    schema: z.object({
+      prompt: z.string().optional().describe('Контекст/пожелания для генерации выгод'),
+      existing_offer: z.string().optional().describe('Уже сгенерированный оффер'),
+      existing_bullets: z.string().optional().describe('Уже сгенерированные буллеты'),
+      existing_cta: z.string().optional().describe('Уже сгенерированный CTA (если есть)')
+    }),
+    meta: { timeout: 30000, retryable: true, dangerous: false }
+  },
+
+  generateCta: {
+    description: 'ШАГ 4: Сгенерировать призыв к действию (CTA). Учитывает оффер, буллеты и выгоды.',
+    schema: z.object({
+      prompt: z.string().optional().describe('Контекст/пожелания для генерации CTA'),
+      existing_offer: z.string().optional().describe('Уже сгенерированный оффер'),
+      existing_bullets: z.string().optional().describe('Уже сгенерированные буллеты'),
+      existing_profits: z.string().optional().describe('Уже сгенерированные выгоды')
+    }),
+    meta: { timeout: 30000, retryable: true, dangerous: false }
+  },
+
+  generateCreatives: {
+    description: 'ШАГ 5 (финал): Сгенерировать картинку-креатив 1080x1920 с готовыми текстами. ВАЖНО: Сначала сгенерируй тексты через generateOffer/Bullets/Profits/Cta, потом вызывай этот инструмент с готовыми текстами.',
+    schema: z.object({
+      offer: z.string().describe('Готовый оффер/заголовок (из generateOffer)'),
+      bullets: z.string().optional().describe('Готовые буллеты (из generateBullets)'),
+      profits: z.string().optional().describe('Готовые выгоды (из generateProfits)'),
+      cta: z.string().optional().describe('Готовый CTA (из generateCta)'),
+      direction_id: uuidSchema.optional().describe('UUID направления'),
+      style_id: z.string().optional().describe('Стиль изображения: modern_performance (современный), clean_minimal (минималистичный), bold_dark (тёмный контрастный), neon_glow (неоновый), gradient_soft (мягкий градиент)'),
+      style_prompt: z.string().optional().describe('Кастомный промпт для freestyle стиля (если style_id не подходит)'),
+      reference_image: z.string().optional().describe('Base64 референсного изображения для копирования стиля')
+    }),
+    meta: { timeout: 120000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
+  // CAROUSEL GENERATION
+  // Flow: generateCarouselTexts → (редактирование) → generateCarousel
+  // ============================================================
+
+  generateCarouselTexts: {
+    description: 'ШАГ 1 для карусели: Сгенерировать тексты для всех карточек. После генерации пользователь может отредактировать тексты.',
+    schema: z.object({
+      carousel_idea: z.string().optional().describe('Идея/тема карусели (например: "5 причин выбрать нас", "Как увеличить продажи")'),
+      cards_count: z.number().min(2).max(10).describe('Количество карточек (2-10)')
+    }),
+    meta: { timeout: 60000, retryable: true, dangerous: false }
+  },
+
+  generateCarousel: {
+    description: 'ШАГ 2 для карусели (финал): Сгенерировать изображения для карусели. ВАЖНО: Сначала сгенерируй тексты через generateCarouselTexts, потом вызывай этот инструмент с готовыми текстами.',
+    schema: z.object({
+      carousel_texts: z.array(z.string()).min(2).max(10).describe('Массив готовых текстов для каждой карточки (2-10 штук)'),
+      visual_style: z.string().optional().describe('Стиль: clean_minimal (минималистичный), modern_performance (современный), bold_dark (тёмный), gradient_soft (градиент)'),
+      style_prompt: z.string().optional().describe('Кастомный промпт для freestyle стиля'),
+      direction_id: uuidSchema.optional().describe('UUID направления')
+    }),
+    meta: { timeout: 300000, retryable: false, dangerous: true }
+  },
+
+  // ============================================================
+  // TEXT CREATIVE (сценарии, посты)
+  // ============================================================
+
+  generateTextCreative: {
+    description: 'Сгенерировать текстовый креатив: сценарий для Reels/видео, пост для соцсетей, оффер.',
+    schema: z.object({
+      text_type: z.enum(['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'])
+        .describe('Тип текста: storytelling (сторителлинг для Reels), direct_offer (прямой продающий оффер), expert_video (экспертное видео), telegram_post (пост Telegram), threads_post (пост Threads), reference (референс)'),
+      user_prompt: z.string().optional().describe('Дополнительные инструкции: тема, тон, особенности')
+    }),
+    meta: { timeout: 60000, retryable: true, dangerous: false }
   }
 };
 
@@ -195,10 +287,25 @@ export const CREATIVE_WRITE_TOOLS = [
   'pauseCreative',
   'startCreativeTest',
   'stopCreativeTest',
-  'generateCreatives'
+  // Text generation (не dangerous - можно перегенерировать)
+  'generateOffer',
+  'generateBullets',
+  'generateProfits',
+  'generateCta',
+  'generateCarouselTexts',
+  'generateTextCreative',
+  // Image generation (dangerous - тратит ресурсы)
+  'generateCreatives',
+  'generateCarousel'
 ];
 
-// Dangerous tools that ALWAYS require confirmation
-export const CREATIVE_DANGEROUS_TOOLS = ['launchCreative', 'startCreativeTest', 'pauseCreative', 'generateCreatives'];
+// Dangerous tools that ALWAYS require confirmation (тратят ресурсы или меняют рекламу)
+export const CREATIVE_DANGEROUS_TOOLS = [
+  'launchCreative',      // Запускает рекламу
+  'startCreativeTest',   // Тратит бюджет на тест
+  'pauseCreative',       // Останавливает рекламу
+  'generateCreatives',   // Генерирует изображение (дорого)
+  'generateCarousel'     // Генерирует карусель (очень дорого)
+];
 
 export default CreativeToolDefs;

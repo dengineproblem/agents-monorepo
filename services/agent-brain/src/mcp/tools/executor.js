@@ -114,6 +114,7 @@ export async function executeToolWithContext(name, args, context) {
   const toolContext = {
     userAccountId: context.userAccountId,
     adAccountId: context.adAccountId,
+    adAccountDbId: context.adAccountDbId,  // UUID for database queries
     accessToken: context.accessToken
   };
 

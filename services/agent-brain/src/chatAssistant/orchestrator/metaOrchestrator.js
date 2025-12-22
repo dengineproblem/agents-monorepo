@@ -47,6 +47,7 @@ export async function processWithMetaTools({
   const sessionId = createSession({
     userAccountId: toolContext.userAccountId,
     adAccountId: toolContext.adAccountId,
+    adAccountDbId: toolContext.adAccountDbId,  // UUID for database queries
     accessToken: toolContext.accessToken,
     conversationId: toolContext.conversationId,
     dangerousPolicy: 'block',
