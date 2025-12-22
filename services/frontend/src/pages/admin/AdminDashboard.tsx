@@ -79,7 +79,11 @@ const AdminDashboard: React.FC = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/stats/dashboard`);
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const headers: HeadersInit = currentUser.id
+        ? { 'x-user-id': currentUser.id }
+        : {};
+      const res = await fetch(`${API_BASE_URL}/admin/stats/dashboard`, { headers });
       if (res.ok) {
         const data = await res.json();
         setStats(data.stats);

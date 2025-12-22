@@ -28,22 +28,27 @@ const AdminLayout: React.FC = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const headers: HeadersInit = currentUser.id
+          ? { 'x-user-id': currentUser.id }
+          : {};
+
         // Fetch unread chats count
-        const chatsRes = await fetch(`${API_BASE_URL}/admin/chats/unread-count`);
+        const chatsRes = await fetch(`${API_BASE_URL}/admin/chats/unread-count`, { headers });
         if (chatsRes.ok) {
           const data = await chatsRes.json();
           setUnreadChats(data.count || 0);
         }
 
         // Fetch unresolved errors count
-        const errorsRes = await fetch(`${API_BASE_URL}/admin/errors/unresolved-count`);
+        const errorsRes = await fetch(`${API_BASE_URL}/admin/errors/unresolved-count`, { headers });
         if (errorsRes.ok) {
           const data = await errorsRes.json();
           setUnresolvedErrors(data.count || 0);
         }
 
         // Fetch unread notifications count
-        const notificationsRes = await fetch(`${API_BASE_URL}/admin/notifications/unread-count`);
+        const notificationsRes = await fetch(`${API_BASE_URL}/admin/notifications/unread-count`, { headers });
         if (notificationsRes.ok) {
           const data = await notificationsRes.json();
           setUnreadNotifications(data.count || 0);
