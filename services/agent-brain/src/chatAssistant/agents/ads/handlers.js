@@ -2517,24 +2517,28 @@ export const adsHandlers = {
   },
 
   // ============================================================
-  // CUSTOM FB API QUERY (LLM-powered)
+  // CUSTOM FB API QUERY (LLM-powered) - Enhanced version
   // ============================================================
 
   /**
    * Execute custom Facebook API query using LLM
    * For non-standard metrics that don't have a dedicated tool
    *
-   * Flow:
-   * 1. LLM analyzes user_request
-   * 2. LLM builds FB Graph API query (endpoint, fields, params)
-   * 3. Execute query to FB
-   * 4. On error: LLM fixes query, retry (max 3 times)
-   * 5. Return result or final error
+   * Enhanced Flow:
+   * 1. LLM (gpt-4o) analyzes user_request with comprehensive FB API reference
+   * 2. Pre-validate generated query plan before execution
+   * 3. Execute query to FB Graph API
+   * 4. On error: LLM fixes query with detailed error context, retry (max 3 times)
+   * 5. Log successful queries for future few-shot learning
+   * 6. Return result or detailed error
    */
-  async customFbQuery({ user_request, entity_type, entity_id, period }, { accessToken, adAccountId }) {
+  async customFbQuery({ user_request, entity_type, entity_id, period }, { accessToken, adAccountId, userAccountId }) {
     const openai = await import('openai');
     const OpenAI = openai.default;
     const client = new OpenAI();
+
+    // Import FB API reference with comprehensive documentation
+    const { buildCustomFbQuerySystemPrompt, validateQueryPlan } = await import('../../shared/fbApiReference.js');
 
     const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
     const dateRange = period ? getDateRange(period) : null;
@@ -2556,42 +2560,8 @@ export const adsHandlers = {
         basePath = actId;
     }
 
-    const systemPrompt = `Ты эксперт по Facebook Marketing API.
-
-Твоя задача: построить корректный запрос к FB Graph API на основе вопроса пользователя.
-
-## Доступные endpoints и fields:
-
-### Account level (act_<id>):
-- /insights: spend, impressions, clicks, cpm, cpc, ctr, actions, cost_per_action_type
-- /campaigns: id, name, status, objective, daily_budget
-- /adsets: id, name, status, daily_budget, targeting
-- /ads: id, name, status, creative
-
-### Campaign/AdSet/Ad level:
-- /insights: те же метрики + date breakdown
-- fields: id, name, status, effective_status, daily_budget, bid_amount
-
-### Breakdowns:
-- age, gender, country, region, device_platform, publisher_platform, placement
-
-### Time ranges:
-- time_range: {"since": "YYYY-MM-DD", "until": "YYYY-MM-DD"}
-- date_preset: today, yesterday, last_7d, last_14d, last_30d, lifetime
-
-## Формат ответа (JSON):
-{
-  "endpoint": "<entity_id>/insights или <entity_id>/campaigns и т.д.",
-  "fields": "spend,impressions,clicks,ctr",
-  "params": {
-    "time_range": {"since": "2024-01-01", "until": "2024-01-07"},
-    "breakdowns": "age,gender",
-    "level": "ad"
-  },
-  "explanation": "Краткое объяснение что запрашиваем"
-}
-
-Отвечай ТОЛЬКО JSON без markdown.`;
+    // Use comprehensive system prompt with few-shot examples
+    const systemPrompt = buildCustomFbQuerySystemPrompt(actId);
 
     const userPrompt = `Запрос пользователя: "${user_request}"
 
@@ -2604,18 +2574,19 @@ ${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Пер�
     const MAX_ATTEMPTS = 3;
     let lastError = null;
     let attemptPrompt = userPrompt;
+    let allAttempts = []; // For logging
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        // Step 1: Get query from LLM
+        // Step 1: Get query from LLM (using gpt-4o for better accuracy)
         const completion = await client.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: 'gpt-4o',  // Upgraded from gpt-4o-mini for complex queries
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: attemptPrompt }
           ],
-          temperature: 0.2,
-          max_tokens: 500
+          temperature: 0.1,  // Lower temperature for more consistent output
+          max_tokens: 800
         });
 
         const llmResponse = completion.choices[0]?.message?.content || '';
@@ -2632,11 +2603,33 @@ ${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Пер�
         } catch (parseError) {
           logger.warn({ attempt, llmResponse }, 'customFbQuery: failed to parse LLM response');
           lastError = `Не удалось распознать план запроса: ${parseError.message}`;
-          attemptPrompt = `${userPrompt}\n\nПредыдущая попытка не удалась: ${lastError}\nПопробуй снова, верни только валидный JSON.`;
+          attemptPrompt = `${userPrompt}\n\nПредыдущая попытка не удалась: ${lastError}\nВерни ТОЛЬКО валидный JSON без markdown блоков.`;
+          allAttempts.push({ attempt, error: lastError, type: 'parse_error' });
           continue;
         }
 
-        // Step 2: Execute FB API query
+        // Step 2: Pre-validate query plan BEFORE sending to FB API
+        const validation = validateQueryPlan(queryPlan);
+        if (!validation.valid) {
+          logger.warn({ attempt, errors: validation.errors, queryPlan }, 'customFbQuery: validation failed');
+          lastError = `Ошибки валидации: ${validation.errors.join('; ')}`;
+          attemptPrompt = `${userPrompt}
+
+ОШИБКИ ВАЛИДАЦИИ (исправь перед отправкой):
+${validation.errors.map(e => `- ${e}`).join('\n')}
+${validation.warnings.length > 0 ? `\nПРЕДУПРЕЖДЕНИЯ:\n${validation.warnings.map(w => `- ${w}`).join('\n')}` : ''}
+
+Исправь запрос и верни только валидный JSON.`;
+          allAttempts.push({ attempt, error: lastError, type: 'validation_error', queryPlan });
+          continue;
+        }
+
+        // Log warnings but proceed
+        if (validation.warnings.length > 0) {
+          logger.info({ warnings: validation.warnings }, 'customFbQuery: validation warnings (proceeding)');
+        }
+
+        // Step 3: Execute FB API query
         const params = {
           fields: queryPlan.fields,
           ...queryPlan.params
@@ -2649,6 +2642,11 @@ ${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Пер�
           params.time_range = JSON.stringify({ since: dateRange.since, until: dateRange.until });
         }
 
+        // Handle filtering (must be JSON string)
+        if (params.filtering && typeof params.filtering === 'object') {
+          params.filtering = JSON.stringify(params.filtering);
+        }
+
         logger.info({
           attempt,
           endpoint: queryPlan.endpoint,
@@ -2658,8 +2656,8 @@ ${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Пер�
 
         const result = await fbGraph('GET', queryPlan.endpoint, accessToken, params);
 
-        // Success!
-        return {
+        // Step 4: Success! Log for future learning
+        const successResult = {
           success: true,
           query: {
             endpoint: queryPlan.endpoint,
@@ -2669,26 +2667,37 @@ ${dateRange ? `Период: ${dateRange.since} - ${dateRange.until}` : 'Пер�
           },
           data: result.data || result,
           attempts: attempt,
-          source: 'custom_fb_query'
+          source: 'custom_fb_query_v2'
         };
+
+        // Log successful query asynchronously (fire and forget)
+        this._logSuccessfulQuery(userAccountId, user_request, queryPlan, successResult.data).catch(err => {
+          logger.warn({ error: err.message }, 'customFbQuery: failed to log successful query');
+        });
+
+        return successResult;
 
       } catch (fbError) {
         const errorMessage = fbError.message || String(fbError);
-        logger.warn({ attempt, error: errorMessage }, 'customFbQuery: FB API error');
+        const fbErrorCode = fbError.fbError?.code;
+        const fbErrorSubcode = fbError.fbError?.error_subcode;
+
+        logger.warn({ attempt, error: errorMessage, fbErrorCode, fbErrorSubcode }, 'customFbQuery: FB API error');
 
         lastError = errorMessage;
+        allAttempts.push({ attempt, error: errorMessage, type: 'fb_api_error', fbErrorCode });
 
-        // Build retry prompt with error context
+        // Build detailed retry prompt with error context
         attemptPrompt = `${userPrompt}
 
-ПРЕДЫДУЩАЯ ПОПЫТКА #${attempt} ОШИБКА:
+ОШИБКА FB API (попытка #${attempt}):
 ${errorMessage}
+${fbErrorCode ? `Код ошибки: ${fbErrorCode}` : ''}
 
-Исправь запрос учитывая эту ошибку. Частые проблемы:
-- Неверный формат time_range (должен быть JSON строка)
-- Недопустимые breakdowns для данного уровня
-- Несуществующие fields
-- Нужен access к ads_read permission`;
+РУКОВОДСТВО ПО ИСПРАВЛЕНИЮ:
+${this._getErrorFixGuidance(fbErrorCode, errorMessage)}
+
+Исправь запрос и верни только валидный JSON.`;
       }
     }
 
@@ -2698,7 +2707,89 @@ ${errorMessage}
       error: `Не удалось выполнить запрос после ${MAX_ATTEMPTS} попыток`,
       last_error: lastError,
       user_request,
+      attempts: allAttempts,
       suggestion: 'Попробуйте переформулировать запрос или использовать стандартные tools (getCampaigns, getSpendReport и т.д.)'
     };
+  },
+
+  /**
+   * Get error-specific guidance for LLM retry
+   * @private
+   */
+  _getErrorFixGuidance(fbErrorCode, errorMessage) {
+    const guidance = [];
+
+    if (fbErrorCode === 100 || errorMessage.includes('Invalid parameter')) {
+      guidance.push('- Проверь что все fields существуют в FB API');
+      guidance.push('- Проверь формат breakdowns (строка через запятую)');
+      guidance.push('- Проверь что level соответствует endpoint');
+    }
+
+    if (errorMessage.includes('time_range') || errorMessage.includes('date')) {
+      guidance.push('- time_range должен быть JSON строкой: {"since":"YYYY-MM-DD","until":"YYYY-MM-DD"}');
+      guidance.push('- Или используй date_preset вместо time_range');
+    }
+
+    if (errorMessage.includes('breakdowns') || errorMessage.includes('breakdown')) {
+      guidance.push('- Максимум 2 breakdowns одновременно');
+      guidance.push('- action_breakdowns отдельно от breakdowns');
+      guidance.push('- Проверь совместимость breakdowns');
+    }
+
+    if (errorMessage.includes('actions') || errorMessage.includes('action_type')) {
+      guidance.push('- Для action_breakdowns нужно поле actions в fields');
+      guidance.push('- action_breakdowns: "action_type" — отдельный параметр');
+    }
+
+    if (errorMessage.includes('permission') || fbErrorCode === 190 || fbErrorCode === 200) {
+      guidance.push('- Ошибка доступа — попробуй другой endpoint или fields');
+      guidance.push('- Не используй fields требующие расширенных permissions');
+    }
+
+    if (guidance.length === 0) {
+      guidance.push('- Упрости запрос: меньше fields и breakdowns');
+      guidance.push('- Проверь что endpoint правильный');
+      guidance.push('- Используй стандартные параметры');
+    }
+
+    return guidance.join('\n');
+  },
+
+  /**
+   * Log successful query for future few-shot learning
+   * @private
+   */
+  async _logSuccessfulQuery(userAccountId, userRequest, queryPlan, responseData) {
+    try {
+      // Only log if we have valid data
+      if (!queryPlan || !userRequest) return;
+
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY
+      );
+
+      // Create summary of response (don't store full data)
+      const responseSummary = {
+        hasData: Boolean(responseData),
+        rowCount: Array.isArray(responseData) ? responseData.length : (responseData?.data?.length || 0),
+        fields: queryPlan.fields?.split(',').length || 0
+      };
+
+      await supabase.from('fb_query_log').insert({
+        user_account_id: userAccountId,
+        user_request: userRequest.substring(0, 500), // Limit length
+        generated_query: queryPlan,
+        response_summary: responseSummary,
+        success: true,
+        created_at: new Date().toISOString()
+      });
+
+      logger.debug({ userRequest: userRequest.substring(0, 50) }, 'customFbQuery: logged successful query');
+    } catch (error) {
+      // Silent fail - logging shouldn't break the main flow
+      logger.debug({ error: error.message }, 'customFbQuery: failed to log query (non-critical)');
+    }
   }
 };

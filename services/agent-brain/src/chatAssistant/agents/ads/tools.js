@@ -880,51 +880,66 @@ dry_run=true ВОЗВРАЩАЕТ:
   },
 
   // ============================================================
-  // CUSTOM FB API QUERY (LLM-powered)
+  // CUSTOM FB API QUERY (LLM-powered) - Enhanced v2
   // ============================================================
   {
     name: 'customFbQuery',
-    description: `Кастомный запрос к FB API через LLM (для нестандартных метрик).
+    description: `Универсальный кастомный запрос к Facebook Marketing API v20.0.
+
+КОГДА ИСПОЛЬЗОВАТЬ:
+- Нужны breakdowns (по возрасту, полу, устройствам, плейсментам)
+- Нужна статистика которой нет в стандартных tools
+- Нестандартные комбинации метрик
+- Сравнение Facebook vs Instagram
+- Детальная разбивка по placement (feed, stories, reels)
+- Video метрики (досмотры 25/50/75/100%)
 
 КАК РАБОТАЕТ:
-1. LLM (gpt-4o-mini) анализирует user_request
-2. LLM строит FB Graph API запрос (endpoint, fields, params)
-3. Выполняем запрос к FB
-4. При ошибке: LLM исправляет запрос, retry (до 3 раз)
+1. LLM (gpt-4o) анализирует user_request с полной документацией FB API
+2. Pre-валидация сгенерированного запроса
+3. Выполнение к FB Graph API v20.0
+4. При ошибке: умный retry с контекстом ошибки (до 3 раз)
+5. Логирование успешных запросов для улучшения
 
 ВОЗВРАЩАЕТ:
 - query: { endpoint, fields, params, explanation }
-- data: результат FB API
+- data: результат FB API (массив или объект)
 - attempts: сколько попыток потребовалось
 
-ДОСТУПНЫЕ endpoints:
-- /insights: spend, impressions, clicks, cpm, cpc, ctr, actions
-- /campaigns, /adsets, /ads: структура аккаунта
-- breakdowns: age, gender, country, device_platform, placement
+ПОДДЕРЖИВАЕМЫЕ ЗАПРОСЫ:
+- Демографика: "разбивка по возрасту и полу"
+- Устройства: "статистика по ios vs android"
+- Платформы: "facebook vs instagram performance"
+- Плейсменты: "feed vs stories vs reels"
+- Качество лидов: "лиды с 2+ сообщениями" (messaging_user_depth_2)
+- Видео: "досмотры видео до конца"
+- Ежедневно: "CPL по дням за 2 недели"
 
-ИСПОЛЬЗУЙ когда:
-- Нужны метрики которых нет в других tools
-- Нестандартные разбивки (по возрасту, полу, устройствам)
-- Специфичные FB API запросы`,
+ПРИМЕРЫ user_request:
+- "разбивка расходов по возрастным группам за неделю"
+- "сколько лидов из мессенджеров vs сайта"
+- "какой placement даёт лучший CTR"
+- "статистика видео досмотров"
+- "CPL по дням за последний месяц"`,
     parameters: {
       type: 'object',
       properties: {
         user_request: {
           type: 'string',
-          description: 'Что нужно узнать на естественном языке (например: "разбивка по возрасту за неделю")'
+          description: 'Описание нужных данных на естественном языке. Чем конкретнее — тем лучше результат.'
         },
         entity_type: {
           type: 'string',
           enum: ['account', 'campaign', 'adset', 'ad'],
-          description: 'Уровень: account (весь аккаунт), campaign, adset или ad'
+          description: 'Уровень данных: account (весь аккаунт), campaign, adset или ad. По умолчанию account.'
         },
         entity_id: {
           type: 'string',
-          description: 'ID сущности (если не account). Получи через getCampaigns/getAdSets'
+          description: 'FB ID сущности (только если entity_type != account). Получи через getCampaigns/getAdSets.'
         },
         period: {
           type: 'string',
-          description: 'Период: today, yesterday, last_7d, last_30d или дата YYYY-MM-DD'
+          description: 'Период: today, yesterday, last_3d, last_7d, last_14d, last_30d, last_90d, this_month, last_month, lifetime'
         }
       },
       required: ['user_request']
