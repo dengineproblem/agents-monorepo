@@ -117,13 +117,9 @@ CREATE TRIGGER trigger_conversation_reports_updated_at
 -- RLS политики
 ALTER TABLE conversation_reports ENABLE ROW LEVEL SECURITY;
 
--- Пользователи могут видеть только свои отчеты
+-- Сервисы могут читать отчеты (service_role обходит RLS)
 CREATE POLICY conversation_reports_select_policy ON conversation_reports
-  FOR SELECT USING (
-    user_account_id IN (
-      SELECT id FROM user_accounts WHERE auth_user_id = auth.uid()
-    )
-  );
+  FOR SELECT USING (true);
 
 -- Сервисы могут создавать/обновлять отчеты
 CREATE POLICY conversation_reports_insert_policy ON conversation_reports

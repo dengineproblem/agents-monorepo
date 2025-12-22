@@ -1,12 +1,57 @@
 import { OpenAI } from 'openai';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
+import { analyzeDialogs } from './analyzeDialogs.js';
 
 const log = createLogger({ module: 'conversationReport' });
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!
 });
+
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.LOG_ALERT_TELEGRAM_BOT_TOKEN;
+
+/**
+ * Отправляет отчёт в Telegram
+ */
+async function sendReportToTelegram(telegramId: string, reportText: string, reportId: string): Promise<boolean> {
+  if (!TELEGRAM_BOT_TOKEN) {
+    log.warn('TELEGRAM_BOT_TOKEN not configured, skipping Telegram notification');
+    return false;
+  }
+
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: telegramId,
+        text: reportText
+      })
+    });
+
+    const result = await response.json() as { ok: boolean; description?: string };
+
+    if (!result.ok) {
+      log.error({ telegramId, error: result.description }, 'Failed to send Telegram message');
+      return false;
+    }
+
+    // Помечаем отчёт как отправленный
+    await supabase
+      .from('conversation_reports')
+      .update({ sent_to_telegram: true, sent_at: new Date().toISOString() })
+      .eq('id', reportId);
+
+    log.info({ telegramId, reportId }, 'Report sent to Telegram');
+    return true;
+  } catch (error: any) {
+    log.error({ telegramId, error: error.message }, 'Error sending Telegram message');
+    return false;
+  }
+}
 
 // Типы данных
 interface DialogAnalysis {
@@ -259,6 +304,59 @@ export async function generateConversationReport(params: {
       log.error({ error: userError.message, userAccountId }, 'Failed to get user account');
     }
 
+    // Получаем WhatsApp instance через direction → whatsapp_phone_numbers
+    // Это правильная связь: direction привязан к конкретному whatsapp номеру
+    const { data: direction, error: directionError } = await supabase
+      .from('account_directions')
+      .select('id, name, whatsapp_phone_number_id')
+      .eq('user_account_id', userAccountId)
+      .eq('objective', 'whatsapp')
+      .limit(1)
+      .single();
+
+    let instanceName: string | null = null;
+
+    if (directionError || !direction?.whatsapp_phone_number_id) {
+      log.warn({ userAccountId, error: directionError?.message }, 'No WhatsApp direction found, skipping dialog analysis');
+    } else {
+      // Получаем instance_name из whatsapp_phone_numbers
+      const { data: phoneNumber, error: phoneError } = await supabase
+        .from('whatsapp_phone_numbers')
+        .select('instance_name')
+        .eq('id', direction.whatsapp_phone_number_id)
+        .single();
+
+      if (phoneError || !phoneNumber?.instance_name) {
+        log.warn({ userAccountId, whatsappPhoneNumberId: direction.whatsapp_phone_number_id }, 'No instance_name in whatsapp_phone_numbers');
+      } else {
+        instanceName = phoneNumber.instance_name;
+      }
+    }
+
+    if (!instanceName) {
+      log.warn({ userAccountId }, 'No active WhatsApp instance found, skipping dialog analysis');
+    } else {
+      // Запускаем анализ диалогов для обновления данных
+      log.info({ instanceName }, 'Running dialog analysis before report generation');
+
+      try {
+        const analysisResult = await analyzeDialogs({
+          instanceName,
+          userAccountId,
+          minIncoming: 3,
+          maxDialogs: 100  // Лимит для скорости
+        });
+
+        log.info({
+          analyzed: analysisResult.analyzed,
+          new_leads: analysisResult.new_leads,
+          errors: analysisResult.errors
+        }, 'Dialog analysis completed');
+      } catch (analysisError: any) {
+        log.error({ error: analysisError.message }, 'Dialog analysis failed, continuing with existing data');
+      }
+    }
+
     // Получаем ВСЕ диалоги пользователя (пагинация)
     const PAGE_SIZE = 1000;
     let allDialogs: DialogAnalysis[] = [];
@@ -438,38 +536,75 @@ export async function generateConversationReport(params: {
     };
 
     // Сохраняем в БД
-    const { error: saveError } = await supabase
-      .from('conversation_reports')
-      .upsert({
-        user_account_id: userAccountId,
-        telegram_id: fullReportData.telegram_id,
-        report_date: fullReportData.report_date,
-        period_start: fullReportData.period_start,
-        period_end: fullReportData.period_end,
-        total_dialogs: fullReportData.total_dialogs,
-        new_dialogs: fullReportData.new_dialogs,
-        active_dialogs: fullReportData.active_dialogs,
-        conversions: fullReportData.conversions,
-        interest_distribution: fullReportData.interest_distribution,
-        funnel_distribution: fullReportData.funnel_distribution,
-        avg_response_time_minutes: fullReportData.avg_response_time_minutes,
-        min_response_time_minutes: fullReportData.min_response_time_minutes,
-        max_response_time_minutes: fullReportData.max_response_time_minutes,
-        total_incoming_messages: fullReportData.total_incoming_messages,
-        total_outgoing_messages: fullReportData.total_outgoing_messages,
-        insights: fullReportData.insights,
-        rejection_reasons: fullReportData.rejection_reasons,
-        common_objections: fullReportData.common_objections,
-        recommendations: fullReportData.recommendations,
-        report_text: fullReportData.report_text,
-        generated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'user_account_id,report_date'
-      });
+    const dataToSave = {
+      user_account_id: userAccountId,
+      telegram_id: fullReportData.telegram_id,
+      report_date: fullReportData.report_date,
+      period_start: fullReportData.period_start,
+      period_end: fullReportData.period_end,
+      total_dialogs: fullReportData.total_dialogs,
+      new_dialogs: fullReportData.new_dialogs,
+      active_dialogs: fullReportData.active_dialogs,
+      conversions: fullReportData.conversions,
+      interest_distribution: fullReportData.interest_distribution,
+      funnel_distribution: fullReportData.funnel_distribution,
+      avg_response_time_minutes: fullReportData.avg_response_time_minutes,
+      min_response_time_minutes: fullReportData.min_response_time_minutes,
+      max_response_time_minutes: fullReportData.max_response_time_minutes,
+      total_incoming_messages: fullReportData.total_incoming_messages,
+      total_outgoing_messages: fullReportData.total_outgoing_messages,
+      insights: fullReportData.insights,
+      rejection_reasons: fullReportData.rejection_reasons,
+      common_objections: fullReportData.common_objections,
+      recommendations: fullReportData.recommendations,
+      report_text: fullReportData.report_text,
+      generated_at: new Date().toISOString(),
+    };
 
-    if (saveError) {
-      log.error({ error: saveError.message }, 'Failed to save report');
-      throw saveError;
+    log.info({ dataToSave: JSON.stringify(dataToSave).substring(0, 500) }, 'Saving report data');
+
+    // Сначала пробуем insert, если конфликт - делаем update
+    let savedData;
+    const { data: insertData, error: insertError } = await supabase
+      .from('conversation_reports')
+      .insert(dataToSave)
+      .select();
+
+    if (insertError) {
+      // Если конфликт - пробуем update
+      if (insertError.code === '23505') {
+        log.info('Report exists, updating...');
+        const { data: updateData, error: updateError } = await supabase
+          .from('conversation_reports')
+          .update(dataToSave)
+          .eq('user_account_id', userAccountId)
+          .eq('report_date', dataToSave.report_date)
+          .select();
+
+        if (updateError) {
+          console.error('Update error:', updateError);
+          log.error({ error: updateError.message, code: updateError.code }, 'Failed to update report');
+          throw updateError;
+        }
+        savedData = updateData;
+      } else {
+        console.error('Insert error:', insertError);
+        log.error({ error: insertError.message, code: insertError.code }, 'Failed to insert report');
+        throw insertError;
+      }
+    } else {
+      savedData = insertData;
+    }
+
+    log.info({ savedCount: savedData?.length }, 'Report saved');
+
+    // Отправляем отчёт в Telegram, если есть telegram_id
+    if (fullReportData.telegram_id && savedData?.[0]?.id) {
+      await sendReportToTelegram(
+        fullReportData.telegram_id,
+        fullReportData.report_text,
+        savedData[0].id
+      );
     }
 
     log.info({ userAccountId, reportDate: reportDateStr, totalDialogs: allDialogs.length }, 'Report generated successfully');
