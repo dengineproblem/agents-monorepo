@@ -15,9 +15,9 @@ import { registerChatRoutes } from './chatAssistant/index.js';
 import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
 import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
 
-// Мониторинговый бот для администратора (получает копии всех отчётов)
-const MONITORING_BOT_TOKEN = process.env.MONITORING_BOT_TOKEN || '8584683514:AAHMPrOyu4v_CT-Tf-k2exgEop-YQPRi3WM';
-const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '-5079020326')
+// Основной бот для отправки отчётов клиентам и в мониторинг
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const MONITORING_CHAT_IDS = (process.env.MONITORING_CHAT_ID || '')
   .split(',')
   .map(id => id.trim())
   .filter(Boolean);
@@ -1937,7 +1937,7 @@ async function sendToMultipleTelegramIds(userAccount, reportText) {
   const results = [];
   for (const chatId of telegramIds) {
     try {
-      const sent = await sendTelegram(chatId, reportText, userAccount.telegram_bot_token);
+      const sent = await sendTelegram(chatId, reportText, TELEGRAM_BOT_TOKEN);
       results.push({ chatId, success: sent });
     } catch (err) {
       fastify.log.error({ where: 'sendToMultipleTelegramIds', chatId, error: String(err) });
@@ -1961,7 +1961,7 @@ async function sendToMultipleTelegramIds(userAccount, reportText) {
  * Добавляет префикс с информацией о пользователе
  */
 async function sendToMonitoringBot(userAccount, reportText, dispatchFailed = false) {
-  if (!MONITORING_BOT_TOKEN || !MONITORING_CHAT_IDS || MONITORING_CHAT_IDS.length === 0) {
+  if (!TELEGRAM_BOT_TOKEN || !MONITORING_CHAT_IDS || MONITORING_CHAT_IDS.length === 0) {
     fastify.log.warn({ where: 'sendToMonitoringBot', error: 'monitoring_not_configured' });
     return false;
   }
@@ -1984,7 +1984,7 @@ async function sendToMonitoringBot(userAccount, reportText, dispatchFailed = fal
     username: userAccount.username,
     chatIds: MONITORING_CHAT_IDS,
     dispatchFailed,
-    botToken: MONITORING_BOT_TOKEN.slice(0, 10) + '***',
+    botToken: TELEGRAM_BOT_TOKEN.slice(0, 10) + '***',
     reportLength: fullReport.length,
     environment: process.env.NODE_ENV || 'unknown',
     hostname: process.env.HOSTNAME || 'unknown'
@@ -1995,7 +1995,7 @@ async function sendToMonitoringBot(userAccount, reportText, dispatchFailed = fal
 
   for (const chatId of MONITORING_CHAT_IDS) {
     try {
-      const sent = await sendTelegram(chatId, fullReport, MONITORING_BOT_TOKEN);
+      const sent = await sendTelegram(chatId, fullReport, TELEGRAM_BOT_TOKEN);
       anySuccess = anySuccess || sent;
       results.push({ chatId, success: sent });
 
