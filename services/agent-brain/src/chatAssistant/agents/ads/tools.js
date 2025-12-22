@@ -92,6 +92,48 @@ export const ADS_TOOLS = [
     }
   },
   {
+    name: 'getAds',
+    description: `Получить статистику на уровне ОБЪЯВЛЕНИЙ (ads level) с метриками.
+
+ВОЗВРАЩАЕТ:
+- ads[]: id, name, status, spend ($), leads, cpl ($), impressions, clicks
+- totals: общий spend, leads, cpl
+
+ИСПОЛЬЗУЙ когда нужно:
+- Статистика по объявлениям (ads level insights)
+- Сравнить эффективность разных объявлений
+- Найти объявления с плохим CPL
+- Сгруппировать по названию объявления (ad_name)
+- Получить spend и CPL по каждому объявлению
+
+ПАРАМЕТРЫ:
+- campaign_id (опционально) - ограничить объявлениями конкретной кампании
+- period или date_from/date_to для указания периода`,
+    parameters: {
+      type: 'object',
+      properties: {
+        campaign_id: {
+          type: 'string',
+          description: 'ID кампании (опционально). Если не указан - все объявления аккаунта'
+        },
+        period: {
+          type: 'string',
+          enum: ['today', 'yesterday', 'last_7d', 'last_14d', 'last_30d', 'this_month', 'last_month'],
+          description: 'Период для метрик (по умолчанию last_7d)'
+        },
+        date_from: {
+          type: 'string',
+          description: 'Начальная дата (YYYY-MM-DD). Альтернатива period'
+        },
+        date_to: {
+          type: 'string',
+          description: 'Конечная дата (YYYY-MM-DD). Альтернатива period'
+        }
+      },
+      required: []
+    }
+  },
+  {
     name: 'getSpendReport',
     description: `Отчёт по расходам с разбивкой по дням или кампаниям.
 

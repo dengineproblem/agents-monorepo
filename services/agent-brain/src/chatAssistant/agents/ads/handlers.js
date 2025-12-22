@@ -180,6 +180,95 @@ export const adsHandlers = {
     return { success: true, adsets };
   },
 
+  async getAds({ campaign_id, period, date_from, date_to }, { accessToken, adAccountId }) {
+    const dateRange = getDateRangeWithDates({ date_from, date_to, period });
+
+    // Определяем endpoint: кампания или весь аккаунт
+    const normalizedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+    const endpoint = campaign_id ? `${campaign_id}/ads` : `${normalizedAccountId}/ads`;
+
+    const fields = 'id,name,status,effective_status';
+
+    // Получаем список объявлений
+    const result = await fbGraph('GET', endpoint, accessToken, {
+      fields,
+      limit: 500
+    });
+
+    if (!result.data || result.data.length === 0) {
+      return { success: true, ads: [], totals: { spend: 0, leads: 0, cpl: null } };
+    }
+
+    // Получаем insights для всех объявлений
+    const adIds = result.data.map(ad => ad.id);
+    const insightsResult = await fbGraph('GET', `${normalizedAccountId}/insights`, accessToken, {
+      level: 'ad',
+      fields: 'ad_id,ad_name,spend,impressions,clicks,actions',
+      time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
+      filtering: JSON.stringify([{ field: 'ad.id', operator: 'IN', value: adIds }]),
+      limit: 500
+    });
+
+    // Создаём map insights по ad_id
+    const insightsMap = {};
+    for (const insight of (insightsResult.data || [])) {
+      insightsMap[insight.ad_id] = insight;
+    }
+
+    let totalSpend = 0;
+    let totalLeads = 0;
+
+    const ads = result.data.map(ad => {
+      const insights = insightsMap[ad.id] || {};
+      const spend = parseFloat(insights.spend || 0);
+
+      // Count leads from ALL sources
+      let messagingLeads = 0;
+      let siteLeads = 0;
+      let leadFormLeads = 0;
+
+      if (insights.actions && Array.isArray(insights.actions)) {
+        for (const action of insights.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads += parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'lead') {
+            leadFormLeads = parseInt(action.value || '0', 10);
+          }
+        }
+      }
+
+      const leads = messagingLeads + siteLeads + leadFormLeads;
+      totalSpend += spend;
+      totalLeads += leads;
+
+      return {
+        id: ad.id,
+        name: insights.ad_name || ad.name,
+        status: ad.effective_status || ad.status,
+        spend: spend.toFixed(2),
+        leads,
+        cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
+        impressions: parseInt(insights.impressions || 0),
+        clicks: parseInt(insights.clicks || 0)
+      };
+    }).filter(ad => parseFloat(ad.spend) > 0 || ad.leads > 0); // Только с активностью
+
+    return {
+      success: true,
+      ads,
+      totals: {
+        spend: totalSpend.toFixed(2),
+        leads: totalLeads,
+        cpl: totalLeads > 0 ? (totalSpend / totalLeads).toFixed(2) : null
+      },
+      period: { since: dateRange.since, until: dateRange.until }
+    };
+  },
+
   async getSpendReport({ period, date_from, date_to, group_by }, { accessToken, adAccountId }) {
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 

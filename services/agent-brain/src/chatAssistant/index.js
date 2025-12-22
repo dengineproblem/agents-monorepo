@@ -31,7 +31,8 @@ const ALLOWED_ORIGINS = [
   'https://performanteaiagency.com',
   'https://agents.performanteaiagency.com',
   'http://localhost:3001',
-  'http://localhost:3002'
+  'http://localhost:3002',
+  'http://localhost:8081'
 ];
 
 const orchestrator = new Orchestrator();

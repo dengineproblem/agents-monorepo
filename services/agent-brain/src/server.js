@@ -40,6 +40,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3001',
   'http://localhost:3002',
   'http://localhost:3003',
+  'http://localhost:8081',
   'http://localhost:8082',
   'http://localhost:7080'
 ];
@@ -52,7 +53,8 @@ await fastify.register(cors, {
       return;
     }
     if (ALLOWED_ORIGINS.includes(origin)) {
-      cb(null, true);
+      // Возвращаем конкретный origin, а не true
+      cb(null, origin);
     } else {
       fastify.log.warn({ origin }, 'CORS: blocked request from unknown origin');
       cb(new Error('CORS: origin not allowed'), false);

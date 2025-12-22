@@ -67,6 +67,17 @@ export const AdsToolDefs = {
     meta: { timeout: 20000, retryable: true }
   },
 
+  getAds: {
+    description: 'Получить статистику на уровне ОБЪЯВЛЕНИЙ (ads level) с метриками: spend, leads, CPL, impressions, clicks. Используй для анализа эффективности объявлений, группировки по названию, поиска объявлений с плохим CPL.',
+    schema: z.object({
+      campaign_id: z.string().optional().describe('ID кампании (опционально). Если не указан - все объявления аккаунта'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
+    }),
+    meta: { timeout: 30000, retryable: true }
+  },
+
   getSpendReport: {
     description: 'Получить отчёт по расходам за период с разбивкой по кампаниям или дням',
     schema: z.object({

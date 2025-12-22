@@ -418,14 +418,5 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       });
     }
   });
-
-  // Healthcheck эндпоинт
-  app.get('/health', async (request, reply) => {
-    return {
-      status: 'ok',
-      service: 'creative-generation-service',
-      timestamp: new Date().toISOString()
-    };
-  });
 };
 

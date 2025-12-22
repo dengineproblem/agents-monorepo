@@ -136,6 +136,7 @@ export const adsTools = [
   createMCPTool('getCampaigns', AdsToolDefs.getCampaigns, adsHandlers.getCampaigns, 'ads'),
   createMCPTool('getCampaignDetails', AdsToolDefs.getCampaignDetails, adsHandlers.getCampaignDetails, 'ads'),
   createMCPTool('getAdSets', AdsToolDefs.getAdSets, adsHandlers.getAdSets, 'ads'),
+  createMCPTool('getAds', AdsToolDefs.getAds, adsHandlers.getAds, 'ads'),
   createMCPTool('getSpendReport', AdsToolDefs.getSpendReport, adsHandlers.getSpendReport, 'ads'),
   // READ tools - Directions
   createMCPTool('getDirections', AdsToolDefs.getDirections, adsHandlers.getDirections, 'ads'),

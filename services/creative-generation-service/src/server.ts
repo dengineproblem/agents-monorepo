@@ -87,6 +87,15 @@ app.get('/', async (request, reply) => {
   };
 });
 
+// Health check endpoint
+app.get('/health', async (request, reply) => {
+  return {
+    status: 'ok',
+    service: 'creative-generation-service',
+    timestamp: new Date().toISOString()
+  };
+});
+
 // Запуск сервера
 const start = async () => {
   try {

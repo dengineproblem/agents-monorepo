@@ -486,12 +486,6 @@ export async function galleryRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({ success: false, error: error.message });
     }
   });
-
-  // ==================== HEALTH CHECK ====================
-
-  fastify.get('/health', async (request, reply) => {
-    return reply.send({ status: 'ok', service: 'gallery' });
-  });
 }
 
 export default galleryRoutes;

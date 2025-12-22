@@ -59,6 +59,7 @@ const Assistant: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingState, setStreamingState] = useState<StreamingState | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const streamingStateRef = useRef<StreamingState | null>(null); // Для синхронного доступа к частичному контенту
 
   // Debug logs
   const isAdmin = isUserAdmin();
@@ -155,8 +156,20 @@ const Assistant: React.FC = () => {
       return;
     }
 
-    // Cancel any existing stream
+    // Cancel any existing stream and save partial response
     if (abortControllerRef.current) {
+      // Сохраняем частичный ответ если есть
+      const partialState = streamingStateRef.current;
+      if (partialState?.text && partialState.text.trim()) {
+        const partialMessage: ChatMessage = {
+          id: `partial-${Date.now()}`,
+          conversation_id: activeConversationIdRef.current || '',
+          role: 'assistant',
+          content: partialState.text + '\n\n_(ответ прерван)_',
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, partialMessage]);
+      }
       abortControllerRef.current.abort();
     }
 
@@ -166,7 +179,9 @@ const Assistant: React.FC = () => {
     try {
       setIsSending(true);
       setIsStreaming(true);
-      setStreamingState(createInitialStreamingState());
+      const initialState = createInitialStreamingState();
+      setStreamingState(initialState);
+      streamingStateRef.current = initialState;
 
       // Optimistically add user message
       const tempUserMessage: ChatMessage = {
@@ -202,9 +217,11 @@ const Assistant: React.FC = () => {
         if (abortController.signal.aborted) break;
 
         // Update streaming state
-        setStreamingState((prev) =>
-          prev ? updateStreamingState(prev, event) : createInitialStreamingState()
-        );
+        setStreamingState((prev) => {
+          const newState = prev ? updateStreamingState(prev, event) : createInitialStreamingState();
+          streamingStateRef.current = newState; // Синхронизируем ref для доступа при прерывании
+          return newState;
+        });
 
         // Handle specific events
         switch (event.type) {
@@ -292,6 +309,7 @@ const Assistant: React.FC = () => {
       setIsSending(false);
       setIsStreaming(false);
       setStreamingState(null);
+      streamingStateRef.current = null;
       abortControllerRef.current = null;
     }
   };
@@ -373,6 +391,32 @@ const Assistant: React.FC = () => {
     toast.info('План отклонён');
   };
 
+  // Handle stopping the current stream
+  const handleStop = useCallback(() => {
+    if (abortControllerRef.current) {
+      // Сохраняем частичный ответ если есть
+      const partialState = streamingStateRef.current;
+      if (partialState?.text && partialState.text.trim()) {
+        const partialMessage: ChatMessage = {
+          id: `partial-${Date.now()}`,
+          conversation_id: activeConversationIdRef.current || '',
+          role: 'assistant',
+          content: partialState.text + '\n\n_(генерация остановлена)_',
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, partialMessage]);
+      }
+
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+      streamingStateRef.current = null;
+      setIsSending(false);
+      setIsStreaming(false);
+      setStreamingState(null);
+      toast.info('Генерация остановлена');
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       <Header onOpenDatePicker={() => {}} />
@@ -436,9 +480,11 @@ const Assistant: React.FC = () => {
         {/* Input */}
         <ChatInput
           onSend={handleSend}
+          onStop={handleStop}
           mode={mode}
           onModeChange={setMode}
           isLoading={isSending}
+          isStreaming={isStreaming}
           disabled={!userAccountId}
         />
       </div>
