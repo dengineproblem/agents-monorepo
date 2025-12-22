@@ -8,6 +8,7 @@ import { templatesRoutes } from './routes/templates.js';
 import { campaignSettingsRoutes } from './routes/campaignSettings.js';
 import { businessProfileRoutes } from './routes/businessProfile.js';
 import { campaignContextsRoutes } from './routes/campaignContexts.js';
+import { conversationReportsRoutes } from './routes/conversationReports.js';
 import { logger } from './lib/logger.js';
 
 dotenv.config();
@@ -42,6 +43,7 @@ app.register(templatesRoutes);
 app.register(campaignSettingsRoutes);
 app.register(businessProfileRoutes);
 app.register(campaignContextsRoutes);
+app.register(conversationReportsRoutes);
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

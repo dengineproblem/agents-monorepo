@@ -4372,6 +4372,77 @@ if (CRON_ENABLED) {
   updateCurrencyRates().catch(err => {
     fastify.log.warn({ where: 'currency_rate_cron', status: 'startup_update_failed', error: String(err) });
   });
+
+  // Cron: Отчёт по перепискам в 9:30 по Алматы (после batch отчёта)
+  const CONVERSATION_REPORT_CRON_SCHEDULE = '30 9 * * *';
+  const CRM_BACKEND_URL = process.env.CRM_BACKEND_URL || 'http://crm-backend:8084';
+  const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+
+  cron.schedule(CONVERSATION_REPORT_CRON_SCHEDULE, async () => {
+    fastify.log.info({
+      where: 'conversation_report_cron',
+      schedule: CONVERSATION_REPORT_CRON_SCHEDULE,
+      status: 'triggered'
+    });
+
+    try {
+      // Вызываем API crm-backend для генерации всех отчётов
+      const response = await fetch(`${CRM_BACKEND_URL}/conversation-reports/generate-all`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminKey: ADMIN_API_KEY })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        fastify.log.info({
+          where: 'conversation_report_cron',
+          status: 'completed',
+          total: result.total,
+          generated: result.generated,
+          failed: result.failed
+        });
+
+        // Отправляем сводку в мониторинг
+        if (BATCH_REPORT_BOT_TOKEN && ONBOARDING_CHAT_ID) {
+          const summaryText = `📊 Отчёты по перепискам сгенерированы\n\n` +
+            `✅ Успешно: ${result.generated}/${result.total}\n` +
+            `❌ С ошибками: ${result.failed}\n` +
+            (result.errors?.length > 0 ? `\n⚠️ Ошибки:\n${result.errors.slice(0, 5).join('\n')}` : '');
+
+          await sendTelegram(ONBOARDING_CHAT_ID, summaryText, BATCH_REPORT_BOT_TOKEN);
+        }
+      } else {
+        throw new Error(result.error || 'Unknown error');
+      }
+    } catch (err) {
+      fastify.log.error({
+        where: 'conversation_report_cron',
+        status: 'failed',
+        error: String(err)
+      });
+
+      // Уведомляем об ошибке
+      if (BATCH_REPORT_BOT_TOKEN && ONBOARDING_CHAT_ID) {
+        await sendTelegram(
+          ONBOARDING_CHAT_ID,
+          `⚠️ Ошибка генерации отчётов по перепискам:\n${String(err)}`,
+          BATCH_REPORT_BOT_TOKEN
+        ).catch(() => {});
+      }
+    }
+  }, {
+    scheduled: true,
+    timezone: "Asia/Almaty"
+  });
+
+  fastify.log.info({
+    where: 'conversation_report_cron',
+    schedule: CONVERSATION_REPORT_CRON_SCHEDULE,
+    timezone: 'Asia/Almaty',
+    status: 'scheduled'
+  });
 } else {
   fastify.log.info({ where: 'cron', status: 'disabled' });
 }
