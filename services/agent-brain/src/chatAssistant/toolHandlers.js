@@ -90,7 +90,9 @@ const toolHandlers = {
   async getCampaigns({ period, status }, { accessToken, adAccountId }) {
     const dateRange = getDateRange(period);
 
-    const fields = 'id,name,status,objective,daily_budget,lifetime_budget,insights.date_preset(today){spend,impressions,clicks,actions}';
+    // Use dynamic time_range instead of hardcoded date_preset(today)
+    const timeRangeStr = `{"since":"${dateRange.since}","until":"${dateRange.until}"}`;
+    const fields = `id,name,status,objective,daily_budget,lifetime_budget,insights.time_range(${timeRangeStr}){spend,impressions,clicks,actions}`;
 
     // Normalize: don't add act_ prefix if already present
     const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
@@ -173,7 +175,9 @@ const toolHandlers = {
 
   async getAdSets({ campaign_id, period }, { accessToken }) {
     const dateRange = getDateRange(period || 'last_7d');
-    const fields = 'id,name,status,daily_budget,targeting,insights.date_preset(today){spend,impressions,clicks,actions}';
+    // Use dynamic time_range instead of hardcoded date_preset(today)
+    const timeRangeStr = `{"since":"${dateRange.since}","until":"${dateRange.until}"}`;
+    const fields = `id,name,status,daily_budget,targeting,insights.time_range(${timeRangeStr}){spend,impressions,clicks,actions}`;
 
     const result = await fbGraph('GET', `${campaign_id}/adsets`, accessToken, {
       fields,
