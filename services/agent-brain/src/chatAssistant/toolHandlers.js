@@ -108,8 +108,26 @@ const toolHandlers = {
     // Parse insights and format response
     const campaigns = (result.data || []).map(c => {
       const insights = c.insights?.data?.[0] || {};
-      const leads = insights.actions?.find(a => a.action_type === 'lead')?.value || 0;
       const spend = parseFloat(insights.spend || 0);
+
+      // Count leads from ALL sources (same logic as facebookApi.ts)
+      let messagingLeads = 0;
+      let siteLeads = 0;
+      let leadFormLeads = 0;
+      if (insights.actions && Array.isArray(insights.actions)) {
+        for (const action of insights.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+            leadFormLeads = parseInt(action.value || '0', 10);
+          }
+        }
+      }
+      const leads = messagingLeads + siteLeads + leadFormLeads;
 
       return {
         id: c.id,
@@ -118,7 +136,7 @@ const toolHandlers = {
         objective: c.objective,
         daily_budget: c.daily_budget ? parseInt(c.daily_budget) / 100 : null,
         spend: spend,
-        leads: parseInt(leads),
+        leads: leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
         impressions: parseInt(insights.impressions || 0),
         clicks: parseInt(insights.clicks || 0)
@@ -164,8 +182,26 @@ const toolHandlers = {
 
     const adsets = (result.data || []).map(a => {
       const insights = a.insights?.data?.[0] || {};
-      const leads = insights.actions?.find(act => act.action_type === 'lead')?.value || 0;
       const spend = parseFloat(insights.spend || 0);
+
+      // Count leads from ALL sources (same logic as facebookApi.ts)
+      let messagingLeads = 0;
+      let siteLeads = 0;
+      let leadFormLeads = 0;
+      if (insights.actions && Array.isArray(insights.actions)) {
+        for (const action of insights.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+            leadFormLeads = parseInt(action.value || '0', 10);
+          }
+        }
+      }
+      const leads = messagingLeads + siteLeads + leadFormLeads;
 
       return {
         id: a.id,
@@ -173,7 +209,7 @@ const toolHandlers = {
         status: a.status,
         daily_budget: a.daily_budget ? parseInt(a.daily_budget) / 100 : null,
         spend,
-        leads: parseInt(leads),
+        leads: leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null
       };
     });
@@ -199,11 +235,29 @@ const toolHandlers = {
     });
 
     const data = (result.data || []).map(row => {
-      const leads = row.actions?.find(a => a.action_type === 'lead')?.value || 0;
+      // Count leads from ALL sources (same logic as facebookApi.ts)
+      let messagingLeads = 0;
+      let siteLeads = 0;
+      let leadFormLeads = 0;
+      if (row.actions && Array.isArray(row.actions)) {
+        for (const action of row.actions) {
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            messagingLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+            leadFormLeads = parseInt(action.value || '0', 10);
+          }
+        }
+      }
+      const leads = messagingLeads + siteLeads + leadFormLeads;
+
       return {
         date: row.date_start,
         spend: parseFloat(row.spend || 0),
-        leads: parseInt(leads),
+        leads: leads,
         impressions: parseInt(row.impressions || 0),
         clicks: parseInt(row.clicks || 0)
       };

@@ -73,10 +73,12 @@ export const adsHandlers = {
             messagingLeads = parseInt(action.value || '0', 10);
           } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
             siteLeads = parseInt(action.value || '0', 10);
-          } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-            siteLeads += parseInt(action.value || '0', 10);
-          } else if (action.action_type === 'lead') {
-            // Facebook Lead Forms (Instant Forms)
+          } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            // Custom conversions - only if no fb_pixel_lead to avoid duplication
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+            // Facebook Lead Forms - only onsite_conversion.lead_grouped
+            // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
             leadFormLeads = parseInt(action.value || '0', 10);
           }
         }
@@ -155,10 +157,12 @@ export const adsHandlers = {
             messagingLeads = parseInt(action.value || '0', 10);
           } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
             siteLeads = parseInt(action.value || '0', 10);
-          } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-            siteLeads += parseInt(action.value || '0', 10);
-          } else if (action.action_type === 'lead') {
-            // Facebook Lead Forms (Instant Forms)
+          } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            // Custom conversions - only if no fb_pixel_lead to avoid duplication
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+            // Facebook Lead Forms - only onsite_conversion.lead_grouped
+            // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
             leadFormLeads = parseInt(action.value || '0', 10);
           }
         }
@@ -233,9 +237,12 @@ export const adsHandlers = {
             messagingLeads = parseInt(action.value || '0', 10);
           } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
             siteLeads = parseInt(action.value || '0', 10);
-          } else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-            siteLeads += parseInt(action.value || '0', 10);
-          } else if (action.action_type === 'lead') {
+          } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            // Custom conversions - only if no fb_pixel_lead to avoid duplication
+            siteLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+            // Facebook Lead Forms - only onsite_conversion.lead_grouped
+            // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
             leadFormLeads = parseInt(action.value || '0', 10);
           }
         }
@@ -314,12 +321,13 @@ export const adsHandlers = {
           else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
             siteLeads = parseInt(action.value || '0', 10);
           }
-          // Custom pixel conversions (also count as site leads)
-          else if (typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-            siteLeads += parseInt(action.value || '0', 10);
+          // Custom pixel conversions - only if no fb_pixel_lead to avoid duplication
+          else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+            siteLeads = parseInt(action.value || '0', 10);
           }
-          // Facebook Lead Forms (Instant Forms)
-          else if (action.action_type === 'lead') {
+          // Facebook Lead Forms - only onsite_conversion.lead_grouped
+          // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
+          else if (action.action_type === 'onsite_conversion.lead_grouped') {
             leadFormLeads = parseInt(action.value || '0', 10);
           }
         }

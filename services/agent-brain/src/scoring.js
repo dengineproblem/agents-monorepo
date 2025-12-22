@@ -89,16 +89,26 @@ async function fetchAdInsights(adAccountId, accessToken, adId, datePresetOrRange
  */
 function extractLeads(actions) {
   if (!actions || !Array.isArray(actions)) return 0;
-  
-  // Ищем действия типа lead
-  const leadAction = actions.find(a => 
-    a.action_type === 'lead' || 
-    a.action_type === 'onsite_conversion.lead_grouped' ||
-    a.action_type === 'onsite_conversion.messaging_conversation_started_7d' ||
-    a.action_type === 'onsite_conversion.total_messaging_connection'
-  );
-  
-  return leadAction ? parseInt(leadAction.value) || 0 : 0;
+
+  // Count leads from ALL sources (same logic as facebookApi.ts)
+  // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
+  let messagingLeads = 0;
+  let siteLeads = 0;
+  let leadFormLeads = 0;
+
+  for (const action of actions) {
+    if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+      messagingLeads = parseInt(action.value || '0', 10);
+    } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+      siteLeads = parseInt(action.value || '0', 10);
+    } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+      siteLeads = parseInt(action.value || '0', 10);
+    } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+      leadFormLeads = parseInt(action.value || '0', 10);
+    }
+  }
+
+  return messagingLeads + siteLeads + leadFormLeads;
 }
 
 /**
@@ -726,14 +736,11 @@ async function fetchCreativeInsights(adAccountId, accessToken, fbCreativeId, opt
   const avgCPM = data.reduce((sum, d) => sum + (parseFloat(d.cpm) || 0), 0) / data.length;
   const avgFrequency = data.reduce((sum, d) => sum + (parseFloat(d.frequency) || 0), 0) / data.length;
   
-  // CPL (cost per lead)
+  // CPL (cost per lead) - use extractLeads for consistent counting
   let totalLeads = 0;
   for (const d of data) {
     if (d.actions) {
-      const leadAction = d.actions.find(a => a.action_type === 'lead' || a.action_type === 'onsite_conversion.lead_grouped');
-      if (leadAction) {
-        totalLeads += parseFloat(leadAction.value) || 0;
-      }
+      totalLeads += extractLeads(d.actions);
     }
   }
   
