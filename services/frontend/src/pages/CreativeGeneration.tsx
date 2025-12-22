@@ -23,6 +23,14 @@ import { VideoScriptsTab } from '@/components/creatives/VideoScriptsTab';
 import { CompetitorReferenceSelector, type CompetitorReference } from '@/components/creatives/CompetitorReferenceSelector';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
+import { ImageHistoryTab } from '@/components/creatives/ImageHistoryTab';
+import { ImageGalleryTab } from '@/components/creatives/ImageGalleryTab';
+import { CarouselHistoryTab } from '@/components/creatives/CarouselHistoryTab';
+import { CarouselGalleryTab } from '@/components/creatives/CarouselGalleryTab';
+import { TextHistoryTab } from '@/components/creatives/TextHistoryTab';
+import { TextGalleryTab } from '@/components/creatives/TextGalleryTab';
+import { galleryApi } from '@/services/galleryApi';
+import { History, GalleryHorizontalEnd, Wand2 as GenerateIcon, Save } from 'lucide-react';
 
 interface CreativeTexts {
   offer: string;
@@ -45,6 +53,14 @@ const CreativeGeneration = () => {
   const competitorCreativeIdFromUrl = searchParams.get('competitorCreativeId');
 
   const [activeTab, setActiveTab] = useState(tabFromUrl || 'images');
+
+  // Подвкладки для каждой основной вкладки
+  const [imageSubTab, setImageSubTab] = useState<'generate' | 'history' | 'gallery'>('generate');
+  const [carouselSubTab, setCarouselSubTab] = useState<'generate' | 'history' | 'gallery'>('generate');
+  const [textSubTab, setTextSubTab] = useState<'generate' | 'history' | 'gallery'>('generate');
+
+  // Состояние для сохранения черновика
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   const [texts, setTexts] = useState<CreativeTexts>({
     offer: '',
@@ -502,6 +518,72 @@ const CreativeGeneration = () => {
     setEditReferenceImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Функция добавления изображения как референса из истории/галереи
+  const handleUseImageAsReference = async (imageUrl: string) => {
+    if (referenceImages.length >= 2) {
+      toast.error('Максимум 2 референса. Удалите один из существующих.');
+      return;
+    }
+
+    try {
+      // Загружаем изображение и конвертируем в base64
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setReferenceImages(prev => [...prev, result]);
+        setImageSubTab('generate'); // Переключаемся на вкладку генерации
+        toast.success('Референс добавлен');
+      };
+      reader.readAsDataURL(blob);
+    } catch (error) {
+      console.error('Error loading reference image:', error);
+      toast.error('Не удалось загрузить изображение');
+    }
+  };
+
+  // Функция сохранения черновика
+  const handleSaveDraft = async () => {
+    if (!userId) {
+      toast.error('Необходимо авторизоваться');
+      return;
+    }
+
+    if (!texts.offer && !texts.bullets && !texts.profits && !generatedImage) {
+      toast.error('Заполните хотя бы одно поле или сгенерируйте изображение');
+      return;
+    }
+
+    setIsSavingDraft(true);
+
+    try {
+      const response = await galleryApi.saveDraft({
+        user_id: userId,
+        account_id: currentAdAccountId || undefined,
+        creative_type: 'image',
+        offer: texts.offer,
+        bullets: texts.bullets,
+        profits: texts.profits,
+        image_url: generatedImage || '',
+        style_id: selectedStyle,
+        direction_id: selectedDirectionId || undefined
+      });
+
+      if (response.success) {
+        toast.success('Черновик сохранён');
+      } else {
+        toast.error(response.error || 'Не удалось сохранить черновик');
+      }
+    } catch (error: any) {
+      console.error('Error saving draft:', error);
+      toast.error('Ошибка сохранения черновика');
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
   const generateCreative = async (isEdit: boolean = false) => {
     // TEMPORARILY DISABLED: Проверяем лимит генераций
     // if (!isMultiAccountMode && creativeGenerationsAvailable <= 0) {
@@ -838,7 +920,25 @@ const CreativeGeneration = () => {
             </TabsList>
 
             <TabsContent value="images" className="mt-0">
-          
+              {/* Подвкладки для картинок */}
+              <Tabs value={imageSubTab} onValueChange={(v) => setImageSubTab(v as any)} className="w-full">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="generate" className="gap-1">
+                    <GenerateIcon className="h-4 w-4" />
+                    Генерация
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="gap-1">
+                    <History className="h-4 w-4" />
+                    История
+                  </TabsTrigger>
+                  <TabsTrigger value="gallery" className="gap-1">
+                    <GalleryHorizontalEnd className="h-4 w-4" />
+                    Галерея
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="generate" className="mt-0">
+
           {/* Предупреждение, если промпт не настроен */}
           {!userPrompt && userId && (
             <Card className="mb-6 shadow-sm border-destructive/50 bg-destructive/5">
@@ -1098,25 +1198,40 @@ const CreativeGeneration = () => {
               </CardContent>
             </Card>
 
-            {/* Кнопка генерации креатива */}
-            <Button
-              onClick={() => generateCreative(false)}
-              disabled={loading.image}
-              className="w-full bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
-              size="lg"
-            >
-              {loading.image ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Генерирую креатив...
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="h-4 w-4 mr-2" />
-                  Сгенерировать креатив
-                </>
-              )}
-            </Button>
+            {/* Кнопки генерации и сохранения черновика */}
+            <div className="flex gap-2">
+              <Button
+                onClick={() => generateCreative(false)}
+                disabled={loading.image}
+                className="flex-1 bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black text-white shadow-md hover:shadow-lg transition-all duration-200"
+                size="lg"
+              >
+                {loading.image ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Генерирую креатив...
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="h-4 w-4 mr-2" />
+                    Сгенерировать креатив
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleSaveDraft}
+                disabled={isSavingDraft || loading.image}
+                variant="outline"
+                size="lg"
+                title="Сохранить как черновик"
+              >
+                {isSavingDraft ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
 
             {loading.image && (
               <Card className="bg-amber-50/50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 shadow-sm">
@@ -1325,26 +1440,129 @@ const CreativeGeneration = () => {
                     </Card>
                   )}
           </div>
+                </TabsContent>
+
+                <TabsContent value="history" className="mt-0">
+                  <ImageHistoryTab
+                    userId={userId}
+                    onUseAsReference={handleUseImageAsReference}
+                  />
+                </TabsContent>
+
+                <TabsContent value="gallery" className="mt-0">
+                  <ImageGalleryTab onUseAsReference={handleUseImageAsReference} />
+                </TabsContent>
+              </Tabs>
             </TabsContent>
 
             <TabsContent value="carousels" className="mt-0">
-              <CarouselTab
-                userId={userId}
-                currentAdAccountId={currentAdAccountId}
-                creativeGenerationsAvailable={creativeGenerationsAvailable}
-                setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
-                directions={directions}
-              />
+              {/* Подвкладки для каруселей */}
+              <Tabs value={carouselSubTab} onValueChange={(v) => setCarouselSubTab(v as any)} className="w-full">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="generate" className="gap-1">
+                    <GenerateIcon className="h-4 w-4" />
+                    Генерация
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="gap-1">
+                    <History className="h-4 w-4" />
+                    История
+                  </TabsTrigger>
+                  <TabsTrigger value="gallery" className="gap-1">
+                    <GalleryHorizontalEnd className="h-4 w-4" />
+                    Галерея
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="generate" className="mt-0">
+                  <CarouselTab
+                    userId={userId}
+                    currentAdAccountId={currentAdAccountId}
+                    creativeGenerationsAvailable={creativeGenerationsAvailable}
+                    setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
+                    directions={directions}
+                  />
+                </TabsContent>
+
+                <TabsContent value="history" className="mt-0">
+                  <CarouselHistoryTab
+                    userId={userId}
+                    onUseAsReference={(imageUrls) => {
+                      // TODO: Интеграция с CarouselTab для референсов
+                      toast.success(`Добавлено ${imageUrls.length} референсов. Переключитесь на генерацию.`);
+                      setCarouselSubTab('generate');
+                    }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="gallery" className="mt-0">
+                  <CarouselGalleryTab
+                    onUseAsReference={(imageUrls) => {
+                      toast.success(`Добавлено ${imageUrls.length} референсов. Переключитесь на генерацию.`);
+                      setCarouselSubTab('generate');
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
             </TabsContent>
 
             <TabsContent value="video-scripts" className="mt-0">
-              <VideoScriptsTab
-                userId={userId}
-                initialPrompt={promptFromUrl || undefined}
-                initialTextType={textTypeFromUrl as any || undefined}
-                initialCompetitorCreativeId={competitorCreativeIdFromUrl || undefined}
-                accountId={currentAdAccountId}
-              />
+              {/* Подвкладки для текстов */}
+              <Tabs value={textSubTab} onValueChange={(v) => setTextSubTab(v as any)} className="w-full">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="generate" className="gap-1">
+                    <GenerateIcon className="h-4 w-4" />
+                    Генерация
+                  </TabsTrigger>
+                  <TabsTrigger value="history" className="gap-1">
+                    <History className="h-4 w-4" />
+                    История
+                  </TabsTrigger>
+                  <TabsTrigger value="gallery" className="gap-1">
+                    <GalleryHorizontalEnd className="h-4 w-4" />
+                    Галерея
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="generate" className="mt-0">
+                  <VideoScriptsTab
+                    userId={userId}
+                    initialPrompt={promptFromUrl || undefined}
+                    initialTextType={textTypeFromUrl as any || undefined}
+                    initialCompetitorCreativeId={competitorCreativeIdFromUrl || undefined}
+                    accountId={currentAdAccountId}
+                  />
+                </TabsContent>
+
+                <TabsContent value="history" className="mt-0">
+                  <TextHistoryTab
+                    userId={userId}
+                    onUseAsReference={(text, textType) => {
+                      // Переключаемся на генерацию с заполненным prompt
+                      // Используем URL параметры для передачи данных
+                      const searchParams = new URLSearchParams(location.search);
+                      searchParams.set('prompt', text);
+                      searchParams.set('textType', 'reference');
+                      window.history.replaceState({}, '', `${location.pathname}?${searchParams.toString()}`);
+                      setTextSubTab('generate');
+                      // Перезагрузим компонент с новыми параметрами
+                      window.location.reload();
+                    }}
+                  />
+                </TabsContent>
+
+                <TabsContent value="gallery" className="mt-0">
+                  <TextGalleryTab
+                    onUseAsReference={(text, textType) => {
+                      const searchParams = new URLSearchParams(location.search);
+                      searchParams.set('prompt', text);
+                      searchParams.set('textType', 'reference');
+                      window.history.replaceState({}, '', `${location.pathname}?${searchParams.toString()}`);
+                      setTextSubTab('generate');
+                      window.location.reload();
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
             </TabsContent>
           </Tabs>
         </div>
