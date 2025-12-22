@@ -167,6 +167,8 @@ export async function processChat({ message, conversationId, mode = 'auto', user
  *   - fbId: Facebook ad account ID for API calls
  */
 async function resolveAdAccountId(userAccountId, adAccountId) {
+  console.log('[resolveAdAccountId] input:', { userAccountId, adAccountId });
+
   // If adAccountId provided, it's a UUID from ad_accounts table
   if (adAccountId) {
     const { data: adAccount } = await supabase
@@ -175,6 +177,7 @@ async function resolveAdAccountId(userAccountId, adAccountId) {
       .eq('id', adAccountId)
       .single();
 
+    console.log('[resolveAdAccountId] found by UUID:', adAccount);
     if (adAccount) {
       return { dbId: adAccount.id, fbId: adAccount.ad_account_id };
     }

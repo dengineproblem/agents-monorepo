@@ -189,19 +189,23 @@ export const adsHandlers = {
   },
 
   async getAds({ campaign_id, period, date_from, date_to }, { accessToken, adAccountId }) {
+    console.log('[getAds] adAccountId from context:', adAccountId);
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 
     // Определяем endpoint: кампания или весь аккаунт
     const normalizedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
     const endpoint = campaign_id ? `${campaign_id}/ads` : `${normalizedAccountId}/ads`;
 
-    const fields = 'id,name,status,effective_status';
+    const fields = 'id,name,status,effective_status,campaign{id,name}';
 
     // Получаем список объявлений
+    console.log('[getAds] endpoint:', endpoint, 'campaign_id:', campaign_id || 'ALL');
     const result = await fbGraph('GET', endpoint, accessToken, {
       fields,
       limit: 500
     });
+
+    console.log('[getAds] Got', result.data?.length || 0, 'ads from FB');
 
     if (!result.data || result.data.length === 0) {
       return { success: true, ads: [], totals: { spend: 0, leads: 0, cpl: null } };
@@ -218,6 +222,7 @@ export const adsHandlers = {
     });
 
     // Создаём map insights по ad_id
+    console.log('[getAds] Got', insightsResult.data?.length || 0, 'insights from FB for', adIds.length, 'ads');
     const insightsMap = {};
     for (const insight of (insightsResult.data || [])) {
       insightsMap[insight.ad_id] = insight;
@@ -260,6 +265,8 @@ export const adsHandlers = {
         id: ad.id,
         name: insights.ad_name || ad.name,
         status: ad.effective_status || ad.status,
+        campaign_id: ad.campaign?.id || null,
+        campaign_name: ad.campaign?.name || null,
         spend: spend.toFixed(2),
         leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
@@ -268,13 +275,41 @@ export const adsHandlers = {
       };
     }).filter(ad => parseFloat(ad.spend) > 0 || ad.leads > 0); // Только с активностью
 
+    console.log('[getAds] After filter:', ads.length, 'ads with activity. Total spend:', totalSpend.toFixed(2), 'leads:', totalLeads);
+
+    // Агрегация по кампаниям для LLM (чтобы не терялись данные в большом списке)
+    const campaignStats = {};
+    for (const ad of ads) {
+      const cid = ad.campaign_id || 'unknown';
+      const cname = ad.campaign_name || 'Без кампании';
+      if (!campaignStats[cid]) {
+        campaignStats[cid] = { campaign_id: cid, campaign_name: cname, spend: 0, leads: 0, ads_count: 0 };
+      }
+      campaignStats[cid].spend += parseFloat(ad.spend);
+      campaignStats[cid].leads += ad.leads;
+      campaignStats[cid].ads_count += 1;
+    }
+
+    const campaigns_summary = Object.values(campaignStats).map(c => ({
+      ...c,
+      spend: c.spend.toFixed(2),
+      cpl: c.leads > 0 ? (c.spend / c.leads).toFixed(2) : null
+    }));
+
+    console.log('[getAds] campaigns_summary:', JSON.stringify(campaigns_summary));
+
     return {
       success: true,
-      ads,
+      // Все объявления с активностью (сортировка по тратам)
+      ads: ads.sort((a, b) => parseFloat(b.spend) - parseFloat(a.spend)),
+      // Сводка по кампаниям для контекста
+      campaigns_summary,
       totals: {
         spend: totalSpend.toFixed(2),
         leads: totalLeads,
-        cpl: totalLeads > 0 ? (totalSpend / totalLeads).toFixed(2) : null
+        cpl: totalLeads > 0 ? (totalSpend / totalLeads).toFixed(2) : null,
+        campaigns_count: campaigns_summary.length,
+        ads_count: ads.length
       },
       period: { since: dateRange.since, until: dateRange.until }
     };

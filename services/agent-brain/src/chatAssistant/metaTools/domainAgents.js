@@ -17,7 +17,7 @@ import { logger } from '../../lib/logger.js';
 const openai = new OpenAI();
 
 // Model for domain agents - fast and good for summarization
-const DOMAIN_AGENT_MODEL = process.env.DOMAIN_AGENT_MODEL || 'gpt-4o-mini';
+const DOMAIN_AGENT_MODEL = process.env.DOMAIN_AGENT_MODEL || 'gpt-5.2';
 
 /**
  * Process raw tool results through domain agent
@@ -55,7 +55,7 @@ export async function processDomainResults(domain, toolCalls, rawResults, contex
         { role: 'user', content: userPrompt }
       ],
       temperature: 0.3,
-      max_tokens: 1500
+      max_completion_tokens: 16000
     });
 
     const content = response.choices[0]?.message?.content || '';
@@ -383,10 +383,11 @@ function formatToolResults(rawResults) {
     if (data.result?.success === false) {
       parts.push(`Ошибка: ${data.result.error || 'unknown'}`);
     } else {
-      // Pretty print result, limit size
+      // Pretty print result, limit size (increased for large datasets like 50+ ads)
       const resultStr = JSON.stringify(data.result, null, 2);
-      if (resultStr.length > 3000) {
-        parts.push(resultStr.substring(0, 3000) + '\n... (данные обрезаны)');
+      console.log(`[formatToolResults] ${toolName}: ${resultStr.length} chars, ads: ${data.result?.ads?.length || 0}, totals: ${JSON.stringify(data.result?.totals || {})}`);
+      if (resultStr.length > 50000) {
+        parts.push(resultStr.substring(0, 50000) + '\n... (данные обрезаны)');
       } else {
         parts.push(resultStr);
       }

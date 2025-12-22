@@ -19,7 +19,7 @@ const periodSchema = z.string().describe('Период: today, yesterday, last_7
 const campaignStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'all']);
 const directionStatusSchema = z.enum(['active', 'paused', 'all']);
 const directionPeriodSchema = z.enum(['7d', '14d', '30d', '90d', '6m', '12m']);
-const groupBySchema = z.enum(['campaign', 'day']);
+const groupBySchema = z.enum(['campaign', 'day', 'total']);
 
 // UUID validation with custom message
 const uuidSchema = z.string().uuid('Invalid UUID format');
