@@ -637,6 +637,131 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     }
   });
 
+  /**
+   * GET /ad-accounts/:userAccountId/all-stats
+   * Получить статистику для всех рекламных аккаунтов пользователя
+   */
+  app.get('/ad-accounts/:userAccountId/all-stats', async (
+    req: FastifyRequest<{
+      Params: { userAccountId: string };
+      Querystring: { since?: string; until?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    const { userAccountId } = req.params;
+    const { since, until } = req.query;
+
+    log.info({ userAccountId, since, until }, 'Fetching stats for all ad accounts');
+
+    try {
+      // Получаем все аккаунты пользователя
+      const { data: adAccounts, error: fetchError } = await supabase
+        .from('ad_accounts')
+        .select('id, name, page_picture_url, connection_status, is_active, ad_account_id, access_token')
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: true });
+
+      if (fetchError) {
+        log.error({ error: fetchError }, 'Error fetching ad accounts');
+        return reply.status(500).send({ error: 'Failed to fetch ad accounts' });
+      }
+
+      const accountsWithStats = [];
+
+      for (const account of adAccounts || []) {
+        const accountData: {
+          id: string;
+          name: string;
+          page_picture_url: string | null;
+          connection_status: string;
+          is_active: boolean;
+          stats: {
+            spend: number;
+            leads: number;
+            impressions: number;
+            clicks: number;
+            cpl: number;
+          } | null;
+        } = {
+          id: account.id,
+          name: account.name,
+          page_picture_url: account.page_picture_url,
+          connection_status: account.connection_status || 'pending',
+          is_active: account.is_active !== false,
+          stats: null,
+        };
+
+        // Если есть access_token и ad_account_id, запрашиваем статистику
+        if (account.access_token && account.ad_account_id && since && until) {
+          try {
+            const fbAccountId = account.ad_account_id.startsWith('act_')
+              ? account.ad_account_id
+              : `act_${account.ad_account_id}`;
+
+            const insightsUrl = new URL(`https://graph.facebook.com/v18.0/${fbAccountId}/insights`);
+            insightsUrl.searchParams.set('access_token', account.access_token);
+            insightsUrl.searchParams.set('level', 'account');
+            insightsUrl.searchParams.set('fields', 'spend,impressions,clicks,actions');
+            insightsUrl.searchParams.set('time_range', JSON.stringify({ since, until }));
+
+            const response = await fetch(insightsUrl.toString());
+            const data = await response.json();
+
+            if (data.data && data.data.length > 0) {
+              const insight = data.data[0];
+              const spend = parseFloat(insight.spend || '0');
+              const impressions = parseInt(insight.impressions || '0', 10);
+              const clicks = parseInt(insight.clicks || '0', 10);
+
+              // Подсчёт лидов из actions
+              let leads = 0;
+              if (insight.actions && Array.isArray(insight.actions)) {
+                for (const action of insight.actions) {
+                  if (
+                    action.action_type === 'onsite_conversion.total_messaging_connection' ||
+                    action.action_type === 'offsite_conversion.fb_pixel_lead' ||
+                    action.action_type === 'onsite_conversion.lead_grouped'
+                  ) {
+                    leads += parseInt(action.value || '0', 10);
+                  }
+                }
+              }
+
+              accountData.stats = {
+                spend,
+                leads,
+                impressions,
+                clicks,
+                cpl: leads > 0 ? spend / leads : 0,
+              };
+            }
+          } catch (fbError) {
+            log.warn({ adAccountId: account.id, error: fbError }, 'Failed to fetch FB stats for account');
+            // Продолжаем без статистики для этого аккаунта
+          }
+        }
+
+        accountsWithStats.push(accountData);
+      }
+
+      return reply.send({ accounts: accountsWithStats });
+    } catch (error: any) {
+      log.error({ error }, 'Error fetching all account stats');
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_all_account_stats',
+        endpoint: '/ad-accounts/:userAccountId/all-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
 }
 
 export default adAccountsRoutes;

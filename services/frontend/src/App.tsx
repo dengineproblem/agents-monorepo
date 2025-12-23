@@ -34,6 +34,7 @@ import AdminOnboarding from './pages/AdminOnboarding';
 import AdminRoute from './components/AdminRoute';
 import Assistant from './pages/Assistant';
 import ConversationReports from './pages/ConversationReports';
+import MultiAccountDashboard from './pages/MultiAccountDashboard';
 import { AdminLayout } from './components/admin';
 import {
   AdminDashboard,
@@ -314,6 +315,7 @@ const AppRoutes = () => {
                   <SidebarAwareContent>
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
+                      <Route path="/accounts" element={<MultiAccountDashboard />} />
                       <Route path="/oauth/callback" element={<OAuthCallback />} />
                       <Route path="/campaign/:id" element={<CampaignDetail />} />
                       {FEATURES.SHOW_CONSULTATIONS && <Route path="/consultations" element={<Consultations />} />}

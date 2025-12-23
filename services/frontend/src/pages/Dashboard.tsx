@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import SummaryStats from '../components/SummaryStats';
 import CampaignList from '../components/CampaignList';
@@ -28,6 +29,7 @@ const WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/token';
 
 const Dashboard: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const {
     loading,
     accountStatus,
@@ -43,6 +45,18 @@ const Dashboard: React.FC = () => {
     adAccounts: contextAdAccounts,
     currentAdAccountId,
   } = useAppContext();
+
+  // Редирект на страницу всех аккаунтов при первом входе в мультиаккаунтный режим
+  useEffect(() => {
+    if (multiAccountEnabled && contextAdAccounts.length > 0) {
+      // Проверяем, был ли уже посещён Dashboard в этой сессии
+      const hasVisitedDashboard = sessionStorage.getItem('hasVisitedDashboard');
+      if (!hasVisitedDashboard) {
+        sessionStorage.setItem('hasVisitedDashboard', 'true');
+        navigate('/accounts', { replace: true });
+      }
+    }
+  }, [multiAccountEnabled, contextAdAccounts, navigate]);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [webhookResult, setWebhookResult] = useState<string>('');
   const [loadingWebhook, setLoadingWebhook] = useState(false);
