@@ -47,6 +47,7 @@ import adminLeadsRoutes from './routes/adminLeads.js';
 import adminErrorsRoutes from './routes/adminErrors.js';
 import adminNotificationsRoutes from './routes/adminNotifications.js';
 import adminSettingsRoutes from './routes/adminSettings.js';
+import adInsightsRoutes from './routes/adInsights.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
@@ -164,6 +165,7 @@ app.register(async (adminApp) => {
   adminApp.register(adminErrorsRoutes);
   adminApp.register(adminNotificationsRoutes);
   adminApp.register(adminSettingsRoutes);
+  adminApp.register(adInsightsRoutes);
 });
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)

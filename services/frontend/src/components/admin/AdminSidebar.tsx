@@ -19,6 +19,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -79,6 +80,11 @@ const menuItems: MenuItem[] = [
     path: '/admin/settings',
     label: 'Настройки',
     icon: Settings,
+  },
+  {
+    path: '/admin/ad-insights',
+    label: 'Ad Insights',
+    icon: TrendingUp,
   },
 ];
 
