@@ -4433,7 +4433,7 @@ if (CRON_ENABLED) {
       }
     }
   }, {
-    scheduled: true,
+    scheduled: false, // ВРЕМЕННО ВЫКЛЮЧЕН - тестируем локально
     timezone: "Asia/Almaty"
   });
 
