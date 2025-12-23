@@ -197,9 +197,10 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
 
   // Основная статистика
   report += `📈 СТАТИСТИКА ДИАЛОГОВ\n`;
-  report += `• Всего диалогов: ${data.total_dialogs}\n`;
-  report += `• Новых: ${data.new_dialogs}\n`;
-  report += `• Активных: ${data.active_dialogs}\n`;
+  report += `• Активных диалогов: ${data.total_dialogs}\n`;
+  if (data.new_dialogs > 0) {
+    report += `• Новых: ${data.new_dialogs}\n`;
+  }
   report += `• Сообщений: 📥 ${data.total_incoming_messages} / 📤 ${data.total_outgoing_messages}\n\n`;
 
   // Распределение по интересу
@@ -221,12 +222,12 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
     report += `\n`;
   }
 
-  // Скорость ответов
+  // Скорость ответов (конвертируем минуты в секунды)
   if (data.avg_response_time_minutes) {
     report += `⏱️ СКОРОСТЬ ОТВЕТОВ\n`;
-    report += `• Средняя: ${Math.round(data.avg_response_time_minutes)} мин\n`;
-    if (data.min_response_time_minutes) report += `• Минимальная: ${Math.round(data.min_response_time_minutes)} мин\n`;
-    if (data.max_response_time_minutes) report += `• Максимальная: ${Math.round(data.max_response_time_minutes)} мин\n`;
+    report += `• Средняя: ${Math.round(data.avg_response_time_minutes * 60)} сек\n`;
+    if (data.min_response_time_minutes) report += `• Минимальная: ${Math.round(data.min_response_time_minutes * 60)} сек\n`;
+    if (data.max_response_time_minutes) report += `• Максимальная: ${Math.round(data.max_response_time_minutes * 60)} сек\n`;
     report += `\n`;
   }
 
@@ -343,8 +344,8 @@ export async function generateConversationReport(params: {
         const analysisResult = await analyzeDialogs({
           instanceName,
           userAccountId,
-          minIncoming: 3,
-          maxDialogs: 100  // Лимит для скорости
+          minIncoming: 3
+          // maxDialogs убран — анализируем все диалоги за период
         });
 
         log.info({
@@ -395,27 +396,27 @@ export async function generateConversationReport(params: {
       return lastMsg >= startOfDay && lastMsg <= endOfDay;
     });
 
-    // Новые диалоги за период (по created_at)
+    // Новые диалоги за период (по first_message — когда клиент написал первый раз)
     const newDialogs = allDialogs.filter(d => {
-      const created = new Date(d.created_at);
-      return created >= startOfDay && created <= endOfDay;
+      const firstMsg = new Date(d.first_message);
+      return firstMsg >= startOfDay && firstMsg <= endOfDay;
     });
 
-    // Распределение по интересу
+    // Распределение по интересу (только активные за период)
     const interestDistribution: Record<string, number> = {
       hot: 0,
       warm: 0,
       cold: 0
     };
-    allDialogs.forEach(d => {
+    activeDialogs.forEach(d => {
       if (d.interest_level) {
         interestDistribution[d.interest_level] = (interestDistribution[d.interest_level] || 0) + 1;
       }
     });
 
-    // Распределение по воронке
+    // Распределение по воронке (только активные за период)
     const funnelDistribution: Record<string, number> = {};
-    allDialogs.forEach(d => {
+    activeDialogs.forEach(d => {
       if (d.funnel_stage) {
         funnelDistribution[d.funnel_stage] = (funnelDistribution[d.funnel_stage] || 0) + 1;
       }
@@ -447,9 +448,9 @@ export async function generateConversationReport(params: {
       maxResponseTime = Math.max(...allResponseTimes);
     }
 
-    // Собираем возражения
+    // Собираем возражения (только активные за период)
     const objectionCounts: Record<string, number> = {};
-    allDialogs.forEach(d => {
+    activeDialogs.forEach(d => {
       if (d.objection) {
         objectionCounts[d.objection] = (objectionCounts[d.objection] || 0) + 1;
       }
@@ -474,7 +475,7 @@ export async function generateConversationReport(params: {
     if (activeDialogs.length > 0) {
       try {
         const prompt = REPORT_ANALYSIS_PROMPT
-          .replace('{{total_dialogs}}', allDialogs.length.toString())
+          .replace('{{total_dialogs}}', activeDialogs.length.toString())
           .replace('{{new_dialogs}}', newDialogs.length.toString())
           .replace('{{active_dialogs}}', activeDialogs.length.toString())
           .replace('{{incoming_messages}}', totalIncoming.toString())
@@ -511,7 +512,7 @@ export async function generateConversationReport(params: {
       report_date: reportDateStr,
       period_start: startOfDay.toISOString(),
       period_end: endOfDay.toISOString(),
-      total_dialogs: allDialogs.length,
+      total_dialogs: activeDialogs.length,
       new_dialogs: newDialogs.length,
       active_dialogs: activeDialogs.length,
       conversions: {}, // TODO: реализовать отслеживание конверсий
