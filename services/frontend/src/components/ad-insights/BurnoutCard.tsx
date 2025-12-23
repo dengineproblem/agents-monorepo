@@ -17,7 +17,11 @@ interface BurnoutCardProps {
 }
 
 export const BurnoutCard: React.FC<BurnoutCardProps> = ({ prediction, onClick }) => {
-  const burnoutPercent = Math.round(prediction.burnout_score * 100);
+  const burnoutScore = prediction.burnout_score ?? 0;
+  const burnoutPercent = Math.round(burnoutScore * 100);
+  const cprChange1w = prediction.predicted_cpr_change_1w ?? 0;
+  const cprChange2w = prediction.predicted_cpr_change_2w ?? 0;
+  const confidence = prediction.confidence ?? 0;
 
   const getBurnoutColor = (score: number) => {
     if (score >= 0.7) return 'bg-red-500';
@@ -53,7 +57,7 @@ export const BurnoutCard: React.FC<BurnoutCardProps> = ({ prediction, onClick })
           <Progress
             value={burnoutPercent}
             className="h-2"
-            indicatorClassName={getBurnoutColor(prediction.burnout_score)}
+            indicatorClassName={getBurnoutColor(burnoutScore)}
           />
         </div>
 
@@ -62,21 +66,21 @@ export const BurnoutCard: React.FC<BurnoutCardProps> = ({ prediction, onClick })
           <div className="space-y-1">
             <p className="text-muted-foreground">CPR через 1 нед</p>
             <p className={`font-medium flex items-center gap-1 ${
-              prediction.predicted_cpr_change_1w > 0 ? 'text-red-500' : 'text-green-500'
+              cprChange1w > 0 ? 'text-red-500' : 'text-green-500'
             }`}>
-              <TrendingUp className={`h-3 w-3 ${prediction.predicted_cpr_change_1w < 0 ? 'rotate-180' : ''}`} />
-              {prediction.predicted_cpr_change_1w > 0 ? '+' : ''}
-              {prediction.predicted_cpr_change_1w.toFixed(1)}%
+              <TrendingUp className={`h-3 w-3 ${cprChange1w < 0 ? 'rotate-180' : ''}`} />
+              {cprChange1w > 0 ? '+' : ''}
+              {cprChange1w.toFixed(1)}%
             </p>
           </div>
           <div className="space-y-1">
             <p className="text-muted-foreground">CPR через 2 нед</p>
             <p className={`font-medium flex items-center gap-1 ${
-              prediction.predicted_cpr_change_2w > 0 ? 'text-red-500' : 'text-green-500'
+              cprChange2w > 0 ? 'text-red-500' : 'text-green-500'
             }`}>
-              <TrendingUp className={`h-3 w-3 ${prediction.predicted_cpr_change_2w < 0 ? 'rotate-180' : ''}`} />
-              {prediction.predicted_cpr_change_2w > 0 ? '+' : ''}
-              {prediction.predicted_cpr_change_2w.toFixed(1)}%
+              <TrendingUp className={`h-3 w-3 ${cprChange2w < 0 ? 'rotate-180' : ''}`} />
+              {cprChange2w > 0 ? '+' : ''}
+              {cprChange2w.toFixed(1)}%
             </p>
           </div>
         </div>
@@ -98,7 +102,7 @@ export const BurnoutCard: React.FC<BurnoutCardProps> = ({ prediction, onClick })
 
         {/* Confidence */}
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>Уверенность: {Math.round(prediction.confidence * 100)}%</span>
+          <span>Уверенность: {Math.round(confidence * 100)}%</span>
           <span>Неделя: {prediction.week_start_date}</span>
         </div>
       </CardContent>

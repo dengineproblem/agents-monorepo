@@ -44,8 +44,8 @@ const RATE_LIMIT_THRESHOLD = 80; // % использования лимита, �
 // Типы
 interface AdAccount {
   id: string;
-  fb_ad_account_id: string;
-  fb_access_token: string;
+  ad_account_id: string;
+  access_token: string;
   user_account_id: string;
 }
 
@@ -150,10 +150,52 @@ async function updateRateLimitState(adAccountId: string, usage: RateLimitState |
       usage_headers: usage,
       throttle_until: throttleUntil,
       throttle_reason: throttleReason,
-      requests_today: supabase.rpc ? undefined : 1, // Increment if RPC available
+      requests_today: 1,
       last_request_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }, { onConflict: 'ad_account_id' });
+}
+
+// ============================================================================
+// RETRY HELPER FOR SUPABASE OPERATIONS
+// ============================================================================
+
+const SUPABASE_MAX_RETRIES = 3;
+const SUPABASE_RETRY_DELAY = 2000; // 2 seconds
+
+/**
+ * Выполняет Supabase операцию с retry на сетевых ошибках
+ */
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  context: string
+): Promise<T> {
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= SUPABASE_MAX_RETRIES; attempt++) {
+    try {
+      return await operation();
+    } catch (error: any) {
+      lastError = error;
+
+      const isNetworkError =
+        error?.message?.includes('fetch failed') ||
+        error?.message?.includes('ECONNRESET') ||
+        error?.message?.includes('ETIMEDOUT') ||
+        error?.code === 'ECONNRESET' ||
+        error?.code === 'ETIMEDOUT';
+
+      if (isNetworkError && attempt < SUPABASE_MAX_RETRIES) {
+        log.warn({ attempt, context, error: error?.message }, `Network error, retrying in ${SUPABASE_RETRY_DELAY}ms...`);
+        await new Promise(resolve => setTimeout(resolve, SUPABASE_RETRY_DELAY));
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError;
 }
 
 // ============================================================================
@@ -234,14 +276,12 @@ export async function syncCampaigns(adAccountId: string, accessToken: string, fb
         synced_at: new Date().toISOString(),
       }));
 
-      const { error } = await supabase
-        .from('meta_campaigns')
-        .upsert(campaigns, { onConflict: 'ad_account_id,fb_campaign_id' });
-
-      if (error) {
-        log.error({ error }, 'Failed to upsert campaigns');
-        throw error;
-      }
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_campaigns')
+          .upsert(campaigns, { onConflict: 'ad_account_id,fb_campaign_id' });
+        if (error) throw error;
+      }, 'upsert campaigns');
 
       totalSynced += campaigns.length;
     }
@@ -284,14 +324,12 @@ export async function syncAdsets(adAccountId: string, accessToken: string, fbAdA
         synced_at: new Date().toISOString(),
       }));
 
-      const { error } = await supabase
-        .from('meta_adsets')
-        .upsert(adsets, { onConflict: 'ad_account_id,fb_adset_id' });
-
-      if (error) {
-        log.error({ error }, 'Failed to upsert adsets');
-        throw error;
-      }
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_adsets')
+          .upsert(adsets, { onConflict: 'ad_account_id,fb_adset_id' });
+        if (error) throw error;
+      }, 'upsert adsets');
 
       totalSynced += adsets.length;
     }
@@ -334,14 +372,12 @@ export async function syncAds(adAccountId: string, accessToken: string, fbAdAcco
         synced_at: new Date().toISOString(),
       }));
 
-      const { error } = await supabase
-        .from('meta_ads')
-        .upsert(ads, { onConflict: 'ad_account_id,fb_ad_id' });
-
-      if (error) {
-        log.error({ error }, 'Failed to upsert ads');
-        throw error;
-      }
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_ads')
+          .upsert(ads, { onConflict: 'ad_account_id,fb_ad_id' });
+        if (error) throw error;
+      }, 'upsert ads');
 
       totalSynced += ads.length;
     }
@@ -454,6 +490,7 @@ async function pollAsyncJobStatus(accessToken: string, reportRunId: string): Pro
 async function fetchAsyncJobResults(accessToken: string, reportRunId: string): Promise<any[]> {
   const results: any[] = [];
   let cursor: string | undefined;
+  let lastCursor: string | undefined;
 
   do {
     const params: any = { limit: 500 };
@@ -461,11 +498,19 @@ async function fetchAsyncJobResults(accessToken: string, reportRunId: string): P
 
     const result = await graph('GET', `${reportRunId}/insights`, accessToken, params);
 
-    if (result.data) {
+    if (result.data && result.data.length > 0) {
       results.push(...result.data);
     }
 
-    cursor = result.paging?.cursors?.after;
+    const newCursor = result.paging?.cursors?.after;
+
+    // Выходим если: нет cursor, пустые данные, или cursor не изменился (бесконечный цикл)
+    if (!newCursor || !result.data?.length || newCursor === lastCursor) {
+      break;
+    }
+
+    lastCursor = cursor;
+    cursor = newCursor;
   } while (cursor);
 
   return results;
@@ -593,19 +638,19 @@ export async function syncWeeklyInsights(
       synced_at: new Date().toISOString(),
     };
 
-    const { error, data } = await supabase
-      .from('meta_insights_weekly')
-      .upsert(insight, {
-        onConflict: 'ad_account_id,fb_ad_id,week_start_date',
-        ignoreDuplicates: false
-      })
-      .select('id');
-
-    if (error) {
-      log.error({ error, adId: row.ad_id, weekStart }, 'Failed to upsert insight');
-    } else {
-      // Простой подсчёт - upsert не различает insert/update в Supabase
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_weekly')
+          .upsert(insight, {
+            onConflict: 'ad_account_id,fb_ad_id,week_start_date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert insight ad=${row.ad_id} week=${weekStart}`);
       inserted++;
+    } catch (error) {
+      log.error({ error, adId: row.ad_id, weekStart }, 'Failed to upsert insight');
     }
   }
 
@@ -716,17 +761,19 @@ export async function syncWeeklyInsightsCampaign(
       synced_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
-      .from('meta_insights_weekly_campaign')
-      .upsert(insight, {
-        onConflict: 'ad_account_id,fb_campaign_id,week_start_date',
-        ignoreDuplicates: false
-      });
-
-    if (error) {
-      log.error({ error, campaignId: row.campaign_id, weekStart }, 'Failed to upsert campaign insight');
-    } else {
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_weekly_campaign')
+          .upsert(insight, {
+            onConflict: 'ad_account_id,fb_campaign_id,week_start_date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert campaign insight campaign=${row.campaign_id} week=${weekStart}`);
       inserted++;
+    } catch (error) {
+      log.error({ error, campaignId: row.campaign_id, weekStart }, 'Failed to upsert campaign insight');
     }
   }
 
@@ -834,17 +881,19 @@ export async function syncWeeklyInsightsAdset(
       synced_at: new Date().toISOString(),
     };
 
-    const { error } = await supabase
-      .from('meta_insights_weekly_adset')
-      .upsert(insight, {
-        onConflict: 'ad_account_id,fb_adset_id,week_start_date',
-        ignoreDuplicates: false
-      });
-
-    if (error) {
-      log.error({ error, adsetId: row.adset_id, weekStart }, 'Failed to upsert adset insight');
-    } else {
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_weekly_adset')
+          .upsert(insight, {
+            onConflict: 'ad_account_id,fb_adset_id,week_start_date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert adset insight adset=${row.adset_id} week=${weekStart}`);
       inserted++;
+    } catch (error) {
+      log.error({ error, adsetId: row.adset_id, weekStart }, 'Failed to upsert adset insight');
     }
   }
 
@@ -858,10 +907,15 @@ export async function syncWeeklyInsightsAdset(
 
 /**
  * Полная синхронизация ad account (справочники + insights на всех уровнях)
+ * Поддерживает legacy и multi-account режимы
  */
 export async function fullSync(adAccountUuid: string, options?: {
   syncCampaignInsights?: boolean;
   syncAdsetInsights?: boolean;
+  // Credentials могут быть переданы извне (для legacy режима)
+  accessToken?: string;
+  fbAdAccountId?: string;
+  isLegacy?: boolean;
 }): Promise<{
   campaigns: number;
   adsets: number;
@@ -873,45 +927,55 @@ export async function fullSync(adAccountUuid: string, options?: {
   const {
     syncCampaignInsights = true,
     syncAdsetInsights = true,
+    accessToken: providedToken,
+    fbAdAccountId: providedFbAccountId,
+    isLegacy = false,
   } = options || {};
 
-  // 1. Получаем credentials
-  const { data: adAccount, error } = await supabase
-    .from('ad_accounts')
-    .select('id, fb_ad_account_id, fb_access_token, user_account_id')
-    .eq('id', adAccountUuid)
-    .single();
+  let cleanFbAccountId: string;
+  let accessToken: string;
 
-  if (error || !adAccount) {
-    throw new Error(`Ad account not found: ${adAccountUuid}`);
+  if (providedToken && providedFbAccountId) {
+    // Credentials переданы извне (legacy или прямой вызов)
+    cleanFbAccountId = providedFbAccountId.replace('act_', '');
+    accessToken = providedToken;
+  } else {
+    // Получаем credentials из ad_accounts (multi-account режим)
+    const { data: adAccount, error } = await supabase
+      .from('ad_accounts')
+      .select('id, ad_account_id, access_token, user_account_id')
+      .eq('id', adAccountUuid)
+      .single();
+
+    if (error || !adAccount) {
+      throw new Error(`Ad account not found: ${adAccountUuid}`);
+    }
+
+    if (!adAccount.access_token) {
+      throw new Error('No access token for ad account');
+    }
+
+    cleanFbAccountId = adAccount.ad_account_id.replace('act_', '');
+    accessToken = adAccount.access_token;
   }
 
-  const { fb_ad_account_id, fb_access_token } = adAccount;
-
-  if (!fb_access_token) {
-    throw new Error('No access token for ad account');
-  }
-
-  // Убираем act_ если есть
-  const cleanFbAccountId = fb_ad_account_id.replace('act_', '');
-
-  log.info({ adAccountUuid, cleanFbAccountId }, 'Starting full sync');
+  log.info({ adAccountUuid, cleanFbAccountId, isLegacy }, 'Starting full sync');
 
   // 2. Синхронизируем справочники
-  const campaigns = await syncCampaigns(adAccountUuid, fb_access_token, cleanFbAccountId);
-  const adsets = await syncAdsets(adAccountUuid, fb_access_token, cleanFbAccountId);
-  const ads = await syncAds(adAccountUuid, fb_access_token, cleanFbAccountId);
+  const campaigns = await syncCampaigns(adAccountUuid, accessToken, cleanFbAccountId);
+  const adsets = await syncAdsets(adAccountUuid, accessToken, cleanFbAccountId);
+  const ads = await syncAds(adAccountUuid, accessToken, cleanFbAccountId);
 
   // 3. Синхронизируем ad-level insights
-  const insights = await syncWeeklyInsights(adAccountUuid, fb_access_token, cleanFbAccountId, 12);
+  const insights = await syncWeeklyInsights(adAccountUuid, accessToken, cleanFbAccountId, 12);
 
   // 4. Синхронизируем campaign-level insights (опционально)
   let campaignInsights: { inserted: number } | undefined;
   if (syncCampaignInsights) {
     try {
-      campaignInsights = await syncWeeklyInsightsCampaign(adAccountUuid, fb_access_token, cleanFbAccountId, 12);
+      campaignInsights = await syncWeeklyInsightsCampaign(adAccountUuid, accessToken, cleanFbAccountId, 12);
     } catch (err: any) {
-      log.error({ error: err, adAccountUuid }, 'Failed to sync campaign insights');
+      log.error({ errorMessage: err?.message, errorStack: err?.stack, adAccountUuid }, 'Failed to sync campaign insights');
     }
   }
 
@@ -919,9 +983,9 @@ export async function fullSync(adAccountUuid: string, options?: {
   let adsetInsights: { inserted: number } | undefined;
   if (syncAdsetInsights) {
     try {
-      adsetInsights = await syncWeeklyInsightsAdset(adAccountUuid, fb_access_token, cleanFbAccountId, 12);
+      adsetInsights = await syncWeeklyInsightsAdset(adAccountUuid, accessToken, cleanFbAccountId, 12);
     } catch (err: any) {
-      log.error({ error: err, adAccountUuid }, 'Failed to sync adset insights');
+      log.error({ errorMessage: err?.message, errorStack: err?.stack, adAccountUuid }, 'Failed to sync adset insights');
     }
   }
 
@@ -944,9 +1008,9 @@ export async function fullSync(adAccountUuid: string, options?: {
 export async function syncAllAccounts(): Promise<Map<string, any>> {
   const { data: accounts, error } = await supabase
     .from('ad_accounts')
-    .select('id, fb_ad_account_id')
+    .select('id, ad_account_id')
     .eq('connection_status', 'connected')
-    .not('fb_access_token', 'is', null);
+    .not('access_token', 'is', null);
 
   if (error) {
     log.error({ error }, 'Failed to fetch ad accounts');

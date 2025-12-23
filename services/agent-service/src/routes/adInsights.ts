@@ -40,6 +40,7 @@ import {
 } from '../services/yearlyAnalyzer.js';
 import { analyzeTrackingHealth, getTrackingIssuesHistory } from '../services/trackingHealth.js';
 import { supabase } from '../lib/supabaseClient.js';
+import { getCredentials } from '../lib/adAccountHelper.js';
 import { createLogger } from '../lib/logger.js';
 
 const log = createLogger({ module: 'adInsightsRoutes' });
@@ -123,6 +124,7 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
   /**
    * POST /admin/ad-insights/:accountId/sync
    * Полная синхронизация: справочники + weekly insights + нормализация + аномалии
+   * Поддерживает legacy и multi-account режимы
    */
   fastify.post<{
     Params: SyncParams;
@@ -137,34 +139,112 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     log.info({ adminId, accountId, months }, 'Admin starting full sync');
 
     try {
-      // 1. Проверяем что аккаунт существует
-      const { data: account, error: accountError } = await supabase
-        .from('ad_accounts')
-        .select('id, fb_ad_account_id, connection_status')
-        .eq('id', accountId)
-        .single();
+      // Определяем режим по формату accountId
+      const isLegacy = accountId.startsWith('legacy_');
+      let userAccountId: string;
+      let adAccountUuid: string;
+      let fbAdAccountId: string;
+      let accessToken: string;
 
-      if (accountError || !account) {
-        return reply.status(404).send({ error: 'Ad account not found' });
+      if (isLegacy) {
+        // Legacy режим: credentials в user_accounts
+        userAccountId = accountId.replace('legacy_', '');
+
+        const { data: user, error: userError } = await supabase
+          .from('user_accounts')
+          .select('id, ad_account_id, access_token, username')
+          .eq('id', userAccountId)
+          .single();
+
+        if (userError || !user) {
+          return reply.status(404).send({ error: 'User account not found', accountId });
+        }
+
+        if (!user.access_token || !user.ad_account_id) {
+          return reply.status(400).send({ error: 'Missing credentials in user account' });
+        }
+
+        fbAdAccountId = user.ad_account_id;
+        accessToken = user.access_token;
+
+        // Для legacy нужна запись в ad_accounts (из-за FK constraints)
+        // Проверяем/создаём ad_account для этого legacy пользователя
+        const { data: existingAdAccount } = await supabase
+          .from('ad_accounts')
+          .select('id')
+          .eq('user_account_id', userAccountId)
+          .eq('ad_account_id', fbAdAccountId)
+          .single();
+
+        if (existingAdAccount) {
+          adAccountUuid = existingAdAccount.id;
+        } else {
+          // Создаём ad_account для legacy пользователя
+          const { data: newAdAccount, error: createError } = await supabase
+            .from('ad_accounts')
+            .insert({
+              user_account_id: userAccountId,
+              ad_account_id: fbAdAccountId,
+              access_token: accessToken,
+              name: user.username || fbAdAccountId,
+              connection_status: 'connected',
+              is_active: true,
+            })
+            .select('id')
+            .single();
+
+          if (createError || !newAdAccount) {
+            log.error({ error: createError, userAccountId }, 'Failed to create ad_account for legacy user');
+            return reply.status(500).send({ error: 'Failed to initialize ad account' });
+          }
+
+          adAccountUuid = newAdAccount.id;
+          log.info({ adAccountUuid, userAccountId, fbAdAccountId }, 'Created ad_account for legacy user');
+        }
+      } else {
+        // Multi-account режим: credentials в ad_accounts
+        const isUuid = accountId.includes('-');
+        const { data: account, error: accountError } = await supabase
+          .from('ad_accounts')
+          .select('id, ad_account_id, access_token, connection_status, user_account_id')
+          .eq(isUuid ? 'id' : 'ad_account_id', accountId)
+          .single();
+
+        if (accountError || !account) {
+          return reply.status(404).send({ error: 'Ad account not found', accountId });
+        }
+
+        // Разрешаем sync если есть access_token (независимо от connection_status)
+        if (!account.access_token) {
+          return reply.status(400).send({ error: 'Missing access token', status: account.connection_status });
+        }
+
+        userAccountId = account.user_account_id;
+        adAccountUuid = account.id;
+        fbAdAccountId = account.ad_account_id;
+        accessToken = account.access_token;
       }
 
-      if (account.connection_status !== 'connected') {
-        return reply.status(400).send({ error: 'Ad account not connected' });
-      }
+      // Для fullSync передаём credentials
+      const cleanFbAccountId = fbAdAccountId.replace('act_', '');
 
-      // 2. Запускаем полную синхронизацию
-      const syncResult = await fullSync(accountId);
+      // 2. Запускаем полную синхронизацию с credentials
+      const syncResult = await fullSync(adAccountUuid, {
+        accessToken,
+        fbAdAccountId: cleanFbAccountId,
+        isLegacy,
+      });
 
       // 3. Нормализуем результаты
-      const normalizeResult = await normalizeAllResults(accountId);
+      const normalizeResult = await normalizeAllResults(adAccountUuid);
 
       // 4. Добавляем clicks как семейство
-      const clicksAdded = await ensureClickFamily(accountId);
+      const clicksAdded = await ensureClickFamily(adAccountUuid);
 
       // 5. Детектируем аномалии
-      const anomalyResult = await processAdAccount(accountId);
+      const anomalyResult = await processAdAccount(adAccountUuid);
 
-      log.info({ adminId, accountId, syncResult, anomalyResult }, 'Full sync completed');
+      log.info({ adminId, accountId, syncResult, anomalyResult, isLegacy }, 'Full sync completed');
 
       return reply.send({
         success: true,
@@ -177,10 +257,16 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
         anomalies: anomalyResult,
       });
     } catch (error: any) {
-      log.error({ error, adminId, accountId }, 'Sync failed');
+      log.error({
+        errorMessage: error?.message,
+        errorStack: error?.stack,
+        errorName: error?.name,
+        adminId,
+        accountId
+      }, 'Sync failed');
       return reply.status(500).send({
         error: 'Sync failed',
-        message: error.message,
+        message: error?.message || 'Unknown error',
       });
     }
   });
@@ -198,23 +284,26 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     const { accountId } = request.params;
 
     try {
+      // accountId может быть UUID или ad_account_id (act_xxx)
+      const isUuid = accountId.includes('-');
       const { data: account } = await supabase
         .from('ad_accounts')
-        .select('fb_ad_account_id, fb_access_token')
-        .eq('id', accountId)
+        .select('id, ad_account_id, access_token')
+        .eq(isUuid ? 'id' : 'ad_account_id', accountId)
         .single();
 
-      if (!account?.fb_access_token) {
+      if (!account?.access_token) {
         return reply.status(400).send({ error: 'No access token' });
       }
 
-      const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
+      const dbAccountId = account.id;
+      const cleanFbAccountId = account.ad_account_id.replace('act_', '');
 
-      const campaigns = await syncCampaigns(accountId, account.fb_access_token, cleanFbAccountId);
-      const adsets = await syncAdsets(accountId, account.fb_access_token, cleanFbAccountId);
-      const ads = await syncAds(accountId, account.fb_access_token, cleanFbAccountId);
+      const campaigns = await syncCampaigns(dbAccountId, account.access_token, cleanFbAccountId);
+      const adsets = await syncAdsets(dbAccountId, account.access_token, cleanFbAccountId);
+      const ads = await syncAds(dbAccountId, account.access_token, cleanFbAccountId);
 
-      log.info({ adminId, accountId, campaigns, adsets, ads }, 'Catalogs synced');
+      log.info({ adminId, accountId: dbAccountId, campaigns, adsets, ads }, 'Catalogs synced');
 
       return reply.send({
         success: true,
@@ -245,16 +334,16 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     try {
       const { data: account } = await supabase
         .from('ad_accounts')
-        .select('fb_ad_account_id, fb_access_token')
+        .select('ad_account_id, access_token')
         .eq('id', accountId)
         .single();
 
-      if (!account?.fb_access_token) {
+      if (!account?.access_token) {
         return reply.status(400).send({ error: 'No access token' });
       }
 
-      const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
-      const result = await syncWeeklyInsights(accountId, account.fb_access_token, cleanFbAccountId, months);
+      const cleanFbAccountId = account.ad_account_id.replace('act_', '');
+      const result = await syncWeeklyInsights(accountId, account.access_token, cleanFbAccountId, months);
 
       log.info({ adminId, accountId, months, result }, 'Insights synced');
 
@@ -656,6 +745,7 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
   /**
    * GET /admin/ad-insights/:accountId/burnout/predictions
    * Предсказания выгорания для всех активных ads
+   * Читает из БД ad_burnout_predictions (формат snake_case для frontend)
    */
   fastify.get<{
     Params: SyncParams;
@@ -671,27 +761,35 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     const { riskLevel, limit = 50 } = request.query;
 
     try {
-      let predictions = await predictAllAds(accountId);
+      // Читаем из БД (уже в snake_case формате)
+      let query = supabase
+        .from('ad_burnout_predictions')
+        .select('*')
+        .eq('ad_account_id', accountId)
+        .order('burnout_score', { ascending: false })
+        .limit(limit);
 
-      // Фильтруем по risk level если указан
       if (riskLevel) {
-        predictions = predictions.filter(p => p.riskLevel === riskLevel);
+        query = query.eq('burnout_level', riskLevel);
       }
 
-      // Лимит
-      predictions = predictions.slice(0, limit);
+      const { data: predictions, error } = await query;
+
+      if (error) throw error;
+
+      const total = predictions?.length || 0;
 
       return reply.send({
         success: true,
-        count: predictions.length,
-        predictions,
+        count: total,
+        predictions: predictions || [],
         summary: {
-          total: predictions.length,
+          total,
           byRisk: {
-            critical: predictions.filter(p => p.riskLevel === 'critical').length,
-            high: predictions.filter(p => p.riskLevel === 'high').length,
-            medium: predictions.filter(p => p.riskLevel === 'medium').length,
-            low: predictions.filter(p => p.riskLevel === 'low').length,
+            critical: predictions?.filter(p => p.burnout_level === 'critical').length || 0,
+            high: predictions?.filter(p => p.burnout_level === 'high').length || 0,
+            medium: predictions?.filter(p => p.burnout_level === 'medium').length || 0,
+            low: predictions?.filter(p => p.burnout_level === 'low').length || 0,
           },
         },
       });
@@ -889,32 +987,67 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
 
   /**
    * GET /admin/ad-insights/accounts
-   * Список всех ad accounts для админки
+   * Список всех ad accounts для админки (legacy + multi-account)
    */
   fastify.get('/admin/ad-insights/accounts', async (request, reply) => {
     const adminId = await requireTechAdmin(request, reply);
     if (!adminId) return;
 
     try {
-      const { data, error } = await supabase
+      // 1. Получаем legacy аккаунты (credentials в user_accounts)
+      const { data: legacyUsers, error: legacyError } = await supabase
+        .from('user_accounts')
+        .select('id, ad_account_id, username, access_token, created_at')
+        .or('multi_account_enabled.is.null,multi_account_enabled.eq.false')
+        .not('access_token', 'is', null)
+        .not('ad_account_id', 'is', null)
+        .neq('ad_account_id', '');  // Исключаем пустые ad_account_id
+
+      if (legacyError) {
+        log.warn({ error: legacyError }, 'Failed to fetch legacy users');
+      }
+
+      // 2. Получаем multi-account аккаунты
+      const { data: multiAccounts, error: multiError } = await supabase
         .from('ad_accounts')
-        .select(`
-          id,
-          fb_ad_account_id,
-          connection_status,
-          user_account_id,
-          created_at,
-          updated_at,
-          user_accounts!inner(email, name)
-        `)
+        .select('id, ad_account_id, name, connection_status, user_account_id, created_at')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (multiError) {
+        log.warn({ error: multiError }, 'Failed to fetch multi accounts');
+      }
+
+      // 3. Объединяем с пометкой типа
+      const accounts = [
+        // Legacy аккаунты
+        ...(legacyUsers || []).map(user => ({
+          id: `legacy_${user.id}`,  // Префикс для идентификации legacy
+          ad_account_id: user.ad_account_id,
+          name: user.username || user.ad_account_id,
+          connection_status: 'connected',  // Legacy всегда connected если есть токен
+          user_account_id: user.id,
+          type: 'legacy' as const,
+          created_at: user.created_at,
+        })),
+        // Multi-account аккаунты
+        ...(multiAccounts || []).map(acc => ({
+          id: acc.id,
+          ad_account_id: acc.ad_account_id,
+          name: acc.name || acc.ad_account_id,
+          connection_status: acc.connection_status,
+          user_account_id: acc.user_account_id,
+          type: 'multi' as const,
+          created_at: acc.created_at,
+        })),
+      ];
+
+      // Сортируем по дате создания
+      accounts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       return reply.send({
         success: true,
-        count: data?.length || 0,
-        accounts: data,
+        count: accounts.length,
+        accounts,
       });
     } catch (error: any) {
       log.error({ error, adminId }, 'Failed to fetch ad accounts');
@@ -943,16 +1076,16 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     try {
       const { data: account } = await supabase
         .from('ad_accounts')
-        .select('fb_ad_account_id, fb_access_token')
+        .select('ad_account_id, access_token')
         .eq('id', accountId)
         .single();
 
-      if (!account?.fb_access_token) {
+      if (!account?.access_token) {
         return reply.status(400).send({ error: 'No access token' });
       }
 
-      const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
-      const result = await syncWeeklyInsightsCampaign(accountId, account.fb_access_token, cleanFbAccountId, months);
+      const cleanFbAccountId = account.ad_account_id.replace('act_', '');
+      const result = await syncWeeklyInsightsCampaign(accountId, account.access_token, cleanFbAccountId, months);
 
       log.info({ adminId, accountId, result }, 'Campaign insights synced');
 
@@ -983,16 +1116,16 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     try {
       const { data: account } = await supabase
         .from('ad_accounts')
-        .select('fb_ad_account_id, fb_access_token')
+        .select('ad_account_id, access_token')
         .eq('id', accountId)
         .single();
 
-      if (!account?.fb_access_token) {
+      if (!account?.access_token) {
         return reply.status(400).send({ error: 'No access token' });
       }
 
-      const cleanFbAccountId = account.fb_ad_account_id.replace('act_', '');
-      const result = await syncWeeklyInsightsAdset(accountId, account.fb_access_token, cleanFbAccountId, months);
+      const cleanFbAccountId = account.ad_account_id.replace('act_', '');
+      const result = await syncWeeklyInsightsAdset(accountId, account.access_token, cleanFbAccountId, months);
 
       log.info({ adminId, accountId, result }, 'Adset insights synced');
 

@@ -25,13 +25,20 @@ export interface Anomaly {
   fb_adset_id?: string;
   fb_campaign_id?: string;
   week_start_date: string;
+  result_family?: string;
   anomaly_type: AnomalyType;
-  severity: AnomalySeverity;
-  metric_value: number;
-  z_score: number;
-  threshold: number;
-  message: string;
-  is_acknowledged: boolean;
+  severity?: AnomalySeverity;
+  // API fields
+  current_value: number;
+  baseline_value: number;
+  delta_pct: number;
+  anomaly_score: number;
+  confidence: number;
+  likely_triggers?: string[];
+  status: 'new' | 'acknowledged' | 'resolved';
+  acknowledged_at?: string;
+  acknowledged_by?: string;
+  notes?: string;
   created_at: string;
   // Joined fields
   ad_name?: string;

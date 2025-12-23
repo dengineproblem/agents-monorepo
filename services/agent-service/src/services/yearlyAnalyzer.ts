@@ -313,8 +313,8 @@ export async function runYearlyAudit(
     },
     pareto: {
       top10PctAds: top10Ads,
-      top10PctContribution,
-      bottom50PctSpend,
+      top10PctContribution: top10Contribution,
+      bottom50PctSpend: bottom50Spend,
     },
     bestWeeks,
     worstWeeks,

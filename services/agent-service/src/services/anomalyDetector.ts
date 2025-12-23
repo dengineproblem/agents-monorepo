@@ -686,13 +686,10 @@ export async function getAnomalies(
     offset?: number;
   } = {}
 ): Promise<any[]> {
+  // Сначала получаем аномалии без JOIN (Supabase требует FK для JOIN)
   let query = supabase
     .from('ad_weekly_anomalies')
-    .select(`
-      *,
-      meta_ads!inner(name, fb_adset_id),
-      meta_adsets!inner(name)
-    `)
+    .select('*')
     .eq('ad_account_id', adAccountId)
     .order('anomaly_score', { ascending: false });
 
@@ -712,14 +709,51 @@ export async function getAnomalies(
     query = query.range(options.offset, options.offset + (options.limit || 50) - 1);
   }
 
-  const { data, error } = await query;
+  const { data: anomalies, error } = await query;
 
   if (error) {
     log.error({ error, adAccountId }, 'Failed to fetch anomalies');
     throw error;
   }
 
-  return data || [];
+  if (!anomalies || anomalies.length === 0) {
+    return [];
+  }
+
+  // Обогащаем данными из meta_ads и meta_adsets
+  const fbAdIds = [...new Set(anomalies.map(a => a.fb_ad_id))];
+
+  const { data: ads } = await supabase
+    .from('meta_ads')
+    .select('fb_ad_id, name, fb_adset_id')
+    .eq('ad_account_id', adAccountId)
+    .in('fb_ad_id', fbAdIds);
+
+  const adsMap = new Map((ads || []).map(ad => [ad.fb_ad_id, ad]));
+
+  // Получаем adsets для имён
+  const adsetIds = [...new Set((ads || []).map(a => a.fb_adset_id).filter(Boolean))];
+
+  let adsetsMap = new Map<string, string>();
+  if (adsetIds.length > 0) {
+    const { data: adsets } = await supabase
+      .from('meta_adsets')
+      .select('fb_adset_id, name')
+      .eq('ad_account_id', adAccountId)
+      .in('fb_adset_id', adsetIds);
+
+    adsetsMap = new Map((adsets || []).map(as => [as.fb_adset_id, as.name]));
+  }
+
+  // Обогащаем аномалии
+  return anomalies.map(anomaly => {
+    const ad = adsMap.get(anomaly.fb_ad_id);
+    return {
+      ...anomaly,
+      ad_name: ad?.name || anomaly.fb_ad_id,
+      adset_name: ad?.fb_adset_id ? adsetsMap.get(ad.fb_adset_id) : null,
+    };
+  });
 }
 
 /**

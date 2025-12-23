@@ -45,32 +45,62 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
   console.log('[graph] URL:', url.replace(/access_token=[^&]+/, 'access_token=HIDDEN'));
   console.log('[graph] Body:', usp.toString().replace(/access_token=[^&]+/, 'access_token=HIDDEN'));
 
-  // Таймаут 15 секунд для Facebook API запросов
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
+  // Retry logic для сетевых ошибок (fetch failed, timeout)
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY = 3000; // 3 секунды между попытками
 
   let res: Response;
-  try {
-    res = await fetch(url, {
-      method,
-      signal: controller.signal,
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: method === 'GET' ? undefined : usp.toString(),
-    });
-    clearTimeout(timeout);
-  } catch (error: any) {
-    clearTimeout(timeout);
-    
-    if (error.name === 'AbortError') {
-      log.error({ 
-        msg: 'fb_fetch_timeout',
-        method, 
-        path,
-        timeout: 15000
-      }, 'Facebook API request timeout');
-      throw new Error(`Facebook API timeout after 15s: ${method} ${path}`);
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      res = await fetch(url, {
+        method,
+        signal: controller.signal,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: method === 'GET' ? undefined : usp.toString(),
+      });
+      clearTimeout(timeout);
+      break; // Успешно - выходим из цикла
+    } catch (error: any) {
+      clearTimeout(timeout);
+      lastError = error;
+
+      const isNetworkError = error.name === 'AbortError' ||
+                             error.message?.includes('fetch failed') ||
+                             error.code === 'ECONNRESET' ||
+                             error.code === 'ETIMEDOUT';
+
+      if (isNetworkError && attempt < MAX_RETRIES) {
+        log.warn({
+          method,
+          path,
+          attempt,
+          error: error.message || error.name
+        }, `Network error, retrying in ${RETRY_DELAY}ms...`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        continue;
+      }
+
+      if (error.name === 'AbortError') {
+        log.error({
+          msg: 'fb_fetch_timeout',
+          method,
+          path,
+          timeout: 15000,
+          attempts: attempt
+        }, 'Facebook API request timeout after retries');
+        throw new Error(`Facebook API timeout after 15s (${attempt} attempts): ${method} ${path}`);
+      }
+      throw error;
     }
-    throw error;
+  }
+
+  if (!res!) {
+    throw lastError || new Error(`Failed to fetch after ${MAX_RETRIES} attempts`);
   }
 
   const text = await res.text();

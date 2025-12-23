@@ -310,12 +310,16 @@ export async function normalizeWeeklyResults(
 
 /**
  * Нормализует все результаты для ad account
+ * ОПТИМИЗИРОВАНО: batch upsert, один запрос маппинга
  */
 export async function normalizeAllResults(adAccountId: string): Promise<{
   processed: number;
   families: Map<string, number>;
 }> {
   log.info({ adAccountId }, 'Starting results normalization');
+
+  // Загружаем маппинг ОДИН раз
+  const actionTypeMap = await loadActionTypeMapping();
 
   // Получаем все insights
   const { data: insights, error } = await supabase
@@ -330,21 +334,11 @@ export async function normalizeAllResults(adAccountId: string): Promise<{
 
   const familyCounts = new Map<string, number>();
   let processed = 0;
+  const batchSize = 100;
+  const allResults: any[] = [];
 
   for (const insight of insights || []) {
-    await normalizeWeeklyResults(
-      adAccountId,
-      insight.fb_ad_id,
-      insight.week_start_date,
-      parseFloat(insight.spend) || 0,
-      insight.actions_json || [],
-      insight.cost_per_action_type_json || []
-    );
-
-    processed++;
-
-    // Подсчитываем семейства
-    const actionTypeMap = await loadActionTypeMapping();
+    // Группируем по семействам
     const familyResults = groupActionsByFamily(
       insight.actions_json || [],
       insight.cost_per_action_type_json || [],
@@ -352,9 +346,64 @@ export async function normalizeAllResults(adAccountId: string): Promise<{
       actionTypeMap
     );
 
+    // Собираем записи для batch upsert
     for (const [family, result] of familyResults) {
+      if (result.count === 0 && parseFloat(insight.spend) === 0) continue;
+
+      allResults.push({
+        ad_account_id: adAccountId,
+        fb_ad_id: insight.fb_ad_id,
+        week_start_date: insight.week_start_date,
+        result_family: family,
+        result_count: result.count,
+        spend: result.cost > 0 ? result.cost : parseFloat(insight.spend) || 0,
+        cpr: result.cpr,
+        action_types_detail: result.actionTypes,
+      });
+
       const current = familyCounts.get(family) || 0;
       familyCounts.set(family, current + result.count);
+    }
+
+    processed++;
+  }
+
+  // Batch upsert
+  log.info({ adAccountId, totalRecords: allResults.length }, 'Upserting weekly results in batches');
+
+  for (let i = 0; i < allResults.length; i += batchSize) {
+    const batch = allResults.slice(i, i + batchSize);
+
+    // Retry logic для сетевых ошибок
+    let lastError: any;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const { error: upsertError } = await supabase
+          .from('meta_weekly_results')
+          .upsert(batch, {
+            onConflict: 'ad_account_id,fb_ad_id,week_start_date,result_family'
+          });
+
+        if (upsertError) throw upsertError;
+        break; // Успех
+      } catch (err: any) {
+        lastError = err;
+        const isNetworkError =
+          err?.message?.includes('fetch failed') ||
+          err?.message?.includes('ECONNRESET') ||
+          err?.code === 'ECONNRESET';
+
+        if (isNetworkError && attempt < 3) {
+          log.warn({ attempt, batch: i/batchSize }, 'Network error, retrying...');
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if ((i / batchSize) % 10 === 0) {
+      log.info({ adAccountId, progress: `${i}/${allResults.length}` }, 'Upsert progress');
     }
   }
 

@@ -63,8 +63,11 @@ const AdminChats: React.FC = () => {
 
   // Fetch users with messages
   const fetchUsers = useCallback(async () => {
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages`);
+      const res = await fetch(`${API_BASE_URL}/admin/chats/users-with-messages`, {
+        headers: { 'x-user-id': currentUser.id || '' },
+      });
       if (res.ok) {
         const data = await res.json();
         setUsers(data.users || []);
@@ -87,8 +90,10 @@ const AdminChats: React.FC = () => {
   // Fetch messages for selected user
   const fetchMessages = useCallback(async (uId: string) => {
     setLoadingMessages(true);
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const headers = { 'x-user-id': currentUser.id || '' };
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=50`);
+      const res = await fetch(`${API_BASE_URL}/admin/chats/${uId}?limit=50`, { headers });
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages || []);
@@ -96,6 +101,7 @@ const AdminChats: React.FC = () => {
         // Mark as read
         await fetch(`${API_BASE_URL}/admin/chats/${uId}/mark-read`, {
           method: 'POST',
+          headers,
         });
 
         // Update unread count in users list

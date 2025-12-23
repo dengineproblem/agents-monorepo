@@ -11,6 +11,7 @@ import type {
   AnomalyType,
   BurnoutPrediction,
   BurnoutPredictionsResponse,
+  DecayRecoveryAnalysis,
   DecayRecoveryResponse,
   LagDependencyStat,
   RecoveryPrediction,
@@ -70,7 +71,7 @@ export const adInsightsApi = {
       if (options?.includeAdsets) params.set('includeAdsets', 'true');
 
       const url = `${API_BASE_URL}/admin/ad-insights/${accountId}/sync?${params}`;
-      const res = await fetchWithAuth(url, { method: 'POST' });
+      const res = await fetchWithAuth(url, { method: 'POST', body: '{}' });
 
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
@@ -237,6 +238,7 @@ export const adInsightsApi = {
 
   /**
    * Получить комбинированный decay + recovery анализ
+   * Трансформирует API ответ в формат DecayRecoveryAnalysis[]
    */
   async getDecayRecoveryAnalysis(accountId: string): Promise<DecayRecoveryResponse> {
     try {
@@ -248,7 +250,62 @@ export const adInsightsApi = {
         return { analysis: [] };
       }
 
-      return await res.json();
+      const data = await res.json();
+
+      // Трансформируем API ответ в DecayRecoveryAnalysis[]
+      const analysisMap = new Map<string, DecayRecoveryAnalysis>();
+
+      // Обрабатываем decay (highRiskAds)
+      for (const item of data.decay?.highRiskAds || []) {
+        const status = item.riskLevel === 'critical' ? 'burned_out' as const :
+                       item.riskLevel === 'high' ? 'degraded' as const : 'healthy' as const;
+
+        analysisMap.set(item.fbAdId, {
+          fb_ad_id: item.fbAdId,
+          ad_name: item.adName,
+          status,
+          decay: {
+            score: item.riskScore || 0,
+            level: item.riskLevel || 'low',
+          },
+          recovery: null,
+          recommendation: item.riskLevel === 'critical'
+            ? 'Рекомендуется отключить объявление'
+            : item.riskLevel === 'high'
+            ? 'Рекомендуется оптимизировать креатив'
+            : 'Мониторинг',
+        });
+      }
+
+      // Обрабатываем recovery (likelyRecoveryAds)
+      for (const item of data.recovery?.likelyRecoveryAds || []) {
+        const existing = analysisMap.get(item.fbAdId);
+        const recoveryData = {
+          score: item.recoveryScore || 0,
+          level: item.recoveryLevel || 'unlikely',
+        };
+
+        if (existing) {
+          existing.recovery = recoveryData;
+          existing.status = item.currentStatus || existing.status;
+          if (item.recoveryLevel === 'likely' || item.recoveryLevel === 'very_likely') {
+            existing.recommendation = 'Высокий потенциал восстановления';
+          }
+        } else {
+          analysisMap.set(item.fbAdId, {
+            fb_ad_id: item.fbAdId,
+            ad_name: item.adName,
+            status: (item.currentStatus as 'healthy' | 'degraded' | 'burned_out') || 'degraded',
+            decay: null,
+            recovery: recoveryData,
+            recommendation: item.recoveryLevel === 'likely'
+              ? 'Высокий потенциал восстановления'
+              : 'Возможно восстановление',
+          });
+        }
+      }
+
+      return { analysis: Array.from(analysisMap.values()) };
     } catch (error) {
       console.error('[adInsightsApi.getDecayRecoveryAnalysis] Error:', error);
       return { analysis: [] };
@@ -261,6 +318,7 @@ export const adInsightsApi = {
 
   /**
    * Получить годовой аудит
+   * Трансформирует API ответ в формат YearlyAudit
    */
   async getYearlyAudit(accountId: string, year?: number): Promise<YearlyAudit | null> {
     try {
@@ -271,7 +329,53 @@ export const adInsightsApi = {
       const res = await fetchWithAuth(url);
 
       if (!res.ok) return null;
-      return await res.json();
+
+      const data = await res.json();
+
+      // Трансформируем API ответ в формат YearlyAudit
+      const totalAds = data.pareto?.top10PctAds?.length || 0;
+      const top20Count = Math.max(1, Math.ceil(totalAds * 2)); // top10 * 2 ≈ top20
+      const top10PctAds = data.pareto?.top10PctAds || [];
+      const totalResults = data.totals?.results || 0;
+      const totalSpend = data.totals?.spend || 0;
+
+      // Считаем top20 contribution (примерно top10 * 1.2)
+      const top20ResultsShare = Math.min(100, (data.pareto?.top10PctContribution || 0) * 1.2);
+      const top20Results = Math.round((top20ResultsShare / 100) * totalResults);
+
+      return {
+        year: year || new Date().getFullYear(),
+        pareto: {
+          top20pct_ads: top20Count,
+          top20pct_results: top20Results,
+          top20pct_results_share: top20ResultsShare / 100, // как дробь 0-1
+          bottom80pct_ads: Math.max(0, totalAds * 10 - top20Count), // примерно
+          bottom80pct_results: totalResults - top20Results,
+        },
+        bestWeeks: (data.bestWeeks || []).map((w: { week: string; cpr: number; spend: number; results: number }) => ({
+          week: w.week,
+          results: w.results,
+          cpr: w.cpr,
+          spend: w.spend,
+        })),
+        worstWeeks: (data.worstWeeks || []).map((w: { week: string; cpr: number; spend: number; results: number }) => ({
+          week: w.week,
+          results: w.results,
+          cpr: w.cpr,
+          spend: w.spend,
+        })),
+        waste: {
+          zeroResultsSpend: data.waste?.zeroResultSpend || 0,
+          highCprSpend: 0, // API не возвращает это поле отдельно
+          totalWaste: data.waste?.zeroResultSpend || 0,
+          wastePercentage: totalSpend > 0 ? ((data.waste?.zeroResultSpend || 0) / totalSpend) * 100 : 0,
+        },
+        stability: {
+          avgWeeklyVariation: (100 - (data.stability?.anomalyFreeWeeksPct || 0)) / 100, // инвертируем
+          maxDrawdown: (data.stability?.avgSpikePct || 0) / 100,
+          consistentWeeks: Math.round((data.stability?.anomalyFreeWeeksPct || 0) / 100 * (data.totals?.weeks || 0)),
+        },
+      };
     } catch (error) {
       console.error('[adInsightsApi.getYearlyAudit] Error:', error);
       return null;

@@ -117,10 +117,11 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
               <TableHeader>
                 <TableRow>
                   <TableHead>Тип</TableHead>
-                  <TableHead>Severity</TableHead>
+                  <TableHead>Score</TableHead>
                   <TableHead>Ad ID</TableHead>
-                  <TableHead>Значение</TableHead>
-                  <TableHead>Z-Score</TableHead>
+                  <TableHead>Текущее</TableHead>
+                  <TableHead>Базовое</TableHead>
+                  <TableHead>Δ %</TableHead>
                   <TableHead>Неделя</TableHead>
                   <TableHead></TableHead>
                 </TableRow>
@@ -132,8 +133,11 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                     icon: <AlertTriangle className="h-4 w-4" />,
                   };
 
+                  const isAcknowledged = anomaly.status === 'acknowledged';
+                  const deltaPct = anomaly.delta_pct ?? 0;
+
                   return (
-                    <TableRow key={anomaly.id} className={anomaly.is_acknowledged ? 'opacity-50' : ''}>
+                    <TableRow key={anomaly.id} className={isAcknowledged ? 'opacity-50' : ''}>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           {typeInfo.icon}
@@ -141,7 +145,9 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                         </div>
                       </TableCell>
                       <TableCell>
-                        <StatusBadge type="severity" value={anomaly.severity} />
+                        <span className={`font-medium ${anomaly.anomaly_score >= 0.8 ? 'text-red-500' : anomaly.anomaly_score >= 0.5 ? 'text-orange-500' : 'text-yellow-500'}`}>
+                          {(anomaly.anomaly_score ?? 0).toFixed(2)}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <span className="font-mono text-xs">{anomaly.fb_ad_id}</span>
@@ -153,26 +159,29 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                       </TableCell>
                       <TableCell>
                         <span className="font-medium">
-                          {typeof anomaly.metric_value === 'number'
-                            ? anomaly.metric_value.toFixed(2)
-                            : anomaly.metric_value}
+                          {(anomaly.current_value ?? 0).toFixed(2)}
                         </span>
                       </TableCell>
                       <TableCell>
-                        <span className={anomaly.z_score > 2 ? 'text-red-500' : 'text-yellow-500'}>
-                          {anomaly.z_score.toFixed(2)}
+                        <span className="text-muted-foreground">
+                          {(anomaly.baseline_value ?? 0).toFixed(2)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className={deltaPct > 0 ? 'text-red-500' : 'text-green-500'}>
+                          {deltaPct > 0 ? '+' : ''}{deltaPct.toFixed(1)}%
                         </span>
                       </TableCell>
                       <TableCell>
                         <span className="text-sm text-muted-foreground">
-                          {formatDistanceToNow(new Date(anomaly.week_start_date), {
+                          {anomaly.week_start_date ? formatDistanceToNow(new Date(anomaly.week_start_date), {
                             addSuffix: true,
                             locale: ru,
-                          })}
+                          }) : '-'}
                         </span>
                       </TableCell>
                       <TableCell>
-                        {!anomaly.is_acknowledged && onAcknowledge && (
+                        {!isAcknowledged && onAcknowledge && (
                           <Button
                             variant="ghost"
                             size="sm"

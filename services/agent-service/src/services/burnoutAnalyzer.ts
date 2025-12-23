@@ -515,6 +515,28 @@ export async function predictAllAds(adAccountId: string): Promise<PredictionResu
     const prediction = await predictBurnout(adAccountId, fbAdId, weekStartDate);
     if (prediction) {
       predictions.push(prediction);
+
+      // Сохраняем в БД
+      try {
+        await supabase
+          .from('ad_burnout_predictions')
+          .upsert({
+            ad_account_id: adAccountId,
+            fb_ad_id: fbAdId,
+            week_start_date: weekStartDate,
+            burnout_score: prediction.riskScore,
+            burnout_level: prediction.riskLevel,
+            predicted_cpr_change_1w: prediction.predictedCprChange1w,
+            predicted_cpr_change_2w: prediction.predictedCprChange2w,
+            confidence: prediction.confidence,
+            top_signals: prediction.topDrivers.map(d => ({ signal: d.warning, weight: d.contribution })),
+            created_at: new Date().toISOString(),
+          }, {
+            onConflict: 'ad_account_id,fb_ad_id,week_start_date'
+          });
+      } catch (err) {
+        log.error({ error: err, adAccountId, fbAdId }, 'Failed to save burnout prediction');
+      }
     }
   }
 

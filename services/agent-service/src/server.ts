@@ -89,6 +89,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3001',
   'http://localhost:3002',
   'http://localhost:3003',
+  'http://localhost:8081',
   'http://localhost:8082',
   'http://localhost:7080'
 ];

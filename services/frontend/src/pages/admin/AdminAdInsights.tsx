@@ -45,8 +45,11 @@ import { API_BASE_URL } from '@/config/api';
 
 interface AdAccount {
   id: string;
-  fb_ad_account_id: string;
+  ad_account_id: string;
   name: string;
+  type: 'legacy' | 'multi';
+  user_account_id: string;
+  connection_status?: string;
 }
 
 const AdminAdInsights: React.FC = () => {
@@ -76,13 +79,17 @@ const AdminAdInsights: React.FC = () => {
   // Load ad accounts
   useEffect(() => {
     const loadAccounts = async () => {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
       try {
-        const res = await fetch(`${API_BASE_URL}/admin/ad-accounts`);
+        const res = await fetch(`${API_BASE_URL}/admin/ad-insights/accounts`, {
+          headers: { 'x-user-id': currentUser.id || '' },
+        });
         if (res.ok) {
           const data = await res.json();
           setAccounts(data.accounts || []);
           if (data.accounts?.length > 0) {
-            setSelectedAccount(data.accounts[0].fb_ad_account_id);
+            // Используем id аккаунта (для legacy это legacy_xxx, для multi это UUID)
+            setSelectedAccount(data.accounts[0].id);
           }
         }
       } catch (err) {
@@ -109,18 +116,22 @@ const AdminAdInsights: React.FC = () => {
           adInsightsApi.getYearlyAudit(selectedAccount),
         ]);
 
-      setAnomalies(anomaliesRes.anomalies);
-      setBurnoutPredictions(burnoutRes.predictions);
-      setDecayRecovery(decayRecoveryRes.analysis);
+      setAnomalies(anomaliesRes?.anomalies || []);
+      setBurnoutPredictions(burnoutRes?.predictions || []);
+      setDecayRecovery(decayRecoveryRes?.analysis || []);
       setTrackingHealth(trackingRes);
       setYearlyAudit(auditRes);
 
-      // Calculate stats
-      const critical = anomaliesRes.anomalies.filter((a) => a.severity === 'critical').length;
-      const highBurnout = burnoutRes.predictions.filter(
+      // Calculate stats with safe defaults
+      const anomaliesList = anomaliesRes?.anomalies || [];
+      const burnoutList = burnoutRes?.predictions || [];
+      const analysisList = decayRecoveryRes?.analysis || [];
+
+      const critical = anomaliesList.filter((a) => a.severity === 'critical').length;
+      const highBurnout = burnoutList.filter(
         (p) => p.burnout_level === 'high' || p.burnout_level === 'critical'
       ).length;
-      const recovery = decayRecoveryRes.analysis.filter(
+      const recovery = analysisList.filter(
         (a) => a.recovery && a.recovery.score >= 0.5
       ).length;
 
@@ -190,13 +201,18 @@ const AdminAdInsights: React.FC = () => {
         </div>
         <div className="flex items-center gap-4">
           <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-            <SelectTrigger className="w-64">
+            <SelectTrigger className="w-72">
               <SelectValue placeholder="Выберите аккаунт" />
             </SelectTrigger>
             <SelectContent>
               {accounts.map((acc) => (
-                <SelectItem key={acc.id} value={acc.fb_ad_account_id}>
-                  {acc.name || acc.fb_ad_account_id}
+                <SelectItem key={acc.id} value={acc.id}>
+                  <div className="flex items-center gap-2">
+                    <span>{acc.name || acc.ad_account_id}</span>
+                    <Badge variant={acc.type === 'legacy' ? 'secondary' : 'outline'} className="text-xs">
+                      {acc.type}
+                    </Badge>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -323,7 +339,7 @@ const AdminAdInsights: React.FC = () => {
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {burnoutPredictions.map((prediction) => (
-                  <BurnoutCard key={prediction.fb_ad_id} prediction={prediction} />
+                  <BurnoutCard key={`${prediction.fb_ad_id}-${prediction.week_start_date}`} prediction={prediction} />
                 ))}
               </div>
             )}
@@ -404,18 +420,18 @@ const AdminAdInsights: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="text-center p-4 bg-green-50 dark:bg-green-950 rounded-lg">
                       <p className="text-2xl font-bold text-green-600">
-                        {Math.round(yearlyAudit.pareto.top20pct_results_share * 100)}%
+                        {Math.round((yearlyAudit.pareto?.top20pct_results_share ?? 0) * 100)}%
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        от {yearlyAudit.pareto.top20pct_ads} топ ads
+                        от {yearlyAudit.pareto?.top20pct_ads ?? 0} топ ads
                       </p>
                     </div>
                     <div className="text-center p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
                       <p className="text-2xl font-bold">
-                        {yearlyAudit.pareto.bottom80pct_results}
+                        {yearlyAudit.pareto?.bottom80pct_results ?? 0}
                       </p>
                       <p className="text-sm text-muted-foreground">
-                        от {yearlyAudit.pareto.bottom80pct_ads} остальных
+                        от {yearlyAudit.pareto?.bottom80pct_ads ?? 0} остальных
                       </p>
                     </div>
                   </div>
@@ -433,19 +449,19 @@ const AdminAdInsights: React.FC = () => {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Zero results</span>
                       <span className="font-medium">
-                        ${yearlyAudit.waste.zeroResultsSpend.toFixed(2)}
+                        ${(yearlyAudit.waste?.zeroResultsSpend ?? 0).toFixed(2)}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">High CPR</span>
                       <span className="font-medium">
-                        ${yearlyAudit.waste.highCprSpend.toFixed(2)}
+                        ${(yearlyAudit.waste?.highCprSpend ?? 0).toFixed(2)}
                       </span>
                     </div>
                     <div className="border-t pt-2 flex justify-between">
                       <span className="font-medium">Всего waste</span>
                       <span className="font-bold text-red-500">
-                        ${yearlyAudit.waste.totalWaste.toFixed(2)} ({yearlyAudit.waste.wastePercentage.toFixed(1)}%)
+                        ${(yearlyAudit.waste?.totalWaste ?? 0).toFixed(2)} ({(yearlyAudit.waste?.wastePercentage ?? 0).toFixed(1)}%)
                       </span>
                     </div>
                   </div>
@@ -459,13 +475,13 @@ const AdminAdInsights: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {yearlyAudit.bestWeeks.slice(0, 5).map((week, idx) => (
+                    {(yearlyAudit.bestWeeks || []).slice(0, 5).map((week, idx) => (
                       <div key={idx} className="flex justify-between items-center">
                         <span className="text-sm">{week.week}</span>
                         <div className="text-right">
                           <span className="font-medium text-green-600">{week.results} res</span>
                           <span className="text-muted-foreground ml-2">
-                            @ ${week.cpr.toFixed(2)}
+                            @ ${(week.cpr ?? 0).toFixed(2)}
                           </span>
                         </div>
                       </div>
@@ -481,13 +497,13 @@ const AdminAdInsights: React.FC = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {yearlyAudit.worstWeeks.slice(0, 5).map((week, idx) => (
+                    {(yearlyAudit.worstWeeks || []).slice(0, 5).map((week, idx) => (
                       <div key={idx} className="flex justify-between items-center">
                         <span className="text-sm">{week.week}</span>
                         <div className="text-right">
                           <span className="font-medium text-red-600">{week.results} res</span>
                           <span className="text-muted-foreground ml-2">
-                            @ ${week.cpr.toFixed(2)}
+                            @ ${(week.cpr ?? 0).toFixed(2)}
                           </span>
                         </div>
                       </div>
@@ -505,18 +521,18 @@ const AdminAdInsights: React.FC = () => {
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div>
                       <p className="text-2xl font-bold">
-                        {(yearlyAudit.stability.avgWeeklyVariation * 100).toFixed(1)}%
+                        {((yearlyAudit.stability?.avgWeeklyVariation ?? 0) * 100).toFixed(1)}%
                       </p>
                       <p className="text-sm text-muted-foreground">Средняя вариация</p>
                     </div>
                     <div>
                       <p className="text-2xl font-bold">
-                        {(yearlyAudit.stability.maxDrawdown * 100).toFixed(1)}%
+                        {((yearlyAudit.stability?.maxDrawdown ?? 0) * 100).toFixed(1)}%
                       </p>
                       <p className="text-sm text-muted-foreground">Макс. просадка</p>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">{yearlyAudit.stability.consistentWeeks}</p>
+                      <p className="text-2xl font-bold">{yearlyAudit.stability?.consistentWeeks ?? 0}</p>
                       <p className="text-sm text-muted-foreground">Стабильных недель</p>
                     </div>
                   </div>
