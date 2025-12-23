@@ -255,14 +255,38 @@ export async function getFilteredDialogsForAnalysis(
 export async function getNewLeads(
   instanceName: string,
   minIncoming: number = 3,
-  excludePhones?: string[]
+  excludePhones?: string[],
+  startDate?: Date,
+  endDate?: Date
 ) {
   const startTime = Date.now();
 
+  // Build params dynamically
+  const params: (string | number | string[])[] = [instanceName, minIncoming];
+  let paramIdx = 3;
+
   // Build exclusion condition using PostgreSQL array (much more efficient!)
-  const excludeCondition = excludePhones && excludePhones.length > 0
-    ? `AND "key"->>'remoteJid' NOT IN (SELECT unnest($3::text[]))`
-    : '';
+  let excludeCondition = '';
+  if (excludePhones && excludePhones.length > 0) {
+    excludeCondition = `AND "key"->>'remoteJid' NOT IN (SELECT unnest($${paramIdx}::text[]))`;
+    params.push(excludePhones);
+    paramIdx++;
+  }
+
+  // Date filter conditions (timestamp is Unix seconds)
+  let dateCondition = '';
+  if (startDate) {
+    const startUnix = Math.floor(startDate.getTime() / 1000);
+    dateCondition += ` AND "messageTimestamp" >= $${paramIdx}`;
+    params.push(startUnix);
+    paramIdx++;
+  }
+  if (endDate) {
+    const endUnix = Math.floor(endDate.getTime() / 1000);
+    dateCondition += ` AND "messageTimestamp" <= $${paramIdx}`;
+    params.push(endUnix);
+    paramIdx++;
+  }
 
   // Получаем ТОЛЬКО НОВЫЕ контакты с МЕНЬШЕ чем minIncoming входящих (без GPT анализа)
   // Исключаем уже существующие в CRM используя массив (эффективно!)
@@ -280,6 +304,7 @@ export async function getNewLeads(
       FROM "Message"
       WHERE "instanceId" IN (SELECT id FROM instance_data)
         ${excludeCondition}
+        ${dateCondition}
       GROUP BY "key"->>'remoteJid'
       HAVING COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') < $2
       ORDER BY MAX("messageTimestamp") DESC
@@ -294,14 +319,9 @@ export async function getNewLeads(
     FROM "Message" m
     WHERE m."instanceId" IN (SELECT id FROM instance_data)
       AND m."key"->>'remoteJid' IN (SELECT remote_jid FROM new_lead_contacts)
+      ${dateCondition}
     ORDER BY m."messageTimestamp" ASC
   `;
-
-  const params = [
-    instanceName,
-    minIncoming,
-    ...(excludePhones && excludePhones.length > 0 ? [excludePhones] : [])
-  ];
 
   log.info({
     instanceName,
