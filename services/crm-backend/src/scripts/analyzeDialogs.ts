@@ -35,7 +35,12 @@ S: — системное сообщение
   "action": "want_call" | "want_work" | "reserve" | "none",
   "score": 0-100,
   "reasoning": string,
-  "custom_fields": Record<string, any> | null
+  "custom_fields": Record<string, any> | null,
+
+  "last_unanswered_message": string | null,
+  "drop_point": string | null,
+  "hidden_objections": string[],
+  "engagement_trend": "falling" | "stable" | "rising"
 }
 
 CLIENT_NAME - ВАЛИДАЦИЯ ИМЕНИ ИЗ WHATSAPP:
@@ -105,6 +110,56 @@ LEAD_TAGS - ВАЖНО:
 
 Interest level (финальный): HOT(75-100), WARM(40-74), COLD(0-39)
 
+АНАЛИЗ DROP POINTS И СКРЫТЫХ ВОЗРАЖЕНИЙ (ВАЖНО!):
+
+1. LAST_UNANSWERED_MESSAGE:
+   - Если ПОСЛЕДНЕЕ сообщение в диалоге ОТ АГЕНТА (A:) и клиент НЕ ответил:
+     → Укажи текст этого сообщения в "last_unanswered_message"
+     → Это точка где "застряла" продажа
+   - Если последнее сообщение от клиента → null
+
+2. DROP_POINT:
+   - Если есть last_unanswered_message, опиши на КАКОМ ЭТАПЕ клиент "отвалился":
+     → "Вопрос о встрече - клиент не готов к офлайн контакту"
+     → "Вопрос о цене - клиент ушёл думать"
+     → "Запрос контактных данных - клиент не готов делиться"
+     → "Предложение консультации - нет интереса"
+   - Если нет drop point → null
+
+3. HIDDEN_OBJECTIONS (массив скрытых возражений):
+   Ищи следующие СКРЫТЫЕ сигналы потери интереса:
+
+   a) ОДНОСЛОЖНЫЕ ОТВЕТЫ после важных вопросов агента:
+      - "да", "ок", "понял", "хорошо" без дополнительных вопросов
+      → "Односложный ответ после вопроса о [тема]"
+
+   b) ИГНОРИРОВАНИЕ ВОПРОСОВ агента:
+      - Агент задал вопрос, клиент не ответил на него напрямую
+      → "Проигнорировал вопрос о [тема]"
+
+   c) ОТСУТСТВИЕ СВОИХ ВОПРОСОВ:
+      - Клиент только отвечает, не задаёт уточняющих вопросов
+      → "Не задаёт вопросов - низкий интерес"
+
+   d) ДОЛГИЕ ПАУЗЫ между сообщениями клиента (12+ часов):
+      → "Долгая пауза перед ответом на [тема]"
+
+   e) СОКРАЩЕНИЕ ДЛИНЫ ответов к концу диалога:
+      → "Ответы становятся короче"
+
+   Если нет скрытых возражений → пустой массив []
+
+4. ENGAGEMENT_TREND:
+   Определи ТРЕНД интереса клиента по ходу диалога:
+
+   - "rising" (растёт): клиент задаёт больше вопросов, ответы становятся длиннее,
+     проявляет инициативу, отвечает быстрее
+
+   - "falling" (падает): ответы становятся короче, односложные ответы,
+     долгие паузы, игнорирование вопросов
+
+   - "stable" (стабильный): равномерная активность на протяжении диалога
+
 ФОРМАТ REASONING - ОБЯЗАТЕЛЬНО:
 Представь reasoning в структурированном виде. Каждая строка должна начинаться с + или - и содержать количество баллов:
 + Причина (баллы: +X)
@@ -166,6 +221,11 @@ interface AnalysisResult {
   score: number;
   reasoning: string;
   custom_fields: Record<string, any> | null;
+  // Новые поля для расширенного анализа
+  last_unanswered_message: string | null;
+  drop_point: string | null;
+  hidden_objections: string[];
+  engagement_trend: 'falling' | 'stable' | 'rising';
 }
 
 /**
@@ -523,10 +583,16 @@ async function saveAnalysisResult(
       score: analysis.score,
       reasoning: analysis.reasoning,
       custom_fields: analysis.custom_fields || null,
-      
+
+      // Новые поля для расширенного анализа
+      last_unanswered_message: analysis.last_unanswered_message || null,
+      drop_point: analysis.drop_point || null,
+      hidden_objections: analysis.hidden_objections || [],
+      engagement_trend: analysis.engagement_trend || null,
+
       // Store full conversation
       messages: contact.messages,
-      
+
       analyzed_at: now,
     }, {
       onConflict: 'instance_name,contact_phone',
@@ -557,8 +623,10 @@ export async function analyzeDialogs(params: {
   minIncoming?: number;
   maxDialogs?: number;
   maxContacts?: number;
+  startDate?: Date;
+  endDate?: Date;
 }) {
-  const { instanceName, userAccountId, minIncoming = 3, maxDialogs, maxContacts } = params;
+  const { instanceName, userAccountId, minIncoming = 3, maxDialogs, maxContacts, startDate, endDate } = params;
 
   log.info({ instanceName, userAccountId, minIncoming, maxDialogs, maxContacts }, 'Starting dialog analysis');
 
@@ -616,7 +684,7 @@ export async function analyzeDialogs(params: {
     // ⚡ OPTIMIZED: Get already filtered dialogs from Evolution PostgreSQL
     // Filtering is done at SQL level (10-20x faster than JS)
     // EXCLUDES already analyzed contacts
-    const messages = await getFilteredDialogsForAnalysis(instanceName, minIncoming, maxDialogs, existingPhonesWithSuffix);
+    const messages = await getFilteredDialogsForAnalysis(instanceName, minIncoming, maxDialogs, existingPhonesWithSuffix, startDate, endDate);
     log.info({ messageCount: messages.length }, '⚡ Retrieved pre-filtered messages from Evolution DB');
 
     // 📥 Get ONLY NEW leads (< minIncoming messages) to save without analysis

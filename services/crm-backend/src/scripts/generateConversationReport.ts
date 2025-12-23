@@ -76,6 +76,11 @@ interface DialogAnalysis {
   analyzed_at: string;
   created_at: string;
   updated_at: string;
+  // Новые поля для расширенного анализа
+  last_unanswered_message: string | null;
+  drop_point: string | null;
+  hidden_objections: string[];
+  engagement_trend: 'falling' | 'stable' | 'rising' | null;
 }
 
 interface ConversationReportData {
@@ -100,6 +105,11 @@ interface ConversationReportData {
   common_objections: Array<{ objection: string; count: number; suggested_response?: string }>;
   recommendations: string[];
   report_text: string;
+  // Новые поля для расширенной аналитики
+  traffic_source: { from_ads: number; smart_match: number; organic: number };
+  drop_points_summary: Array<{ point: string; count: number }>;
+  hidden_objections_summary: Array<{ type: string; count: number }>;
+  engagement_trends: { falling: number; stable: number; rising: number };
 }
 
 // Промпт для анализа переписок через LLM
@@ -208,7 +218,27 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
   report += `🎯 ИНТЕРЕС КЛИЕНТОВ\n`;
   report += `• 🔥 Горячие: ${interest.hot || 0}\n`;
   report += `• ☀️ Тёплые: ${interest.warm || 0}\n`;
-  report += `• ❄️ Холодные: ${interest.cold || 0}\n\n`;
+  report += `• ❄️ Холодные: ${interest.cold || 0}\n`;
+
+  // Тренды интереса (новое)
+  const trends = data.engagement_trends;
+  if (trends && (trends.falling > 0 || trends.stable > 0 || trends.rising > 0)) {
+    report += `\n📉 ДИНАМИКА ИНТЕРЕСА\n`;
+    if (trends.rising > 0) report += `• 📈 Растёт: ${trends.rising}\n`;
+    if (trends.stable > 0) report += `• ➡️ Стабильный: ${trends.stable}\n`;
+    if (trends.falling > 0) report += `• 📉 Падает: ${trends.falling}\n`;
+  }
+  report += `\n`;
+
+  // Источник трафика (новое)
+  const traffic = data.traffic_source;
+  if (traffic && (traffic.from_ads > 0 || traffic.smart_match > 0 || traffic.organic > 0)) {
+    const total = traffic.from_ads + traffic.smart_match + traffic.organic;
+    const adsPercent = total > 0 ? Math.round((traffic.from_ads + traffic.smart_match) / total * 100) : 0;
+    report += `📣 ИСТОЧНИК ТРАФИКА\n`;
+    report += `• С рекламы: ${traffic.from_ads + traffic.smart_match} (${adsPercent}%)\n`;
+    report += `• Органика: ${traffic.organic} (${100 - adsPercent}%)\n\n`;
+  }
 
   // Конверсии
   const conv = data.conversions;
@@ -254,6 +284,24 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
     report += `❌ ПРИЧИНЫ ОТКАЗА\n`;
     data.rejection_reasons.slice(0, 3).forEach((rej) => {
       report += `• ${rej.reason}: ${rej.count}\n`;
+    });
+    report += `\n`;
+  }
+
+  // Drop points - где теряем клиентов (новое)
+  if (data.drop_points_summary && data.drop_points_summary.length > 0) {
+    report += `🚫 ГДЕ ТЕРЯЕМ КЛИЕНТОВ\n`;
+    data.drop_points_summary.slice(0, 3).forEach((dp) => {
+      report += `• ${dp.point}: ${dp.count}x\n`;
+    });
+    report += `\n`;
+  }
+
+  // Скрытые возражения (новое)
+  if (data.hidden_objections_summary && data.hidden_objections_summary.length > 0) {
+    report += `🔇 СКРЫТЫЕ СИГНАЛЫ\n`;
+    data.hidden_objections_summary.slice(0, 3).forEach((ho) => {
+      report += `• ${ho.type}: ${ho.count}x\n`;
     });
     report += `\n`;
   }
@@ -344,7 +392,9 @@ export async function generateConversationReport(params: {
         const analysisResult = await analyzeDialogs({
           instanceName,
           userAccountId,
-          minIncoming: 3
+          minIncoming: 3,
+          startDate: startOfDay,
+          endDate: endOfDay
           // maxDialogs убран — анализируем все диалоги за период
         });
 
@@ -456,6 +506,87 @@ export async function generateConversationReport(params: {
       }
     });
 
+    // === НОВАЯ СТАТИСТИКА ===
+
+    // 1. Drop Points - где клиенты "отваливаются"
+    const dropPointCounts: Record<string, number> = {};
+    activeDialogs.forEach(d => {
+      if (d.drop_point) {
+        dropPointCounts[d.drop_point] = (dropPointCounts[d.drop_point] || 0) + 1;
+      }
+    });
+    const dropPointsSummary = Object.entries(dropPointCounts)
+      .map(([point, count]) => ({ point, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Топ 5 drop points
+
+    // 2. Скрытые возражения
+    const hiddenObjectionCounts: Record<string, number> = {};
+    activeDialogs.forEach(d => {
+      if (d.hidden_objections && Array.isArray(d.hidden_objections)) {
+        d.hidden_objections.forEach(obj => {
+          // Группируем по типу (первое слово)
+          const type = obj.split(' ')[0] || obj;
+          hiddenObjectionCounts[type] = (hiddenObjectionCounts[type] || 0) + 1;
+        });
+      }
+    });
+    const hiddenObjectionsSummary = Object.entries(hiddenObjectionCounts)
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Топ 5 типов
+
+    // 3. Тренды интереса
+    const engagementTrends = { falling: 0, stable: 0, rising: 0 };
+    activeDialogs.forEach(d => {
+      if (d.engagement_trend && engagementTrends.hasOwnProperty(d.engagement_trend)) {
+        engagementTrends[d.engagement_trend]++;
+      }
+    });
+
+    // 4. Источник трафика - сопоставление с leads
+    let trafficSource = { from_ads: 0, smart_match: 0, organic: 0 };
+
+    // Получаем телефоны активных диалогов
+    const activePhones = activeDialogs.map(d => d.contact_phone);
+
+    if (activePhones.length > 0) {
+      // Ищем соответствующие leads
+      const { data: matchedLeads } = await supabase
+        .from('leads')
+        .select('phone, source_id, needs_manual_match')
+        .eq('user_account_id', userAccountId)
+        .in('phone', activePhones);
+
+      if (matchedLeads) {
+        const leadsMap = new Map(matchedLeads.map(l => [l.phone, l]));
+
+        activePhones.forEach(phone => {
+          const lead = leadsMap.get(phone);
+          if (lead) {
+            if (lead.source_id) {
+              // Есть source_id = точно с рекламы
+              trafficSource.from_ads++;
+            } else if (lead.needs_manual_match) {
+              // Smart match = вероятно реклама
+              trafficSource.smart_match++;
+            } else {
+              // Органика
+              trafficSource.organic++;
+            }
+          } else {
+            // Нет в leads = органика
+            trafficSource.organic++;
+          }
+        });
+      } else {
+        // Все органика если нет данных leads
+        trafficSource.organic = activePhones.length;
+      }
+    }
+
+    // === КОНЕЦ НОВОЙ СТАТИСТИКИ ===
+
     // Примеры диалогов для LLM (последние 5 активных)
     const dialogSamples = activeDialogs.slice(0, 5).map(d => {
       const lastMessages = (d.messages || []).slice(-5);
@@ -527,6 +658,11 @@ export async function generateConversationReport(params: {
       rejection_reasons: llmAnalysis.rejection_reasons || [],
       common_objections: llmAnalysis.common_objections || [],
       recommendations: llmAnalysis.recommendations || [],
+      // Новые поля для расширенной аналитики
+      traffic_source: trafficSource,
+      drop_points_summary: dropPointsSummary,
+      hidden_objections_summary: hiddenObjectionsSummary,
+      engagement_trends: engagementTrends,
     };
 
     // Генерируем текст отчёта
@@ -559,6 +695,11 @@ export async function generateConversationReport(params: {
       common_objections: fullReportData.common_objections,
       recommendations: fullReportData.recommendations,
       report_text: fullReportData.report_text,
+      // Новые поля для расширенной аналитики
+      traffic_source: fullReportData.traffic_source,
+      drop_points_summary: fullReportData.drop_points_summary,
+      hidden_objections_summary: fullReportData.hidden_objections_summary,
+      engagement_trends: fullReportData.engagement_trends,
       generated_at: new Date().toISOString(),
     };
 

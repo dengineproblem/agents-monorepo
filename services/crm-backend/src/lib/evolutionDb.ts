@@ -143,18 +143,49 @@ export async function getFilteredDialogsForAnalysis(
   instanceName: string,
   minIncoming: number = 3,
   maxDialogs?: number,
-  excludePhones?: string[]
+  excludePhones?: string[],
+  startDate?: Date,
+  endDate?: Date
 ) {
   const startTime = Date.now();
 
-  // Build exclusion condition using PostgreSQL array (much more efficient!)
-  const excludeParam = maxDialogs ? '$4' : '$3';
-  const excludeCondition = excludePhones && excludePhones.length > 0
-    ? `AND "key"->>'remoteJid' NOT IN (SELECT unnest(${excludeParam}::text[]))`
-    : '';
+  // Build params dynamically
+  const params: (string | number | string[])[] = [instanceName, minIncoming];
+  let paramIdx = 3;
+
+  // Date filter conditions (timestamp is Unix seconds)
+  let dateCondition = '';
+  if (startDate) {
+    const startUnix = Math.floor(startDate.getTime() / 1000);
+    dateCondition += ` AND "messageTimestamp" >= $${paramIdx}`;
+    params.push(startUnix);
+    paramIdx++;
+  }
+  if (endDate) {
+    const endUnix = Math.floor(endDate.getTime() / 1000);
+    dateCondition += ` AND "messageTimestamp" <= $${paramIdx}`;
+    params.push(endUnix);
+    paramIdx++;
+  }
+
+  // maxDialogs limit
+  let limitClause = '';
+  if (maxDialogs) {
+    limitClause = `LIMIT $${paramIdx}`;
+    params.push(maxDialogs);
+    paramIdx++;
+  }
+
+  // Exclude phones condition
+  let excludeCondition = '';
+  if (excludePhones && excludePhones.length > 0) {
+    excludeCondition = `AND "key"->>'remoteJid' NOT IN (SELECT unnest($${paramIdx}::text[]))`;
+    params.push(excludePhones);
+    paramIdx++;
+  }
 
   // Оптимизированный SQL запрос:
-  // 1. Группирует по контактам
+  // 1. Группирует по контактам (в рамках периода если указан)
   // 2. Считает входящие сообщения
   // 3. Фильтрует HAVING incoming_count >= minIncoming (в БД!)
   // 4. Исключает уже проанализированные контакты используя массив (эффективно!)
@@ -172,11 +203,12 @@ export async function getFilteredDialogsForAnalysis(
         COUNT(*) as total_messages
       FROM "Message"
       WHERE "instanceId" IN (SELECT id FROM instance_data)
+        ${dateCondition}
         ${excludeCondition}
       GROUP BY "key"->>'remoteJid'
       HAVING COUNT(*) FILTER (WHERE "key"->>'fromMe' = 'false') >= $2
       ORDER BY total_messages DESC
-      ${maxDialogs ? 'LIMIT $3' : ''}
+      ${limitClause}
     )
     SELECT
       m."key"->>'remoteJid' as remote_jid,
@@ -188,21 +220,17 @@ export async function getFilteredDialogsForAnalysis(
     FROM "Message" m
     WHERE m."instanceId" IN (SELECT id FROM instance_data)
       AND m."key"->>'remoteJid' IN (SELECT remote_jid FROM eligible_contacts)
+      ${dateCondition.replace(/"messageTimestamp"/g, 'm."messageTimestamp"')}
     ORDER BY m."messageTimestamp" ASC
   `;
-
-  const params = [
-    instanceName,
-    minIncoming,
-    ...(maxDialogs ? [maxDialogs] : []),
-    ...(excludePhones && excludePhones.length > 0 ? [excludePhones] : [])
-  ];
 
   log.info({
     instanceName,
     minIncoming,
     maxDialogs: maxDialogs || 'unlimited',
-    excludeCount: excludePhones?.length || 0
+    excludeCount: excludePhones?.length || 0,
+    startDate: startDate?.toISOString(),
+    endDate: endDate?.toISOString()
   }, '⚡ Fetching filtered dialogs (SQL-level filtering)');
 
   const result = await evolutionQuery(query, params);
