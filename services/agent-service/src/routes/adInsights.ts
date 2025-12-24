@@ -88,6 +88,57 @@ async function requireTechAdmin(
 }
 
 // ============================================================================
+// ACCOUNT ID RESOLVER
+// ============================================================================
+
+/**
+ * Резолвит accountId (legacy_xxx или UUID) в реальный ad_account_id (UUID)
+ * Для использования в запросах к таблицам с аномалиями и features
+ */
+async function resolveAdAccountUuid(accountId: string): Promise<string | null> {
+  const isLegacy = accountId.startsWith('legacy_');
+
+  if (isLegacy) {
+    // Legacy режим: извлекаем user_account_id и ищем ad_account
+    const userAccountId = accountId.replace('legacy_', '');
+
+    // Сначала получаем ad_account_id из user_accounts
+    const { data: user } = await supabase
+      .from('user_accounts')
+      .select('ad_account_id')
+      .eq('id', userAccountId)
+      .single();
+
+    if (!user?.ad_account_id) return null;
+
+    // Ищем ad_account с этим fb ad_account_id и user_account_id
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id')
+      .eq('user_account_id', userAccountId)
+      .eq('ad_account_id', user.ad_account_id)
+      .single();
+
+    return adAccount?.id || null;
+  } else {
+    // Multi-account режим: accountId это UUID ad_account
+    const isUuid = accountId.includes('-');
+    if (isUuid) {
+      return accountId;
+    }
+
+    // Если передан fb ad_account_id (act_xxx), ищем UUID
+    const { data: adAccount } = await supabase
+      .from('ad_accounts')
+      .select('id')
+      .eq('ad_account_id', accountId)
+      .single();
+
+    return adAccount?.id || null;
+  }
+}
+
+// ============================================================================
 // TYPES
 // ============================================================================
 
@@ -426,10 +477,16 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     if (!adminId) return;
 
     const { accountId } = request.params;
-    const { status, type, minScore, limit = 50, offset = 0 } = request.query;
+    const { status, type, minScore, limit, offset = 0 } = request.query;
 
     try {
-      const anomalies = await getAnomalies(accountId, {
+      // Резолвим accountId (legacy_xxx или UUID) в реальный ad_account UUID
+      const resolvedAccountId = await resolveAdAccountUuid(accountId);
+      if (!resolvedAccountId) {
+        return reply.status(404).send({ error: 'Ad account not found', accountId });
+      }
+
+      const anomalies = await getAnomalies(resolvedAccountId, {
         status,
         anomalyType: type,
         minScore,
@@ -461,7 +518,13 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
     const { accountId } = request.params;
 
     try {
-      const summary = await getAnomalySummary(accountId);
+      // Резолвим accountId в реальный ad_account UUID
+      const resolvedAccountId = await resolveAdAccountUuid(accountId);
+      if (!resolvedAccountId) {
+        return reply.status(404).send({ error: 'Ad account not found', accountId });
+      }
+
+      const summary = await getAnomalySummary(resolvedAccountId);
 
       return reply.send({
         success: true,

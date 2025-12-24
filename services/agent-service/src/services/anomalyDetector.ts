@@ -1,12 +1,16 @@
 /**
  * ANOMALY DETECTOR SERVICE
  *
- * Детекция аномалий CPR (Cost Per Result):
- * - CPR spike: резкий рост стоимости результата
- * - CTR drop: падение CTR
- * - Frequency high: высокая частота показов
+ * Детекция аномалий CPR (Cost Per Result) с анализом предшествующих отклонений.
  *
- * Вычисление features и baselines для анализа зависимостей
+ * Фокус только на CPR spike (рост стоимости результата):
+ * - Для каждой аномалии анализируем предшествующие отклонения за 1-2 недели до
+ * - Отслеживаемые метрики-предшественники:
+ *   - Performance: frequency, CTR, link_ctr, CPM, spend
+ *   - Creative quality (Ad Relevance Diagnostics): quality_ranking, engagement_ranking, conversion_ranking
+ * - Пороги значимости: 15% для performance, 20% для rankings, 30% для spend
+ *
+ * Вычисление features и baselines для анализа зависимостей.
  */
 
 import { supabase } from '../lib/supabaseClient.js';
@@ -53,6 +57,7 @@ interface WeeklyData {
   cpc: number;
   cpm: number;
   reach: number;
+  link_ctr: number;
   result_count: number;
   cpr: number | null;
   quality_rank_score: number | null;
@@ -67,22 +72,39 @@ interface FeatureSet {
   cpc: number;
   cpm: number;
   reach: number;
+  link_ctr: number;
   result_count: number;
   cpr: number | null;
   baseline_cpr: number | null;
   baseline_frequency: number | null;
   baseline_ctr: number | null;
   baseline_cpc: number | null;
+  baseline_cpm: number | null;
+  baseline_spend: number | null;
+  baseline_link_ctr: number | null;
   cpr_delta_pct: number | null;
   freq_delta_pct: number | null;
   ctr_delta_pct: number | null;
   cpc_delta_pct: number | null;
+  cpm_delta_pct: number | null;
+  spend_delta_pct: number | null;
+  link_ctr_delta_pct: number | null;
   cpr_lag1: number | null;
   cpr_lag2: number | null;
   freq_lag1: number | null;
   freq_lag2: number | null;
   ctr_lag1: number | null;
   ctr_lag2: number | null;
+  cpm_lag1: number | null;
+  cpm_lag2: number | null;
+  spend_lag1: number | null;
+  spend_lag2: number | null;
+  link_ctr_lag1: number | null;
+  link_ctr_lag2: number | null;
+  results_lag1: number | null;
+  results_lag2: number | null;
+  baseline_results: number | null;
+  results_delta_pct: number | null;
   freq_slope: number | null;
   ctr_slope: number | null;
   reach_growth_rate: number | null;
@@ -98,6 +120,17 @@ interface FeatureSet {
   engagement_drop: number | null;
   conversion_drop: number | null;
   relevance_drop: number | null;
+  // Ranking baselines
+  baseline_quality: number | null;
+  baseline_engagement: number | null;
+  baseline_conversion: number | null;
+  // Ranking lags (Iteration 3 - Preceding Deviations)
+  quality_rank_lag1: number | null;
+  quality_rank_lag2: number | null;
+  engagement_rank_lag1: number | null;
+  engagement_rank_lag2: number | null;
+  conversion_rank_lag1: number | null;
+  conversion_rank_lag2: number | null;
 }
 
 interface Anomaly {
@@ -108,7 +141,75 @@ interface Anomaly {
   anomaly_score: number;
   confidence: number;
   likely_triggers: { metric: string; value: number; delta: string }[];
+  preceding_deviations?: PrecedingDeviations;
+  // Pause detection (Iteration 4)
+  pause_days_count?: number;
+  has_delivery_gap?: boolean;
 }
+
+interface PauseAnalysis {
+  pause_days_count: number;
+  has_delivery_gap: boolean;
+  active_days: number;
+  min_daily_impressions: number;
+  max_daily_impressions: number;
+  daily_impressions_cv: number | null;  // Coefficient of variation
+}
+
+// Типы для предшествующих отклонений
+type DeviationDirection = 'bad' | 'good' | 'neutral';
+type MetricName = 'frequency' | 'ctr' | 'link_ctr' | 'cpm' | 'spend' | 'results' | 'quality_ranking' | 'engagement_ranking' | 'conversion_ranking';
+
+interface MetricDeviation {
+  metric: MetricName;
+  value: number;
+  baseline: number;
+  delta_pct: number;
+  is_significant: boolean;
+  direction: DeviationDirection;
+}
+
+interface WeekDeviations {
+  week_start: string;
+  week_end: string;
+  deviations: MetricDeviation[];
+  // Raw ranking values (без порогов, просто для отображения)
+  quality_ranking: number | null;
+  engagement_ranking: number | null;
+  conversion_ranking: number | null;
+}
+
+interface PrecedingDeviations {
+  week_0: WeekDeviations | null;      // Неделя аномалии (текущая)
+  week_minus_1: WeekDeviations | null;
+  week_minus_2: WeekDeviations | null;
+}
+
+// Конфигурация порогов значимости
+const DEVIATION_THRESHOLDS: Record<MetricName, number> = {
+  frequency: 0.15,           // 15% отклонение = значимое
+  ctr: 0.15,
+  link_ctr: 0.15,
+  cpm: 0.15,
+  spend: 0.30,               // 30% для spend
+  results: 0.20,             // 20% падение результатов = значимое
+  quality_ranking: 0.20,     // 20% падение ranking = значимо (score 5 → 4)
+  engagement_ranking: 0.20,
+  conversion_ranking: 0.20,
+};
+
+// Логика определения "плохого" направления для метрики
+const BAD_DIRECTION: Record<MetricName, 'increase' | 'decrease'> = {
+  frequency: 'increase',       // Рост частоты = плохо
+  ctr: 'decrease',             // Падение CTR = плохо
+  link_ctr: 'decrease',        // Падение Link CTR = плохо
+  cpm: 'increase',             // Рост CPM = плохо
+  spend: 'increase',           // Рост spend = информационно
+  results: 'decrease',         // Падение результатов = плохо
+  quality_ranking: 'decrease', // Падение качества = плохо
+  engagement_ranking: 'decrease',
+  conversion_ranking: 'decrease',
+};
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -186,6 +287,11 @@ async function loadConfig(): Promise<AnomalyConfig> {
 // FEATURE COMPUTATION
 // ============================================================================
 
+interface ComputeFeaturesResult {
+  features: FeatureSet;
+  weeklyData: WeeklyData[];
+}
+
 /**
  * Вычисляет features для одного ad на одну неделю
  */
@@ -195,11 +301,11 @@ async function computeFeatures(
   weekStartDate: string,
   primaryFamily: string,
   config: AnomalyConfig
-): Promise<FeatureSet | null> {
+): Promise<ComputeFeaturesResult | null> {
   // Получаем данные за последние 12 недель (текущая + 11 предыдущих)
   const { data: insights, error } = await supabase
     .from('meta_insights_weekly')
-    .select('week_start_date, spend, frequency, ctr, cpc, cpm, reach, quality_rank_score, engagement_rank_score, conversion_rank_score')
+    .select('week_start_date, spend, frequency, ctr, cpc, cpm, reach, link_ctr, quality_rank_score, engagement_rank_score, conversion_rank_score')
     .eq('ad_account_id', adAccountId)
     .eq('fb_ad_id', fbAdId)
     .lte('week_start_date', weekStartDate)
@@ -232,6 +338,7 @@ async function computeFeatures(
       cpc: parseFloat(i.cpc as any) || 0,
       cpm: parseFloat(i.cpm as any) || 0,
       reach: parseInt(i.reach as any) || 0,
+      link_ctr: parseFloat((i as any).link_ctr as any) || 0,
       result_count: result?.result_count || 0,
       cpr: result?.cpr ? parseFloat(result.cpr as any) : null,
       quality_rank_score: (i as any).quality_rank_score ?? null,
@@ -253,11 +360,19 @@ async function computeFeatures(
   const baselineFreqs = baselineWeeks.map(w => w.frequency).filter(v => v > 0);
   const baselineCtrs = baselineWeeks.map(w => w.ctr).filter(v => v > 0);
   const baselineCpcs = baselineWeeks.map(w => w.cpc).filter(v => v > 0);
+  const baselineCpms = baselineWeeks.map(w => w.cpm).filter(v => v > 0);
+  const baselineSpends = baselineWeeks.map(w => w.spend).filter(v => v > 0);
+  const baselineLinkCtrs = baselineWeeks.map(w => w.link_ctr).filter(v => v > 0);
+  const baselineResults = baselineWeeks.map(w => w.result_count).filter(v => v > 0);
 
   const baseline_cpr = median(baselineCprs);
   const baseline_frequency = median(baselineFreqs);
   const baseline_ctr = median(baselineCtrs);
   const baseline_cpc = median(baselineCpcs);
+  const baseline_cpm = median(baselineCpms);
+  const baseline_spend = median(baselineSpends);
+  const baseline_link_ctr = median(baselineLinkCtrs);
+  const baseline_results = median(baselineResults);
 
   // Дельты
   const cpr_delta_pct = baseline_cpr && current.cpr
@@ -272,6 +387,18 @@ async function computeFeatures(
   const cpc_delta_pct = baseline_cpc && current.cpc
     ? ((current.cpc - baseline_cpc) / baseline_cpc) * 100
     : null;
+  const cpm_delta_pct = baseline_cpm && current.cpm
+    ? ((current.cpm - baseline_cpm) / baseline_cpm) * 100
+    : null;
+  const spend_delta_pct = baseline_spend && current.spend
+    ? ((current.spend - baseline_spend) / baseline_spend) * 100
+    : null;
+  const link_ctr_delta_pct = baseline_link_ctr && current.link_ctr
+    ? ((current.link_ctr - baseline_link_ctr) / baseline_link_ctr) * 100
+    : null;
+  const results_delta_pct = baseline_results && current.result_count
+    ? ((current.result_count - baseline_results) / baseline_results) * 100
+    : null;
 
   // Лаги
   const cpr_lag1 = weeklyData[1]?.cpr || null;
@@ -280,6 +407,22 @@ async function computeFeatures(
   const freq_lag2 = weeklyData[2]?.frequency || null;
   const ctr_lag1 = weeklyData[1]?.ctr || null;
   const ctr_lag2 = weeklyData[2]?.ctr || null;
+  const cpm_lag1 = weeklyData[1]?.cpm || null;
+  const cpm_lag2 = weeklyData[2]?.cpm || null;
+  const spend_lag1 = weeklyData[1]?.spend || null;
+  const spend_lag2 = weeklyData[2]?.spend || null;
+  const link_ctr_lag1 = weeklyData[1]?.link_ctr || null;
+  const link_ctr_lag2 = weeklyData[2]?.link_ctr || null;
+  const results_lag1 = weeklyData[1]?.result_count || null;
+  const results_lag2 = weeklyData[2]?.result_count || null;
+
+  // Ranking лаги (Iteration 3 - Preceding Deviations)
+  const quality_rank_lag1 = weeklyData[1]?.quality_rank_score ?? null;
+  const quality_rank_lag2 = weeklyData[2]?.quality_rank_score ?? null;
+  const engagement_rank_lag1 = weeklyData[1]?.engagement_rank_score ?? null;
+  const engagement_rank_lag2 = weeklyData[2]?.engagement_rank_score ?? null;
+  const conversion_rank_lag1 = weeklyData[1]?.conversion_rank_score ?? null;
+  const conversion_rank_lag2 = weeklyData[2]?.conversion_rank_score ?? null;
 
   // Slopes (тренды за последние 4 недели)
   const last4Weeks = weeklyData.slice(0, 4);
@@ -343,29 +486,50 @@ async function computeFeatures(
     ? relevance_health - baseline_relevance
     : null;
 
-  return {
+  const features: FeatureSet = {
     spend: current.spend,
     frequency: current.frequency,
     ctr: current.ctr,
     cpc: current.cpc,
     cpm: current.cpm,
     reach: current.reach,
+    link_ctr: current.link_ctr,
     result_count: current.result_count,
     cpr: current.cpr,
+    // Baselines
     baseline_cpr,
     baseline_frequency,
     baseline_ctr,
     baseline_cpc,
+    baseline_cpm,
+    baseline_spend,
+    baseline_link_ctr,
+    baseline_results,
+    // Дельты
     cpr_delta_pct,
     freq_delta_pct,
     ctr_delta_pct,
     cpc_delta_pct,
+    cpm_delta_pct,
+    spend_delta_pct,
+    link_ctr_delta_pct,
+    results_delta_pct,
+    // Лаги
     cpr_lag1,
     cpr_lag2,
     freq_lag1,
     freq_lag2,
     ctr_lag1,
     ctr_lag2,
+    cpm_lag1,
+    cpm_lag2,
+    spend_lag1,
+    spend_lag2,
+    link_ctr_lag1,
+    link_ctr_lag2,
+    results_lag1,
+    results_lag2,
+    // Тренды
     freq_slope,
     ctr_slope,
     reach_growth_rate,
@@ -381,7 +545,221 @@ async function computeFeatures(
     engagement_drop,
     conversion_drop,
     relevance_drop,
+    // Ranking baselines (Iteration 3)
+    baseline_quality,
+    baseline_engagement,
+    baseline_conversion,
+    // Ranking лаги (Iteration 3 - Preceding Deviations)
+    quality_rank_lag1,
+    quality_rank_lag2,
+    engagement_rank_lag1,
+    engagement_rank_lag2,
+    conversion_rank_lag1,
+    conversion_rank_lag2,
   };
+
+  return { features, weeklyData };
+}
+
+/**
+ * Вычисляет features из предзагруженного кэша (БЕЗ запросов к БД!)
+ */
+function computeFeaturesFromCache(
+  insightsCache: InsightsCache,
+  resultsCache: ResultsCache,
+  fbAdId: string,
+  weekStartDate: string,
+  primaryFamily: string,
+  config: AnomalyConfig
+): ComputeFeaturesResult | null {
+  // Получаем данные из кэша
+  const allInsights = insightsCache.get(fbAdId) || [];
+  const allResults = resultsCache.get(fbAdId) || [];
+
+  // Фильтруем по дате (до weekStartDate включительно, отсортировано desc)
+  const insights = allInsights
+    .filter(i => i.week_start_date <= weekStartDate)
+    .slice(0, 12); // последние 12 недель
+
+  if (insights.length === 0) {
+    return null;
+  }
+
+  // Фильтруем results по primary_family
+  const familyResults = allResults.filter(r => r.result_family === primaryFamily);
+  const results = familyResults
+    .filter(r => r.week_start_date <= weekStartDate)
+    .slice(0, 12);
+
+  // Объединяем данные
+  const weeklyData: WeeklyData[] = insights.map(i => {
+    const result = results.find(r => r.week_start_date === i.week_start_date);
+    return {
+      week_start_date: i.week_start_date,
+      spend: i.spend,
+      frequency: i.frequency,
+      ctr: i.ctr,
+      cpc: i.cpc,
+      cpm: i.cpm,
+      reach: i.reach,
+      link_ctr: i.link_ctr || 0,
+      result_count: result?.result_count || 0,
+      cpr: result?.cpr || null,
+      quality_rank_score: i.quality_rank_score,
+      engagement_rank_score: i.engagement_rank_score,
+      conversion_rank_score: i.conversion_rank_score,
+    };
+  });
+
+  const current = weeklyData[0];
+  if (!current || current.week_start_date !== weekStartDate) {
+    return null;
+  }
+
+  // Baseline (недели 1-8)
+  const baselineWeeks = weeklyData.slice(1, config.baseline_weeks + 1);
+
+  // Baselines (медианы)
+  const baselineCprs = baselineWeeks.map(w => w.cpr).filter((v): v is number => v !== null && v > 0);
+  const baselineFreqs = baselineWeeks.map(w => w.frequency).filter(v => v > 0);
+  const baselineCtrs = baselineWeeks.map(w => w.ctr).filter(v => v > 0);
+  const baselineCpcs = baselineWeeks.map(w => w.cpc).filter(v => v > 0);
+  const baselineCpms = baselineWeeks.map(w => w.cpm).filter(v => v > 0);
+  const baselineSpends = baselineWeeks.map(w => w.spend).filter(v => v > 0);
+  const baselineLinkCtrs = baselineWeeks.map(w => w.link_ctr).filter(v => v > 0);
+  const baselineResults = baselineWeeks.map(w => w.result_count).filter(v => v > 0);
+
+  const baseline_cpr = median(baselineCprs);
+  const baseline_frequency = median(baselineFreqs);
+  const baseline_ctr = median(baselineCtrs);
+  const baseline_cpc = median(baselineCpcs);
+  const baseline_cpm = median(baselineCpms);
+  const baseline_spend = median(baselineSpends);
+  const baseline_link_ctr = median(baselineLinkCtrs);
+  const baseline_results = median(baselineResults);
+
+  // Дельты
+  const cpr_delta_pct = baseline_cpr && current.cpr
+    ? ((current.cpr - baseline_cpr) / baseline_cpr) * 100
+    : null;
+  const freq_delta_pct = baseline_frequency && current.frequency
+    ? ((current.frequency - baseline_frequency) / baseline_frequency) * 100
+    : null;
+  const ctr_delta_pct = baseline_ctr && current.ctr
+    ? ((current.ctr - baseline_ctr) / baseline_ctr) * 100
+    : null;
+  const cpc_delta_pct = baseline_cpc && current.cpc
+    ? ((current.cpc - baseline_cpc) / baseline_cpc) * 100
+    : null;
+  const cpm_delta_pct = baseline_cpm && current.cpm
+    ? ((current.cpm - baseline_cpm) / baseline_cpm) * 100
+    : null;
+  const spend_delta_pct = baseline_spend && current.spend
+    ? ((current.spend - baseline_spend) / baseline_spend) * 100
+    : null;
+  const link_ctr_delta_pct = baseline_link_ctr && current.link_ctr
+    ? ((current.link_ctr - baseline_link_ctr) / baseline_link_ctr) * 100
+    : null;
+  const results_delta_pct = baseline_results && current.result_count
+    ? ((current.result_count - baseline_results) / baseline_results) * 100
+    : null;
+
+  // Лаги
+  const cpr_lag1 = weeklyData[1]?.cpr || null;
+  const cpr_lag2 = weeklyData[2]?.cpr || null;
+  const freq_lag1 = weeklyData[1]?.frequency || null;
+  const freq_lag2 = weeklyData[2]?.frequency || null;
+  const ctr_lag1 = weeklyData[1]?.ctr || null;
+  const ctr_lag2 = weeklyData[2]?.ctr || null;
+  const cpm_lag1 = weeklyData[1]?.cpm || null;
+  const cpm_lag2 = weeklyData[2]?.cpm || null;
+  const spend_lag1 = weeklyData[1]?.spend || null;
+  const spend_lag2 = weeklyData[2]?.spend || null;
+  const link_ctr_lag1 = weeklyData[1]?.link_ctr || null;
+  const link_ctr_lag2 = weeklyData[2]?.link_ctr || null;
+  const results_lag1 = weeklyData[1]?.result_count || null;
+  const results_lag2 = weeklyData[2]?.result_count || null;
+
+  // Ranking лаги
+  const quality_rank_lag1 = weeklyData[1]?.quality_rank_score ?? null;
+  const quality_rank_lag2 = weeklyData[2]?.quality_rank_score ?? null;
+  const engagement_rank_lag1 = weeklyData[1]?.engagement_rank_score ?? null;
+  const engagement_rank_lag2 = weeklyData[2]?.engagement_rank_score ?? null;
+  const conversion_rank_lag1 = weeklyData[1]?.conversion_rank_score ?? null;
+  const conversion_rank_lag2 = weeklyData[2]?.conversion_rank_score ?? null;
+
+  // Slopes (тренды за последние 4 недели)
+  const last4Weeks = weeklyData.slice(0, 4);
+  const freq_slope = calculateSlope(last4Weeks.map(w => w.frequency).reverse());
+  const ctr_slope = calculateSlope(last4Weeks.map(w => w.ctr).reverse());
+
+  // Reach growth rate
+  const reach_growth_rate = weeklyData[1]?.reach && weeklyData[1].reach > 0
+    ? ((current.reach - weeklyData[1].reach) / weeklyData[1].reach) * 100
+    : null;
+
+  // Spend change
+  const spend_change_pct = weeklyData[1]?.spend && weeklyData[1].spend > 0
+    ? ((current.spend - weeklyData[1].spend) / weeklyData[1].spend) * 100
+    : null;
+
+  // Качество данных
+  const weeks_with_data = weeklyData.filter(w => w.spend > 0).length;
+  const minResults = getMinResults(primaryFamily, config);
+  const min_results_met = current.result_count >= minResults;
+
+  // Ranking scores
+  const quality_score = current.quality_rank_score;
+  const engagement_score = current.engagement_rank_score;
+  const conversion_score = current.conversion_rank_score;
+
+  const relevance_health = (quality_score !== null || engagement_score !== null || conversion_score !== null)
+    ? (quality_score ?? 0) + (engagement_score ?? 0) + (conversion_score ?? 0)
+    : null;
+
+  // Baseline rankings
+  const baselineQuality = baselineWeeks.map(w => w.quality_rank_score).filter((v): v is number => v !== null);
+  const baselineEngagement = baselineWeeks.map(w => w.engagement_rank_score).filter((v): v is number => v !== null);
+  const baselineConversion = baselineWeeks.map(w => w.conversion_rank_score).filter((v): v is number => v !== null);
+
+  const baseline_quality = baselineQuality.length > 0 ? median(baselineQuality) : null;
+  const baseline_engagement = baselineEngagement.length > 0 ? median(baselineEngagement) : null;
+  const baseline_conversion = baselineConversion.length > 0 ? median(baselineConversion) : null;
+  const baseline_relevance = (baseline_quality !== null || baseline_engagement !== null || baseline_conversion !== null)
+    ? (baseline_quality ?? 0) + (baseline_engagement ?? 0) + (baseline_conversion ?? 0)
+    : null;
+
+  // Drops
+  const quality_drop = quality_score !== null && baseline_quality !== null
+    ? quality_score - baseline_quality : null;
+  const engagement_drop = engagement_score !== null && baseline_engagement !== null
+    ? engagement_score - baseline_engagement : null;
+  const conversion_drop = conversion_score !== null && baseline_conversion !== null
+    ? conversion_score - baseline_conversion : null;
+  const relevance_drop = relevance_health !== null && baseline_relevance !== null
+    ? relevance_health - baseline_relevance : null;
+
+  const features: FeatureSet = {
+    spend: current.spend,
+    frequency: current.frequency,
+    ctr: current.ctr,
+    cpc: current.cpc,
+    cpm: current.cpm,
+    reach: current.reach,
+    link_ctr: current.link_ctr,
+    result_count: current.result_count,
+    cpr: current.cpr,
+    baseline_cpr, baseline_frequency, baseline_ctr, baseline_cpc, baseline_cpm, baseline_spend, baseline_link_ctr, baseline_results,
+    cpr_delta_pct, freq_delta_pct, ctr_delta_pct, cpc_delta_pct, cpm_delta_pct, spend_delta_pct, link_ctr_delta_pct, results_delta_pct,
+    cpr_lag1, cpr_lag2, freq_lag1, freq_lag2, ctr_lag1, ctr_lag2, cpm_lag1, cpm_lag2, spend_lag1, spend_lag2, link_ctr_lag1, link_ctr_lag2, results_lag1, results_lag2,
+    freq_slope, ctr_slope, reach_growth_rate, spend_change_pct, weeks_with_data, min_results_met,
+    quality_score, engagement_score, conversion_score, relevance_health,
+    quality_drop, engagement_drop, conversion_drop, relevance_drop,
+    baseline_quality, baseline_engagement, baseline_conversion,
+    quality_rank_lag1, quality_rank_lag2, engagement_rank_lag1, engagement_rank_lag2, conversion_rank_lag1, conversion_rank_lag2,
+  };
+
+  return { features, weeklyData };
 }
 
 /**
@@ -446,29 +824,572 @@ async function determinePrimaryFamily(
 // ============================================================================
 
 /**
- * Детектирует аномалии для одного ad на одну неделю
+ * Вычисляет дату конца недели (+ 6 дней от начала)
  */
+function getWeekEndDate(weekStart: string): string {
+  const start = new Date(weekStart);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  return end.toISOString().split('T')[0];
+}
+
+/**
+ * Определяет направление отклонения: плохо, хорошо или нейтрально
+ */
+function getDeviationDirection(metric: MetricName, deltaPct: number): DeviationDirection {
+  if (Math.abs(deltaPct) < DEVIATION_THRESHOLDS[metric] * 100) {
+    return 'neutral';
+  }
+
+  const badDirection = BAD_DIRECTION[metric];
+
+  if (badDirection === 'increase') {
+    // Для frequency, cpm, spend: рост = плохо, падение = хорошо
+    return deltaPct > 0 ? 'bad' : 'good';
+  } else {
+    // Для ctr, link_ctr: падение = плохо, рост = хорошо
+    return deltaPct < 0 ? 'bad' : 'good';
+  }
+}
+
+// ============================================================================
+// PAUSE DETECTION (Iteration 4) - BATCH OPTIMIZED
+// ============================================================================
+
+type DailyInsightsMap = Map<string, Array<{ date: string; impressions: number; spend: number }>>;
+
+// Типы для batch-кэшей
+type AdsMap = Map<string, { fb_adset_id: string | null }>;
+type AdsetsMap = Map<string, { optimization_goal: string | null }>;
+type WeeklyResultsMap = Map<string, Array<{ result_family: string; result_count: number }>>;
+
+// Типы для batch-кэширования insights (для computeFeatures)
+interface WeeklyInsightRow {
+  fb_ad_id: string;
+  week_start_date: string;
+  spend: number;
+  frequency: number;
+  ctr: number;
+  cpc: number;
+  cpm: number;
+  reach: number;
+  link_ctr: number | null;
+  quality_rank_score: number | null;
+  engagement_rank_score: number | null;
+  conversion_rank_score: number | null;
+}
+type InsightsCache = Map<string, WeeklyInsightRow[]>; // key = fb_ad_id
+
+interface WeeklyResultRow {
+  fb_ad_id: string;
+  week_start_date: string;
+  result_family: string;
+  result_count: number;
+  cpr: number | null;
+}
+type ResultsCache = Map<string, WeeklyResultRow[]>; // key = fb_ad_id
+
+/**
+ * Загружает ВСЕ ads для аккаунта одним запросом
+ */
+async function loadAllAds(adAccountId: string): Promise<AdsMap> {
+  log.info({ adAccountId }, 'Loading all ads...');
+  const { data, error } = await supabase
+    .from('meta_ads')
+    .select('fb_ad_id, fb_adset_id')
+    .eq('ad_account_id', adAccountId);
+
+  if (error || !data) {
+    log.warn({ adAccountId, error }, 'Failed to load ads for batch processing');
+    return new Map();
+  }
+
+  log.info({ adAccountId, count: data.length }, 'Loaded all ads');
+  const map: AdsMap = new Map();
+  for (const row of data) {
+    map.set(row.fb_ad_id, { fb_adset_id: row.fb_adset_id });
+  }
+  return map;
+}
+
+/**
+ * Загружает ВСЕ adsets для аккаунта одним запросом
+ */
+async function loadAllAdsets(adAccountId: string): Promise<AdsetsMap> {
+  log.info({ adAccountId }, 'Loading all adsets...');
+  const { data, error } = await supabase
+    .from('meta_adsets')
+    .select('fb_adset_id, optimization_goal')
+    .eq('ad_account_id', adAccountId);
+
+  if (error || !data) {
+    log.warn({ adAccountId, error }, 'Failed to load adsets for batch processing');
+    return new Map();
+  }
+
+  log.info({ adAccountId, count: data.length }, 'Loaded all adsets');
+  const map: AdsetsMap = new Map();
+  for (const row of data) {
+    map.set(row.fb_adset_id, { optimization_goal: row.optimization_goal });
+  }
+  return map;
+}
+
+/**
+ * Загружает ВСЕ weekly_results для аккаунта одним запросом
+ */
+async function loadAllWeeklyResults(adAccountId: string): Promise<WeeklyResultsMap> {
+  log.info({ adAccountId }, 'Loading all weekly results...');
+  const { data, error } = await supabase
+    .from('meta_weekly_results')
+    .select('fb_ad_id, week_start_date, result_family, result_count')
+    .eq('ad_account_id', adAccountId);
+
+  if (error || !data) {
+    log.warn({ adAccountId, error }, 'Failed to load weekly results for batch processing');
+    return new Map();
+  }
+
+  log.info({ adAccountId, count: data.length }, 'Loaded all weekly results');
+  // Группируем по fb_ad_id (для определения primary family)
+  const map: WeeklyResultsMap = new Map();
+  for (const row of data) {
+    if (!map.has(row.fb_ad_id)) {
+      map.set(row.fb_ad_id, []);
+    }
+    map.get(row.fb_ad_id)!.push({
+      result_family: row.result_family,
+      result_count: row.result_count || 0,
+    });
+  }
+  return map;
+}
+
+/**
+ * Загружает ВСЕ weekly insights для computeFeatures (batch)
+ */
+async function loadAllInsightsForCompute(adAccountId: string): Promise<InsightsCache> {
+  log.info({ adAccountId }, 'Loading all insights for compute...');
+  const { data, error } = await supabase
+    .from('meta_insights_weekly')
+    .select('fb_ad_id, week_start_date, spend, frequency, ctr, cpc, cpm, reach, link_ctr, quality_rank_score, engagement_rank_score, conversion_rank_score')
+    .eq('ad_account_id', adAccountId)
+    .order('week_start_date', { ascending: false });
+
+  if (error || !data) {
+    log.warn({ adAccountId, error }, 'Failed to load insights for compute');
+    return new Map();
+  }
+
+  log.info({ adAccountId, count: data.length }, 'Loaded all insights for compute');
+  const map: InsightsCache = new Map();
+  for (const row of data) {
+    if (!map.has(row.fb_ad_id)) {
+      map.set(row.fb_ad_id, []);
+    }
+    map.get(row.fb_ad_id)!.push({
+      fb_ad_id: row.fb_ad_id,
+      week_start_date: row.week_start_date,
+      spend: parseFloat(row.spend as any) || 0,
+      frequency: parseFloat(row.frequency as any) || 0,
+      ctr: parseFloat(row.ctr as any) || 0,
+      cpc: parseFloat(row.cpc as any) || 0,
+      cpm: parseFloat(row.cpm as any) || 0,
+      reach: parseInt(row.reach as any) || 0,
+      link_ctr: row.link_ctr ? parseFloat(row.link_ctr as any) : null,
+      quality_rank_score: row.quality_rank_score ?? null,
+      engagement_rank_score: row.engagement_rank_score ?? null,
+      conversion_rank_score: row.conversion_rank_score ?? null,
+    });
+  }
+  return map;
+}
+
+/**
+ * Загружает ВСЕ weekly results для computeFeatures (batch)
+ */
+async function loadAllResultsForCompute(adAccountId: string): Promise<ResultsCache> {
+  log.info({ adAccountId }, 'Loading all results for compute...');
+  const { data, error } = await supabase
+    .from('meta_weekly_results')
+    .select('fb_ad_id, week_start_date, result_family, result_count, cpr')
+    .eq('ad_account_id', adAccountId)
+    .order('week_start_date', { ascending: false });
+
+  if (error || !data) {
+    log.warn({ adAccountId, error }, 'Failed to load results for compute');
+    return new Map();
+  }
+
+  log.info({ adAccountId, count: data.length }, 'Loaded all results for compute');
+  const map: ResultsCache = new Map();
+  for (const row of data) {
+    if (!map.has(row.fb_ad_id)) {
+      map.set(row.fb_ad_id, []);
+    }
+    map.get(row.fb_ad_id)!.push({
+      fb_ad_id: row.fb_ad_id,
+      week_start_date: row.week_start_date,
+      result_family: row.result_family,
+      result_count: row.result_count || 0,
+      cpr: row.cpr ? parseFloat(row.cpr as any) : null,
+    });
+  }
+  return map;
+}
+
+/**
+ * Определяет primary family из кэша (без запросов к БД)
+ */
+function determinePrimaryFamilyFromCache(
+  adsMap: AdsMap,
+  adsetsMap: AdsetsMap,
+  weeklyResultsMap: WeeklyResultsMap,
+  fbAdId: string
+): string {
+  // Проверяем optimization_goal
+  const ad = adsMap.get(fbAdId);
+  if (ad?.fb_adset_id) {
+    const adset = adsetsMap.get(ad.fb_adset_id);
+    const goal = adset?.optimization_goal;
+    if (goal === 'CONVERSATIONS') return 'messages';
+    if (goal === 'LEAD_GENERATION') return 'leadgen_form';
+    if (goal === 'VALUE') return 'purchase';
+  }
+
+  // Fallback: выбираем семейство с наибольшим количеством результатов
+  const results = weeklyResultsMap.get(fbAdId);
+  if (results && results.length > 0) {
+    const familyCounts = new Map<string, number>();
+    for (const r of results) {
+      const current = familyCounts.get(r.result_family) || 0;
+      familyCounts.set(r.result_family, current + r.result_count);
+    }
+
+    let maxFamily = 'other';
+    let maxCount = 0;
+    for (const [family, count] of familyCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        maxFamily = family;
+      }
+    }
+    return maxFamily;
+  }
+
+  return 'other';
+}
+
+/**
+ * Загружает ВСЕ daily insights для аккаунта одним запросом
+ * Возвращает Map с ключом "fb_ad_id|week_start"
+ */
+async function loadAllDailyInsights(adAccountId: string): Promise<DailyInsightsMap> {
+  const { data, error } = await supabase
+    .from('meta_insights_daily')
+    .select('fb_ad_id, date, impressions, spend')
+    .eq('ad_account_id', adAccountId)
+    .order('date', { ascending: true });
+
+  if (error || !data) {
+    log.warn({ adAccountId, error }, 'Failed to load daily insights for pause detection');
+    return new Map();
+  }
+
+  // Группируем по ad_id + week_start
+  const map: DailyInsightsMap = new Map();
+
+  for (const row of data) {
+    // Вычисляем week_start для этой даты
+    const date = new Date(row.date);
+    const dayOfWeek = date.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() + mondayOffset);
+    const weekStartStr = weekStart.toISOString().split('T')[0];
+
+    const key = `${row.fb_ad_id}|${weekStartStr}`;
+    if (!map.has(key)) {
+      map.set(key, []);
+    }
+    map.get(key)!.push({
+      date: row.date,
+      impressions: row.impressions || 0,
+      spend: row.spend || 0,
+    });
+  }
+
+  log.info({ adAccountId, totalDays: data.length, uniqueWeeks: map.size }, 'Loaded daily insights for pause detection');
+  return map;
+}
+
+/**
+ * Анализирует паузы используя предзагруженные данные
+ */
+function analyzePauseFromCache(
+  dailyMap: DailyInsightsMap,
+  fbAdId: string,
+  weekStartDate: string
+): PauseAnalysis {
+  const key = `${fbAdId}|${weekStartDate}`;
+  const dailyData = dailyMap.get(key);
+
+  if (!dailyData || dailyData.length === 0) {
+    return {
+      pause_days_count: 0,
+      has_delivery_gap: false,
+      active_days: 0,
+      min_daily_impressions: 0,
+      max_daily_impressions: 0,
+      daily_impressions_cv: null,
+    };
+  }
+
+  const impressions = dailyData.map(d => d.impressions);
+  const hasSpend = dailyData.some(d => d.spend > 0);
+
+  const activeDays = impressions.filter(i => i > 0).length;
+  const pauseDays = impressions.filter(i => i === 0).length;
+
+  const hasDeliveryGap = hasSpend && activeDays > 0 && pauseDays > 0;
+
+  const minDailyImpressions = Math.min(...impressions);
+  const maxDailyImpressions = Math.max(...impressions);
+
+  let dailyImpressionsCv: number | null = null;
+  if (activeDays > 1) {
+    const activeImpressions = impressions.filter(i => i > 0);
+    const mean = activeImpressions.reduce((a, b) => a + b, 0) / activeImpressions.length;
+    if (mean > 0) {
+      const variance = activeImpressions.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / activeImpressions.length;
+      dailyImpressionsCv = Math.sqrt(variance) / mean;
+    }
+  }
+
+  return {
+    pause_days_count: pauseDays,
+    has_delivery_gap: hasDeliveryGap,
+    active_days: activeDays,
+    min_daily_impressions: minDailyImpressions,
+    max_daily_impressions: maxDailyImpressions,
+    daily_impressions_cv: dailyImpressionsCv,
+  };
+}
+
+// ============================================================================
+// PRECEDING DEVIATIONS
+// ============================================================================
+
+/**
+ * Анализирует предшествующие отклонения метрик за 1-2 недели до аномалии
+ */
+function analyzePrecedingDeviations(
+  features: FeatureSet,
+  weeklyData: WeeklyData[]
+): PrecedingDeviations {
+  const result: PrecedingDeviations = {
+    week_0: null,       // Неделя аномалии (текущая)
+    week_minus_1: null,
+    week_minus_2: null,
+  };
+
+  // Конфигурация метрик для анализа (с лагами для week -1, -2)
+  const metricsConfig: Array<{
+    name: MetricName;
+    lag1Key: keyof FeatureSet;
+    lag2Key: keyof FeatureSet;
+    baselineKey: keyof FeatureSet;
+  }> = [
+    { name: 'frequency', lag1Key: 'freq_lag1', lag2Key: 'freq_lag2', baselineKey: 'baseline_frequency' },
+    { name: 'ctr', lag1Key: 'ctr_lag1', lag2Key: 'ctr_lag2', baselineKey: 'baseline_ctr' },
+    { name: 'link_ctr', lag1Key: 'link_ctr_lag1', lag2Key: 'link_ctr_lag2', baselineKey: 'baseline_link_ctr' },
+    { name: 'cpm', lag1Key: 'cpm_lag1', lag2Key: 'cpm_lag2', baselineKey: 'baseline_cpm' },
+    { name: 'spend', lag1Key: 'spend_lag1', lag2Key: 'spend_lag2', baselineKey: 'baseline_spend' },
+    { name: 'results', lag1Key: 'results_lag1', lag2Key: 'results_lag2', baselineKey: 'baseline_results' },
+    // Facebook Ad Relevance Diagnostics (качество креатива)
+    { name: 'quality_ranking', lag1Key: 'quality_rank_lag1', lag2Key: 'quality_rank_lag2', baselineKey: 'baseline_quality' },
+    { name: 'engagement_ranking', lag1Key: 'engagement_rank_lag1', lag2Key: 'engagement_rank_lag2', baselineKey: 'baseline_engagement' },
+    { name: 'conversion_ranking', lag1Key: 'conversion_rank_lag1', lag2Key: 'conversion_rank_lag2', baselineKey: 'baseline_conversion' },
+  ];
+
+  // Конфигурация метрик для week 0 (текущая неделя — без лагов)
+  const week0Metrics: Array<{
+    name: MetricName;
+    currentKey: keyof FeatureSet;
+    baselineKey: keyof FeatureSet;
+  }> = [
+    { name: 'frequency', currentKey: 'frequency', baselineKey: 'baseline_frequency' },
+    { name: 'ctr', currentKey: 'ctr', baselineKey: 'baseline_ctr' },
+    { name: 'link_ctr', currentKey: 'link_ctr', baselineKey: 'baseline_link_ctr' },
+    { name: 'cpm', currentKey: 'cpm', baselineKey: 'baseline_cpm' },
+    { name: 'spend', currentKey: 'spend', baselineKey: 'baseline_spend' },
+    { name: 'results', currentKey: 'result_count', baselineKey: 'baseline_results' },
+    { name: 'quality_ranking', currentKey: 'quality_score', baselineKey: 'baseline_quality' },
+    { name: 'engagement_ranking', currentKey: 'engagement_score', baselineKey: 'baseline_engagement' },
+    { name: 'conversion_ranking', currentKey: 'conversion_score', baselineKey: 'baseline_conversion' },
+  ];
+
+  // Анализ недели 0 (текущая неделя аномалии)
+  if (weeklyData[0]) {
+    const deviations: MetricDeviation[] = [];
+
+    for (const metric of week0Metrics) {
+      const value = features[metric.currentKey] as number | null;
+      const baseline = features[metric.baselineKey] as number | null;
+
+      if (value !== null && baseline !== null && baseline > 0) {
+        const deltaPct = ((value - baseline) / baseline) * 100;
+        const threshold = DEVIATION_THRESHOLDS[metric.name] * 100;
+        const isSignificant = Math.abs(deltaPct) >= threshold;
+        const direction = getDeviationDirection(metric.name, deltaPct);
+
+        if (isSignificant) {
+          deviations.push({
+            metric: metric.name,
+            value,
+            baseline,
+            delta_pct: deltaPct,
+            is_significant: isSignificant,
+            direction,
+          });
+        }
+      }
+    }
+
+    // Всегда создаём week_0 если есть данные (rankings показываем всегда)
+    result.week_0 = {
+      week_start: weeklyData[0].week_start_date,
+      week_end: getWeekEndDate(weeklyData[0].week_start_date),
+      deviations,
+      quality_ranking: weeklyData[0].quality_rank_score,
+      engagement_ranking: weeklyData[0].engagement_rank_score,
+      conversion_ranking: weeklyData[0].conversion_rank_score,
+    };
+  }
+
+  // Анализ недели -1
+  if (weeklyData[1]) {
+    const deviations: MetricDeviation[] = [];
+
+    for (const metric of metricsConfig) {
+      const value = features[metric.lag1Key] as number | null;
+      const baseline = features[metric.baselineKey] as number | null;
+
+      if (value !== null && baseline !== null && baseline > 0) {
+        const deltaPct = ((value - baseline) / baseline) * 100;
+        const threshold = DEVIATION_THRESHOLDS[metric.name] * 100;
+        const isSignificant = Math.abs(deltaPct) >= threshold;
+        const direction = getDeviationDirection(metric.name, deltaPct);
+
+        // Записываем все значимые отклонения
+        if (isSignificant) {
+          deviations.push({
+            metric: metric.name,
+            value,
+            baseline,
+            delta_pct: deltaPct,
+            is_significant: isSignificant,
+            direction,
+          });
+        }
+      }
+    }
+
+    // Всегда создаём week_minus_1 если есть данные
+    result.week_minus_1 = {
+      week_start: weeklyData[1].week_start_date,
+      week_end: getWeekEndDate(weeklyData[1].week_start_date),
+      deviations,
+      quality_ranking: weeklyData[1].quality_rank_score,
+      engagement_ranking: weeklyData[1].engagement_rank_score,
+      conversion_ranking: weeklyData[1].conversion_rank_score,
+    };
+  }
+
+  // Анализ недели -2
+  if (weeklyData[2]) {
+    const deviations: MetricDeviation[] = [];
+
+    for (const metric of metricsConfig) {
+      const value = features[metric.lag2Key] as number | null;
+      const baseline = features[metric.baselineKey] as number | null;
+
+      if (value !== null && baseline !== null && baseline > 0) {
+        const deltaPct = ((value - baseline) / baseline) * 100;
+        const threshold = DEVIATION_THRESHOLDS[metric.name] * 100;
+        const isSignificant = Math.abs(deltaPct) >= threshold;
+        const direction = getDeviationDirection(metric.name, deltaPct);
+
+        if (isSignificant) {
+          deviations.push({
+            metric: metric.name,
+            value,
+            baseline,
+            delta_pct: deltaPct,
+            is_significant: isSignificant,
+            direction,
+          });
+        }
+      }
+    }
+
+    // Всегда создаём week_minus_2 если есть данные
+    result.week_minus_2 = {
+      week_start: weeklyData[2].week_start_date,
+      week_end: getWeekEndDate(weeklyData[2].week_start_date),
+      deviations,
+      quality_ranking: weeklyData[2].quality_rank_score,
+      engagement_ranking: weeklyData[2].engagement_rank_score,
+      conversion_ranking: weeklyData[2].conversion_rank_score,
+    };
+  }
+
+  return result;
+}
+
+/**
+ * Детектирует аномалии CPR для одного ad на одну неделю
+ *
+ * Фокус только на CPR spike с анализом предшествующих отклонений:
+ * - Для каждого роста CPR анализируем что происходило за 1-2 недели до
+ * - Отслеживаем отклонения в frequency, CTR, link_ctr, CPM, spend
+ * - Анализируем паузы в доставке (Iteration 4)
+ */
+// Значимые бизнес-результаты для CPR анализа
+// Игнорируем 'other', 'video_view', 'click', 'engagement' — это не конверсии
+const VALID_RESULT_FAMILIES = new Set(['messages', 'leadgen_form', 'purchase', 'registration']);
+
 function detectAnomalies(
   features: FeatureSet,
   primaryFamily: string,
-  config: AnomalyConfig
+  config: AnomalyConfig,
+  weeklyData: WeeklyData[],
+  pauseAnalysis?: PauseAnalysis
 ): Anomaly[] {
   const anomalies: Anomaly[] = [];
+
+  // Не детектируем аномалии для незначимых result families (video_view, other, click)
+  if (!VALID_RESULT_FAMILIES.has(primaryFamily)) {
+    return anomalies;
+  }
 
   // Не детектируем аномалии если нет данных или мало результатов
   if (!features.min_results_met || features.weeks_with_data < 4) {
     return anomalies;
   }
 
-  // 1. CPR Spike
+  // CPR Spike - единственный тип аномалии
   if (features.cpr && features.baseline_cpr && features.cpr_delta_pct !== null) {
     const threshold = (config.cpr_spike_threshold - 1) * 100; // 20%
 
     if (features.cpr_delta_pct >= threshold) {
+      // Анализируем что происходило за 1-2 недели до аномалии
+      const precedingDeviations = analyzePrecedingDeviations(features, weeklyData);
+
+      // Формируем likely_triggers из текущей недели (для совместимости)
       const likelyTriggers: Anomaly['likely_triggers'] = [];
 
-      // Проверяем что могло вызвать рост CPR
-      if (features.freq_delta_pct !== null && features.freq_delta_pct > 20) {
+      if (features.freq_delta_pct !== null && features.freq_delta_pct > 15) {
         likelyTriggers.push({
           metric: 'frequency',
           value: features.frequency,
@@ -482,18 +1403,11 @@ function detectAnomalies(
           delta: `${features.ctr_delta_pct.toFixed(1)}%`,
         });
       }
-      if (features.cpc_delta_pct !== null && features.cpc_delta_pct > 15) {
+      if (features.cpm_delta_pct !== null && features.cpm_delta_pct > 15) {
         likelyTriggers.push({
-          metric: 'cpc',
-          value: features.cpc,
-          delta: `+${features.cpc_delta_pct.toFixed(1)}%`,
-        });
-      }
-      if (features.reach_growth_rate !== null && features.reach_growth_rate < -20) {
-        likelyTriggers.push({
-          metric: 'reach',
-          value: features.reach,
-          delta: `${features.reach_growth_rate.toFixed(1)}%`,
+          metric: 'cpm',
+          value: features.cpm,
+          delta: `+${features.cpm_delta_pct.toFixed(1)}%`,
         });
       }
 
@@ -511,52 +1425,10 @@ function detectAnomalies(
         anomaly_score: anomalyScore,
         confidence,
         likely_triggers: likelyTriggers,
-      });
-    }
-  }
-
-  // 2. CTR Drop
-  if (features.ctr && features.baseline_ctr && features.ctr_delta_pct !== null) {
-    const threshold = (1 - config.ctr_drop_threshold) * 100; // 20%
-
-    if (features.ctr_delta_pct <= -threshold) {
-      const confidence = Math.min(1, features.weeks_with_data / 8);
-      const anomalyScore = Math.min(1, Math.abs(features.ctr_delta_pct) / 100 * confidence);
-
-      anomalies.push({
-        anomaly_type: 'ctr_drop',
-        current_value: features.ctr,
-        baseline_value: features.baseline_ctr,
-        delta_pct: features.ctr_delta_pct,
-        anomaly_score: anomalyScore,
-        confidence,
-        likely_triggers: [
-          {
-            metric: 'frequency',
-            value: features.frequency,
-            delta: features.freq_delta_pct ? `${features.freq_delta_pct > 0 ? '+' : ''}${features.freq_delta_pct.toFixed(1)}%` : 'N/A',
-          },
-        ],
-      });
-    }
-  }
-
-  // 3. Frequency High
-  if (features.frequency && features.baseline_frequency && features.freq_delta_pct !== null) {
-    const threshold = (config.freq_high_threshold - 1) * 100; // 50%
-
-    if (features.freq_delta_pct >= threshold) {
-      const confidence = Math.min(1, features.weeks_with_data / 8);
-      const anomalyScore = Math.min(1, features.freq_delta_pct / 100 * confidence);
-
-      anomalies.push({
-        anomaly_type: 'freq_high',
-        current_value: features.frequency,
-        baseline_value: features.baseline_frequency,
-        delta_pct: features.freq_delta_pct,
-        anomaly_score: anomalyScore,
-        confidence,
-        likely_triggers: [],
+        preceding_deviations: precedingDeviations,
+        // Pause detection (Iteration 4)
+        pause_days_count: pauseAnalysis?.pause_days_count ?? 0,
+        has_delivery_gap: pauseAnalysis?.has_delivery_gap ?? false,
       });
     }
   }
@@ -579,6 +1451,25 @@ export async function processAdAccount(adAccountId: string): Promise<{
 
   const config = await loadConfig();
 
+  // BATCH LOAD: Загружаем ВСЕ данные одним запросом каждый
+  const [dailyInsightsMap, adsMap, adsetsMap, weeklyResultsMap, insightsCache, resultsCache] = await Promise.all([
+    loadAllDailyInsights(adAccountId),
+    loadAllAds(adAccountId),
+    loadAllAdsets(adAccountId),
+    loadAllWeeklyResults(adAccountId),
+    loadAllInsightsForCompute(adAccountId),
+    loadAllResultsForCompute(adAccountId),
+  ]);
+
+  log.info({
+    adAccountId,
+    adsCount: adsMap.size,
+    adsetsCount: adsetsMap.size,
+    weeklyResultsAds: weeklyResultsMap.size,
+    insightsCacheAds: insightsCache.size,
+    resultsCacheAds: resultsCache.size
+  }, 'Batch data loaded');
+
   // Получаем все уникальные пары (ad_id, week_start_date)
   const { data: insights, error } = await supabase
     .from('meta_insights_weekly')
@@ -592,30 +1483,48 @@ export async function processAdAccount(adAccountId: string): Promise<{
     throw error;
   }
 
+  log.info({ adAccountId, insightsCount: insights?.length ?? 0 }, 'Starting anomaly processing');
+
   let adsProcessed = 0;
   let anomaliesDetected = 0;
 
   for (const insight of insights || []) {
     try {
-      // Определяем primary family
-      const primaryFamily = await determinePrimaryFamily(
-        adAccountId,
-        insight.fb_ad_id,
-        insight.week_start_date
+      // Логируем первые 5 записей для диагностики
+      if (adsProcessed < 5) {
+        log.info({ adAccountId, processed: adsProcessed, fbAdId: insight.fb_ad_id }, 'Processing insight');
+      }
+
+      // Определяем primary family из кэша (БЕЗ запросов к БД!)
+      const primaryFamily = determinePrimaryFamilyFromCache(
+        adsMap,
+        adsetsMap,
+        weeklyResultsMap,
+        insight.fb_ad_id
       );
 
-      // Вычисляем features
-      const features = await computeFeatures(
-        adAccountId,
+      // Вычисляем features из кэша (БЕЗ запросов к БД!)
+      const result = computeFeaturesFromCache(
+        insightsCache,
+        resultsCache,
         insight.fb_ad_id,
         insight.week_start_date,
         primaryFamily,
         config
       );
 
-      if (!features) continue;
+      if (!result) continue;
 
-      // Сохраняем features
+      const { features, weeklyData } = result;
+
+      // Анализируем паузы из предзагруженного кэша (без запроса к БД)
+      const pauseAnalysis = analyzePauseFromCache(
+        dailyInsightsMap,
+        insight.fb_ad_id,
+        insight.week_start_date
+      );
+
+      // Сохраняем features (включая данные о паузах)
       await supabase
         .from('ad_weekly_features')
         .upsert({
@@ -624,13 +1533,18 @@ export async function processAdAccount(adAccountId: string): Promise<{
           week_start_date: insight.week_start_date,
           primary_family: primaryFamily,
           ...features,
+          // Pause detection fields (Iteration 4)
+          active_days: pauseAnalysis.active_days,
+          min_daily_impressions: pauseAnalysis.min_daily_impressions,
+          max_daily_impressions: pauseAnalysis.max_daily_impressions,
+          daily_impressions_cv: pauseAnalysis.daily_impressions_cv,
           created_at: new Date().toISOString(),
         }, {
           onConflict: 'ad_account_id,fb_ad_id,week_start_date'
         });
 
-      // Детектируем аномалии
-      const anomalies = detectAnomalies(features, primaryFamily, config);
+      // Детектируем аномалии с анализом предшествующих отклонений и пауз
+      const anomalies = detectAnomalies(features, primaryFamily, config, weeklyData, pauseAnalysis);
 
       // Сохраняем аномалии
       for (const anomaly of anomalies) {
@@ -648,6 +1562,10 @@ export async function processAdAccount(adAccountId: string): Promise<{
             anomaly_score: anomaly.anomaly_score,
             confidence: anomaly.confidence,
             likely_triggers: anomaly.likely_triggers,
+            preceding_deviations: anomaly.preceding_deviations,
+            // Pause detection (Iteration 4)
+            pause_days_count: anomaly.pause_days_count,
+            has_delivery_gap: anomaly.has_delivery_gap,
             status: 'new',
             created_at: new Date().toISOString(),
           }, {
@@ -658,6 +1576,11 @@ export async function processAdAccount(adAccountId: string): Promise<{
       }
 
       adsProcessed++;
+
+      // Логируем прогресс каждые 200 записей
+      if (adsProcessed % 200 === 0) {
+        log.info({ adAccountId, processed: adsProcessed, total: insights?.length ?? 0 }, 'Processing progress');
+      }
     } catch (err) {
       log.error({
         error: err,

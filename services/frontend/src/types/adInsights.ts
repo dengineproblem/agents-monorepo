@@ -9,14 +9,59 @@
 // ============================================================================
 
 export type AnomalySeverity = 'low' | 'medium' | 'high' | 'critical';
+
+// Основной тип аномалии - только CPR spike
+// Старые типы оставлены для совместимости с историческими данными
 export type AnomalyType =
-  | 'ctr_drop'
-  | 'ctr_crash'
-  | 'cpr_spike'
+  | 'cpr_spike'     // Рост стоимости результата
+  | 'ctr_drop'      // (legacy) Падение CTR
+  | 'ctr_crash'     // (legacy) Обвал CTR
+  | 'freq_high'     // (legacy) Высокая частота
   | 'frequency_spike'
   | 'frequency_critical'
   | 'reach_drop'
   | 'spend_anomaly';
+
+// ============================================================================
+// PRECEDING DEVIATIONS (предшествующие отклонения)
+// ============================================================================
+
+export type DeviationDirection = 'bad' | 'good' | 'neutral';
+export type MetricName = 'frequency' | 'ctr' | 'link_ctr' | 'cpm' | 'spend' | 'results' | 'quality_ranking' | 'engagement_ranking' | 'conversion_ranking';
+
+/**
+ * Отклонение одной метрики от baseline
+ */
+export interface MetricDeviation {
+  metric: MetricName;
+  value: number;
+  baseline: number;
+  delta_pct: number;
+  is_significant: boolean;
+  direction: DeviationDirection;
+}
+
+/**
+ * Отклонения за одну неделю
+ */
+export interface WeekDeviations {
+  week_start: string;
+  week_end: string;
+  deviations: MetricDeviation[];
+  // Raw ranking values (без порогов, просто для отображения)
+  quality_ranking: number | null;
+  engagement_ranking: number | null;
+  conversion_ranking: number | null;
+}
+
+/**
+ * Отклонения метрик для текущей недели и предшествующих 1-2 недель
+ */
+export interface PrecedingDeviations {
+  week_0: WeekDeviations | null;       // Неделя аномалии (текущая)
+  week_minus_1: WeekDeviations | null; // За 1 неделю до
+  week_minus_2: WeekDeviations | null; // За 2 недели до
+}
 
 export interface Anomaly {
   id: string;
@@ -34,7 +79,11 @@ export interface Anomaly {
   delta_pct: number;
   anomaly_score: number;
   confidence: number;
-  likely_triggers?: string[];
+  likely_triggers?: Array<{ metric: string; value: number; delta: string }>;
+  preceding_deviations?: PrecedingDeviations | null;
+  // Pause detection (Iteration 4)
+  pause_days_count?: number;
+  has_delivery_gap?: boolean;
   status: 'new' | 'acknowledged' | 'resolved';
   acknowledged_at?: string;
   acknowledged_by?: string;

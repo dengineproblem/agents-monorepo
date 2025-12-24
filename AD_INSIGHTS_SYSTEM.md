@@ -26,8 +26,9 @@
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              SUPABASE                                        │
-│  meta_insights_weekly, meta_weekly_results, ad_weekly_anomalies,            │
-│  ad_burnout_predictions, lag_dependency_stats, yearly_audit_cache           │
+│  meta_insights_weekly, meta_insights_daily, meta_weekly_results,            │
+│  ad_weekly_anomalies, ad_weekly_features, ad_burnout_predictions,           │
+│  lag_dependency_stats, yearly_audit_cache                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,12 +48,14 @@ CREATE TABLE meta_insights_weekly (
     week_start_date DATE NOT NULL,
     impressions INTEGER,
     clicks INTEGER,
+    link_clicks INTEGER,
     spend DECIMAL(12,2),
     reach INTEGER,
     frequency DECIMAL(6,3),
     ctr DECIMAL(6,4),
     cpc DECIMAL(10,4),
     cpm DECIMAL(10,4),
+    link_ctr DECIMAL(8,6),           -- CTR по ссылкам (Migration 113)
     actions_json JSONB,
     quality_rank_score DECIMAL(5,2),
     engagement_rank_score DECIMAL(5,2),
@@ -82,7 +85,7 @@ CREATE TABLE meta_weekly_results (
 ```
 
 #### `ad_weekly_anomalies`
-Детектированные аномалии CPR.
+Детектированные аномалии CPR с анализом предшествующих отклонений.
 
 ```sql
 CREATE TABLE ad_weekly_anomalies (
@@ -92,13 +95,15 @@ CREATE TABLE ad_weekly_anomalies (
     fb_ad_id TEXT NOT NULL,
     week_start_date DATE NOT NULL,
     result_family TEXT NOT NULL,
-    anomaly_type TEXT NOT NULL,      -- 'cpr_spike', 'zero_results', 'performance_drop'
+    anomaly_type TEXT NOT NULL,      -- 'cpr_spike' (основной тип)
     severity TEXT NOT NULL,          -- 'low', 'medium', 'high', 'critical'
     current_value DECIMAL(12,4),
     baseline_value DECIMAL(12,4),
     delta_pct DECIMAL(8,2),
     anomaly_score DECIMAL(5,3),
     confidence DECIMAL(4,3),
+    likely_triggers JSONB,           -- триггеры на текущей неделе
+    preceding_deviations JSONB,      -- отклонения за 1-2 недели до (Migration 113)
     status TEXT DEFAULT 'new',       -- 'new', 'acknowledged', 'resolved'
     spike_pct DECIMAL(8,2),
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -220,7 +225,8 @@ CREATE TABLE yearly_audit_cache (
 **Query параметры:**
 - `severity` - 'low', 'medium', 'high', 'critical'
 - `type` - 'cpr_spike', 'zero_results', 'performance_drop'
-- `limit` (number, default: 50)
+- `limit` (number, optional) - лимит записей (без лимита по умолчанию)
+- `offset` (number, default: 0) - сдвиг для пагинации
 - `acknowledged` (boolean) - фильтр по статусу
 
 **Response:**
@@ -510,18 +516,86 @@ API возвращает данные в camelCase формате, frontend ож
 - `syncCampaigns()` / `syncAdsets()` / `syncAds()` - синхронизация сущностей
 
 ### `resultNormalizer.ts`
-Нормализация результатов из `actions_json` в семейства:
-- `messages` - messaging_conversation_started_7d, onsite_conversion.messaging_*
-- `leads` - lead, leadgen_grouped
-- `purchases` - purchase, omni_purchase
-- `registrations` - complete_registration
-- `clicks` - link_click (fallback)
+Нормализация результатов из `actions_json` в семейства.
+
+**ВАЖНО:** Используется ОДИН action_type на категорию для избежания дублирования (аналогично логике для обычных пользователей в facebookApi.ts):
+
+- `messages` - `onsite_conversion.total_messaging_connection` (только этот!)
+- `leadgen_form` - `onsite_conversion.lead_grouped` (только этот!)
+- `website_lead` - `offsite_conversion.fb_pixel_lead`, `fb_pixel_complete_registration`
+- `purchase` - `offsite_conversion.fb_pixel_purchase`
+- `click` - `link_click`, `landing_page_view`
+
+**НЕ используются** (дублируют другие action types):
+- `lead` - агрегат, дублирует `lead_grouped`
+- `messaging_conversation_started_7d` - дублирует `total_messaging_connection`
+- `messaging_first_reply` - дублирует `total_messaging_connection`
 
 ### `anomalyDetector.ts`
-Детекция аномалий:
-- CPR spikes (рост CPR > 2x от baseline)
-- Zero results (spend без результатов)
-- Performance drops (падение результатов)
+Детекция аномалий CPR с анализом предшествующих отклонений:
+
+**Фокус только на CPR spike** (рост стоимости результата ≥20% от baseline).
+
+Для каждой аномалии анализируются **3 недели:**
+- `week_0` - **неделя аномалии** (текущая неделя с CPR spike)
+- `week_minus_1` - неделя перед аномалией
+- `week_minus_2` - 2 недели до аномалии
+
+**Performance метрики (с порогами отклонений):**
+- `frequency` - рост частоты показов (порог 15%)
+- `ctr` - падение CTR (порог 15%)
+- `link_ctr` - падение CTR по ссылкам (порог 15%)
+- `cpm` - рост CPM (порог 15%)
+- `spend` - рост расхода (порог 30%)
+- `results` - падение количества результатов (порог 20%)
+
+**Ad Relevance Diagnostics (качество креатива):**
+Для каждой недели отображаются **raw values** рейтингов (без порогов):
+- `quality_ranking` - оценка качества креатива
+- `engagement_ranking` - вовлечённость аудитории
+- `conversion_ranking` - конверсионность креатива
+
+**Значения ranking scores от Facebook:**
+- `+2` = Above Average (зелёный)
+- `0` = Average (жёлтый)
+- `-1`, `-2`, `-3` = Below Average (красный)
+
+**Направление отклонений:**
+| Метрика | Плохо (красный) | Хорошо (зелёный) |
+|---------|-----------------|------------------|
+| frequency | Рост ≥15% | Падение ≥15% |
+| ctr | Падение ≥15% | Рост ≥15% |
+| link_ctr | Падение ≥15% | Рост ≥15% |
+| cpm | Рост ≥15% | Падение ≥15% |
+| spend | Рост ≥30% | (не отмечаем) |
+| results | Падение ≥20% | Рост ≥20% |
+
+**Структура `preceding_deviations` (JSONB):**
+```json
+{
+  "week_0": {
+    "week_start": "2025-12-16",
+    "week_end": "2025-12-22",
+    "deviations": [
+      {"metric": "results", "value": 10, "baseline": 15, "delta_pct": -33.3, "is_significant": true, "direction": "bad"}
+    ],
+    "quality_ranking": 2,
+    "engagement_ranking": 0,
+    "conversion_ranking": -1
+  },
+  "week_minus_1": {
+    "week_start": "2025-12-09",
+    "week_end": "2025-12-15",
+    "deviations": [
+      {"metric": "frequency", "value": 4.2, "baseline": 2.8, "delta_pct": 50.0, "is_significant": true, "direction": "bad"}
+    ],
+    "quality_ranking": 2,
+    "engagement_ranking": 2,
+    "conversion_ranking": 0
+  },
+  "week_minus_2": { ... }
+}
+```
 
 ### `burnoutAnalyzer.ts`
 Прогнозирование выгорания:
@@ -546,6 +620,57 @@ API возвращает данные в camelCase формате, frontend ож
 
 ### Migration 111: `fix_lag_dependency_stats`
 Исправление схемы `lag_dependency_stats` с правильными колонками.
+
+### Migration 113: `cpr_preceding_deviations`
+Система анализа предшествующих отклонений для CPR аномалий:
+- Новые колонки в `ad_weekly_features`: `cpm_lag1/2`, `spend_lag1/2`, `link_ctr`, `link_ctr_lag1/2`, `baseline_cpm/spend/link_ctr`, `cpm/spend/link_ctr_delta_pct`
+- Новая колонка в `ad_weekly_anomalies`: `preceding_deviations` (JSONB)
+- Новая колонка в `meta_insights_weekly`: `link_ctr`
+
+### Migration 114: `ranking_deviations`
+Добавление лагов для Ad Relevance Diagnostics (качество креатива):
+- Новые колонки в `ad_weekly_features`:
+  - `quality_rank_lag1`, `quality_rank_lag2` - лаги качества
+  - `engagement_rank_lag1`, `engagement_rank_lag2` - лаги вовлечённости
+  - `conversion_rank_lag1`, `conversion_rank_lag2` - лаги конверсионности
+
+### Migration 115: `daily_insights_pause_detection`
+Детекция пауз в доставке рекламы на уровне дней:
+
+**Новая таблица `meta_insights_daily`:**
+```sql
+CREATE TABLE meta_insights_daily (
+    id UUID PRIMARY KEY,
+    ad_account_id UUID NOT NULL,
+    fb_ad_id TEXT NOT NULL,
+    date DATE NOT NULL,
+    impressions INTEGER DEFAULT 0,
+    clicks INTEGER DEFAULT 0,
+    spend DECIMAL(12,2) DEFAULT 0,
+    reach INTEGER DEFAULT 0,
+    ctr DECIMAL(6,4),
+    cpm DECIMAL(10,4),
+    cpc DECIMAL(10,4),
+    results_count INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(ad_account_id, fb_ad_id, date)
+);
+```
+
+**Новые колонки в `ad_weekly_anomalies`:**
+- `pause_days_count` - количество дней с нулевыми impressions
+- `has_delivery_gap` - флаг наличия значительной паузы в доставке
+
+**Новые колонки в `ad_weekly_features`:**
+- `active_days` - количество дней с impressions > 0 (из 7)
+- `min_daily_impressions` - минимальные impressions за день
+- `max_daily_impressions` - максимальные impressions за день
+- `daily_impressions_cv` - коэффициент вариации (std/mean)
+
+**Логика детекции пауз:**
+- Если spend > 0, но impressions = 0 → вероятная пауза (неоплата, модерация, лимиты)
+- Delivery gap = есть дни с impressions и дни без impressions в одной неделе
+- Высокий CV указывает на нестабильную доставку
 
 ## Multi-Account Support
 
@@ -578,6 +703,51 @@ curl -X POST "http://localhost:8082/admin/ad-insights/{accountId}/sync?weeks=52"
 Открыть `/admin/ad-insights` в браузере (требуется авторизация tech_admin).
 
 ## Changelog
+
+### 2025-12-24 (v2): Week 0 + Results Metric + Raw Rankings
+- **НОВОЕ:** `week_0` добавлен в preceding_deviations
+  - Неделя аномалии теперь отображается наряду с предшествующими неделями
+  - Позволяет видеть отклонения непосредственно в неделю CPR spike
+- **НОВОЕ:** Метрика `results` (количество результатов)
+  - Порог значимости: 20%
+  - Падение результатов = bad (красный)
+- **НОВОЕ:** Raw ranking values в каждой неделе (week_0, week_-1, week_-2)
+  - quality_ranking, engagement_ranking, conversion_ranking
+  - Отображаются БЕЗ порогов, просто для информации
+  - Цветовая индикация: +2=Above (зелёный), 0=Average (жёлтый), <0=Below (красный)
+- **ИСПРАВЛЕНО:** Убран default limit=50 из endpoint anomalies
+  - Теперь возвращаются все аномалии по умолчанию
+- **ОБНОВЛЕНО:** UI таблицы - 3-колоночная сетка недель с rankings под каждой неделей
+
+### 2025-12-24: Preceding Deviations System + Ad Relevance Diagnostics
+- **НОВОЕ:** Система анализа предшествующих отклонений для CPR аномалий
+  - Фокус только на CPR spike (убраны `ctr_drop`, `freq_high`)
+  - Для каждой аномалии фиксируются отклонения метрик за 1-2 недели до
+  - Performance метрики: frequency, CTR, link_ctr, CPM, spend
+  - Пороги значимости: 15% (30% для spend)
+  - Направление отклонений: bad/good/neutral
+- **НОВОЕ:** Link CTR (CTR по ссылкам) как отдельная метрика
+- **НОВОЕ:** Ad Relevance Diagnostics (качество креатива) в preceding deviations
+  - `quality_ranking` - оценка качества креатива (Facebook)
+  - `engagement_ranking` - вовлечённость аудитории
+  - `conversion_ranking` - конверсионность креатива
+  - Порог значимости: 20%
+  - Падение = плохо, рост = хорошо
+- **ОБНОВЛЕНО:** UI таблицы аномалий с expandable rows
+  - Клик на строку раскрывает детали предшествующих отклонений
+  - Недели отображаются как диапазон дат
+  - Цветовая индикация: красный=плохо, зелёный=хорошо
+  - Иконки для каждой метрики (★ качество, 👍 вовлечённость, 🎯 конверсии)
+- **ТРЕБУЕТСЯ:** Применить миграции 113, 114 и пересинхронизировать данные
+
+### 2025-12-23 (v2)
+- **ИСПРАВЛЕНО:** Дублирование результатов в Yearly Audit
+  - Убраны дублирующие action types из маппинга в `resultNormalizer.ts`
+  - Теперь используется один action_type на категорию (как для обычных пользователей)
+  - `messages` = только `total_messaging_connection`
+  - `leadgen_form` = только `lead_grouped`
+- **УЛУЧШЕНО:** Отображение недель в формате диапазона "15 дек — 21 дек"
+- **ТРЕБУЕТСЯ:** Пересинхронизация данных после обновления
 
 ### 2025-12-23
 - Исправлены форматы ответов API для соответствия frontend expectations
