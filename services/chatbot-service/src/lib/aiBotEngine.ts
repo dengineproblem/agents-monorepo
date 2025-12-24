@@ -159,7 +159,8 @@ export async function getBotConfigForInstance(instanceName: string): Promise<AIB
  */
 export function shouldBotRespondWithConfig(
   lead: LeadInfo,
-  botConfig: AIBotConfig
+  botConfig: AIBotConfig,
+  messageText?: string
 ): { shouldRespond: boolean; reason?: string } {
   // 1. Бот не активен
   if (!botConfig.is_active) {
@@ -173,6 +174,17 @@ export function shouldBotRespondWithConfig(
 
   // 3. Бот на паузе
   if (lead.bot_paused) {
+    // Проверить resume_phrases - если сообщение содержит фразу возобновления, снять паузу
+    if (messageText && botConfig.resume_phrases?.length > 0) {
+      const lowerMessage = messageText.toLowerCase();
+      const shouldResume = botConfig.resume_phrases.some(phrase =>
+        lowerMessage.includes(phrase.toLowerCase())
+      );
+      if (shouldResume) {
+        // Пауза будет снята в processIncomingMessage
+        return { shouldRespond: true, reason: 'resume_phrase_detected' };
+      }
+    }
     return { shouldRespond: false, reason: 'bot_paused' };
   }
 
@@ -184,13 +196,24 @@ export function shouldBotRespondWithConfig(
     }
   }
 
-  // 5. Этапы воронки где бот молчит
+  // 5. Проверить stop_phrases - если сообщение содержит стоп-фразу, поставить на паузу
+  if (messageText && botConfig.stop_phrases?.length > 0) {
+    const lowerMessage = messageText.toLowerCase();
+    const shouldStop = botConfig.stop_phrases.some(phrase =>
+      lowerMessage.includes(phrase.toLowerCase())
+    );
+    if (shouldStop) {
+      return { shouldRespond: false, reason: 'stop_phrase_detected' };
+    }
+  }
+
+  // 6. Этапы воронки где бот молчит
   const silentStages = ['consultation_completed', 'deal_closed', 'deal_lost'];
   if (silentStages.includes(lead.funnel_stage)) {
     return { shouldRespond: false, reason: 'silent_stage' };
   }
 
-  // 6. Проверка расписания
+  // 7. Проверка расписания
   if (botConfig.schedule_enabled) {
     if (!isWithinSchedule(botConfig)) {
       return { shouldRespond: false, reason: 'outside_schedule' };
@@ -307,10 +330,27 @@ async function processAIBotResponse(
     }
 
     // Проверить условия ответа
-    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig);
+    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig, messageText);
     if (!shouldRespond) {
+      // Если обнаружена стоп-фраза, поставить бота на паузу
+      if (reason === 'stop_phrase_detected') {
+        await supabase
+          .from('dialog_analysis')
+          .update({ bot_paused: true })
+          .eq('id', lead.id);
+        log.info({ leadId: lead.id }, 'Bot paused by stop phrase');
+      }
       log.debug({ phone, leadId: lead.id, reason }, 'Bot should not respond');
       return;
+    }
+
+    // Если обнаружена фраза возобновления, снять паузу
+    if (reason === 'resume_phrase_detected') {
+      await supabase
+        .from('dialog_analysis')
+        .update({ bot_paused: false, bot_paused_until: null })
+        .eq('id', lead.id);
+      log.info({ leadId: lead.id }, 'Bot resumed by resume phrase');
     }
 
     // Создать клиент OpenAI (свой ключ или дефолтный)
@@ -414,6 +454,83 @@ async function processAIBotResponse(
 }
 
 /**
+ * Загрузить историю сообщений из базы данных
+ * Сообщения хранятся в JSONB поле 'messages' таблицы dialog_analysis
+ */
+async function loadMessageHistory(
+  leadId: string,
+  config: AIBotConfig
+): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
+  try {
+    // Получить messages из dialog_analysis
+    const { data: lead, error } = await supabase
+      .from('dialog_analysis')
+      .select('messages')
+      .eq('id', leadId)
+      .single();
+
+    if (error || !lead?.messages) {
+      log.debug({ leadId }, 'No message history found');
+      return [];
+    }
+
+    // messages - это JSONB массив [{sender, content, timestamp}, ...]
+    const rawMessages = Array.isArray(lead.messages) ? lead.messages : [];
+
+    // Фильтровать по времени если задано
+    const now = new Date();
+    let filteredMessages = rawMessages;
+
+    if (config.history_time_limit_hours) {
+      const cutoff = new Date(now.getTime() - config.history_time_limit_hours * 60 * 60 * 1000);
+      filteredMessages = rawMessages.filter((msg: any) => {
+        const msgTime = new Date(msg.timestamp || msg.created_at || 0);
+        return msgTime >= cutoff;
+      });
+    }
+
+    // Ограничить количество сообщений (берём последние N)
+    if (config.history_message_limit && filteredMessages.length > config.history_message_limit) {
+      filteredMessages = filteredMessages.slice(-config.history_message_limit);
+    }
+
+    // Преобразовать в формат OpenAI с учётом токен-лимита
+    let totalTokens = 0;
+    const tokenLimit = config.history_token_limit || 10000;
+
+    // Идём с конца (новые сообщения важнее) и добавляем пока не превысим лимит
+    const reversedMessages = [...filteredMessages].reverse();
+    const history: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+
+    for (const msg of reversedMessages) {
+      const content = msg.content || msg.text || '';
+      const estimatedTokens = Math.ceil(content.length / 4);
+
+      if (totalTokens + estimatedTokens > tokenLimit) {
+        break;
+      }
+
+      // Определить роль: bot/assistant = assistant, остальное = user
+      const sender = (msg.sender || msg.from || 'user').toLowerCase();
+      const role = (sender === 'bot' || sender === 'assistant') ? 'assistant' : 'user';
+
+      history.unshift({
+        role,
+        content
+      });
+
+      totalTokens += estimatedTokens;
+    }
+
+    log.debug({ leadId, messageCount: history.length, estimatedTokens: totalTokens }, 'Loaded message history');
+    return history;
+  } catch (error: any) {
+    log.error({ error: error.message, leadId }, 'Error loading message history');
+    return [];
+  }
+}
+
+/**
  * Генерация ответа через OpenAI
  */
 async function generateAIResponse(
@@ -495,8 +612,13 @@ async function generateAIResponse(
   const model = modelMap[config.model] || 'gpt-4o-mini';
 
   try {
+    // Загрузить историю сообщений
+    const history = await loadMessageHistory(lead.id, config);
+
+    // Собрать массив сообщений: system + history + текущее
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt + clientInfo },
+      ...history,
       { role: 'user', content: messageText }
     ];
 
@@ -698,50 +820,82 @@ export async function processIncomingMessage(
 
     switch (messageType) {
       case 'audio':
-        if (!botConfig.voice_recognition_enabled && botConfig.voice_default_response) {
-          await sendMessage({
-            instanceName,
-            phone,
-            message: botConfig.voice_default_response
-          });
+        if (!botConfig.voice_recognition_enabled) {
+          // Распознавание выключено - отправить дефолтный ответ
+          if (botConfig.voice_default_response) {
+            await sendMessage({
+              instanceName,
+              phone,
+              message: botConfig.voice_default_response
+            });
+          }
           return { processed: true, reason: 'voice_not_supported' };
         }
         // TODO: Добавить транскрипцию через Whisper
+        // Пока что обрабатываем как текст (messageText может содержать транскрипцию от Evolution API)
+        if (!messageText || messageText.trim() === '') {
+          return { processed: false, reason: 'empty_audio_message' };
+        }
         break;
 
       case 'image':
-        if (!botConfig.image_recognition_enabled && botConfig.image_default_response) {
-          await sendMessage({
-            instanceName,
-            phone,
-            message: botConfig.image_default_response
-          });
+        if (!botConfig.image_recognition_enabled) {
+          // Распознавание выключено - отправить дефолтный ответ
+          if (botConfig.image_default_response) {
+            await sendMessage({
+              instanceName,
+              phone,
+              message: botConfig.image_default_response
+            });
+          }
           return { processed: true, reason: 'image_not_supported' };
         }
         // TODO: Добавить обработку изображений через Vision
+        // Пока что если есть caption - обработаем его
+        if (!messageText || messageText.trim() === '') {
+          return { processed: false, reason: 'empty_image_message' };
+        }
         break;
 
       case 'document':
-        if (!botConfig.document_recognition_enabled && botConfig.document_default_response) {
-          await sendMessage({
-            instanceName,
-            phone,
-            message: botConfig.document_default_response
-          });
+        if (!botConfig.document_recognition_enabled) {
+          // Распознавание выключено - отправить дефолтный ответ
+          if (botConfig.document_default_response) {
+            await sendMessage({
+              instanceName,
+              phone,
+              message: botConfig.document_default_response
+            });
+          }
           return { processed: true, reason: 'document_not_supported' };
+        }
+        // Пока что если есть caption - обработаем его
+        if (!messageText || messageText.trim() === '') {
+          return { processed: false, reason: 'empty_document_message' };
         }
         break;
 
       case 'file':
-        if (botConfig.file_handling_mode === 'respond' && botConfig.file_default_response) {
-          await sendMessage({
-            instanceName,
-            phone,
-            message: botConfig.file_default_response
-          });
-          return { processed: true, reason: 'file_not_supported' };
+        if (botConfig.file_handling_mode === 'respond') {
+          if (botConfig.file_default_response) {
+            await sendMessage({
+              instanceName,
+              phone,
+              message: botConfig.file_default_response
+            });
+          }
+          return { processed: true, reason: 'file_responded' };
         }
+        // file_handling_mode === 'ignore'
         return { processed: false, reason: 'file_ignored' };
+
+      case 'text':
+      default:
+        // Проверить что текст не пустой
+        if (!messageText || messageText.trim() === '') {
+          return { processed: false, reason: 'empty_message' };
+        }
+        break;
     }
 
     // Склеить сообщения с настраиваемым буфером
