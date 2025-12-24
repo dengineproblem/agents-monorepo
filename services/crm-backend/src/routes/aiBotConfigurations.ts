@@ -138,14 +138,18 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Get all bots for a user
    */
   app.get('/ai-bots', async (request, reply) => {
-    try {
-      const { userId } = request.query as { userId: string };
+    const startTime = Date.now();
+    const { userId } = request.query as { userId: string };
 
+    app.log.info({ userId, path: '/ai-bots' }, '[GET /ai-bots] Request received');
+
+    try {
       if (!userId) {
+        app.log.warn({}, '[GET /ai-bots] Missing userId parameter');
         return reply.status(400).send({ error: 'userId is required' });
       }
 
-      app.log.info({ userId }, 'Fetching AI bots');
+      app.log.debug({ userId }, '[GET /ai-bots] Querying database for user bots');
 
       const { data: bots, error } = await supabase
         .from('ai_bot_configurations')
@@ -154,15 +158,33 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .order('created_at', { ascending: false });
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          userId,
+          elapsed: Date.now() - startTime
+        }, '[GET /ai-bots] Database error');
         throw error;
       }
+
+      const botsCount = bots?.length || 0;
+      app.log.info({
+        userId,
+        botsCount,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots] Successfully fetched bots');
 
       return reply.send({
         success: true,
         bots: (bots || []).map(toCamelCase),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to fetch AI bots');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        userId,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots] Failed to fetch AI bots');
       return reply.status(500).send({
         error: 'Failed to fetch bots',
         message: error.message
@@ -175,10 +197,13 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Get a specific bot by ID
    */
   app.get('/ai-bots/:botId', async (request, reply) => {
-    try {
-      const { botId } = request.params as { botId: string };
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
 
-      app.log.info({ botId }, 'Fetching AI bot');
+    app.log.info({ botId }, '[GET /ai-bots/:botId] Request received');
+
+    try {
+      app.log.debug({ botId }, '[GET /ai-bots/:botId] Fetching bot from database');
 
       const { data: bot, error } = await supabase
         .from('ai_bot_configurations')
@@ -188,17 +213,46 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          app.log.warn({ botId, elapsed: Date.now() - startTime }, '[GET /ai-bots/:botId] Bot not found');
           return reply.status(404).send({ error: 'Bot not found' });
         }
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[GET /ai-bots/:botId] Database error');
         throw error;
       }
 
+      app.log.debug({
+        botId,
+        botName: bot.name,
+        isActive: bot.is_active,
+        model: bot.model
+      }, '[GET /ai-bots/:botId] Bot found, fetching functions');
+
       // Also fetch functions for this bot
-      const { data: functions } = await supabase
+      const { data: functions, error: funcError } = await supabase
         .from('ai_bot_functions')
         .select('*')
         .eq('bot_id', botId)
         .eq('is_active', true);
+
+      if (funcError) {
+        app.log.warn({
+          error: funcError.message,
+          botId
+        }, '[GET /ai-bots/:botId] Error fetching functions (non-fatal)');
+      }
+
+      const functionsCount = functions?.length || 0;
+      app.log.info({
+        botId,
+        botName: bot.name,
+        functionsCount,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots/:botId] Successfully fetched bot with functions');
 
       return reply.send({
         success: true,
@@ -206,7 +260,12 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         functions: (functions || []).map(toCamelCase),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to fetch AI bot');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots/:botId] Failed to fetch AI bot');
       return reply.status(500).send({
         error: 'Failed to fetch bot',
         message: error.message
@@ -219,10 +278,19 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Create a new bot
    */
   app.post('/ai-bots', async (request, reply) => {
+    const startTime = Date.now();
+
+    app.log.info({ bodySize: JSON.stringify(request.body).length }, '[POST /ai-bots] Request received');
+
     try {
       const body = CreateBotSchema.parse(request.body);
 
-      app.log.info({ userId: body.userAccountId }, 'Creating AI bot');
+      app.log.debug({
+        userId: body.userAccountId,
+        name: body.name,
+        model: body.model,
+        temperature: body.temperature
+      }, '[POST /ai-bots] Creating new bot');
 
       const insertData = {
         user_account_id: body.userAccountId,
@@ -239,10 +307,21 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .single();
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          userId: body.userAccountId,
+          elapsed: Date.now() - startTime
+        }, '[POST /ai-bots] Database insert error');
         throw error;
       }
 
-      app.log.info({ botId: bot.id }, 'AI bot created');
+      app.log.info({
+        botId: bot.id,
+        botName: bot.name,
+        userId: body.userAccountId,
+        elapsed: Date.now() - startTime
+      }, '[POST /ai-bots] Bot created successfully');
 
       return reply.status(201).send({
         success: true,
@@ -250,13 +329,21 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        app.log.warn({
+          validationErrors: error.errors,
+          elapsed: Date.now() - startTime
+        }, '[POST /ai-bots] Validation error');
         return reply.status(400).send({
           error: 'Validation error',
           details: error.errors
         });
       }
 
-      app.log.error({ error: error.message }, 'Failed to create AI bot');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        elapsed: Date.now() - startTime
+      }, '[POST /ai-bots] Failed to create AI bot');
       return reply.status(500).send({
         error: 'Failed to create bot',
         message: error.message
@@ -269,11 +356,20 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Update a bot
    */
   app.put('/ai-bots/:botId', async (request, reply) => {
-    try {
-      const { botId } = request.params as { botId: string };
-      const body = UpdateBotSchema.parse(request.body);
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
 
-      app.log.info({ botId, updates: Object.keys(body) }, 'Updating AI bot');
+    app.log.info({ botId, bodySize: JSON.stringify(request.body).length }, '[PUT /ai-bots/:botId] Request received');
+
+    try {
+      const body = UpdateBotSchema.parse(request.body);
+      const updateKeys = Object.keys(body);
+
+      app.log.debug({
+        botId,
+        updateFields: updateKeys,
+        fieldCount: updateKeys.length
+      }, '[PUT /ai-bots/:botId] Updating bot configuration');
 
       // Build update object
       const updateData = toSnakeCase(body);
@@ -288,12 +384,25 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          app.log.warn({ botId, elapsed: Date.now() - startTime }, '[PUT /ai-bots/:botId] Bot not found');
           return reply.status(404).send({ error: 'Bot not found' });
         }
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[PUT /ai-bots/:botId] Database update error');
         throw error;
       }
 
-      app.log.info({ botId }, 'AI bot updated');
+      app.log.info({
+        botId,
+        botName: bot.name,
+        updatedFields: updateKeys,
+        isActive: bot.is_active,
+        elapsed: Date.now() - startTime
+      }, '[PUT /ai-bots/:botId] Bot updated successfully');
 
       return reply.send({
         success: true,
@@ -301,13 +410,23 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        app.log.warn({
+          botId,
+          validationErrors: error.errors,
+          elapsed: Date.now() - startTime
+        }, '[PUT /ai-bots/:botId] Validation error');
         return reply.status(400).send({
           error: 'Validation error',
           details: error.errors
         });
       }
 
-      app.log.error({ error: error.message }, 'Failed to update AI bot');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[PUT /ai-bots/:botId] Failed to update AI bot');
       return reply.status(500).send({
         error: 'Failed to update bot',
         message: error.message
@@ -320,10 +439,13 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Delete a bot
    */
   app.delete('/ai-bots/:botId', async (request, reply) => {
-    try {
-      const { botId } = request.params as { botId: string };
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
 
-      app.log.info({ botId }, 'Deleting AI bot');
+    app.log.info({ botId }, '[DELETE /ai-bots/:botId] Request received');
+
+    try {
+      app.log.debug({ botId }, '[DELETE /ai-bots/:botId] Deleting bot from database');
 
       const { error } = await supabase
         .from('ai_bot_configurations')
@@ -331,17 +453,31 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .eq('id', botId);
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[DELETE /ai-bots/:botId] Database delete error');
         throw error;
       }
 
-      app.log.info({ botId }, 'AI bot deleted');
+      app.log.info({
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[DELETE /ai-bots/:botId] Bot deleted successfully');
 
       return reply.send({
         success: true,
         message: 'Bot deleted successfully'
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to delete AI bot');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[DELETE /ai-bots/:botId] Failed to delete AI bot');
       return reply.status(500).send({
         error: 'Failed to delete bot',
         message: error.message
@@ -354,12 +490,15 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Duplicate a bot
    */
   app.post('/ai-bots/:botId/duplicate', async (request, reply) => {
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
+
+    app.log.info({ botId }, '[POST /ai-bots/:botId/duplicate] Request received');
+
     try {
-      const { botId } = request.params as { botId: string };
-
-      app.log.info({ botId }, 'Duplicating AI bot');
-
       // Get original bot
+      app.log.debug({ botId }, '[POST /ai-bots/:botId/duplicate] Fetching original bot');
+
       const { data: originalBot, error: fetchError } = await supabase
         .from('ai_bot_configurations')
         .select('*')
@@ -368,10 +507,16 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       if (fetchError) {
         if (fetchError.code === 'PGRST116') {
+          app.log.warn({ botId, elapsed: Date.now() - startTime }, '[POST /ai-bots/:botId/duplicate] Original bot not found');
           return reply.status(404).send({ error: 'Bot not found' });
         }
         throw fetchError;
       }
+
+      app.log.debug({
+        originalId: botId,
+        originalName: originalBot.name
+      }, '[POST /ai-bots/:botId/duplicate] Creating copy');
 
       // Create copy
       const { id, created_at, updated_at, ...botData } = originalBot;
@@ -385,14 +530,23 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .single();
 
       if (insertError) {
+        app.log.error({
+          error: insertError.message,
+          code: insertError.code,
+          elapsed: Date.now() - startTime
+        }, '[POST /ai-bots/:botId/duplicate] Failed to insert copy');
         throw insertError;
       }
 
       // Also duplicate functions
+      app.log.debug({ originalId: botId }, '[POST /ai-bots/:botId/duplicate] Fetching functions to duplicate');
+
       const { data: functions } = await supabase
         .from('ai_bot_functions')
         .select('*')
         .eq('bot_id', botId);
+
+      const functionsCount = functions?.length || 0;
 
       if (functions && functions.length > 0) {
         const newFunctions = functions.map(({ id, bot_id, created_at, updated_at, ...funcData }) => ({
@@ -400,19 +554,37 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
           bot_id: newBot.id,
         }));
 
-        await supabase
+        const { error: funcInsertError } = await supabase
           .from('ai_bot_functions')
           .insert(newFunctions);
+
+        if (funcInsertError) {
+          app.log.warn({
+            error: funcInsertError.message,
+            newBotId: newBot.id
+          }, '[POST /ai-bots/:botId/duplicate] Failed to duplicate functions (non-fatal)');
+        }
       }
 
-      app.log.info({ originalId: botId, newId: newBot.id }, 'AI bot duplicated');
+      app.log.info({
+        originalId: botId,
+        newId: newBot.id,
+        newName: newBot.name,
+        functionsDuplicated: functionsCount,
+        elapsed: Date.now() - startTime
+      }, '[POST /ai-bots/:botId/duplicate] Bot duplicated successfully');
 
       return reply.status(201).send({
         success: true,
         bot: toCamelCase(newBot),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to duplicate AI bot');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[POST /ai-bots/:botId/duplicate] Failed to duplicate AI bot');
       return reply.status(500).send({
         error: 'Failed to duplicate bot',
         message: error.message
@@ -425,30 +597,44 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Toggle bot active status
    */
   app.patch('/ai-bots/:botId/toggle', async (request, reply) => {
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
+
+    app.log.info({ botId }, '[PATCH /ai-bots/:botId/toggle] Request received');
+
     try {
-      const { botId } = request.params as { botId: string };
-
-      app.log.info({ botId }, 'Toggling AI bot status');
-
       // Get current status
+      app.log.debug({ botId }, '[PATCH /ai-bots/:botId/toggle] Fetching current status');
+
       const { data: bot, error: fetchError } = await supabase
         .from('ai_bot_configurations')
-        .select('is_active')
+        .select('is_active, name')
         .eq('id', botId)
         .single();
 
       if (fetchError) {
         if (fetchError.code === 'PGRST116') {
+          app.log.warn({ botId, elapsed: Date.now() - startTime }, '[PATCH /ai-bots/:botId/toggle] Bot not found');
           return reply.status(404).send({ error: 'Bot not found' });
         }
         throw fetchError;
       }
 
+      const previousStatus = bot.is_active;
+      const newStatus = !previousStatus;
+
+      app.log.debug({
+        botId,
+        botName: bot.name,
+        previousStatus,
+        newStatus
+      }, '[PATCH /ai-bots/:botId/toggle] Toggling status');
+
       // Toggle status
       const { data: updatedBot, error: updateError } = await supabase
         .from('ai_bot_configurations')
         .update({
-          is_active: !bot.is_active,
+          is_active: newStatus,
           updated_at: new Date().toISOString()
         })
         .eq('id', botId)
@@ -456,17 +642,34 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .single();
 
       if (updateError) {
+        app.log.error({
+          error: updateError.message,
+          code: updateError.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[PATCH /ai-bots/:botId/toggle] Failed to update status');
         throw updateError;
       }
 
-      app.log.info({ botId, isActive: updatedBot.is_active }, 'AI bot status toggled');
+      app.log.info({
+        botId,
+        botName: updatedBot.name,
+        previousStatus,
+        newStatus: updatedBot.is_active,
+        elapsed: Date.now() - startTime
+      }, '[PATCH /ai-bots/:botId/toggle] Bot status toggled successfully');
 
       return reply.send({
         success: true,
         bot: toCamelCase(updatedBot),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to toggle AI bot status');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[PATCH /ai-bots/:botId/toggle] Failed to toggle AI bot status');
       return reply.status(500).send({
         error: 'Failed to toggle bot status',
         message: error.message
@@ -481,9 +684,12 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Get all functions for a bot
    */
   app.get('/ai-bots/:botId/functions', async (request, reply) => {
-    try {
-      const { botId } = request.params as { botId: string };
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
 
+    app.log.info({ botId }, '[GET /ai-bots/:botId/functions] Request received');
+
+    try {
       const { data: functions, error } = await supabase
         .from('ai_bot_functions')
         .select('*')
@@ -491,15 +697,33 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .order('created_at', { ascending: true });
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[GET /ai-bots/:botId/functions] Database error');
         throw error;
       }
+
+      const functionsCount = functions?.length || 0;
+      app.log.info({
+        botId,
+        functionsCount,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots/:botId/functions] Successfully fetched functions');
 
       return reply.send({
         success: true,
         functions: (functions || []).map(toCamelCase),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to fetch bot functions');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots/:botId/functions] Failed to fetch bot functions');
       return reply.status(500).send({
         error: 'Failed to fetch functions',
         message: error.message
@@ -512,12 +736,17 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Create a new function for a bot
    */
   app.post('/ai-bots/:botId/functions', async (request, reply) => {
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
+    const body = request.body as any;
+
+    app.log.info({
+      botId,
+      functionName: body.name,
+      handlerType: body.handlerType
+    }, '[POST /ai-bots/:botId/functions] Request received');
+
     try {
-      const { botId } = request.params as { botId: string };
-      const body = request.body as any;
-
-      app.log.info({ botId, functionName: body.name }, 'Creating bot function');
-
       const insertData = {
         bot_id: botId,
         name: body.name,
@@ -528,6 +757,13 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         is_active: body.isActive ?? true,
       };
 
+      app.log.debug({
+        botId,
+        functionName: body.name,
+        handlerType: body.handlerType,
+        hasParameters: Object.keys(body.parameters || {}).length > 0
+      }, '[POST /ai-bots/:botId/functions] Creating function');
+
       const { data: func, error } = await supabase
         .from('ai_bot_functions')
         .insert(insertData)
@@ -535,15 +771,33 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .single();
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[POST /ai-bots/:botId/functions] Database insert error');
         throw error;
       }
+
+      app.log.info({
+        botId,
+        functionId: func.id,
+        functionName: func.name,
+        elapsed: Date.now() - startTime
+      }, '[POST /ai-bots/:botId/functions] Function created successfully');
 
       return reply.status(201).send({
         success: true,
         function: toCamelCase(func),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to create bot function');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[POST /ai-bots/:botId/functions] Failed to create bot function');
       return reply.status(500).send({
         error: 'Failed to create function',
         message: error.message
@@ -556,18 +810,28 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Update a function
    */
   app.put('/ai-bots/:botId/functions/:functionId', async (request, reply) => {
+    const startTime = Date.now();
+    const { botId, functionId } = request.params as { botId: string; functionId: string };
+    const body = request.body as any;
+
+    app.log.info({ botId, functionId }, '[PUT /ai-bots/:botId/functions/:functionId] Request received');
+
     try {
-      const { functionId } = request.params as { botId: string; functionId: string };
-      const body = request.body as any;
-
       const updateData: any = { updated_at: new Date().toISOString() };
+      const updateFields: string[] = [];
 
-      if (body.name !== undefined) updateData.name = body.name;
-      if (body.description !== undefined) updateData.description = body.description;
-      if (body.parameters !== undefined) updateData.parameters = body.parameters;
-      if (body.handlerType !== undefined) updateData.handler_type = body.handlerType;
-      if (body.handlerConfig !== undefined) updateData.handler_config = body.handlerConfig;
-      if (body.isActive !== undefined) updateData.is_active = body.isActive;
+      if (body.name !== undefined) { updateData.name = body.name; updateFields.push('name'); }
+      if (body.description !== undefined) { updateData.description = body.description; updateFields.push('description'); }
+      if (body.parameters !== undefined) { updateData.parameters = body.parameters; updateFields.push('parameters'); }
+      if (body.handlerType !== undefined) { updateData.handler_type = body.handlerType; updateFields.push('handlerType'); }
+      if (body.handlerConfig !== undefined) { updateData.handler_config = body.handlerConfig; updateFields.push('handlerConfig'); }
+      if (body.isActive !== undefined) { updateData.is_active = body.isActive; updateFields.push('isActive'); }
+
+      app.log.debug({
+        functionId,
+        updateFields,
+        fieldCount: updateFields.length
+      }, '[PUT /ai-bots/:botId/functions/:functionId] Updating function');
 
       const { data: func, error } = await supabase
         .from('ai_bot_functions')
@@ -577,15 +841,34 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .single();
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          functionId,
+          elapsed: Date.now() - startTime
+        }, '[PUT /ai-bots/:botId/functions/:functionId] Database update error');
         throw error;
       }
+
+      app.log.info({
+        botId,
+        functionId,
+        functionName: func.name,
+        updatedFields: updateFields,
+        elapsed: Date.now() - startTime
+      }, '[PUT /ai-bots/:botId/functions/:functionId] Function updated successfully');
 
       return reply.send({
         success: true,
         function: toCamelCase(func),
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to update bot function');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        functionId,
+        elapsed: Date.now() - startTime
+      }, '[PUT /ai-bots/:botId/functions/:functionId] Failed to update bot function');
       return reply.status(500).send({
         error: 'Failed to update function',
         message: error.message
@@ -598,24 +881,44 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Delete a function
    */
   app.delete('/ai-bots/:botId/functions/:functionId', async (request, reply) => {
-    try {
-      const { functionId } = request.params as { botId: string; functionId: string };
+    const startTime = Date.now();
+    const { botId, functionId } = request.params as { botId: string; functionId: string };
 
+    app.log.info({ botId, functionId }, '[DELETE /ai-bots/:botId/functions/:functionId] Request received');
+
+    try {
       const { error } = await supabase
         .from('ai_bot_functions')
         .delete()
         .eq('id', functionId);
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          functionId,
+          elapsed: Date.now() - startTime
+        }, '[DELETE /ai-bots/:botId/functions/:functionId] Database delete error');
         throw error;
       }
+
+      app.log.info({
+        botId,
+        functionId,
+        elapsed: Date.now() - startTime
+      }, '[DELETE /ai-bots/:botId/functions/:functionId] Function deleted successfully');
 
       return reply.send({
         success: true,
         message: 'Function deleted successfully'
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to delete bot function');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        functionId,
+        elapsed: Date.now() - startTime
+      }, '[DELETE /ai-bots/:botId/functions/:functionId] Failed to delete bot function');
       return reply.status(500).send({
         error: 'Failed to delete function',
         message: error.message
@@ -630,14 +933,18 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Get all WhatsApp instances for a user (with linked bot info)
    */
   app.get('/whatsapp-instances', async (request, reply) => {
-    try {
-      const { userId } = request.query as { userId: string };
+    const startTime = Date.now();
+    const { userId } = request.query as { userId: string };
 
+    app.log.info({ userId }, '[GET /whatsapp-instances] Request received');
+
+    try {
       if (!userId) {
+        app.log.warn({}, '[GET /whatsapp-instances] Missing userId parameter');
         return reply.status(400).send({ error: 'userId is required' });
       }
 
-      app.log.info({ userId }, 'Fetching WhatsApp instances');
+      app.log.debug({ userId }, '[GET /whatsapp-instances] Querying instances with bot info');
 
       const { data: instances, error } = await supabase
         .from('whatsapp_instances')
@@ -658,8 +965,17 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .order('created_at', { ascending: false });
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          userId,
+          elapsed: Date.now() - startTime
+        }, '[GET /whatsapp-instances] Database error');
         throw error;
       }
+
+      const instancesCount = instances?.length || 0;
+      const linkedCount = instances?.filter((i: any) => i.ai_bot_id).length || 0;
 
       // Transform response
       const result = (instances || []).map((inst: any) => ({
@@ -676,12 +992,24 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         } : null
       }));
 
+      app.log.info({
+        userId,
+        instancesCount,
+        linkedCount,
+        elapsed: Date.now() - startTime
+      }, '[GET /whatsapp-instances] Successfully fetched instances');
+
       return reply.send({
         success: true,
         instances: result
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to fetch WhatsApp instances');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        userId,
+        elapsed: Date.now() - startTime
+      }, '[GET /whatsapp-instances] Failed to fetch WhatsApp instances');
       return reply.status(500).send({
         error: 'Failed to fetch instances',
         message: error.message
@@ -694,11 +1022,21 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Link a bot to a WhatsApp instance
    */
   app.patch('/whatsapp-instances/:instanceId/link-bot', async (request, reply) => {
-    try {
-      const { instanceId } = request.params as { instanceId: string };
-      const { botId } = request.body as { botId: string | null };
+    const startTime = Date.now();
+    const { instanceId } = request.params as { instanceId: string };
+    const { botId } = request.body as { botId: string | null };
 
-      app.log.info({ instanceId, botId }, 'Linking bot to WhatsApp instance');
+    app.log.info({
+      instanceId,
+      botId,
+      action: botId ? 'link' : 'unlink'
+    }, '[PATCH /whatsapp-instances/:instanceId/link-bot] Request received');
+
+    try {
+      app.log.debug({
+        instanceId,
+        newBotId: botId
+      }, '[PATCH /whatsapp-instances/:instanceId/link-bot] Updating instance bot link');
 
       const { data: instance, error } = await supabase
         .from('whatsapp_instances')
@@ -721,12 +1059,30 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          app.log.warn({
+            instanceId,
+            elapsed: Date.now() - startTime
+          }, '[PATCH /whatsapp-instances/:instanceId/link-bot] Instance not found');
           return reply.status(404).send({ error: 'Instance not found' });
         }
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          instanceId,
+          elapsed: Date.now() - startTime
+        }, '[PATCH /whatsapp-instances/:instanceId/link-bot] Database update error');
         throw error;
       }
 
-      app.log.info({ instanceId, botId: instance.ai_bot_id }, 'Bot linked to instance');
+      const linkedBot = instance.ai_bot_configurations as any;
+      app.log.info({
+        instanceId,
+        instanceName: instance.instance_name,
+        newBotId: instance.ai_bot_id,
+        linkedBotName: linkedBot?.name || null,
+        action: instance.ai_bot_id ? 'linked' : 'unlinked',
+        elapsed: Date.now() - startTime
+      }, '[PATCH /whatsapp-instances/:instanceId/link-bot] Bot link updated successfully');
 
       return reply.send({
         success: true,
@@ -734,15 +1090,20 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
           id: instance.id,
           instanceName: instance.instance_name,
           aiBotId: instance.ai_bot_id,
-          linkedBot: instance.ai_bot_configurations ? {
-            id: (instance.ai_bot_configurations as any).id,
-            name: (instance.ai_bot_configurations as any).name,
-            isActive: (instance.ai_bot_configurations as any).is_active
+          linkedBot: linkedBot ? {
+            id: linkedBot.id,
+            name: linkedBot.name,
+            isActive: linkedBot.is_active
           } : null
         }
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to link bot to instance');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        instanceId,
+        elapsed: Date.now() - startTime
+      }, '[PATCH /whatsapp-instances/:instanceId/link-bot] Failed to link bot to instance');
       return reply.status(500).send({
         error: 'Failed to link bot',
         message: error.message
@@ -755,10 +1116,13 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
    * Get all WhatsApp instances linked to a specific bot
    */
   app.get('/ai-bots/:botId/linked-instances', async (request, reply) => {
-    try {
-      const { botId } = request.params as { botId: string };
+    const startTime = Date.now();
+    const { botId } = request.params as { botId: string };
 
-      app.log.info({ botId }, 'Fetching linked instances for bot');
+    app.log.info({ botId }, '[GET /ai-bots/:botId/linked-instances] Request received');
+
+    try {
+      app.log.debug({ botId }, '[GET /ai-bots/:botId/linked-instances] Querying linked instances');
 
       const { data: instances, error } = await supabase
         .from('whatsapp_instances')
@@ -766,8 +1130,22 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         .eq('ai_bot_id', botId);
 
       if (error) {
+        app.log.error({
+          error: error.message,
+          code: error.code,
+          botId,
+          elapsed: Date.now() - startTime
+        }, '[GET /ai-bots/:botId/linked-instances] Database error');
         throw error;
       }
+
+      const instancesCount = instances?.length || 0;
+      app.log.info({
+        botId,
+        linkedInstancesCount: instancesCount,
+        instances: instances?.map((i: any) => i.instance_name) || [],
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots/:botId/linked-instances] Successfully fetched linked instances');
 
       return reply.send({
         success: true,
@@ -779,7 +1157,12 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         }))
       });
     } catch (error: any) {
-      app.log.error({ error: error.message }, 'Failed to fetch linked instances');
+      app.log.error({
+        error: error.message,
+        stack: error.stack,
+        botId,
+        elapsed: Date.now() - startTime
+      }, '[GET /ai-bots/:botId/linked-instances] Failed to fetch linked instances');
       return reply.status(500).send({
         error: 'Failed to fetch linked instances',
         message: error.message
