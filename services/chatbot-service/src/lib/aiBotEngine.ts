@@ -1,6 +1,13 @@
 /**
  * AI Bot Engine - обработка сообщений с использованием настроек из конструктора
  * Использует таблицу ai_bot_configurations для получения настроек бота
+ *
+ * Logging features:
+ * - Correlation ID для трассировки запросов
+ * - Маскирование чувствительных данных (телефоны, API ключи)
+ * - Структурированные теги для фильтрации
+ * - Метрики производительности
+ * - Классификация ошибок
  */
 
 import { FastifyInstance } from 'fastify';
@@ -9,8 +16,23 @@ import { redis } from './redis.js';
 import OpenAI from 'openai';
 import { sendWhatsAppMessage as sendMessage } from './evolutionApi.js';
 import { createLogger } from './logger.js';
+import {
+  createContextLogger,
+  ContextLogger,
+  RequestContext,
+  maskPhone,
+  maskApiKey,
+  maskUuid,
+  truncateText,
+  logDbOperation,
+  logOpenAiCall,
+  logWebhookCall,
+  logIncomingMessage,
+  logOutgoingMessage,
+  LogTag
+} from './logUtils.js';
 
-const log = createLogger({ module: 'aiBotEngine' });
+const baseLog = createLogger({ module: 'aiBotEngine' });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 
@@ -92,12 +114,18 @@ export interface LeadInfo {
 /**
  * Получить конфигурацию бота для инстанса WhatsApp
  */
-export async function getBotConfigForInstance(instanceName: string): Promise<AIBotConfig | null> {
-  log.info({ instanceName }, '[getBotConfigForInstance] Starting bot config lookup');
+export async function getBotConfigForInstance(
+  instanceName: string,
+  ctxLog?: ContextLogger
+): Promise<AIBotConfig | null> {
+  // Используем переданный логгер или создаём новый
+  const log = ctxLog || createContextLogger(baseLog, { instanceName }, ['config', 'db']);
+
+  log.info({ instance: instanceName }, '[getBotConfigForInstance] Starting bot config lookup', ['config']);
 
   try {
     // Сначала получаем инстанс с привязанным ботом
-    log.debug({ instanceName }, '[getBotConfigForInstance] Querying whatsapp_instances');
+    log.debug({ instance: instanceName }, '[getBotConfigForInstance] Querying whatsapp_instances', ['db']);
     const { data: instance, error: instanceError } = await supabase
       .from('whatsapp_instances')
       .select('ai_bot_id, user_account_id')
@@ -105,24 +133,25 @@ export async function getBotConfigForInstance(instanceName: string): Promise<AIB
       .maybeSingle();
 
     if (instanceError) {
-      log.error({ instanceName, error: instanceError.message, code: instanceError.code }, '[getBotConfigForInstance] DB error fetching instance');
+      log.error(instanceError, '[getBotConfigForInstance] DB error fetching instance', {
+        instance: instanceName
+      }, ['db']);
       return null;
     }
 
     if (!instance) {
-      log.warn({ instanceName }, '[getBotConfigForInstance] Instance not found in database');
+      log.warn({ instance: instanceName }, '[getBotConfigForInstance] Instance not found in database', ['db']);
       return null;
     }
 
-    log.debug({
-      instanceName,
-      userAccountId: instance.user_account_id,
-      aiBotId: instance.ai_bot_id
-    }, '[getBotConfigForInstance] Instance found');
+    logDbOperation(log, 'select', 'whatsapp_instances', {
+      userId: maskUuid(instance.user_account_id),
+      hasBotId: !!instance.ai_bot_id
+    }, true);
 
     // Если бот привязан - используем его
     if (instance.ai_bot_id) {
-      log.debug({ botId: instance.ai_bot_id }, '[getBotConfigForInstance] Fetching linked bot config');
+      log.debug({ botId: maskUuid(instance.ai_bot_id) }, '[getBotConfigForInstance] Fetching linked bot config', ['db']);
       const { data: bot, error: botError } = await supabase
         .from('ai_bot_configurations')
         .select('*')
@@ -131,26 +160,27 @@ export async function getBotConfigForInstance(instanceName: string): Promise<AIB
         .maybeSingle();
 
       if (botError) {
-        log.error({ error: botError.message, code: botError.code, botId: instance.ai_bot_id }, '[getBotConfigForInstance] DB error fetching bot config');
+        log.error(botError, '[getBotConfigForInstance] DB error fetching bot config', {
+          botId: maskUuid(instance.ai_bot_id)
+        }, ['db']);
         return null;
       }
 
       if (bot) {
         log.info({
-          botId: bot.id,
+          botId: maskUuid(bot.id),
           botName: bot.name,
           model: bot.model,
-          temperature: bot.temperature,
-          isActive: bot.is_active
-        }, '[getBotConfigForInstance] Using linked bot');
+          temp: bot.temperature
+        }, '[getBotConfigForInstance] Using linked bot', ['config']);
         return bot;
       } else {
-        log.warn({ botId: instance.ai_bot_id }, '[getBotConfigForInstance] Linked bot not found or inactive');
+        log.warn({ botId: maskUuid(instance.ai_bot_id) }, '[getBotConfigForInstance] Linked bot not found or inactive', ['config']);
       }
     }
 
     // Если бот не привязан - ищем активного бота пользователя
-    log.debug({ userAccountId: instance.user_account_id }, '[getBotConfigForInstance] No linked bot, searching for default active bot');
+    log.debug({ userId: maskUuid(instance.user_account_id) }, '[getBotConfigForInstance] No linked bot, searching for default', ['db']);
     const { data: defaultBot, error: defaultError } = await supabase
       .from('ai_bot_configurations')
       .select('*')
@@ -161,28 +191,26 @@ export async function getBotConfigForInstance(instanceName: string): Promise<AIB
       .maybeSingle();
 
     if (defaultError) {
-      log.error({ error: defaultError.message, code: defaultError.code }, '[getBotConfigForInstance] DB error fetching default bot');
+      log.error(defaultError, '[getBotConfigForInstance] DB error fetching default bot', {}, ['db']);
       return null;
     }
 
     if (defaultBot) {
       log.info({
-        botId: defaultBot.id,
+        botId: maskUuid(defaultBot.id),
         botName: defaultBot.name,
-        model: defaultBot.model,
-        temperature: defaultBot.temperature
-      }, '[getBotConfigForInstance] Using default active bot');
+        model: defaultBot.model
+      }, '[getBotConfigForInstance] Using default active bot', ['config']);
       return defaultBot;
     }
 
-    log.warn({ instanceName, userAccountId: instance.user_account_id }, '[getBotConfigForInstance] No active bot found for user');
+    log.warn({
+      instance: instanceName,
+      userId: maskUuid(instance.user_account_id)
+    }, '[getBotConfigForInstance] No active bot found for user', ['config']);
     return null;
   } catch (error: any) {
-    log.error({
-      error: error.message,
-      stack: error.stack,
-      instanceName
-    }, '[getBotConfigForInstance] Unexpected error');
+    log.error(error, '[getBotConfigForInstance] Unexpected error', { instance: instanceName });
     return null;
   }
 }
@@ -193,45 +221,49 @@ export async function getBotConfigForInstance(instanceName: string): Promise<AIB
 export function shouldBotRespondWithConfig(
   lead: LeadInfo,
   botConfig: AIBotConfig,
-  messageText?: string
+  messageText?: string,
+  ctxLog?: ContextLogger
 ): { shouldRespond: boolean; reason?: string } {
-  log.info({
+  const log = ctxLog || createContextLogger(baseLog, {
     leadId: lead.id,
-    phone: lead.contact_phone,
-    botId: botConfig.id,
+    botId: botConfig.id
+  }, ['processing']);
+
+  log.info({
+    leadId: maskUuid(lead.id),
+    phone: maskPhone(lead.contact_phone),
     botName: botConfig.name,
-    messageLength: messageText?.length || 0
+    msgLen: messageText?.length || 0
   }, '[shouldBotRespondWithConfig] Checking if bot should respond');
 
   // 1. Бот не активен
   if (!botConfig.is_active) {
-    log.debug({ botId: botConfig.id }, '[shouldBotRespondWithConfig] Bot is inactive');
+    log.debug({ reason: 'bot_inactive' }, '[shouldBotRespondWithConfig] Bot is inactive');
     return { shouldRespond: false, reason: 'bot_inactive' };
   }
 
   // 2. Менеджер взял в работу
   if (lead.assigned_to_human) {
-    log.debug({ leadId: lead.id }, '[shouldBotRespondWithConfig] Lead assigned to human');
+    log.debug({ reason: 'assigned_to_human' }, '[shouldBotRespondWithConfig] Lead assigned to human');
     return { shouldRespond: false, reason: 'assigned_to_human' };
   }
 
   // 3. Бот на паузе
   if (lead.bot_paused) {
-    log.debug({ leadId: lead.id, botPaused: true }, '[shouldBotRespondWithConfig] Bot is paused for this lead');
+    log.debug({ botPaused: true }, '[shouldBotRespondWithConfig] Bot is paused for this lead');
     // Проверить resume_phrases - если сообщение содержит фразу возобновления, снять паузу
     if (messageText && botConfig.resume_phrases?.length > 0) {
       const lowerMessage = messageText.toLowerCase();
       log.debug({
-        resumePhrases: botConfig.resume_phrases,
-        messagePreview: lowerMessage.substring(0, 100)
+        resumePhrasesCount: botConfig.resume_phrases.length,
+        msgPreview: truncateText(lowerMessage, 60)
       }, '[shouldBotRespondWithConfig] Checking resume phrases');
 
       const shouldResume = botConfig.resume_phrases.some(phrase =>
         lowerMessage.includes(phrase.toLowerCase())
       );
       if (shouldResume) {
-        log.info({ leadId: lead.id }, '[shouldBotRespondWithConfig] Resume phrase detected, will unpause');
-        // Пауза будет снята в processIncomingMessage
+        log.info({ reason: 'resume_phrase_detected' }, '[shouldBotRespondWithConfig] Resume phrase detected, will unpause');
         return { shouldRespond: true, reason: 'resume_phrase_detected' };
       }
     }
@@ -242,14 +274,13 @@ export function shouldBotRespondWithConfig(
   if (lead.bot_paused_until) {
     const pausedUntil = new Date(lead.bot_paused_until);
     const now = new Date();
+    const isPaused = pausedUntil > now;
     log.debug({
-      leadId: lead.id,
       pausedUntil: pausedUntil.toISOString(),
-      now: now.toISOString(),
-      isPaused: pausedUntil > now
+      isPaused
     }, '[shouldBotRespondWithConfig] Checking temporary pause');
 
-    if (pausedUntil > now) {
+    if (isPaused) {
       return { shouldRespond: false, reason: 'bot_paused_temporarily' };
     }
   }
@@ -258,15 +289,15 @@ export function shouldBotRespondWithConfig(
   if (messageText && botConfig.stop_phrases?.length > 0) {
     const lowerMessage = messageText.toLowerCase();
     log.debug({
-      stopPhrases: botConfig.stop_phrases,
-      messagePreview: lowerMessage.substring(0, 100)
+      stopPhrasesCount: botConfig.stop_phrases.length,
+      msgPreview: truncateText(lowerMessage, 60)
     }, '[shouldBotRespondWithConfig] Checking stop phrases');
 
     const matchedPhrase = botConfig.stop_phrases.find(phrase =>
       lowerMessage.includes(phrase.toLowerCase())
     );
     if (matchedPhrase) {
-      log.info({ leadId: lead.id, matchedPhrase }, '[shouldBotRespondWithConfig] Stop phrase detected');
+      log.info({ matchedPhrase, reason: 'stop_phrase_detected' }, '[shouldBotRespondWithConfig] Stop phrase detected');
       return { shouldRespond: false, reason: 'stop_phrase_detected' };
     }
   }
@@ -274,7 +305,7 @@ export function shouldBotRespondWithConfig(
   // 6. Этапы воронки где бот молчит
   const silentStages = ['consultation_completed', 'deal_closed', 'deal_lost'];
   if (silentStages.includes(lead.funnel_stage)) {
-    log.debug({ leadId: lead.id, funnelStage: lead.funnel_stage }, '[shouldBotRespondWithConfig] Lead in silent funnel stage');
+    log.debug({ funnelStage: lead.funnel_stage, reason: 'silent_stage' }, '[shouldBotRespondWithConfig] Lead in silent funnel stage');
     return { shouldRespond: false, reason: 'silent_stage' };
   }
 
@@ -282,34 +313,33 @@ export function shouldBotRespondWithConfig(
   if (botConfig.schedule_enabled) {
     log.debug({
       scheduleEnabled: true,
-      hoursStart: botConfig.schedule_hours_start,
-      hoursEnd: botConfig.schedule_hours_end,
+      hours: `${botConfig.schedule_hours_start}-${botConfig.schedule_hours_end}`,
       days: botConfig.schedule_days,
-      timezone: botConfig.timezone
-    }, '[shouldBotRespondWithConfig] Checking schedule');
+      tz: botConfig.timezone
+    }, '[shouldBotRespondWithConfig] Checking schedule', ['schedule']);
 
-    if (!isWithinSchedule(botConfig)) {
-      log.debug({ botId: botConfig.id }, '[shouldBotRespondWithConfig] Outside of schedule');
+    if (!isWithinSchedule(botConfig, log)) {
+      log.debug({ reason: 'outside_schedule' }, '[shouldBotRespondWithConfig] Outside of schedule', ['schedule']);
       return { shouldRespond: false, reason: 'outside_schedule' };
     }
   }
 
-  log.info({ leadId: lead.id, botId: botConfig.id }, '[shouldBotRespondWithConfig] Bot should respond');
+  log.info({ shouldRespond: true }, '[shouldBotRespondWithConfig] Bot should respond');
   return { shouldRespond: true };
 }
 
 /**
  * Проверка расписания работы бота
  */
-function isWithinSchedule(config: AIBotConfig): boolean {
+function isWithinSchedule(config: AIBotConfig, ctxLog?: ContextLogger): boolean {
+  const log = ctxLog || createContextLogger(baseLog, { botId: config.id }, ['schedule']);
   const now = new Date();
   const timezone = config.timezone || 'Asia/Yekaterinburg';
 
   log.debug({
-    botId: config.id,
-    timezone,
+    tz: timezone,
     nowUTC: now.toISOString()
-  }, '[isWithinSchedule] Checking schedule');
+  }, '[isWithinSchedule] Checking schedule', ['schedule']);
 
   // Получить время в часовом поясе бота
   const options: Intl.DateTimeFormatOptions = {
@@ -338,13 +368,12 @@ function isWithinSchedule(config: AIBotConfig): boolean {
     localDay: day,
     dayName: dayPart?.value,
     allowedDays: config.schedule_days,
-    hoursStart: config.schedule_hours_start,
-    hoursEnd: config.schedule_hours_end
-  }, '[isWithinSchedule] Parsed local time');
+    hours: `${config.schedule_hours_start}-${config.schedule_hours_end}`
+  }, '[isWithinSchedule] Parsed local time', ['schedule']);
 
   // Проверка дня недели
   if (!config.schedule_days.includes(day)) {
-    log.debug({ day, allowedDays: config.schedule_days }, '[isWithinSchedule] Day not in schedule');
+    log.debug({ day, reason: 'day_not_allowed' }, '[isWithinSchedule] Day not in schedule', ['schedule']);
     return false;
   }
 
@@ -352,129 +381,146 @@ function isWithinSchedule(config: AIBotConfig): boolean {
   if (hour < config.schedule_hours_start || hour >= config.schedule_hours_end) {
     log.debug({
       hour,
-      hoursStart: config.schedule_hours_start,
-      hoursEnd: config.schedule_hours_end
-    }, '[isWithinSchedule] Hour outside schedule');
+      reason: 'hour_outside'
+    }, '[isWithinSchedule] Hour outside schedule', ['schedule']);
     return false;
   }
 
-  log.debug({ hour, day }, '[isWithinSchedule] Within schedule');
+  log.debug({ hour, day, inSchedule: true }, '[isWithinSchedule] Within schedule', ['schedule']);
   return true;
 }
 
 /**
  * Склейка сообщений через Redis с настраиваемой задержкой
+ * Сохраняет correlation ID для передачи в processAIBotResponse
  */
 export async function collectMessagesWithConfig(
   phone: string,
   instanceName: string,
   newMessage: string,
   botConfig: AIBotConfig,
-  app: FastifyInstance
+  app: FastifyInstance,
+  ctx?: RequestContext
 ): Promise<void> {
+  const ctxLog = createContextLogger(baseLog, ctx || { phone, instanceName }, ['redis', 'processing']);
+
   const bufferSeconds = botConfig.message_buffer_seconds || 7;
   const key = `pending_messages:${instanceName}:${phone}`;
   const timerId = `timer:${key}`;
+  const ctxKey = `ctx:${key}`;
 
-  log.info({
-    phone,
-    instanceName,
-    bufferSeconds,
-    messageLength: newMessage.length,
-    messagePreview: newMessage.substring(0, 100)
-  }, '[collectMessagesWithConfig] Adding message to buffer');
+  ctxLog.info({
+    bufferSec: bufferSeconds,
+    msgLen: newMessage.length,
+    msgPreview: truncateText(newMessage, 80)
+  }, '[collectMessagesWithConfig] Adding message to buffer', ['redis']);
 
   // Добавить сообщение в очередь
   const listLength = await redis.rpush(key, newMessage);
   await redis.expire(key, bufferSeconds + 5);
 
-  log.debug({
-    phone,
-    key,
-    listLength,
-    expireSeconds: bufferSeconds + 5
-  }, '[collectMessagesWithConfig] Message added to Redis list');
+  // Сохраняем контекст (correlation ID) в Redis для передачи в timer callback
+  if (ctx) {
+    await redis.set(ctxKey, JSON.stringify(ctx), 'EX', bufferSeconds + 5);
+  }
+
+  ctxLog.debug({
+    redisKey: key,
+    listLen: listLength,
+    expireSec: bufferSeconds + 5
+  }, '[collectMessagesWithConfig] Message added to Redis list', ['redis']);
 
   // Проверить, есть ли уже таймер
   const exists = await redis.exists(timerId);
 
   if (!exists) {
-    log.debug({
-      phone,
+    ctxLog.debug({
       timerId,
-      bufferSeconds
-    }, '[collectMessagesWithConfig] Creating new timer, will process in N seconds');
+      bufferSec: bufferSeconds
+    }, '[collectMessagesWithConfig] Creating new timer', ['redis']);
 
     await redis.set(timerId, '1', 'EX', bufferSeconds);
 
     // Через N секунд обработать все сообщения
     setTimeout(async () => {
-      log.info({ phone, instanceName, timerId }, '[collectMessagesWithConfig] Timer fired, processing buffered messages');
+      // Восстанавливаем контекст из Redis
+      let savedCtx: RequestContext | undefined;
+      try {
+        const ctxData = await redis.get(ctxKey);
+        if (ctxData) {
+          savedCtx = JSON.parse(ctxData);
+        }
+      } catch {
+        // Ignore parse errors
+      }
+
+      const timerLog = createContextLogger(baseLog, savedCtx || { phone, instanceName }, ['redis', 'processing']);
+      timerLog.info({}, '[collectMessagesWithConfig] Timer fired, processing buffered messages', ['redis']);
 
       try {
         const messages = await redis.lrange(key, 0, -1);
-        await redis.del(key, timerId);
+        await redis.del(key, timerId, ctxKey);
 
-        log.debug({
-          phone,
-          messageCount: messages.length,
-          messagesPreview: messages.map(m => m.substring(0, 50))
-        }, '[collectMessagesWithConfig] Retrieved messages from buffer');
+        timerLog.debug({
+          msgCount: messages.length,
+          msgPreviews: messages.map(m => truncateText(m, 40))
+        }, '[collectMessagesWithConfig] Retrieved messages from buffer', ['redis']);
 
         if (messages.length > 0) {
           const combined = messages.join('\n');
-          log.info({
-            phone,
-            instanceName,
-            combinedLength: combined.length,
-            messageCount: messages.length
+          timerLog.info({
+            combinedLen: combined.length,
+            msgCount: messages.length
           }, '[collectMessagesWithConfig] Sending combined message to processAIBotResponse');
 
-          await processAIBotResponse(phone, instanceName, combined, botConfig, app);
+          await processAIBotResponse(phone, instanceName, combined, botConfig, app, savedCtx);
         } else {
-          log.warn({ phone, key }, '[collectMessagesWithConfig] No messages in buffer after timer');
+          timerLog.warn({ redisKey: key }, '[collectMessagesWithConfig] No messages in buffer after timer', ['redis']);
         }
       } catch (error: any) {
-        log.error({
-          error: error.message,
-          stack: error.stack,
-          phone,
-          instanceName
-        }, '[collectMessagesWithConfig] Error processing collected messages');
+        timerLog.error(error, '[collectMessagesWithConfig] Error processing collected messages', {
+          phone: maskPhone(phone)
+        });
       }
     }, bufferSeconds * 1000);
   } else {
-    log.debug({
-      phone,
-      timerId
-    }, '[collectMessagesWithConfig] Timer already exists, message added to existing buffer');
+    ctxLog.debug({
+      timerId,
+      action: 'added_to_existing'
+    }, '[collectMessagesWithConfig] Timer already exists, message added to existing buffer', ['redis']);
   }
 }
 
 /**
  * Основная функция генерации и отправки ответа бота
+ * Принимает RequestContext для сохранения correlation ID между этапами
  */
 async function processAIBotResponse(
   phone: string,
   instanceName: string,
   messageText: string,
   botConfig: AIBotConfig,
-  app: FastifyInstance
+  app: FastifyInstance,
+  ctx?: RequestContext
 ): Promise<void> {
-  const startTime = Date.now();
-
-  log.info({
+  const ctxLog = createContextLogger(baseLog, {
+    ...ctx,
     phone,
     instanceName,
     botId: botConfig.id,
-    botName: botConfig.name,
-    messageLength: messageText.length,
-    messagePreview: messageText.substring(0, 150)
+    botName: botConfig.name
+  }, ['processing', 'openai']);
+
+  ctxLog.info({
+    msgLen: messageText.length,
+    msgPreview: truncateText(messageText, 120)
   }, '[processAIBotResponse] Starting to process message');
 
   try {
     // Получить информацию о лиде
-    log.debug({ phone, instanceName }, '[processAIBotResponse] Fetching lead from database');
+    ctxLog.checkpoint('fetch_lead');
+    ctxLog.debug({ phone: maskPhone(phone) }, '[processAIBotResponse] Fetching lead from database', ['db']);
+
     const { data: lead, error: leadError } = await supabase
       .from('dialog_analysis')
       .select('*')
@@ -483,52 +529,45 @@ async function processAIBotResponse(
       .maybeSingle();
 
     if (leadError) {
-      log.error({
-        error: leadError.message,
-        code: leadError.code,
-        phone,
-        instanceName
-      }, '[processAIBotResponse] Error fetching lead');
+      ctxLog.error(leadError, '[processAIBotResponse] Error fetching lead', {
+        phone: maskPhone(phone)
+      }, ['db']);
       return;
     }
 
     if (!lead) {
-      log.warn({ phone, instanceName }, '[processAIBotResponse] Lead not found');
+      ctxLog.warn({ phone: maskPhone(phone) }, '[processAIBotResponse] Lead not found', ['db']);
       return;
     }
 
-    log.debug({
-      leadId: lead.id,
-      contactName: lead.contact_name,
-      funnelStage: lead.funnel_stage,
-      interestLevel: lead.interest_level,
-      botPaused: lead.bot_paused,
-      assignedToHuman: lead.assigned_to_human
-    }, '[processAIBotResponse] Lead found');
+    ctxLog.updateContext({ leadId: lead.id });
+    logDbOperation(ctxLog, 'select', 'dialog_analysis', {
+      leadId: maskUuid(lead.id),
+      funnelStage: lead.funnel_stage
+    }, true);
 
     // Проверить условия ответа
-    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig, messageText);
+    ctxLog.checkpoint('check_respond');
+    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig, messageText, ctxLog);
     if (!shouldRespond) {
       // Если обнаружена стоп-фраза, поставить бота на паузу
       if (reason === 'stop_phrase_detected') {
-        log.info({ leadId: lead.id }, '[processAIBotResponse] Pausing bot due to stop phrase');
+        ctxLog.info({ action: 'pause_bot' }, '[processAIBotResponse] Pausing bot due to stop phrase', ['db']);
         await supabase
           .from('dialog_analysis')
           .update({ bot_paused: true })
           .eq('id', lead.id);
       }
-      log.info({
-        phone,
-        leadId: lead.id,
+      ctxLog.info({
         reason,
-        elapsed: Date.now() - startTime
+        ...ctxLog.getTimings()
       }, '[processAIBotResponse] Bot should not respond, exiting');
       return;
     }
 
     // Если обнаружена фраза возобновления, снять паузу
     if (reason === 'resume_phrase_detected') {
-      log.info({ leadId: lead.id }, '[processAIBotResponse] Resuming bot due to resume phrase');
+      ctxLog.info({ action: 'resume_bot' }, '[processAIBotResponse] Resuming bot due to resume phrase', ['db']);
       await supabase
         .from('dialog_analysis')
         .update({ bot_paused: false, bot_paused_until: null })
@@ -538,48 +577,55 @@ async function processAIBotResponse(
     // Создать клиент OpenAI (свой ключ или дефолтный)
     const apiKey = botConfig.custom_openai_api_key || OPENAI_API_KEY;
     if (!apiKey) {
-      log.error({ botId: botConfig.id }, '[processAIBotResponse] No OpenAI API key configured');
+      ctxLog.error(new Error('No API key'), '[processAIBotResponse] No OpenAI API key configured', {}, ['config']);
       return;
     }
 
-    log.debug({
+    ctxLog.debug({
       hasCustomKey: !!botConfig.custom_openai_api_key,
       model: botConfig.model,
-      temperature: botConfig.temperature
-    }, '[processAIBotResponse] Initializing OpenAI client');
+      temp: botConfig.temperature,
+      apiKeyMasked: maskApiKey(apiKey)
+    }, '[processAIBotResponse] Initializing OpenAI client', ['openai']);
 
     const openai = new OpenAI({ apiKey });
 
     // Генерировать ответ
-    log.info({ leadId: lead.id, botId: botConfig.id }, '[processAIBotResponse] Calling generateAIResponse');
+    ctxLog.checkpoint('generate_ai');
+    ctxLog.info({}, '[processAIBotResponse] Calling generateAIResponse', ['openai']);
+
     const aiStartTime = Date.now();
-    const response = await generateAIResponse(lead, messageText, botConfig, openai);
+    const response = await generateAIResponse(lead, messageText, botConfig, openai, ctxLog);
     const aiElapsed = Date.now() - aiStartTime;
 
-    log.info({
-      leadId: lead.id,
+    logOpenAiCall(ctxLog, {
+      model: botConfig.model,
+      latencyMs: aiElapsed,
+      success: !!response.text
+    });
+
+    ctxLog.info({
       hasText: !!response.text,
-      textLength: response.text?.length || 0,
-      hasFunctionCall: !!response.functionCall,
+      textLen: response.text?.length || 0,
+      hasFunc: !!response.functionCall,
       moveToStage: response.moveToStage,
-      needsHuman: response.needsHuman,
-      aiElapsedMs: aiElapsed
-    }, '[processAIBotResponse] AI response generated');
+      needsHuman: response.needsHuman
+    }, '[processAIBotResponse] AI response generated', ['openai']);
 
     if (!response.text) {
-      log.warn({ phone, leadId: lead.id }, '[processAIBotResponse] No response text generated');
+      ctxLog.warn({}, '[processAIBotResponse] No response text generated', ['openai']);
       return;
     }
 
     // Очистить markdown если нужно
     let finalText = response.text;
     if (botConfig.clean_markdown) {
-      const beforeLength = finalText.length;
+      const beforeLen = finalText.length;
       finalText = cleanMarkdown(finalText);
-      log.debug({
-        beforeLength,
-        afterLength: finalText.length,
-        cleaned: beforeLength - finalText.length
+      ctxLog.debug({
+        beforeLen,
+        afterLen: finalText.length,
+        removed: beforeLen - finalText.length
       }, '[processAIBotResponse] Markdown cleaned');
     }
 
@@ -587,32 +633,30 @@ async function processAIBotResponse(
     let chunks: string[];
     if (botConfig.split_messages) {
       chunks = splitMessage(finalText, botConfig.split_max_length);
-      log.debug({
+      ctxLog.debug({
         splitEnabled: true,
-        maxLength: botConfig.split_max_length,
-        chunksCount: chunks.length,
-        chunkLengths: chunks.map(c => c.length)
+        maxLen: botConfig.split_max_length,
+        chunksCount: chunks.length
       }, '[processAIBotResponse] Message split into chunks');
     } else {
       chunks = [finalText];
     }
 
     // Отправить сообщения
-    log.info({
-      phone,
-      instanceName,
+    ctxLog.checkpoint('send_message');
+    ctxLog.info({
       chunksCount: chunks.length,
-      totalLength: finalText.length
-    }, '[processAIBotResponse] Sending messages via Evolution API');
+      totalLen: finalText.length
+    }, '[processAIBotResponse] Sending messages via Evolution API', ['message']);
 
+    const sendStartTime = Date.now();
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      log.debug({
-        chunkIndex: i + 1,
+      ctxLog.debug({
+        chunkIdx: i + 1,
         totalChunks: chunks.length,
-        chunkLength: chunk.length,
-        chunkPreview: chunk.substring(0, 100)
-      }, '[processAIBotResponse] Sending chunk');
+        chunkLen: chunk.length
+      }, '[processAIBotResponse] Sending chunk', ['message']);
 
       await sendMessage({
         instanceName,
@@ -621,18 +665,23 @@ async function processAIBotResponse(
       });
 
       if (chunks.length > 1 && i < chunks.length - 1) {
-        log.debug({ delayMs: 2000 }, '[processAIBotResponse] Waiting between chunks');
-        await delay(2000); // 2 сек между частями
+        await delay(2000);
       }
     }
 
+    logOutgoingMessage(ctxLog, {
+      messageLength: finalText.length,
+      chunksCount: chunks.length,
+      latencyMs: Date.now() - sendStartTime,
+      success: true
+    });
+
     // Обновить этап воронки если нужно
     if (response.moveToStage) {
-      log.info({
-        leadId: lead.id,
+      ctxLog.info({
         oldStage: lead.funnel_stage,
         newStage: response.moveToStage
-      }, '[processAIBotResponse] Moving lead to new funnel stage');
+      }, '[processAIBotResponse] Moving lead to new funnel stage', ['db']);
 
       await supabase
         .from('dialog_analysis')
@@ -642,7 +691,7 @@ async function processAIBotResponse(
 
     // Если нужен менеджер
     if (response.needsHuman) {
-      log.info({ leadId: lead.id }, '[processAIBotResponse] Transferring lead to human');
+      ctxLog.info({ action: 'transfer_human' }, '[processAIBotResponse] Transferring lead to human', ['db']);
 
       await supabase
         .from('dialog_analysis')
@@ -652,13 +701,11 @@ async function processAIBotResponse(
 
     // Выполнить функцию если указана
     if (response.functionCall) {
-      log.info({
-        leadId: lead.id,
-        functionName: response.functionCall.name,
-        arguments: response.functionCall.arguments
+      ctxLog.info({
+        funcName: response.functionCall.name
       }, '[processAIBotResponse] Executing function call');
 
-      await handleFunctionCall(response.functionCall, lead, botConfig, app);
+      await handleFunctionCall(response.functionCall, lead, botConfig, app, ctxLog);
     }
 
     // Обновить время последнего сообщения
@@ -667,30 +714,22 @@ async function processAIBotResponse(
       .update({ last_bot_message_at: new Date().toISOString() })
       .eq('id', lead.id);
 
-    const totalElapsed = Date.now() - startTime;
-    log.info({
-      phone,
-      leadId: lead.id,
-      responseLength: finalText.length,
+    ctxLog.info({
+      responseLen: finalText.length,
       chunksCount: chunks.length,
-      aiElapsedMs: aiElapsed,
-      totalElapsedMs: totalElapsed
+      ...ctxLog.getTimings()
     }, '[processAIBotResponse] Bot response sent successfully');
 
   } catch (error: any) {
-    log.error({
-      error: error.message,
-      stack: error.stack,
-      phone,
-      instanceName,
-      botId: botConfig.id,
-      elapsed: Date.now() - startTime
-    }, '[processAIBotResponse] Error processing message');
+    ctxLog.error(error, '[processAIBotResponse] Error processing message', {
+      phone: maskPhone(phone),
+      ...ctxLog.getTimings()
+    });
 
     // Отправить сообщение об ошибке если настроено
     if (botConfig.error_message) {
-      log.debug({
-        errorMessage: botConfig.error_message.substring(0, 100)
+      ctxLog.debug({
+        errorMsgLen: botConfig.error_message.length
       }, '[processAIBotResponse] Sending error message to user');
 
       try {
@@ -700,9 +739,7 @@ async function processAIBotResponse(
           message: botConfig.error_message
         });
       } catch (e) {
-        log.error({
-          error: (e as any).message
-        }, '[processAIBotResponse] Failed to send error message');
+        ctxLog.error(e, '[processAIBotResponse] Failed to send error message');
       }
     }
   }
@@ -714,18 +751,19 @@ async function processAIBotResponse(
  */
 async function loadMessageHistory(
   leadId: string,
-  config: AIBotConfig
+  config: AIBotConfig,
+  ctxLog?: ContextLogger
 ): Promise<OpenAI.Chat.Completions.ChatCompletionMessageParam[]> {
+  const log = ctxLog || createContextLogger(baseLog, { leadId }, ['db']);
+
   log.debug({
-    leadId,
-    historyTokenLimit: config.history_token_limit,
-    historyMessageLimit: config.history_message_limit,
-    historyTimeLimitHours: config.history_time_limit_hours
-  }, '[loadMessageHistory] Starting to load message history');
+    tokenLimit: config.history_token_limit,
+    msgLimit: config.history_message_limit,
+    timeLimitH: config.history_time_limit_hours
+  }, '[loadMessageHistory] Starting to load message history', ['db']);
 
   try {
     // Получить messages из dialog_analysis
-    log.debug({ leadId }, '[loadMessageHistory] Fetching messages from dialog_analysis');
     const { data: lead, error } = await supabase
       .from('dialog_analysis')
       .select('messages')
@@ -734,24 +772,21 @@ async function loadMessageHistory(
 
     if (error) {
       log.warn({
-        leadId,
-        error: error.message,
-        code: error.code
-      }, '[loadMessageHistory] Error fetching messages from database');
+        errorCode: error.code
+      }, '[loadMessageHistory] Error fetching messages from database', ['db']);
       return [];
     }
 
     if (!lead?.messages) {
-      log.debug({ leadId }, '[loadMessageHistory] No message history found in database');
+      log.debug({}, '[loadMessageHistory] No message history found in database', ['db']);
       return [];
     }
 
     // messages - это JSONB массив [{sender, content, timestamp}, ...]
     const rawMessages = Array.isArray(lead.messages) ? lead.messages : [];
     log.debug({
-      leadId,
-      rawMessageCount: rawMessages.length
-    }, '[loadMessageHistory] Raw messages loaded from JSONB');
+      rawCount: rawMessages.length
+    }, '[loadMessageHistory] Raw messages loaded from JSONB', ['db']);
 
     // Фильтровать по времени если задано
     const now = new Date();
@@ -765,12 +800,9 @@ async function loadMessageHistory(
         return msgTime >= cutoff;
       });
       log.debug({
-        leadId,
-        timeLimitHours: config.history_time_limit_hours,
-        cutoffTime: cutoff.toISOString(),
+        timeLimitH: config.history_time_limit_hours,
         beforeCount,
-        afterCount: filteredMessages.length,
-        filtered: beforeCount - filteredMessages.length
+        afterCount: filteredMessages.length
       }, '[loadMessageHistory] Applied time filter');
     }
 
@@ -779,8 +811,7 @@ async function loadMessageHistory(
       const beforeCount = filteredMessages.length;
       filteredMessages = filteredMessages.slice(-config.history_message_limit);
       log.debug({
-        leadId,
-        messageLimit: config.history_message_limit,
+        msgLimit: config.history_message_limit,
         beforeCount,
         afterCount: filteredMessages.length
       }, '[loadMessageHistory] Applied message limit');
@@ -817,22 +848,17 @@ async function loadMessageHistory(
     }
 
     log.info({
-      leadId,
-      rawMessages: rawMessages.length,
-      afterFilters: filteredMessages.length,
+      rawCount: rawMessages.length,
+      filteredCount: filteredMessages.length,
       finalCount: history.length,
-      estimatedTokens: totalTokens,
+      estTokens: totalTokens,
       tokenLimit,
-      skippedDueToTokens
+      skipped: skippedDueToTokens
     }, '[loadMessageHistory] Message history loaded successfully');
 
     return history;
   } catch (error: any) {
-    log.error({
-      error: error.message,
-      stack: error.stack,
-      leadId
-    }, '[loadMessageHistory] Unexpected error loading message history');
+    log.error(error, '[loadMessageHistory] Unexpected error loading message history');
     return [];
   }
 }
@@ -844,25 +870,28 @@ async function generateAIResponse(
   lead: LeadInfo,
   messageText: string,
   config: AIBotConfig,
-  openai: OpenAI
+  openai: OpenAI,
+  ctxLog?: ContextLogger
 ): Promise<{
   text: string;
   moveToStage?: string;
   needsHuman?: boolean;
   functionCall?: { name: string; arguments: any };
 }> {
-  const startTime = Date.now();
-
-  log.info({
+  const log = ctxLog || createContextLogger(baseLog, {
     leadId: lead.id,
-    botId: config.id,
+    botId: config.id
+  }, ['openai']);
+
+  log.checkpoint('start_generate');
+  log.info({
     model: config.model,
-    temperature: config.temperature,
-    messageLength: messageText.length
-  }, '[generateAIResponse] Starting AI response generation');
+    temp: config.temperature,
+    msgLen: messageText.length
+  }, '[generateAIResponse] Starting AI response generation', ['openai']);
 
   // Получить функции бота
-  log.debug({ botId: config.id }, '[generateAIResponse] Fetching bot functions');
+  log.debug({}, '[generateAIResponse] Fetching bot functions', ['db']);
   const { data: functions, error: functionsError } = await supabase
     .from('ai_bot_functions')
     .select('*')
@@ -871,21 +900,19 @@ async function generateAIResponse(
 
   if (functionsError) {
     log.warn({
-      error: functionsError.message,
-      botId: config.id
-    }, '[generateAIResponse] Error fetching bot functions');
+      errorCode: functionsError.code
+    }, '[generateAIResponse] Error fetching bot functions', ['db']);
   }
 
   log.debug({
-    functionCount: functions?.length || 0,
-    functionNames: functions?.map(f => f.name) || []
-  }, '[generateAIResponse] Bot functions loaded');
+    funcCount: functions?.length || 0,
+    funcNames: functions?.map(f => f.name) || []
+  }, '[generateAIResponse] Bot functions loaded', ['db']);
 
   // Построить системный промпт
   let systemPrompt = config.system_prompt || 'Ты — AI-ассистент.';
   log.debug({
-    systemPromptLength: systemPrompt.length,
-    systemPromptPreview: systemPrompt.substring(0, 200)
+    promptLen: systemPrompt.length
   }, '[generateAIResponse] Base system prompt');
 
   // Добавить текущую дату/время если включено
@@ -902,13 +929,10 @@ async function generateAIResponse(
     });
     const formattedDate = formatter.format(now);
     systemPrompt += `\n\nТекущая дата и время: ${formattedDate}`;
-    log.debug({
-      timezone: config.timezone,
-      formattedDate
-    }, '[generateAIResponse] Added datetime to prompt');
+    log.debug({ datetime: formattedDate }, '[generateAIResponse] Added datetime to prompt');
   }
 
-  // Добавить информацию о клиенте
+  // Добавить информацию о клиенте (маскируем телефон)
   const clientInfo = `
 Информация о клиенте:
 - Имя: ${lead.contact_name || 'неизвестно'}
@@ -919,9 +943,7 @@ async function generateAIResponse(
 
   log.debug({
     clientName: lead.contact_name,
-    clientPhone: lead.contact_phone,
     businessType: lead.business_type,
-    interestLevel: lead.interest_level,
     funnelStage: lead.funnel_stage
   }, '[generateAIResponse] Client info added to prompt');
 
@@ -942,7 +964,7 @@ async function generateAIResponse(
     log.debug({
       toolsCount: tools.length,
       toolNames: tools.map(t => t.function.name)
-    }, '[generateAIResponse] Prepared OpenAI tools');
+    }, '[generateAIResponse] Prepared OpenAI tools', ['openai']);
   }
 
   // Маппинг моделей
@@ -964,12 +986,12 @@ async function generateAIResponse(
   log.debug({
     configModel: config.model,
     mappedModel: model
-  }, '[generateAIResponse] Model mapping');
+  }, '[generateAIResponse] Model mapping', ['openai']);
 
   try {
     // Загрузить историю сообщений
-    log.debug({ leadId: lead.id }, '[generateAIResponse] Loading message history');
-    const history = await loadMessageHistory(lead.id, config);
+    log.checkpoint('load_history');
+    const history = await loadMessageHistory(lead.id, config, log);
 
     // Собрать массив сообщений: system + history + текущее
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -979,11 +1001,10 @@ async function generateAIResponse(
     ];
 
     log.debug({
-      totalMessages: messages.length,
-      systemPromptLength: (systemPrompt + clientInfo).length,
-      historyLength: history.length,
-      userMessageLength: messageText.length
-    }, '[generateAIResponse] Messages array prepared');
+      totalMsgs: messages.length,
+      historyLen: history.length,
+      userMsgLen: messageText.length
+    }, '[generateAIResponse] Messages array prepared', ['openai']);
 
     const completionParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model,
@@ -997,13 +1018,14 @@ async function generateAIResponse(
       completionParams.tool_choice = 'auto';
     }
 
+    log.checkpoint('api_call');
     log.info({
       model,
-      temperature: config.temperature,
+      temp: config.temperature,
       maxTokens: 1000,
-      messagesCount: messages.length,
+      msgsCount: messages.length,
       toolsCount: tools.length
-    }, '[generateAIResponse] Calling OpenAI API');
+    }, '[generateAIResponse] Calling OpenAI API', ['openai', 'api']);
 
     const apiStartTime = Date.now();
     const completion = await openai.chat.completions.create(completionParams);
@@ -1011,29 +1033,31 @@ async function generateAIResponse(
 
     const choice = completion.choices[0];
 
-    log.info({
-      apiElapsedMs: apiElapsed,
-      finishReason: choice.finish_reason,
-      hasContent: !!choice.message.content,
-      contentLength: choice.message.content?.length || 0,
-      hasToolCalls: !!choice.message.tool_calls?.length,
-      toolCallsCount: choice.message.tool_calls?.length || 0,
+    logOpenAiCall(log, {
+      model,
       promptTokens: completion.usage?.prompt_tokens,
       completionTokens: completion.usage?.completion_tokens,
-      totalTokens: completion.usage?.total_tokens
-    }, '[generateAIResponse] OpenAI API response received');
+      totalTokens: completion.usage?.total_tokens,
+      latencyMs: apiElapsed,
+      success: true
+    });
+
+    log.info({
+      finishReason: choice.finish_reason,
+      hasContent: !!choice.message.content,
+      contentLen: choice.message.content?.length || 0,
+      hasToolCalls: !!choice.message.tool_calls?.length
+    }, '[generateAIResponse] OpenAI API response received', ['openai']);
 
     // Проверить вызов функции
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       const toolCall = choice.message.tool_calls[0];
       log.info({
-        functionName: toolCall.function.name,
-        argumentsRaw: toolCall.function.arguments,
-        contentWithCall: choice.message.content?.substring(0, 100)
-      }, '[generateAIResponse] Function call detected');
+        funcName: toolCall.function.name,
+        argsPreview: truncateText(toolCall.function.arguments, 80)
+      }, '[generateAIResponse] Function call detected', ['openai']);
 
-      const totalElapsed = Date.now() - startTime;
-      log.info({ totalElapsedMs: totalElapsed }, '[generateAIResponse] Completed with function call');
+      log.info({ ...log.getTimings() }, '[generateAIResponse] Completed with function call');
 
       return {
         text: choice.message.content || '',
@@ -1044,28 +1068,31 @@ async function generateAIResponse(
       };
     }
 
-    const totalElapsed = Date.now() - startTime;
     log.info({
-      responseLength: choice.message.content?.length || 0,
-      responsePreview: choice.message.content?.substring(0, 150),
-      totalElapsedMs: totalElapsed
-    }, '[generateAIResponse] Completed with text response');
+      responseLen: choice.message.content?.length || 0,
+      responsePreview: truncateText(choice.message.content, 100),
+      ...log.getTimings()
+    }, '[generateAIResponse] Completed with text response', ['openai']);
 
     return {
       text: choice.message.content || ''
     };
 
   } catch (error: any) {
-    const elapsed = Date.now() - startTime;
-    log.error({
-      error: error.message,
-      stack: error.stack,
+    logOpenAiCall(log, {
+      model,
+      latencyMs: 0,
+      success: false,
+      errorMessage: error.message
+    });
+
+    log.error(error, '[generateAIResponse] Error calling OpenAI', {
+      model,
       errorCode: error.code,
       errorStatus: error.status,
-      leadId: lead.id,
-      model,
-      elapsedMs: elapsed
-    }, '[generateAIResponse] Error calling OpenAI');
+      ...log.getTimings()
+    }, ['openai', 'api']);
+
     return { text: '' };
   }
 }
@@ -1077,23 +1104,25 @@ async function handleFunctionCall(
   functionCall: { name: string; arguments: any },
   lead: LeadInfo,
   botConfig: AIBotConfig,
-  app: FastifyInstance
+  app: FastifyInstance,
+  ctxLog?: ContextLogger
 ): Promise<void> {
-  const startTime = Date.now();
-
-  log.info({
-    functionName: functionCall.name,
-    arguments: functionCall.arguments,
+  const log = ctxLog || createContextLogger(baseLog, {
     leadId: lead.id,
     botId: botConfig.id
+  }, ['processing']);
+
+  log.checkpoint('start_function');
+  log.info({
+    funcName: functionCall.name,
+    argsKeys: Object.keys(functionCall.arguments || {})
   }, '[handleFunctionCall] Starting function execution');
 
   try {
     // Получить конфигурацию функции
     log.debug({
-      botId: botConfig.id,
-      functionName: functionCall.name
-    }, '[handleFunctionCall] Fetching function config from database');
+      funcName: functionCall.name
+    }, '[handleFunctionCall] Fetching function config from database', ['db']);
 
     const { data: func, error: funcError } = await supabase
       .from('ai_bot_functions')
@@ -1104,67 +1133,55 @@ async function handleFunctionCall(
       .maybeSingle();
 
     if (funcError) {
-      log.error({
-        error: funcError.message,
-        code: funcError.code,
-        functionName: functionCall.name
-      }, '[handleFunctionCall] Error fetching function config');
+      log.error(funcError, '[handleFunctionCall] Error fetching function config', {
+        funcName: functionCall.name
+      }, ['db']);
       return;
     }
 
     if (!func) {
       log.warn({
-        functionName: functionCall.name,
-        botId: botConfig.id
-      }, '[handleFunctionCall] Function not found or inactive');
+        funcName: functionCall.name
+      }, '[handleFunctionCall] Function not found or inactive', ['db']);
       return;
     }
 
-    log.debug({
-      functionId: func.id,
-      functionName: func.name,
-      handlerType: func.handler_type,
-      handlerConfig: func.handler_config
-    }, '[handleFunctionCall] Function config loaded');
+    logDbOperation(log, 'select', 'ai_bot_functions', {
+      funcId: maskUuid(func.id),
+      handlerType: func.handler_type
+    }, true);
 
     switch (func.handler_type) {
       case 'forward_to_manager':
         log.info({
-          leadId: lead.id,
-          phone: lead.contact_phone
-        }, '[handleFunctionCall] Forwarding lead to manager');
+          phone: maskPhone(lead.contact_phone),
+          action: 'forward_to_manager'
+        }, '[handleFunctionCall] Forwarding lead to manager', ['db']);
 
-        // Передать менеджеру
         const { error: forwardError } = await supabase
           .from('dialog_analysis')
           .update({ assigned_to_human: true, bot_paused: true })
           .eq('id', lead.id);
 
         if (forwardError) {
-          log.error({
-            error: forwardError.message,
-            leadId: lead.id
-          }, '[handleFunctionCall] Error updating lead for manager forward');
+          log.error(forwardError, '[handleFunctionCall] Error updating lead for manager forward', {}, ['db']);
         } else {
-          log.info({
-            leadId: lead.id,
-            elapsed: Date.now() - startTime
-          }, '[handleFunctionCall] Successfully forwarded to manager');
+          logDbOperation(log, 'update', 'dialog_analysis', { action: 'forward_to_manager' }, true);
+          log.info({ ...log.getTimings() }, '[handleFunctionCall] Successfully forwarded to manager');
         }
         break;
 
       case 'internal':
         log.debug({
-          functionName: functionCall.name,
-          arguments: functionCall.arguments
+          funcName: functionCall.name,
+          argsKeys: Object.keys(functionCall.arguments || {})
         }, '[handleFunctionCall] Processing internal function');
 
         // Внутренняя обработка
         if (functionCall.name === 'save_user_data') {
           log.info({
-            leadId: lead.id,
-            dataToSave: functionCall.arguments
-          }, '[handleFunctionCall] Saving user data');
+            fieldsToSave: Object.keys(functionCall.arguments || {})
+          }, '[handleFunctionCall] Saving user data', ['db']);
 
           const { error: saveError } = await supabase
             .from('dialog_analysis')
@@ -1172,20 +1189,16 @@ async function handleFunctionCall(
             .eq('id', lead.id);
 
           if (saveError) {
-            log.error({
-              error: saveError.message,
-              leadId: lead.id
-            }, '[handleFunctionCall] Error saving user data');
+            log.error(saveError, '[handleFunctionCall] Error saving user data', {}, ['db']);
           } else {
-            log.info({
-              leadId: lead.id,
-              savedFields: Object.keys(functionCall.arguments),
-              elapsed: Date.now() - startTime
-            }, '[handleFunctionCall] User data saved successfully');
+            logDbOperation(log, 'update', 'dialog_analysis', {
+              savedFields: Object.keys(functionCall.arguments || {})
+            }, true);
+            log.info({ ...log.getTimings() }, '[handleFunctionCall] User data saved successfully');
           }
         } else {
           log.warn({
-            functionName: functionCall.name
+            funcName: functionCall.name
           }, '[handleFunctionCall] Unknown internal function');
         }
         break;
@@ -1205,9 +1218,8 @@ async function handleFunctionCall(
           };
 
           log.info({
-            webhookUrl,
             payloadSize: JSON.stringify(webhookPayload).length
-          }, '[handleFunctionCall] Calling external webhook');
+          }, '[handleFunctionCall] Calling external webhook', ['webhook', 'api']);
 
           try {
             const webhookStartTime = Date.now();
@@ -1219,49 +1231,51 @@ async function handleFunctionCall(
 
             const webhookElapsed = Date.now() - webhookStartTime;
 
-            log.info({
-              webhookUrl,
-              status: response.status,
-              statusText: response.statusText,
-              webhookElapsedMs: webhookElapsed,
-              totalElapsedMs: Date.now() - startTime
-            }, '[handleFunctionCall] Webhook called successfully');
+            logWebhookCall(log, {
+              url: webhookUrl,
+              method: 'POST',
+              statusCode: response.status,
+              latencyMs: webhookElapsed,
+              success: response.ok
+            });
+
+            log.info({ ...log.getTimings() }, '[handleFunctionCall] Webhook called successfully', ['webhook']);
           } catch (e) {
-            log.error({
-              error: (e as any).message,
-              webhookUrl,
-              functionName: functionCall.name
-            }, '[handleFunctionCall] Webhook call failed');
+            logWebhookCall(log, {
+              url: webhookUrl,
+              method: 'POST',
+              latencyMs: 0,
+              success: false,
+              errorMessage: (e as any).message
+            });
+            log.error(e, '[handleFunctionCall] Webhook call failed', {}, ['webhook', 'api']);
           }
         } else {
           log.warn({
-            functionName: functionCall.name,
-            handlerConfig: func.handler_config
-          }, '[handleFunctionCall] Webhook URL not configured');
+            funcName: functionCall.name,
+            reason: 'no_url'
+          }, '[handleFunctionCall] Webhook URL not configured', ['webhook']);
         }
         break;
 
       default:
         log.warn({
           handlerType: func.handler_type,
-          functionName: functionCall.name
+          funcName: functionCall.name
         }, '[handleFunctionCall] Unknown handler type');
     }
 
     log.info({
-      functionName: functionCall.name,
+      funcName: functionCall.name,
       handlerType: func.handler_type,
-      elapsed: Date.now() - startTime
+      ...log.getTimings()
     }, '[handleFunctionCall] Function execution completed');
 
   } catch (error: any) {
-    log.error({
-      error: error.message,
-      stack: error.stack,
-      functionName: functionCall.name,
-      leadId: lead.id,
-      elapsed: Date.now() - startTime
-    }, '[handleFunctionCall] Unexpected error handling function call');
+    log.error(error, '[handleFunctionCall] Unexpected error handling function call', {
+      funcName: functionCall.name,
+      ...log.getTimings()
+    });
   }
 }
 
@@ -1310,6 +1324,7 @@ function delay(ms: number): Promise<void> {
 
 /**
  * Главная точка входа - обработка входящего сообщения
+ * Создаёт correlation ID для всей цепочки обработки
  */
 export async function processIncomingMessage(
   phone: string,
@@ -1317,39 +1332,57 @@ export async function processIncomingMessage(
   messageText: string,
   messageType: 'text' | 'image' | 'audio' | 'document' | 'file',
   app: FastifyInstance
-): Promise<{ processed: boolean; reason?: string }> {
-  const startTime = Date.now();
-
-  log.info({
+): Promise<{ processed: boolean; reason?: string; correlationId?: string }> {
+  // Создаём контекстный логгер с correlation ID
+  const ctxLog = createContextLogger(baseLog, {
     phone,
-    instanceName,
+    instanceName
+  }, ['message', 'processing']);
+
+  ctxLog.info({
+    msgType: messageType,
+    msgLength: messageText?.length || 0,
+    msgPreview: truncateText(messageText, 80)
+  }, '[processIncomingMessage] === NEW INCOMING MESSAGE ===');
+
+  // Логируем входящее сообщение со структурой
+  logIncomingMessage(ctxLog, {
     messageType,
     messageLength: messageText?.length || 0,
-    messagePreview: messageText?.substring(0, 100) || '[empty]'
-  }, '[processIncomingMessage] === NEW INCOMING MESSAGE ===');
+    hasMedia: ['image', 'audio', 'document', 'file'].includes(messageType)
+  });
 
   try {
     // Получить конфигурацию бота для этого инстанса
-    log.debug({ instanceName }, '[processIncomingMessage] Fetching bot configuration');
-    const botConfig = await getBotConfigForInstance(instanceName);
+    ctxLog.checkpoint('fetch_config');
+    ctxLog.debug({ instance: instanceName }, '[processIncomingMessage] Fetching bot configuration', ['config']);
+    const botConfig = await getBotConfigForInstance(instanceName, ctxLog);
 
     if (!botConfig) {
-      log.warn({
-        instanceName,
-        elapsed: Date.now() - startTime
-      }, '[processIncomingMessage] No bot config found, message will not be processed');
-      return { processed: false, reason: 'no_bot_config' };
+      ctxLog.warn({
+        reason: 'no_bot_config',
+        ...ctxLog.getTimings()
+      }, '[processIncomingMessage] No bot config found, message will not be processed', ['config']);
+      return { processed: false, reason: 'no_bot_config', correlationId: ctxLog.context.correlationId };
     }
 
-    log.info({
+    // Обновляем контекст с данными бота
+    ctxLog.updateContext({
       botId: botConfig.id,
+      botName: botConfig.name
+    });
+
+    ctxLog.info({
+      botId: maskUuid(botConfig.id),
       botName: botConfig.name,
       model: botConfig.model,
       isActive: botConfig.is_active
-    }, '[processIncomingMessage] Bot config loaded');
+    }, '[processIncomingMessage] Bot config loaded', ['config']);
 
     // Получить информацию о лиде
-    log.debug({ phone, instanceName }, '[processIncomingMessage] Fetching lead info');
+    ctxLog.checkpoint('fetch_lead');
+    ctxLog.debug({ phone: maskPhone(phone) }, '[processIncomingMessage] Fetching lead info', ['db']);
+
     const { data: lead, error: leadError } = await supabase
       .from('dialog_analysis')
       .select('*')
@@ -1358,66 +1391,62 @@ export async function processIncomingMessage(
       .maybeSingle();
 
     if (leadError) {
-      log.error({
-        error: leadError.message,
-        code: leadError.code,
-        phone,
-        instanceName
-      }, '[processIncomingMessage] Error fetching lead');
-      return { processed: false, reason: 'lead_fetch_error' };
+      ctxLog.error(leadError, '[processIncomingMessage] Error fetching lead', {
+        phone: maskPhone(phone),
+        instance: instanceName
+      }, ['db']);
+      return { processed: false, reason: 'lead_fetch_error', correlationId: ctxLog.context.correlationId };
     }
 
     if (!lead) {
-      log.warn({
-        phone,
-        instanceName,
-        elapsed: Date.now() - startTime
-      }, '[processIncomingMessage] Lead not found in dialog_analysis');
-      return { processed: false, reason: 'lead_not_found' };
+      ctxLog.warn({
+        phone: maskPhone(phone),
+        reason: 'lead_not_found',
+        ...ctxLog.getTimings()
+      }, '[processIncomingMessage] Lead not found in dialog_analysis', ['db']);
+      return { processed: false, reason: 'lead_not_found', correlationId: ctxLog.context.correlationId };
     }
 
-    log.debug({
-      leadId: lead.id,
+    // Обновляем контекст с данными лида
+    ctxLog.updateContext({ leadId: lead.id });
+
+    logDbOperation(ctxLog, 'select', 'dialog_analysis', {
+      leadId: maskUuid(lead.id),
       contactName: lead.contact_name,
-      funnelStage: lead.funnel_stage,
-      botPaused: lead.bot_paused,
-      assignedToHuman: lead.assigned_to_human
-    }, '[processIncomingMessage] Lead info loaded');
+      funnelStage: lead.funnel_stage
+    }, true);
 
     // Проверить, должен ли бот ответить
-    log.debug({ leadId: lead.id }, '[processIncomingMessage] Checking if bot should respond');
-    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig);
+    ctxLog.checkpoint('check_respond');
+    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig, undefined, ctxLog);
     if (!shouldRespond) {
-      log.info({
-        leadId: lead.id,
+      ctxLog.info({
         reason,
-        elapsed: Date.now() - startTime
+        ...ctxLog.getTimings()
       }, '[processIncomingMessage] Bot should not respond');
-      return { processed: false, reason };
+      return { processed: false, reason, correlationId: ctxLog.context.correlationId };
     }
 
     // Обработка разных типов сообщений
     let textToProcess = messageText;
 
-    log.debug({
-      messageType,
+    ctxLog.debug({
+      msgType: messageType,
       hasText: !!messageText,
       textLength: messageText?.length || 0
     }, '[processIncomingMessage] Processing message by type');
 
     switch (messageType) {
       case 'audio':
-        log.debug({
-          voiceRecognitionEnabled: botConfig.voice_recognition_enabled
+        ctxLog.debug({
+          voiceEnabled: botConfig.voice_recognition_enabled
         }, '[processIncomingMessage] Processing audio message');
 
         if (!botConfig.voice_recognition_enabled) {
-          log.info({
-            leadId: lead.id,
-            hasDefaultResponse: !!botConfig.voice_default_response
+          ctxLog.info({
+            hasDefault: !!botConfig.voice_default_response
           }, '[processIncomingMessage] Voice recognition disabled, sending default response');
 
-          // Распознавание выключено - отправить дефолтный ответ
           if (botConfig.voice_default_response) {
             await sendMessage({
               instanceName,
@@ -1425,31 +1454,25 @@ export async function processIncomingMessage(
               message: botConfig.voice_default_response
             });
           }
-          return { processed: true, reason: 'voice_not_supported' };
+          return { processed: true, reason: 'voice_not_supported', correlationId: ctxLog.context.correlationId };
         }
-        // TODO: Добавить транскрипцию через Whisper
-        // Пока что обрабатываем как текст (messageText может содержать транскрипцию от Evolution API)
         if (!messageText || messageText.trim() === '') {
-          log.warn({ leadId: lead.id }, '[processIncomingMessage] Empty audio message (no transcription)');
-          return { processed: false, reason: 'empty_audio_message' };
+          ctxLog.warn({}, '[processIncomingMessage] Empty audio message (no transcription)');
+          return { processed: false, reason: 'empty_audio_message', correlationId: ctxLog.context.correlationId };
         }
-        log.debug({
-          transcriptionLength: messageText.length
-        }, '[processIncomingMessage] Audio has transcription, processing as text');
+        ctxLog.debug({ transcriptionLen: messageText.length }, '[processIncomingMessage] Audio has transcription');
         break;
 
       case 'image':
-        log.debug({
-          imageRecognitionEnabled: botConfig.image_recognition_enabled
+        ctxLog.debug({
+          imageEnabled: botConfig.image_recognition_enabled
         }, '[processIncomingMessage] Processing image message');
 
         if (!botConfig.image_recognition_enabled) {
-          log.info({
-            leadId: lead.id,
-            hasDefaultResponse: !!botConfig.image_default_response
+          ctxLog.info({
+            hasDefault: !!botConfig.image_default_response
           }, '[processIncomingMessage] Image recognition disabled, sending default response');
 
-          // Распознавание выключено - отправить дефолтный ответ
           if (botConfig.image_default_response) {
             await sendMessage({
               instanceName,
@@ -1457,31 +1480,25 @@ export async function processIncomingMessage(
               message: botConfig.image_default_response
             });
           }
-          return { processed: true, reason: 'image_not_supported' };
+          return { processed: true, reason: 'image_not_supported', correlationId: ctxLog.context.correlationId };
         }
-        // TODO: Добавить обработку изображений через Vision
-        // Пока что если есть caption - обработаем его
         if (!messageText || messageText.trim() === '') {
-          log.warn({ leadId: lead.id }, '[processIncomingMessage] Empty image message (no caption)');
-          return { processed: false, reason: 'empty_image_message' };
+          ctxLog.warn({}, '[processIncomingMessage] Empty image message (no caption)');
+          return { processed: false, reason: 'empty_image_message', correlationId: ctxLog.context.correlationId };
         }
-        log.debug({
-          captionLength: messageText.length
-        }, '[processIncomingMessage] Image has caption, processing as text');
+        ctxLog.debug({ captionLen: messageText.length }, '[processIncomingMessage] Image has caption');
         break;
 
       case 'document':
-        log.debug({
-          documentRecognitionEnabled: botConfig.document_recognition_enabled
+        ctxLog.debug({
+          docEnabled: botConfig.document_recognition_enabled
         }, '[processIncomingMessage] Processing document message');
 
         if (!botConfig.document_recognition_enabled) {
-          log.info({
-            leadId: lead.id,
-            hasDefaultResponse: !!botConfig.document_default_response
+          ctxLog.info({
+            hasDefault: !!botConfig.document_default_response
           }, '[processIncomingMessage] Document recognition disabled, sending default response');
 
-          // Распознавание выключено - отправить дефолтный ответ
           if (botConfig.document_default_response) {
             await sendMessage({
               instanceName,
@@ -1489,27 +1506,23 @@ export async function processIncomingMessage(
               message: botConfig.document_default_response
             });
           }
-          return { processed: true, reason: 'document_not_supported' };
+          return { processed: true, reason: 'document_not_supported', correlationId: ctxLog.context.correlationId };
         }
-        // Пока что если есть caption - обработаем его
         if (!messageText || messageText.trim() === '') {
-          log.warn({ leadId: lead.id }, '[processIncomingMessage] Empty document message (no caption)');
-          return { processed: false, reason: 'empty_document_message' };
+          ctxLog.warn({}, '[processIncomingMessage] Empty document message (no caption)');
+          return { processed: false, reason: 'empty_document_message', correlationId: ctxLog.context.correlationId };
         }
-        log.debug({
-          captionLength: messageText.length
-        }, '[processIncomingMessage] Document has caption, processing as text');
+        ctxLog.debug({ captionLen: messageText.length }, '[processIncomingMessage] Document has caption');
         break;
 
       case 'file':
-        log.debug({
-          fileHandlingMode: botConfig.file_handling_mode
+        ctxLog.debug({
+          fileMode: botConfig.file_handling_mode
         }, '[processIncomingMessage] Processing file message');
 
         if (botConfig.file_handling_mode === 'respond') {
-          log.info({
-            leadId: lead.id,
-            hasDefaultResponse: !!botConfig.file_default_response
+          ctxLog.info({
+            hasDefault: !!botConfig.file_default_response
           }, '[processIncomingMessage] File handling mode is respond');
 
           if (botConfig.file_default_response) {
@@ -1519,57 +1532,41 @@ export async function processIncomingMessage(
               message: botConfig.file_default_response
             });
           }
-          return { processed: true, reason: 'file_responded' };
+          return { processed: true, reason: 'file_responded', correlationId: ctxLog.context.correlationId };
         }
-        // file_handling_mode === 'ignore'
-        log.info({ leadId: lead.id }, '[processIncomingMessage] File ignored per config');
-        return { processed: false, reason: 'file_ignored' };
+        ctxLog.info({}, '[processIncomingMessage] File ignored per config');
+        return { processed: false, reason: 'file_ignored', correlationId: ctxLog.context.correlationId };
 
       case 'text':
       default:
-        // Проверить что текст не пустой
         if (!messageText || messageText.trim() === '') {
-          log.warn({
-            leadId: lead.id,
-            messageType
-          }, '[processIncomingMessage] Empty text message');
-          return { processed: false, reason: 'empty_message' };
+          ctxLog.warn({ msgType: messageType }, '[processIncomingMessage] Empty text message');
+          return { processed: false, reason: 'empty_message', correlationId: ctxLog.context.correlationId };
         }
-        log.debug({
-          textLength: messageText.length
-        }, '[processIncomingMessage] Text message validated');
+        ctxLog.debug({ textLen: messageText.length }, '[processIncomingMessage] Text message validated');
         break;
     }
 
     // Склеить сообщения с настраиваемым буфером
-    log.info({
-      phone,
-      instanceName,
-      textLength: textToProcess.length,
-      bufferSeconds: botConfig.message_buffer_seconds
-    }, '[processIncomingMessage] Adding to message buffer');
+    ctxLog.checkpoint('buffer');
+    ctxLog.info({
+      textLen: textToProcess.length,
+      bufferSec: botConfig.message_buffer_seconds
+    }, '[processIncomingMessage] Adding to message buffer', ['redis']);
 
-    await collectMessagesWithConfig(phone, instanceName, textToProcess, botConfig, app);
+    await collectMessagesWithConfig(phone, instanceName, textToProcess, botConfig, app, ctxLog.context);
 
-    const elapsed = Date.now() - startTime;
-    log.info({
-      phone,
-      instanceName,
-      leadId: lead.id,
-      messageType,
-      elapsedMs: elapsed
+    ctxLog.info({
+      msgType: messageType,
+      ...ctxLog.getTimings()
     }, '[processIncomingMessage] Message queued for processing successfully');
 
-    return { processed: true };
+    return { processed: true, correlationId: ctxLog.context.correlationId };
   } catch (error: any) {
-    log.error({
-      error: error.message,
-      stack: error.stack,
-      phone,
-      instanceName,
-      messageType,
-      elapsed: Date.now() - startTime
-    }, '[processIncomingMessage] Unexpected error processing message');
-    return { processed: false, reason: 'error' };
+    ctxLog.error(error, '[processIncomingMessage] Unexpected error processing message', {
+      msgType: messageType,
+      ...ctxLog.getTimings()
+    });
+    return { processed: false, reason: 'error', correlationId: ctxLog.context.correlationId };
   }
 }
