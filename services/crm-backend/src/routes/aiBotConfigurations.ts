@@ -622,4 +622,168 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  // ===== WhatsApp Instance - Bot Linking =====
+
+  /**
+   * GET /whatsapp-instances
+   * Get all WhatsApp instances for a user (with linked bot info)
+   */
+  app.get('/whatsapp-instances', async (request, reply) => {
+    try {
+      const { userId } = request.query as { userId: string };
+
+      if (!userId) {
+        return reply.status(400).send({ error: 'userId is required' });
+      }
+
+      app.log.info({ userId }, 'Fetching WhatsApp instances');
+
+      const { data: instances, error } = await supabase
+        .from('whatsapp_instances')
+        .select(`
+          id,
+          instance_name,
+          phone_number,
+          status,
+          ai_bot_id,
+          created_at,
+          ai_bot_configurations (
+            id,
+            name,
+            is_active
+          )
+        `)
+        .eq('user_account_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      // Transform response
+      const result = (instances || []).map((inst: any) => ({
+        id: inst.id,
+        instanceName: inst.instance_name,
+        phoneNumber: inst.phone_number,
+        status: inst.status,
+        aiBotId: inst.ai_bot_id,
+        createdAt: inst.created_at,
+        linkedBot: inst.ai_bot_configurations ? {
+          id: inst.ai_bot_configurations.id,
+          name: inst.ai_bot_configurations.name,
+          isActive: inst.ai_bot_configurations.is_active
+        } : null
+      }));
+
+      return reply.send({
+        success: true,
+        instances: result
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to fetch WhatsApp instances');
+      return reply.status(500).send({
+        error: 'Failed to fetch instances',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /whatsapp-instances/:instanceId/link-bot
+   * Link a bot to a WhatsApp instance
+   */
+  app.patch('/whatsapp-instances/:instanceId/link-bot', async (request, reply) => {
+    try {
+      const { instanceId } = request.params as { instanceId: string };
+      const { botId } = request.body as { botId: string | null };
+
+      app.log.info({ instanceId, botId }, 'Linking bot to WhatsApp instance');
+
+      const { data: instance, error } = await supabase
+        .from('whatsapp_instances')
+        .update({
+          ai_bot_id: botId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', instanceId)
+        .select(`
+          id,
+          instance_name,
+          ai_bot_id,
+          ai_bot_configurations (
+            id,
+            name,
+            is_active
+          )
+        `)
+        .single();
+
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return reply.status(404).send({ error: 'Instance not found' });
+        }
+        throw error;
+      }
+
+      app.log.info({ instanceId, botId: instance.ai_bot_id }, 'Bot linked to instance');
+
+      return reply.send({
+        success: true,
+        instance: {
+          id: instance.id,
+          instanceName: instance.instance_name,
+          aiBotId: instance.ai_bot_id,
+          linkedBot: instance.ai_bot_configurations ? {
+            id: (instance.ai_bot_configurations as any).id,
+            name: (instance.ai_bot_configurations as any).name,
+            isActive: (instance.ai_bot_configurations as any).is_active
+          } : null
+        }
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to link bot to instance');
+      return reply.status(500).send({
+        error: 'Failed to link bot',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /ai-bots/:botId/linked-instances
+   * Get all WhatsApp instances linked to a specific bot
+   */
+  app.get('/ai-bots/:botId/linked-instances', async (request, reply) => {
+    try {
+      const { botId } = request.params as { botId: string };
+
+      app.log.info({ botId }, 'Fetching linked instances for bot');
+
+      const { data: instances, error } = await supabase
+        .from('whatsapp_instances')
+        .select('id, instance_name, phone_number, status')
+        .eq('ai_bot_id', botId);
+
+      if (error) {
+        throw error;
+      }
+
+      return reply.send({
+        success: true,
+        instances: (instances || []).map((inst: any) => ({
+          id: inst.id,
+          instanceName: inst.instance_name,
+          phoneNumber: inst.phone_number,
+          status: inst.status
+        }))
+      });
+    } catch (error: any) {
+      app.log.error({ error: error.message }, 'Failed to fetch linked instances');
+      return reply.status(500).send({
+        error: 'Failed to fetch linked instances',
+        message: error.message
+      });
+    }
+  });
 }

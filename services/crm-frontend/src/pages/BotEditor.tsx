@@ -15,6 +15,9 @@ import {
   Bell,
   Shield,
   Zap,
+  Link2,
+  Smartphone,
+  Unlink,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,7 +37,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { aiBotApi } from '@/services/aiBotApi';
+import { aiBotApi, type LinkedInstance } from '@/services/aiBotApi';
 import type { AIBotConfiguration, UpdateBotRequest } from '@/types/aiBot';
 import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK } from '@/types/aiBot';
 
@@ -98,6 +101,15 @@ export function BotEditor() {
     queryFn: () => aiBotApi.getBot(botId!),
     enabled: !!botId,
   });
+
+  // Fetch linked WhatsApp instances
+  const { data: linkedInstancesData } = useQuery({
+    queryKey: ['ai-bot-linked-instances', botId],
+    queryFn: () => aiBotApi.getLinkedInstances(botId!),
+    enabled: !!botId,
+  });
+
+  const linkedInstances = linkedInstancesData?.instances || [];
 
   const updateMutation = useMutation({
     mutationFn: (updates: UpdateBotRequest) => aiBotApi.updateBot(botId!, updates),
@@ -177,10 +189,14 @@ export function BotEditor() {
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
+        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-9">
           <TabsTrigger value="general" className="flex items-center gap-1">
             <Bot className="w-4 h-4" />
             <span className="hidden lg:inline">Основное</span>
+          </TabsTrigger>
+          <TabsTrigger value="instances" className="flex items-center gap-1">
+            <Smartphone className="w-4 h-4" />
+            <span className="hidden lg:inline">WhatsApp</span>
           </TabsTrigger>
           <TabsTrigger value="prompt" className="flex items-center gap-1">
             <MessageSquare className="w-4 h-4" />
@@ -299,6 +315,71 @@ export function BotEditor() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* Instances Tab */}
+        <TabsContent value="instances">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Link2 className="w-5 h-5" />
+                Привязанные WhatsApp инстансы
+              </CardTitle>
+              <CardDescription>
+                Этот бот автоматически отвечает на сообщения в следующих WhatsApp аккаунтах
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {linkedInstances.length === 0 ? (
+                <div className="text-center py-8">
+                  <Smartphone className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">
+                    Нет привязанных WhatsApp инстансов
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Привяжите этого бота к WhatsApp инстансу на странице настройки инстансов
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {linkedInstances.map((instance: LinkedInstance) => (
+                    <div
+                      key={instance.id}
+                      className="flex items-center justify-between p-4 rounded-lg border bg-muted/30"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-full bg-green-100 text-green-700">
+                          <Smartphone className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-medium">{instance.instanceName}</div>
+                          {instance.phoneNumber && (
+                            <div className="text-sm text-muted-foreground">
+                              {instance.phoneNumber}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <Badge variant={instance.status === 'connected' ? 'default' : 'secondary'}>
+                        {instance.status === 'connected' ? 'Подключён' : instance.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <Separator className="my-6" />
+
+              <div className="bg-muted/50 rounded-lg p-4">
+                <h4 className="font-medium mb-2">Как привязать бота к WhatsApp?</h4>
+                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                  <li>Перейдите в раздел "WhatsApp" в меню</li>
+                  <li>Выберите нужный инстанс</li>
+                  <li>В настройках инстанса выберите этого бота</li>
+                </ol>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Prompt Tab */}

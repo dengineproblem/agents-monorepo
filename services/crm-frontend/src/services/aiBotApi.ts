@@ -146,4 +146,68 @@ export const aiBotApi = {
     if (!response.ok) throw new Error('Failed to delete function');
     return response.json();
   },
+
+  // ===== WhatsApp Instances =====
+
+  /**
+   * Get all WhatsApp instances for a user
+   */
+  async getWhatsAppInstances(userId: string): Promise<{
+    success: boolean;
+    instances: WhatsAppInstance[];
+  }> {
+    const response = await fetch(`${API_BASE_URL}/whatsapp-instances?userId=${userId}`);
+    if (!response.ok) throw new Error('Failed to fetch instances');
+    return response.json();
+  },
+
+  /**
+   * Link a bot to a WhatsApp instance
+   */
+  async linkBotToInstance(instanceId: string, botId: string | null): Promise<{
+    success: boolean;
+    instance: WhatsAppInstance;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/whatsapp-instances/${instanceId}/link-bot`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botId }),
+    });
+    if (!response.ok) throw new Error('Failed to link bot to instance');
+    return response.json();
+  },
+
+  /**
+   * Get all WhatsApp instances linked to a specific bot
+   */
+  async getLinkedInstances(botId: string): Promise<{
+    success: boolean;
+    instances: LinkedInstance[];
+  }> {
+    const response = await fetch(`${API_BASE_URL}/ai-bots/${botId}/linked-instances`);
+    if (!response.ok) throw new Error('Failed to fetch linked instances');
+    return response.json();
+  },
 };
+
+// Types for WhatsApp instances
+export interface WhatsAppInstance {
+  id: string;
+  instanceName: string;
+  phoneNumber: string | null;
+  status: string;
+  aiBotId: string | null;
+  createdAt: string;
+  linkedBot: {
+    id: string;
+    name: string;
+    isActive: boolean;
+  } | null;
+}
+
+export interface LinkedInstance {
+  id: string;
+  instanceName: string;
+  phoneNumber: string | null;
+  status: string;
+}

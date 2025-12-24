@@ -146,3 +146,11 @@ COMMENT ON COLUMN ai_bot_configurations.resume_phrases IS 'Фразы для в�
 COMMENT ON COLUMN ai_bot_configurations.message_buffer_seconds IS 'Время ожидания перед ответом (склейка сообщений)';
 COMMENT ON COLUMN ai_bot_configurations.delayed_messages IS 'JSON массив отложенных сообщений [{hours, minutes, prompt, repeat_count, off_hours_behavior, off_hours_time}]';
 COMMENT ON COLUMN ai_bot_configurations.custom_openai_api_key IS 'Свой API ключ OpenAI (шифруется)';
+
+-- ===== 4. Добавить привязку бота к WhatsApp инстансу =====
+
+ALTER TABLE whatsapp_instances ADD COLUMN IF NOT EXISTS ai_bot_id UUID REFERENCES ai_bot_configurations(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_whatsapp_instances_ai_bot ON whatsapp_instances(ai_bot_id);
+
+COMMENT ON COLUMN whatsapp_instances.ai_bot_id IS 'Привязанный AI бот для автоматических ответов';

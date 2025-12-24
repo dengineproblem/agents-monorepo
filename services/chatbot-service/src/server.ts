@@ -69,20 +69,55 @@ app.register(campaignRoutes);
 // Internal API endpoint for processing messages from agent-service
 app.post('/process-message', async (request, reply) => {
   try {
-    const { contactPhone, instanceName, messageText } = request.body as {
+    const { contactPhone, instanceName, messageText, messageType = 'text' } = request.body as {
       contactPhone: string;
       instanceName: string;
       messageText: string;
+      messageType?: 'text' | 'image' | 'audio' | 'document' | 'file';
     };
 
     if (!contactPhone || !instanceName || !messageText) {
       return reply.status(400).send({ error: 'Missing required fields' });
     }
 
-    // Динамический импорт для избежания циркулярных зависимостей
+    // Импорт движков
     const { collectMessages, shouldBotRespond } = await import('./lib/chatbotEngine.js');
+    const { processIncomingMessage, getBotConfigForInstance } = await import('./lib/aiBotEngine.js');
     const { supabase } = await import('./lib/supabase.js');
     const { markCampaignReply } = await import('./lib/campaignAnalytics.js');
+
+    // Проверить, есть ли бот из конструктора для этого инстанса
+    const botConfig = await getBotConfigForInstance(instanceName);
+
+    if (botConfig) {
+      // Использовать новый движок AI-ботов из конструктора
+      app.log.info({ instanceName, botId: botConfig.id, botName: botConfig.name }, 'Using AI bot from constructor');
+
+      const result = await processIncomingMessage(
+        contactPhone,
+        instanceName,
+        messageText,
+        messageType,
+        app
+      );
+
+      // Mark reply on campaign message if applicable
+      const { data: lead } = await supabase
+        .from('dialog_analysis')
+        .select('id')
+        .eq('contact_phone', contactPhone)
+        .eq('instance_name', instanceName)
+        .maybeSingle();
+
+      if (lead) {
+        await markCampaignReply(lead.id);
+      }
+
+      return reply.send({ success: result.processed, reason: result.reason });
+    }
+
+    // Fallback на старый движок chatbotEngine
+    app.log.debug({ instanceName }, 'No AI bot config, using legacy engine');
 
     // Получить информацию о лиде
     const { data: lead } = await supabase
