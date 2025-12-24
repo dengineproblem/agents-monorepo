@@ -68,7 +68,7 @@ export const tikTokHandlers = {
 
     if (campaignIds.length > 0) {
       try {
-        const reportResult = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+        const reportResult = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
           advertiser_id: tikTokAdvertiserId,
           report_type: 'BASIC',
           data_level: 'AUCTION_CAMPAIGN',
@@ -204,7 +204,7 @@ export const tikTokHandlers = {
     let metricsMap = {};
     if (adGroupIds.length > 0) {
       try {
-        const reportResult = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+        const reportResult = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
           advertiser_id: tikTokAdvertiserId,
           report_type: 'BASIC',
           data_level: 'AUCTION_ADGROUP',
@@ -270,7 +270,7 @@ export const tikTokHandlers = {
     let metricsMap = {};
     if (adIds.length > 0) {
       try {
-        const reportResult = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+        const reportResult = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
           advertiser_id: tikTokAdvertiserId,
           report_type: 'BASIC',
           data_level: 'AUCTION_AD',
@@ -324,7 +324,7 @@ export const tikTokHandlers = {
     const dimensions = group_by === 'day' ? ['stat_time_day'] : ['campaign_id'];
     const dataLevel = group_by === 'adgroup' ? 'AUCTION_ADGROUP' : 'AUCTION_CAMPAIGN';
 
-    const result = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+    const result = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       report_type: 'BASIC',
       data_level: dataLevel,
@@ -442,7 +442,7 @@ export const tikTokHandlers = {
     let metricsMap = {};
     if (campaignIds.length > 0) {
       try {
-        const reportResult = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+        const reportResult = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
           advertiser_id: tikTokAdvertiserId,
           report_type: 'BASIC',
           data_level: 'AUCTION_CAMPAIGN',
@@ -824,7 +824,7 @@ export const tikTokHandlers = {
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 
     // Get report from TikTok
-    const result = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+    const result = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       report_type: 'BASIC',
       data_level: 'AUCTION_CAMPAIGN',
@@ -890,7 +890,7 @@ export const tikTokHandlers = {
     // Get TikTok metrics
     let tikTokData = { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
     try {
-      const ttResult = await tikTokGraph('GET', 'report/integrated/get/', tikTokAccessToken, {
+      const ttResult = await tikTokGraph('POST', 'report/integrated/get/', tikTokAccessToken, {
         advertiser_id: tikTokAdvertiserId,
         report_type: 'BASIC',
         data_level: 'AUCTION_ADVERTISER',

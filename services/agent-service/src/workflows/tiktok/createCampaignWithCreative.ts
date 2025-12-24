@@ -326,7 +326,7 @@ export async function workflowCreateTikTokCampaignWithCreative(
     gender: finalTargeting.gender,
     pacing: 'PACING_MODE_SMOOTH' as const,
     placement_type: 'PLACEMENT_TYPE_AUTOMATIC' as const,
-    status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
+    operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
     // Pixel для конверсий
     ...(context.pixel_id && objective === 'conversions' && { pixel_id: context.pixel_id }),
     // Identity для креативов
@@ -370,8 +370,8 @@ export async function workflowCreateTikTokCampaignWithCreative(
       ad_format: 'SINGLE_VIDEO' as const,
       video_id: creative.tiktok_video_id,
       ad_text: creative.description || creative.title,
-      call_to_action: 'LEARN_MORE' as const,
-      status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
+      call_to_action: 'LEARN_MORE',
+      operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
       // Identity
       ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
     };

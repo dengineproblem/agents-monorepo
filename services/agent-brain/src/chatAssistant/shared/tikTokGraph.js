@@ -218,7 +218,7 @@ export async function updateTikTokCampaignStatus(advertiserId, accessToken, camp
   return tikTokGraph('POST', 'campaign/status/update/', accessToken, {
     advertiser_id: advertiserId,
     campaign_ids: Array.isArray(campaignIds) ? campaignIds : [campaignIds],
-    status  // 'ENABLE' or 'DISABLE'
+    operation_status: status  // 'ENABLE' or 'DISABLE'
   });
 }
 
@@ -229,7 +229,7 @@ export async function updateTikTokAdGroupStatus(advertiserId, accessToken, adgro
   return tikTokGraph('POST', 'adgroup/status/update/', accessToken, {
     advertiser_id: advertiserId,
     adgroup_ids: Array.isArray(adgroupIds) ? adgroupIds : [adgroupIds],
-    status
+    operation_status: status
   });
 }
 
@@ -240,7 +240,7 @@ export async function updateTikTokAdStatus(advertiserId, accessToken, adIds, sta
   return tikTokGraph('POST', 'ad/status/update/', accessToken, {
     advertiser_id: advertiserId,
     ad_ids: Array.isArray(adIds) ? adIds : [adIds],
-    status
+    operation_status: status
   });
 }
 
@@ -267,16 +267,16 @@ export async function getTikTokReport(advertiserId, accessToken, options) {
     filtering
   } = options;
 
-  return tikTokGraph('GET', 'report/integrated/get/', accessToken, {
+  return tikTokGraph('POST', 'report/integrated/get/', accessToken, {
     advertiser_id: advertiserId,
     report_type: 'BASIC',
     data_level: dataLevel,
-    dimensions: JSON.stringify(dimensions),
-    metrics: JSON.stringify(metrics),
+    dimensions,
+    metrics,
     start_date: startDate,
     end_date: endDate,
     page_size: 500,
-    ...filtering && { filtering: JSON.stringify(filtering) }
+    ...filtering && { filtering }
   });
 }
 

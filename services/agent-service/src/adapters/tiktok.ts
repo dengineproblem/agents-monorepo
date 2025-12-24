@@ -15,6 +15,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../lib/logger.js';
 import { resolveTikTokError } from '../lib/tiktokErrors.js';
@@ -506,7 +507,7 @@ export async function uploadVideo(
   }
 
   // Иначе - загрузка файла
-  const tmpPath = path.join('/var/tmp', `tt_video_${randomUUID()}.mp4`);
+  const tmpPath = path.join(os.tmpdir(), `tt_video_${randomUUID()}.mp4`);
 
   if (Buffer.isBuffer(videoSource)) {
     fs.writeFileSync(tmpPath, videoSource);
@@ -570,7 +571,7 @@ export async function uploadImage(
   }
 
   // Загрузка файла
-  const tmpPath = path.join('/var/tmp', `tt_image_${randomUUID()}.jpg`);
+  const tmpPath = path.join(os.tmpdir(), `tt_image_${randomUUID()}.jpg`);
 
   if (Buffer.isBuffer(imageSource)) {
     fs.writeFileSync(tmpPath, imageSource);
