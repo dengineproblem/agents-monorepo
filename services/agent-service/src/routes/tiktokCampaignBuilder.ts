@@ -555,10 +555,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
           }
         );
 
-        return reply.send({
-          success: true,
-          ...result
-        });
+        return reply.send(result);
 
       } catch (error: any) {
         log.error({ error }, 'TikTok create campaign failed');
@@ -753,10 +750,13 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         creds.advertiserId,
         creds.accessToken,
         {
-          campaign_ids: campaignIds,
+          report_type: 'BASIC',
+          data_level: 'AUCTION_CAMPAIGN',
+          dimensions: ['campaign_id'],
           start_date: startDate,
           end_date: endDate,
-          metrics: ['spend', 'impressions', 'clicks', 'conversions', 'cpc', 'cpm', 'ctr']
+          metrics: ['spend', 'impressions', 'clicks', 'conversions', 'cpc', 'cpm', 'ctr'],
+          filtering: campaignIds && campaignIds.length > 0 ? { campaign_ids: campaignIds } : undefined
         }
       );
 

@@ -205,7 +205,7 @@ export async function workflowCreateTikTokCampaignWithCreative(
       const uploadResult = await withStep(
         'upload_video',
         { creative_id: creative.id },
-        () => tt.uploadVideo(advertiserId!, accessToken!, creative.media_url, creative.title || 'Creative')
+        () => tt.uploadVideo(advertiserId!, accessToken!, creative.media_url)
       );
 
       tiktok_video_id = uploadResult.video_id;
@@ -253,14 +253,13 @@ export async function workflowCreateTikTokCampaignWithCreative(
   const campaignResult = await withStep(
     'create_campaign',
     { name: campaign_name, objective: objectiveConfig.objective_type },
-    () => tt.createCampaign(
-      advertiserId!,
-      accessToken!,
+    () => tt.createCampaign(advertiserId!, accessToken!, {
       campaign_name,
-      objectiveConfig.objective_type,
-      daily_budget,  // TikTok принимает в долларах
-      auto_activate ? 'ENABLE' : 'DISABLE'
-    )
+      objective_type: objectiveConfig.objective_type,
+      budget: daily_budget,  // TikTok принимает в долларах
+      budget_mode: 'BUDGET_MODE_DAY',
+      operation_status: auto_activate ? 'ENABLE' : 'DISABLE'
+    })
   );
 
   const campaign_id = campaignResult.campaign_id;
@@ -422,13 +421,13 @@ export async function workflowCreateTikTokCampaignWithCreative(
       created_ads.map(ad => ({
         ad_id: ad.ad_id,
         user_creative_id: ad.user_creative_id,
-        direction_id: null,
+        direction_id: undefined,
         user_id: user_account_id,
-        account_id: ad_account_id || null,
+        account_id: ad_account_id || undefined,
         adset_id: adgroup_id,  // TikTok AdGroup = FB AdSet
         campaign_id: campaign_id,
         fb_creative_id: ad.tiktok_video_id,  // Используем video_id как reference
-        source: 'tiktok_campaign_builder' as const
+        source: 'tiktok_campaign_builder'
       }))
     );
   } catch (mappingError) {

@@ -161,8 +161,8 @@ export async function deactivateTikTokAdGroupWithAds(
   try {
     // 1. Получить все ads в AdGroup
     const adsResponse = await tt.getAds(advertiserId, accessToken, {
-      adgroup_ids: [tikTokAdGroupId],
-      page_size: 100
+      adgroupIds: [tikTokAdGroupId],
+      pageSize: 100
     });
 
     const ads = adsResponse.ads || [];
@@ -365,8 +365,7 @@ export async function workflowCreateAdInDirection(
       const uploadResult = await tt.uploadVideo(
         advertiserId,
         accessToken,
-        creative.media_url,
-        creative.title || 'Creative'
+        creative.media_url
       );
 
       tiktok_video_id = uploadResult.video_id;
@@ -468,11 +467,11 @@ export async function workflowCreateAdInDirection(
         user_creative_id: ad.user_creative_id,
         direction_id: direction_id,
         user_id: user_account_id,
-        account_id: ad_account_id || null,
+        account_id: ad_account_id || undefined,
         adset_id: adgroup.tiktok_adgroup_id,
-        campaign_id: null,  // Можно получить из AdGroup если нужно
+        campaign_id: undefined,  // Можно получить из AdGroup если нужно
         fb_creative_id: ad.tiktok_video_id,
-        source: 'tiktok_direction' as const
+        source: 'tiktok_direction'
       }))
     );
   } catch (mappingError) {
