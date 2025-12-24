@@ -52,19 +52,31 @@ export async function tikTokGraph(
 ): Promise<any> {
   const { timeout = DEFAULT_TIMEOUT, skipRetry = false } = options;
   const url = `${TIKTOK_BASE_URL}/${endpoint}`;
+  const requestId = randomUUID().substring(0, 8);
 
-  log.debug({
+  log.info({
+    requestId,
     method,
     endpoint,
-    params: JSON.stringify(params).substring(0, 500)
-  }, 'TikTok API request');
+    url,
+    params: JSON.stringify(params).substring(0, 1000),
+    timeout,
+    skipRetry
+  }, '[TikTok:API] >>> Отправка запроса');
 
   let lastError: any;
+  const startTime = Date.now();
 
   for (let attempt = 1; attempt <= (skipRetry ? 1 : MAX_RETRIES); attempt++) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      log.debug({
+        requestId,
+        attempt,
+        maxRetries: MAX_RETRIES
+      }, '[TikTok:API] Попытка запроса');
 
       let response;
 
@@ -98,12 +110,17 @@ export async function tikTokGraph(
       clearTimeout(timeoutId);
 
       const data = response.data;
+      const duration = Date.now() - startTime;
 
-      log.debug({
+      log.info({
+        requestId,
         endpoint,
         code: data.code,
-        message: data.message
-      }, 'TikTok API response');
+        message: data.message,
+        request_id: data.request_id,
+        duration_ms: duration,
+        data_keys: data.data ? Object.keys(data.data) : null
+      }, '[TikTok:API] <<< Ответ получен');
 
       // TikTok возвращает code: 0 при успехе
       if (data.code !== 0) {
@@ -118,18 +135,29 @@ export async function tikTokGraph(
         error.resolution = resolveTikTokError(error.tiktok);
 
         log.error({
-          msg: error.resolution?.msgCode || 'tiktok_api_error',
-          meta: error.tiktok,
-          resolution: error.resolution
-        }, 'TikTok API error');
+          requestId,
+          endpoint,
+          tiktok_code: data.code,
+          tiktok_message: data.message,
+          tiktok_request_id: data.request_id,
+          resolution: error.resolution,
+          duration_ms: duration
+        }, '[TikTok:API] ❌ API вернул ошибку');
 
         throw error;
       }
+
+      log.debug({
+        requestId,
+        endpoint,
+        response_data: JSON.stringify(data.data || {}).substring(0, 500)
+      }, '[TikTok:API] Детали ответа');
 
       return data;
 
     } catch (error: any) {
       lastError = error;
+      const duration = Date.now() - startTime;
 
       // Проверяем, нужен ли retry
       const isNetworkError = error.code === 'ECONNRESET' ||
@@ -139,14 +167,28 @@ export async function tikTokGraph(
 
       const isRateLimitError = error.tiktok?.code === 40100; // Rate limit
 
-      if ((isNetworkError || isRateLimitError) && attempt < MAX_RETRIES && !skipRetry) {
-        log.warn({
-          attempt,
-          endpoint,
-          error: error.message
-        }, `TikTok API error, retrying in ${RETRY_DELAY}ms...`);
+      log.warn({
+        requestId,
+        attempt,
+        endpoint,
+        error_message: error.message,
+        error_code: error.code || error.tiktok?.code,
+        is_network_error: isNetworkError,
+        is_rate_limit: isRateLimitError,
+        will_retry: (isNetworkError || isRateLimitError) && attempt < MAX_RETRIES && !skipRetry,
+        duration_ms: duration
+      }, '[TikTok:API] ⚠️ Ошибка запроса');
 
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+      if ((isNetworkError || isRateLimitError) && attempt < MAX_RETRIES && !skipRetry) {
+        const delay = RETRY_DELAY * attempt;
+        log.info({
+          requestId,
+          attempt,
+          next_attempt: attempt + 1,
+          delay_ms: delay
+        }, `[TikTok:API] Повтор через ${delay}ms...`);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
 
@@ -158,6 +200,16 @@ export async function tikTokGraph(
           error: error.message
         };
       }
+
+      log.error({
+        requestId,
+        endpoint,
+        method,
+        error_message: error.message,
+        error_stack: error.stack?.substring(0, 500),
+        tiktok_meta: error.tiktok,
+        duration_ms: duration
+      }, '[TikTok:API] ❌ Финальная ошибка после всех попыток');
 
       throw error;
     }
@@ -182,6 +234,13 @@ export async function getCampaigns(
     filtering?: any;
   } = {}
 ): Promise<any> {
+  log.info({
+    advertiserId,
+    page: options.page || 1,
+    pageSize: options.pageSize || 100,
+    hasFiltering: !!options.filtering
+  }, '[TikTok:getCampaigns] Запрос списка кампаний');
+
   const params: any = {
     advertiser_id: advertiserId,
     page: options.page || 1,
@@ -193,7 +252,15 @@ export async function getCampaigns(
     params.filtering = options.filtering;
   }
 
-  return tikTokGraph('GET', 'campaign/get/', accessToken, params);
+  const result = await tikTokGraph('GET', 'campaign/get/', accessToken, params);
+
+  log.info({
+    advertiserId,
+    campaigns_count: result.data?.list?.length || 0,
+    page_info: result.data?.page_info
+  }, '[TikTok:getCampaigns] Кампании получены');
+
+  return result;
 }
 
 /**
@@ -210,6 +277,15 @@ export async function createCampaign(
     operation_status?: 'ENABLE' | 'DISABLE';
   }
 ): Promise<{ campaign_id: string }> {
+  log.info({
+    advertiserId,
+    campaign_name: params.campaign_name,
+    objective_type: params.objective_type,
+    budget: params.budget,
+    budget_mode: params.budget_mode,
+    operation_status: params.operation_status || 'ENABLE'
+  }, '[TikTok:createCampaign] Создание кампании');
+
   const result = await tikTokGraph('POST', 'campaign/create/', accessToken, {
     advertiser_id: advertiserId,
     campaign_name: params.campaign_name,
@@ -218,6 +294,12 @@ export async function createCampaign(
     budget_mode: params.budget_mode,
     operation_status: params.operation_status || 'ENABLE'
   });
+
+  log.info({
+    advertiserId,
+    campaign_id: result.data.campaign_id,
+    campaign_name: params.campaign_name
+  }, '[TikTok:createCampaign] ✅ Кампания создана');
 
   return { campaign_id: result.data.campaign_id };
 }
@@ -231,11 +313,25 @@ export async function updateCampaignStatus(
   campaignIds: string[],
   status: 'ENABLE' | 'DISABLE'
 ): Promise<any> {
-  return tikTokGraph('POST', 'campaign/status/update/', accessToken, {
+  log.info({
+    advertiserId,
+    campaignIds,
+    new_status: status
+  }, '[TikTok:updateCampaignStatus] Изменение статуса кампаний');
+
+  const result = await tikTokGraph('POST', 'campaign/status/update/', accessToken, {
     advertiser_id: advertiserId,
     campaign_ids: campaignIds,
     operation_status: status
   });
+
+  log.info({
+    advertiserId,
+    campaignIds,
+    new_status: status
+  }, '[TikTok:updateCampaignStatus] ✅ Статус кампаний обновлён');
+
+  return result;
 }
 
 /**
@@ -247,11 +343,25 @@ export async function updateCampaignBudget(
   campaignId: string,
   budget: number
 ): Promise<any> {
-  return tikTokGraph('POST', 'campaign/update/', accessToken, {
+  log.info({
+    advertiserId,
+    campaignId,
+    new_budget: budget
+  }, '[TikTok:updateCampaignBudget] Изменение бюджета кампании');
+
+  const result = await tikTokGraph('POST', 'campaign/update/', accessToken, {
     advertiser_id: advertiserId,
     campaign_id: campaignId,
     budget: budget
   });
+
+  log.info({
+    advertiserId,
+    campaignId,
+    new_budget: budget
+  }, '[TikTok:updateCampaignBudget] ✅ Бюджет кампании обновлён');
+
+  return result;
 }
 
 // ============================================================
@@ -270,6 +380,13 @@ export async function getAdGroups(
     pageSize?: number;
   } = {}
 ): Promise<any> {
+  log.info({
+    advertiserId,
+    campaignIds: options.campaignIds,
+    page: options.page || 1,
+    pageSize: options.pageSize || 100
+  }, '[TikTok:getAdGroups] Запрос списка AdGroups');
+
   const params: any = {
     advertiser_id: advertiserId,
     page: options.page || 1,
@@ -281,7 +398,14 @@ export async function getAdGroups(
     params.filtering = { campaign_ids: options.campaignIds };
   }
 
-  return tikTokGraph('GET', 'adgroup/get/', accessToken, params);
+  const result = await tikTokGraph('GET', 'adgroup/get/', accessToken, params);
+
+  log.info({
+    advertiserId,
+    adgroups_count: result.data?.list?.length || 0
+  }, '[TikTok:getAdGroups] AdGroups получены');
+
+  return result;
 }
 
 /**
@@ -315,6 +439,20 @@ export async function createAdGroup(
     identity_type?: 'AUTH_CODE' | 'TT_USER';
   }
 ): Promise<{ adgroup_id: string }> {
+  log.info({
+    advertiserId,
+    campaign_id: params.campaign_id,
+    adgroup_name: params.adgroup_name,
+    budget: params.budget,
+    budget_mode: params.budget_mode,
+    optimization_goal: params.optimization_goal,
+    bid_type: params.bid_type,
+    location_ids: params.location_ids,
+    age_groups: params.age_groups,
+    gender: params.gender,
+    operation_status: params.operation_status || 'ENABLE'
+  }, '[TikTok:createAdGroup] Создание AdGroup');
+
   const body: any = {
     advertiser_id: advertiserId,
     campaign_id: params.campaign_id,
@@ -345,6 +483,13 @@ export async function createAdGroup(
 
   const result = await tikTokGraph('POST', 'adgroup/create/', accessToken, body);
 
+  log.info({
+    advertiserId,
+    adgroup_id: result.data.adgroup_id,
+    adgroup_name: params.adgroup_name,
+    campaign_id: params.campaign_id
+  }, '[TikTok:createAdGroup] ✅ AdGroup создана');
+
   return { adgroup_id: result.data.adgroup_id };
 }
 
@@ -357,11 +502,25 @@ export async function updateAdGroupStatus(
   adgroupIds: string[],
   status: 'ENABLE' | 'DISABLE'
 ): Promise<any> {
-  return tikTokGraph('POST', 'adgroup/status/update/', accessToken, {
+  log.info({
+    advertiserId,
+    adgroupIds,
+    new_status: status
+  }, '[TikTok:updateAdGroupStatus] Изменение статуса AdGroups');
+
+  const result = await tikTokGraph('POST', 'adgroup/status/update/', accessToken, {
     advertiser_id: advertiserId,
     adgroup_ids: adgroupIds,
     operation_status: status
   });
+
+  log.info({
+    advertiserId,
+    adgroupIds,
+    new_status: status
+  }, '[TikTok:updateAdGroupStatus] ✅ Статус AdGroups обновлён');
+
+  return result;
 }
 
 /**
@@ -373,11 +532,25 @@ export async function updateAdGroupBudget(
   adgroupId: string,
   budget: number
 ): Promise<any> {
-  return tikTokGraph('POST', 'adgroup/update/', accessToken, {
+  log.info({
+    advertiserId,
+    adgroupId,
+    new_budget: budget
+  }, '[TikTok:updateAdGroupBudget] Изменение бюджета AdGroup');
+
+  const result = await tikTokGraph('POST', 'adgroup/update/', accessToken, {
     advertiser_id: advertiserId,
     adgroup_id: adgroupId,
     budget: budget
   });
+
+  log.info({
+    advertiserId,
+    adgroupId,
+    new_budget: budget
+  }, '[TikTok:updateAdGroupBudget] ✅ Бюджет AdGroup обновлён');
+
+  return result;
 }
 
 // ============================================================
@@ -396,6 +569,13 @@ export async function getAds(
     pageSize?: number;
   } = {}
 ): Promise<any> {
+  log.info({
+    advertiserId,
+    adgroupIds: options.adgroupIds,
+    page: options.page || 1,
+    pageSize: options.pageSize || 100
+  }, '[TikTok:getAds] Запрос списка Ads');
+
   const params: any = {
     advertiser_id: advertiserId,
     page: options.page || 1,
@@ -407,7 +587,14 @@ export async function getAds(
     params.filtering = { adgroup_ids: options.adgroupIds };
   }
 
-  return tikTokGraph('GET', 'ad/get/', accessToken, params);
+  const result = await tikTokGraph('GET', 'ad/get/', accessToken, params);
+
+  log.info({
+    advertiserId,
+    ads_count: result.data?.list?.length || 0
+  }, '[TikTok:getAds] Ads получены');
+
+  return result;
 }
 
 /**
@@ -432,6 +619,18 @@ export async function createAd(
     operation_status?: 'ENABLE' | 'DISABLE';
   }
 ): Promise<{ ad_id: string }> {
+  log.info({
+    advertiserId,
+    adgroup_id: params.adgroup_id,
+    ad_name: params.ad_name,
+    ad_format: params.ad_format,
+    ad_text: params.ad_text?.substring(0, 100),
+    video_id: params.video_id,
+    has_image_ids: !!params.image_ids,
+    call_to_action: params.call_to_action,
+    operation_status: params.operation_status || 'ENABLE'
+  }, '[TikTok:createAd] Создание Ad');
+
   const body: any = {
     advertiser_id: advertiserId,
     adgroup_id: params.adgroup_id,
@@ -457,6 +656,13 @@ export async function createAd(
 
   const result = await tikTokGraph('POST', 'ad/create/', accessToken, body);
 
+  log.info({
+    advertiserId,
+    ad_id: result.data.ad_id,
+    ad_name: params.ad_name,
+    adgroup_id: params.adgroup_id
+  }, '[TikTok:createAd] ✅ Ad создан');
+
   return { ad_id: result.data.ad_id };
 }
 
@@ -469,11 +675,25 @@ export async function updateAdStatus(
   adIds: string[],
   status: 'ENABLE' | 'DISABLE'
 ): Promise<any> {
-  return tikTokGraph('POST', 'ad/status/update/', accessToken, {
+  log.info({
+    advertiserId,
+    adIds,
+    new_status: status
+  }, '[TikTok:updateAdStatus] Изменение статуса Ads');
+
+  const result = await tikTokGraph('POST', 'ad/status/update/', accessToken, {
     advertiser_id: advertiserId,
     ad_ids: adIds,
     operation_status: status
   });
+
+  log.info({
+    advertiserId,
+    adIds,
+    new_status: status
+  }, '[TikTok:updateAdStatus] ✅ Статус Ads обновлён');
+
+  return result;
 }
 
 // ============================================================
@@ -492,17 +712,34 @@ export async function uploadVideo(
   accessToken: string,
   videoSource: string | Buffer
 ): Promise<{ video_id: string }> {
-  log.info({ advertiserId }, 'Uploading video to TikTok');
+  const isUrl = typeof videoSource === 'string' && videoSource.startsWith('http');
+  const uploadType = isUrl ? 'UPLOAD_BY_URL' : 'UPLOAD_BY_FILE';
+  const startTime = Date.now();
+
+  log.info({
+    advertiserId,
+    upload_type: uploadType,
+    source_type: isUrl ? 'url' : 'buffer',
+    source_url: isUrl ? (videoSource as string).substring(0, 100) : undefined,
+    buffer_size: Buffer.isBuffer(videoSource) ? videoSource.length : undefined
+  }, '[TikTok:uploadVideo] Начало загрузки видео');
 
   // Если передан URL - используем upload по URL
-  if (typeof videoSource === 'string' && videoSource.startsWith('http')) {
+  if (isUrl) {
     const result = await tikTokGraph('POST', 'file/video/ad/upload/', accessToken, {
       advertiser_id: advertiserId,
       upload_type: 'UPLOAD_BY_URL',
       video_url: videoSource
     });
 
-    log.info({ advertiserId, videoId: result.data.video_id }, 'Video uploaded via URL');
+    const duration = Date.now() - startTime;
+    log.info({
+      advertiserId,
+      video_id: result.data.video_id,
+      upload_type: 'UPLOAD_BY_URL',
+      duration_ms: duration
+    }, '[TikTok:uploadVideo] ✅ Видео загружено по URL');
+
     return { video_id: result.data.video_id };
   }
 
@@ -511,7 +748,13 @@ export async function uploadVideo(
 
   if (Buffer.isBuffer(videoSource)) {
     fs.writeFileSync(tmpPath, videoSource);
+    log.debug({
+      advertiserId,
+      tmp_path: tmpPath,
+      file_size: videoSource.length
+    }, '[TikTok:uploadVideo] Временный файл создан');
   } else {
+    log.error({ advertiserId }, '[TikTok:uploadVideo] ❌ Неверный источник видео');
     throw new Error('Invalid video source: must be URL or Buffer');
   }
 
@@ -520,6 +763,8 @@ export async function uploadVideo(
     formData.append('advertiser_id', advertiserId);
     formData.append('upload_type', 'UPLOAD_BY_FILE');
     formData.append('video_file', fs.createReadStream(tmpPath));
+
+    log.debug({ advertiserId }, '[TikTok:uploadVideo] Отправка файла...');
 
     const response = await axios.post(
       `${TIKTOK_BASE_URL}/file/video/ad/upload/`,
@@ -535,15 +780,28 @@ export async function uploadVideo(
     );
 
     if (response.data.code !== 0) {
+      log.error({
+        advertiserId,
+        code: response.data.code,
+        message: response.data.message
+      }, '[TikTok:uploadVideo] ❌ Ошибка загрузки');
       throw new Error(response.data.message || 'Video upload failed');
     }
 
-    log.info({ advertiserId, videoId: response.data.data.video_id }, 'Video uploaded via file');
+    const duration = Date.now() - startTime;
+    log.info({
+      advertiserId,
+      video_id: response.data.data.video_id,
+      upload_type: 'UPLOAD_BY_FILE',
+      duration_ms: duration
+    }, '[TikTok:uploadVideo] ✅ Видео загружено из файла');
+
     return { video_id: response.data.data.video_id };
 
   } finally {
     if (fs.existsSync(tmpPath)) {
       fs.unlinkSync(tmpPath);
+      log.debug({ advertiserId, tmp_path: tmpPath }, '[TikTok:uploadVideo] Временный файл удалён');
     }
   }
 }
@@ -556,17 +814,34 @@ export async function uploadImage(
   accessToken: string,
   imageSource: string | Buffer
 ): Promise<{ image_id: string }> {
-  log.info({ advertiserId }, 'Uploading image to TikTok');
+  const isUrl = typeof imageSource === 'string' && imageSource.startsWith('http');
+  const uploadType = isUrl ? 'UPLOAD_BY_URL' : 'UPLOAD_BY_FILE';
+  const startTime = Date.now();
+
+  log.info({
+    advertiserId,
+    upload_type: uploadType,
+    source_type: isUrl ? 'url' : 'buffer',
+    source_url: isUrl ? (imageSource as string).substring(0, 100) : undefined,
+    buffer_size: Buffer.isBuffer(imageSource) ? imageSource.length : undefined
+  }, '[TikTok:uploadImage] Начало загрузки изображения');
 
   // Если передан URL - используем upload по URL
-  if (typeof imageSource === 'string' && imageSource.startsWith('http')) {
+  if (isUrl) {
     const result = await tikTokGraph('POST', 'file/image/ad/upload/', accessToken, {
       advertiser_id: advertiserId,
       upload_type: 'UPLOAD_BY_URL',
       image_url: imageSource
     });
 
-    log.info({ advertiserId, imageId: result.data.image_id }, 'Image uploaded via URL');
+    const duration = Date.now() - startTime;
+    log.info({
+      advertiserId,
+      image_id: result.data.image_id,
+      upload_type: 'UPLOAD_BY_URL',
+      duration_ms: duration
+    }, '[TikTok:uploadImage] ✅ Изображение загружено по URL');
+
     return { image_id: result.data.image_id };
   }
 
@@ -575,7 +850,13 @@ export async function uploadImage(
 
   if (Buffer.isBuffer(imageSource)) {
     fs.writeFileSync(tmpPath, imageSource);
+    log.debug({
+      advertiserId,
+      tmp_path: tmpPath,
+      file_size: imageSource.length
+    }, '[TikTok:uploadImage] Временный файл создан');
   } else {
+    log.error({ advertiserId }, '[TikTok:uploadImage] ❌ Неверный источник изображения');
     throw new Error('Invalid image source: must be URL or Buffer');
   }
 
@@ -584,6 +865,8 @@ export async function uploadImage(
     formData.append('advertiser_id', advertiserId);
     formData.append('upload_type', 'UPLOAD_BY_FILE');
     formData.append('image_file', fs.createReadStream(tmpPath));
+
+    log.debug({ advertiserId }, '[TikTok:uploadImage] Отправка файла...');
 
     const response = await axios.post(
       `${TIKTOK_BASE_URL}/file/image/ad/upload/`,
@@ -599,15 +882,28 @@ export async function uploadImage(
     );
 
     if (response.data.code !== 0) {
+      log.error({
+        advertiserId,
+        code: response.data.code,
+        message: response.data.message
+      }, '[TikTok:uploadImage] ❌ Ошибка загрузки');
       throw new Error(response.data.message || 'Image upload failed');
     }
 
-    log.info({ advertiserId, imageId: response.data.data.image_id }, 'Image uploaded via file');
+    const duration = Date.now() - startTime;
+    log.info({
+      advertiserId,
+      image_id: response.data.data.image_id,
+      upload_type: 'UPLOAD_BY_FILE',
+      duration_ms: duration
+    }, '[TikTok:uploadImage] ✅ Изображение загружено из файла');
+
     return { image_id: response.data.data.image_id };
 
   } finally {
     if (fs.existsSync(tmpPath)) {
       fs.unlinkSync(tmpPath);
+      log.debug({ advertiserId, tmp_path: tmpPath }, '[TikTok:uploadImage] Временный файл удалён');
     }
   }
 }
@@ -634,7 +930,19 @@ export async function getReport(
     filtering?: any;
   }
 ): Promise<any> {
-  return tikTokGraph('POST', 'report/integrated/get/', accessToken, {
+  log.info({
+    advertiserId,
+    report_type: params.report_type,
+    data_level: params.data_level,
+    dimensions: params.dimensions,
+    metrics: params.metrics,
+    date_range: `${params.start_date} - ${params.end_date}`,
+    page: params.page || 1,
+    page_size: params.page_size || 100,
+    has_filtering: !!params.filtering
+  }, '[TikTok:getReport] Запрос отчёта');
+
+  const result = await tikTokGraph('POST', 'report/integrated/get/', accessToken, {
     advertiser_id: advertiserId,
     service_type: 'AUCTION',
     report_type: params.report_type,
@@ -647,6 +955,14 @@ export async function getReport(
     page_size: params.page_size || 100,
     filtering: params.filtering
   });
+
+  log.info({
+    advertiserId,
+    rows_count: result.data?.list?.length || 0,
+    page_info: result.data?.page_info
+  }, '[TikTok:getReport] ✅ Отчёт получен');
+
+  return result;
 }
 
 // ============================================================
@@ -660,10 +976,24 @@ export async function getAdvertiserInfo(
   advertiserId: string,
   accessToken: string
 ): Promise<any> {
-  return tikTokGraph('GET', 'advertiser/info/', accessToken, {
+  log.info({ advertiserId }, '[TikTok:getAdvertiserInfo] Запрос информации об аккаунте');
+
+  const result = await tikTokGraph('GET', 'advertiser/info/', accessToken, {
     advertiser_ids: [advertiserId],
     fields: ['advertiser_id', 'name', 'company', 'status', 'currency', 'timezone', 'balance']
   });
+
+  const info = result.data?.list?.[0];
+  log.info({
+    advertiserId,
+    name: info?.name,
+    company: info?.company,
+    status: info?.status,
+    currency: info?.currency,
+    balance: info?.balance
+  }, '[TikTok:getAdvertiserInfo] ✅ Информация получена');
+
+  return result;
 }
 
 /**
@@ -673,11 +1003,20 @@ export async function getPixels(
   advertiserId: string,
   accessToken: string
 ): Promise<any> {
-  return tikTokGraph('GET', 'pixel/list/', accessToken, {
+  log.info({ advertiserId }, '[TikTok:getPixels] Запрос списка пикселей');
+
+  const result = await tikTokGraph('GET', 'pixel/list/', accessToken, {
     advertiser_id: advertiserId,
     page: 1,
     page_size: 100
   });
+
+  log.info({
+    advertiserId,
+    pixels_count: result.data?.pixels?.length || 0
+  }, '[TikTok:getPixels] ✅ Пиксели получены');
+
+  return result;
 }
 
 // ============================================================
@@ -691,9 +1030,18 @@ export async function getIdentities(
   advertiserId: string,
   accessToken: string
 ): Promise<any> {
-  return tikTokGraph('GET', 'identity/get/', accessToken, {
+  log.info({ advertiserId }, '[TikTok:getIdentities] Запрос идентификаторов');
+
+  const result = await tikTokGraph('GET', 'identity/get/', accessToken, {
     advertiser_id: advertiserId
   });
+
+  log.info({
+    advertiserId,
+    identities_count: result.data?.identity_list?.length || 0
+  }, '[TikTok:getIdentities] ✅ Идентификаторы получены');
+
+  return result;
 }
 
 // ============================================================

@@ -15,6 +15,9 @@ import {
 } from '../../lib/tiktokSettings.js';
 import { resolveTikTokError } from '../../lib/tiktokErrors.js';
 import { saveAdCreativeMappingBatch } from '../../lib/adCreativeMapping.js';
+import { createLogger } from '../../lib/logger.js';
+
+const log = createLogger({ module: 'tiktokCampaignWorkflow' });
 
 // ============================================================
 // TYPES
@@ -111,15 +114,18 @@ export async function workflowCreateTikTokCampaignWithCreative(
   } = params;
 
   const { user_account_id, ad_account_id } = context;
+  const workflowStartTime = Date.now();
 
-  console.log('[TikTok:CreateCampaignWithCreative] Starting workflow:', {
+  log.info({
     user_creative_ids_count: user_creative_ids.length,
     user_creative_ids,
     objective,
     campaign_name,
     daily_budget,
-    use_default_settings
-  });
+    use_default_settings,
+    auto_activate,
+    user_account_id
+  }, '[TikTok:Workflow:CreateCampaign] 🚀 Начало workflow');
 
   // ===================================================
   // STEP 0: Получаем credentials
@@ -138,10 +144,11 @@ export async function workflowCreateTikTokCampaignWithCreative(
     identityId = identityId || creds.identityId;
   }
 
-  console.log('[TikTok:CreateCampaignWithCreative] Credentials loaded:', {
+  log.info({
     advertiserId,
-    hasIdentity: !!identityId
-  });
+    hasIdentity: !!identityId,
+    step: 'credentials_loaded'
+  }, '[TikTok:Workflow:CreateCampaign] ✅ Credentials загружены');
 
   // ===================================================
   // STEP 1: Получаем ВСЕ креативы из Supabase
@@ -158,17 +165,19 @@ export async function workflowCreateTikTokCampaignWithCreative(
   }
 
   if (creatives.length !== user_creative_ids.length) {
-    console.warn('[TikTok:CreateCampaignWithCreative] Some creatives not found:', {
+    log.warn({
       requested: user_creative_ids.length,
-      found: creatives.length
-    });
+      found: creatives.length,
+      missing: user_creative_ids.filter(id => !creatives.some(c => c.id === id))
+    }, '[TikTok:Workflow:CreateCampaign] ⚠️ Некоторые креативы не найдены');
   }
 
-  console.log('[TikTok:CreateCampaignWithCreative] Creatives found:', {
+  log.info({
     count: creatives.length,
     ids: creatives.map(c => c.id),
-    titles: creatives.map(c => c.title)
-  });
+    titles: creatives.map(c => c.title),
+    step: 'creatives_loaded'
+  }, '[TikTok:Workflow:CreateCampaign] ✅ Креативы загружены');
 
   // ===================================================
   // STEP 2: Подготовка данных креативов
@@ -196,10 +205,12 @@ export async function workflowCreateTikTokCampaignWithCreative(
         throw new Error(`Creative ${creative.id} has no media_url and no tiktok_video_id`);
       }
 
-      console.log('[TikTok:CreateCampaignWithCreative] Uploading video for creative:', {
+      log.info({
         creative_id: creative.id,
-        media_url: creative.media_url.substring(0, 50) + '...'
-      });
+        media_url: creative.media_url.substring(0, 80),
+        creative_index: i + 1,
+        total_creatives: creatives.length
+      }, '[TikTok:Workflow:CreateCampaign] 📤 Загрузка видео для креатива');
 
       // Загружаем видео по URL
       const uploadResult = await withStep(
@@ -219,10 +230,11 @@ export async function workflowCreateTikTokCampaignWithCreative(
         })
         .eq('id', creative.id);
 
-      console.log('[TikTok:CreateCampaignWithCreative] Video uploaded:', {
+      log.info({
         creative_id: creative.id,
-        tiktok_video_id
-      });
+        tiktok_video_id,
+        step: 'video_uploaded'
+      }, '[TikTok:Workflow:CreateCampaign] ✅ Видео загружено');
     }
 
     creative_data.push({
@@ -235,17 +247,23 @@ export async function workflowCreateTikTokCampaignWithCreative(
     });
   }
 
-  console.log('[TikTok:CreateCampaignWithCreative] Prepared creative data:', {
+  log.info({
     count: creative_data.length,
-    creatives: creative_data.map(c => ({ id: c.user_creative_id, video_id: c.tiktok_video_id }))
-  });
+    creatives: creative_data.map(c => ({ id: c.user_creative_id, video_id: c.tiktok_video_id })),
+    step: 'creatives_prepared'
+  }, '[TikTok:Workflow:CreateCampaign] ✅ Данные креативов подготовлены');
 
   // ===================================================
   // STEP 3: Получаем objective config
   // ===================================================
   const objectiveConfig = getTikTokObjectiveConfig(objective);
 
-  console.log('[TikTok:CreateCampaignWithCreative] Objective config:', objectiveConfig);
+  log.info({
+    objective,
+    objective_type: objectiveConfig.objective_type,
+    optimization_goal: objectiveConfig.optimization_goal,
+    billing_event: objectiveConfig.billing_event
+  }, '[TikTok:Workflow:CreateCampaign] 📋 Objective config');
 
   // ===================================================
   // STEP 4: Создаем Campaign
@@ -267,16 +285,22 @@ export async function workflowCreateTikTokCampaignWithCreative(
     throw Object.assign(new Error('create_campaign_failed'), { step: 'create_campaign_no_id' });
   }
 
-  console.log('[TikTok:CreateCampaignWithCreative] Campaign created:', campaign_id);
+  log.info({
+    campaign_id,
+    campaign_name,
+    step: 'campaign_created'
+  }, '[TikTok:Workflow:CreateCampaign] ✅ Кампания создана');
 
   // ===================================================
   // STEP 5: Определяем targeting
   // ===================================================
   let finalTargeting: TikTokTargeting;
+  let targetingSource: string;
 
   if (targeting) {
     finalTargeting = targeting;
-    console.log('[TikTok:CreateCampaignWithCreative] Using provided targeting');
+    targetingSource = 'provided';
+    log.info({ source: 'provided' }, '[TikTok:Workflow:CreateCampaign] 🎯 Используем предоставленный targeting');
   } else if (use_default_settings) {
     // Попробуем загрузить настройки пользователя
     const { data: userSettings } = await supabase
@@ -287,13 +311,16 @@ export async function workflowCreateTikTokCampaignWithCreative(
 
     if (userSettings) {
       finalTargeting = convertToTikTokTargeting(userSettings);
-      console.log('[TikTok:CreateCampaignWithCreative] Using user default settings');
+      targetingSource = 'user_settings';
+      log.info({ source: 'user_settings' }, '[TikTok:Workflow:CreateCampaign] 🎯 Используем настройки пользователя');
     } else {
       finalTargeting = getDefaultTikTokTargeting();
-      console.log('[TikTok:CreateCampaignWithCreative] Using fallback targeting');
+      targetingSource = 'fallback';
+      log.info({ source: 'fallback' }, '[TikTok:Workflow:CreateCampaign] 🎯 Используем дефолтный targeting (KZ)');
     }
   } else {
     finalTargeting = getDefaultTikTokTargeting();
+    targetingSource = 'default';
   }
 
   // ===================================================
@@ -333,13 +360,16 @@ export async function workflowCreateTikTokCampaignWithCreative(
     ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
   };
 
-  console.log('[TikTok:CreateCampaignWithCreative] Creating AdGroup:', {
+  log.info({
     name: finalAdGroupName,
     campaign_id,
     optimization_goal: objectiveConfig.optimization_goal,
     location_ids: finalTargeting.location_ids,
-    age_groups: finalTargeting.age_groups
-  });
+    age_groups: finalTargeting.age_groups,
+    gender: finalTargeting.gender,
+    targeting_source: targetingSource,
+    budget: daily_budget
+  }, '[TikTok:Workflow:CreateCampaign] 📦 Создание AdGroup');
 
   const adGroupResult = await withStep(
     'create_adgroup',
@@ -352,7 +382,12 @@ export async function workflowCreateTikTokCampaignWithCreative(
     throw Object.assign(new Error('create_adgroup_failed'), { step: 'create_adgroup_no_id' });
   }
 
-  console.log('[TikTok:CreateCampaignWithCreative] AdGroup created:', adgroup_id);
+  log.info({
+    adgroup_id,
+    adgroup_name: finalAdGroupName,
+    campaign_id,
+    step: 'adgroup_created'
+  }, '[TikTok:Workflow:CreateCampaign] ✅ AdGroup создана');
 
   // ===================================================
   // STEP 7: Создаем Ads
@@ -376,11 +411,13 @@ export async function workflowCreateTikTokCampaignWithCreative(
       ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
     };
 
-    console.log('[TikTok:CreateCampaignWithCreative] Creating ad:', {
+    log.info({
       ad_name: creative.ad_name,
       adgroup_id,
-      video_id: creative.tiktok_video_id
-    });
+      video_id: creative.tiktok_video_id,
+      ad_index: created_ads.length + 1,
+      total_ads: creative_data.length
+    }, '[TikTok:Workflow:CreateCampaign] 📺 Создание Ad');
 
     const adResult = await withStep(
       'create_ad',
@@ -396,10 +433,11 @@ export async function workflowCreateTikTokCampaignWithCreative(
       });
     }
 
-    console.log('[TikTok:CreateCampaignWithCreative] Ad created:', {
+    log.info({
       ad_id,
-      creative_id: creative.user_creative_id
-    });
+      creative_id: creative.user_creative_id,
+      step: 'ad_created'
+    }, '[TikTok:Workflow:CreateCampaign] ✅ Ad создан');
 
     created_ads.push({
       ad_id,
@@ -408,10 +446,11 @@ export async function workflowCreateTikTokCampaignWithCreative(
     });
   }
 
-  console.log('[TikTok:CreateCampaignWithCreative] All ads created:', {
+  log.info({
     count: created_ads.length,
-    ads: created_ads
-  });
+    ads: created_ads.map(a => ({ ad_id: a.ad_id, creative_id: a.user_creative_id })),
+    step: 'all_ads_created'
+  }, '[TikTok:Workflow:CreateCampaign] ✅ Все Ads созданы');
 
   // ===================================================
   // STEP 8: Сохраняем маппинг для трекинга
@@ -432,12 +471,28 @@ export async function workflowCreateTikTokCampaignWithCreative(
     );
   } catch (mappingError) {
     // Не фейлим workflow если маппинг не сохранился
-    console.error('[TikTok:CreateCampaignWithCreative] Failed to save mapping:', mappingError);
+    log.error({
+      error: mappingError,
+      campaign_id,
+      adgroup_id
+    }, '[TikTok:Workflow:CreateCampaign] ⚠️ Ошибка сохранения маппинга (не критично)');
   }
 
   // ===================================================
   // RETURN
   // ===================================================
+  const workflowDuration = Date.now() - workflowStartTime;
+
+  log.info({
+    campaign_id,
+    adgroup_id,
+    ads_count: created_ads.length,
+    objective,
+    auto_activate,
+    duration_ms: workflowDuration,
+    step: 'workflow_complete'
+  }, '[TikTok:Workflow:CreateCampaign] 🎉 Workflow завершён успешно');
+
   return {
     success: true,
     campaign_id,

@@ -47,6 +47,14 @@ export const tikTokHandlers = {
   // ============================================================
 
   async getTikTokCampaigns({ period, date_from, date_to, status }, { tikTokAccessToken, tikTokAdvertiserId }) {
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      period,
+      date_from,
+      date_to,
+      status
+    }, '[TikTok:Handler:getCampaigns] Запрос списка кампаний');
+
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 
     // Get campaigns
@@ -115,6 +123,12 @@ export const tikTokHandlers = {
     const campaignsWithRefs = attachRefs(formattedCampaigns, 'tc');
     const entityMap = buildEntityMap(formattedCampaigns, 'tc');
 
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      total: formattedCampaigns.length,
+      dateRange
+    }, '[TikTok:Handler:getCampaigns] ✅ Кампании получены');
+
     return {
       success: true,
       platform: 'tiktok',
@@ -126,6 +140,10 @@ export const tikTokHandlers = {
   },
 
   async getTikTokCampaignDetails({ campaign_id }, { tikTokAccessToken, tikTokAdvertiserId }) {
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      campaign_id
+    }, '[TikTok:Handler:getCampaignDetails] Запрос деталей кампании');
     // Get campaign info
     const campaignResult = await tikTokGraph('GET', 'campaign/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
@@ -492,7 +510,15 @@ export const tikTokHandlers = {
   // ============================================================
 
   async pauseTikTokCampaign({ campaign_id, reason, dry_run }, { tikTokAccessToken, tikTokAdvertiserId }) {
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      campaign_id,
+      reason,
+      dry_run
+    }, '[TikTok:Handler:pauseCampaign] Запрос на паузу кампании');
+
     if (dry_run) {
+      logger.info({ campaign_id, dry_run: true }, '[TikTok:Handler:pauseCampaign] Dry run - кампания не остановлена');
       return {
         success: true,
         dry_run: true,
@@ -509,6 +535,12 @@ export const tikTokHandlers = {
       status: 'DISABLE'
     });
 
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      campaign_id,
+      new_status: 'DISABLE'
+    }, '[TikTok:Handler:pauseCampaign] ✅ Кампания остановлена');
+
     return {
       success: true,
       action: 'pause_campaign',
@@ -519,11 +551,22 @@ export const tikTokHandlers = {
   },
 
   async resumeTikTokCampaign({ campaign_id }, { tikTokAccessToken, tikTokAdvertiserId }) {
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      campaign_id
+    }, '[TikTok:Handler:resumeCampaign] Запрос на возобновление кампании');
+
     await tikTokGraph('POST', 'campaign/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       campaign_ids: JSON.stringify([campaign_id]),
       status: 'ENABLE'
     });
+
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      campaign_id,
+      new_status: 'ENABLE'
+    }, '[TikTok:Handler:resumeCampaign] ✅ Кампания возобновлена');
 
     return {
       success: true,
@@ -538,7 +581,15 @@ export const tikTokHandlers = {
   // ============================================================
 
   async pauseTikTokAdGroup({ adgroup_id, reason, dry_run }, { tikTokAccessToken, tikTokAdvertiserId }) {
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      adgroup_id,
+      reason,
+      dry_run
+    }, '[TikTok:Handler:pauseAdGroup] Запрос на паузу AdGroup');
+
     if (dry_run) {
+      logger.info({ adgroup_id, dry_run: true }, '[TikTok:Handler:pauseAdGroup] Dry run - AdGroup не остановлена');
       return {
         success: true,
         dry_run: true,
@@ -553,6 +604,12 @@ export const tikTokHandlers = {
       adgroup_ids: JSON.stringify([adgroup_id]),
       status: 'DISABLE'
     });
+
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      adgroup_id,
+      new_status: 'DISABLE'
+    }, '[TikTok:Handler:pauseAdGroup] ✅ AdGroup остановлена');
 
     return {
       success: true,
@@ -654,6 +711,13 @@ export const tikTokHandlers = {
   // ============================================================
 
   async pauseTikTokDirection({ direction_id, reason, dry_run }, { tikTokAccessToken, tikTokAdvertiserId, userAccountId }) {
+    logger.info({
+      userAccountId,
+      direction_id,
+      reason,
+      dry_run
+    }, '[TikTok:Handler:pauseDirection] Запрос на паузу направления');
+
     // Get direction
     const { data: direction, error } = await supabase
       .from('account_directions')
@@ -663,10 +727,12 @@ export const tikTokHandlers = {
       .single();
 
     if (error || !direction) {
+      logger.error({ direction_id, error }, '[TikTok:Handler:pauseDirection] ❌ Направление не найдено');
       return { success: false, error: 'Direction not found' };
     }
 
     if (dry_run) {
+      logger.info({ direction_id, direction_name: direction.name, dry_run: true }, '[TikTok:Handler:pauseDirection] Dry run');
       return {
         success: true,
         dry_run: true,
@@ -680,6 +746,11 @@ export const tikTokHandlers = {
 
     // Pause TikTok campaign if exists
     if (direction.tiktok_campaign_id) {
+      logger.info({
+        direction_id,
+        tiktok_campaign_id: direction.tiktok_campaign_id
+      }, '[TikTok:Handler:pauseDirection] Останавливаем кампанию TikTok');
+
       await tikTokGraph('POST', 'campaign/status/update/', tikTokAccessToken, {
         advertiser_id: tikTokAdvertiserId,
         campaign_ids: JSON.stringify([direction.tiktok_campaign_id]),
@@ -692,6 +763,12 @@ export const tikTokHandlers = {
       .from('account_directions')
       .update({ is_active: false })
       .eq('id', direction_id);
+
+    logger.info({
+      direction_id,
+      direction_name: direction.name,
+      tiktok_campaign_id: direction.tiktok_campaign_id
+    }, '[TikTok:Handler:pauseDirection] ✅ Направление остановлено');
 
     return {
       success: true,
