@@ -1,4 +1,4 @@
-import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight, Cpu } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
@@ -11,6 +11,7 @@ export function Sidebar() {
   
   const navItems = [
     { path: '/', icon: MessageSquare, label: 'CRM' },
+    { path: '/bots', icon: Cpu, label: 'AI-боты' },
     { path: '/chatbot', icon: Bot, label: 'Настройки бота' },
     { path: '/reactivation', icon: Send, label: 'Рассылки' }
   ];
