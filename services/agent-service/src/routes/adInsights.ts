@@ -21,7 +21,7 @@ import {
   syncAds
 } from '../services/adInsightsSync.js';
 import { normalizeAllResults, ensureClickFamily } from '../services/resultNormalizer.js';
-import { processAdAccount, getAnomalies, updateAnomalyStatus, getAnomalySummary } from '../services/anomalyDetector.js';
+import { processAdAccount, getAnomalies, updateAnomalyStatus, getAnomalySummary, updateMissingPrecedingDeviations } from '../services/anomalyDetector.js';
 import {
   runQuantileAnalysis,
   predictBurnout,
@@ -561,6 +561,41 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ error, adminId, anomalyId }, 'Failed to update anomaly');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /admin/ad-insights/:accountId/update-preceding-deviations
+   * Обновить preceding_deviations для всех аномалий (заполнить пропущенные)
+   */
+  fastify.post<{
+    Params: SyncParams;
+  }>('/admin/ad-insights/:accountId/update-preceding-deviations', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+
+    try {
+      // Резолвим accountId (legacy_xxx или UUID) в реальный ad_account UUID
+      const resolvedAccountId = await resolveAdAccountUuid(accountId);
+      if (!resolvedAccountId) {
+        return reply.status(404).send({ error: 'Ad account not found', accountId });
+      }
+
+      log.info({ adminId, accountId: resolvedAccountId }, 'Starting update of preceding deviations');
+
+      const result = await updateMissingPrecedingDeviations(resolvedAccountId);
+
+      log.info({ adminId, accountId: resolvedAccountId, ...result }, 'Preceding deviations updated');
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Failed to update preceding deviations');
       return reply.status(500).send({ error: error.message });
     }
   });

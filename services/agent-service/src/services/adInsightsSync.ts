@@ -606,19 +606,25 @@ export async function syncWeeklyInsights(
   for (const row of results) {
     const weekStart = getWeekStart(row.date_start);
 
+    const impressions = parseInt(row.impressions) || 0;
+    const linkClicks = extractLinkClicks(row.actions);
+    // Link CTR = link_clicks / impressions (CTR по ссылкам отдельно от общего CTR)
+    const linkCtr = impressions > 0 ? (linkClicks / impressions) * 100 : null;
+
     const insight = {
       ad_account_id: adAccountId,
       fb_ad_id: row.ad_id,
       week_start_date: weekStart,
       spend: parseFloat(row.spend) || 0,
-      impressions: parseInt(row.impressions) || 0,
+      impressions,
       reach: parseInt(row.reach) || 0,
       frequency: parseFloat(row.frequency) || 0,
       cpm: parseFloat(row.cpm) || 0,
       ctr: parseFloat(row.ctr) || 0,
       cpc: parseFloat(row.cpc) || 0,
       clicks: parseInt(row.clicks) || 0,
-      link_clicks: extractLinkClicks(row.actions),
+      link_clicks: linkClicks,
+      link_ctr: linkCtr,
       actions_json: row.actions || [],
       cost_per_action_type_json: row.cost_per_action_type || [],
       video_views: extractVideoViews(row.actions),
@@ -912,6 +918,7 @@ export async function syncWeeklyInsightsAdset(
 export async function fullSync(adAccountUuid: string, options?: {
   syncCampaignInsights?: boolean;
   syncAdsetInsights?: boolean;
+  syncDailyInsights?: boolean;
   // Credentials могут быть переданы извне (для legacy режима)
   accessToken?: string;
   fbAdAccountId?: string;
@@ -923,10 +930,12 @@ export async function fullSync(adAccountUuid: string, options?: {
   insights: { inserted: number; updated: number };
   campaignInsights?: { inserted: number };
   adsetInsights?: { inserted: number };
+  dailyInsights?: { inserted: number };
 }> {
   const {
     syncCampaignInsights = true,
     syncAdsetInsights = true,
+    syncDailyInsights: shouldSyncDaily = true,
     accessToken: providedToken,
     fbAdAccountId: providedFbAccountId,
     isLegacy = false,
@@ -989,6 +998,16 @@ export async function fullSync(adAccountUuid: string, options?: {
     }
   }
 
+  // 6. Синхронизируем daily insights (для детекции пауз)
+  let dailyInsights: { inserted: number } | undefined;
+  if (shouldSyncDaily) {
+    try {
+      dailyInsights = await syncDailyInsights(adAccountUuid, accessToken, cleanFbAccountId, 3);
+    } catch (err: any) {
+      log.error({ errorMessage: err?.message, errorStack: err?.stack, adAccountUuid }, 'Failed to sync daily insights');
+    }
+  }
+
   log.info({
     adAccountUuid,
     campaigns,
@@ -997,9 +1016,10 @@ export async function fullSync(adAccountUuid: string, options?: {
     insights,
     campaignInsights,
     adsetInsights,
+    dailyInsights,
   }, 'Full sync completed');
 
-  return { campaigns, adsets, ads, insights, campaignInsights, adsetInsights };
+  return { campaigns, adsets, ads, insights, campaignInsights, adsetInsights, dailyInsights };
 }
 
 /**
@@ -1030,4 +1050,154 @@ export async function syncAllAccounts(): Promise<Map<string, any>> {
   }
 
   return results;
+}
+
+// ============================================================================
+// DAILY INSIGHTS SYNC (для детекции пауз)
+// ============================================================================
+
+/**
+ * Извлекает общее количество результатов из actions
+ */
+function extractResultsCount(actions: any[]): number {
+  if (!Array.isArray(actions)) return 0;
+  // Результаты - это различные conversion actions
+  const resultTypes = [
+    'lead', 'purchase', 'complete_registration', 'contact',
+    'add_to_cart', 'initiate_checkout', 'submit_application'
+  ];
+  let total = 0;
+  for (const action of actions) {
+    if (resultTypes.includes(action.action_type)) {
+      total += parseInt(action.value) || 0;
+    }
+  }
+  return total;
+}
+
+/**
+ * Синхронизирует daily insights для ad account
+ * Используется для детекции пауз в доставке
+ */
+export async function syncDailyInsights(
+  adAccountId: string,
+  accessToken: string,
+  fbAdAccountId: string,
+  months: number = 3 // За 3 месяца для анализа пауз
+): Promise<{ inserted: number }> {
+  log.info({ adAccountId, fbAdAccountId, months }, 'Starting daily insights sync');
+
+  // 1. Проверяем rate limit
+  const canProceed = await checkRateLimit(adAccountId);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  // 2. Запускаем async job с time_increment=1 (daily)
+  const timeRange = getDateRange(months);
+
+  const fields = [
+    'ad_id',
+    'spend',
+    'impressions',
+    'reach',
+    'clicks',
+    'actions',
+  ].join(',');
+
+  const result = await graph('POST', `act_${fbAdAccountId}/insights`, accessToken, {
+    level: 'ad',
+    time_increment: 1, // DAILY (not weekly)
+    time_range: JSON.stringify(timeRange),
+    fields,
+    action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+  });
+
+  const reportRunId = result.report_run_id;
+  if (!reportRunId) {
+    throw new Error('No report_run_id in response for daily insights');
+  }
+
+  log.info({ adAccountId, reportRunId }, 'Daily async job started');
+
+  // 3. Ждём завершения
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+
+    const jobStatus = await pollAsyncJobStatus(accessToken, reportRunId);
+    status = jobStatus.status;
+
+    log.info({
+      adAccountId,
+      reportRunId,
+      status,
+      progress: jobStatus.async_percent_completion
+    }, 'Polling daily async job');
+
+    if (status === 'Job Failed') {
+      throw new Error('Async daily insights job failed');
+    }
+
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') {
+    throw new Error(`Async daily job timeout after ${pollCount} polls`);
+  }
+
+  // 4. Получаем результаты
+  const results = await fetchAsyncJobResults(accessToken, reportRunId);
+  log.info({ adAccountId, resultsCount: results.length }, 'Fetched daily async job results');
+
+  // 5. Сохраняем в БД
+  let inserted = 0;
+
+  for (const row of results) {
+    const date = row.date_start; // Дата без времени
+    const impressions = parseInt(row.impressions) || 0;
+    const clicks = parseInt(row.clicks) || 0;
+    const spend = parseFloat(row.spend) || 0;
+    const reach = parseInt(row.reach) || 0;
+
+    // Вычисляемые метрики
+    const ctr = impressions > 0 ? (clicks / impressions) * 100 : null;
+    const cpm = impressions > 0 ? (spend / impressions) * 1000 : null;
+    const cpc = clicks > 0 ? spend / clicks : null;
+
+    const insight = {
+      ad_account_id: adAccountId,
+      fb_ad_id: row.ad_id,
+      date,
+      impressions,
+      clicks,
+      spend,
+      reach,
+      ctr,
+      cpm,
+      cpc,
+      results_count: extractResultsCount(row.actions),
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_daily')
+          .upsert(insight, {
+            onConflict: 'ad_account_id,fb_ad_id,date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert daily insight ad=${row.ad_id} date=${date}`);
+      inserted++;
+    } catch (error) {
+      log.error({ error, adId: row.ad_id, date }, 'Failed to upsert daily insight');
+    }
+  }
+
+  log.info({ adAccountId, inserted }, 'Daily insights synced');
+  return { inserted };
 }

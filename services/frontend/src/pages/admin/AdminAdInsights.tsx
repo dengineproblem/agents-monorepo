@@ -52,6 +52,20 @@ interface AdAccount {
   connection_status?: string;
 }
 
+/**
+ * Форматирует дату начала недели в диапазон "15 дек — 21 дек"
+ */
+function formatWeekRange(weekStart: string): string {
+  const start = new Date(weekStart);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+
+  const formatDate = (d: Date) =>
+    d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+
+  return `${formatDate(start)} — ${formatDate(end)}`;
+}
+
 const AdminAdInsights: React.FC = () => {
   // Account selection
   const [accounts, setAccounts] = useState<AdAccount[]>([]);
@@ -477,7 +491,7 @@ const AdminAdInsights: React.FC = () => {
                   <div className="space-y-2">
                     {(yearlyAudit.bestWeeks || []).slice(0, 5).map((week, idx) => (
                       <div key={idx} className="flex justify-between items-center">
-                        <span className="text-sm">{week.week}</span>
+                        <span className="text-sm">{formatWeekRange(week.week)}</span>
                         <div className="text-right">
                           <span className="font-medium text-green-600">{week.results} res</span>
                           <span className="text-muted-foreground ml-2">
@@ -499,7 +513,7 @@ const AdminAdInsights: React.FC = () => {
                   <div className="space-y-2">
                     {(yearlyAudit.worstWeeks || []).slice(0, 5).map((week, idx) => (
                       <div key={idx} className="flex justify-between items-center">
-                        <span className="text-sm">{week.week}</span>
+                        <span className="text-sm">{formatWeekRange(week.week)}</span>
                         <div className="text-right">
                           <span className="font-medium text-red-600">{week.results} res</span>
                           <span className="text-muted-foreground ml-2">

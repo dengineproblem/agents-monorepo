@@ -63,6 +63,7 @@ function formatMetricValue(value: number, metric: string): string {
       return `${value.toFixed(2)}%`;
     case 'cpm':
     case 'spend':
+    case 'cpr':
       return `$${value.toFixed(2)}`;
     case 'frequency':
       return value.toFixed(2);
@@ -90,6 +91,7 @@ function getMetricIcon(metric: string): React.ReactNode {
       return <MousePointerClick className="h-3.5 w-3.5" />;
     case 'cpm':
     case 'spend':
+    case 'cpr':
       return <DollarSign className="h-3.5 w-3.5" />;
     case 'results':
       return <BarChart3 className="h-3.5 w-3.5" />;
@@ -119,6 +121,8 @@ function getMetricLabel(metric: string): string {
       return 'CPM';
     case 'spend':
       return 'Расход';
+    case 'cpr':
+      return 'CPR';
     case 'results':
       return 'Результаты';
     case 'quality_ranking':
@@ -143,113 +147,161 @@ function formatRankingLabel(score: number | null): { label: string; color: strin
   return { label: 'Below', color: 'text-red-600' };
 }
 
+// Порядок метрик для отображения (без rankings — они отдельно)
+const METRICS_ORDER = ['frequency', 'ctr', 'link_ctr', 'cpm', 'cpr', 'spend', 'results'];
+
 /**
- * Компонент отображения отклонений за одну неделю в виде таблицы
+ * Объединённая таблица отклонений по всем 3 неделям
+ * Строки = метрики, колонки = недели
  */
-function WeekDeviationsTable({ week, label }: { week: WeekDeviations | null; label: string }) {
-  if (!week) {
-    return null;
-  }
+function UnifiedDeviationsTable({
+  week0,
+  weekMinus1,
+  weekMinus2,
+}: {
+  week0: WeekDeviations | null;
+  weekMinus1: WeekDeviations | null;
+  weekMinus2: WeekDeviations | null;
+}) {
+  // Хелпер: найти deviation для метрики в неделе
+  const getDeviation = (week: WeekDeviations | null, metric: string): MetricDeviation | undefined =>
+    week?.deviations?.find((d) => d.metric === metric);
 
-  const weekRange = `${format(new Date(week.week_start), 'd MMM', { locale: ru })} — ${format(new Date(week.week_end), 'd MMM', { locale: ru })}`;
-  const hasDeviations = week.deviations && week.deviations.length > 0;
-  const hasRankings = week.quality_ranking !== null || week.engagement_ranking !== null || week.conversion_ranking !== null;
+  // Хелпер: определить цвет ячейки
+  const getCellColor = (dev: MetricDeviation | undefined): string => {
+    if (!dev) return 'text-muted-foreground';
+    if (dev.is_significant && dev.direction === 'bad') return 'text-red-600 font-medium';
+    if (dev.is_significant && dev.direction === 'good') return 'text-green-600 font-medium';
+    return 'text-gray-700';
+  };
 
-  // Показываем если есть хоть что-то
-  if (!hasDeviations && !hasRankings) {
-    return null;
-  }
+  // Хелпер: форматировать ячейку (значение + delta)
+  const formatCell = (dev: MetricDeviation | undefined): React.ReactNode => {
+    if (!dev) return '—';
+    const valueStr = formatMetricValue(dev.value, dev.metric);
+    const deltaStr = `${dev.delta_pct > 0 ? '+' : ''}${dev.delta_pct.toFixed(1)}%`;
+    return (
+      <span>
+        {valueStr} <span className="text-xs">({deltaStr})</span>
+      </span>
+    );
+  };
 
-  const qualityRanking = formatRankingLabel(week.quality_ranking);
-  const engagementRanking = formatRankingLabel(week.engagement_ranking);
-  const conversionRanking = formatRankingLabel(week.conversion_ranking);
+  // Хелпер: форматировать заголовок недели
+  const formatWeekHeader = (week: WeekDeviations | null, label: string): string => {
+    if (!week) return label;
+    return `${format(new Date(week.week_start), 'd MMM', { locale: ru })} — ${format(new Date(week.week_end), 'd MMM', { locale: ru })}`;
+  };
+
+  // Хелпер: форматировать rankings для недели
+  const formatRankings = (week: WeekDeviations | null): React.ReactNode => {
+    if (!week) return <span className="text-muted-foreground">—</span>;
+    const q = formatRankingLabel(week.quality_ranking);
+    const e = formatRankingLabel(week.engagement_ranking);
+    const c = formatRankingLabel(week.conversion_ranking);
+    return (
+      <div className="flex flex-col gap-0.5 text-xs">
+        <span className={q.color}>Q: {q.label}</span>
+        <span className={e.color}>E: {e.label}</span>
+        <span className={c.color}>C: {c.label}</span>
+      </div>
+    );
+  };
 
   return (
-    <div className="mb-4">
-      <div className="text-sm font-medium mb-2">{label}</div>
+    <table className="w-full text-sm border-collapse">
+      <thead>
+        <tr className="border-b">
+          <th className="text-left py-2 pr-4 font-medium text-muted-foreground">Метрика</th>
+          <th className="text-center py-2 px-3 font-medium text-muted-foreground">
+            <div className="flex flex-col">
+              <span>📍 Аномалия</span>
+              <span className="text-xs font-normal">{formatWeekHeader(week0, 'Week 0')}</span>
+            </div>
+          </th>
+          <th className="text-center py-2 px-3 font-medium text-muted-foreground">
+            <div className="flex flex-col">
+              <span>-1 неделя</span>
+              <span className="text-xs font-normal">{formatWeekHeader(weekMinus1, 'Week -1')}</span>
+            </div>
+          </th>
+          <th className="text-center py-2 px-3 font-medium text-muted-foreground">
+            <div className="flex flex-col">
+              <span>-2 недели</span>
+              <span className="text-xs font-normal">{formatWeekHeader(weekMinus2, 'Week -2')}</span>
+            </div>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {METRICS_ORDER.map((metric) => {
+          const dev0 = getDeviation(week0, metric);
+          const dev1 = getDeviation(weekMinus1, metric);
+          const dev2 = getDeviation(weekMinus2, metric);
 
-      {/* Deviations table */}
-      {hasDeviations && (
-        <table className="w-full text-sm border-collapse mb-3">
-          <thead>
-            <tr className="border-b">
-              <th className="text-left py-1.5 pr-4 font-medium text-muted-foreground">Метрика</th>
-              <th className="text-right py-1.5 px-4 font-medium text-muted-foreground">{weekRange}</th>
-              <th className="text-right py-1.5 px-4 font-medium text-muted-foreground">Baseline</th>
-              <th className="text-right py-1.5 pl-4 font-medium text-muted-foreground">Δ %</th>
+          return (
+            <tr key={metric} className="border-b border-gray-100">
+              <td className="py-2 pr-4">
+                <div className="flex items-center gap-1.5">
+                  {getMetricIcon(metric)}
+                  <span>{getMetricLabel(metric)}</span>
+                </div>
+              </td>
+              <td className={`text-center py-2 px-3 ${getCellColor(dev0)}`}>
+                {formatCell(dev0)}
+              </td>
+              <td className={`text-center py-2 px-3 ${getCellColor(dev1)}`}>
+                {formatCell(dev1)}
+              </td>
+              <td className={`text-center py-2 px-3 ${getCellColor(dev2)}`}>
+                {formatCell(dev2)}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {week.deviations.map((dev, idx) => {
-              const deltaColor = dev.direction === 'bad'
-                ? 'text-red-600'
-                : dev.direction === 'good'
-                  ? 'text-green-600'
-                  : 'text-gray-600';
-
-              return (
-                <tr key={`${dev.metric}-${idx}`} className="border-b border-gray-100">
-                  <td className="py-1.5 pr-4">
-                    <div className="flex items-center gap-1.5">
-                      {getMetricIcon(dev.metric)}
-                      <span>{getMetricLabel(dev.metric)}</span>
-                    </div>
-                  </td>
-                  <td className="text-right py-1.5 px-4 font-medium">
-                    {formatMetricValue(dev.value, dev.metric)}
-                  </td>
-                  <td className="text-right py-1.5 px-4 text-muted-foreground">
-                    {formatMetricValue(dev.baseline, dev.metric)}
-                  </td>
-                  <td className={`text-right py-1.5 pl-4 font-medium ${deltaColor}`}>
-                    {dev.delta_pct > 0 ? '+' : ''}{dev.delta_pct.toFixed(1)}%
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-
-      {/* Rankings row */}
-      {hasRankings && (
-        <div className="flex gap-3 text-xs">
-          <div className="flex items-center gap-1">
-            <Star className="h-3 w-3 text-muted-foreground" />
-            <span className="text-muted-foreground">Quality:</span>
-            <span className={`font-medium ${qualityRanking.color}`}>{qualityRanking.label}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <ThumbsUp className="h-3 w-3 text-muted-foreground" />
-            <span className="text-muted-foreground">Engage:</span>
-            <span className={`font-medium ${engagementRanking.color}`}>{engagementRanking.label}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Target className="h-3 w-3 text-muted-foreground" />
-            <span className="text-muted-foreground">Convert:</span>
-            <span className={`font-medium ${conversionRanking.color}`}>{conversionRanking.label}</span>
-          </div>
-        </div>
-      )}
-    </div>
+          );
+        })}
+        {/* Rankings row */}
+        <tr className="bg-muted/20">
+          <td className="py-2 pr-4">
+            <div className="flex items-center gap-1.5">
+              <Star className="h-3.5 w-3.5" />
+              <span>Rankings</span>
+            </div>
+          </td>
+          <td className="text-center py-2 px-3">{formatRankings(week0)}</td>
+          <td className="text-center py-2 px-3">{formatRankings(weekMinus1)}</td>
+          <td className="text-center py-2 px-3">{formatRankings(weekMinus2)}</td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 
 /**
- * Подсчитывает общее количество значимых отклонений
+ * Подсчитывает общее количество ЗНАЧИМЫХ отклонений (is_significant = true)
  */
-function countDeviations(anomaly: Anomaly): number {
+function countSignificantDeviations(anomaly: Anomaly): number {
   let count = 0;
   if (anomaly.preceding_deviations?.week_0?.deviations) {
-    count += anomaly.preceding_deviations.week_0.deviations.length;
+    count += anomaly.preceding_deviations.week_0.deviations.filter((d) => d.is_significant).length;
   }
   if (anomaly.preceding_deviations?.week_minus_1?.deviations) {
-    count += anomaly.preceding_deviations.week_minus_1.deviations.length;
+    count += anomaly.preceding_deviations.week_minus_1.deviations.filter((d) => d.is_significant).length;
   }
   if (anomaly.preceding_deviations?.week_minus_2?.deviations) {
-    count += anomaly.preceding_deviations.week_minus_2.deviations.length;
+    count += anomaly.preceding_deviations.week_minus_2.deviations.filter((d) => d.is_significant).length;
   }
   return count;
+}
+
+/**
+ * Проверяет есть ли данные для отображения
+ */
+function hasDataData(anomaly: Anomaly): boolean {
+  return !!(
+    anomaly.preceding_deviations?.week_0 ||
+    anomaly.preceding_deviations?.week_minus_1 ||
+    anomaly.preceding_deviations?.week_minus_2
+  );
 }
 
 export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
@@ -326,18 +378,18 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                   const isExpanded = expandedRows.has(anomaly.id);
                   const isAcknowledged = anomaly.status === 'acknowledged';
                   const deltaPct = anomaly.delta_pct ?? 0;
-                  const deviationsCount = countDeviations(anomaly);
-                  const hasDeviations = deviationsCount > 0;
+                  const deviationsCount = countSignificantDeviations(anomaly);
+                  const hasData = hasDataData(anomaly);
 
                   return (
                     <React.Fragment key={anomaly.id}>
                       {/* Основная строка */}
                       <TableRow
-                        className={`${isAcknowledged ? 'opacity-50' : ''} ${hasDeviations ? 'cursor-pointer hover:bg-muted/50' : ''}`}
-                        onClick={() => hasDeviations && toggleRow(anomaly.id)}
+                        className={`${isAcknowledged ? 'opacity-50' : ''} ${hasData ? 'cursor-pointer hover:bg-muted/50' : ''}`}
+                        onClick={() => hasData && toggleRow(anomaly.id)}
                       >
                         <TableCell className="w-8 p-2">
-                          {hasDeviations && (
+                          {hasData && (
                             isExpanded
                               ? <ChevronDown className="h-4 w-4 text-muted-foreground" />
                               : <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -383,7 +435,7 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                           </span>
                         </TableCell>
                         <TableCell>
-                          {hasDeviations ? (
+                          {hasData ? (
                             <Badge variant="outline" className="text-xs">
                               {deviationsCount} сигнал{deviationsCount === 1 ? '' : deviationsCount < 5 ? 'а' : 'ов'}
                             </Badge>
@@ -417,26 +469,19 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                       </TableRow>
 
                       {/* Expanded row с деталями отклонений */}
-                      {isExpanded && hasDeviations && (
+                      {isExpanded && hasData && (
                         <TableRow className="bg-muted/30 hover:bg-muted/30">
                           <TableCell colSpan={11} className="p-4">
                             <div className="text-sm font-medium mb-3 text-muted-foreground">
-                              Отклонения метрик
+                              Отклонения метрик {deviationsCount > 0 && (
+                                <span className="text-red-500">({deviationsCount} значимых)</span>
+                              )}
                             </div>
-                            <div className="grid gap-4 md:grid-cols-3">
-                              <WeekDeviationsTable
-                                week={anomaly.preceding_deviations?.week_0 ?? null}
-                                label="📍 Неделя аномалии"
-                              />
-                              <WeekDeviationsTable
-                                week={anomaly.preceding_deviations?.week_minus_1 ?? null}
-                                label="За 1 неделю до"
-                              />
-                              <WeekDeviationsTable
-                                week={anomaly.preceding_deviations?.week_minus_2 ?? null}
-                                label="За 2 недели до"
-                              />
-                            </div>
+                            <UnifiedDeviationsTable
+                              week0={anomaly.preceding_deviations?.week_0 ?? null}
+                              weekMinus1={anomaly.preceding_deviations?.week_minus_1 ?? null}
+                              weekMinus2={anomaly.preceding_deviations?.week_minus_2 ?? null}
+                            />
                           </TableCell>
                         </TableRow>
                       )}

@@ -17,32 +17,28 @@ import { createLogger } from '../lib/logger.js';
 const log = createLogger({ module: 'resultNormalizer' });
 
 // Маппинг action_type → result_family (fallback если нет в БД)
+// ВАЖНО: Используем ОДИН action_type на категорию чтобы избежать дублирования!
+// Логика аналогична facebookApi.ts для обычных пользователей
 const ACTION_TYPE_FAMILY_MAP: Record<string, string> = {
-  // Messages
-  'onsite_conversion.messaging_conversation_started_7d': 'messages',
-  'onsite_conversion.messaging_first_reply': 'messages',
-  'messaging_first_reply': 'messages',
-  'messaging_conversation_started_7d': 'messages',
+  // Messages - ТОЛЬКО total_messaging_connection (как в facebookApi.ts)
+  // НЕ используем: messaging_conversation_started_7d, messaging_first_reply - они дублируют
+  'onsite_conversion.total_messaging_connection': 'messages',
 
-  // Leadgen form
-  'lead': 'leadgen_form',
-  'leadgen_grouped': 'leadgen_form',
+  // Leadgen form - ТОЛЬКО lead_grouped (как в facebookApi.ts)
+  // НЕ используем: 'lead' - это агрегат, дублирует lead_grouped
   'onsite_conversion.lead_grouped': 'leadgen_form',
 
-  // Website lead (pixel)
+  // Website lead (pixel) - fb_pixel_lead имеет приоритет
   'offsite_conversion.fb_pixel_lead': 'website_lead',
   'offsite_conversion.fb_pixel_complete_registration': 'website_lead',
   'offsite_conversion.fb_pixel_submit_application': 'website_lead',
 
   // Purchase
   'offsite_conversion.fb_pixel_purchase': 'purchase',
-  'onsite_conversion.purchase': 'purchase',
-  'purchase': 'purchase',
 
   // Click
   'link_click': 'click',
   'landing_page_view': 'click',
-  'outbound_click': 'click',
 
   // Video
   'video_view': 'video_view',
