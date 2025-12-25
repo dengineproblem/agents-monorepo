@@ -98,6 +98,83 @@ async function getQualificationPrompt(
 }
 
 /**
+ * CRM qualification status from leads table
+ */
+interface CrmQualificationStatus {
+  hasIntegration: boolean;      // Has AMO CRM or Bitrix24 connected
+  isQualified: boolean;         // From leads.is_qualified (set by CRM sync)
+  isScheduled: boolean;         // From leads.is_scheduled (set by CRM sync)
+  source: 'amocrm' | 'bitrix24' | null;
+}
+
+/**
+ * Get CRM qualification status for a lead
+ * Checks leads table for is_qualified flag set by AMO/Bitrix sync
+ */
+async function getCrmQualificationStatus(
+  contactPhone: string,
+  userAccountId: string
+): Promise<CrmQualificationStatus> {
+  const defaultResult: CrmQualificationStatus = {
+    hasIntegration: false,
+    isQualified: false,
+    isScheduled: false,
+    source: null,
+  };
+
+  try {
+    // Check if user has AMO or Bitrix integration
+    const { data: userAccount } = await supabase
+      .from('user_accounts')
+      .select(`
+        amocrm_access_token,
+        bitrix24_access_token,
+        amocrm_qualification_fields,
+        amocrm_scheduled_fields,
+        bitrix24_qualification_fields,
+        bitrix24_scheduled_fields
+      `)
+      .eq('id', userAccountId)
+      .single();
+
+    if (!userAccount) return defaultResult;
+
+    const hasAmocrm = !!userAccount.amocrm_access_token;
+    const hasBitrix = !!userAccount.bitrix24_access_token;
+
+    if (!hasAmocrm && !hasBitrix) return defaultResult;
+
+    // Find lead by phone
+    const { data: lead } = await supabase
+      .from('leads')
+      .select('is_qualified, is_scheduled, amocrm_lead_id, bitrix24_lead_id, bitrix24_deal_id')
+      .eq('chat_id', contactPhone)
+      .eq('user_account_id', userAccountId)
+      .maybeSingle();
+
+    if (!lead) return defaultResult;
+
+    // Determine source
+    let source: 'amocrm' | 'bitrix24' | null = null;
+    if (lead.amocrm_lead_id) {
+      source = 'amocrm';
+    } else if (lead.bitrix24_lead_id || lead.bitrix24_deal_id) {
+      source = 'bitrix24';
+    }
+
+    return {
+      hasIntegration: hasAmocrm || hasBitrix,
+      isQualified: lead.is_qualified || false,
+      isScheduled: lead.is_scheduled || false,
+      source,
+    };
+  } catch (error) {
+    log.error({ error, contactPhone, userAccountId }, 'Error getting CRM qualification status');
+    return defaultResult;
+  }
+}
+
+/**
  * Format dialog messages for LLM analysis
  */
 function formatMessagesForAnalysis(
@@ -259,19 +336,58 @@ export async function processDialogForCapi(
     return;
   }
 
-  // Analyze qualification
-  const result = await analyzeQualification(dialog);
+  // Check CRM status first (from leads table synced with AMO/Bitrix)
+  const crmStatus = await getCrmQualificationStatus(
+    dialog.contact_phone,
+    dialog.user_account_id
+  );
 
-  if (!result) {
-    log.warn({ dialogId: dialog.id }, 'Qualification analysis failed');
-    return;
+  log.info({
+    dialogId: dialog.id,
+    crmStatus,
+  }, 'CRM qualification status');
+
+  // Analyze qualification via LLM
+  const llmResult = await analyzeQualification(dialog);
+
+  if (!llmResult) {
+    log.warn({ dialogId: dialog.id }, 'LLM qualification analysis failed');
   }
+
+  // Merge CRM and LLM results
+  // CRM takes priority for qualified and scheduled if available
+  const result: QualificationResult = {
+    is_interested: llmResult?.is_interested || (dialog.incoming_count >= 2),
+    is_qualified: crmStatus.hasIntegration && crmStatus.source
+      ? crmStatus.isQualified
+      : (llmResult?.is_qualified || false),
+    is_scheduled: crmStatus.hasIntegration && crmStatus.source
+      ? crmStatus.isScheduled
+      : (llmResult?.is_scheduled || false),
+    qualification_details: llmResult?.qualification_details || {
+      answered_questions: 0,
+      matching_criteria: 0,
+      missing_info: [],
+    },
+    reasoning: llmResult?.reasoning || 'LLM analysis failed',
+  };
+
+  // Determine sources
+  const qualifiedSource = crmStatus.hasIntegration && crmStatus.source && crmStatus.isQualified
+    ? crmStatus.source
+    : (llmResult?.is_qualified ? 'whatsapp' : null);
+
+  const scheduledSource = crmStatus.hasIntegration && crmStatus.source && crmStatus.isScheduled
+    ? crmStatus.source
+    : (llmResult?.is_scheduled ? 'whatsapp' : null);
 
   // Save qualification result to dialog_analysis
   await supabase
     .from('dialog_analysis')
     .update({
       qualification_result: result,
+      capi_qualified_source: qualifiedSource,
+      capi_scheduled_source: scheduledSource,
     })
     .eq('id', dialog.id);
 
@@ -297,11 +413,19 @@ export async function processDialogForCapi(
   // Send CAPI events based on levels (highest first)
   // Level 3: Scheduled
   if (result.is_scheduled && !dialog.capi_scheduled_sent) {
+    log.info({
+      dialogId: dialog.id,
+      source: scheduledSource,
+    }, 'Sending CAPI Schedule event');
     await sendCapiEventForLevel(dialog, 3, pixelId, accessToken);
   }
 
   // Level 2: Qualified
   if (result.is_qualified && !dialog.capi_qualified_sent) {
+    log.info({
+      dialogId: dialog.id,
+      source: qualifiedSource,
+    }, 'Sending CAPI Qualified event');
     await sendCapiEventForLevel(dialog, 2, pixelId, accessToken);
   }
 
