@@ -672,6 +672,38 @@ CREATE TABLE meta_insights_daily (
 - Delivery gap = есть дни с impressions и дни без impressions в одной неделе
 - Высокий CV указывает на нестабильную доставку
 
+### Migration 116-118: Baseline columns
+Добавление baseline колонок для всех метрик:
+
+**Migration 116:** `baseline_conversion` для ranking deviations
+**Migration 117:** `baseline_quality`, `baseline_engagement` для Ad Relevance
+**Migration 118:** Все остальные baseline колонки:
+- `baseline_frequency`, `baseline_ctr`, `baseline_cpc`, `baseline_cpm`
+- `baseline_spend`, `baseline_link_ctr`, `baseline_results`
+
+### Migration 119: `add_missing_feature_columns`
+Добавление недостающих колонок для полного набора features:
+- `results_delta_pct` - дельта результатов vs baseline
+- `results_lag1`, `results_lag2` - лаги результатов
+- `link_ctr`, `link_ctr_delta_pct` - Link CTR и его дельта
+
+### Migration 120-121: `fix_decimal_precision`
+Исправление precision для полей которые могут превышать 100%:
+- Все `*_delta_pct` поля: `DECIMAL(12,4)` (было `DECIMAL(8,2)`)
+- `reach_growth_rate`, `freq_slope`, `ctr_slope`: увеличен precision
+- Добавлены недостающие lag колонки: `cpm_lag1/2`, `spend_lag1/2`, `link_ctr_lag1/2`
+
+### Migration 122: `fix_ranking_drops_to_decimal`
+Изменение типа ranking drop колонок с SMALLINT на DECIMAL:
+```sql
+ALTER TABLE ad_weekly_features
+ALTER COLUMN quality_drop TYPE DECIMAL(3,1),
+ALTER COLUMN engagement_drop TYPE DECIMAL(3,1),
+ALTER COLUMN conversion_drop TYPE DECIMAL(3,1),
+ALTER COLUMN relevance_drop TYPE DECIMAL(4,1);
+```
+**Причина:** baseline для rankings - это медиана (может быть 1.5), поэтому drop = score - baseline может быть дробным.
+
 ## Multi-Account Support
 
 Система поддерживает multi-account архитектуру:
@@ -703,6 +735,27 @@ curl -X POST "http://localhost:8082/admin/ad-insights/{accountId}/sync?weeks=52"
 Открыть `/admin/ad-insights` в браузере (требуется авторизация tech_admin).
 
 ## Changelog
+
+### 2025-12-25 (v3): Complete Preceding Deviations + Schema Fixes
+- **НОВОЕ:** On-the-fly baseline calculation
+  - Если stored baselines = null, baseline вычисляется на лету из данных последних 8 недель
+  - Решает проблему новых рекламных аккаунтов без исторических baselines
+- **НОВОЕ:** Все 7 метрик показываются для всех 3 недель
+  - Ранее показывались только значимые отклонения (>15%)
+  - Теперь: frequency, ctr, link_ctr, cpm, cpr, spend, results — всегда присутствуют
+  - CPR добавлен как отдельная метрика в preceding_deviations
+- **ИСПРАВЛЕНО:** Schema fixes (миграции 116-122)
+  - Добавлены все baseline колонки для метрик
+  - Исправлен precision для delta полей (DECIMAL(12,4) вместо DECIMAL(8,2))
+  - Добавлены недостающие lag колонки (cpm, spend, link_ctr)
+  - Ranking drops изменены с SMALLINT на DECIMAL(3,1) для дробных значений
+- **ИСПРАВЛЕНО:** weeklyData lookup
+  - Исправлен поиск данных по ключу даты вместо lag columns
+  - Корректно находит features для week_minus_1 и week_minus_2
+- **ОБНОВЛЕНО:** UI таблицы аномалий
+  - Все метрики показываются даже если delta = 0
+  - Улучшена визуализация для полной картины состояния рекламы
+- **ТРЕБУЕТСЯ:** Применить миграции 116-122, пересинхронизировать данные, запустить detect-anomalies и update-preceding-deviations
 
 ### 2025-12-24 (v2): Week 0 + Results Metric + Raw Rankings
 - **НОВОЕ:** `week_0` добавлен в preceding_deviations
