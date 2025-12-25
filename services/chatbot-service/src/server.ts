@@ -83,6 +83,7 @@ app.post('/process-message', async (request, reply) => {
     const { collectMessages, shouldBotRespond } = await import('./lib/chatbotEngine.js');
     const { supabase } = await import('./lib/supabase.js');
     const { markCampaignReply } = await import('./lib/campaignAnalytics.js');
+    const { getDialogForCapi, processDialogForCapi } = await import('./lib/qualificationAgent.js');
 
     // Получить информацию о лиде
     const { data: lead } = await supabase
@@ -109,6 +110,23 @@ app.post('/process-message', async (request, reply) => {
     // Склеить сообщения (задержка 5 сек)
     // @ts-ignore
     await collectMessages(contactPhone, instanceName, messageText, app);
+
+    // Запустить LLM-агент квалификации в фоне (не блокирует ответ бота)
+    // Анализирует диалог и отправляет CAPI события если нужно
+    setImmediate(async () => {
+      try {
+        const dialogData = await getDialogForCapi(instanceName, contactPhone);
+        if (dialogData) {
+          await processDialogForCapi(dialogData);
+        }
+      } catch (capiError: any) {
+        app.log.error({
+          error: capiError.message,
+          contactPhone,
+          instanceName
+        }, 'Error in CAPI qualification processing');
+      }
+    });
 
     return reply.send({ success: true });
   } catch (error: any) {

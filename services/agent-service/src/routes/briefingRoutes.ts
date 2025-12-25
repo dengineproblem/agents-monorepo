@@ -4,7 +4,7 @@
 
 import { type FastifyRequest, FastifyPluginAsync } from 'fastify';
 import { supabase } from '../lib/supabase.js';
-import { generatePrompt1, generatePrompt4, type BriefingData } from '../lib/openaiPromptGenerator.js';
+import { generatePrompt1, generatePrompt2, generatePrompt4, type BriefingData } from '../lib/openaiPromptGenerator.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import {
@@ -228,15 +228,18 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
 
         const isMultiAccountMode = user.multi_account_enabled === true;
 
-        // 2. Генерируем prompt1 и prompt4 через OpenAI
+        // 2. Генерируем prompt1, prompt2 и prompt4 через OpenAI
         reqLog.info('Начинаем генерацию промптов через OpenAI');
         let generatedPrompt1: string;
+        let generatedPrompt2: string;
         let generatedPrompt4: string;
-        
+
         try {
-          // Генерируем оба промпта параллельно для ускорения
-          [generatedPrompt1, generatedPrompt4] = await Promise.all([
+          // Генерируем все промпты параллельно для ускорения
+          // prompt2 — для LLM-агента квалификации лидов (Meta CAPI)
+          [generatedPrompt1, generatedPrompt2, generatedPrompt4] = await Promise.all([
             generatePrompt1(briefingData),
+            generatePrompt2(briefingData),
             generatePrompt4(briefingData),
           ]);
         } catch (openaiError) {
@@ -260,6 +263,7 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
             user_account_id: user_id,
             name: briefingData.business_name,
             prompt1: generatedPrompt1,
+            prompt2: generatedPrompt2,  // ✅ НОВОЕ: prompt2 для квалификации лидов (Meta CAPI)
             prompt4: generatedPrompt4,
             is_active: true,
             connection_status: 'pending',
@@ -295,6 +299,7 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
             .from('user_accounts')
             .update({
               prompt1: generatedPrompt1,
+              prompt2: generatedPrompt2,  // ✅ НОВОЕ: prompt2 для квалификации лидов (Meta CAPI)
               prompt4: generatedPrompt4,
               updated_at: new Date().toISOString(),
             })

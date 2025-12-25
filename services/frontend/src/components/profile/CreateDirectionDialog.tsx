@@ -82,15 +82,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Загрузка пикселей при выборе цели "Site Leads"
+  // Загрузка пикселей для всех типов целей (для Meta CAPI)
+  // Для site_leads пиксель обязателен, для остальных — опционален
   useEffect(() => {
     const loadPixels = async () => {
-      if (objective !== 'site_leads') {
-        // Сброс пикселей при переключении на другую цель
-        setPixels([]);
-        setPixelId('');
-        return;
-      }
       setIsLoadingPixels(true);
       try {
         const list = await facebookApi.getPixels();
@@ -104,7 +99,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       }
     };
     loadPixels();
-  }, [objective]);
+  }, []); // Загружаем один раз при открытии диалога
 
   // Загрузка лидформ при выборе цели "Lead Forms"
   useEffect(() => {
@@ -226,11 +221,13 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         age_max: ageMax,
         gender,
         description: description.trim(),
+        // ✅ НОВОЕ: pixel_id передаётся для ВСЕХ типов целей (для Meta CAPI)
+        // Для site_leads обязателен, для остальных — опционален
+        pixel_id: pixelId || null,
         ...(objective === 'whatsapp' && { client_question: clientQuestion.trim() }),
         ...(objective === 'instagram_traffic' && { instagram_url: instagramUrl.trim() }),
         ...(objective === 'site_leads' && {
           site_url: siteUrl.trim(),
-          pixel_id: pixelId || null,
           utm_tag: utmTag.trim() || DEFAULT_UTM,
         }),
         ...(objective === 'lead_forms' && {
@@ -775,6 +772,54 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     Выберите лидформу, которая будет использоваться для сбора заявок
                   </p>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* СЕКЦИЯ: Meta CAPI (Пиксель) для всех типов кроме site_leads */}
+          {objective !== 'site_leads' && (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">📊 Meta Conversions API (опционально)</h3>
+              <p className="text-xs text-muted-foreground -mt-2">
+                Выберите пиксель для отслеживания конверсий через Meta CAPI
+              </p>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="pixel-id-capi">Facebook Pixel</Label>
+                  <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_PIXEL_ID} />
+                </div>
+                <Select
+                  value={pixelId || 'none'}
+                  onValueChange={(value) => setPixelId(value === 'none' ? '' : value)}
+                  disabled={isSubmitting || isLoadingPixels}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={
+                      isLoadingPixels
+                        ? 'Загрузка...'
+                        : pixels.length === 0
+                          ? 'Нет доступных пикселей'
+                          : 'Выберите пиксель (опционально)'
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Без пикселя</SelectItem>
+                    {pixels.length === 0 && !isLoadingPixels && (
+                      <SelectItem value="no-pixels" disabled>
+                        Пиксели не найдены в рекламном кабинете
+                      </SelectItem>
+                    )}
+                    {pixels.map((pixel) => (
+                      <SelectItem key={pixel.id} value={pixel.id}>
+                        {pixel.name} ({pixel.id})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  При выборе пикселя система будет отправлять события конверсий (интерес, квалификация, запись) в Meta для оптимизации рекламы
+                </p>
               </div>
             </div>
           )}
