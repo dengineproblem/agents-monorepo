@@ -435,6 +435,111 @@ CREATE TABLE yearly_audit_cache (
 }
 ```
 
+### Cross-Account Patterns (Паттерны аномалий)
+
+Анализ паттернов CPR аномалий по всем аккаунтам. Не требует выбора конкретного аккаунта.
+
+#### `GET /admin/ad-insights/patterns/summary`
+Общая статистика паттернов.
+
+**Response:**
+```json
+{
+  "total_anomalies": 606,
+  "total_eligible_weeks": 14500,
+  "overall_anomaly_rate": 4.18,
+  "top_month": {
+    "bucket": "2025-03",
+    "anomaly_rate": 6.2,
+    "anomaly_count": 45
+  },
+  "top_precursors": [
+    {
+      "metric": "frequency",
+      "week_offset": "week_minus_1",
+      "significant_pct": 72,
+      "avg_delta_pct": 38.5,
+      "direction": "bad"
+    }
+  ],
+  "family_breakdown": [
+    {
+      "result_family": "messages",
+      "eligible_count": 8500,
+      "anomaly_count": 380,
+      "anomaly_rate": 4.47
+    }
+  ],
+  "account_breakdown": [
+    {
+      "account_id": "uuid",
+      "fb_account_id": "act_123456",
+      "account_name": "Main Account",
+      "anomaly_count": 120,
+      "pct_of_total": 19.8
+    }
+  ],
+  "period": {
+    "from": "2024-01-01",
+    "to": "2025-12-23"
+  }
+}
+```
+
+#### `GET /admin/ad-insights/patterns/seasonality`
+Сезонность аномалий (anomaly rate по месяцам/неделям).
+
+**Query параметры:**
+- `granularity` - 'month' | 'week' (default: 'month')
+
+**Response:**
+```json
+{
+  "buckets": [
+    {
+      "bucket": "2025-03",
+      "eligible_count": 1200,
+      "anomaly_count": 45,
+      "anomaly_rate": 3.75,
+      "avg_delta_pct": 42.5,
+      "is_elevated": true
+    }
+  ],
+  "summary": {
+    "total_eligible": 14500,
+    "total_anomalies": 606,
+    "avg_rate": 4.18,
+    "rate_stddev": 1.2
+  }
+}
+```
+
+#### `GET /admin/ad-insights/patterns/metrics`
+Статистика метрик-виновников по неделям.
+
+**Response:**
+```json
+{
+  "week_0": [
+    {
+      "metric": "frequency",
+      "occurrences": 606,
+      "significant_count": 515,
+      "significant_pct": 85,
+      "avg_delta_pct": 42.3,
+      "direction_breakdown": {
+        "bad": 480,
+        "good": 20,
+        "neutral": 15
+      }
+    }
+  ],
+  "week_minus_1": [...],
+  "week_minus_2": [...],
+  "total_anomalies": 606
+}
+```
+
 ## Frontend
 
 ### Компоненты
@@ -445,6 +550,18 @@ CREATE TABLE yearly_audit_cache (
 - **Burnout** - карточки прогнозов выгорания
 - **Decay/Recovery** - анализ деградации и восстановления
 - **Yearly** - годовой аудит (Pareto, waste, stability)
+- **Patterns** - cross-account анализ паттернов аномалий (не требует выбора аккаунта)
+
+#### Patterns Components (`components/ad-insights/patterns/`)
+
+| Компонент | Описание |
+|-----------|----------|
+| `SeasonalityChart.tsx` | Bar chart anomaly_rate по месяцам/неделям с baseline линией |
+| `MetricsHeatmap.tsx` | Таблица-heatmap: Metric × Week (0/-1/-2) → significant_pct |
+| `PrecursorsCard.tsx` | Топ-10 метрик-предвестников (week_-1, week_-2) |
+| `FamilyBreakdown.tsx` | Breakdown аномалий по result_family |
+| `AccountBreakdown.tsx` | Breakdown аномалий по ad accounts |
+| `PatternsFilters.tsx` | Фильтры: granularity, period |
 
 #### `AnomaliesTable.tsx`
 Таблица аномалий с колонками:
@@ -832,6 +949,28 @@ curl -X POST "http://localhost:8082/admin/ad-insights/{accountId}/sync?weeks=52"
 Открыть `/admin/ad-insights` в браузере (требуется авторизация tech_admin).
 
 ## Changelog
+
+### 2025-12-25 (v5): Cross-Account Patterns Dashboard
+- **НОВОЕ:** Таб "Паттерны" для cross-account анализа аномалий
+  - Не требует выбора конкретного аккаунта
+  - Анализирует все 606 CPR spike аномалий (только delta_pct > 0)
+- **НОВОЕ:** API endpoints для паттернов
+  - `GET /admin/ad-insights/patterns/summary` - общая статистика
+  - `GET /admin/ad-insights/patterns/seasonality` - anomaly rate по месяцам/неделям
+  - `GET /admin/ad-insights/patterns/metrics` - метрики-виновники по неделям
+- **НОВОЕ:** Компоненты визуализации
+  - `SeasonalityChart` - bar chart anomaly_rate с baseline и elevated buckets
+  - `MetricsHeatmap` - таблица significant_pct по метрикам и неделям
+  - `PrecursorsCard` - топ-10 метрик-предвестников (исключены results, cpr)
+  - `FamilyBreakdown` - breakdown по result_family
+  - `AccountBreakdown` - breakdown по ad accounts с именами
+- **НОВОЕ:** Account names lookup
+  - Для multi-account: из `ad_accounts.name`
+  - Для legacy: из `user_accounts.username`
+- **КЛЮЧЕВЫЕ ИНСАЙТЫ:**
+  - Anomaly rate = anomalies / eligible_weeks (не просто count!)
+  - Elevated buckets: rate > avg + 1σ
+  - Предвестники: метрики week_-1 и week_-2, исключая results и cpr (следствия)
 
 ### 2025-12-25 (v4): Daily Breakdown для аномалий
 - **НОВОЕ:** Детализация аномалий по дням недели

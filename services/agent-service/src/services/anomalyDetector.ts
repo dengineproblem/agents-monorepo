@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
   min_results_leads: 5,
   min_results_purchases: 3,
   min_results_clicks: 50,
-  baseline_weeks: 8,
+  baseline_weeks: 4,  // Снижено с 8 до 4 для анализа более новых объявлений
   cpr_weight: 0.40,
   freq_weight: 0.25,
   ctr_weight: 0.20,

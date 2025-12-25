@@ -1603,4 +1603,663 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       return reply.status(500).send({ error: error.message });
     }
   });
+
+  // ============================================================================
+  // PATTERNS ANALYSIS ENDPOINTS (Cross-Account, Admin Only)
+  // ============================================================================
+
+  /**
+   * GET /admin/ad-insights/patterns/seasonality
+   * Сезонность аномалий: anomaly_rate по месяцам/неделям
+   * Cross-account анализ всех 606 аномалий
+   */
+  fastify.get<{
+    Querystring: {
+      granularity?: 'month' | 'week';
+      result_family?: string;
+      optimization_goal?: string;
+      from?: string;
+      to?: string;
+      min_eligible?: number;
+    };
+  }>('/admin/ad-insights/patterns/seasonality', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const {
+      granularity = 'month',
+      result_family,
+      optimization_goal,
+      from,
+      to,
+      min_eligible = 50,
+    } = request.query;
+
+    try {
+      // Определяем формат bucket в зависимости от granularity
+      const bucketExpr = granularity === 'month'
+        ? "TO_CHAR(f.week_start_date, 'YYYY-MM')"
+        : "TO_CHAR(f.week_start_date, 'IYYY-\"W\"IW')";
+
+      // Строим фильтры
+      const filters: string[] = ['f.baseline_cpr IS NOT NULL', 'f.spend > 0'];
+      const params: any[] = [];
+      let paramIndex = 1;
+
+      if (result_family && result_family !== 'all') {
+        filters.push(`r.result_family = $${paramIndex++}`);
+        params.push(result_family);
+      }
+      if (optimization_goal && optimization_goal !== 'all') {
+        filters.push(`s.optimization_goal = $${paramIndex++}`);
+        params.push(optimization_goal);
+      }
+      if (from) {
+        filters.push(`f.week_start_date >= $${paramIndex++}`);
+        params.push(from);
+      }
+      if (to) {
+        filters.push(`f.week_start_date <= $${paramIndex++}`);
+        params.push(to);
+      }
+
+      params.push(min_eligible);
+      const minEligibleParamIndex = paramIndex++;
+
+      const query = `
+        WITH eligible AS (
+          SELECT
+            f.ad_id,
+            f.week_start_date,
+            ${bucketExpr} as bucket
+          FROM ad_weekly_features f
+          JOIN meta_weekly_results r ON r.ad_id = f.ad_id AND r.week_start_date = f.week_start_date
+          JOIN meta_ads a ON a.id = f.ad_id
+          JOIN meta_adsets s ON s.id = a.adset_id
+          WHERE ${filters.join(' AND ')}
+        ),
+        anomalies AS (
+          SELECT ad_id, week_start_date, delta_pct
+          FROM ad_weekly_anomalies
+          WHERE anomaly_type = 'cpr_spike' AND delta_pct > 0
+        ),
+        bucket_stats AS (
+          SELECT
+            e.bucket,
+            COUNT(DISTINCT (e.ad_id, e.week_start_date)) as eligible_count,
+            COUNT(DISTINCT CASE WHEN a.ad_id IS NOT NULL THEN (a.ad_id, a.week_start_date) END) as anomaly_count,
+            AVG(a.delta_pct) as avg_delta_pct
+          FROM eligible e
+          LEFT JOIN anomalies a ON a.ad_id = e.ad_id AND a.week_start_date = e.week_start_date
+          GROUP BY e.bucket
+          HAVING COUNT(DISTINCT (e.ad_id, e.week_start_date)) >= $${minEligibleParamIndex}
+        ),
+        overall_stats AS (
+          SELECT
+            AVG(anomaly_count::float / NULLIF(eligible_count, 0)) as avg_rate,
+            STDDEV(anomaly_count::float / NULLIF(eligible_count, 0)) as rate_stddev,
+            SUM(eligible_count) as total_eligible,
+            SUM(anomaly_count) as total_anomalies
+          FROM bucket_stats
+        )
+        SELECT
+          b.bucket,
+          b.eligible_count,
+          b.anomaly_count,
+          ROUND((b.anomaly_count::float / NULLIF(b.eligible_count, 0) * 100)::numeric, 2) as anomaly_rate,
+          ROUND(b.avg_delta_pct::numeric, 1) as avg_delta_pct,
+          (b.anomaly_count::float / NULLIF(b.eligible_count, 0)) > (o.avg_rate + o.rate_stddev) as is_elevated,
+          o.total_eligible,
+          o.total_anomalies,
+          ROUND((o.avg_rate * 100)::numeric, 2) as overall_avg_rate,
+          ROUND((o.rate_stddev * 100)::numeric, 2) as overall_rate_stddev
+        FROM bucket_stats b
+        CROSS JOIN overall_stats o
+        ORDER BY b.bucket
+      `;
+
+      const { data: result, error } = await supabase.rpc('exec_sql', {
+        sql_query: query,
+        params: params,
+      });
+
+      // Если rpc не работает, делаем через raw query
+      if (error) {
+        // Fallback: простой запрос без CTE
+        log.warn({ error }, 'RPC failed, using fallback query');
+
+        // Простая версия без join на adsets для optimization_goal
+        const { data: anomalies } = await supabase
+          .from('ad_weekly_anomalies')
+          .select('fb_ad_id, week_start_date, delta_pct')
+          .eq('anomaly_type', 'cpr_spike')
+          .gt('delta_pct', 0); // Только негативные аномалии (CPR вырос)
+
+        const { data: features } = await supabase
+          .from('ad_weekly_features')
+          .select('fb_ad_id, week_start_date, baseline_cpr, spend')
+          .not('baseline_cpr', 'is', null)
+          .gt('spend', 0);
+
+        if (!anomalies || !features) {
+          return reply.status(500).send({ error: 'Failed to fetch data' });
+        }
+
+        // Группируем в JS
+        const eligibleByBucket = new Map<string, Set<string>>();
+        const anomaliesByBucket = new Map<string, { count: number; deltas: number[] }>();
+
+        for (const f of features) {
+          const date = new Date(f.week_start_date);
+          const bucket = granularity === 'month'
+            ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+            : `${date.getFullYear()}-W${String(getISOWeek(date)).padStart(2, '0')}`;
+
+          if (!eligibleByBucket.has(bucket)) {
+            eligibleByBucket.set(bucket, new Set());
+          }
+          eligibleByBucket.get(bucket)!.add(`${f.fb_ad_id}_${f.week_start_date}`);
+        }
+
+        const anomalySet = new Set(anomalies.map(a => `${a.fb_ad_id}_${a.week_start_date}`));
+
+        for (const a of anomalies) {
+          const date = new Date(a.week_start_date);
+          const bucket = granularity === 'month'
+            ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+            : `${date.getFullYear()}-W${String(getISOWeek(date)).padStart(2, '0')}`;
+
+          if (!anomaliesByBucket.has(bucket)) {
+            anomaliesByBucket.set(bucket, { count: 0, deltas: [] });
+          }
+          const stats = anomaliesByBucket.get(bucket)!;
+          stats.count++;
+          if (a.delta_pct) stats.deltas.push(a.delta_pct);
+        }
+
+        // Собираем buckets
+        const buckets: any[] = [];
+        let totalEligible = 0;
+        let totalAnomalies = 0;
+        const rates: number[] = [];
+
+        for (const [bucket, eligibleSet] of eligibleByBucket) {
+          const eligibleCount = eligibleSet.size;
+          if (eligibleCount < min_eligible) continue;
+
+          const anomalyStats = anomaliesByBucket.get(bucket) || { count: 0, deltas: [] };
+          const anomalyCount = anomalyStats.count;
+          const rate = eligibleCount > 0 ? (anomalyCount / eligibleCount) * 100 : 0;
+          const avgDelta = anomalyStats.deltas.length > 0
+            ? anomalyStats.deltas.reduce((a, b) => a + b, 0) / anomalyStats.deltas.length
+            : null;
+
+          totalEligible += eligibleCount;
+          totalAnomalies += anomalyCount;
+          rates.push(rate);
+
+          buckets.push({
+            bucket,
+            eligible_count: eligibleCount,
+            anomaly_count: anomalyCount,
+            anomaly_rate: Math.round(rate * 100) / 100,
+            avg_delta_pct: avgDelta ? Math.round(avgDelta * 10) / 10 : null,
+            is_elevated: false, // Will be updated below
+          });
+        }
+
+        // Вычисляем avg и stddev для is_elevated
+        const avgRate = rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
+        const rateStddev = rates.length > 1
+          ? Math.sqrt(rates.reduce((sum, r) => sum + Math.pow(r - avgRate, 2), 0) / rates.length)
+          : 0;
+
+        for (const b of buckets) {
+          b.is_elevated = b.anomaly_rate > avgRate + rateStddev;
+        }
+
+        // Сортируем по bucket
+        buckets.sort((a, b) => a.bucket.localeCompare(b.bucket));
+
+        return reply.send({
+          success: true,
+          buckets,
+          summary: {
+            total_eligible: totalEligible,
+            total_anomalies: totalAnomalies,
+            avg_rate: Math.round(avgRate * 100) / 100,
+            rate_stddev: Math.round(rateStddev * 100) / 100,
+          },
+        });
+      }
+
+      // Успешный RPC результат
+      const buckets = result.map((r: any) => ({
+        bucket: r.bucket,
+        eligible_count: r.eligible_count,
+        anomaly_count: r.anomaly_count,
+        anomaly_rate: r.anomaly_rate,
+        avg_delta_pct: r.avg_delta_pct,
+        is_elevated: r.is_elevated,
+      }));
+
+      const summary = result.length > 0 ? {
+        total_eligible: result[0].total_eligible,
+        total_anomalies: result[0].total_anomalies,
+        avg_rate: result[0].overall_avg_rate,
+        rate_stddev: result[0].overall_rate_stddev,
+      } : {
+        total_eligible: 0,
+        total_anomalies: 0,
+        avg_rate: 0,
+        rate_stddev: 0,
+      };
+
+      return reply.send({
+        success: true,
+        buckets,
+        summary,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId }, 'Seasonality analysis failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/patterns/metrics
+   * Метрики-виновники: какие метрики чаще отклоняются в week_0, week_-1, week_-2
+   * SQL развёртка JSONB preceding_deviations
+   */
+  fastify.get<{
+    Querystring: {
+      week_offset?: '0' | '-1' | '-2' | 'all';
+      result_family?: string;
+      optimization_goal?: string;
+    };
+  }>('/admin/ad-insights/patterns/metrics', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { week_offset = 'all' } = request.query;
+
+    try {
+      // Получаем все аномалии с preceding_deviations (только негативные)
+      const { data: anomalies, error } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('id, delta_pct, preceding_deviations')
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0) // Только негативные аномалии (CPR вырос)
+        .not('preceding_deviations', 'is', null);
+
+      if (error) throw error;
+
+      const totalAnomalies = anomalies?.length || 0;
+
+      // Агрегируем метрики по week_offset
+      const weekStats: Record<string, Map<string, {
+        occurrences: number;
+        significant_count: number;
+        delta_sum: number;
+        bad: number;
+        good: number;
+        neutral: number;
+      }>> = {
+        week_0: new Map(),
+        week_minus_1: new Map(),
+        week_minus_2: new Map(),
+      };
+
+      for (const anomaly of anomalies || []) {
+        const pd = anomaly.preceding_deviations as any;
+        if (!pd) continue;
+
+        for (const [weekKey, weekData] of Object.entries(pd) as [string, any][]) {
+          const normalizedKey = weekKey.replace('week_', 'week_').replace('-', '_minus_');
+          const targetKey = normalizedKey === 'week_0' ? 'week_0'
+            : normalizedKey === 'week_minus_1' || normalizedKey === 'week_-1' ? 'week_minus_1'
+            : normalizedKey === 'week_minus_2' || normalizedKey === 'week_-2' ? 'week_minus_2'
+            : null;
+
+          if (!targetKey || !weekStats[targetKey]) continue;
+
+          const deviations = weekData?.deviations || [];
+          for (const dev of deviations) {
+            const metric = dev.metric;
+            if (!metric) continue;
+
+            if (!weekStats[targetKey].has(metric)) {
+              weekStats[targetKey].set(metric, {
+                occurrences: 0,
+                significant_count: 0,
+                delta_sum: 0,
+                bad: 0,
+                good: 0,
+                neutral: 0,
+              });
+            }
+
+            const stats = weekStats[targetKey].get(metric)!;
+            stats.occurrences++;
+            if (dev.is_significant) stats.significant_count++;
+            if (typeof dev.delta_pct === 'number') stats.delta_sum += dev.delta_pct;
+            if (dev.direction === 'bad') stats.bad++;
+            else if (dev.direction === 'good') stats.good++;
+            else stats.neutral++;
+          }
+        }
+      }
+
+      // Преобразуем в массивы для ответа
+      const formatStats = (statsMap: Map<string, any>) => {
+        return Array.from(statsMap.entries())
+          .map(([metric, stats]) => ({
+            metric,
+            occurrences: stats.occurrences,
+            significant_count: stats.significant_count,
+            significant_pct: totalAnomalies > 0
+              ? Math.round((stats.significant_count / totalAnomalies) * 100 * 10) / 10
+              : 0,
+            avg_delta_pct: stats.occurrences > 0
+              ? Math.round((stats.delta_sum / stats.occurrences) * 10) / 10
+              : 0,
+            direction_breakdown: {
+              bad: stats.bad,
+              good: stats.good,
+              neutral: stats.neutral,
+            },
+          }))
+          .sort((a, b) => b.significant_count - a.significant_count);
+      };
+
+      return reply.send({
+        success: true,
+        total_anomalies: totalAnomalies,
+        week_0: formatStats(weekStats.week_0),
+        week_minus_1: formatStats(weekStats.week_minus_1),
+        week_minus_2: formatStats(weekStats.week_minus_2),
+      });
+    } catch (error: any) {
+      log.error({ error, adminId }, 'Metrics analysis failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/ad-insights/patterns/summary
+   * Общая сводка паттернов: top month, top precursors, family breakdown
+   */
+  fastify.get('/admin/ad-insights/patterns/summary', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    try {
+      // 1. Получаем общее количество аномалий и eligible weeks (только негативные)
+      const { count: totalAnomalies } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('*', { count: 'exact', head: true })
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0);
+
+      const { count: totalEligible } = await supabase
+        .from('ad_weekly_features')
+        .select('*', { count: 'exact', head: true })
+        .not('baseline_cpr', 'is', null)
+        .gt('spend', 0);
+
+      const overallRate = totalEligible && totalEligible > 0
+        ? Math.round(((totalAnomalies || 0) / totalEligible) * 100 * 100) / 100
+        : 0;
+
+      // 2. Получаем топ месяц (простой подсчёт, только негативные)
+      const { data: anomalies } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('week_start_date, delta_pct')
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0);
+
+      const monthCounts = new Map<string, { count: number; deltas: number[] }>();
+      for (const a of anomalies || []) {
+        const date = new Date(a.week_start_date);
+        const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        if (!monthCounts.has(month)) {
+          monthCounts.set(month, { count: 0, deltas: [] });
+        }
+        const stats = monthCounts.get(month)!;
+        stats.count++;
+        if (a.delta_pct) stats.deltas.push(a.delta_pct);
+      }
+
+      let topMonth = { bucket: '-', anomaly_count: 0, anomaly_rate: 0 };
+      for (const [month, stats] of monthCounts) {
+        if (stats.count > topMonth.anomaly_count) {
+          topMonth = {
+            bucket: month,
+            anomaly_count: stats.count,
+            anomaly_rate: 0, // Would need eligible count per month for accurate rate
+          };
+        }
+      }
+
+      // 3. Получаем топ precursors из preceding_deviations (только негативные)
+      const { data: anomaliesWithPd } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('delta_pct, preceding_deviations')
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0)
+        .not('preceding_deviations', 'is', null);
+
+      const precursorStats = new Map<string, {
+        metric: string;
+        week_offset: string;
+        significant_count: number;
+        delta_sum: number;
+        direction_counts: Record<string, number>;
+      }>();
+
+      for (const a of anomaliesWithPd || []) {
+        const pd = a.preceding_deviations as any;
+        if (!pd) continue;
+
+        // Только week_minus_1 и week_minus_2 (предвестники)
+        for (const weekKey of ['week_minus_1', 'week_-1', 'week_minus_2', 'week_-2']) {
+          const weekData = pd[weekKey];
+          if (!weekData?.deviations) continue;
+
+          const normalizedWeek = weekKey.includes('1') ? 'week_minus_1' : 'week_minus_2';
+
+          for (const dev of weekData.deviations) {
+            if (!dev.is_significant) continue;
+
+            const key = `${dev.metric}_${normalizedWeek}`;
+            if (!precursorStats.has(key)) {
+              precursorStats.set(key, {
+                metric: dev.metric,
+                week_offset: normalizedWeek,
+                significant_count: 0,
+                delta_sum: 0,
+                direction_counts: { bad: 0, good: 0, neutral: 0 },
+              });
+            }
+
+            const stats = precursorStats.get(key)!;
+            stats.significant_count++;
+            if (typeof dev.delta_pct === 'number') stats.delta_sum += dev.delta_pct;
+            stats.direction_counts[dev.direction || 'neutral']++;
+          }
+        }
+      }
+
+      const topPrecursors = Array.from(precursorStats.values())
+        .map(s => ({
+          metric: s.metric,
+          week_offset: s.week_offset,
+          significant_pct: (totalAnomalies || 0) > 0
+            ? Math.round((s.significant_count / (totalAnomalies || 1)) * 100 * 10) / 10
+            : 0,
+          avg_delta_pct: s.significant_count > 0
+            ? Math.round((s.delta_sum / s.significant_count) * 10) / 10
+            : 0,
+          direction: Object.entries(s.direction_counts)
+            .sort((a, b) => b[1] - a[1])[0]?.[0] || 'neutral',
+        }))
+        .sort((a, b) => b.significant_pct - a.significant_pct)
+        .slice(0, 15); // Возвращаем больше, чтобы после фильтрации на фронте осталось 10
+
+      // 4. Family breakdown (только негативные)
+      const { data: anomaliesWithFamily } = await supabase
+        .from('ad_weekly_anomalies')
+        .select(`
+          fb_ad_id,
+          week_start_date,
+          delta_pct
+        `)
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0);
+
+      // Получаем result_family для каждой аномалии
+      const familyCounts = new Map<string, { anomaly_count: number }>();
+
+      if (anomaliesWithFamily && anomaliesWithFamily.length > 0) {
+        const adIds = [...new Set(anomaliesWithFamily.map(a => a.fb_ad_id))];
+
+        const { data: results } = await supabase
+          .from('meta_weekly_results')
+          .select('fb_ad_id, week_start_date, result_family')
+          .in('fb_ad_id', adIds);
+
+        const resultMap = new Map<string, string>();
+        for (const r of results || []) {
+          resultMap.set(`${r.fb_ad_id}_${r.week_start_date}`, r.result_family);
+        }
+
+        for (const a of anomaliesWithFamily) {
+          const family = resultMap.get(`${a.fb_ad_id}_${a.week_start_date}`) || 'unknown';
+          if (!familyCounts.has(family)) {
+            familyCounts.set(family, { anomaly_count: 0 });
+          }
+          familyCounts.get(family)!.anomaly_count++;
+        }
+      }
+
+      const familyBreakdown = Array.from(familyCounts.entries())
+        .map(([family, stats]) => ({
+          result_family: family,
+          anomaly_count: stats.anomaly_count,
+          eligible_count: 0, // Would need to compute per-family eligible
+          anomaly_rate: 0,
+        }))
+        .sort((a, b) => b.anomaly_count - a.anomaly_count);
+
+      // 5. Account breakdown - аномалии по аккаунтам
+      const { data: anomaliesByAccount } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('ad_account_id')
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0);
+
+      const accountCounts = new Map<string, number>();
+      for (const a of anomaliesByAccount || []) {
+        const accId = a.ad_account_id;
+        accountCounts.set(accId, (accountCounts.get(accId) || 0) + 1);
+      }
+
+      // Получаем имена аккаунтов (включая user_account_id для legacy)
+      const accountIds = Array.from(accountCounts.keys());
+      const { data: accounts } = await supabase
+        .from('ad_accounts')
+        .select('id, ad_account_id, name, user_account_id')
+        .in('id', accountIds);
+
+      // Собираем user_account_id для тех, у кого нет name (legacy аккаунты)
+      const userAccountIds = (accounts || [])
+        .filter(acc => !acc.name && acc.user_account_id)
+        .map(acc => acc.user_account_id);
+
+      // Получаем username из user_accounts для legacy
+      const userMap = new Map<string, string>();
+      if (userAccountIds.length > 0) {
+        const { data: users } = await supabase
+          .from('user_accounts')
+          .select('id, username')
+          .in('id', userAccountIds);
+        for (const user of users || []) {
+          if (user.username) {
+            userMap.set(user.id, user.username);
+          }
+        }
+      }
+
+      const accountMap = new Map<string, { ad_account_id: string; name: string | null; user_account_id: string | null }>();
+      for (const acc of accounts || []) {
+        accountMap.set(acc.id, {
+          ad_account_id: acc.ad_account_id,
+          name: acc.name,
+          user_account_id: acc.user_account_id,
+        });
+      }
+
+      const accountBreakdown = Array.from(accountCounts.entries())
+        .map(([accId, count]) => {
+          const acc = accountMap.get(accId);
+          // Имя: сначала ad_accounts.name, потом user_accounts.username, потом ad_account_id
+          const accountName = acc?.name
+            || (acc?.user_account_id ? userMap.get(acc.user_account_id) : null)
+            || acc?.ad_account_id
+            || 'Unknown';
+          return {
+            account_id: accId,
+            fb_account_id: acc?.ad_account_id || 'unknown',
+            account_name: accountName,
+            anomaly_count: count,
+            pct_of_total: totalAnomalies ? Math.round((count / totalAnomalies) * 100 * 10) / 10 : 0,
+          };
+        })
+        .sort((a, b) => b.anomaly_count - a.anomaly_count);
+
+      // 6. Период данных (только негативные)
+      const { data: dateRange } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('week_start_date')
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0)
+        .order('week_start_date', { ascending: true })
+        .limit(1);
+
+      const { data: dateRangeEnd } = await supabase
+        .from('ad_weekly_anomalies')
+        .select('week_start_date')
+        .eq('anomaly_type', 'cpr_spike')
+        .gt('delta_pct', 0)
+        .order('week_start_date', { ascending: false })
+        .limit(1);
+
+      return reply.send({
+        success: true,
+        total_anomalies: totalAnomalies || 0,
+        total_eligible_weeks: totalEligible || 0,
+        overall_anomaly_rate: overallRate,
+        top_month: topMonth,
+        top_precursors: topPrecursors,
+        family_breakdown: familyBreakdown,
+        account_breakdown: accountBreakdown,
+        period: {
+          from: dateRange?.[0]?.week_start_date || null,
+          to: dateRangeEnd?.[0]?.week_start_date || null,
+        },
+      });
+    } catch (error: any) {
+      log.error({ error, adminId }, 'Patterns summary failed');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+}
+
+// Helper: ISO week number
+function getISOWeek(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
 }

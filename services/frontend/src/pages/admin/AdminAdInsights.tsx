@@ -33,6 +33,14 @@ import {
   DecayRecoveryList,
   TrackingHealthCard,
 } from '@/components/ad-insights';
+import {
+  SeasonalityChart,
+  MetricsHeatmap,
+  PrecursorsCard,
+  FamilyBreakdown,
+  AccountBreakdown,
+  PatternsFilters,
+} from '@/components/ad-insights/patterns';
 import type {
   Anomaly,
   BurnoutPrediction,
@@ -40,6 +48,10 @@ import type {
   TrackingHealthResponse,
   YearlyAudit,
   AnomalySeverity,
+  PatternsQueryParams,
+  SeasonalityResponse,
+  MetricsResponse,
+  PatternsSummaryResponse,
 } from '@/types/adInsights';
 import { API_BASE_URL } from '@/config/api';
 
@@ -89,6 +101,14 @@ const AdminAdInsights: React.FC = () => {
     highBurnout: 0,
     recoveryPotential: 0,
   });
+
+  // Patterns state (cross-account)
+  const [activeTab, setActiveTab] = useState('anomalies');
+  const [patternsParams, setPatternsParams] = useState<PatternsQueryParams>({ granularity: 'month' });
+  const [seasonality, setSeasonality] = useState<SeasonalityResponse | null>(null);
+  const [patternsMetrics, setPatternsMetrics] = useState<MetricsResponse | null>(null);
+  const [patternsSummary, setPatternsSummary] = useState<PatternsSummaryResponse | null>(null);
+  const [loadingPatterns, setLoadingPatterns] = useState(false);
 
   // Load ad accounts
   useEffect(() => {
@@ -197,6 +217,39 @@ const AdminAdInsights: React.FC = () => {
     setAnomalies(res.anomalies);
   };
 
+  // Load patterns data (cross-account)
+  const loadPatternsData = useCallback(async () => {
+    setLoadingPatterns(true);
+    try {
+      const [seasonalityRes, metricsRes, summaryRes] = await Promise.all([
+        adInsightsApi.getSeasonality(patternsParams),
+        adInsightsApi.getPatternsMetrics(patternsParams),
+        adInsightsApi.getPatternsSummary(),
+      ]);
+      setSeasonality(seasonalityRes);
+      setPatternsMetrics(metricsRes);
+      setPatternsSummary(summaryRes);
+    } catch (err) {
+      console.error('Error loading patterns:', err);
+    } finally {
+      setLoadingPatterns(false);
+    }
+  }, [patternsParams]);
+
+  // Load patterns when tab is selected
+  useEffect(() => {
+    if (activeTab === 'patterns' && !seasonality) {
+      loadPatternsData();
+    }
+  }, [activeTab, loadPatternsData, seasonality]);
+
+  // Reload patterns when params change
+  useEffect(() => {
+    if (activeTab === 'patterns') {
+      loadPatternsData();
+    }
+  }, [patternsParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loadingAccounts) {
     return (
       <div className="flex items-center justify-center h-[50vh]">
@@ -211,35 +264,42 @@ const AdminAdInsights: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Ad Insights</h1>
-          <p className="text-muted-foreground">Аналитика и детекция аномалий</p>
+          <p className="text-muted-foreground">
+            {activeTab === 'patterns'
+              ? 'Cross-account анализ паттернов аномалий'
+              : 'Аналитика и детекция аномалий'}
+          </p>
         </div>
-        <div className="flex items-center gap-4">
-          <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-            <SelectTrigger className="w-72">
-              <SelectValue placeholder="Выберите аккаунт" />
-            </SelectTrigger>
-            <SelectContent>
-              {accounts.map((acc) => (
-                <SelectItem key={acc.id} value={acc.id}>
-                  <div className="flex items-center gap-2">
-                    <span>{acc.name || acc.ad_account_id}</span>
-                    <Badge variant={acc.type === 'legacy' ? 'secondary' : 'outline'} className="text-xs">
-                      {acc.type}
-                    </Badge>
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={handleSync} disabled={syncing || !selectedAccount}>
-            {syncing ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Синхронизация
-          </Button>
-        </div>
+        {/* Hide account selector on patterns tab (cross-account) */}
+        {activeTab !== 'patterns' && (
+          <div className="flex items-center gap-4">
+            <Select value={selectedAccount} onValueChange={setSelectedAccount}>
+              <SelectTrigger className="w-72">
+                <SelectValue placeholder="Выберите аккаунт" />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((acc) => (
+                  <SelectItem key={acc.id} value={acc.id}>
+                    <div className="flex items-center gap-2">
+                      <span>{acc.name || acc.ad_account_id}</span>
+                      <Badge variant={acc.type === 'legacy' ? 'secondary' : 'outline'} className="text-xs">
+                        {acc.type}
+                      </Badge>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={handleSync} disabled={syncing || !selectedAccount}>
+              {syncing ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Синхронизация
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Quick Stats */}
@@ -294,7 +354,7 @@ const AdminAdInsights: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="anomalies" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="anomalies" className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
@@ -320,6 +380,15 @@ const AdminAdInsights: React.FC = () => {
           <TabsTrigger value="yearly" className="flex items-center gap-2">
             <Calendar className="h-4 w-4" />
             Годовой аудит
+          </TabsTrigger>
+          <TabsTrigger value="patterns" className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Паттерны
+            {patternsSummary?.total_anomalies && (
+              <Badge variant="secondary" className="ml-1">
+                {patternsSummary.total_anomalies}
+              </Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 
@@ -554,6 +623,117 @@ const AdminAdInsights: React.FC = () => {
               </Card>
             </div>
           )}
+        </TabsContent>
+
+        {/* Patterns Tab (Cross-Account) */}
+        <TabsContent value="patterns" className="space-y-6">
+          {/* Filters */}
+          <PatternsFilters
+            params={patternsParams}
+            onChange={(newParams) => setPatternsParams((prev) => ({ ...prev, ...newParams }))}
+          />
+
+          {/* Summary Cards */}
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Всего аномалий</CardTitle>
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{patternsSummary?.total_anomalies ?? 0}</div>
+                <p className="text-xs text-muted-foreground">
+                  {patternsSummary?.period?.from && patternsSummary?.period?.to
+                    ? `${patternsSummary.period.from} — ${patternsSummary.period.to}`
+                    : 'За весь период'}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Anomaly Rate</CardTitle>
+                <Activity className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{patternsSummary?.overall_anomaly_rate?.toFixed(2) ?? 0}%</div>
+                <p className="text-xs text-muted-foreground">
+                  {patternsSummary?.total_eligible_weeks ?? 0} eligible weeks
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Top месяц</CardTitle>
+                <Calendar className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{patternsSummary?.top_month?.bucket ?? '-'}</div>
+                <p className="text-xs text-muted-foreground">
+                  {patternsSummary?.top_month?.anomaly_count ?? 0} аномалий
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Top предвестник</CardTitle>
+                <TrendingUp className="h-4 w-4 text-purple-500" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {patternsSummary?.top_precursors?.[0]?.metric ?? '-'}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {patternsSummary?.top_precursors?.[0]
+                    ? `${patternsSummary.top_precursors[0].significant_pct.toFixed(0)}% аномалий`
+                    : 'Нет данных'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Seasonality Chart */}
+          <SeasonalityChart
+            buckets={seasonality?.buckets ?? []}
+            summary={seasonality?.summary ?? { total_eligible: 0, total_anomalies: 0, avg_rate: 0, rate_stddev: 0 }}
+            granularity={patternsParams.granularity || 'month'}
+            isLoading={loadingPatterns}
+          />
+
+          {/* Metrics Heatmap + Precursors */}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <MetricsHeatmap
+                week0={patternsMetrics?.week_0 ?? []}
+                weekMinus1={patternsMetrics?.week_minus_1 ?? []}
+                weekMinus2={patternsMetrics?.week_minus_2 ?? []}
+                totalAnomalies={patternsMetrics?.total_anomalies ?? 0}
+                isLoading={loadingPatterns}
+              />
+            </div>
+            <div>
+              <PrecursorsCard
+                precursors={patternsSummary?.top_precursors ?? []}
+                isLoading={loadingPatterns}
+              />
+            </div>
+          </div>
+
+          {/* Account & Family Breakdown */}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <AccountBreakdown
+              breakdown={patternsSummary?.account_breakdown ?? []}
+              totalAnomalies={patternsSummary?.total_anomalies ?? 0}
+              isLoading={loadingPatterns}
+            />
+            <FamilyBreakdown
+              breakdown={patternsSummary?.family_breakdown ?? []}
+              totalAnomalies={patternsSummary?.total_anomalies ?? 0}
+              isLoading={loadingPatterns}
+            />
+          </div>
         </TabsContent>
       </Tabs>
     </div>

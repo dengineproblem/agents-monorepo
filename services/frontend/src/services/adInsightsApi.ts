@@ -20,6 +20,11 @@ import type {
   TrackingHealthResponse,
   YearlyAudit,
   AdInsightsDashboardStats,
+  // Patterns types
+  PatternsQueryParams,
+  SeasonalityResponse,
+  MetricsResponse,
+  PatternsSummaryResponse,
 } from '@/types/adInsights';
 
 /**
@@ -434,6 +439,123 @@ export const adInsightsApi = {
     } catch (error) {
       console.error('[adInsightsApi.getDashboardStats] Error:', error);
       return null;
+    }
+  },
+
+  // ============================================================================
+  // PATTERNS ANALYSIS (Cross-Account)
+  // ============================================================================
+
+  /**
+   * Получить сезонность аномалий по месяцам/неделям
+   * Cross-account анализ всех аномалий
+   */
+  async getSeasonality(params?: PatternsQueryParams): Promise<SeasonalityResponse> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.granularity) queryParams.set('granularity', params.granularity);
+      if (params?.result_family) queryParams.set('result_family', params.result_family);
+      if (params?.optimization_goal) queryParams.set('optimization_goal', params.optimization_goal);
+      if (params?.from) queryParams.set('from', params.from);
+      if (params?.to) queryParams.set('to', params.to);
+      if (params?.min_eligible) queryParams.set('min_eligible', String(params.min_eligible));
+
+      const url = `${API_BASE_URL}/admin/ad-insights/patterns/seasonality?${queryParams}`;
+      const res = await fetchWithAuth(url);
+
+      if (!res.ok) {
+        console.error('[adInsightsApi.getSeasonality] HTTP error:', res.status);
+        return {
+          success: false,
+          buckets: [],
+          summary: { total_eligible: 0, total_anomalies: 0, avg_rate: 0, rate_stddev: 0 },
+        };
+      }
+
+      return await res.json();
+    } catch (error) {
+      console.error('[adInsightsApi.getSeasonality] Error:', error);
+      return {
+        success: false,
+        buckets: [],
+        summary: { total_eligible: 0, total_anomalies: 0, avg_rate: 0, rate_stddev: 0 },
+      };
+    }
+  },
+
+  /**
+   * Получить статистику метрик-виновников по неделям
+   * Анализ preceding_deviations для week_0, week_-1, week_-2
+   */
+  async getPatternsMetrics(params?: PatternsQueryParams): Promise<MetricsResponse> {
+    try {
+      const queryParams = new URLSearchParams();
+      if (params?.result_family) queryParams.set('result_family', params.result_family);
+      if (params?.optimization_goal) queryParams.set('optimization_goal', params.optimization_goal);
+
+      const url = `${API_BASE_URL}/admin/ad-insights/patterns/metrics?${queryParams}`;
+      const res = await fetchWithAuth(url);
+
+      if (!res.ok) {
+        console.error('[adInsightsApi.getPatternsMetrics] HTTP error:', res.status);
+        return {
+          success: false,
+          total_anomalies: 0,
+          week_0: [],
+          week_minus_1: [],
+          week_minus_2: [],
+        };
+      }
+
+      return await res.json();
+    } catch (error) {
+      console.error('[adInsightsApi.getPatternsMetrics] Error:', error);
+      return {
+        success: false,
+        total_anomalies: 0,
+        week_0: [],
+        week_minus_1: [],
+        week_minus_2: [],
+      };
+    }
+  },
+
+  /**
+   * Получить общую сводку паттернов
+   * Включает top month, top precursors, family breakdown
+   */
+  async getPatternsSummary(): Promise<PatternsSummaryResponse> {
+    try {
+      const url = `${API_BASE_URL}/admin/ad-insights/patterns/summary`;
+      const res = await fetchWithAuth(url);
+
+      if (!res.ok) {
+        console.error('[adInsightsApi.getPatternsSummary] HTTP error:', res.status);
+        return {
+          success: false,
+          total_anomalies: 0,
+          total_eligible_weeks: 0,
+          overall_anomaly_rate: 0,
+          top_month: { bucket: '-', anomaly_count: 0, anomaly_rate: 0 },
+          top_precursors: [],
+          family_breakdown: [],
+          period: { from: null, to: null },
+        };
+      }
+
+      return await res.json();
+    } catch (error) {
+      console.error('[adInsightsApi.getPatternsSummary] Error:', error);
+      return {
+        success: false,
+        total_anomalies: 0,
+        total_eligible_weeks: 0,
+        overall_anomaly_rate: 0,
+        top_month: { bucket: '-', anomaly_count: 0, anomaly_rate: 0 },
+        top_precursors: [],
+        family_breakdown: [],
+        period: { from: null, to: null },
+      };
     }
   },
 };

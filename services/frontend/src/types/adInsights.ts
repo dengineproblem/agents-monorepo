@@ -377,3 +377,131 @@ export interface AdInsightsDashboardStats {
   trackingHealthScore: number;
   lastSyncDate?: string;
 }
+
+// ============================================================================
+// PATTERNS ANALYSIS (Cross-Account)
+// ============================================================================
+
+/**
+ * Query params для patterns endpoints
+ */
+export interface PatternsQueryParams {
+  granularity?: 'month' | 'week';
+  result_family?: string;
+  optimization_goal?: string;
+  from?: string;
+  to?: string;
+  min_eligible?: number;
+}
+
+/**
+ * Bucket сезонности (месяц или неделя)
+ */
+export interface SeasonalityBucket {
+  bucket: string;              // "2024-01" или "2024-W12"
+  eligible_count: number;      // Всего eligible ad-weeks
+  anomaly_count: number;       // Аномалий
+  anomaly_rate: number;        // rate = anomalies / eligible (в %)
+  avg_delta_pct: number | null;// Средний delta_pct аномалий
+  is_elevated: boolean;        // rate > avg + 1σ
+}
+
+/**
+ * Summary сезонности
+ */
+export interface SeasonalitySummary {
+  total_eligible: number;
+  total_anomalies: number;
+  avg_rate: number;            // Средний rate (в %)
+  rate_stddev: number;         // Стандартное отклонение rate
+}
+
+/**
+ * Ответ endpoint /patterns/seasonality
+ */
+export interface SeasonalityResponse {
+  success: boolean;
+  buckets: SeasonalityBucket[];
+  summary: SeasonalitySummary;
+}
+
+/**
+ * Статистика по одной метрике
+ */
+export interface PatternMetricStats {
+  metric: string;              // frequency, ctr, cpm, etc.
+  occurrences: number;         // Сколько раз метрика была в deviations
+  significant_count: number;   // Сколько раз is_significant = true
+  significant_pct: number;     // % от total_anomalies
+  avg_delta_pct: number;       // Средний delta от baseline
+  direction_breakdown: {
+    bad: number;               // Ухудшение (рост freq, падение ctr)
+    good: number;              // Улучшение
+    neutral: number;           // Нейтрально
+  };
+}
+
+/**
+ * Ответ endpoint /patterns/metrics
+ */
+export interface MetricsResponse {
+  success: boolean;
+  total_anomalies: number;
+  week_0: PatternMetricStats[];
+  week_minus_1: PatternMetricStats[];
+  week_minus_2: PatternMetricStats[];
+}
+
+/**
+ * Топ предвестник
+ */
+export interface TopPrecursor {
+  metric: string;
+  week_offset: string;         // week_minus_1 или week_minus_2
+  significant_pct: number;     // % аномалий где эта метрика significant
+  avg_delta_pct: number;
+  direction: string;           // преобладающее направление
+}
+
+/**
+ * Breakdown по result_family
+ */
+export interface FamilyBreakdownItem {
+  result_family: string;
+  eligible_count: number;
+  anomaly_count: number;
+  anomaly_rate: number;
+}
+
+/**
+ * Breakdown по ad account
+ */
+export interface AccountBreakdownItem {
+  account_id: string;
+  fb_account_id: string;
+  account_name: string;
+  anomaly_count: number;
+  pct_of_total: number;
+}
+
+/**
+ * Ответ endpoint /patterns/summary
+ */
+export interface PatternsSummaryResponse {
+  success: boolean;
+  total_anomalies: number;
+  total_eligible_weeks: number;
+  overall_anomaly_rate: number;
+  top_month: {
+    bucket: string;
+    anomaly_count: number;
+    anomaly_rate: number;
+  };
+  top_precursors: TopPrecursor[];
+  family_breakdown: FamilyBreakdownItem[];
+  account_breakdown: AccountBreakdownItem[];
+  period: {
+    from: string | null;
+    to: string | null;
+  };
+}
