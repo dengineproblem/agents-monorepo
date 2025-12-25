@@ -39,6 +39,7 @@ import {
   analyzeGoalDrift
 } from '../services/yearlyAnalyzer.js';
 import { analyzeTrackingHealth, getTrackingIssuesHistory } from '../services/trackingHealth.js';
+import { enrichDailyBreakdown } from '../services/dailyBreakdownEnricher.js';
 import { supabase } from '../lib/supabaseClient.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { createLogger } from '../lib/logger.js';
@@ -596,6 +597,47 @@ export default async function adInsightsRoutes(fastify: FastifyInstance) {
       });
     } catch (error: any) {
       log.error({ error, adminId, accountId }, 'Failed to update preceding deviations');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /admin/ad-insights/:accountId/enrich-daily-breakdown
+   * Обогатить аномалии детализацией по дням
+   * Если данных нет в БД — запрашивает из Facebook API
+   */
+  fastify.post<{
+    Params: SyncParams;
+    Querystring: {
+      forceRefresh?: boolean;
+      limit?: number;
+    };
+  }>('/admin/ad-insights/:accountId/enrich-daily-breakdown', async (request, reply) => {
+    const adminId = await requireTechAdmin(request, reply);
+    if (!adminId) return;
+
+    const { accountId } = request.params;
+    const { forceRefresh = false, limit } = request.query;
+
+    try {
+      // Резолвим accountId (legacy_xxx или UUID) в реальный ad_account UUID
+      const resolvedAccountId = await resolveAdAccountUuid(accountId);
+      if (!resolvedAccountId) {
+        return reply.status(404).send({ error: 'Ad account not found', accountId });
+      }
+
+      log.info({ adminId, accountId: resolvedAccountId, forceRefresh, limit }, 'Starting daily breakdown enrichment');
+
+      const result = await enrichDailyBreakdown(resolvedAccountId, { forceRefresh, limit });
+
+      log.info({ adminId, accountId: resolvedAccountId, ...result }, 'Daily breakdown enrichment completed');
+
+      return reply.send({
+        success: true,
+        ...result,
+      });
+    } catch (error: any) {
+      log.error({ error, adminId, accountId }, 'Failed to enrich daily breakdown');
       return reply.status(500).send({ error: error.message });
     }
   });

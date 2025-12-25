@@ -34,7 +34,8 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import type { Anomaly, MetricDeviation, WeekDeviations, AnomalySeverity } from '@/types/adInsights';
+import type { Anomaly, MetricDeviation, WeekDeviations, AnomalySeverity, DailyBreakdownResult, DayBreakdown } from '@/types/adInsights';
+import { Calendar } from 'lucide-react';
 
 interface AnomaliesTableProps {
   anomalies: Anomaly[];
@@ -149,6 +150,121 @@ function formatRankingLabel(score: number | null): { label: string; color: strin
 
 // Порядок метрик для отображения (без rankings — они отдельно)
 const METRICS_ORDER = ['frequency', 'ctr', 'link_ctr', 'cpm', 'cpr', 'spend', 'results'];
+
+/**
+ * Таблица детализации по дням недели
+ */
+function DailyBreakdownTable({ breakdown }: { breakdown: DailyBreakdownResult }) {
+  if (!breakdown || !breakdown.days || breakdown.days.length === 0) {
+    return <div className="text-muted-foreground text-sm py-2">Нет данных по дням</div>;
+  }
+
+  const { days, summary } = breakdown;
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <div className="text-sm font-medium mb-3 flex items-center gap-2">
+        <Calendar className="h-4 w-4" />
+        Детализация по дням
+        <Badge variant="outline" className="text-xs ml-2">
+          {summary.active_days} активных / {summary.pause_days} пауза
+        </Badge>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse">
+          <thead>
+            <tr className="border-b bg-muted/30">
+              <th className="text-left py-2 px-2 font-medium">День</th>
+              <th className="text-right py-2 px-2 font-medium">Spend</th>
+              <th className="text-right py-2 px-2 font-medium">Impr</th>
+              <th className="text-right py-2 px-2 font-medium">CTR</th>
+              <th className="text-right py-2 px-2 font-medium">CPM</th>
+              <th className="text-right py-2 px-2 font-medium">Results</th>
+              <th className="text-right py-2 px-2 font-medium">CPR</th>
+              <th className="text-left py-2 px-2 font-medium">Сигналы</th>
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((day: DayBreakdown) => {
+              const isWorst = day.date === summary.worst_day;
+              const isBest = day.date === summary.best_day;
+              const isPause = day.metrics.impressions === 0;
+
+              const rowClass = isWorst
+                ? 'bg-red-50'
+                : isBest
+                  ? 'bg-green-50'
+                  : isPause
+                    ? 'opacity-50'
+                    : '';
+
+              return (
+                <tr key={day.date} className={`border-b border-gray-100 ${rowClass}`}>
+                  <td className="py-2 px-2">
+                    <div className="flex items-center gap-1">
+                      {format(new Date(day.date), 'EEE d', { locale: ru })}
+                      {isWorst && <AlertTriangle className="h-3 w-3 text-red-500" />}
+                      {isBest && <Check className="h-3 w-3 text-green-500" />}
+                      {isPause && <PauseCircle className="h-3 w-3 text-gray-400" />}
+                    </div>
+                  </td>
+                  <td className="text-right py-2 px-2">
+                    ${day.metrics.spend.toFixed(2)}
+                  </td>
+                  <td className="text-right py-2 px-2">
+                    {day.metrics.impressions.toLocaleString()}
+                  </td>
+                  <td className="text-right py-2 px-2">
+                    {day.metrics.ctr !== null ? `${day.metrics.ctr.toFixed(2)}%` : '—'}
+                  </td>
+                  <td className="text-right py-2 px-2">
+                    {day.metrics.cpm !== null ? `$${day.metrics.cpm.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="text-right py-2 px-2">
+                    {day.metrics.results}
+                  </td>
+                  <td className="text-right py-2 px-2 font-medium">
+                    {day.metrics.cpr !== null ? `$${day.metrics.cpr.toFixed(2)}` : '—'}
+                  </td>
+                  <td className="text-left py-2 px-2">
+                    {(() => {
+                      // Показываем только значимые отклонения
+                      const significantDeviations = day.deviations.filter(d => d.is_significant);
+                      if (significantDeviations.length === 0) {
+                        return <span className="text-muted-foreground">—</span>;
+                      }
+                      return (
+                        <div className="flex flex-wrap gap-1">
+                          {significantDeviations.map((dev, i) => (
+                            <Badge
+                              key={i}
+                              variant="outline"
+                              className={`text-xs ${
+                                dev.direction === 'bad'
+                                  ? 'border-red-300 text-red-600 bg-red-50'
+                                  : dev.direction === 'good'
+                                    ? 'border-green-300 text-green-600 bg-green-50'
+                                    : 'border-gray-300 text-gray-600'
+                              }`}
+                            >
+                              {dev.metric === 'cpr' ? 'CPR' : dev.metric.toUpperCase()}
+                              {dev.delta_pct > 0 ? '+' : ''}{dev.delta_pct.toFixed(0)}%
+                            </Badge>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Объединённая таблица отклонений по всем 3 неделям
@@ -482,6 +598,10 @@ export const AnomaliesTable: React.FC<AnomaliesTableProps> = ({
                               weekMinus1={anomaly.preceding_deviations?.week_minus_1 ?? null}
                               weekMinus2={anomaly.preceding_deviations?.week_minus_2 ?? null}
                             />
+                            {/* Daily Breakdown - детализация по дням */}
+                            {anomaly.daily_breakdown && (
+                              <DailyBreakdownTable breakdown={anomaly.daily_breakdown} />
+                            )}
                           </TableCell>
                         </TableRow>
                       )}

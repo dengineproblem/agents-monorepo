@@ -63,6 +63,60 @@ export interface PrecedingDeviations {
   week_minus_2: WeekDeviations | null; // За 2 недели до
 }
 
+// ============================================================================
+// DAILY BREAKDOWN (детализация по дням)
+// ============================================================================
+
+export type DailyMetricName = 'frequency' | 'ctr' | 'link_ctr' | 'cpm' | 'cpr' | 'spend' | 'results';
+
+/**
+ * Метрики за один день
+ */
+export interface DailyMetrics {
+  impressions: number;
+  spend: number;
+  frequency: number | null;
+  ctr: number | null;
+  link_ctr: number | null;
+  cpm: number | null;
+  cpr: number | null;
+  results: number;
+}
+
+/**
+ * Отклонение метрики от среднего за неделю
+ */
+export interface DailyDeviation {
+  metric: DailyMetricName;
+  value: number;
+  week_avg: number;
+  delta_pct: number;
+  is_significant: boolean;
+  direction: DeviationDirection;
+}
+
+/**
+ * Данные за один день
+ */
+export interface DayBreakdown {
+  date: string;
+  metrics: DailyMetrics;
+  deviations: DailyDeviation[];
+}
+
+/**
+ * Полная детализация аномалии по дням недели
+ */
+export interface DailyBreakdownResult {
+  days: DayBreakdown[];
+  summary: {
+    worst_day: string | null;
+    best_day: string | null;
+    active_days: number;
+    pause_days: number;
+  };
+}
+
 export interface Anomaly {
   id: string;
   ad_account_id: string;
@@ -81,6 +135,8 @@ export interface Anomaly {
   confidence: number;
   likely_triggers?: Array<{ metric: string; value: number; delta: string }>;
   preceding_deviations?: PrecedingDeviations | null;
+  // Daily breakdown (детализация по дням)
+  daily_breakdown?: DailyBreakdownResult | null;
   // Pause detection (Iteration 4)
   pause_days_count?: number;
   has_delivery_gap?: boolean;

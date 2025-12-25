@@ -1103,6 +1103,7 @@ export async function syncDailyInsights(
     'reach',
     'clicks',
     'actions',
+    'outbound_clicks',  // Для link_clicks
   ].join(',');
 
   const result = await graph('POST', `act_${fbAdAccountId}/insights`, accessToken, {
@@ -1162,10 +1163,17 @@ export async function syncDailyInsights(
     const spend = parseFloat(row.spend) || 0;
     const reach = parseInt(row.reach) || 0;
 
+    // Link clicks: приоритет outbound_clicks, иначе из actions
+    const linkClicks = row.outbound_clicks?.[0]?.value
+      ? parseInt(row.outbound_clicks[0].value)
+      : extractLinkClicks(row.actions);
+
     // Вычисляемые метрики
     const ctr = impressions > 0 ? (clicks / impressions) * 100 : null;
     const cpm = impressions > 0 ? (spend / impressions) * 1000 : null;
     const cpc = clicks > 0 ? spend / clicks : null;
+    const frequency = reach > 0 ? impressions / reach : null;
+    const linkCtr = impressions > 0 ? (linkClicks / impressions) * 100 : null;
 
     const insight = {
       ad_account_id: adAccountId,
@@ -1178,6 +1186,11 @@ export async function syncDailyInsights(
       ctr,
       cpm,
       cpc,
+      // Новые поля (миграция 123)
+      frequency,
+      link_clicks: linkClicks,
+      link_ctr: linkCtr,
+      actions_json: row.actions || null,
       results_count: extractResultsCount(row.actions),
       created_at: new Date().toISOString(),
     };

@@ -255,6 +255,23 @@ CREATE TABLE yearly_audit_cache (
 #### `POST /admin/ad-insights/:accountId/anomalies/:anomalyId/acknowledge`
 Подтвердить (скрыть) аномалию.
 
+#### `POST /admin/ad-insights/:accountId/enrich-daily-breakdown`
+Обогатить аномалии детализацией по дням. Работает только с данными из БД (не делает запросы к Facebook API).
+
+**Query параметры:**
+- `forceRefresh` (boolean, default: false) - пересчитать даже если уже есть
+- `limit` (number, optional) - лимит аномалий для обработки
+
+**Response:**
+```json
+{
+  "success": true,
+  "enriched": 45,
+  "skipped": 5,
+  "errors": 0
+}
+```
+
 ### Burnout Predictions
 
 #### `GET /admin/ad-insights/:accountId/burnout/predictions`
@@ -597,6 +614,38 @@ API возвращает данные в camelCase формате, frontend ож
 }
 ```
 
+### `dailyBreakdownEnricher.ts`
+Обогащение аномалий детализацией по дням:
+
+**Функция `enrichDailyBreakdown(adAccountId, options)`:**
+- Загружает аномалии где `daily_breakdown IS NULL` (или все при `forceRefresh=true`)
+- Для каждой аномалии:
+  - Читает `meta_insights_daily` за неделю аномалии
+  - Вычисляет CPR для каждого дня
+  - Сравнивает с week_avg для определения deviations
+  - Определяет worst/best дни по CPR
+- Batch update аномалий с `daily_breakdown` JSONB
+- Если данных нет в БД — подгружает из Facebook API (async job)
+
+**Метрики по дням:**
+- `impressions`, `spend`, `results` — базовые
+- `frequency = impressions / reach`
+- `ctr = clicks / impressions * 100`
+- `link_ctr = link_clicks / impressions * 100`
+- `cpm = spend / impressions * 1000`
+- `cpr = spend / results`
+
+**Пороги значимости отклонений:**
+| Метрика | Порог | Плохо | Хорошо |
+|---------|-------|-------|--------|
+| cpr | 15% | Рост | Падение |
+| frequency | 15% | Рост | Падение |
+| ctr | 15% | Падение | Рост |
+| link_ctr | 15% | Падение | Рост |
+| cpm | 15% | Рост | Падение |
+| spend | 30% | Рост | — |
+| results | 20% | Падение | Рост |
+
 ### `burnoutAnalyzer.ts`
 Прогнозирование выгорания:
 - Quantile analysis по CPR тренду
@@ -704,6 +753,54 @@ ALTER COLUMN relevance_drop TYPE DECIMAL(4,1);
 ```
 **Причина:** baseline для rankings - это медиана (может быть 1.5), поэтому drop = score - baseline может быть дробным.
 
+### Migration 123: `daily_breakdown_enhancement`
+Расширение daily insights и добавление daily_breakdown для аномалий:
+
+**Расширение `meta_insights_daily`:**
+```sql
+ALTER TABLE meta_insights_daily
+ADD COLUMN IF NOT EXISTS frequency DECIMAL(8,4),
+ADD COLUMN IF NOT EXISTS link_clicks INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS link_ctr DECIMAL(8,6),
+ADD COLUMN IF NOT EXISTS actions_json JSONB;
+```
+
+**Добавление `daily_breakdown` в `ad_weekly_anomalies`:**
+```sql
+ALTER TABLE ad_weekly_anomalies
+ADD COLUMN IF NOT EXISTS daily_breakdown JSONB;
+```
+
+**Структура `daily_breakdown` (JSONB):**
+```json
+{
+  "days": [
+    {
+      "date": "2025-01-06",
+      "metrics": {
+        "impressions": 1500,
+        "spend": 25.50,
+        "frequency": 1.8,
+        "ctr": 2.1,
+        "link_ctr": 1.5,
+        "cpm": 17.00,
+        "cpr": 5.10,
+        "results": 5
+      },
+      "deviations": [
+        {"metric": "cpr", "value": 5.10, "week_avg": 4.20, "delta_pct": 21.4, "direction": "bad"}
+      ]
+    }
+  ],
+  "summary": {
+    "worst_day": "2025-01-08",
+    "best_day": "2025-01-06",
+    "active_days": 6,
+    "pause_days": 1
+  }
+}
+```
+
 ## Multi-Account Support
 
 Система поддерживает multi-account архитектуру:
@@ -735,6 +832,31 @@ curl -X POST "http://localhost:8082/admin/ad-insights/{accountId}/sync?weeks=52"
 Открыть `/admin/ad-insights` в браузере (требуется авторизация tech_admin).
 
 ## Changelog
+
+### 2025-12-25 (v4): Daily Breakdown для аномалий
+- **НОВОЕ:** Детализация аномалий по дням недели
+  - Для каждой аномалии (неделя + объявление) можно увидеть метрики по каждому дню
+  - Метрики: impressions, spend, frequency, ctr, link_ctr, cpm, cpr, results
+  - Определяются worst/best дни по CPR
+  - Показываются значимые отклонения от среднего за неделю
+- **НОВОЕ:** Расширение `meta_insights_daily` (миграция 123)
+  - Добавлены поля: frequency, link_clicks, link_ctr, actions_json
+  - Данные синхронизируются через syncDailyInsights()
+- **НОВОЕ:** Сервис `dailyBreakdownEnricher.ts`
+  - Обогащает аномалии детализацией по дням
+  - Работает только с данными из БД (не делает запросы к Facebook API)
+- **НОВОЕ:** Endpoint `POST /admin/ad-insights/:accountId/enrich-daily-breakdown`
+  - Query параметры: `forceRefresh` (boolean), `limit` (number)
+  - Возвращает: `{ success, enriched, skipped, errors }`
+- **НОВОЕ:** UI компонент `DailyBreakdownTable`
+  - Интегрирован в expanded row аномалий
+  - Таблица с колонками: День, Spend, Impr, CTR, CPM, Results, CPR, Сигналы
+  - Подсветка worst (красный) и best (зелёный) дней
+  - Индикация pause дней
+- **ТРЕБУЕТСЯ:**
+  1. Применить миграцию 123
+  2. Пересинхронизировать данные: `POST /admin/ad-insights/:accountId/sync`
+  3. Обогатить аномалии: `POST /admin/ad-insights/:accountId/enrich-daily-breakdown`
 
 ### 2025-12-25 (v3): Complete Preceding Deviations + Schema Fixes
 - **НОВОЕ:** On-the-fly baseline calculation
