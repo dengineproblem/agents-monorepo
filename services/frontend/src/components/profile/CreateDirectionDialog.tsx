@@ -14,7 +14,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
-import { ChevronDown } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
 import type { DirectionObjective, CreateDefaultSettingsInput } from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
@@ -22,6 +23,233 @@ import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
+import { API_BASE_URL } from '@/config/api';
+import {
+  getLeadCustomFields as getAmocrmFields,
+  type CustomField as AmocrmCustomField,
+  type QualificationFieldConfig as AmocrmFieldConfig,
+} from '@/services/amocrmApi';
+import {
+  getBitrix24Status,
+  getBitrix24LeadCustomFields,
+  getBitrix24DealCustomFields,
+  type CustomField as Bitrix24CustomField,
+  type QualificationFieldConfig as Bitrix24FieldConfig,
+} from '@/services/bitrix24Api';
+
+// Unified type for CRM field selection in direction CAPI settings
+export interface CapiFieldConfig {
+  field_id: string | number;
+  field_name: string;
+  field_type: string;
+  enum_id?: string | number | null;
+  enum_value?: string | null;
+  entity_type?: string; // for Bitrix24
+}
+
+interface SelectedCapiField {
+  fieldId: string | number | null;
+  enumId: string | number | null;
+}
+
+interface ExistingCapiDirection {
+  id: string;
+  name: string;
+  pixel_id: string;
+  pixel_name?: string;
+}
+
+export type CrmType = 'amocrm' | 'bitrix24';
+export type CapiSource = 'whatsapp' | 'crm';
+
+const MAX_CAPI_FIELDS = 3;
+
+// CRM Field Selector Component
+interface CrmFieldSelectorProps {
+  fields: (AmocrmCustomField | Bitrix24CustomField)[];
+  selectedFields: SelectedCapiField[];
+  setSelectedFields: React.Dispatch<React.SetStateAction<SelectedCapiField[]>>;
+  crmType: CrmType;
+  isSubmitting: boolean;
+  getFieldById: (fieldId: string | number | null) => AmocrmCustomField | Bitrix24CustomField | undefined;
+  getFieldId: (field: AmocrmCustomField | Bitrix24CustomField) => string | number;
+  getFieldName: (field: AmocrmCustomField | Bitrix24CustomField) => string;
+  getFieldType: (field: AmocrmCustomField | Bitrix24CustomField) => string;
+  getFieldEnums: (field: AmocrmCustomField | Bitrix24CustomField) => Array<{ id: string | number; value: string }>;
+  needsEnumSelection: (field: AmocrmCustomField | Bitrix24CustomField | null) => boolean;
+}
+
+const CrmFieldSelector: React.FC<CrmFieldSelectorProps> = ({
+  fields,
+  selectedFields,
+  setSelectedFields,
+  crmType,
+  isSubmitting,
+  getFieldById,
+  getFieldId,
+  getFieldName,
+  getFieldType,
+  getFieldEnums,
+  needsEnumSelection,
+}) => {
+  const handleFieldChange = (index: number, value: string) => {
+    const fieldId = value === 'none' ? null : (crmType === 'amocrm' ? parseInt(value) : value);
+    setSelectedFields(prev => {
+      const updated = [...prev];
+      updated[index] = { fieldId, enumId: null };
+      return updated;
+    });
+  };
+
+  const handleEnumChange = (index: number, value: string) => {
+    const enumId = value === 'none' ? null : (crmType === 'amocrm' ? parseInt(value) : value);
+    setSelectedFields(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], enumId };
+      return updated;
+    });
+  };
+
+  const addField = () => {
+    if (selectedFields.length < MAX_CAPI_FIELDS) {
+      setSelectedFields(prev => [...prev, { fieldId: null, enumId: null }]);
+    }
+  };
+
+  const removeField = (index: number) => {
+    if (selectedFields.length > 1) {
+      setSelectedFields(prev => prev.filter((_, i) => i !== index));
+    } else {
+      setSelectedFields([{ fieldId: null, enumId: null }]);
+    }
+  };
+
+  const isCheckboxType = (field: AmocrmCustomField | Bitrix24CustomField | null): boolean => {
+    if (!field) return false;
+    const fieldType = getFieldType(field);
+    return fieldType === 'checkbox' || fieldType === 'boolean';
+  };
+
+  const getSelectedCheckboxFieldIds = (excludeIndex: number) => {
+    return selectedFields
+      .filter((_, i) => i !== excludeIndex)
+      .filter(sf => {
+        if (!sf.fieldId) return false;
+        const field = getFieldById(sf.fieldId);
+        return field && isCheckboxType(field);
+      })
+      .map(sf => sf.fieldId)
+      .filter(Boolean);
+  };
+
+  const activeFieldsCount = selectedFields.filter(sf => sf.fieldId !== null).length;
+
+  return (
+    <div className="space-y-2">
+      {selectedFields.map((sf, index) => {
+        const selectedCheckboxIds = getSelectedCheckboxFieldIds(index);
+        const currentField = sf.fieldId ? getFieldById(sf.fieldId) : null;
+
+        return (
+          <div key={index} className="flex items-start gap-2">
+            <div className="flex-1 space-y-1">
+              <Select
+                value={sf.fieldId?.toString() || 'none'}
+                onValueChange={(value) => handleFieldChange(index, value)}
+                disabled={isSubmitting || fields.length === 0}
+              >
+                <SelectTrigger className="w-full bg-white dark:bg-gray-900 h-8 text-sm">
+                  <SelectValue placeholder="Выберите поле" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">
+                    <span className="text-muted-foreground">Не выбрано</span>
+                  </SelectItem>
+                  {fields.map((field) => {
+                    const fId = getFieldId(field);
+                    const isDisabled = isCheckboxType(field) && selectedCheckboxIds.includes(fId);
+                    return (
+                      <SelectItem
+                        key={fId}
+                        value={fId.toString()}
+                        disabled={isDisabled}
+                      >
+                        {getFieldName(field)} ({getFieldType(field)})
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+
+              {currentField && needsEnumSelection(currentField) && (
+                <Select
+                  value={sf.enumId?.toString() || 'none'}
+                  onValueChange={(value) => handleEnumChange(index, value)}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger className="w-full bg-white dark:bg-gray-900 h-8 text-sm">
+                    <SelectValue placeholder="Выберите значение" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      <span className="text-muted-foreground">Не выбрано</span>
+                    </SelectItem>
+                    {getFieldEnums(currentField).map((enumItem) => (
+                      <SelectItem key={enumItem.id} value={enumItem.id.toString()}>
+                        {enumItem.value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            {selectedFields.length > 1 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeField(index)}
+                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 flex-shrink-0"
+                disabled={isSubmitting}
+              >
+                <span className="text-lg">&times;</span>
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      {selectedFields.length < MAX_CAPI_FIELDS && fields.length > 0 && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={addField}
+          disabled={isSubmitting}
+          className="w-full h-8 text-xs"
+        >
+          + Добавить поле ({selectedFields.length}/{MAX_CAPI_FIELDS})
+        </Button>
+      )}
+
+      {activeFieldsCount > 0 && (
+        <p className="text-xs text-green-600 flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3" />
+          {activeFieldsCount === 1 ? 'Выбрано 1 поле' : `Выбрано ${activeFieldsCount} поля`}
+        </p>
+      )}
+    </div>
+  );
+};
+
+// CAPI settings to be passed to parent
+export interface DirectionCapiSettings {
+  capi_enabled: boolean;
+  capi_source: CapiSource | null;
+  capi_crm_type: CrmType | null;
+  capi_interest_fields: CapiFieldConfig[];
+  capi_qualified_fields: CapiFieldConfig[];
+  capi_scheduled_fields: CapiFieldConfig[];
+}
 
 interface CreateDirectionDialogProps {
   open: boolean;
@@ -33,6 +261,7 @@ interface CreateDirectionDialogProps {
     target_cpl_cents: number;
     whatsapp_phone_number?: string;
     adSettings: CreateDefaultSettingsInput;
+    capiSettings?: DirectionCapiSettings;
   }) => Promise<void>;
   userAccountId: string;
 }
@@ -79,6 +308,29 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
 
+  // CAPI Configuration (direction-level)
+  const [capiEnabled, setCapiEnabled] = useState(false);
+  const [capiSource, setCapiSource] = useState<CapiSource>('whatsapp');
+  const [capiCrmType, setCapiCrmType] = useState<CrmType>('amocrm');
+
+  // CRM field selections for each CAPI level
+  const [capiInterestFields, setCapiInterestFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+  const [capiQualifiedFields, setCapiQualifiedFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+  const [capiScheduledFields, setCapiScheduledFields] = useState<SelectedCapiField[]>([{ fieldId: null, enumId: null }]);
+
+  // Connected CRMs
+  const [connectedCrms, setConnectedCrms] = useState<CrmType[]>([]);
+  const [isLoadingCrms, setIsLoadingCrms] = useState(false);
+
+  // CRM custom fields (loaded based on selected CRM type)
+  const [crmFields, setCrmFields] = useState<(AmocrmCustomField | Bitrix24CustomField)[]>([]);
+  const [isLoadingCrmFields, setIsLoadingCrmFields] = useState(false);
+
+  // Existing directions with CAPI (for reuse pixel option)
+  const [existingCapiDirections, setExistingCapiDirections] = useState<ExistingCapiDirection[]>([]);
+  const [useExistingPixel, setUseExistingPixel] = useState(false);
+  const [selectedExistingPixelId, setSelectedExistingPixelId] = useState<string>('');
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -124,6 +376,114 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     };
     loadLeadForms();
   }, [objective]);
+
+  // Load connected CRMs on mount
+  useEffect(() => {
+    const loadConnectedCrms = async () => {
+      setIsLoadingCrms(true);
+      const crms: CrmType[] = [];
+
+      try {
+        // Check AmoCRM connection (check if user has amocrm token via API)
+        const amocrmResponse = await fetch(
+          `${API_BASE_URL}/amocrm/pipelines?userAccountId=${userAccountId}`
+        );
+        if (amocrmResponse.ok) {
+          crms.push('amocrm');
+        }
+      } catch {
+        // Not connected
+      }
+
+      try {
+        // Check Bitrix24 connection
+        const bitrixStatus = await getBitrix24Status(userAccountId);
+        if (bitrixStatus.connected) {
+          crms.push('bitrix24');
+        }
+      } catch {
+        // Not connected
+      }
+
+      setConnectedCrms(crms);
+      // Set default CRM type if only one is connected
+      if (crms.length === 1) {
+        setCapiCrmType(crms[0]);
+      }
+      setIsLoadingCrms(false);
+    };
+
+    if (open && userAccountId) {
+      loadConnectedCrms();
+    }
+  }, [open, userAccountId]);
+
+  // Load CRM fields when CRM type changes and CAPI source is CRM
+  useEffect(() => {
+    const loadCrmFields = async () => {
+      if (!capiEnabled || capiSource !== 'crm') {
+        setCrmFields([]);
+        return;
+      }
+
+      setIsLoadingCrmFields(true);
+      try {
+        if (capiCrmType === 'amocrm') {
+          const response = await getAmocrmFields(userAccountId);
+          setCrmFields(response.fields || []);
+        } else if (capiCrmType === 'bitrix24') {
+          // Load lead or deal fields based on entity type preference
+          // For now, load lead fields
+          const response = await getBitrix24LeadCustomFields(userAccountId);
+          setCrmFields(response.fields || []);
+        }
+      } catch (err) {
+        console.error('Failed to load CRM fields:', err);
+        setCrmFields([]);
+      } finally {
+        setIsLoadingCrmFields(false);
+      }
+    };
+
+    loadCrmFields();
+  }, [capiEnabled, capiSource, capiCrmType, userAccountId]);
+
+  // Load existing CAPI directions for pixel reuse option
+  useEffect(() => {
+    const loadExistingCapiDirections = async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/directions?userAccountId=${userAccountId}`
+        );
+        if (!response.ok) return;
+
+        const directions = await response.json();
+        const capiDirs: ExistingCapiDirection[] = [];
+
+        for (const dir of directions) {
+          // Check if direction has CAPI enabled with pixel
+          const pixelId = dir.default_ad_settings?.pixel_id;
+          if (pixelId) {
+            const pixel = pixels.find(p => p.id === pixelId);
+            capiDirs.push({
+              id: dir.id,
+              name: dir.name,
+              pixel_id: pixelId,
+              pixel_name: pixel?.name,
+            });
+          }
+        }
+
+        setExistingCapiDirections(capiDirs);
+      } catch {
+        // Ignore errors
+      }
+    };
+
+    if (open && userAccountId && pixels.length > 0) {
+      loadExistingCapiDirections();
+    }
+  }, [open, userAccountId, pixels]);
 
   const handleCitySelection = (cityId: string) => {
     // Простая логика как в VideoUpload
@@ -235,6 +595,16 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         }),
       };
 
+      // Build CAPI settings if enabled
+      const capiSettings: DirectionCapiSettings | undefined = capiEnabled && pixelId ? {
+        capi_enabled: true,
+        capi_source: capiSource,
+        capi_crm_type: capiSource === 'crm' ? capiCrmType : null,
+        capi_interest_fields: capiSource === 'crm' ? convertFieldsToConfig(capiInterestFields) : [],
+        capi_qualified_fields: capiSource === 'crm' ? convertFieldsToConfig(capiQualifiedFields) : [],
+        capi_scheduled_fields: capiSource === 'crm' ? convertFieldsToConfig(capiScheduledFields) : [],
+      } : undefined;
+
       await onSubmit({
         name: name.trim(),
         objective,
@@ -242,6 +612,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         target_cpl_cents: Math.round(cplValue * 100),
         whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
         adSettings,
+        capiSettings,
       });
 
       // Сброс формы
@@ -271,6 +642,100 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
     setLeadFormId('');
+    // CAPI settings
+    setCapiEnabled(false);
+    setCapiSource('whatsapp');
+    setCapiCrmType('amocrm');
+    setCapiInterestFields([{ fieldId: null, enumId: null }]);
+    setCapiQualifiedFields([{ fieldId: null, enumId: null }]);
+    setCapiScheduledFields([{ fieldId: null, enumId: null }]);
+    setUseExistingPixel(false);
+    setSelectedExistingPixelId('');
+  };
+
+  // Helper functions for CRM field selection
+  const getFieldById = (fieldId: string | number | null) => {
+    if (!fieldId) return null;
+    return crmFields.find(f => {
+      if (capiCrmType === 'amocrm') {
+        return (f as AmocrmCustomField).field_id === fieldId;
+      } else {
+        return (f as Bitrix24CustomField).id === fieldId;
+      }
+    });
+  };
+
+  const getFieldName = (field: AmocrmCustomField | Bitrix24CustomField): string => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).field_name;
+    }
+    return (field as Bitrix24CustomField).label || (field as Bitrix24CustomField).fieldName;
+  };
+
+  const getFieldId = (field: AmocrmCustomField | Bitrix24CustomField): string | number => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).field_id;
+    }
+    return (field as Bitrix24CustomField).id;
+  };
+
+  const getFieldType = (field: AmocrmCustomField | Bitrix24CustomField): string => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).field_type;
+    }
+    return (field as Bitrix24CustomField).userTypeId;
+  };
+
+  const getFieldEnums = (field: AmocrmCustomField | Bitrix24CustomField) => {
+    if (capiCrmType === 'amocrm') {
+      return (field as AmocrmCustomField).enums || [];
+    }
+    return (field as Bitrix24CustomField).list || [];
+  };
+
+  const isSelectType = (field: AmocrmCustomField | Bitrix24CustomField | null): boolean => {
+    if (!field) return false;
+    const fieldType = getFieldType(field);
+    // AmoCRM: select, multiselect
+    // Bitrix24: enumeration (type_id)
+    return ['select', 'multiselect', 'enumeration'].includes(fieldType);
+  };
+
+  const needsEnumSelection = (field: AmocrmCustomField | Bitrix24CustomField | null): boolean => {
+    if (!field) return false;
+    const enums = getFieldEnums(field);
+    return isSelectType(field) && enums.length > 0;
+  };
+
+  const convertFieldsToConfig = (fields: SelectedCapiField[]): CapiFieldConfig[] => {
+    return fields
+      .filter(sf => sf.fieldId !== null)
+      .map(sf => {
+        const field = getFieldById(sf.fieldId);
+        if (!field) return null;
+
+        const enums = getFieldEnums(field);
+        let enumValue: string | null = null;
+        if (sf.enumId) {
+          const selectedEnum = enums.find(e => {
+            if (capiCrmType === 'amocrm') {
+              return (e as { id: number }).id === sf.enumId;
+            }
+            return (e as { id: string }).id === sf.enumId;
+          });
+          enumValue = selectedEnum ? (selectedEnum as { value: string }).value : null;
+        }
+
+        return {
+          field_id: getFieldId(field),
+          field_name: getFieldName(field),
+          field_type: getFieldType(field),
+          enum_id: sf.enumId,
+          enum_value: enumValue,
+          ...(capiCrmType === 'bitrix24' && { entity_type: 'lead' }),
+        };
+      })
+      .filter(Boolean) as CapiFieldConfig[];
   };
 
   return (
@@ -776,51 +1241,269 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {/* СЕКЦИЯ: Meta CAPI (Пиксель) для всех типов кроме site_leads */}
+          {/* СЕКЦИЯ: Meta CAPI - расширенная конфигурация */}
           {objective !== 'site_leads' && (
             <div className="space-y-4">
-              <h3 className="font-semibold text-sm">📊 Meta Conversions API (опционально)</h3>
-              <p className="text-xs text-muted-foreground -mt-2">
-                Выберите пиксель для отслеживания конверсий через Meta CAPI
-              </p>
-
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <Label htmlFor="pixel-id-capi">Facebook Pixel</Label>
-                  <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_PIXEL_ID} />
+              <Separator />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-sm">📊 Meta Conversions API</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Отправка событий конверсий в Meta для оптимизации рекламы
+                  </p>
                 </div>
-                <Select
-                  value={pixelId || 'none'}
-                  onValueChange={(value) => setPixelId(value === 'none' ? '' : value)}
-                  disabled={isSubmitting || isLoadingPixels}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={
-                      isLoadingPixels
-                        ? 'Загрузка...'
-                        : pixels.length === 0
-                          ? 'Нет доступных пикселей'
-                          : 'Выберите пиксель (опционально)'
-                    } />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Без пикселя</SelectItem>
-                    {pixels.length === 0 && !isLoadingPixels && (
-                      <SelectItem value="no-pixels" disabled>
-                        Пиксели не найдены в рекламном кабинете
-                      </SelectItem>
-                    )}
-                    {pixels.map((pixel) => (
-                      <SelectItem key={pixel.id} value={pixel.id}>
-                        {pixel.name} ({pixel.id})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  При выборе пикселя система будет отправлять события конверсий (интерес, квалификация, запись) в Meta для оптимизации рекламы
-                </p>
+                <Switch
+                  checked={capiEnabled}
+                  onCheckedChange={setCapiEnabled}
+                  disabled={isSubmitting}
+                />
               </div>
+
+              {capiEnabled && (
+                <div className="space-y-4 pl-4 border-l-2 border-blue-200">
+                  {/* Выбор пикселя */}
+                  <div className="space-y-2">
+                    {existingCapiDirections.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="use-existing-pixel"
+                            checked={useExistingPixel}
+                            onChange={(e) => {
+                              setUseExistingPixel(e.target.checked);
+                              if (e.target.checked && existingCapiDirections.length > 0) {
+                                const first = existingCapiDirections[0];
+                                setSelectedExistingPixelId(first.pixel_id);
+                                setPixelId(first.pixel_id);
+                              } else {
+                                setSelectedExistingPixelId('');
+                                setPixelId('');
+                              }
+                            }}
+                            disabled={isSubmitting}
+                          />
+                          <Label htmlFor="use-existing-pixel" className="font-normal cursor-pointer">
+                            Использовать пиксель из другого направления
+                          </Label>
+                        </div>
+                        {useExistingPixel && (
+                          <div className="ml-6">
+                            <Select
+                              value={selectedExistingPixelId}
+                              onValueChange={(value) => {
+                                setSelectedExistingPixelId(value);
+                                setPixelId(value);
+                              }}
+                              disabled={isSubmitting}
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Выберите направление" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {existingCapiDirections.map((dir) => (
+                                  <SelectItem key={dir.id} value={dir.pixel_id}>
+                                    {dir.name} - {dir.pixel_name || dir.pixel_id}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3" />
+                              Лиды будут объединены в одну аудиторию с выбранным направлением
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {!useExistingPixel && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5">
+                          <Label>Facebook Pixel</Label>
+                          <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_PIXEL_ID} />
+                        </div>
+                        <Select
+                          value={pixelId || 'none'}
+                          onValueChange={(value) => setPixelId(value === 'none' ? '' : value)}
+                          disabled={isSubmitting || isLoadingPixels}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={
+                              isLoadingPixels
+                                ? 'Загрузка...'
+                                : pixels.length === 0
+                                  ? 'Нет доступных пикселей'
+                                  : 'Выберите пиксель'
+                            } />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Без пикселя</SelectItem>
+                            {pixels.map((pixel) => (
+                              <SelectItem key={pixel.id} value={pixel.id}>
+                                {pixel.name} ({pixel.id})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Источник данных */}
+                  {pixelId && (
+                    <div className="space-y-3">
+                      <Label>Источник данных для событий</Label>
+                      <RadioGroup
+                        value={capiSource}
+                        onValueChange={(value) => setCapiSource(value as CapiSource)}
+                        disabled={isSubmitting}
+                      >
+                        <div className="flex items-start space-x-2">
+                          <RadioGroupItem value="whatsapp" id="capi-source-whatsapp" className="mt-1" />
+                          <div>
+                            <Label htmlFor="capi-source-whatsapp" className="font-normal cursor-pointer">
+                              WhatsApp (AI-анализ)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              ИИ анализирует диалоги и определяет уровень интереса
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-start space-x-2">
+                          <RadioGroupItem
+                            value="crm"
+                            id="capi-source-crm"
+                            className="mt-1"
+                            disabled={connectedCrms.length === 0}
+                          />
+                          <div>
+                            <Label
+                              htmlFor="capi-source-crm"
+                              className={`font-normal cursor-pointer ${connectedCrms.length === 0 ? 'text-muted-foreground' : ''}`}
+                            >
+                              CRM (поля карточки)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              {connectedCrms.length === 0
+                                ? 'Нет подключённых CRM'
+                                : 'События отправляются при изменении полей в CRM'}
+                            </p>
+                          </div>
+                        </div>
+                      </RadioGroup>
+
+                      {/* CRM Configuration */}
+                      {capiSource === 'crm' && connectedCrms.length > 0 && (
+                        <div className="space-y-4 mt-4">
+                          {/* CRM Type Selection */}
+                          {connectedCrms.length > 1 && (
+                            <div className="space-y-2">
+                              <Label>Выберите CRM</Label>
+                              <Select
+                                value={capiCrmType}
+                                onValueChange={(value) => setCapiCrmType(value as CrmType)}
+                                disabled={isSubmitting}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {connectedCrms.includes('amocrm') && (
+                                    <SelectItem value="amocrm">AmoCRM</SelectItem>
+                                  )}
+                                  {connectedCrms.includes('bitrix24') && (
+                                    <SelectItem value="bitrix24">Bitrix24</SelectItem>
+                                  )}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          {isLoadingCrmFields ? (
+                            <div className="text-sm text-muted-foreground">Загрузка полей CRM...</div>
+                          ) : crmFields.length === 0 ? (
+                            <div className="text-sm text-amber-600">
+                              В CRM не найдено подходящих полей (Флаг, Список, Мультисписок)
+                            </div>
+                          ) : (
+                            <>
+                              {/* Level 1: Interest (Lead) */}
+                              <div className="space-y-2 p-3 border rounded-lg bg-blue-50 dark:bg-blue-900/20">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-blue-600 font-medium text-sm">Level 1: Интерес (Lead)</span>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  Событие отправляется при установке любого из выбранных полей
+                                </p>
+                                <CrmFieldSelector
+                                  fields={crmFields}
+                                  selectedFields={capiInterestFields}
+                                  setSelectedFields={setCapiInterestFields}
+                                  crmType={capiCrmType}
+                                  isSubmitting={isSubmitting}
+                                  getFieldById={getFieldById}
+                                  getFieldId={getFieldId}
+                                  getFieldName={getFieldName}
+                                  getFieldType={getFieldType}
+                                  getFieldEnums={getFieldEnums}
+                                  needsEnumSelection={needsEnumSelection}
+                                />
+                              </div>
+
+                              {/* Level 2: Qualified (CompleteRegistration) */}
+                              <div className="space-y-2 p-3 border rounded-lg bg-green-50 dark:bg-green-900/20">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-green-600 font-medium text-sm">Level 2: Квалификация (CompleteRegistration)</span>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  Событие отправляется при установке любого из выбранных полей
+                                </p>
+                                <CrmFieldSelector
+                                  fields={crmFields}
+                                  selectedFields={capiQualifiedFields}
+                                  setSelectedFields={setCapiQualifiedFields}
+                                  crmType={capiCrmType}
+                                  isSubmitting={isSubmitting}
+                                  getFieldById={getFieldById}
+                                  getFieldId={getFieldId}
+                                  getFieldName={getFieldName}
+                                  getFieldType={getFieldType}
+                                  getFieldEnums={getFieldEnums}
+                                  needsEnumSelection={needsEnumSelection}
+                                />
+                              </div>
+
+                              {/* Level 3: Scheduled (Schedule) */}
+                              <div className="space-y-2 p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-purple-600 font-medium text-sm">Level 3: Запись (Schedule)</span>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                  Событие отправляется при установке любого из выбранных полей
+                                </p>
+                                <CrmFieldSelector
+                                  fields={crmFields}
+                                  selectedFields={capiScheduledFields}
+                                  setSelectedFields={setCapiScheduledFields}
+                                  crmType={capiCrmType}
+                                  isSubmitting={isSubmitting}
+                                  getFieldById={getFieldById}
+                                  getFieldId={getFieldId}
+                                  getFieldName={getFieldName}
+                                  getFieldType={getFieldType}
+                                  getFieldEnums={getFieldEnums}
+                                  needsEnumSelection={needsEnumSelection}
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

@@ -2,6 +2,19 @@
 
 export type DirectionObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
 
+// CAPI settings types
+export type CapiSource = 'whatsapp' | 'crm';
+export type CapiCrmType = 'amocrm' | 'bitrix24';
+
+export interface CapiFieldConfig {
+  field_id: string | number;
+  field_name: string;
+  field_type: string;
+  enum_id?: string | number | null;
+  enum_value?: string | null;
+  entity_type?: string; // for Bitrix24
+}
+
 export interface Direction {
   id: string;
   user_account_id: string;
@@ -20,6 +33,13 @@ export interface Direction {
   key_stage_2_status_id?: number | null;
   key_stage_3_pipeline_id?: number | null;
   key_stage_3_status_id?: number | null;
+  // CAPI settings (direction-level)
+  capi_enabled?: boolean;
+  capi_source?: CapiSource | null;
+  capi_crm_type?: CapiCrmType | null;
+  capi_interest_fields?: CapiFieldConfig[];
+  capi_qualified_fields?: CapiFieldConfig[];
+  capi_scheduled_fields?: CapiFieldConfig[];
   created_at: string;
   updated_at: string;
 }
@@ -46,6 +66,13 @@ export interface CreateDirectionPayload {
     // Lead Forms специфичные
     lead_form_id?: string;
   };
+  // CAPI settings (direction-level)
+  capi_enabled?: boolean;
+  capi_source?: CapiSource | null;
+  capi_crm_type?: CapiCrmType | null;
+  capi_interest_fields?: CapiFieldConfig[];
+  capi_qualified_fields?: CapiFieldConfig[];
+  capi_scheduled_fields?: CapiFieldConfig[];
 }
 
 export interface UpdateDirectionPayload {

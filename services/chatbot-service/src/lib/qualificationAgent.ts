@@ -39,6 +39,26 @@ export interface QualificationResult {
   reasoning: string;
 }
 
+// CRM field config from direction CAPI settings
+interface CapiFieldConfig {
+  field_id: string | number;
+  field_name: string;
+  field_type: string;
+  enum_id?: string | number | null;
+  enum_value?: string | null;
+  entity_type?: string;
+}
+
+// Direction CAPI settings
+interface DirectionCapiSettings {
+  capi_enabled: boolean;
+  capi_source: 'whatsapp' | 'crm' | null;
+  capi_crm_type: 'amocrm' | 'bitrix24' | null;
+  capi_interest_fields: CapiFieldConfig[];
+  capi_qualified_fields: CapiFieldConfig[];
+  capi_scheduled_fields: CapiFieldConfig[];
+}
+
 // Dialog data for analysis
 interface DialogData {
   id: string;
@@ -60,6 +80,8 @@ interface DialogData {
   capi_interest_sent?: boolean;
   capi_qualified_sent?: boolean;
   capi_scheduled_sent?: boolean;
+  // Direction CAPI settings (loaded from direction)
+  direction_capi_settings?: DirectionCapiSettings;
 }
 
 /**
@@ -98,10 +120,47 @@ async function getQualificationPrompt(
 }
 
 /**
+ * Get direction CAPI settings
+ */
+async function getDirectionCapiSettings(
+  directionId: string
+): Promise<DirectionCapiSettings | null> {
+  try {
+    const { data: direction } = await supabase
+      .from('account_directions')
+      .select(`
+        capi_enabled,
+        capi_source,
+        capi_crm_type,
+        capi_interest_fields,
+        capi_qualified_fields,
+        capi_scheduled_fields
+      `)
+      .eq('id', directionId)
+      .single();
+
+    if (!direction) return null;
+
+    return {
+      capi_enabled: direction.capi_enabled || false,
+      capi_source: direction.capi_source || null,
+      capi_crm_type: direction.capi_crm_type || null,
+      capi_interest_fields: direction.capi_interest_fields || [],
+      capi_qualified_fields: direction.capi_qualified_fields || [],
+      capi_scheduled_fields: direction.capi_scheduled_fields || [],
+    };
+  } catch (error) {
+    log.error({ error, directionId }, 'Error getting direction CAPI settings');
+    return null;
+  }
+}
+
+/**
  * CRM qualification status from leads table
  */
 interface CrmQualificationStatus {
-  hasIntegration: boolean;      // Has AMO CRM or Bitrix24 connected
+  hasIntegration: boolean;      // Has CRM configured in direction
+  isInterested: boolean;        // From CRM field matching (if configured)
   isQualified: boolean;         // From leads.is_qualified (set by CRM sync)
   isScheduled: boolean;         // From leads.is_scheduled (set by CRM sync)
   source: 'amocrm' | 'bitrix24' | null;
@@ -109,41 +168,27 @@ interface CrmQualificationStatus {
 
 /**
  * Get CRM qualification status for a lead
- * Checks leads table for is_qualified flag set by AMO/Bitrix sync
+ * Uses direction-level CAPI settings for field matching
  */
 async function getCrmQualificationStatus(
   contactPhone: string,
-  userAccountId: string
+  userAccountId: string,
+  capiSettings?: DirectionCapiSettings
 ): Promise<CrmQualificationStatus> {
   const defaultResult: CrmQualificationStatus = {
     hasIntegration: false,
+    isInterested: false,
     isQualified: false,
     isScheduled: false,
     source: null,
   };
 
+  // If no CAPI settings or source is not CRM, return default
+  if (!capiSettings || capiSettings.capi_source !== 'crm' || !capiSettings.capi_crm_type) {
+    return defaultResult;
+  }
+
   try {
-    // Check if user has AMO or Bitrix integration
-    const { data: userAccount } = await supabase
-      .from('user_accounts')
-      .select(`
-        amocrm_access_token,
-        bitrix24_access_token,
-        amocrm_qualification_fields,
-        amocrm_scheduled_fields,
-        bitrix24_qualification_fields,
-        bitrix24_scheduled_fields
-      `)
-      .eq('id', userAccountId)
-      .single();
-
-    if (!userAccount) return defaultResult;
-
-    const hasAmocrm = !!userAccount.amocrm_access_token;
-    const hasBitrix = !!userAccount.bitrix24_access_token;
-
-    if (!hasAmocrm && !hasBitrix) return defaultResult;
-
     // Find lead by phone
     const { data: lead } = await supabase
       .from('leads')
@@ -154,16 +199,21 @@ async function getCrmQualificationStatus(
 
     if (!lead) return defaultResult;
 
-    // Determine source
-    let source: 'amocrm' | 'bitrix24' | null = null;
+    // Determine source from lead data
+    let detectedSource: 'amocrm' | 'bitrix24' | null = null;
     if (lead.amocrm_lead_id) {
-      source = 'amocrm';
+      detectedSource = 'amocrm';
     } else if (lead.bitrix24_lead_id || lead.bitrix24_deal_id) {
-      source = 'bitrix24';
+      detectedSource = 'bitrix24';
     }
 
+    // Use the source configured in direction, or detected from lead
+    const source = capiSettings.capi_crm_type || detectedSource;
+
     return {
-      hasIntegration: hasAmocrm || hasBitrix,
+      hasIntegration: true,
+      // For interest - we check if interest fields are configured (will be evaluated by CRM sync)
+      isInterested: (capiSettings.capi_interest_fields?.length || 0) > 0,
       isQualified: lead.is_qualified || false,
       isScheduled: lead.is_scheduled || false,
       source,
@@ -314,6 +364,7 @@ function getDefaultQualificationPrompt(): string {
 
 /**
  * Process dialog and send CAPI events if needed
+ * Now uses direction-level CAPI settings to determine behavior
  */
 export async function processDialogForCapi(
   dialog: DialogData
@@ -321,6 +372,7 @@ export async function processDialogForCapi(
   log.info({
     dialogId: dialog.id,
     contactPhone: dialog.contact_phone,
+    directionId: dialog.direction_id,
     alreadySentInterest: dialog.capi_interest_sent,
     alreadySentQualified: dialog.capi_qualified_sent,
     alreadySentScheduled: dialog.capi_scheduled_sent,
@@ -336,50 +388,84 @@ export async function processDialogForCapi(
     return;
   }
 
-  // Check CRM status first (from leads table synced with AMO/Bitrix)
-  const crmStatus = await getCrmQualificationStatus(
-    dialog.contact_phone,
-    dialog.user_account_id
-  );
+  // Get direction CAPI settings
+  let capiSettings: DirectionCapiSettings | null = null;
+  if (dialog.direction_id) {
+    capiSettings = await getDirectionCapiSettings(dialog.direction_id);
+  }
+
+  // If CAPI not enabled for this direction, skip
+  if (!capiSettings?.capi_enabled) {
+    log.debug({
+      dialogId: dialog.id,
+      directionId: dialog.direction_id,
+    }, 'CAPI not enabled for direction, skipping');
+    return;
+  }
 
   log.info({
     dialogId: dialog.id,
-    crmStatus,
-  }, 'CRM qualification status');
+    capiSource: capiSettings.capi_source,
+    capiCrmType: capiSettings.capi_crm_type,
+  }, 'Direction CAPI settings');
 
-  // Analyze qualification via LLM
-  const llmResult = await analyzeQualification(dialog);
+  let result: QualificationResult;
+  let interestSource: string | null = null;
+  let qualifiedSource: string | null = null;
+  let scheduledSource: string | null = null;
 
-  if (!llmResult) {
-    log.warn({ dialogId: dialog.id }, 'LLM qualification analysis failed');
+  if (capiSettings.capi_source === 'crm') {
+    // CRM mode: use CRM field matching
+    const crmStatus = await getCrmQualificationStatus(
+      dialog.contact_phone,
+      dialog.user_account_id,
+      capiSettings
+    );
+
+    log.info({
+      dialogId: dialog.id,
+      crmStatus,
+    }, 'CRM qualification status');
+
+    result = {
+      is_interested: crmStatus.isInterested,
+      is_qualified: crmStatus.isQualified,
+      is_scheduled: crmStatus.isScheduled,
+      qualification_details: {
+        answered_questions: 0,
+        matching_criteria: 0,
+        missing_info: [],
+      },
+      reasoning: 'CRM field matching',
+    };
+
+    if (crmStatus.isInterested) interestSource = crmStatus.source;
+    if (crmStatus.isQualified) qualifiedSource = crmStatus.source;
+    if (crmStatus.isScheduled) scheduledSource = crmStatus.source;
+  } else {
+    // WhatsApp mode: use LLM analysis
+    const llmResult = await analyzeQualification(dialog);
+
+    if (!llmResult) {
+      log.warn({ dialogId: dialog.id }, 'LLM qualification analysis failed');
+    }
+
+    result = {
+      is_interested: llmResult?.is_interested || (dialog.incoming_count >= 2),
+      is_qualified: llmResult?.is_qualified || false,
+      is_scheduled: llmResult?.is_scheduled || false,
+      qualification_details: llmResult?.qualification_details || {
+        answered_questions: 0,
+        matching_criteria: 0,
+        missing_info: [],
+      },
+      reasoning: llmResult?.reasoning || 'LLM analysis failed',
+    };
+
+    if (result.is_interested) interestSource = 'whatsapp';
+    if (result.is_qualified) qualifiedSource = 'whatsapp';
+    if (result.is_scheduled) scheduledSource = 'whatsapp';
   }
-
-  // Merge CRM and LLM results
-  // CRM takes priority for qualified and scheduled if available
-  const result: QualificationResult = {
-    is_interested: llmResult?.is_interested || (dialog.incoming_count >= 2),
-    is_qualified: crmStatus.hasIntegration && crmStatus.source
-      ? crmStatus.isQualified
-      : (llmResult?.is_qualified || false),
-    is_scheduled: crmStatus.hasIntegration && crmStatus.source
-      ? crmStatus.isScheduled
-      : (llmResult?.is_scheduled || false),
-    qualification_details: llmResult?.qualification_details || {
-      answered_questions: 0,
-      matching_criteria: 0,
-      missing_info: [],
-    },
-    reasoning: llmResult?.reasoning || 'LLM analysis failed',
-  };
-
-  // Determine sources
-  const qualifiedSource = crmStatus.hasIntegration && crmStatus.source && crmStatus.isQualified
-    ? crmStatus.source
-    : (llmResult?.is_qualified ? 'whatsapp' : null);
-
-  const scheduledSource = crmStatus.hasIntegration && crmStatus.source && crmStatus.isScheduled
-    ? crmStatus.source
-    : (llmResult?.is_scheduled ? 'whatsapp' : null);
 
   // Save qualification result to dialog_analysis
   await supabase
@@ -429,8 +515,12 @@ export async function processDialogForCapi(
     await sendCapiEventForLevel(dialog, 2, pixelId, accessToken);
   }
 
-  // Level 1: Interested (2+ messages)
+  // Level 1: Interested
   if (result.is_interested && !dialog.capi_interest_sent) {
+    log.info({
+      dialogId: dialog.id,
+      source: interestSource,
+    }, 'Sending CAPI Interest event');
     await sendCapiEventForLevel(dialog, 1, pixelId, accessToken);
   }
 }
