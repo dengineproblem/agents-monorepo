@@ -950,6 +950,23 @@ curl -X POST "http://localhost:8082/admin/ad-insights/{accountId}/sync?weeks=52"
 
 ## Changelog
 
+### 2025-12-26: Auto-sync on FB Approval
+- **НОВОЕ:** Автоматическая синхронизация insights при одобрении FB подключения
+  - Когда админ нажимает "Подтв." на странице онбординга (`/admin/onboarding`)
+  - Синхронизация запускается в фоне, не блокируя ответ API
+  - Работает для обоих режимов: legacy и multi-account
+- **Что синхронизируется:**
+  - Кампании (`syncCampaigns`)
+  - Группы объявлений (`syncAdsets`)
+  - Объявления (`syncAds`)
+  - Weekly insights за 3 месяца (`syncWeeklyInsights`)
+  - Нормализация результатов (`normalizeAllResults`)
+  - Детекция аномалий (`processAdAccount`)
+- **Файлы:**
+  - `routes/onboarding.ts` - добавлена функция `triggerBackgroundSync()`
+  - Вызывается в `POST /onboarding/approve-fb/:userId` после успешного одобрения
+- **Ошибки:** логируются в `admin_error_logs` с `action: 'background_sync_on_approval'`
+
 ### 2025-12-25 (v5): Cross-Account Patterns Dashboard
 - **НОВОЕ:** Таб "Паттерны" для cross-account анализа аномалий
   - Не требует выбора конкретного аккаунта

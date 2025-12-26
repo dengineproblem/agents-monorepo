@@ -12,6 +12,14 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { sendTelegramNotification } from '../lib/telegramNotifier.js';
+import {
+  syncCampaigns,
+  syncAdsets,
+  syncAds,
+  syncWeeklyInsights,
+} from '../services/adInsightsSync.js';
+import { normalizeAllResults } from '../services/resultNormalizer.js';
+import { processAdAccount as detectAnomalies } from '../services/anomalyDetector.js';
 
 const logger = createLogger({ module: 'onboardingRoutes' });
 
@@ -175,6 +183,126 @@ async function sendUserTelegramNotification(
   } catch (err) {
     logger.error({ error: String(err), userId }, 'Failed to send user telegram notification');
     return false;
+  }
+}
+
+/**
+ * Запускает фоновую синхронизацию insights для пользователя
+ * Работает с обоими режимами: legacy и multi-account
+ */
+async function triggerBackgroundSync(userId: string): Promise<void> {
+  try {
+    // Получаем данные пользователя
+    const { data: user, error: userError } = await supabase
+      .from('user_accounts')
+      .select('id, ad_account_id, access_token, multi_account_enabled')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !user) {
+      logger.warn({ userId }, 'Cannot trigger sync: user not found');
+      return;
+    }
+
+    // Определяем режим и запускаем синхронизацию
+    if (user.multi_account_enabled) {
+      // Multi-account режим: синхронизируем все ad_accounts
+      const { data: adAccounts } = await supabase
+        .from('ad_accounts')
+        .select('id, ad_account_id, access_token')
+        .eq('user_account_id', userId)
+        .eq('is_active', true);
+
+      if (!adAccounts?.length) {
+        logger.warn({ userId }, 'No active ad accounts for multi-account user');
+        return;
+      }
+
+      for (const account of adAccounts) {
+        if (!account.access_token || !account.ad_account_id) continue;
+
+        const fbAccountId = account.ad_account_id.replace('act_', '');
+        logger.info({ userId, adAccountId: account.id }, 'Starting background sync for ad account');
+
+        // Синхронизация каталогов
+        await syncCampaigns(account.id, account.access_token, fbAccountId);
+        await syncAdsets(account.id, account.access_token, fbAccountId);
+        await syncAds(account.id, account.access_token, fbAccountId);
+
+        // Weekly insights за 12 недель
+        await syncWeeklyInsights(account.id, account.access_token, fbAccountId, 3);
+
+        // Нормализация и аномалии
+        await normalizeAllResults(account.id);
+        await detectAnomalies(account.id);
+
+        logger.info({ userId, adAccountId: account.id }, 'Background sync completed for ad account');
+      }
+    } else {
+      // Legacy режим: credentials в user_accounts
+      if (!user.access_token || !user.ad_account_id) {
+        logger.warn({ userId }, 'Legacy user has no FB credentials');
+        return;
+      }
+
+      // Для legacy нужна запись в ad_accounts
+      let adAccountUuid: string;
+      const fbAccountId = user.ad_account_id.replace('act_', '');
+
+      // Проверяем/создаём ad_account
+      const { data: existing } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('user_account_id', userId)
+        .eq('ad_account_id', user.ad_account_id)
+        .single();
+
+      if (existing) {
+        adAccountUuid = existing.id;
+      } else {
+        const { data: created, error: createError } = await supabase
+          .from('ad_accounts')
+          .insert({
+            user_account_id: userId,
+            ad_account_id: user.ad_account_id,
+            access_token: user.access_token,
+            name: `Legacy ${user.ad_account_id}`,
+            is_active: true,
+            connection_status: 'active',
+          })
+          .select('id')
+          .single();
+
+        if (createError || !created) {
+          logger.error({ userId, error: createError?.message }, 'Failed to create ad_account for legacy user');
+          return;
+        }
+        adAccountUuid = created.id;
+      }
+
+      logger.info({ userId, adAccountId: adAccountUuid }, 'Starting background sync for legacy user');
+
+      // Синхронизация
+      await syncCampaigns(adAccountUuid, user.access_token, fbAccountId);
+      await syncAdsets(adAccountUuid, user.access_token, fbAccountId);
+      await syncAds(adAccountUuid, user.access_token, fbAccountId);
+      await syncWeeklyInsights(adAccountUuid, user.access_token, fbAccountId, 3);
+      await normalizeAllResults(adAccountUuid);
+      await detectAnomalies(adAccountUuid);
+
+      logger.info({ userId, adAccountId: adAccountUuid }, 'Background sync completed for legacy user');
+    }
+  } catch (err) {
+    logger.error({ error: String(err), userId }, 'Background sync failed');
+    // Логируем ошибку в admin_error_logs
+    logErrorToAdmin({
+      user_account_id: userId,
+      error_type: 'api',
+      raw_error: err instanceof Error ? err.message : String(err),
+      stack_trace: err instanceof Error ? err.stack : undefined,
+      action: 'background_sync_on_approval',
+      severity: 'warning',
+    }).catch(() => {});
   }
 }
 
@@ -524,6 +652,11 @@ export default async function onboardingRoutes(app: FastifyInstance) {
       }
 
       logger.info({ userId, username: user.username }, 'FB connection approved');
+
+      // Запускаем фоновую синхронизацию (не ждём завершения)
+      triggerBackgroundSync(userId).catch(err => {
+        logger.error({ error: String(err), userId }, 'Background sync trigger failed');
+      });
 
       return reply.send({
         success: true,
