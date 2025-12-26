@@ -49,6 +49,17 @@ interface AdAccount {
   user_account_id: string;
 }
 
+// Контекст синхронизации для поддержки legacy/multi-account
+interface SyncContext {
+  // UUID для сохранения в таблицы
+  adAccountId: string | null;  // null для legacy
+  userAccountId: string;       // всегда заполнен
+  // FB credentials
+  accessToken: string;
+  fbAdAccountId: string;       // act_xxx
+  isLegacy: boolean;
+}
+
 interface SyncJob {
   id: string;
   ad_account_id: string;
@@ -908,6 +919,573 @@ export async function syncWeeklyInsightsAdset(
 }
 
 // ============================================================================
+// CONTEXT-AWARE SYNC FUNCTIONS (support legacy + multi-account)
+// ============================================================================
+
+/**
+ * Возвращает объект для upsert с правильными ID полями
+ */
+function getAccountIds(ctx: SyncContext): { ad_account_id: string | null; user_account_id: string } {
+  return {
+    ad_account_id: ctx.adAccountId,
+    user_account_id: ctx.userAccountId,
+  };
+}
+
+/**
+ * Синхронизирует кампании с поддержкой контекста
+ */
+async function syncCampaignsWithContext(ctx: SyncContext): Promise<number> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, isLegacy: ctx.isLegacy }, 'Syncing campaigns');
+
+  const fields = 'id,name,status,objective,created_time,updated_time';
+  let cursor: string | undefined;
+  let totalSynced = 0;
+  const accountIds = getAccountIds(ctx);
+
+  do {
+    const params: any = { fields, limit: 500 };
+    if (cursor) params.after = cursor;
+
+    const result = await graph('GET', `act_${ctx.fbAdAccountId}/campaigns`, ctx.accessToken, params);
+
+    if (result.data && result.data.length > 0) {
+      const campaigns = result.data.map((c: any) => ({
+        ...accountIds,
+        fb_campaign_id: c.id,
+        name: c.name,
+        status: c.status,
+        objective: c.objective,
+        created_time: c.created_time,
+        updated_time: c.updated_time,
+        synced_at: new Date().toISOString(),
+      }));
+
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_campaigns')
+          .upsert(campaigns, { onConflict: ctx.isLegacy ? 'user_account_id,fb_campaign_id' : 'ad_account_id,fb_campaign_id' });
+        if (error) throw error;
+      }, 'upsert campaigns');
+
+      totalSynced += campaigns.length;
+    }
+
+    cursor = result.paging?.cursors?.after;
+  } while (cursor);
+
+  log.info({ userAccountId: ctx.userAccountId, totalSynced }, 'Campaigns synced');
+  return totalSynced;
+}
+
+/**
+ * Синхронизирует adsets с поддержкой контекста
+ */
+async function syncAdsetsWithContext(ctx: SyncContext): Promise<number> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, isLegacy: ctx.isLegacy }, 'Syncing adsets');
+
+  const fields = 'id,name,status,campaign_id,optimization_goal,billing_event,targeting,created_time,updated_time';
+  let cursor: string | undefined;
+  let totalSynced = 0;
+  const accountIds = getAccountIds(ctx);
+
+  do {
+    const params: any = { fields, limit: 500 };
+    if (cursor) params.after = cursor;
+
+    const result = await graph('GET', `act_${ctx.fbAdAccountId}/adsets`, ctx.accessToken, params);
+
+    if (result.data && result.data.length > 0) {
+      const adsets = result.data.map((a: any) => ({
+        ...accountIds,
+        fb_adset_id: a.id,
+        fb_campaign_id: a.campaign_id,
+        name: a.name,
+        status: a.status,
+        optimization_goal: a.optimization_goal,
+        billing_event: a.billing_event,
+        targeting: a.targeting,
+        created_time: a.created_time,
+        updated_time: a.updated_time,
+        synced_at: new Date().toISOString(),
+      }));
+
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_adsets')
+          .upsert(adsets, { onConflict: ctx.isLegacy ? 'user_account_id,fb_adset_id' : 'ad_account_id,fb_adset_id' });
+        if (error) throw error;
+      }, 'upsert adsets');
+
+      totalSynced += adsets.length;
+    }
+
+    cursor = result.paging?.cursors?.after;
+  } while (cursor);
+
+  log.info({ userAccountId: ctx.userAccountId, totalSynced }, 'Adsets synced');
+  return totalSynced;
+}
+
+/**
+ * Синхронизирует ads с поддержкой контекста
+ */
+async function syncAdsWithContext(ctx: SyncContext): Promise<number> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, isLegacy: ctx.isLegacy }, 'Syncing ads');
+
+  const fields = 'id,name,status,adset_id,campaign_id,creative{id,object_story_spec},created_time,updated_time';
+  let cursor: string | undefined;
+  let totalSynced = 0;
+  const accountIds = getAccountIds(ctx);
+
+  do {
+    const params: any = { fields, limit: 500 };
+    if (cursor) params.after = cursor;
+
+    const result = await graph('GET', `act_${ctx.fbAdAccountId}/ads`, ctx.accessToken, params);
+
+    if (result.data && result.data.length > 0) {
+      const ads = result.data.map((a: any) => ({
+        ...accountIds,
+        fb_ad_id: a.id,
+        fb_adset_id: a.adset_id,
+        fb_campaign_id: a.campaign_id,
+        fb_creative_id: a.creative?.id,
+        name: a.name,
+        status: a.status,
+        object_story_spec: a.creative?.object_story_spec,
+        created_time: a.created_time,
+        updated_time: a.updated_time,
+        synced_at: new Date().toISOString(),
+      }));
+
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_ads')
+          .upsert(ads, { onConflict: ctx.isLegacy ? 'user_account_id,fb_ad_id' : 'ad_account_id,fb_ad_id' });
+        if (error) throw error;
+      }, 'upsert ads');
+
+      totalSynced += ads.length;
+    }
+
+    cursor = result.paging?.cursors?.after;
+  } while (cursor);
+
+  log.info({ userAccountId: ctx.userAccountId, totalSynced }, 'Ads synced');
+  return totalSynced;
+}
+
+/**
+ * Синхронизирует weekly insights с поддержкой контекста
+ */
+async function syncWeeklyInsightsWithContext(ctx: SyncContext, months: number = 12): Promise<{ inserted: number; updated: number }> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, months, isLegacy: ctx.isLegacy }, 'Starting weekly insights sync');
+
+  // Для rate limit используем userAccountId (он всегда есть)
+  const rateLimitKey = ctx.adAccountId || ctx.userAccountId;
+  const canProceed = await checkRateLimit(rateLimitKey);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  const timeRange = getDateRange(months);
+  log.info({ userAccountId: ctx.userAccountId, timeRange }, 'Starting async insights job');
+
+  const reportRunId = await startAsyncInsightsJob(ctx.accessToken, ctx.fbAdAccountId, timeRange);
+  log.info({ userAccountId: ctx.userAccountId, reportRunId }, 'Async job started');
+
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+    const jobStatus = await pollAsyncJobStatus(ctx.accessToken, reportRunId);
+    status = jobStatus.status;
+
+    log.info({
+      userAccountId: ctx.userAccountId,
+      reportRunId,
+      status,
+      progress: jobStatus.async_percent_completion
+    }, 'Polling async job');
+
+    if (status === 'Job Failed') {
+      throw new Error('Async insights job failed');
+    }
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') {
+    throw new Error(`Async job timeout after ${pollCount} polls`);
+  }
+
+  const results = await fetchAsyncJobResults(ctx.accessToken, reportRunId);
+  log.info({ userAccountId: ctx.userAccountId, resultsCount: results.length }, 'Fetched async job results');
+
+  let inserted = 0;
+  const updated = 0;
+  const accountIds = getAccountIds(ctx);
+
+  for (const row of results) {
+    const weekStart = getWeekStart(row.date_start);
+    const impressions = parseInt(row.impressions) || 0;
+    const linkClicks = extractLinkClicks(row.actions);
+    const linkCtr = impressions > 0 ? (linkClicks / impressions) * 100 : null;
+
+    const insight = {
+      ...accountIds,
+      fb_ad_id: row.ad_id,
+      week_start_date: weekStart,
+      spend: parseFloat(row.spend) || 0,
+      impressions,
+      reach: parseInt(row.reach) || 0,
+      frequency: parseFloat(row.frequency) || 0,
+      cpm: parseFloat(row.cpm) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      cpc: parseFloat(row.cpc) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      link_clicks: linkClicks,
+      link_ctr: linkCtr,
+      actions_json: row.actions || [],
+      cost_per_action_type_json: row.cost_per_action_type || [],
+      video_views: extractVideoViews(row.actions),
+      video_p25_watched: row.video_p25_watched_actions?.[0]?.value || 0,
+      video_p50_watched: row.video_p50_watched_actions?.[0]?.value || 0,
+      video_p75_watched: row.video_p75_watched_actions?.[0]?.value || 0,
+      video_p95_watched: row.video_p95_watched_actions?.[0]?.value || 0,
+      video_avg_time_watched_sec: row.video_avg_time_watched_actions?.[0]?.value || 0,
+      quality_ranking: row.quality_ranking,
+      engagement_rate_ranking: row.engagement_rate_ranking,
+      conversion_rate_ranking: row.conversion_rate_ranking,
+      quality_rank_score: rankingToScore(row.quality_ranking),
+      engagement_rank_score: rankingToScore(row.engagement_rate_ranking),
+      conversion_rank_score: rankingToScore(row.conversion_rate_ranking),
+      attribution_window: '7d_click_1d_view',
+      synced_at: new Date().toISOString(),
+    };
+
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_weekly')
+          .upsert(insight, {
+            onConflict: ctx.isLegacy ? 'user_account_id,fb_ad_id,week_start_date' : 'ad_account_id,fb_ad_id,week_start_date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert insight ad=${row.ad_id} week=${weekStart}`);
+      inserted++;
+    } catch (error) {
+      log.error({ error, adId: row.ad_id, weekStart }, 'Failed to upsert insight');
+    }
+  }
+
+  log.info({ userAccountId: ctx.userAccountId, inserted, updated }, 'Weekly insights synced');
+  return { inserted, updated };
+}
+
+/**
+ * Синхронизирует campaign-level insights с контекстом
+ */
+async function syncWeeklyInsightsCampaignWithContext(ctx: SyncContext, months: number = 12): Promise<{ inserted: number }> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, months }, 'Starting campaign-level insights sync');
+
+  const rateLimitKey = ctx.adAccountId || ctx.userAccountId;
+  const canProceed = await checkRateLimit(rateLimitKey);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  const timeRange = getDateRange(months);
+  const fields = [
+    'campaign_id', 'campaign_name', 'spend', 'impressions', 'reach', 'frequency',
+    'cpm', 'ctr', 'cpc', 'clicks', 'actions', 'cost_per_action_type',
+    'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking',
+  ].join(',');
+
+  const result = await graph('POST', `act_${ctx.fbAdAccountId}/insights`, ctx.accessToken, {
+    level: 'campaign',
+    time_increment: 7,
+    time_range: JSON.stringify(timeRange),
+    fields,
+    action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+  });
+
+  const reportRunId = result.report_run_id;
+  if (!reportRunId) throw new Error('No report_run_id in response for campaign insights');
+
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+    const jobStatus = await pollAsyncJobStatus(ctx.accessToken, reportRunId);
+    status = jobStatus.status;
+    if (status === 'Job Failed') throw new Error('Async campaign insights job failed');
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') throw new Error(`Async campaign job timeout after ${pollCount} polls`);
+
+  const results = await fetchAsyncJobResults(ctx.accessToken, reportRunId);
+  log.info({ userAccountId: ctx.userAccountId, resultsCount: results.length }, 'Fetched campaign insights');
+
+  let inserted = 0;
+  const accountIds = getAccountIds(ctx);
+
+  for (const row of results) {
+    const weekStart = getWeekStart(row.date_start);
+
+    const insight = {
+      ...accountIds,
+      fb_campaign_id: row.campaign_id,
+      week_start_date: weekStart,
+      spend: parseFloat(row.spend) || 0,
+      impressions: parseInt(row.impressions) || 0,
+      reach: parseInt(row.reach) || 0,
+      frequency: parseFloat(row.frequency) || 0,
+      cpm: parseFloat(row.cpm) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      cpc: parseFloat(row.cpc) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      link_clicks: extractLinkClicks(row.actions),
+      actions_json: row.actions || [],
+      cost_per_action_type_json: row.cost_per_action_type || [],
+      quality_ranking: row.quality_ranking,
+      engagement_rate_ranking: row.engagement_rate_ranking,
+      conversion_rate_ranking: row.conversion_rate_ranking,
+      attribution_window: '7d_click_1d_view',
+      synced_at: new Date().toISOString(),
+    };
+
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_weekly_campaign')
+          .upsert(insight, {
+            onConflict: ctx.isLegacy ? 'user_account_id,fb_campaign_id,week_start_date' : 'ad_account_id,fb_campaign_id,week_start_date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert campaign insight campaign=${row.campaign_id} week=${weekStart}`);
+      inserted++;
+    } catch (error) {
+      log.error({ error, campaignId: row.campaign_id, weekStart }, 'Failed to upsert campaign insight');
+    }
+  }
+
+  log.info({ userAccountId: ctx.userAccountId, inserted }, 'Campaign-level insights synced');
+  return { inserted };
+}
+
+/**
+ * Синхронизирует adset-level insights с контекстом
+ */
+async function syncWeeklyInsightsAdsetWithContext(ctx: SyncContext, months: number = 12): Promise<{ inserted: number }> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, months }, 'Starting adset-level insights sync');
+
+  const rateLimitKey = ctx.adAccountId || ctx.userAccountId;
+  const canProceed = await checkRateLimit(rateLimitKey);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  const timeRange = getDateRange(months);
+  const fields = [
+    'adset_id', 'adset_name', 'campaign_id', 'spend', 'impressions', 'reach', 'frequency',
+    'cpm', 'ctr', 'cpc', 'clicks', 'actions', 'cost_per_action_type',
+    'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking',
+  ].join(',');
+
+  const result = await graph('POST', `act_${ctx.fbAdAccountId}/insights`, ctx.accessToken, {
+    level: 'adset',
+    time_increment: 7,
+    time_range: JSON.stringify(timeRange),
+    fields,
+    action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+  });
+
+  const reportRunId = result.report_run_id;
+  if (!reportRunId) throw new Error('No report_run_id in response for adset insights');
+
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+    const jobStatus = await pollAsyncJobStatus(ctx.accessToken, reportRunId);
+    status = jobStatus.status;
+    if (status === 'Job Failed') throw new Error('Async adset insights job failed');
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') throw new Error(`Async adset job timeout after ${pollCount} polls`);
+
+  const results = await fetchAsyncJobResults(ctx.accessToken, reportRunId);
+  log.info({ userAccountId: ctx.userAccountId, resultsCount: results.length }, 'Fetched adset insights');
+
+  let inserted = 0;
+  const accountIds = getAccountIds(ctx);
+
+  for (const row of results) {
+    const weekStart = getWeekStart(row.date_start);
+
+    const insight = {
+      ...accountIds,
+      fb_adset_id: row.adset_id,
+      fb_campaign_id: row.campaign_id,
+      week_start_date: weekStart,
+      spend: parseFloat(row.spend) || 0,
+      impressions: parseInt(row.impressions) || 0,
+      reach: parseInt(row.reach) || 0,
+      frequency: parseFloat(row.frequency) || 0,
+      cpm: parseFloat(row.cpm) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      cpc: parseFloat(row.cpc) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      link_clicks: extractLinkClicks(row.actions),
+      actions_json: row.actions || [],
+      cost_per_action_type_json: row.cost_per_action_type || [],
+      quality_ranking: row.quality_ranking,
+      engagement_rate_ranking: row.engagement_rate_ranking,
+      conversion_rate_ranking: row.conversion_rate_ranking,
+      attribution_window: '7d_click_1d_view',
+      synced_at: new Date().toISOString(),
+    };
+
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_weekly_adset')
+          .upsert(insight, {
+            onConflict: ctx.isLegacy ? 'user_account_id,fb_adset_id,week_start_date' : 'ad_account_id,fb_adset_id,week_start_date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert adset insight adset=${row.adset_id} week=${weekStart}`);
+      inserted++;
+    } catch (error) {
+      log.error({ error, adsetId: row.adset_id, weekStart }, 'Failed to upsert adset insight');
+    }
+  }
+
+  log.info({ userAccountId: ctx.userAccountId, inserted }, 'Adset-level insights synced');
+  return { inserted };
+}
+
+/**
+ * Синхронизирует daily insights с контекстом
+ */
+async function syncDailyInsightsWithContext(ctx: SyncContext, months: number = 3): Promise<{ inserted: number }> {
+  log.info({ userAccountId: ctx.userAccountId, fbAdAccountId: ctx.fbAdAccountId, months }, 'Starting daily insights sync');
+
+  const rateLimitKey = ctx.adAccountId || ctx.userAccountId;
+  const canProceed = await checkRateLimit(rateLimitKey);
+  if (!canProceed) {
+    throw new Error('Rate limited, try again later');
+  }
+
+  const timeRange = getDateRange(months);
+  const fields = ['ad_id', 'spend', 'impressions', 'reach', 'clicks', 'actions', 'outbound_clicks'].join(',');
+
+  const result = await graph('POST', `act_${ctx.fbAdAccountId}/insights`, ctx.accessToken, {
+    level: 'ad',
+    time_increment: 1,
+    time_range: JSON.stringify(timeRange),
+    fields,
+    action_attribution_windows: JSON.stringify(['7d_click', '1d_view']),
+  });
+
+  const reportRunId = result.report_run_id;
+  if (!reportRunId) throw new Error('No report_run_id in response for daily insights');
+
+  log.info({ userAccountId: ctx.userAccountId, reportRunId }, 'Daily async job started');
+
+  let pollCount = 0;
+  let status = 'Job Running';
+
+  while (status !== 'Job Completed' && pollCount < ASYNC_MAX_POLLS) {
+    await new Promise(resolve => setTimeout(resolve, ASYNC_POLL_INTERVAL));
+    const jobStatus = await pollAsyncJobStatus(ctx.accessToken, reportRunId);
+    status = jobStatus.status;
+
+    log.info({
+      userAccountId: ctx.userAccountId,
+      reportRunId,
+      status,
+      progress: jobStatus.async_percent_completion
+    }, 'Polling daily async job');
+
+    if (status === 'Job Failed') throw new Error('Async daily insights job failed');
+    pollCount++;
+  }
+
+  if (status !== 'Job Completed') throw new Error(`Async daily job timeout after ${pollCount} polls`);
+
+  const results = await fetchAsyncJobResults(ctx.accessToken, reportRunId);
+  log.info({ userAccountId: ctx.userAccountId, resultsCount: results.length }, 'Fetched daily async job results');
+
+  let inserted = 0;
+  const accountIds = getAccountIds(ctx);
+
+  for (const row of results) {
+    const date = row.date_start;
+    const impressions = parseInt(row.impressions) || 0;
+    const clicks = parseInt(row.clicks) || 0;
+    const spend = parseFloat(row.spend) || 0;
+    const reach = parseInt(row.reach) || 0;
+
+    const linkClicks = row.outbound_clicks?.[0]?.value
+      ? parseInt(row.outbound_clicks[0].value)
+      : extractLinkClicks(row.actions);
+
+    const ctr = impressions > 0 ? (clicks / impressions) * 100 : null;
+    const cpm = impressions > 0 ? (spend / impressions) * 1000 : null;
+    const cpc = clicks > 0 ? spend / clicks : null;
+    const frequency = reach > 0 ? impressions / reach : null;
+    const linkCtr = impressions > 0 ? (linkClicks / impressions) * 100 : null;
+
+    const insight = {
+      ...accountIds,
+      fb_ad_id: row.ad_id,
+      date,
+      impressions,
+      clicks,
+      spend,
+      reach,
+      ctr,
+      cpm,
+      cpc,
+      frequency,
+      link_clicks: linkClicks,
+      link_ctr: linkCtr,
+      actions_json: row.actions || null,
+      results_count: extractResultsCount(row.actions),
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      await withRetry(async () => {
+        const { error } = await supabase
+          .from('meta_insights_daily')
+          .upsert(insight, {
+            onConflict: ctx.isLegacy ? 'user_account_id,fb_ad_id,date' : 'ad_account_id,fb_ad_id,date',
+            ignoreDuplicates: false
+          });
+        if (error) throw error;
+      }, `upsert daily insight ad=${row.ad_id} date=${date}`);
+      inserted++;
+    } catch (error) {
+      log.error({ error, adId: row.ad_id, date }, 'Failed to upsert daily insight');
+    }
+  }
+
+  log.info({ userAccountId: ctx.userAccountId, inserted }, 'Daily insights synced');
+  return { inserted };
+}
+
+// ============================================================================
 // FULL SYNC ORCHESTRATOR
 // ============================================================================
 
@@ -915,7 +1493,7 @@ export async function syncWeeklyInsightsAdset(
  * Полная синхронизация ad account (справочники + insights на всех уровнях)
  * Поддерживает legacy и multi-account режимы
  */
-export async function fullSync(adAccountUuid: string, options?: {
+export async function fullSync(accountUuid: string, options?: {
   syncCampaignInsights?: boolean;
   syncAdsetInsights?: boolean;
   syncDailyInsights?: boolean;
@@ -941,50 +1519,59 @@ export async function fullSync(adAccountUuid: string, options?: {
     isLegacy = false,
   } = options || {};
 
-  let cleanFbAccountId: string;
-  let accessToken: string;
+  let ctx: SyncContext;
 
-  if (providedToken && providedFbAccountId) {
-    // Credentials переданы извне (legacy или прямой вызов)
-    cleanFbAccountId = providedFbAccountId.replace('act_', '');
-    accessToken = providedToken;
+  if (isLegacy && providedToken && providedFbAccountId) {
+    // Legacy режим: credentials переданы извне, accountUuid = user_account_id
+    ctx = {
+      adAccountId: null,  // Для legacy не используем ad_account_id
+      userAccountId: accountUuid,
+      accessToken: providedToken,
+      fbAdAccountId: providedFbAccountId.replace('act_', ''),
+      isLegacy: true,
+    };
   } else {
-    // Получаем credentials из ad_accounts (multi-account режим)
+    // Multi-account режим: получаем credentials из ad_accounts
     const { data: adAccount, error } = await supabase
       .from('ad_accounts')
       .select('id, ad_account_id, access_token, user_account_id')
-      .eq('id', adAccountUuid)
+      .eq('id', accountUuid)
       .single();
 
     if (error || !adAccount) {
-      throw new Error(`Ad account not found: ${adAccountUuid}`);
+      throw new Error(`Ad account not found: ${accountUuid}`);
     }
 
     if (!adAccount.access_token) {
       throw new Error('No access token for ad account');
     }
 
-    cleanFbAccountId = adAccount.ad_account_id.replace('act_', '');
-    accessToken = adAccount.access_token;
+    ctx = {
+      adAccountId: adAccount.id,
+      userAccountId: adAccount.user_account_id,
+      accessToken: adAccount.access_token,
+      fbAdAccountId: adAccount.ad_account_id.replace('act_', ''),
+      isLegacy: false,
+    };
   }
 
-  log.info({ adAccountUuid, cleanFbAccountId, isLegacy }, 'Starting full sync');
+  log.info({ accountUuid, fbAdAccountId: ctx.fbAdAccountId, isLegacy: ctx.isLegacy }, 'Starting full sync');
 
   // 2. Синхронизируем справочники
-  const campaigns = await syncCampaigns(adAccountUuid, accessToken, cleanFbAccountId);
-  const adsets = await syncAdsets(adAccountUuid, accessToken, cleanFbAccountId);
-  const ads = await syncAds(adAccountUuid, accessToken, cleanFbAccountId);
+  const campaigns = await syncCampaignsWithContext(ctx);
+  const adsets = await syncAdsetsWithContext(ctx);
+  const ads = await syncAdsWithContext(ctx);
 
   // 3. Синхронизируем ad-level insights
-  const insights = await syncWeeklyInsights(adAccountUuid, accessToken, cleanFbAccountId, 12);
+  const insights = await syncWeeklyInsightsWithContext(ctx, 12);
 
   // 4. Синхронизируем campaign-level insights (опционально)
   let campaignInsights: { inserted: number } | undefined;
   if (syncCampaignInsights) {
     try {
-      campaignInsights = await syncWeeklyInsightsCampaign(adAccountUuid, accessToken, cleanFbAccountId, 12);
+      campaignInsights = await syncWeeklyInsightsCampaignWithContext(ctx, 12);
     } catch (err: any) {
-      log.error({ errorMessage: err?.message, errorStack: err?.stack, adAccountUuid }, 'Failed to sync campaign insights');
+      log.error({ errorMessage: err?.message, errorStack: err?.stack, accountUuid }, 'Failed to sync campaign insights');
     }
   }
 
@@ -992,9 +1579,9 @@ export async function fullSync(adAccountUuid: string, options?: {
   let adsetInsights: { inserted: number } | undefined;
   if (syncAdsetInsights) {
     try {
-      adsetInsights = await syncWeeklyInsightsAdset(adAccountUuid, accessToken, cleanFbAccountId, 12);
+      adsetInsights = await syncWeeklyInsightsAdsetWithContext(ctx, 12);
     } catch (err: any) {
-      log.error({ errorMessage: err?.message, errorStack: err?.stack, adAccountUuid }, 'Failed to sync adset insights');
+      log.error({ errorMessage: err?.message, errorStack: err?.stack, accountUuid }, 'Failed to sync adset insights');
     }
   }
 
@@ -1002,14 +1589,15 @@ export async function fullSync(adAccountUuid: string, options?: {
   let dailyInsights: { inserted: number } | undefined;
   if (shouldSyncDaily) {
     try {
-      dailyInsights = await syncDailyInsights(adAccountUuid, accessToken, cleanFbAccountId, 3);
+      dailyInsights = await syncDailyInsightsWithContext(ctx, 3);
     } catch (err: any) {
-      log.error({ errorMessage: err?.message, errorStack: err?.stack, adAccountUuid }, 'Failed to sync daily insights');
+      log.error({ errorMessage: err?.message, errorStack: err?.stack, accountUuid }, 'Failed to sync daily insights');
     }
   }
 
   log.info({
-    adAccountUuid,
+    accountUuid,
+    isLegacy: ctx.isLegacy,
     campaigns,
     adsets,
     ads,

@@ -110,6 +110,8 @@ export const translations = {
       saving: 'Saving...',
       save: 'Save',
       suspended: 'Suspended',
+      overview: 'Overview',
+      forecast: 'Forecast',
     },
     dashboard: {
       title: 'Dashboard',
@@ -421,6 +423,8 @@ export const translations = {
       saving: 'Сохр...',
       save: 'Сохранить',
       suspended: 'Приостановлена',
+      overview: 'Обзор',
+      forecast: 'Прогноз бюджета',
     },
     dashboard: {
       title: 'Панель управления',

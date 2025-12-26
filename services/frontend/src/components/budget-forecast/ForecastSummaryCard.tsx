@@ -20,7 +20,7 @@ export const ForecastSummaryCard: React.FC<Props> = ({ summary }) => {
         <CardContent className="pt-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
             <DollarSign className="h-4 w-4" />
-            <span>Spend/неделю</span>
+            <span>Затраты/неделю</span>
           </div>
           <div className="text-2xl font-bold">
             ${summary.current_weekly_spend.toFixed(0)}
@@ -56,7 +56,7 @@ export const ForecastSummaryCard: React.FC<Props> = ({ summary }) => {
         <CardContent className="pt-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
             <Users className="h-4 w-4" />
-            <span>Eligible объявлений</span>
+            <span>Подходящих объявлений</span>
           </div>
           <div className="text-2xl font-bold">
             {summary.eligible_ads}

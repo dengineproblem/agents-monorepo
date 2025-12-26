@@ -14,7 +14,8 @@ import {
   forecastCampaignBudget,
   forecastAd,
   type CampaignForecastResponse,
-  type AdForecast
+  type AdForecast,
+  type AccountContext
 } from '../services/budgetForecaster.js';
 
 const log = createLogger({ module: 'budgetForecastRoutes' });
@@ -60,16 +61,46 @@ setInterval(() => {
 // ============================================================================
 
 /**
- * Резолвит ad_account в UUID для запросов к meta_* таблицам
+ * Резолвит аккаунт для запросов к meta_* таблицам
+ *
+ * Поддерживает два режима:
+ * - Legacy: multi_account_enabled = false/null → используем user_account_id
+ * - Multi-account: multi_account_enabled = true → используем ad_account_id
  *
  * @param accountIdParam - может быть UUID (ad_accounts.id) или act_xxx (Facebook format)
- * @returns UUID из ad_accounts.id
+ * @returns AccountContext с информацией о режиме
  */
 async function resolveUserAdAccount(
   userId: string,
   accountIdParam?: string
-): Promise<string | null> {
+): Promise<AccountContext | null> {
   log.info({ userId, accountIdParam }, 'resolveUserAdAccount: start');
+
+  // Получаем информацию о пользователе для определения режима
+  const { data: userAccount } = await supabase
+    .from('user_accounts')
+    .select('id, multi_account_enabled, ad_account_id')
+    .eq('id', userId)
+    .single();
+
+  if (!userAccount) {
+    log.warn({ userId }, 'User account not found');
+    return null;
+  }
+
+  const isMultiAccount = userAccount.multi_account_enabled === true;
+
+  // LEGACY MODE: используем user_account_id напрямую
+  if (!isMultiAccount) {
+    log.info({ userId, mode: 'legacy' }, 'Using legacy mode with user_account_id');
+    return {
+      user_account_id: userId,
+      ad_account_id: null,
+      is_legacy: true
+    };
+  }
+
+  // MULTI-ACCOUNT MODE: ищем ad_account_id
 
   // Если передан конкретный accountId
   if (accountIdParam) {
@@ -77,24 +108,41 @@ async function resolveUserAdAccount(
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(accountIdParam);
 
     if (isUuid) {
-      // accountIdParam это уже UUID - используем напрямую
-      log.info({ userId, accountIdParam, result: accountIdParam }, 'Using UUID directly');
-      return accountIdParam;
+      // Проверяем, принадлежит ли этот аккаунт пользователю
+      const { data: account } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('id', accountIdParam)
+        .eq('user_account_id', userId)
+        .single();
+
+      if (account) {
+        log.info({ userId, accountIdParam, mode: 'multi-account' }, 'Using UUID directly');
+        return {
+          user_account_id: userId,
+          ad_account_id: accountIdParam,
+          is_legacy: false
+        };
+      }
     }
 
     // accountIdParam это act_xxx - ищем UUID в ad_accounts
-    // Пробуем оба формата: с и без act_
     const { data: accounts } = await supabase
       .from('ad_accounts')
       .select('id, ad_account_id')
+      .eq('user_account_id', userId)
       .or(`ad_account_id.eq.${normalizedId},ad_account_id.eq.${accountIdParam}`);
 
     log.info({ userId, normalizedId, accountIdParam, foundAccounts: accounts?.length || 0 }, 'Searching by ad_account_id');
 
     if (accounts && accounts.length > 0) {
       const found = accounts[0];
-      log.info({ userId, result: found.id }, 'Found UUID by ad_account_id');
-      return found.id;
+      log.info({ userId, result: found.id, mode: 'multi-account' }, 'Found UUID by ad_account_id');
+      return {
+        user_account_id: userId,
+        ad_account_id: found.id,
+        is_legacy: false
+      };
     }
 
     log.warn({ userId, accountIdParam }, 'Ad account not found');
@@ -102,7 +150,6 @@ async function resolveUserAdAccount(
   }
 
   // Если accountId не передан - ищем активный аккаунт пользователя
-  // Сначала проверяем multi-account mode
   const { data: activeAccount } = await supabase
     .from('ad_accounts')
     .select('id')
@@ -112,8 +159,12 @@ async function resolveUserAdAccount(
     .single();
 
   if (activeAccount) {
-    log.info({ userId, result: activeAccount.id }, 'Found active account');
-    return activeAccount.id;
+    log.info({ userId, result: activeAccount.id, mode: 'multi-account' }, 'Found active account');
+    return {
+      user_account_id: userId,
+      ad_account_id: activeAccount.id,
+      is_legacy: false
+    };
   }
 
   // Fallback: первый аккаунт пользователя
@@ -126,33 +177,15 @@ async function resolveUserAdAccount(
     .single();
 
   if (firstAccount) {
-    log.info({ userId, result: firstAccount.id }, 'Found first account');
-    return firstAccount.id;
+    log.info({ userId, result: firstAccount.id, mode: 'multi-account' }, 'Found first account');
+    return {
+      user_account_id: userId,
+      ad_account_id: firstAccount.id,
+      is_legacy: false
+    };
   }
 
-  // Legacy fallback: читаем ad_account_id из user_accounts и резолвим в UUID
-  const { data: userAccount } = await supabase
-    .from('user_accounts')
-    .select('ad_account_id')
-    .eq('id', userId)
-    .single();
-
-  if (userAccount?.ad_account_id) {
-    const legacyId = userAccount.ad_account_id.replace(/^act_/, '');
-    const { data: legacyAccount } = await supabase
-      .from('ad_accounts')
-      .select('id')
-      .or(`ad_account_id.eq.${legacyId},ad_account_id.eq.${userAccount.ad_account_id}`)
-      .limit(1)
-      .single();
-
-    if (legacyAccount) {
-      log.info({ userId, result: legacyAccount.id }, 'Found account via legacy ad_account_id');
-      return legacyAccount.id;
-    }
-  }
-
-  log.warn({ userId }, 'No ad accounts found');
+  log.warn({ userId }, 'No ad accounts found for multi-account user');
   return null;
 }
 
@@ -160,7 +193,7 @@ async function resolveUserAdAccount(
  * Получает fb_campaign_id по внутреннему ID или напрямую
  */
 async function resolveCampaignId(
-  adAccountId: string,
+  ctx: AccountContext,
   campaignIdParam: string
 ): Promise<string | null> {
   // Если это уже fb_campaign_id (числовая строка)
@@ -169,13 +202,19 @@ async function resolveCampaignId(
   }
 
   // Иначе пробуем найти по внутреннему ID
-  const { data: campaign } = await supabase
+  let query = supabase
     .from('meta_campaigns')
     .select('fb_campaign_id')
-    .eq('ad_account_id', adAccountId)
-    .eq('id', campaignIdParam)
-    .single();
+    .eq('id', campaignIdParam);
 
+  // Применяем фильтр в зависимости от режима
+  if (ctx.is_legacy) {
+    query = query.eq('user_account_id', ctx.user_account_id).is('ad_account_id', null);
+  } else {
+    query = query.eq('ad_account_id', ctx.ad_account_id);
+  }
+
+  const { data: campaign } = await query.single();
   return campaign?.fb_campaign_id || null;
 }
 
@@ -215,20 +254,21 @@ export default async function budgetForecastRoutes(fastify: FastifyInstance) {
     const { accountId } = request.query;
 
     try {
-      // Resolve ad account
-      const adAccountId = await resolveUserAdAccount(userId, accountId);
-      if (!adAccountId) {
+      // Resolve account context
+      const ctx = await resolveUserAdAccount(userId, accountId);
+      if (!ctx) {
         return reply.code(403).send({ error: 'No access to ad account' });
       }
 
       // Resolve campaign ID
-      const fbCampaignId = await resolveCampaignId(adAccountId, campaignId);
+      const fbCampaignId = await resolveCampaignId(ctx, campaignId);
       if (!fbCampaignId) {
         return reply.code(404).send({ error: 'Campaign not found' });
       }
 
-      // Check cache
-      const cacheKey = `forecast_campaign_${adAccountId}_${fbCampaignId}`;
+      // Check cache - используем user_account_id для legacy, ad_account_id для multi-account
+      const cacheAccountId = ctx.is_legacy ? ctx.user_account_id : ctx.ad_account_id;
+      const cacheKey = `forecast_campaign_${cacheAccountId}_${fbCampaignId}`;
       const cached = getCached<CampaignForecastResponse>(cacheKey);
       if (cached) {
         log.info({ campaignId: fbCampaignId, cached: true }, 'Returning cached forecast');
@@ -236,7 +276,7 @@ export default async function budgetForecastRoutes(fastify: FastifyInstance) {
       }
 
       // Compute forecast
-      const result = await forecastCampaignBudget(adAccountId, fbCampaignId);
+      const result = await forecastCampaignBudget(ctx, fbCampaignId);
 
       if (!result) {
         return reply.code(404).send({ error: 'No forecast data available' });
@@ -271,48 +311,64 @@ export default async function budgetForecastRoutes(fastify: FastifyInstance) {
     const { accountId } = request.query;
 
     try {
-      // Resolve ad account
-      const adAccountId = await resolveUserAdAccount(userId, accountId);
-      if (!adAccountId) {
+      // Resolve account context
+      const ctx = await resolveUserAdAccount(userId, accountId);
+      if (!ctx) {
         return reply.code(403).send({ error: 'No access to ad account' });
       }
 
       // Check cache
-      const cacheKey = `forecast_ad_${adAccountId}_${adId}`;
+      const cacheAccountId = ctx.is_legacy ? ctx.user_account_id : ctx.ad_account_id;
+      const cacheKey = `forecast_ad_${cacheAccountId}_${adId}`;
       const cached = getCached<AdForecast>(cacheKey);
       if (cached) {
         return reply.send(cached);
       }
 
       // Получаем информацию об объявлении
-      const { data: adData } = await supabase
+      let adQuery = supabase
         .from('meta_ads')
         .select('fb_ad_id, name')
-        .eq('ad_account_id', adAccountId)
         .or(`fb_ad_id.eq.${adId},id.eq.${adId}`)
-        .limit(1)
-        .single();
+        .limit(1);
+
+      // Применяем фильтр в зависимости от режима
+      if (ctx.is_legacy) {
+        adQuery = adQuery.eq('user_account_id', ctx.user_account_id).is('ad_account_id', null);
+      } else {
+        adQuery = adQuery.eq('ad_account_id', ctx.ad_account_id);
+      }
+
+      const { data: adData } = await adQuery.single();
 
       if (!adData) {
         return reply.code(404).send({ error: 'Ad not found' });
       }
 
-      // Получаем primary_family
-      const { data: resultData } = await supabase
+      // Получаем primary_family (только целевые: messages, leads, purchase)
+      const TARGET_RESULT_FAMILIES = ['messages', 'leadgen_form', 'website_lead', 'purchase'];
+      let resultQuery = supabase
         .from('meta_weekly_results')
         .select('result_family')
-        .eq('ad_account_id', adAccountId)
         .eq('fb_ad_id', adData.fb_ad_id)
+        .in('result_family', TARGET_RESULT_FAMILIES)
         .gt('result_count', 0)
         .order('week_start_date', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
+      // Применяем фильтр в зависимости от режима
+      if (ctx.is_legacy) {
+        resultQuery = resultQuery.eq('user_account_id', ctx.user_account_id).is('ad_account_id', null);
+      } else {
+        resultQuery = resultQuery.eq('ad_account_id', ctx.ad_account_id);
+      }
+
+      const { data: resultData } = await resultQuery.single();
       const resultFamily = resultData?.result_family || 'messages';
 
       // Compute forecast
       const result = await forecastAd(
-        adAccountId,
+        ctx,
         adData.fb_ad_id,
         adData.name || adData.fb_ad_id,
         resultFamily

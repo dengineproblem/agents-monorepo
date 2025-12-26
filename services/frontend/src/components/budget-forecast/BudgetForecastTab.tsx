@@ -103,7 +103,7 @@ export const BudgetForecastTab: React.FC<Props> = ({ campaignId }) => {
             value={selectedDelta}
             onValueChange={(v) => setSelectedDelta(v as ScalingDelta)}
           >
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-4">
               {Object.entries(DELTA_LABELS).map(([key, label]) => (
                 <TabsTrigger key={key} value={key}>
                   {label}
@@ -179,7 +179,7 @@ const ScenarioCard: React.FC<ScenarioCardProps> = ({ title, metrics, current }) 
       <CardContent>
         <div className="space-y-3">
           <MetricRow
-            label="Spend"
+            label="Затраты"
             value={`$${metrics.spend.toFixed(0)}`}
             change={spendChange}
             invertColors={true}

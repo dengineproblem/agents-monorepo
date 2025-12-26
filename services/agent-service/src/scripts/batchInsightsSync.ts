@@ -112,13 +112,14 @@ interface BatchJobConfig {
 }
 
 interface AdAccount {
-  id: string;
+  id: string;  // For multi-account: ad_accounts.id, for legacy: user_accounts.id
   user_account_id: string;
-  ad_account_id: string;
+  ad_account_id: string;  // FB ad account ID (act_xxx)
   business_id: string | null;
   access_token: string;
   is_active: boolean;
   connection_status: string;
+  is_legacy: boolean;  // true for legacy mode (credentials in user_accounts)
 }
 
 interface BusinessGroup {
@@ -214,10 +215,14 @@ function formatTime(date: Date): string {
 async function getAllAccounts(limit?: number): Promise<AdAccount[]> {
   const accounts: AdAccount[] = [];
 
-  // 1. Multi-account аккаунты из ad_accounts
+  // 1. Multi-account: аккаунты из ad_accounts (для пользователей с multi_account_enabled = true)
   const { data: multiAccounts, error: multiError } = await supabase
     .from('ad_accounts')
-    .select('id, user_account_id, ad_account_id, business_id, access_token, is_active, connection_status')
+    .select(`
+      id, user_account_id, ad_account_id, business_id, access_token, is_active, connection_status,
+      user_accounts!inner(multi_account_enabled)
+    `)
+    .eq('user_accounts.multi_account_enabled', true)
     .not('access_token', 'is', null)
     .not('ad_account_id', 'is', null);
 
@@ -227,10 +232,19 @@ async function getAllAccounts(limit?: number): Promise<AdAccount[]> {
 
   // Добавляем multi-account
   for (const acc of multiAccounts || []) {
-    accounts.push(acc);
+    accounts.push({
+      id: acc.id,
+      user_account_id: acc.user_account_id,
+      ad_account_id: acc.ad_account_id,
+      business_id: acc.business_id,
+      access_token: acc.access_token,
+      is_active: acc.is_active,
+      connection_status: acc.connection_status,
+      is_legacy: false,
+    });
   }
 
-  // 2. Legacy аккаунты из user_accounts (credentials в user_accounts)
+  // 2. Legacy: аккаунты напрямую из user_accounts (credentials в user_accounts)
   const { data: legacyUsers, error: legacyError } = await supabase
     .from('user_accounts')
     .select('id, ad_account_id, access_token, username')
@@ -243,65 +257,22 @@ async function getAllAccounts(limit?: number): Promise<AdAccount[]> {
     log.warn({ error: legacyError }, 'Failed to fetch legacy users');
   }
 
-  // Проверяем какие legacy аккаунты уже есть в ad_accounts
-  const existingAdAccountIds = new Set(multiAccounts?.map((a: { ad_account_id: string }) => a.ad_account_id) || []);
-
-  // Для legacy аккаунтов создаём/получаем записи в ad_accounts
+  // Добавляем legacy аккаунты напрямую (без создания записей в ad_accounts)
   for (const user of legacyUsers || []) {
-    // Пропускаем если уже есть в multi-account
-    if (existingAdAccountIds.has(user.ad_account_id)) {
-      continue;
-    }
-
     // Проверяем валидность ad_account_id
     if (!user.ad_account_id.startsWith('act_')) {
       continue;
     }
 
-    // Проверяем/создаём запись в ad_accounts
-    const { data: existing } = await supabase
-      .from('ad_accounts')
-      .select('id')
-      .eq('user_account_id', user.id)
-      .eq('ad_account_id', user.ad_account_id)
-      .single();
-
-    let adAccountId: string;
-
-    if (existing) {
-      adAccountId = existing.id;
-    } else {
-      // Создаём ad_account для legacy
-      const { data: created, error: createError } = await supabase
-        .from('ad_accounts')
-        .insert({
-          user_account_id: user.id,
-          ad_account_id: user.ad_account_id,
-          access_token: user.access_token,
-          name: user.username || user.ad_account_id,
-          connection_status: 'connected',
-          is_active: true,
-        })
-        .select('id')
-        .single();
-
-      if (createError || !created) {
-        log.warn({ error: createError, userId: user.id }, 'Failed to create ad_account for legacy user');
-        continue;
-      }
-
-      adAccountId = created.id;
-      log.info({ adAccountId, userId: user.id, fbAccountId: user.ad_account_id }, 'Created ad_account for legacy user');
-    }
-
     accounts.push({
-      id: adAccountId,
+      id: user.id,  // Используем user_account_id как id для legacy
       user_account_id: user.id,
       ad_account_id: user.ad_account_id,
       business_id: null,
       access_token: user.access_token,
       is_active: true,
       connection_status: 'connected',
+      is_legacy: true,
     });
   }
 
@@ -566,7 +537,14 @@ async function processAccount(
     if (!config.skipFullsync) {
       await updateAccountLog(jobId, account.id, { step_fullsync: 'running' });
 
-      const syncResult = await fullSync(account.id);
+      // Для legacy передаём credentials напрямую, для multi-account - только id
+      const syncResult = account.is_legacy
+        ? await fullSync(account.user_account_id, {
+            accessToken: account.access_token,
+            fbAdAccountId: account.ad_account_id,
+            isLegacy: true,
+          })
+        : await fullSync(account.id);
 
       stats.campaigns = syncResult.campaigns || 0;
       stats.adsets = syncResult.adsets || 0;

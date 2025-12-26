@@ -3,6 +3,8 @@
  * Используется для снижения нагрузки на Facebook API и избежания rate limits
  */
 
+import { safeSetItem, safeGetItem, safeRemoveItem } from './safeStorage';
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -16,22 +18,22 @@ interface CacheEntry<T> {
  */
 export function getCachedData<T>(key: string): T | null {
   try {
-    const cached = localStorage.getItem(key);
+    const cached = safeGetItem(key);
     if (!cached) {
       console.log(`[Cache] Промах: ${key}`);
       return null;
     }
-    
+
     const entry: CacheEntry<T> = JSON.parse(cached);
     const now = Date.now();
-    
+
     // Проверяем, не истек ли TTL
     if (now - entry.timestamp > entry.ttl) {
       console.log(`[Cache] Истек: ${key} (возраст: ${Math.round((now - entry.timestamp) / 1000)}с)`);
-      localStorage.removeItem(key);
+      safeRemoveItem(key);
       return null;
     }
-    
+
     console.log(`[Cache] Попадание: ${key} (возраст: ${Math.round((now - entry.timestamp) / 1000)}с)`);
     return entry.data;
   } catch (error) {
@@ -47,31 +49,17 @@ export function getCachedData<T>(key: string): T | null {
  * @param ttlMinutes Время жизни кэша в минутах (по умолчанию 5 минут)
  */
 export function setCachedData<T>(key: string, data: T, ttlMinutes: number = 5): void {
-  try {
-    const entry: CacheEntry<T> = {
-      data,
-      timestamp: Date.now(),
-      ttl: ttlMinutes * 60 * 1000
-    };
-    localStorage.setItem(key, JSON.stringify(entry));
+  const entry: CacheEntry<T> = {
+    data,
+    timestamp: Date.now(),
+    ttl: ttlMinutes * 60 * 1000
+  };
+
+  const success = safeSetItem(key, JSON.stringify(entry));
+  if (success) {
     console.log(`[Cache] Сохранено: ${key} (TTL: ${ttlMinutes} мин)`);
-  } catch (error) {
-    console.error(`[Cache] Ошибка при сохранении кэша ${key}:`, error);
-    // Если localStorage переполнен, очищаем старые кэши
-    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-      console.warn('[Cache] localStorage переполнен, очищаю старые кэши...');
-      cleanOldCaches();
-      // Пытаемся еще раз
-      try {
-        localStorage.setItem(key, JSON.stringify({
-          data,
-          timestamp: Date.now(),
-          ttl: ttlMinutes * 60 * 1000
-        }));
-      } catch (retryError) {
-        console.error('[Cache] Не удалось сохранить даже после очистки');
-      }
-    }
+  } else {
+    console.error(`[Cache] Не удалось сохранить: ${key}`);
   }
 }
 
@@ -83,14 +71,14 @@ export function invalidateCache(pattern: string): void {
   try {
     const keys = Object.keys(localStorage);
     let removed = 0;
-    
+
     keys.forEach(key => {
       if (key.includes(pattern)) {
-        localStorage.removeItem(key);
+        safeRemoveItem(key);
         removed++;
       }
     });
-    
+
     if (removed > 0) {
       console.log(`[Cache] Инвалидировано ${removed} записей по паттерну: ${pattern}`);
     }
@@ -107,28 +95,28 @@ export function cleanOldCaches(): void {
     const keys = Object.keys(localStorage);
     const now = Date.now();
     let removed = 0;
-    
+
     keys.forEach(key => {
       // Проверяем только ключи, которые выглядят как наш кэш
-      if (key.startsWith('adsets_') || key.startsWith('adset_stats_')) {
+      if (key.startsWith('adsets_') || key.startsWith('adset_stats_') || key.startsWith('api_cache_') || key.startsWith('cache_')) {
         try {
-          const cached = localStorage.getItem(key);
+          const cached = safeGetItem(key);
           if (cached) {
             const entry = JSON.parse(cached);
             // Удаляем, если истек TTL
             if (now - entry.timestamp > entry.ttl) {
-              localStorage.removeItem(key);
+              safeRemoveItem(key);
               removed++;
             }
           }
         } catch {
           // Если не удалось распарсить, удаляем
-          localStorage.removeItem(key);
+          safeRemoveItem(key);
           removed++;
         }
       }
     });
-    
+
     console.log(`[Cache] Очищено ${removed} устаревших записей`);
   } catch (error) {
     console.error('[Cache] Ошибка при очистке старых кэшей:', error);
@@ -142,14 +130,14 @@ export function clearAllCaches(): void {
   try {
     const keys = Object.keys(localStorage);
     let removed = 0;
-    
+
     keys.forEach(key => {
-      if (key.startsWith('adsets_') || key.startsWith('adset_stats_')) {
-        localStorage.removeItem(key);
+      if (key.startsWith('adsets_') || key.startsWith('adset_stats_') || key.startsWith('api_cache_') || key.startsWith('cache_')) {
+        safeRemoveItem(key);
         removed++;
       }
     });
-    
+
     console.log(`[Cache] Очищено всего ${removed} записей`);
   } catch (error) {
     console.error('[Cache] Ошибка при полной очистке кэшей:', error);

@@ -52,10 +52,9 @@ export interface AdForecast {
   forecasts: {
     no_change: WeeklyForecast[];
     scaling: {
-      delta_10: WeeklyForecast[];
       delta_20: WeeklyForecast[];
-      delta_30: WeeklyForecast[];
       delta_50: WeeklyForecast[];
+      delta_100: WeeklyForecast[];
     };
   };
   elasticity: ElasticityK;
@@ -89,20 +88,18 @@ export interface CampaignForecastResponse {
 }
 
 // Типы для UI
-export type ScalingDelta = 'no_change' | 'delta_10' | 'delta_20' | 'delta_30' | 'delta_50';
+export type ScalingDelta = 'no_change' | 'delta_20' | 'delta_50' | 'delta_100';
 
 export const DELTA_LABELS: Record<ScalingDelta, string> = {
   no_change: 'Без изменений',
-  delta_10: '+10%',
   delta_20: '+20%',
-  delta_30: '+30%',
   delta_50: '+50%',
+  delta_100: '+100%',
 };
 
 export const DELTA_VALUES: Record<ScalingDelta, number> = {
   no_change: 0,
-  delta_10: 0.1,
   delta_20: 0.2,
-  delta_30: 0.3,
   delta_50: 0.5,
+  delta_100: 1.0,
 };

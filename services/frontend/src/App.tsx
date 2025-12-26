@@ -51,6 +51,10 @@ import { OnboardingWizard } from './components/onboarding/OnboardingWizard';
 import { FacebookManualConnectModal } from './components/profile/FacebookManualConnectModal';
 import { OnboardingTour } from './components/onboarding/OnboardingTour';
 import { useAppContext } from './context/AppContext';
+import { initSafeStorage } from './utils/safeStorage';
+
+// Инициализация безопасного хранилища при старте
+initSafeStorage();
 
 const queryClient = new QueryClient();
 

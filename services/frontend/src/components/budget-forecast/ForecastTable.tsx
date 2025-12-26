@@ -15,8 +15,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, TrendingDown, Minus, AlertCircle, CheckCircle } from 'lucide-react';
-import type { AdForecast, ScalingDelta, WeeklyForecast } from '@/types/budgetForecast';
+import { AlertCircle, CheckCircle } from 'lucide-react';
+import type { AdForecast, ScalingDelta } from '@/types/budgetForecast';
 
 interface Props {
   ads: AdForecast[];
@@ -24,11 +24,18 @@ interface Props {
 }
 
 export const ForecastTable: React.FC<Props> = ({ ads, selectedDelta }) => {
-  const getForecast = (ad: AdForecast): WeeklyForecast | null => {
+  // Получить CPR для конкретного delta (week 1)
+  const getCprForDelta = (ad: AdForecast, delta: 'delta_20' | 'delta_50' | 'delta_100'): number | null => {
+    const forecast = ad.forecasts.scaling[delta]?.[0];
+    return forecast?.cpr_predicted ?? null;
+  };
+
+  // Получить results для выбранного delta
+  const getResultsForSelectedDelta = (ad: AdForecast): number | null => {
     if (selectedDelta === 'no_change') {
-      return ad.forecasts.no_change[0] || null;
+      return ad.forecasts.no_change[0]?.results_predicted ?? null;
     }
-    return ad.forecasts.scaling[selectedDelta]?.[0] || null;
+    return ad.forecasts.scaling[selectedDelta]?.[0]?.results_predicted ?? null;
   };
 
   const getSourceBadge = (source: string) => {
@@ -44,27 +51,12 @@ export const ForecastTable: React.FC<Props> = ({ ads, selectedDelta }) => {
     }
   };
 
-  const getChangeIcon = (change: number, invert = false) => {
-    const isPositive = change > 0;
-    const isNegative = change < 0;
-
-    if (Math.abs(change) < 1) {
-      return <Minus className="h-3 w-3 text-muted-foreground" />;
-    }
-
-    if (isPositive) {
-      return invert ? (
-        <TrendingUp className="h-3 w-3 text-red-500" />
-      ) : (
-        <TrendingUp className="h-3 w-3 text-green-500" />
-      );
-    }
-
-    return invert ? (
-      <TrendingDown className="h-3 w-3 text-green-500" />
-    ) : (
-      <TrendingDown className="h-3 w-3 text-red-500" />
-    );
+  // Цвет CPR: красный если выше текущего, зелёный если ниже
+  const getCprColor = (predicted: number | null, current: number): string => {
+    if (predicted === null) return '';
+    if (predicted > current * 1.01) return 'text-red-500';
+    if (predicted < current * 0.99) return 'text-green-500';
+    return '';
   };
 
   return (
@@ -79,24 +71,23 @@ export const ForecastTable: React.FC<Props> = ({ ads, selectedDelta }) => {
               <TableRow>
                 <TableHead>Объявление</TableHead>
                 <TableHead>Тип</TableHead>
-                <TableHead className="text-right">Текущий Spend</TableHead>
-                <TableHead className="text-right">Прогноз Spend</TableHead>
-                <TableHead className="text-right">Текущий CPR</TableHead>
-                <TableHead className="text-right">Прогноз CPR</TableHead>
-                <TableHead className="text-right">Прогноз Results</TableHead>
+                <TableHead className="text-right">Затраты/нед</TableHead>
+                <TableHead className="text-right">CPR</TableHead>
+                <TableHead className="text-right">CPR +20%</TableHead>
+                <TableHead className="text-right">CPR +50%</TableHead>
+                <TableHead className="text-right">CPR +100%</TableHead>
+                <TableHead className="text-right">Результаты</TableHead>
                 <TableHead className="text-center">Модель</TableHead>
                 <TableHead className="text-center">Статус</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {ads.map((ad) => {
-                const forecast = getForecast(ad);
-                const cprChange = forecast
-                  ? ((forecast.cpr_predicted - ad.current_week.cpr) / ad.current_week.cpr) * 100
-                  : 0;
-                const spendChange = forecast
-                  ? ((forecast.spend_predicted - ad.current_week.spend) / ad.current_week.spend) * 100
-                  : 0;
+                const cpr20 = getCprForDelta(ad, 'delta_20');
+                const cpr50 = getCprForDelta(ad, 'delta_50');
+                const cpr100 = getCprForDelta(ad, 'delta_100');
+                const results = getResultsForSelectedDelta(ad);
+                const currentCpr = ad.current_week.cpr;
 
                 return (
                   <TableRow key={ad.fb_ad_id}>
@@ -112,30 +103,19 @@ export const ForecastTable: React.FC<Props> = ({ ads, selectedDelta }) => {
                       ${ad.current_week.spend.toFixed(0)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {forecast ? (
-                        <div className="flex items-center justify-end gap-1">
-                          <span>${forecast.spend_predicted.toFixed(0)}</span>
-                          {getChangeIcon(spendChange, true)}
-                        </div>
-                      ) : (
-                        '-'
-                      )}
+                      ${currentCpr.toFixed(2)}
+                    </TableCell>
+                    <TableCell className={`text-right ${getCprColor(cpr20, currentCpr)}`}>
+                      {cpr20 !== null ? `$${cpr20.toFixed(2)}` : '-'}
+                    </TableCell>
+                    <TableCell className={`text-right ${getCprColor(cpr50, currentCpr)}`}>
+                      {cpr50 !== null ? `$${cpr50.toFixed(2)}` : '-'}
+                    </TableCell>
+                    <TableCell className={`text-right ${getCprColor(cpr100, currentCpr)}`}>
+                      {cpr100 !== null ? `$${cpr100.toFixed(2)}` : '-'}
                     </TableCell>
                     <TableCell className="text-right">
-                      ${ad.current_week.cpr.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {forecast ? (
-                        <div className="flex items-center justify-end gap-1">
-                          <span>${forecast.cpr_predicted.toFixed(2)}</span>
-                          {getChangeIcon(cprChange, true)}
-                        </div>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {forecast ? forecast.results_predicted.toFixed(0) : '-'}
+                      {results !== null ? results.toFixed(0) : '-'}
                     </TableCell>
                     <TableCell className="text-center">
                       {getSourceBadge(ad.elasticity.source)}

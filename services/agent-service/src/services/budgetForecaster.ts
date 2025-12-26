@@ -3,7 +3,7 @@
  *
  * Прогнозирование бюджета на основе исторических данных:
  * - Baseline forecast: что будет если ничего не менять
- * - Scaling forecast: что будет при увеличении spend на +10/20/30/50%
+ * - Scaling forecast: что будет при увеличении spend на +20/50/100%
  * - Модель эластичности k с pooling (ad → account → global → fallback)
  */
 
@@ -15,6 +15,17 @@ const log = createLogger({ module: 'budgetForecaster' });
 // ============================================================================
 // TYPES
 // ============================================================================
+
+/**
+ * Контекст аккаунта для запросов.
+ * Legacy: user_account_id NOT NULL, ad_account_id NULL
+ * Multi-account: ad_account_id NOT NULL
+ */
+export interface AccountContext {
+  user_account_id: string;
+  ad_account_id: string | null;
+  is_legacy: boolean;
+}
 
 export interface WeeklyForecast {
   week_offset: number;        // 1 или 2
@@ -64,10 +75,9 @@ export interface AdForecast {
   forecasts: {
     no_change: WeeklyForecast[];
     scaling: {
-      delta_10: WeeklyForecast[];
       delta_20: WeeklyForecast[];
-      delta_30: WeeklyForecast[];
       delta_50: WeeklyForecast[];
+      delta_100: WeeklyForecast[];
     };
   };
   elasticity: ElasticityK;
@@ -135,6 +145,37 @@ const FALLBACK_K = 0.15;  // консервативная эластичност
 const SPEND_GROWTH_THRESHOLD = 1.15;  // минимум 15% рост spend для события
 const WEEKS_FOR_BASELINE = 4;  // недель для baseline (берет сколько есть, минимум 2)
 
+// Целевые result_family для прогнозирования (исключаем click, video_view)
+const TARGET_RESULT_FAMILIES = ['messages', 'leadgen_form', 'website_lead', 'purchase'];
+
+// ============================================================================
+// ACCOUNT CONTEXT HELPERS
+// ============================================================================
+
+/**
+ * Применяет фильтр по аккаунту к query на основе контекста
+ * Legacy: фильтрует по user_account_id + ad_account_id IS NULL
+ * Multi-account: фильтрует по ad_account_id
+ */
+function applyAccountFilter<T extends { eq: (column: string, value: string) => T; is: (column: string, value: null) => T }>(
+  query: T,
+  ctx: AccountContext
+): T {
+  if (ctx.is_legacy) {
+    // Для legacy: фильтруем по user_account_id И проверяем что ad_account_id IS NULL
+    // Это исключает данные от multi-account режима того же пользователя
+    return query.eq('user_account_id', ctx.user_account_id).is('ad_account_id', null);
+  }
+  return query.eq('ad_account_id', ctx.ad_account_id!);
+}
+
+/**
+ * Возвращает ID аккаунта для использования в ключах кэша и логах
+ */
+function getAccountIdForContext(ctx: AccountContext): string {
+  return ctx.is_legacy ? ctx.user_account_id : ctx.ad_account_id!;
+}
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -171,7 +212,7 @@ function linearRegressionSlope(points: { x: number; y: number }[]): number {
  * Вычисляет события spend growth для объявления
  */
 async function getSpendGrowthEvents(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId?: string,
   resultFamily?: string
 ): Promise<SpendGrowthEvent[]> {
@@ -179,12 +220,14 @@ async function getSpendGrowthEvents(
   let query = supabase
     .from('meta_weekly_results')
     .select('fb_ad_id, week_start_date, result_family, spend, cpr')
-    .eq('ad_account_id', adAccountId)
     .gt('spend', 0)
     .gt('cpr', 0)
     .order('fb_ad_id')
     .order('result_family')
     .order('week_start_date');
+
+  // Применяем фильтр по аккаунту
+  query = applyAccountFilter(query, ctx);
 
   if (fbAdId) {
     query = query.eq('fb_ad_id', fbAdId);
@@ -259,11 +302,11 @@ function calculateK(events: SpendGrowthEvent[]): number | null {
  * Вычисляет коэффициент эластичности k на уровне объявления
  */
 async function computeAdLevelK(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId: string,
   resultFamily: string
 ): Promise<{ k: number | null; events: number }> {
-  const events = await getSpendGrowthEvents(adAccountId, fbAdId, resultFamily);
+  const events = await getSpendGrowthEvents(ctx, fbAdId, resultFamily);
   const k = calculateK(events);
 
   return {
@@ -276,11 +319,11 @@ async function computeAdLevelK(
  * Вычисляет коэффициент эластичности k на уровне аккаунта + семейства
  */
 async function computeAccountFamilyK(
-  adAccountId: string,
+  ctx: AccountContext,
   resultFamily: string
 ): Promise<{ k: number | null; events: number }> {
   // Получаем все события для аккаунта + семейства (без фильтра по ad)
-  const events = await getSpendGrowthEvents(adAccountId, undefined, resultFamily);
+  const events = await getSpendGrowthEvents(ctx, undefined, resultFamily);
   const k = calculateK(events);
 
   return {
@@ -371,15 +414,15 @@ async function computeGlobalFamilyK(
  * Вычисляет коэффициент эластичности k с pooling
  */
 export async function computeElasticityK(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId: string,
   resultFamily: string
 ): Promise<ElasticityK> {
   // 1. Ad-level k (минимум 3 события)
-  const adLevel = await computeAdLevelK(adAccountId, fbAdId, resultFamily);
+  const adLevel = await computeAdLevelK(ctx, fbAdId, resultFamily);
 
   // 2. Account + Family level (минимум 10 событий)
-  const accountFamily = await computeAccountFamilyK(adAccountId, resultFamily);
+  const accountFamily = await computeAccountFamilyK(ctx, resultFamily);
 
   // 3. Global + Family level (минимум 30 событий)
   const globalFamily = await computeGlobalFamilyK(resultFamily);
@@ -422,20 +465,23 @@ export async function computeElasticityK(
  * Вычисляет baseline прогноз на основе медианы последних недель
  */
 export async function computeBaselineForecast(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId: string,
   resultFamily: string
 ): Promise<BaselineForecast | null> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('meta_weekly_results')
     .select('week_start_date, spend, result_count, cpr')
-    .eq('ad_account_id', adAccountId)
     .eq('fb_ad_id', fbAdId)
     .eq('result_family', resultFamily)
     .gt('spend', 0)
     .gt('cpr', 0)
     .order('week_start_date', { ascending: false })
     .limit(WEEKS_FOR_BASELINE);
+
+  query = applyAccountFilter(query, ctx);
+
+  const { data, error } = await query;
 
   if (error || !data || data.length < ELIGIBILITY.min_weeks_with_data) {
     return null;
@@ -464,18 +510,22 @@ export async function computeBaselineForecast(
 
 /**
  * Вычисляет прогноз при увеличении spend на delta%
+ *
+ * Важно: slope НЕ применяется к scaling прогнозам, потому что:
+ * - slope отражает исторический тренд CPR БЕЗ изменения бюджета
+ * - при scaling эластичность k уже учитывает влияние бюджета на CPR
+ * - применение slope к scaling давало бы нереалистичные результаты
  */
 function computeScalingForecast(
   currentCpr: number,
   currentSpend: number,
   delta: number,
   elasticityK: number,
-  weekOffset: number,
-  cprSlope: number = 0
+  weekOffset: number
 ): WeeklyForecast {
   // Формула: cpr_pred = current_cpr * exp(k * ln(1 + delta))
   const spendPred = currentSpend * (1 + delta);
-  const cprPred = currentCpr * Math.exp(elasticityK * Math.log(1 + delta)) + cprSlope * weekOffset;
+  const cprPred = currentCpr * Math.exp(elasticityK * Math.log(1 + delta));
   const resultsPred = cprPred > 0 ? spendPred / cprPred : 0;
 
   // Confidence зависит от источника k и weekOffset
@@ -494,14 +544,18 @@ function computeScalingForecast(
 
 /**
  * Вычисляет baseline прогноз (без изменения spend)
+ * Использует текущие метрики + тренд CPR, чтобы показать "что будет если ничего не менять"
  */
 function computeNoChangeForecast(
-  baseline: BaselineForecast,
+  currentSpend: number,
+  currentCpr: number,
+  cprSlope: number,
   weekOffset: number
 ): WeeklyForecast {
-  const cprPred = baseline.median_cpr + baseline.cpr_slope * weekOffset;
-  const spendPred = baseline.median_spend;
-  const resultsPred = cprPred > 0 ? spendPred / cprPred : baseline.median_results;
+  // CPR = текущий CPR + тренд (slope показывает изменение CPR за неделю)
+  const cprPred = currentCpr + cprSlope * weekOffset;
+  const spendPred = currentSpend;
+  const resultsPred = cprPred > 0 ? spendPred / cprPred : 0;
 
   return {
     week_offset: weekOffset,
@@ -520,19 +574,22 @@ function computeNoChangeForecast(
  * Проверяет eligibility объявления для прогнозирования
  */
 async function checkEligibility(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId: string,
   resultFamily: string
 ): Promise<ForecastEligibility> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('meta_weekly_results')
     .select('spend, result_count')
-    .eq('ad_account_id', adAccountId)
     .eq('fb_ad_id', fbAdId)
     .eq('result_family', resultFamily)
     .gt('spend', 0)
     .order('week_start_date', { ascending: false })
     .limit(WEEKS_FOR_BASELINE);
+
+  query = applyAccountFilter(query, ctx);
+
+  const { data, error } = await query;
 
   if (error || !data) {
     return {
@@ -597,20 +654,22 @@ async function checkEligibility(
  * Получает текущую неделю данных для объявления
  */
 async function getCurrentWeekData(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId: string,
   resultFamily: string
 ): Promise<WeeklyResultRow | null> {
-  const { data, error } = await supabase
+  let query = supabase
     .from('meta_weekly_results')
     .select('fb_ad_id, week_start_date, result_family, spend, result_count, cpr')
-    .eq('ad_account_id', adAccountId)
     .eq('fb_ad_id', fbAdId)
     .eq('result_family', resultFamily)
     .gt('spend', 0)
     .order('week_start_date', { ascending: false })
-    .limit(1)
-    .single();
+    .limit(1);
+
+  query = applyAccountFilter(query, ctx);
+
+  const { data, error } = await query.single();
 
   if (error || !data) return null;
   return data;
@@ -620,28 +679,28 @@ async function getCurrentWeekData(
  * Прогноз для одного объявления
  */
 export async function forecastAd(
-  adAccountId: string,
+  ctx: AccountContext,
   fbAdId: string,
   adName: string,
   resultFamily: string
 ): Promise<AdForecast | null> {
   // Проверяем eligibility
-  const eligibility = await checkEligibility(adAccountId, fbAdId, resultFamily);
+  const eligibility = await checkEligibility(ctx, fbAdId, resultFamily);
 
   // Получаем текущие данные
-  const currentWeek = await getCurrentWeekData(adAccountId, fbAdId, resultFamily);
+  const currentWeek = await getCurrentWeekData(ctx, fbAdId, resultFamily);
   if (!currentWeek) {
     return null;
   }
 
   // Получаем baseline
-  const baseline = await computeBaselineForecast(adAccountId, fbAdId, resultFamily);
+  const baseline = await computeBaselineForecast(ctx, fbAdId, resultFamily);
   if (!baseline) {
     return null;
   }
 
   // Получаем эластичность
-  const elasticity = await computeElasticityK(adAccountId, fbAdId, resultFamily);
+  const elasticity = await computeElasticityK(ctx, fbAdId, resultFamily);
 
   // Вычисляем прогнозы
   const currentCpr = currentWeek.cpr || baseline.median_cpr;
@@ -649,25 +708,21 @@ export async function forecastAd(
 
   const forecasts = {
     no_change: [
-      computeNoChangeForecast(baseline, 1),
-      computeNoChangeForecast(baseline, 2)
+      computeNoChangeForecast(currentSpend, currentCpr, baseline.cpr_slope, 1),
+      computeNoChangeForecast(currentSpend, currentCpr, baseline.cpr_slope, 2)
     ],
     scaling: {
-      delta_10: [
-        computeScalingForecast(currentCpr, currentSpend, 0.10, elasticity.effective, 1, baseline.cpr_slope),
-        computeScalingForecast(currentCpr, currentSpend, 0.10, elasticity.effective, 2, baseline.cpr_slope)
-      ],
       delta_20: [
-        computeScalingForecast(currentCpr, currentSpend, 0.20, elasticity.effective, 1, baseline.cpr_slope),
-        computeScalingForecast(currentCpr, currentSpend, 0.20, elasticity.effective, 2, baseline.cpr_slope)
-      ],
-      delta_30: [
-        computeScalingForecast(currentCpr, currentSpend, 0.30, elasticity.effective, 1, baseline.cpr_slope),
-        computeScalingForecast(currentCpr, currentSpend, 0.30, elasticity.effective, 2, baseline.cpr_slope)
+        computeScalingForecast(currentCpr, currentSpend, 0.20, elasticity.effective, 1),
+        computeScalingForecast(currentCpr, currentSpend, 0.20, elasticity.effective, 2)
       ],
       delta_50: [
-        computeScalingForecast(currentCpr, currentSpend, 0.50, elasticity.effective, 1, baseline.cpr_slope),
-        computeScalingForecast(currentCpr, currentSpend, 0.50, elasticity.effective, 2, baseline.cpr_slope)
+        computeScalingForecast(currentCpr, currentSpend, 0.50, elasticity.effective, 1),
+        computeScalingForecast(currentCpr, currentSpend, 0.50, elasticity.effective, 2)
+      ],
+      delta_100: [
+        computeScalingForecast(currentCpr, currentSpend, 1.00, elasticity.effective, 1),
+        computeScalingForecast(currentCpr, currentSpend, 1.00, elasticity.effective, 2)
       ]
     }
   };
@@ -693,64 +748,95 @@ export async function forecastAd(
  * Прогноз для всех объявлений кампании
  */
 export async function forecastCampaignBudget(
-  adAccountId: string,
+  ctx: AccountContext,
   fbCampaignId: string
 ): Promise<CampaignForecastResponse | null> {
-  log.info({ adAccountId, fbCampaignId }, 'Starting campaign budget forecast');
+  const accountId = getAccountIdForContext(ctx);
+  log.info({ accountId, fbCampaignId, isLegacy: ctx.is_legacy }, 'Starting campaign budget forecast');
 
   // Получаем название кампании
-  const { data: campaignData } = await supabase
+  let campaignQuery = supabase
     .from('meta_campaigns')
     .select('name')
-    .eq('ad_account_id', adAccountId)
-    .eq('fb_campaign_id', fbCampaignId)
-    .single();
+    .eq('fb_campaign_id', fbCampaignId);
 
+  campaignQuery = applyAccountFilter(campaignQuery, ctx);
+
+  const { data: campaignData } = await campaignQuery.single();
   const campaignName = campaignData?.name || fbCampaignId;
 
   // Получаем все adsets кампании
-  let { data: adsetsData } = await supabase
+  let adsetsQuery = supabase
     .from('meta_adsets')
-    .select('fb_adset_id, ad_account_id')
-    .eq('ad_account_id', adAccountId)
+    .select('fb_adset_id, ad_account_id, user_account_id')
     .eq('fb_campaign_id', fbCampaignId);
 
-  let effectiveAccountId = adAccountId;
+  adsetsQuery = applyAccountFilter(adsetsQuery, ctx);
 
-  // Если не нашли - пробуем найти кампанию в любом аккаунте (fallback для мультиаккаунта)
-  if (!adsetsData || adsetsData.length === 0) {
+  let { data: adsetsData } = await adsetsQuery;
+
+  // Контекст для последующих запросов (может измениться при fallback)
+  let effectiveCtx = ctx;
+
+  // Если не нашли и это multi-account - пробуем найти кампанию в любом аккаунте пользователя
+  // (fallback для случая когда кампания была синхронизирована под другим ad_account_id)
+  if (!ctx.is_legacy && (!adsetsData || adsetsData.length === 0)) {
     const { data: campaignAdsets } = await supabase
       .from('meta_adsets')
-      .select('fb_adset_id, ad_account_id')
+      .select('fb_adset_id, ad_account_id, user_account_id')
       .eq('fb_campaign_id', fbCampaignId)
+      .eq('user_account_id', ctx.user_account_id)
       .limit(10);
 
     if (campaignAdsets && campaignAdsets.length > 0) {
-      // Используем ad_account_id из найденных adsets
-      effectiveAccountId = campaignAdsets[0].ad_account_id;
       adsetsData = campaignAdsets;
+
+      // Определяем контекст на основе найденных данных
+      const foundAdAccountId = campaignAdsets[0].ad_account_id;
+      if (foundAdAccountId) {
+        // Данные с ad_account_id - используем multi-account контекст
+        effectiveCtx = {
+          user_account_id: ctx.user_account_id,
+          ad_account_id: foundAdAccountId,
+          is_legacy: false
+        };
+      } else {
+        // Данные без ad_account_id - это legacy данные
+        effectiveCtx = {
+          user_account_id: ctx.user_account_id,
+          ad_account_id: null,
+          is_legacy: true
+        };
+      }
+
       log.info({
-        originalAccountId: adAccountId,
-        effectiveAccountId,
+        originalAccountId: accountId,
+        effectiveAccountId: getAccountIdForContext(effectiveCtx),
+        isLegacyFallback: effectiveCtx.is_legacy,
         fbCampaignId,
-      }, 'Campaign found in different account, using fallback');
-    } else {
-      log.warn({ adAccountId, fbCampaignId }, 'No adsets found for campaign in any account');
-      return null;
+      }, 'Campaign found via user_account_id fallback');
     }
+  }
+
+  if (!adsetsData || adsetsData.length === 0) {
+    log.warn({ accountId, fbCampaignId }, 'No adsets found for campaign');
+    return null;
   }
 
   const adsetIds = adsetsData.map(a => a.fb_adset_id);
 
-  // Получаем все объявления этих adsets
-  const { data: adsData, error: adsError } = await supabase
+  // Получаем все объявления этих adsets (используем effectiveCtx!)
+  let adsQuery = supabase
     .from('meta_ads')
     .select('fb_ad_id, name')
-    .eq('ad_account_id', effectiveAccountId)
     .in('fb_adset_id', adsetIds);
 
+  adsQuery = applyAccountFilter(adsQuery, effectiveCtx);
+
+  const { data: adsData, error: adsError } = await adsQuery;
+
   if (adsError || !adsData || adsData.length === 0) {
-    log.warn({ effectiveAccountId, fbCampaignId, adsetIds }, 'No ads found for campaign adsets');
+    log.warn({ accountId, fbCampaignId, adsetIds }, 'No ads found for campaign adsets');
     return null;
   }
 
@@ -758,21 +844,34 @@ export async function forecastCampaignBudget(
   const adForecasts: AdForecast[] = [];
 
   for (const ad of adsData) {
-    // Получаем primary_family для этого объявления
-    const { data: resultData } = await supabase
+    // Получаем primary_family для этого объявления (только целевые: messages, leads, purchase)
+    let resultQuery = supabase
       .from('meta_weekly_results')
-      .select('result_family')
-      .eq('ad_account_id', effectiveAccountId)
+      .select('result_family, result_count')
       .eq('fb_ad_id', ad.fb_ad_id)
+      .in('result_family', TARGET_RESULT_FAMILIES)
       .gt('result_count', 0)
       .order('week_start_date', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
-    const resultFamily = resultData?.result_family || 'messages';
+    resultQuery = applyAccountFilter(resultQuery, effectiveCtx);
+
+    const { data: resultData, error: resultError } = await resultQuery.maybeSingle();
+
+    // Если не нашли целевой result_family — логируем и пропускаем объявление
+    if (!resultData) {
+      log.debug({
+        fbAdId: ad.fb_ad_id,
+        effectiveCtxIsLegacy: effectiveCtx.is_legacy,
+        error: resultError?.message
+      }, 'No target result_family found for ad, skipping');
+      continue;
+    }
+
+    const resultFamily = resultData.result_family;
 
     try {
-      const forecast = await forecastAd(effectiveAccountId, ad.fb_ad_id, ad.name || ad.fb_ad_id, resultFamily);
+      const forecast = await forecastAd(effectiveCtx, ad.fb_ad_id, ad.name || ad.fb_ad_id, resultFamily);
       if (forecast) {
         adForecasts.push(forecast);
       }
@@ -786,13 +885,15 @@ export async function forecastCampaignBudget(
   }
 
   // Вычисляем summary
+  // Важно: current spend/results считаем ТОЛЬКО по eligible ads,
+  // чтобы проценты в summary соответствовали прогнозам
   const eligibleAds = adForecasts.filter(a => a.eligibility.is_eligible);
-  const currentSpend = adForecasts.reduce((s, a) => s + a.current_week.spend, 0);
-  const currentResults = adForecasts.reduce((s, a) => s + a.current_week.results, 0);
+  const currentSpend = eligibleAds.reduce((s, a) => s + a.current_week.spend, 0);
+  const currentResults = eligibleAds.reduce((s, a) => s + a.current_week.results, 0);
   const avgCpr = currentResults > 0 ? currentSpend / currentResults : 0;
 
   // Агрегируем прогнозы
-  const aggregateForecasts = (ads: AdForecast[], delta: 'no_change' | 'delta_10' | 'delta_20' | 'delta_30' | 'delta_50') => {
+  const aggregateForecasts = (ads: AdForecast[], delta: 'no_change' | 'delta_20' | 'delta_50' | 'delta_100') => {
     const week1 = { spend: 0, results: 0, cpr: 0 };
     const week2 = { spend: 0, results: 0, cpr: 0 };
 
@@ -826,17 +927,17 @@ export async function forecastCampaignBudget(
     forecasts: {
       no_change: aggregateForecasts(eligibleAds, 'no_change'),
       scaling: {
-        delta_10: aggregateForecasts(eligibleAds, 'delta_10'),
         delta_20: aggregateForecasts(eligibleAds, 'delta_20'),
-        delta_30: aggregateForecasts(eligibleAds, 'delta_30'),
-        delta_50: aggregateForecasts(eligibleAds, 'delta_50')
+        delta_50: aggregateForecasts(eligibleAds, 'delta_50'),
+        delta_100: aggregateForecasts(eligibleAds, 'delta_100')
       }
     }
   };
 
   log.info({
-    adAccountId,
+    accountId,
     fbCampaignId,
+    isLegacy: ctx.is_legacy,
     totalAds: adForecasts.length,
     eligibleAds: eligibleAds.length
   }, 'Campaign budget forecast completed');
