@@ -28,6 +28,19 @@ export const CAPI_EVENTS = {
 export type CapiEventName = typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
 export type CapiEventLevel = 1 | 2 | 3;
 
+// Meta CAPI response structure
+interface MetaCapiResponse {
+  events_received?: number;
+  messages?: string[];
+  fbtrace_id?: string;
+  error?: {
+    message: string;
+    type: string;
+    code: number;
+    fbtrace_id?: string;
+  };
+}
+
 export interface CapiEventParams {
   // Required
   pixelId: string;
@@ -177,7 +190,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       }),
     });
 
-    const responseData = await response.json();
+    const responseData = await response.json() as MetaCapiResponse;
 
     if (!response.ok) {
       log.error({

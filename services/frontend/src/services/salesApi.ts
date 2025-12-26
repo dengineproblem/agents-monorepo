@@ -32,6 +32,12 @@ export interface CampaignROI {
     total: number;
     rate: number;
   };
+  // CAPI события (Meta Conversions API)
+  capi_events?: {
+    interest: number;    // Level 1 - Lead event (клиент отправил 2+ сообщения)
+    qualified: number;   // Level 2 - CompleteRegistration (прошёл квалификацию)
+    scheduled: number;   // Level 3 - Schedule (записался на консультацию)
+  };
   // Новые поля для типа медиа и миниатюр
   media_type?: 'video' | 'image' | 'carousel' | null;
   image_url?: string | null;
@@ -496,6 +502,69 @@ class SalesApiService {
         p.amount += Number(purchase.amount) || 0;
       }
 
+      // ШАГ 4.5: Загружаем CAPI события для расчёта конверсий
+      // Создаём маппинг lead_id → creative_id
+      const leadIdToCreativeId = new Map<number, string>();
+      const phoneToCreativeId = new Map<string, string>();
+      for (const lead of leadsData || []) {
+        if (lead.id && lead.creative_id) {
+          leadIdToCreativeId.set(lead.id, lead.creative_id);
+        }
+        if (lead.chat_id && lead.creative_id) {
+          phoneToCreativeId.set(lead.chat_id, lead.creative_id);
+        }
+      }
+
+      // Загружаем CAPI события
+      let capiQuery = (supabase as any)
+        .from('capi_events_log')
+        .select('lead_id, contact_phone, event_level, capi_status')
+        .eq('user_account_id', userAccountId)
+        .eq('capi_status', 'success'); // Только успешные события
+
+      if (directionId) {
+        capiQuery = capiQuery.eq('direction_id', directionId);
+      }
+
+      if (since) {
+        capiQuery = capiQuery.gte('created_at', since + 'T00:00:00.000Z');
+      }
+
+      const { data: capiEventsData, error: capiError } = await capiQuery;
+
+      if (capiError) {
+        console.error('Ошибка загрузки CAPI событий:', capiError);
+      }
+
+      console.log('📊 Загружено CAPI событий:', capiEventsData?.length || 0);
+
+      // Агрегируем CAPI события по creative_id
+      const capiByCreative = new Map<string, { interest: number; qualified: number; scheduled: number }>();
+      for (const event of capiEventsData || []) {
+        let creativeId: string | undefined;
+
+        // Сначала пробуем связать через lead_id
+        if (event.lead_id && leadIdToCreativeId.has(event.lead_id)) {
+          creativeId = leadIdToCreativeId.get(event.lead_id);
+        }
+        // Если нет lead_id, пробуем через contact_phone
+        else if (event.contact_phone && phoneToCreativeId.has(event.contact_phone)) {
+          creativeId = phoneToCreativeId.get(event.contact_phone);
+        }
+
+        if (!creativeId) continue;
+
+        if (!capiByCreative.has(creativeId)) {
+          capiByCreative.set(creativeId, { interest: 0, qualified: 0, scheduled: 0 });
+        }
+        const capi = capiByCreative.get(creativeId)!;
+
+        // event_level: 1=interest, 2=qualified, 3=scheduled
+        if (event.event_level === 1) capi.interest++;
+        else if (event.event_level === 2) capi.qualified++;
+        else if (event.event_level === 3) capi.scheduled++;
+      }
+
       // Группируем лиды по креативам для расчёта выручки, конверсий и квалификации
       const revenueByCreative = new Map<string, { revenue: number; conversions: number; leadsCount: number; qualifiedCount: number }>();
       for (const lead of leadsData || []) {
@@ -559,6 +628,9 @@ class SalesApiService {
           creativeUrl = firstCard?.image_url_4k || firstCard?.image_url || '';
         }
 
+        // CAPI события для этого креатива
+        const capiData = capiByCreative.get(creativeId);
+
         campaigns.push({
           id: creativeId,
           name: creative.title || `Креатив ${creativeId.substring(0, 8)}...`,
@@ -573,6 +645,12 @@ class SalesApiService {
             qualified: qualifiedCount,
             total: leads,
             rate: qualificationRate
+          } : undefined,
+          // CAPI события (Meta Conversions API)
+          capi_events: capiData ? {
+            interest: capiData.interest,
+            qualified: capiData.qualified,
+            scheduled: capiData.scheduled
           } : undefined,
           // Новые поля для типа медиа и миниатюр
           media_type: creative.media_type || null,

@@ -198,6 +198,9 @@ const ROIAnalytics: React.FC = () => {
       { header: 'ROI %', accessor: (c) => c.roi.toFixed(1) },
       { header: 'Лиды', accessor: (c) => c.leads },
       { header: '% квал', accessor: (c) => c.qualification?.rate !== undefined ? c.qualification.rate.toFixed(1) : '' },
+      { header: 'CAPI Интерес', accessor: (c) => c.capi_events?.interest ?? '' },
+      { header: 'CAPI Квал', accessor: (c) => c.capi_events?.qualified ?? '' },
+      { header: 'CAPI Запись', accessor: (c) => c.capi_events?.scheduled ?? '' },
       { header: 'Конверсия %', accessor: (c) => c.leads > 0 ? ((c.conversions / c.leads) * 100).toFixed(1) : '0' },
     ], 'creatives');
   };
@@ -897,6 +900,9 @@ const ROIAnalytics: React.FC = () => {
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Лиды</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">CPL</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">% квал</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground" title="CAPI Level 1: Клиент проявил интерес (2+ сообщения)">Интерес</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground" title="CAPI Level 2: Клиент прошёл квалификацию">Квал CAPI</th>
+                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground" title="CAPI Level 3: Клиент записался на консультацию">Запись</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Конверсия %</th>
                             {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
@@ -978,6 +984,25 @@ const ROIAnalytics: React.FC = () => {
                                   {campaign.qualification?.rate !== undefined
                                     ? `${campaign.qualification.rate.toFixed(1)}%`
                                     : '—'
+                                  }
+                                </td>
+                                {/* CAPI события */}
+                                <td className="py-2 px-3 text-center text-sm">
+                                  {campaign.capi_events?.interest !== undefined && campaign.capi_events.interest > 0
+                                    ? <span className="text-blue-600 dark:text-blue-400 font-medium">{campaign.capi_events.interest}</span>
+                                    : <span className="text-muted-foreground">—</span>
+                                  }
+                                </td>
+                                <td className="py-2 px-3 text-center text-sm">
+                                  {campaign.capi_events?.qualified !== undefined && campaign.capi_events.qualified > 0
+                                    ? <span className="text-green-600 dark:text-green-400 font-medium">{campaign.capi_events.qualified}</span>
+                                    : <span className="text-muted-foreground">—</span>
+                                  }
+                                </td>
+                                <td className="py-2 px-3 text-center text-sm">
+                                  {campaign.capi_events?.scheduled !== undefined && campaign.capi_events.scheduled > 0
+                                    ? <span className="text-purple-600 dark:text-purple-400 font-medium">{campaign.capi_events.scheduled}</span>
+                                    : <span className="text-muted-foreground">—</span>
                                   }
                                 </td>
                                 <td className="py-2 px-3 text-left text-sm">
@@ -1436,6 +1461,23 @@ const ROIAnalytics: React.FC = () => {
                             }
                           </span>
                         </div>
+                        {/* CAPI события (мобильная версия) */}
+                        {campaign.capi_events && (campaign.capi_events.interest > 0 || campaign.capi_events.qualified > 0 || campaign.capi_events.scheduled > 0) && (
+                          <div className="flex justify-between text-xs pt-1 border-t border-dashed">
+                            <span className="text-muted-foreground">CAPI:</span>
+                            <span className="font-medium flex gap-2">
+                              {campaign.capi_events.interest > 0 && (
+                                <span className="text-blue-600" title="Интерес">{campaign.capi_events.interest}🔵</span>
+                              )}
+                              {campaign.capi_events.qualified > 0 && (
+                                <span className="text-green-600" title="Квал">{campaign.capi_events.qualified}🟢</span>
+                              )}
+                              {campaign.capi_events.scheduled > 0 && (
+                                <span className="text-purple-600" title="Запись">{campaign.capi_events.scheduled}🟣</span>
+                              )}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">Конверсии:</span>
                           <span className="font-medium">

@@ -19,8 +19,9 @@ import DirectionsCard from '@/components/profile/DirectionsCard';
 import { WhatsAppConnectionCard } from '@/components/profile/WhatsAppConnectionCard';
 import { TildaConnectionCard, TildaInstructionsDialog } from '@/components/profile/TildaConnectionCard';
 // TEMPORARILY HIDDEN: import { AmoCRMKeyStageSettings } from '@/components/amocrm/AmoCRMKeyStageSettings';
-import { AmoCRMQualificationFieldModal } from '@/components/amocrm/AmoCRMQualificationFieldModal';
-import { Bitrix24QualificationFieldModal } from '@/components/bitrix24/Bitrix24QualificationFieldModal';
+// REMOVED: Old qualification field modals - now configured at direction level via CAPI settings
+// import { AmoCRMQualificationFieldModal } from '@/components/amocrm/AmoCRMQualificationFieldModal';
+// import { Bitrix24QualificationFieldModal } from '@/components/bitrix24/Bitrix24QualificationFieldModal';
 import {
   getBitrix24Status,
   disconnectBitrix24,
@@ -172,15 +173,17 @@ const Profile: React.FC = () => {
   const [amocrmInputSubdomain, setAmocrmInputSubdomain] = useState('');
   const [isSyncingAmocrm, setIsSyncingAmocrm] = useState(false);
   const [amocrmKeyStagesModal, setAmocrmKeyStagesModal] = useState(false);
-  const [amocrmQualificationModal, setAmocrmQualificationModal] = useState(false);
-  const [amocrmQualificationFieldName, setAmocrmQualificationFieldName] = useState<string | null>(null);
+  // REMOVED: Qualification now configured at direction level via CAPI settings
+  // const [amocrmQualificationModal, setAmocrmQualificationModal] = useState(false);
+  // const [amocrmQualificationFieldName, setAmocrmQualificationFieldName] = useState<string | null>(null);
 
   // Bitrix24 Integration
   const [bitrix24Connected, setBitrix24Connected] = useState(false);
   const [bitrix24Domain, setBitrix24Domain] = useState('');
   const [bitrix24EntityType, setBitrix24EntityType] = useState<'lead' | 'deal' | 'both'>('lead');
   const [bitrix24Modal, setBitrix24Modal] = useState(false);
-  const [bitrix24QualificationModal, setBitrix24QualificationModal] = useState(false);
+  // REMOVED: Qualification now configured at direction level via CAPI settings
+  // const [bitrix24QualificationModal, setBitrix24QualificationModal] = useState(false);
   const [isSyncingBitrix24, setIsSyncingBitrix24] = useState(false);
 
   // Facebook Manual Connect Modal
@@ -365,17 +368,7 @@ const Profile: React.FC = () => {
             console.error('Failed to check webhook status:', error);
           }
 
-          // Load qualification field setting
-          try {
-            const qualRes = await fetch(`${API_BASE_URL}/amocrm/qualification-field?userAccountId=${user.id}`);
-            if (qualRes.ok) {
-              const qualData = await qualRes.json();
-              console.log('Qualification field loaded:', qualData);
-              setAmocrmQualificationFieldName(qualData.fieldName || null);
-            }
-          } catch (error) {
-            console.error('Failed to load qualification field:', error);
-          }
+          // REMOVED: Qualification now configured at direction level via CAPI settings
         }
       } catch (error) {
         console.error('Failed to load AmoCRM status:', error);
@@ -413,29 +406,13 @@ const Profile: React.FC = () => {
       setBitrix24Connected(true);
       setBitrix24Domain(data.domain);
       setBitrix24EntityType(data.entityType as 'lead' | 'deal' | 'both');
-      // Open qualification modal after connection
-      setTimeout(() => {
-        setBitrix24QualificationModal(true);
-      }, 500);
+      // REMOVED: Qualification now configured at direction level via CAPI settings
     });
 
     return cleanup;
   }, [user?.id]);
 
-  // Handle AmoCRM OAuth callback - open qualification modal after connection
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const amocrmSetup = params.get('amocrm_setup');
-
-    if (amocrmSetup === 'true') {
-      // Clear URL params
-      window.history.replaceState({}, document.title, '/profile');
-      // Open qualification modal after short delay to let AmoCRM status load
-      setTimeout(() => {
-        setAmocrmQualificationModal(true);
-      }, 500);
-    }
-  }, []);
+  // REMOVED: AmoCRM qualification modal auto-open - now configured at direction level via CAPI settings
 
   const tarifBadge = useMemo(() => {
     if (!tarif) return null;
@@ -1938,24 +1915,7 @@ const Profile: React.FC = () => {
               </Button>
               */}
 
-              {/* Qualification Field Configuration */}
-              <div className="space-y-2">
-                <Button
-                  onClick={() => {
-                    setAmocrmModal(false);
-                    setAmocrmQualificationModal(true);
-                  }}
-                  variant="default"
-                  className="w-full"
-                >
-                  Настроить квалификацию
-                </Button>
-                {amocrmQualificationFieldName && (
-                  <p className="text-xs text-muted-foreground text-center">
-                    Текущее поле: {amocrmQualificationFieldName}
-                  </p>
-                )}
-              </div>
+              {/* REMOVED: Qualification now configured at direction level via CAPI settings */}
 
               <Button
                 onClick={handleAmoCRMSync}
@@ -2012,21 +1972,7 @@ const Profile: React.FC = () => {
           onSettingsSaved={() => setTildaConnected(true)}
         />
 
-        {/* AmoCRM Qualification Field Modal */}
-        {user?.id && (
-          <AmoCRMQualificationFieldModal
-            isOpen={amocrmQualificationModal}
-            onClose={() => setAmocrmQualificationModal(false)}
-            userAccountId={user.id}
-            onSave={() => {
-              // Reload qualification field name after save
-              fetch(`${API_BASE_URL}/amocrm/qualification-field?userAccountId=${user.id}`)
-                .then(res => res.json())
-                .then(data => setAmocrmQualificationFieldName(data.fieldName || null))
-                .catch(err => console.error('Failed to reload qualification field:', err));
-            }}
-          />
-        )}
+        {/* REMOVED: AmoCRM Qualification Field Modal - now configured at direction level via CAPI settings */}
 
         {/* Bitrix24 Management Modal */}
         <Dialog open={bitrix24Modal} onOpenChange={setBitrix24Modal}>
@@ -2047,17 +1993,7 @@ const Profile: React.FC = () => {
                 </div>
               </div>
 
-              {/* Qualification Field Configuration */}
-              <Button
-                onClick={() => {
-                  setBitrix24Modal(false);
-                  setBitrix24QualificationModal(true);
-                }}
-                variant="default"
-                className="w-full"
-              >
-                Настроить квалификацию
-              </Button>
+              {/* REMOVED: Qualification now configured at direction level via CAPI settings */}
 
               <Button
                 onClick={handleBitrix24Sync}
@@ -2079,23 +2015,7 @@ const Profile: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Bitrix24 Qualification Field Modal */}
-        {user?.id && (
-          <Bitrix24QualificationFieldModal
-            isOpen={bitrix24QualificationModal}
-            onClose={() => setBitrix24QualificationModal(false)}
-            userAccountId={user.id}
-            entityType={bitrix24EntityType}
-            onSave={() => {
-              // Reload Bitrix24 status after save
-              getBitrix24Status(user.id)
-                .then(status => {
-                  setBitrix24EntityType(status.entityType || 'lead');
-                })
-                .catch(err => console.error('Failed to reload Bitrix24 status:', err));
-            }}
-          />
-        )}
+        {/* REMOVED: Bitrix24 Qualification Field Modal - now configured at direction level via CAPI settings */}
       </div>
     </div>
   );

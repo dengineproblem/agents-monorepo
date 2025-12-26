@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS capi_events_log (
 
   -- Reference to dialog
   dialog_analysis_id UUID REFERENCES dialog_analysis(id) ON DELETE SET NULL,
-  lead_id UUID REFERENCES leads(id) ON DELETE SET NULL,
+  lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
 
   -- User context
   user_account_id UUID NOT NULL REFERENCES user_accounts(id) ON DELETE CASCADE,

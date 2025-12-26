@@ -122,7 +122,12 @@ const AdminErrors: React.FC = () => {
         params.append('resolved', resolvedFilter === 'resolved' ? 'true' : 'false');
       }
 
-      const res = await fetch(`${API_BASE_URL}/admin/errors?${params}`);
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const res = await fetch(`${API_BASE_URL}/admin/errors?${params}`, {
+        headers: {
+          'x-user-id': currentUser.id || '',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         setErrors(data.errors || []);
