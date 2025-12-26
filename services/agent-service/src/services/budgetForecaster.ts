@@ -885,11 +885,10 @@ export async function forecastCampaignBudget(
   }
 
   // Вычисляем summary
-  // Важно: current spend/results считаем ТОЛЬКО по eligible ads,
-  // чтобы проценты в summary соответствовали прогнозам
+  // current spend/results считаем по ВСЕМ объявлениям кампании
   const eligibleAds = adForecasts.filter(a => a.eligibility.is_eligible);
-  const currentSpend = eligibleAds.reduce((s, a) => s + a.current_week.spend, 0);
-  const currentResults = eligibleAds.reduce((s, a) => s + a.current_week.results, 0);
+  const currentSpend = adForecasts.reduce((s, a) => s + a.current_week.spend, 0);
+  const currentResults = adForecasts.reduce((s, a) => s + a.current_week.results, 0);
   const avgCpr = currentResults > 0 ? currentSpend / currentResults : 0;
 
   // Агрегируем прогнозы
