@@ -7,10 +7,12 @@ import DateRangePicker from '../components/DateRangePicker';
 import { useAppContext } from '../context/AppContext';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { ArrowLeft, LayoutDashboard, TrendingUp } from 'lucide-react';
 import { useTranslation } from '../i18n/LanguageContext';
 import { REQUIRE_CONFIRMATION } from '../config/appReview';
 import { invalidateCache } from '../utils/apiCache';
+import { BudgetForecastTab } from '../components/budget-forecast';
 
 
 const CampaignDetail: React.FC = () => {
@@ -102,12 +104,31 @@ const CampaignDetail: React.FC = () => {
         </div>
         
         {id && <CampaignDetailStats campaignId={id} />}
-        
+
         {id && (
-          <div className="mb-6">
-            <h2 className="text-lg font-medium mb-3">Ad Sets</h2>
-            <AdsetList campaignId={id} dateRange={dateRange} forceRefresh={forceRefresh} />
-          </div>
+          <Tabs defaultValue="overview" className="mt-4">
+            <TabsList>
+              <TabsTrigger value="overview" className="flex items-center gap-1.5">
+                <LayoutDashboard className="h-4 w-4" />
+                {t('campaign.overview') || 'Обзор'}
+              </TabsTrigger>
+              <TabsTrigger value="forecast" className="flex items-center gap-1.5">
+                <TrendingUp className="h-4 w-4" />
+                {t('campaign.forecast') || 'Прогноз'}
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="mt-4">
+              <div className="mb-6">
+                <h2 className="text-lg font-medium mb-3">Ad Sets</h2>
+                <AdsetList campaignId={id} dateRange={dateRange} forceRefresh={forceRefresh} />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="forecast" className="mt-4">
+              <BudgetForecastTab campaignId={id} />
+            </TabsContent>
+          </Tabs>
         )}
       </div>
       
