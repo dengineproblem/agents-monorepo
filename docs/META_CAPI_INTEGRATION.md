@@ -1,18 +1,21 @@
 # Meta Conversions API (CAPI) Integration
 
-Интеграция с Meta Conversions API для отправки событий конверсии из WhatsApp-диалогов.
+Интеграция с Meta Conversions API для отправки событий конверсии из WhatsApp-диалогов и CRM.
 
 ## Обзор
 
-Система автоматически анализирует WhatsApp-переписки с помощью LLM и отправляет события конверсии в Facebook для оптимизации рекламы.
+Система отправляет события конверсии в Facebook для оптимизации рекламы. Поддерживается два источника данных:
+
+1. **WhatsApp (LLM)** — автоматический анализ переписок с помощью GPT-4o-mini
+2. **CRM (field mapping)** — отслеживание изменений полей в AMO CRM / Bitrix24
 
 ### Три уровня конверсии
 
-| Уровень | Событие | Условие |
-|---------|---------|---------|
-| 1 | `Lead` (INTEREST) | Клиент отправил 2+ сообщения |
-| 2 | `CompleteRegistration` (QUALIFIED) | Клиент ответил на все квалификационные вопросы |
-| 3 | `Schedule` (SCHEDULED) | Клиент записался на консультацию/встречу |
+| Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
+|---------|---------|---------------------|---------------|
+| 1 | `Lead` (INTEREST) | Клиент отправил 2+ сообщения | Поле CRM установлено в нужное значение |
+| 2 | `CompleteRegistration` (QUALIFIED) | Клиент ответил на все квалификационные вопросы | Поле CRM установлено в нужное значение |
+| 3 | `Schedule` (SCHEDULED) | Клиент записался на консультацию/встречу | Поле CRM установлено в нужное значение |
 
 ## Архитектура
 
@@ -21,24 +24,47 @@ WhatsApp → Evolution API → agent-service → chatbot-service
                                │                 │
                                │                 ├── chatbotEngine (ответы бота)
                                │                 │
-                               │                 └── qualificationAgent (LLM анализ)
+                               │                 └── qualificationAgent
                                │                          │
-                               │                          └── metaCapiClient
-                               │                                  │
-                               └──────────────────────────────────└── Meta CAPI
+                               │                    ┌─────┴─────┐
+                               │                    │           │
+                               │               LLM анализ   CRM check
+                               │               (WhatsApp)   (field mapping)
+                               │                    │           │
+                               │                    └─────┬─────┘
+                               │                          │
+                               │                    metaCapiClient
+                               │                          │
+                               └──────────────────────────└── Meta CAPI
+```
+
+### CRM Webhooks (для CRM источника)
+
+```
+AMO CRM / Bitrix24
+        │
+        └── Webhook при изменении поля
+                │
+                └── agent-service
+                        │
+                        └── Проверка capi_*_fields для направления
+                                │
+                                └── metaCapiClient → Meta CAPI
 ```
 
 ## Компоненты
 
 ### 1. qualificationAgent.ts
 
-LLM-агент для анализа диалогов и определения уровня квалификации.
+Агент для определения уровня квалификации и отправки CAPI событий.
 
 **Основные функции:**
 
 - `analyzeQualification(dialog)` - анализирует диалог с помощью GPT-4o-mini
-- `processDialogForCapi(dialog)` - отправляет CAPI события на основе анализа
+- `processDialogForCapi(dialog)` - отправляет CAPI события на основе анализа или CRM статуса
 - `getDialogForCapi(instanceName, contactPhone)` - получает данные диалога для анализа
+- `getDirectionCapiSettings(directionId)` - загружает настройки CAPI для направления
+- `getCrmQualificationStatus(...)` - проверяет CRM поля для определения уровня
 
 **Промпт квалификации (prompt2):**
 
@@ -85,17 +111,60 @@ const CAPI_EVENTS = {
 - Статус: `success` / `error` / `skipped`
 - Ответ от Facebook API
 
+### Миграция 127_direction_capi_settings.sql
+
+**account_directions (настройки CAPI на уровне направления):**
+- `capi_enabled` (BOOLEAN) - включен ли CAPI для направления
+- `capi_source` (TEXT) - источник событий: `whatsapp` или `crm`
+- `capi_crm_type` (TEXT) - тип CRM: `amocrm` или `bitrix24`
+- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/Lead)
+- `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/CompleteRegistration)
+- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled/Schedule)
+
+**Формат JSONB для CRM полей:**
+```json
+[
+  {
+    "field_id": "123456",
+    "field_name": "Статус лида",
+    "field_type": "select",
+    "enum_id": "789",
+    "enum_value": "Заинтересован"
+  }
+]
+```
+
+Для Bitrix24 также поддерживается `entity_type` (contact/deal/lead).
+
 ## Настройка
 
-### 1. Выбор пикселя для направления
+### 1. Настройки CAPI при создании направления
 
-При создании направления (любой objective) можно выбрать пиксель в разделе "Meta Conversions API":
+При создании направления в `CreateDirectionDialog.tsx` доступны настройки CAPI:
 
-```
-CreateDirectionDialog.tsx:
-- Загрузка списка пикселей из Facebook
-- Сохранение pixel_id в default_ad_settings
-```
+**Шаг 1: Включение CAPI**
+- Переключатель "Включить Meta CAPI"
+- При включении появляются дополнительные опции
+
+**Шаг 2: Выбор пикселя**
+- Если есть другие направления с пикселем — предлагается использовать тот же
+- Предупреждение: "Аудитории разных направлений будут агрегированы"
+- Или выбор нового пикселя из списка
+
+**Шаг 3: Выбор источника событий**
+- `WhatsApp (AI анализ)` — LLM анализирует переписку
+- `CRM (поля)` — отслеживание полей в AMO CRM / Bitrix24
+
+**Шаг 4 (только для CRM источника):**
+- Выбор типа CRM (AMO CRM или Bitrix24)
+- Настройка полей для каждого уровня конверсии:
+  - Level 1 (Интерес / Lead)
+  - Level 2 (Квалифицирован / CompleteRegistration)
+  - Level 3 (Записался / Schedule)
+
+**Логика проверки CRM полей:**
+- Если настроено несколько полей — используется логика OR
+- Событие отправляется при совпадении хотя бы одного поля
 
 ### 2. Access Token
 
@@ -111,6 +180,8 @@ CreateDirectionDialog.tsx:
 
 ## Поток данных
 
+### Источник: WhatsApp (LLM анализ)
+
 1. **Входящее сообщение** → `evolutionWebhooks.ts`
    - Извлекает ctwa_clid из referral
    - Сохраняет в leads
@@ -122,15 +193,34 @@ CreateDirectionDialog.tsx:
    - **В фоне:** запускает qualificationAgent
 
 3. **qualificationAgent**
-   - Получает данные диалога
-   - Анализирует через GPT-4o-mini
-   - Определяет уровни: is_interested, is_qualified, is_scheduled
+   - Загружает настройки CAPI направления
+   - Проверяет `capi_enabled` и `capi_source`
+   - Если `capi_source === 'whatsapp'`:
+     - Анализирует через GPT-4o-mini
+     - Определяет уровни: is_interested, is_qualified, is_scheduled
 
 4. **metaCapiClient**
    - Проверяет, какие события ещё не отправлены
    - Отправляет события в Meta CAPI
    - Обновляет флаги в dialog_analysis
    - Логирует в capi_events_log
+
+### Источник: CRM (field mapping)
+
+1. **Webhook от CRM** → `agent-service`
+   - AMO CRM: изменение сделки/контакта
+   - Bitrix24: изменение лида/сделки/контакта
+
+2. **qualificationAgent** → `getCrmQualificationStatus()`
+   - Загружает настройки CAPI направления
+   - Если `capi_source === 'crm'`:
+     - Получает текущие значения полей из CRM
+     - Сравнивает с `capi_interest_fields`, `capi_qualified_fields`, `capi_scheduled_fields`
+     - Определяет уровни на основе совпадений (OR логика)
+
+3. **metaCapiClient**
+   - Отправляет события по совпавшим уровням
+   - Обновляет флаги и логирует
 
 ## Дедупликация
 
