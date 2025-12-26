@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Plus, Target, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDirections } from '@/hooks/useDirections';
-import { CreateDirectionDialog } from './CreateDirectionDialog';
+import { CreateDirectionDialog, type DirectionCapiSettings } from './CreateDirectionDialog';
 import { EditDirectionDialog } from './EditDirectionDialog';
 import { DeleteDirectionAlert } from './DeleteDirectionAlert';
 import { DirectionAdSets } from '../DirectionAdSets';
@@ -66,12 +66,13 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
     target_cpl_cents: number;
     whatsapp_phone_number?: string;
     adSettings: CreateDefaultSettingsInput;
+    capiSettings?: DirectionCapiSettings;
   }) => {
     console.log('[DirectionsCard] Создание направления с настройками:', data);
-    
+
     // Подготовка default_settings для API (без direction_id, он добавится на бэкенде)
     const { direction_id, campaign_goal, ...settingsData } = data.adSettings;
-    
+
     // Создаём направление + настройки одним запросом
     const result = await createDirection({
       name: data.name,
@@ -80,6 +81,13 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       target_cpl_cents: data.target_cpl_cents,
       whatsapp_phone_number: data.whatsapp_phone_number, // Передаем WhatsApp номер
       default_settings: settingsData, // Передаём настройки в том же запросе
+      // CAPI settings (direction-level)
+      capi_enabled: data.capiSettings?.capi_enabled,
+      capi_source: data.capiSettings?.capi_source,
+      capi_crm_type: data.capiSettings?.capi_crm_type,
+      capi_interest_fields: data.capiSettings?.capi_interest_fields,
+      capi_qualified_fields: data.capiSettings?.capi_qualified_fields,
+      capi_scheduled_fields: data.capiSettings?.capi_scheduled_fields,
     });
 
     if (!result.success || !result.direction) {
@@ -290,6 +298,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         onSubmit={handleCreate}
+        userAccountId={userAccountId || ''}
       />
 
       <EditDirectionDialog

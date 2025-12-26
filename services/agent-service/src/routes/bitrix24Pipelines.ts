@@ -837,6 +837,91 @@ export default async function bitrix24PipelinesRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * GET /bitrix24/scheduled-fields
+   *
+   * Get current scheduled appointment field settings
+   * Used for CAPI Level 3 (Schedule) event detection
+   */
+  app.get('/bitrix24/scheduled-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+
+      const { data: userAccount, error } = await supabase
+        .from('user_accounts')
+        .select('bitrix24_scheduled_fields')
+        .eq('id', userAccountId)
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to fetch scheduled fields: ${error.message}`);
+      }
+
+      return reply.send({
+        fields: userAccount?.bitrix24_scheduled_fields || []
+      });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching Bitrix24 scheduled fields');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /bitrix24/scheduled-fields
+   *
+   * Update scheduled appointment field settings
+   * Used for CAPI Level 3 (Schedule) event detection
+   */
+  app.patch('/bitrix24/scheduled-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = QualificationFieldsBodySchema.safeParse(request.body);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId, fields } = parsed.data;
+
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({ bitrix24_scheduled_fields: fields })
+        .eq('id', userAccountId);
+
+      if (error) {
+        throw new Error(`Failed to update scheduled fields: ${error.message}`);
+      }
+
+      app.log.info({ userAccountId, fieldsCount: fields.length }, 'Bitrix24 scheduled fields updated');
+
+      return reply.send({ success: true });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error updating Bitrix24 scheduled fields');
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
 }
 
 // ============================================================================

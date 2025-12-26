@@ -1784,6 +1784,152 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  /**
+   * GET /amocrm/scheduled-fields
+   * Get current scheduled appointment fields settings (up to 3 fields)
+   * Used for CAPI Level 3 (Schedule) event detection
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *
+   * Returns: { fields: [{field_id, field_name, field_type, enum_id?, enum_value?}] }
+   */
+  app.get('/amocrm/scheduled-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+
+      const { data: account, error } = await supabase
+        .from('user_accounts')
+        .select('amocrm_scheduled_fields')
+        .eq('id', userAccountId)
+        .maybeSingle();
+
+      if (error) {
+        app.log.error({ error }, 'Error fetching scheduled fields setting');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      // Return array of fields (or empty array if not set)
+      const fields = account?.amocrm_scheduled_fields || [];
+
+      return reply.send({ fields });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error getting scheduled fields');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_scheduled_fields',
+        endpoint: '/amocrm/scheduled-fields',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * PATCH /amocrm/scheduled-fields
+   * Save scheduled appointment fields settings (up to 3 fields)
+   * Used for CAPI Level 3 (Schedule) event detection
+   *
+   * Query params:
+   *   - userAccountId: UUID of user account
+   *
+   * Body: { fields: [{field_id, field_name, field_type, enum_id?, enum_value?}] }
+   *
+   * Returns: { success: true }
+   */
+  app.patch('/amocrm/scheduled-fields', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const parsed = UserAccountIdSchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          issues: parsed.error.flatten()
+        });
+      }
+
+      const { userAccountId } = parsed.data;
+      const { fields } = request.body as {
+        fields: Array<{
+          field_id: number;
+          field_name: string;
+          field_type: string;
+          enum_id?: number | null;
+          enum_value?: string | null;
+        }>;
+      };
+
+      // Validate max 3 fields
+      if (fields && fields.length > 3) {
+        return reply.code(400).send({
+          error: 'validation_error',
+          message: 'Maximum 3 scheduled fields allowed'
+        });
+      }
+
+      app.log.info({ userAccountId, fieldsCount: fields?.length || 0 }, 'Saving scheduled fields setting');
+
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({
+          amocrm_scheduled_fields: fields || [],
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userAccountId);
+
+      if (error) {
+        app.log.error({ error }, 'Error saving scheduled fields setting');
+        return reply.code(500).send({
+          error: 'database_error',
+          message: error.message
+        });
+      }
+
+      app.log.info({ userAccountId, fieldsCount: fields?.length || 0 }, 'Scheduled fields setting saved');
+
+      return reply.send({ success: true });
+
+    } catch (error: any) {
+      app.log.error({ error }, 'Error saving scheduled fields');
+
+      logErrorToAdmin({
+        user_account_id: (request.query as any)?.userAccountId,
+        error_type: 'amocrm',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'save_scheduled_fields',
+        endpoint: '/amocrm/scheduled-fields',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({
+        error: 'internal_error',
+        message: error.message
+      });
+    }
+  });
 }
 
 

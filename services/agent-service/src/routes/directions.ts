@@ -11,6 +11,16 @@ const log = createLogger({ module: 'directionsRoutes' });
 // VALIDATION SCHEMAS
 // ========================================
 
+// CAPI field config schema
+const CapiFieldConfigSchema = z.object({
+  field_id: z.union([z.string(), z.number()]),
+  field_name: z.string(),
+  field_type: z.string(),
+  enum_id: z.union([z.string(), z.number(), z.null()]).optional(),
+  enum_value: z.string().nullable().optional(),
+  entity_type: z.string().optional(), // for Bitrix24
+});
+
 const CreateDirectionSchema = z.object({
   userAccountId: z.string().uuid(),
   accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
@@ -37,6 +47,13 @@ const CreateDirectionSchema = z.object({
     // Lead Forms specific
     lead_form_id: z.string().optional(),
   }).optional(),
+  // CAPI settings (direction-level)
+  capi_enabled: z.boolean().optional(),
+  capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
+  capi_crm_type: z.enum(['amocrm', 'bitrix24']).nullable().optional(),
+  capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
+  capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
+  capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
 });
 
 const UpdateDirectionSchema = z.object({
@@ -495,6 +512,13 @@ export async function directionsRoutes(app: FastifyInstance) {
             fb_campaign_id: fbCampaign.campaign_id,
             campaign_status: fbCampaign.status,
             is_active: true,
+            // CAPI settings (direction-level)
+            capi_enabled: input.capi_enabled || false,
+            capi_source: input.capi_source || null,
+            capi_crm_type: input.capi_crm_type || null,
+            capi_interest_fields: input.capi_interest_fields || [],
+            capi_qualified_fields: input.capi_qualified_fields || [],
+            capi_scheduled_fields: input.capi_scheduled_fields || [],
           })
           .select()
           .single();

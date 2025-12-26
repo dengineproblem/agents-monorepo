@@ -643,3 +643,80 @@ export async function getQualifiedLeadsTotal(
   return response.json();
 }
 
+// ============================================================================
+// Scheduled Fields (CAPI Level 3 - Schedule)
+// ============================================================================
+
+export interface ScheduledFieldsSettings {
+  fields: QualificationFieldConfig[];
+}
+
+/**
+ * Get scheduled appointment fields settings (up to 3 fields)
+ * Used for CAPI Level 3 (Schedule) event detection
+ *
+ * @param userAccountId - User account UUID
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Array of scheduled field configs
+ */
+export async function getScheduledFields(
+  userAccountId: string,
+  accountId?: string
+): Promise<ScheduledFieldsSettings> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/scheduled-fields?${queryParams.toString()}`
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to fetch scheduled fields');
+  }
+
+  return response.json();
+}
+
+/**
+ * Save scheduled appointment fields settings (up to 3 fields)
+ * Used for CAPI Level 3 (Schedule) event detection
+ *
+ * @param userAccountId - User account UUID
+ * @param fields - Array of field configs (max 3)
+ * @param accountId - Optional ad_account UUID for multi-account mode
+ * @returns Success status
+ */
+export async function setScheduledFields(
+  userAccountId: string,
+  fields: QualificationFieldConfig[],
+  accountId?: string
+): Promise<{ success: boolean }> {
+  const queryParams = new URLSearchParams({ userAccountId });
+
+  if (accountId) {
+    queryParams.append('accountId', accountId);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/amocrm/scheduled-fields?${queryParams.toString()}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ fields }),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to save scheduled fields');
+  }
+
+  return response.json();
+}
+

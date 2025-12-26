@@ -126,6 +126,15 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const sourceUrl = externalAdReply?.sourceUrl; // Ссылка на рекламу (Instagram/Facebook)
   const mediaUrl = externalAdReply?.mediaUrl; // Медиа из рекламы
 
+  // ✅ НОВОЕ: Извлекаем ctwa_clid (Click-to-WhatsApp Click ID) для Meta CAPI
+  // ctwa_clid используется для атрибуции конверсий в Meta Conversions API
+  // Может приходить в разных местах в зависимости от версии Evolution API
+  const referral = contextInfo?.referral || data.referral;
+  const ctwaClid = referral?.ctwaClid ||  // Стандартное место
+                   contextInfo?.ctwaClid ||  // Альтернативное место
+                   externalAdReply?.ctwaClid ||  // В externalAdReply
+                   data.ctwaClid;  // На верхнем уровне data
+
   // ✅ ИСПОЛЬЗУЕМ ТОЛЬКО sourceId из externalAdReply (реальный Facebook Ad ID)
   // ❌ НЕ используем stanzaId - это просто message ID, а не Ad ID!
   const finalSourceId = sourceId;
@@ -138,7 +147,9 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     sourceId: finalSourceId || null,
     sourceType: sourceType || null,
     sourceUrl: sourceUrl || null,
+    ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: логируем ctwa_clid для CAPI
     hasExternalAdReply: !!externalAdReply,
+    hasReferral: !!referral,
     keyKeys: message.key ? Object.keys(message.key) : [],
     messageText: messageText.substring(0, 50)
   }, 'Incoming message structure');
@@ -261,6 +272,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     creativeId,      // Pass resolved value
     directionId,     // Pass resolved value
     creativeUrl: sourceUrl || mediaUrl,
+    ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: передаём ctwa_clid для CAPI
     messageText,
     timestamp: new Date(message.messageTimestamp * 1000 || Date.now()),
     rawData: message
@@ -283,6 +295,7 @@ async function processAdLead(params: {
   creativeId: string | null;
   directionId: string | null;
   creativeUrl?: string;
+  ctwaClid?: string | null;  // ✅ НОВОЕ: Click-to-WhatsApp Click ID для CAPI
   messageText: string;
   timestamp: Date;
   rawData: any;
@@ -298,17 +311,18 @@ async function processAdLead(params: {
     creativeId,
     directionId,
     creativeUrl,
+    ctwaClid,  // ✅ НОВОЕ
     messageText,
     timestamp,
     rawData
   } = params;
 
-  app.log.info({ userAccountId, clientPhone, sourceId, creativeId, directionId }, 'Processing ad lead');
+  app.log.info({ userAccountId, clientPhone, sourceId, creativeId, directionId, ctwaClid }, 'Processing ad lead');
 
   // 3. Проверить, существует ли уже лид
   const { data: existingLead } = await supabase
     .from('leads')
-    .select('id, sale_amount')
+    .select('id, sale_amount, ctwa_clid')  // ✅ НОВОЕ: получаем ctwa_clid для сохранения
     .eq('chat_id', clientPhone)
     .maybeSingle();
 
@@ -324,6 +338,7 @@ async function processAdLead(params: {
         whatsapp_phone_number_id: whatsappPhoneNumberId,
         user_account_id: userAccountId,
         account_id: accountId || null,  // UUID для мультиаккаунтности
+        ctwa_clid: ctwaClid || existingLead.ctwa_clid,  // ✅ НОВОЕ: сохраняем ctwa_clid (не перезаписываем если уже есть)
         updated_at: timestamp
       })
       .eq('id', existingLead.id);
@@ -348,6 +363,7 @@ async function processAdLead(params: {
         creative_id: creativeId,
         direction_id: directionId,
         whatsapp_phone_number_id: whatsappPhoneNumberId,
+        ctwa_clid: ctwaClid || null,  // ✅ НОВОЕ: сохраняем ctwa_clid для CAPI
         funnel_stage: 'new_lead',
         status: 'active',
         created_at: timestamp,
@@ -370,6 +386,7 @@ async function processAdLead(params: {
     instanceName,
     contactPhone: clientPhone,
     messageText,
+    ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: передаём ctwa_clid для CAPI
     timestamp
   }, app);
 
@@ -386,14 +403,15 @@ async function upsertDialogAnalysis(params: {
   instanceName: string;
   contactPhone: string;
   messageText: string;
+  ctwaClid?: string | null;  // ✅ НОВОЕ: Click-to-WhatsApp Click ID для CAPI
   timestamp: Date;
 }, app: FastifyInstance) {
-  const { userAccountId, accountId, instanceName, contactPhone, messageText, timestamp } = params;
+  const { userAccountId, accountId, instanceName, contactPhone, messageText, ctwaClid, timestamp } = params;
 
   // Проверить существование записи
   const { data: existing } = await supabase
     .from('dialog_analysis')
-    .select('id')
+    .select('id, ctwa_clid')  // ✅ НОВОЕ: получаем ctwa_clid для сохранения
     .eq('contact_phone', contactPhone)
     .eq('instance_name', instanceName)
     .maybeSingle();
@@ -404,6 +422,7 @@ async function upsertDialogAnalysis(params: {
       .from('dialog_analysis')
       .update({
         last_message: messageText,
+        ctwa_clid: ctwaClid || existing.ctwa_clid,  // ✅ НОВОЕ: сохраняем ctwa_clid (не перезаписываем если уже есть)
         analyzed_at: timestamp.toISOString()
       })
       .eq('id', existing.id);
@@ -417,6 +436,7 @@ async function upsertDialogAnalysis(params: {
         instance_name: instanceName,
         contact_phone: contactPhone,
         last_message: messageText,
+        ctwa_clid: ctwaClid || null,  // ✅ НОВОЕ: сохраняем ctwa_clid для CAPI
         funnel_stage: 'new_lead',
         interest_level: 'unknown',
         analyzed_at: timestamp.toISOString()
