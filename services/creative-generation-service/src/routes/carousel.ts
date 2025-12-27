@@ -230,7 +230,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const supabase = getSupabaseClient();
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, prompt1, creative_generations_available, multi_account_enabled')
+          .select('id, prompt4, creative_generations_available, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -253,31 +253,33 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         //   });
         // }
 
-        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
-        let userPrompt1 = user.prompt1 || '';
+        // Определяем prompt4: в мультиаккаунтном режиме берём из ad_accounts
+        // Для freestyle стиля prompt4 не используется
+        const selectedStyle = visual_style || 'clean_minimal';
+        let userPrompt4 = selectedStyle === 'freestyle' ? '' : (user.prompt4 || '');
 
-        if (isMultiAccountMode && account_id) {
+        if (selectedStyle !== 'freestyle' && isMultiAccountMode && account_id) {
           const { data: adAccount, error: adError } = await supabase
             .from('ad_accounts')
-            .select('prompt1')
+            .select('prompt4')
             .eq('id', account_id)
             .eq('user_account_id', user_id)
             .single();
 
-          if (!adError && adAccount?.prompt1) {
-            userPrompt1 = adAccount.prompt1;
+          if (!adError && adAccount?.prompt4) {
+            userPrompt4 = adAccount.prompt4;
           }
         }
 
-        if (!userPrompt1) {
-          userPrompt1 = 'Информация о бизнесе не указана';
+        if (!userPrompt4 && selectedStyle !== 'freestyle') {
+          userPrompt4 = 'Информация о бизнесе не указана';
         }
 
         // Генерируем изображения для всех карточек
         const images = await generateCarouselImages(
           carousel_texts,
-          userPrompt1,
-          visual_style || 'clean_minimal',
+          userPrompt4,
+          selectedStyle,
           custom_prompts,
           reference_images,
           style_prompt  // Для freestyle стиля
@@ -436,7 +438,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         const supabase = getSupabaseClient();
         const { data: user, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, prompt1, creative_generations_available, multi_account_enabled')
+          .select('id, prompt4, creative_generations_available, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -483,24 +485,26 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
-        let userPrompt1 = user.prompt1 || '';
+        // Определяем prompt4: в мультиаккаунтном режиме берём из ad_accounts
+        // Для freestyle стиля prompt4 не используется
+        const visualStyle = carousel.visual_style || 'clean_minimal';
+        let userPrompt4 = visualStyle === 'freestyle' ? '' : (user.prompt4 || '');
 
-        if (isMultiAccountMode && account_id) {
+        if (visualStyle !== 'freestyle' && isMultiAccountMode && account_id) {
           const { data: adAccount, error: adError } = await supabase
             .from('ad_accounts')
-            .select('prompt1')
+            .select('prompt4')
             .eq('id', account_id)
             .eq('user_account_id', user_id)
             .single();
 
-          if (!adError && adAccount?.prompt1) {
-            userPrompt1 = adAccount.prompt1;
+          if (!adError && adAccount?.prompt4) {
+            userPrompt4 = adAccount.prompt4;
           }
         }
 
-        if (!userPrompt1) {
-          userPrompt1 = 'Информация о бизнесе не указана';
+        if (!userPrompt4 && visualStyle !== 'freestyle') {
+          userPrompt4 = 'Информация о бизнесе не указана';
         }
 
         // Извлекаем существующие изображения для консистентности
@@ -520,12 +524,11 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
         }
 
         // Перегенерируем карточку с использованием сохраненного visual_style
-        const visualStyle = carousel.visual_style || 'clean_minimal';
         const newImage = await regenerateCarouselCard(
           text,
           card_index,
           existingImages,
-          userPrompt1,
+          userPrompt4,
           visualStyle,
           custom_prompt,
           contentReferenceImages,

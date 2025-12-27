@@ -30,7 +30,8 @@ import { CarouselGalleryTab } from '@/components/creatives/CarouselGalleryTab';
 import { TextHistoryTab } from '@/components/creatives/TextHistoryTab';
 import { TextGalleryTab } from '@/components/creatives/TextGalleryTab';
 import { galleryApi } from '@/services/galleryApi';
-import { History, GalleryHorizontalEnd, Wand2 as GenerateIcon, Save } from 'lucide-react';
+import { History, GalleryHorizontalEnd, Wand2 as GenerateIcon, Save, RotateCcw } from 'lucide-react';
+import { useImageDraftAutoSave } from '@/hooks/useAutoSaveDraft';
 
 interface CreativeTexts {
   offer: string;
@@ -113,6 +114,16 @@ const CreativeGeneration = () => {
   // Загрузка направлений (с фильтрацией по аккаунту для multi-account режима)
   const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
 
+  // Автосохранение черновика
+  const {
+    hasSavedDraft,
+    savedDraft,
+    saveDraft: saveImageDraft,
+    restoreDraft: restoreImageDraft,
+    discardDraft: discardImageDraft,
+    clearDraft: clearImageDraft
+  } = useImageDraftAutoSave(userId, currentAdAccountId);
+
   // Лимиты символов для каждого типа текста
   const CHARACTER_LIMITS = {
     offer: 60,    // Заголовок
@@ -133,6 +144,68 @@ const CreativeGeneration = () => {
       });
     };
   }, [generatedImage, referenceImages]);
+
+  // Автосохранение черновика при изменении данных
+  useEffect(() => {
+    if (!userId) return;
+
+    // Проверяем что есть что сохранять
+    const hasContent =
+      texts.offer ||
+      texts.bullets ||
+      texts.profits ||
+      generatedImage ||
+      referenceImages.length > 0;
+
+    if (!hasContent) return;
+
+    saveImageDraft({
+      userId,
+      accountId: currentAdAccountId || undefined,
+      texts,
+      selectedStyle,
+      stylePrompt,
+      referenceImages,
+      referenceImagePrompt,
+      generatedImage: generatedImage || undefined,
+      generatedCreativeId: generatedCreativeId || undefined,
+      selectedDirectionId
+    });
+  }, [
+    userId,
+    currentAdAccountId,
+    texts,
+    selectedStyle,
+    stylePrompt,
+    referenceImages,
+    referenceImagePrompt,
+    generatedImage,
+    generatedCreativeId,
+    selectedDirectionId,
+    saveImageDraft
+  ]);
+
+  // Функция восстановления черновика
+  const handleRestoreDraft = () => {
+    const draft = restoreImageDraft();
+    if (draft) {
+      setTexts(draft.texts);
+      setSelectedStyle(draft.selectedStyle as any);
+      setStylePrompt(draft.stylePrompt);
+      setReferenceImages(draft.referenceImages);
+      setReferenceImagePrompt(draft.referenceImagePrompt);
+      if (draft.generatedImage) {
+        setGeneratedImage(draft.generatedImage);
+      }
+      if (draft.generatedCreativeId) {
+        setGeneratedCreativeId(draft.generatedCreativeId);
+      }
+      if (draft.selectedDirectionId) {
+        setSelectedDirectionId(draft.selectedDirectionId);
+      }
+      toast.success('Черновик восстановлен');
+    }
+  };
 
   // Закрытие полноэкранного просмотра по Escape
   useEffect(() => {
@@ -880,6 +953,9 @@ const CreativeGeneration = () => {
       setGeneratedCreativeId('');
       setTexts({ offer: '', bullets: '', profits: '' });
       setSelectedDirectionId('');
+
+      // Очищаем черновик после успешного создания
+      clearImageDraft();
     } catch (error: any) {
       console.error('Ошибка при создании креатива:', error);
       toast.error(error.message || 'Ошибка создания креатива', { id: 'upscale-create' });
@@ -938,6 +1014,47 @@ const CreativeGeneration = () => {
                 </TabsList>
 
                 <TabsContent value="generate" className="mt-0">
+
+          {/* Уведомление о сохраненном черновике */}
+          {hasSavedDraft && savedDraft && (
+            <Card className="mb-6 shadow-sm border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/50">
+                      <RotateCcw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-blue-900 dark:text-blue-100">
+                        Найден незавершённый черновик
+                      </div>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                        Сохранено {new Date(savedDraft.savedAt).toLocaleString('ru-RU')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={discardImageDraft}
+                      className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                    >
+                      Отклонить
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleRestoreDraft}
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-2" />
+                      Восстановить
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Предупреждение, если промпт не настроен */}
           {!userPrompt && userId && (

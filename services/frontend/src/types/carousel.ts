@@ -56,7 +56,7 @@ export interface GenerateCarouselRequest {
   visual_style?: CarouselVisualStyle;
   style_prompt?: string; // Промпт для freestyle стиля
   custom_prompts?: (string | null)[];
-  reference_images?: (string | null)[];
+  reference_images?: (string[] | null)[]; // Массив референсов для каждой карточки (до 2 на карточку)
   direction_id?: string;
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -7,13 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw, X, Plus } from 'lucide-react';
+import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw, X, Plus, RotateCcw, Undo2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
 import type { CarouselCard, CarouselVisualStyle, CardChangeOption } from '@/types/carousel';
 import JSZip from 'jszip';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
+import { useCarouselDraftAutoSave } from '@/hooks/useAutoSaveDraft';
 
 interface CarouselTabProps {
   userId: string | null;
@@ -60,6 +61,9 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   // Опции что именно менять при перегенерации
   const [cardChangeOptions, setCardChangeOptions] = useState<{[key: number]: CardChangeOption[]}>({});
 
+  // История изображений для отката (храним предыдущую версию для каждой карточки)
+  const [cardImageHistory, setCardImageHistory] = useState<{[key: number]: string}>({});
+
   // State для множественных промптов и референсов
   interface GlobalPrompt {
     id: string;
@@ -86,6 +90,76 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   // State для выбора карточек для скачивания
   const [selectedCardsForDownload, setSelectedCardsForDownload] = useState<number[]>([]);
 
+  // Автосохранение черновика
+  const {
+    hasSavedDraft,
+    savedDraft,
+    saveDraft: saveCarouselDraft,
+    restoreDraft: restoreCarouselDraft,
+    discardDraft: discardCarouselDraft,
+    clearDraft: clearCarouselDraft
+  } = useCarouselDraftAutoSave(userId, currentAdAccountId);
+
+  // Автосохранение при изменении данных
+  useEffect(() => {
+    if (!userId) return;
+
+    // Проверяем что есть что сохранять
+    const hasContent =
+      carouselIdea ||
+      carouselCards.length > 0 ||
+      globalPrompts.length > 0 ||
+      globalReferences.length > 0;
+
+    if (!hasContent) return;
+
+    saveCarouselDraft({
+      userId,
+      accountId: currentAdAccountId || undefined,
+      carouselIdea,
+      cardsCount,
+      carouselCards,
+      visualStyle,
+      stylePrompt,
+      globalPrompts,
+      globalReferences,
+      generatedCarouselId,
+      selectedDirectionId
+    });
+  }, [
+    userId,
+    currentAdAccountId,
+    carouselIdea,
+    cardsCount,
+    carouselCards,
+    visualStyle,
+    stylePrompt,
+    globalPrompts,
+    globalReferences,
+    generatedCarouselId,
+    selectedDirectionId,
+    saveCarouselDraft
+  ]);
+
+  // Функция восстановления черновика
+  const handleRestoreCarouselDraft = useCallback(() => {
+    const draft = restoreCarouselDraft();
+    if (draft) {
+      setCarouselIdea(draft.carouselIdea);
+      setCardsCount(draft.cardsCount);
+      setCarouselCards(draft.carouselCards);
+      setVisualStyle(draft.visualStyle as CarouselVisualStyle);
+      setStylePrompt(draft.stylePrompt);
+      setGlobalPrompts(draft.globalPrompts);
+      setGlobalReferences(draft.globalReferences);
+      setGeneratedCarouselId(draft.generatedCarouselId);
+      if (draft.selectedDirectionId) {
+        setSelectedDirectionId(draft.selectedDirectionId);
+      }
+      toast.success('Черновик карусели восстановлен');
+    }
+  }, [restoreCarouselDraft]);
+
   // Сброс состояния при смене аккаунта
   useEffect(() => {
     if (!currentAdAccountId) return;
@@ -104,6 +178,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setCardRegenerationPrompts({});
     setCardRegenerationImages({});
     setCardChangeOptions({});
+    setCardImageHistory({});
     setGlobalPrompts([]);
     setGlobalReferences([]);
     setLoadedImages({});
@@ -203,13 +278,12 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     });
   };
 
-  const buildReferenceImagesArray = (): (string | null)[] => {
+  const buildReferenceImagesArray = (): (string[] | null)[] => {
     return carouselCards.map((_, cardIndex) => {
       // Находим все референсы, которые применены к этой карточке
       const applicableRefs = globalReferences.filter(r => r.appliedToCards.includes(cardIndex));
-      // Если есть хотя бы один - возвращаем первый (можно расширить логику для нескольких)
-      // Пока API поддерживает один референс на карточку, берём первый
-      return applicableRefs.length > 0 ? applicableRefs[0].base64 : null;
+      // Возвращаем массив всех референсов для этой карточки (до 2 штук)
+      return applicableRefs.length > 0 ? applicableRefs.map(r => r.base64) : null;
     });
   };
 
@@ -486,6 +560,15 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const handleRegenerateCard = async (cardIndex: number) => {
     if (!userId || !generatedCarouselId) return;
 
+    // Сохраняем текущее изображение в историю перед регенерацией
+    const currentImageUrl = carouselCards[cardIndex]?.image_url;
+    if (currentImageUrl) {
+      setCardImageHistory(prev => ({
+        ...prev,
+        [cardIndex]: currentImageUrl
+      }));
+    }
+
     setRegeneratingCardIndex(cardIndex);
     try {
       const customPrompt = cardRegenerationPrompts[cardIndex] || undefined;
@@ -550,6 +633,31 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     } finally {
       setRegeneratingCardIndex(null);
     }
+  };
+
+  // Откат к предыдущей версии изображения
+  const handleUndoCardImage = (cardIndex: number) => {
+    const previousImageUrl = cardImageHistory[cardIndex];
+    if (!previousImageUrl) {
+      toast.error('Нет предыдущей версии для отката');
+      return;
+    }
+
+    // Восстанавливаем предыдущее изображение
+    const updatedCards = [...carouselCards];
+    updatedCards[cardIndex] = {
+      ...updatedCards[cardIndex],
+      image_url: previousImageUrl,
+      image_url_4k: undefined // Сбрасываем 4K версию
+    };
+    setCarouselCards(updatedCards);
+
+    // Очищаем историю для этой карточки
+    const newHistory = { ...cardImageHistory };
+    delete newHistory[cardIndex];
+    setCardImageHistory(newHistory);
+
+    toast.success(`Изображение карточки ${cardIndex + 1} восстановлено`);
   };
 
   // Upload референсного изображения для перегенерации (до 2 референсов)
@@ -734,6 +842,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
           `Креатив создан! ID: ${response.fb_creative_id}`,
           { id: toastId }
         );
+        // Очищаем черновик после успешного создания
+        clearCarouselDraft();
       } else {
         // Показываем детальную ошибку
         const errorMessage = response.facebook_error
@@ -756,12 +866,61 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setGeneratedCarouselId('');
     setCurrentCardIndex(0);
     setSelectedDirectionId('');
+    setGlobalPrompts([]);
+    setGlobalReferences([]);
+    setCardImageHistory({});  // Очищаем историю изображений
+    // Очищаем черновик при сбросе
+    clearCarouselDraft();
   };
 
   const hasGeneratedImages = carouselCards.length > 0 && carouselCards.every(c => c.image_url);
 
   return (
     <div className="space-y-6 py-6">
+      {/* Уведомление о сохраненном черновике */}
+      {hasSavedDraft && savedDraft && (
+        <Card className="shadow-sm border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/30">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/50">
+                  <RotateCcw className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <div className="font-medium text-blue-900 dark:text-blue-100">
+                    Найден незавершённый черновик карусели
+                  </div>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    {savedDraft.carouselCards.length > 0
+                      ? `${savedDraft.carouselCards.length} карточек • `
+                      : ''}
+                    Сохранено {new Date(savedDraft.savedAt).toLocaleString('ru-RU')}
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={discardCarouselDraft}
+                  className="border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                >
+                  Отклонить
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleRestoreCarouselDraft}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Восстановить
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Ввод идеи карусели */}
       <Card>
         <CardHeader>
@@ -1331,20 +1490,35 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                       </div>
                     </div>
 
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleRegenerateCard(currentCardIndex)}
-                      disabled={regeneratingCardIndex === currentCardIndex}
-                      className="w-full"
-                    >
-                      {regeneratingCardIndex === currentCardIndex ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleRegenerateCard(currentCardIndex)}
+                        disabled={regeneratingCardIndex === currentCardIndex}
+                        className="flex-1"
+                      >
+                        {regeneratingCardIndex === currentCardIndex ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Перегенерировать
+                      </Button>
+
+                      {/* Кнопка отката к предыдущей версии */}
+                      {cardImageHistory[currentCardIndex] && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleUndoCardImage(currentCardIndex)}
+                          disabled={regeneratingCardIndex === currentCardIndex}
+                          title="Вернуть предыдущую версию"
+                        >
+                          <Undo2 className="h-4 w-4" />
+                        </Button>
                       )}
-                      Перегенерировать карточку {currentCardIndex + 1}
-                    </Button>
+                    </div>
                   </div>
                 </div>
 

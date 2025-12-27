@@ -110,7 +110,7 @@ export interface GenerateCarouselRequest {
   visual_style?: CarouselVisualStyle; // Визуальный стиль карусели (по умолчанию 'clean_minimal')
   style_prompt?: string; // Промпт для freestyle стиля — пользователь сам задаёт визуальный стиль
   custom_prompts?: (string | null)[]; // Опциональные промпты для каждой карточки
-  reference_images?: (string | null)[]; // Опциональные референсные изображения (base64)
+  reference_images?: (string[] | null)[]; // Массив референсов для каждой карточки (до 2 на карточку)
   direction_id?: string;
 }
 
