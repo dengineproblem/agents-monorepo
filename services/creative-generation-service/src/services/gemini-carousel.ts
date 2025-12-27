@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { generateCarouselCardPrompt } from './carouselPromptGenerator';
 import { upscaleImageTo4K } from './gemini-image';
-import { CarouselVisualStyle } from '../types';
+import { CarouselVisualStyle, CardChangeOption } from '../types';
 
 let genAI: GoogleGenerativeAI | null = null;
 
@@ -28,6 +28,7 @@ function getGeminiClient(): GoogleGenerativeAI {
  * @param contentReferenceImages - Референсы контента от пользователя (товар, персонаж и т.п.) — до 2 штук
  * @param currentCardImage - Текущее изображение карточки (для перегенерации — редактируем эту картинку)
  * @param stylePrompt - Промпт для freestyle стиля (пользователь сам задаёт визуальный стиль)
+ * @param changeOptions - Что именно менять при перегенерации (если не указано — меняем всё)
  * @returns Base64 изображение
  */
 async function generateCarouselCard(
@@ -40,7 +41,8 @@ async function generateCarouselCard(
   styleReferenceImage?: string,
   contentReferenceImages?: string[],
   currentCardImage?: string,
-  stylePrompt?: string
+  stylePrompt?: string,
+  changeOptions?: CardChangeOption[]
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Generating card ${cardIndex + 1}/${totalCards}...`);
@@ -79,9 +81,60 @@ async function generateCarouselCard(
     // Оно идёт ПЕРВЫМ, чтобы Gemini понял что именно его нужно модифицировать
     if (currentCardImage) {
       console.log('[Gemini Carousel] Adding CURRENT CARD for editing...');
-      contentParts.push({
-        text: '\n\n[ИЗОБРАЖЕНИЕ ДЛЯ РЕДАКТИРОВАНИЯ - ГЛАВНОЕ!]\nЭто текущая карточка, которую нужно УЛУЧШИТЬ и ПЕРЕГЕНЕРИРОВАТЬ. Создай НОВУЮ версию этого изображения, сохраняя общую концепцию и композицию, но с улучшениями. Если есть дополнительные инструкции от пользователя — примени их к ЭТОМУ изображению.'
-      });
+      console.log('[Gemini Carousel] Change options:', changeOptions || 'all (default)');
+
+      // Формируем инструкцию в зависимости от того, что нужно менять
+      let editInstruction: string;
+
+      if (changeOptions && changeOptions.length > 0) {
+        // Пользователь выбрал конкретные элементы для изменения
+        const changeLabels: Record<CardChangeOption, string> = {
+          'background': 'ФОН (сцена, цвета, атмосфера)',
+          'typography': 'ТИПОГРАФИКА (шрифт, размер, расположение текста)',
+          'main_object': 'ОСНОВНОЙ ОБЪЕКТ (персонаж/предмет — поза, ракурс, действие)',
+          'composition': 'КОМПОЗИЦИЯ (расположение элементов на изображении)'
+        };
+
+        const keepLabels: Record<CardChangeOption, string> = {
+          'background': 'фон и атмосферу',
+          'typography': 'типографику и расположение текста',
+          'main_object': 'основной объект/персонаж',
+          'composition': 'общую композицию'
+        };
+
+        const allOptions: CardChangeOption[] = ['background', 'typography', 'main_object', 'composition'];
+        const toChange = changeOptions;
+        const toKeep = allOptions.filter(opt => !changeOptions.includes(opt));
+
+        const changeList = toChange.map(opt => `• ${changeLabels[opt]}`).join('\n');
+        const keepList = toKeep.length > 0
+          ? toKeep.map(opt => keepLabels[opt]).join(', ')
+          : '';
+
+        editInstruction = `[ИЗОБРАЖЕНИЕ ДЛЯ РЕДАКТИРОВАНИЯ]
+Это текущая карточка. Тебе нужно создать НОВУЮ версию с КОНКРЕТНЫМИ изменениями.
+
+⚡ ИЗМЕНИТЬ (пользователь явно попросил):
+${changeList}
+
+${toKeep.length > 0 ? `✓ СОХРАНИТЬ БЕЗ ИЗМЕНЕНИЙ:
+${keepList}` : '✓ Можешь изменить ВСЁ — пользователь выбрал все элементы для изменения.'}
+
+ВАЖНО: Инструкции пользователя (custom_prompt) имеют ВЫСШИЙ ПРИОРИТЕТ. Если пользователь просит изменить фон — МЕНЯЙ ФОН ПОЛНОСТЬЮ, даже если он был хорош.`;
+      } else {
+        // По умолчанию — улучшаем всё, но инструкции пользователя в приоритете
+        editInstruction = `[ИЗОБРАЖЕНИЕ ДЛЯ РЕДАКТИРОВАНИЯ]
+Это текущая карточка. Создай НОВУЮ улучшенную версию.
+
+ВАЖНО: Если есть дополнительные инструкции от пользователя (custom_prompt) — они имеют ВЫСШИЙ ПРИОРИТЕТ!
+• Если пользователь просит изменить фон — ПОЛНОСТЬЮ МЕНЯЙ ФОН
+• Если пользователь просит изменить композицию — МЕНЯЙ КОМПОЗИЦИЮ
+• Если пользователь просит изменить персонажа/объект — МЕНЯЙ ЕГО
+
+Только если инструкций нет — сохраняй общую концепцию с небольшими улучшениями.`;
+      }
+
+      contentParts.push({ text: '\n\n' + editInstruction });
       contentParts.push({
         inlineData: {
           mimeType: 'image/jpeg',
@@ -281,6 +334,7 @@ export async function generateCarouselImages(
  * @param customPrompt - Дополнительный промпт от пользователя
  * @param contentReferenceImages - Референсы контента от пользователя (до 2 штук)
  * @param stylePrompt - Промпт для freestyle стиля (пользователь сам задаёт визуальный стиль)
+ * @param changeOptions - Что именно менять при перегенерации (если не указано — меняем всё)
  * @returns Base64 изображение
  */
 export async function regenerateCarouselCard(
@@ -291,7 +345,8 @@ export async function regenerateCarouselCard(
   visualStyle: CarouselVisualStyle = 'clean_minimal',
   customPrompt?: string,
   contentReferenceImages?: string[],
-  stylePrompt?: string
+  stylePrompt?: string,
+  changeOptions?: CardChangeOption[]
 ): Promise<string> {
   try {
     console.log(`[Gemini Carousel] Regenerating card ${cardIndex + 1}...`);
@@ -328,7 +383,8 @@ export async function regenerateCarouselCard(
       styleReference,
       contentReferenceImages,
       currentCardImage,  // Передаём текущую карточку для редактирования
-      stylePrompt  // Для freestyle стиля
+      stylePrompt,  // Для freestyle стиля
+      changeOptions  // Что именно менять при перегенерации
     );
 
     console.log(`[Gemini Carousel] Card ${cardIndex + 1} regenerated successfully`);

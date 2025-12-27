@@ -7,6 +7,13 @@ export type CarouselVisualStyle =
   | 'asset_focus'
   | 'freestyle';
 
+// Опции того, что именно менять при перегенерации карточки
+export type CardChangeOption =
+  | 'background'      // Фон, сцена, атмосфера
+  | 'typography'      // Шрифт, размер, расположение текста
+  | 'main_object'     // Основной предмет/персонаж (поза, ракурс, действие)
+  | 'composition';    // Композиция, расположение элементов
+
 export interface CarouselCard {
   order: number;
   text: string;
@@ -71,6 +78,7 @@ export interface RegenerateCarouselCardRequest {
   reference_image?: string; // Для обратной совместимости (первый референс)
   reference_images?: string[]; // До 2 референсов
   text: string;
+  change_options?: CardChangeOption[]; // Что именно менять (если не указано — меняем всё)
 }
 
 export interface RegenerateCarouselCardResponse {

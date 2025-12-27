@@ -403,7 +403,7 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
     '/regenerate-carousel-card',
     async (request: FastifyRequest<{ Body: RegenerateCarouselCardRequest }>, reply: FastifyReply) => {
       try {
-        const { user_id, account_id, carousel_id, card_index, custom_prompt, style_prompt, reference_image, reference_images, text } = request.body;
+        const { user_id, account_id, carousel_id, card_index, custom_prompt, style_prompt, reference_image, reference_images, text, change_options } = request.body;
 
         // Собираем все референсы в один массив (reference_images приоритетнее)
         let contentReferenceImages: string[] | undefined;
@@ -420,7 +420,8 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           card_index,
           has_custom_prompt: !!custom_prompt,
           custom_prompt_length: custom_prompt?.length || 0,
-          reference_images_count: contentReferenceImages?.length || 0
+          reference_images_count: contentReferenceImages?.length || 0,
+          change_options: change_options || 'all (default)'
         });
 
         // Валидация
@@ -528,7 +529,8 @@ export default async function carouselRoutes(fastify: FastifyInstance) {
           visualStyle,
           custom_prompt,
           contentReferenceImages,
-          style_prompt  // Для freestyle стиля
+          style_prompt,  // Для freestyle стиля
+          change_options  // Что именно менять при перегенерации
         );
 
         // Загружаем новое изображение в Storage

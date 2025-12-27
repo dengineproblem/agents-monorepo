@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sparkles, Loader2, ImageIcon, Download, ChevronLeft, ChevronRight, RefreshCw, X, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { carouselApi } from '@/services/carouselApi';
-import type { CarouselCard, CarouselVisualStyle } from '@/types/carousel';
+import type { CarouselCard, CarouselVisualStyle, CardChangeOption } from '@/types/carousel';
 import JSZip from 'jszip';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
@@ -57,6 +57,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [cardRegenerationPrompts, setCardRegenerationPrompts] = useState<{[key: number]: string}>({});
   // Теперь поддерживаем до 2 референсов на карточку
   const [cardRegenerationImages, setCardRegenerationImages] = useState<{[key: number]: string[]}>({});
+  // Опции что именно менять при перегенерации
+  const [cardChangeOptions, setCardChangeOptions] = useState<{[key: number]: CardChangeOption[]}>({});
 
   // State для множественных промптов и референсов
   interface GlobalPrompt {
@@ -101,6 +103,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setSelectedDirectionId('');
     setCardRegenerationPrompts({});
     setCardRegenerationImages({});
+    setCardChangeOptions({});
     setGlobalPrompts([]);
     setGlobalReferences([]);
     setLoadedImages({});
@@ -487,6 +490,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     try {
       const customPrompt = cardRegenerationPrompts[cardIndex] || undefined;
       const referenceImages = cardRegenerationImages[cardIndex] || [];
+      const changeOptions = cardChangeOptions[cardIndex] || [];
       // Для обратной совместимости с API передаём первый референс как reference_image
       // и массив как reference_images
       const referenceImage = referenceImages.length > 0 ? referenceImages[0] : undefined;
@@ -495,7 +499,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         cardIndex,
         hasCustomPrompt: !!customPrompt,
         customPromptLength: customPrompt?.length || 0,
-        referenceImagesCount: referenceImages.length
+        referenceImagesCount: referenceImages.length,
+        changeOptions: changeOptions.length > 0 ? changeOptions : 'all (default)'
       });
 
       const response = await carouselApi.regenerateCard({
@@ -507,7 +512,8 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         style_prompt: visualStyle === 'freestyle' ? (stylePrompt || undefined) : undefined,
         reference_image: referenceImage,
         reference_images: referenceImages.length > 0 ? referenceImages : undefined,
-        text: carouselCards[cardIndex].text
+        text: carouselCards[cardIndex].text,
+        change_options: changeOptions.length > 0 ? changeOptions : undefined
       });
 
       if (response.success && response.card_data) {
@@ -521,7 +527,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
           setCreativeGenerationsAvailable(response.generations_remaining);
         }
 
-        // Очищаем промпт и изображения после успешной регенерации
+        // Очищаем промпт, изображения и опции после успешной регенерации
         const newPrompts = {...cardRegenerationPrompts};
         delete newPrompts[cardIndex];
         setCardRegenerationPrompts(newPrompts);
@@ -529,6 +535,10 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
         const newImages = {...cardRegenerationImages};
         delete newImages[cardIndex];
         setCardRegenerationImages(newImages);
+
+        const newOptions = {...cardChangeOptions};
+        delete newOptions[cardIndex];
+        setCardChangeOptions(newOptions);
 
         toast.success(`Карточка ${cardIndex + 1} перегенерирована!`);
       } else {
@@ -1170,7 +1180,54 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
                     Перегенерировать карточку
                     <HelpTooltip tooltipKey={TooltipKeys.CAROUSEL_REGENERATE_CARD} iconSize="sm" />
                   </h4>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
+                    {/* Что именно менять */}
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Что изменить?</Label>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        {([
+                          { value: 'background' as CardChangeOption, label: 'Фон' },
+                          { value: 'typography' as CardChangeOption, label: 'Типографика' },
+                          { value: 'main_object' as CardChangeOption, label: 'Объект/персонаж' },
+                          { value: 'composition' as CardChangeOption, label: 'Композиция' }
+                        ]).map(option => {
+                          const currentOptions = cardChangeOptions[currentCardIndex] || [];
+                          const isChecked = currentOptions.includes(option.value);
+                          return (
+                            <label
+                              key={option.value}
+                              className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${
+                                isChecked
+                                  ? 'bg-primary/10 border-primary/30'
+                                  : 'bg-background border-border hover:border-primary/20'
+                              }`}
+                            >
+                              <Checkbox
+                                checked={isChecked}
+                                onCheckedChange={(checked) => {
+                                  const current = cardChangeOptions[currentCardIndex] || [];
+                                  const updated = checked
+                                    ? [...current, option.value]
+                                    : current.filter(o => o !== option.value);
+                                  setCardChangeOptions({
+                                    ...cardChangeOptions,
+                                    [currentCardIndex]: updated
+                                  });
+                                }}
+                                disabled={regeneratingCardIndex === currentCardIndex}
+                              />
+                              <span className="text-xs">{option.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {(cardChangeOptions[currentCardIndex] || []).length === 0
+                          ? 'Не выбрано — будет улучшена вся карточка'
+                          : `Выбрано: ${(cardChangeOptions[currentCardIndex] || []).length}`}
+                      </p>
+                    </div>
+
                     <div>
                       <Label htmlFor={`regen-prompt-section-${currentCardIndex}`} className="text-xs text-muted-foreground">
                         Дополнительный промпт
