@@ -372,6 +372,158 @@ const timerLog = createContextLogger(baseLog, savedCtx, ['redis']);
 
 ---
 
+## Защита и надёжность
+
+### Rate Limiting
+
+Защита от спама с использованием Token Bucket алгоритма:
+
+```typescript
+// Конфигурация: 20 сообщений в минуту на телефон
+const MESSAGE_RATE_LIMIT: RateLimitConfig = {
+  maxTokens: 20,
+  refillRate: 0.333, // ~20 в минуту
+  tokensPerRequest: 1
+};
+
+// Проверка
+const rateCheck = checkRateLimit(`msg:${instanceName}:${phone}`, MESSAGE_RATE_LIMIT);
+if (!rateCheck.allowed) {
+  // Сообщение отклонено, retryAfterMs указывает когда можно повторить
+}
+```
+
+### Duplicate Detection
+
+Предотвращение повторной обработки одинаковых сообщений:
+
+```typescript
+// Использует hash-based сравнение с окном в 1 минуту
+if (isDuplicateMessage(phone, instanceName, messageText, ctxLog)) {
+  return { processed: false, reason: 'duplicate_message' };
+}
+```
+
+### Retry Logic
+
+Автоматические повторы для transient errors с exponential backoff:
+
+```typescript
+// Конфигурация
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2
+};
+
+// Использование
+const botConfig = await withRetry(
+  () => getBotConfigForInstance(instanceName, ctxLog),
+  ctxLog,
+  'getBotConfigForInstance',
+  { ...DEFAULT_RETRY_CONFIG, maxRetries: 2 }
+);
+```
+
+Retry применяется для ошибок с `isRetryable: true`:
+- `db_error` — ошибки базы данных
+- `timeout_error` — таймауты
+- `network_error` — сетевые ошибки
+- `openai_error` — rate limit от OpenAI
+
+### Валидация сообщений
+
+```typescript
+const validation = validateMessage(messageText, ctxLog);
+// {
+//   valid: boolean,
+//   sanitized: string,    // Очищенное сообщение
+//   warnings: string[]    // Предупреждения (truncated, removed null bytes)
+// }
+```
+
+Включает:
+- Ограничение длины (50000 символов)
+- Удаление null bytes
+- Удаление replacement characters
+
+### Safe JSON Parse
+
+Безопасный парсинг JSON с логированием ошибок:
+
+```typescript
+const functionArgs = safeJsonParse<Record<string, any>>(
+  toolCall.function.arguments || '{}',
+  {},
+  log,
+  `function_call:${toolCall.function.name}`
+);
+```
+
+### Подсчёт стоимости API
+
+```typescript
+// Цены за 1K токенов (центы)
+const TOKEN_PRICES = {
+  'gpt-4o': { input: 0.25, output: 1.0 },
+  'gpt-4o-mini': { input: 0.015, output: 0.06 },
+};
+
+// Лог включает стоимость
+logOpenAiCallWithCost(log, {
+  model: 'gpt-4o',
+  promptTokens: 500,
+  completionTokens: 200,
+  ...
+});
+// Output: [OpenAI] API call completed (gpt-4o) - $0.0033
+```
+
+### Stage Transitions
+
+Логирование переходов между этапами обработки:
+
+```typescript
+type ProcessingStage =
+  | 'received'         // Сообщение получено
+  | 'validated'        // Провалидировано
+  | 'config_loaded'    // Конфиг бота загружен
+  | 'lead_loaded'      // Лид загружен
+  | 'conditions_checked' // Условия проверены
+  | 'buffered'         // Добавлено в буфер
+  | 'history_loaded'   // История загружена
+  | 'ai_called'        // OpenAI вызван
+  | 'response_generated' // Ответ сгенерирован
+  | 'message_sent'     // Сообщение отправлено
+  | 'completed'        // Завершено успешно
+  | 'failed';          // Ошибка
+
+// Пример лога
+// [Flow] received → validated
+// [Flow] validated → config_loaded
+// ...
+// [Flow] === PROCESSING COMPLETED SUCCESSFULLY ===
+```
+
+### Сохранение истории сообщений
+
+Бот автоматически сохраняет входящие и исходящие сообщения:
+
+```typescript
+// Структура сообщения в JSONB поле 'messages'
+{
+  sender: 'user' | 'bot',
+  content: string,
+  timestamp: string  // ISO 8601
+}
+
+// Лимит: 100 последних сообщений
+const trimmedMessages = currentMessages.slice(-LIMITS.MAX_HISTORY_MESSAGES);
+```
+
+---
+
 ## Конфигурация моделей
 
 Поддерживаемые модели OpenAI:
@@ -576,3 +728,18 @@ redis-cli lrange "pending_messages:instance:phone" 0 -1
   - Метрики производительности
   - Классификация ошибок
   - Context propagation через Redis
+
+### v1.3.0 (2024-12-28)
+- Защита и надёжность:
+  - Rate limiting (20 сообщений/мин на телефон)
+  - Duplicate detection для предотвращения двойной обработки
+  - Retry логика с exponential backoff и jitter
+  - Валидация и санитизация входящих сообщений
+  - Безопасный JSON.parse (safeJsonParse)
+- Расширенное логирование:
+  - Stage transitions (переходы между этапами обработки)
+  - Processing summary с полными метриками
+  - Подсчёт стоимости API вызовов OpenAI
+- Улучшения:
+  - Сохранение истории сообщений (user + bot responses)
+  - Лимит истории до 100 сообщений

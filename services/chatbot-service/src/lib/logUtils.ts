@@ -551,3 +551,403 @@ export function logOutgoingMessage(
     );
   }
 }
+
+// ============ RETRY ЛОГИКА ============
+
+/** Конфигурация retry */
+export interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  backoffMultiplier: number;
+}
+
+/** Дефолтная конфигурация retry */
+export const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2
+};
+
+/** Рассчитать задержку для retry с jitter */
+export function calculateRetryDelay(attempt: number, config: RetryConfig = DEFAULT_RETRY_CONFIG): number {
+  const delay = Math.min(
+    config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt),
+    config.maxDelayMs
+  );
+  // Добавляем jitter ±20%
+  const jitter = delay * 0.2 * (Math.random() - 0.5) * 2;
+  return Math.round(delay + jitter);
+}
+
+/** Выполнить функцию с retry */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  ctxLog: ContextLogger,
+  operationName: string,
+  config: RetryConfig = DEFAULT_RETRY_CONFIG
+): Promise<T> {
+  let lastError: any;
+
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        const delay = calculateRetryDelay(attempt - 1, config);
+        ctxLog.debug({
+          attempt,
+          maxRetries: config.maxRetries,
+          delayMs: delay,
+          operation: operationName
+        }, `[Retry] Attempt ${attempt}/${config.maxRetries} after ${delay}ms delay`, ['processing']);
+
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      const { isRetryable } = classifyError(error);
+
+      ctxLog.warn({
+        attempt,
+        maxRetries: config.maxRetries,
+        operation: operationName,
+        errorMessage: error?.message,
+        isRetryable
+      }, `[Retry] Attempt ${attempt} failed for ${operationName}`, ['processing']);
+
+      if (!isRetryable || attempt >= config.maxRetries) {
+        break;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+// ============ RATE LIMITING ============
+
+/** Состояние rate limiter для конкретного ключа */
+interface RateLimitState {
+  tokens: number;
+  lastRefill: number;
+}
+
+/** In-memory rate limiter (для одного процесса) */
+const rateLimitStates = new Map<string, RateLimitState>();
+
+/** Конфигурация rate limiter */
+export interface RateLimitConfig {
+  maxTokens: number;      // Максимальное количество токенов
+  refillRate: number;     // Токенов в секунду
+  tokensPerRequest: number; // Токенов на запрос
+}
+
+/** Дефолтная конфигурация (10 сообщений в минуту) */
+export const DEFAULT_RATE_LIMIT: RateLimitConfig = {
+  maxTokens: 10,
+  refillRate: 0.167, // ~10 в минуту
+  tokensPerRequest: 1
+};
+
+/** Проверить rate limit */
+export function checkRateLimit(
+  key: string,
+  config: RateLimitConfig = DEFAULT_RATE_LIMIT,
+  ctxLog?: ContextLogger
+): { allowed: boolean; remainingTokens: number; retryAfterMs?: number } {
+  const now = Date.now();
+  let state = rateLimitStates.get(key);
+
+  if (!state) {
+    state = { tokens: config.maxTokens, lastRefill: now };
+    rateLimitStates.set(key, state);
+  }
+
+  // Пополнить токены
+  const elapsed = (now - state.lastRefill) / 1000;
+  const refill = elapsed * config.refillRate;
+  state.tokens = Math.min(config.maxTokens, state.tokens + refill);
+  state.lastRefill = now;
+
+  // Проверить доступность
+  if (state.tokens >= config.tokensPerRequest) {
+    state.tokens -= config.tokensPerRequest;
+
+    ctxLog?.debug({
+      rateLimitKey: key,
+      remainingTokens: Math.round(state.tokens * 100) / 100,
+      maxTokens: config.maxTokens
+    }, '[RateLimit] Request allowed', ['processing']);
+
+    return { allowed: true, remainingTokens: state.tokens };
+  }
+
+  // Рассчитать время до следующего доступного токена
+  const tokensNeeded = config.tokensPerRequest - state.tokens;
+  const retryAfterMs = Math.ceil((tokensNeeded / config.refillRate) * 1000);
+
+  ctxLog?.warn({
+    rateLimitKey: key,
+    remainingTokens: Math.round(state.tokens * 100) / 100,
+    retryAfterMs
+  }, '[RateLimit] Request throttled', ['processing']);
+
+  return { allowed: false, remainingTokens: state.tokens, retryAfterMs };
+}
+
+/** Очистить rate limit state для ключа */
+export function resetRateLimit(key: string): void {
+  rateLimitStates.delete(key);
+}
+
+// ============ ПОДСЧЁТ СТОИМОСТИ ТОКЕНОВ ============
+
+/** Цены за 1K токенов в центах (примерные на декабрь 2024) */
+export const TOKEN_PRICES: Record<string, { input: number; output: number }> = {
+  'gpt-4o': { input: 0.25, output: 1.0 },
+  'gpt-4o-mini': { input: 0.015, output: 0.06 },
+  'gpt-4-turbo': { input: 1.0, output: 3.0 },
+  'gpt-3.5-turbo': { input: 0.05, output: 0.15 }
+};
+
+/** Рассчитать стоимость API вызова */
+export function calculateApiCost(
+  model: string,
+  promptTokens: number,
+  completionTokens: number
+): { inputCostCents: number; outputCostCents: number; totalCostCents: number } {
+  const prices = TOKEN_PRICES[model] || TOKEN_PRICES['gpt-4o-mini'];
+
+  const inputCostCents = (promptTokens / 1000) * prices.input;
+  const outputCostCents = (completionTokens / 1000) * prices.output;
+  const totalCostCents = inputCostCents + outputCostCents;
+
+  return {
+    inputCostCents: Math.round(inputCostCents * 1000) / 1000,
+    outputCostCents: Math.round(outputCostCents * 1000) / 1000,
+    totalCostCents: Math.round(totalCostCents * 1000) / 1000
+  };
+}
+
+/** Расширенный лог для OpenAI с стоимостью */
+export function logOpenAiCallWithCost(
+  ctxLogger: ContextLogger,
+  data: {
+    model: string;
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    latencyMs: number;
+    success: boolean;
+    errorMessage?: string;
+  }
+): void {
+  if (data.success && data.promptTokens && data.completionTokens) {
+    const cost = calculateApiCost(data.model, data.promptTokens, data.completionTokens);
+
+    ctxLogger.info(
+      {
+        aiModel: data.model,
+        aiPromptTokens: data.promptTokens,
+        aiCompletionTokens: data.completionTokens,
+        aiTotalTokens: data.totalTokens,
+        aiLatencyMs: data.latencyMs,
+        aiInputCostCents: cost.inputCostCents,
+        aiOutputCostCents: cost.outputCostCents,
+        aiTotalCostCents: cost.totalCostCents
+      },
+      `[OpenAI] API call completed (${data.model}) - $${(cost.totalCostCents / 100).toFixed(4)}`,
+      ['openai', 'api']
+    );
+  } else {
+    logOpenAiCall(ctxLogger, data);
+  }
+}
+
+// ============ ВАЛИДАЦИЯ И САНИТИЗАЦИЯ ============
+
+/** Максимальные размеры */
+export const LIMITS = {
+  MAX_MESSAGE_LENGTH: 50000,      // Максимальная длина сообщения
+  MAX_HISTORY_MESSAGES: 100,      // Максимум сообщений в истории
+  MAX_SYSTEM_PROMPT_LENGTH: 10000 // Максимальная длина системного промпта
+};
+
+/** Валидировать входящее сообщение */
+export function validateMessage(
+  message: string | undefined,
+  ctxLog?: ContextLogger
+): { valid: boolean; sanitized: string; warnings: string[] } {
+  const warnings: string[] = [];
+
+  if (!message) {
+    return { valid: false, sanitized: '', warnings: ['Message is empty'] };
+  }
+
+  let sanitized = message;
+
+  // Проверить длину
+  if (sanitized.length > LIMITS.MAX_MESSAGE_LENGTH) {
+    const originalLength = sanitized.length;
+    sanitized = sanitized.substring(0, LIMITS.MAX_MESSAGE_LENGTH);
+    warnings.push(`Message truncated from ${originalLength} to ${LIMITS.MAX_MESSAGE_LENGTH} chars`);
+
+    ctxLog?.warn({
+      originalLength,
+      truncatedTo: LIMITS.MAX_MESSAGE_LENGTH
+    }, '[Validation] Message truncated due to length limit', ['validation']);
+  }
+
+  // Удалить null bytes и другие проблемные символы
+  const beforeSanitize = sanitized.length;
+  sanitized = sanitized.replace(/\x00/g, '').replace(/\uFFFD/g, '');
+  if (sanitized.length !== beforeSanitize) {
+    warnings.push('Removed null bytes or replacement characters');
+  }
+
+  return { valid: true, sanitized, warnings };
+}
+
+// ============ DUPLICATE DETECTION ============
+
+/** Хранилище для обнаружения дубликатов */
+const recentMessages = new Map<string, { hash: string; timestamp: number }>();
+
+/** Очистка старых записей (каждые 5 минут) */
+const DUPLICATE_WINDOW_MS = 60000; // 1 минута
+
+/** Создать хэш сообщения */
+function hashMessage(phone: string, message: string): string {
+  // Простой хэш для быстрого сравнения
+  let hash = 0;
+  const str = `${phone}:${message}`;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return hash.toString(16);
+}
+
+/** Проверить на дубликат сообщения */
+export function isDuplicateMessage(
+  phone: string,
+  instanceName: string,
+  message: string,
+  ctxLog?: ContextLogger
+): boolean {
+  const now = Date.now();
+  const key = `${instanceName}:${phone}`;
+  const hash = hashMessage(phone, message);
+
+  // Очистить старые записи
+  for (const [k, v] of recentMessages.entries()) {
+    if (now - v.timestamp > DUPLICATE_WINDOW_MS) {
+      recentMessages.delete(k);
+    }
+  }
+
+  const existing = recentMessages.get(key);
+  if (existing && existing.hash === hash && (now - existing.timestamp) < DUPLICATE_WINDOW_MS) {
+    ctxLog?.warn({
+      phone: maskPhone(phone),
+      instance: instanceName,
+      timeSinceLastMs: now - existing.timestamp
+    }, '[Duplicate] Duplicate message detected, skipping', ['validation', 'message']);
+    return true;
+  }
+
+  recentMessages.set(key, { hash, timestamp: now });
+  return false;
+}
+
+// ============ FLOW LOGGING ============
+
+/** Типы этапов обработки сообщения */
+export type ProcessingStage =
+  | 'received'
+  | 'validated'
+  | 'config_loaded'
+  | 'lead_loaded'
+  | 'conditions_checked'
+  | 'buffered'
+  | 'history_loaded'
+  | 'ai_called'
+  | 'response_generated'
+  | 'message_sent'
+  | 'function_executed'
+  | 'completed'
+  | 'failed';
+
+/** Лог перехода между этапами */
+export function logStageTransition(
+  ctxLog: ContextLogger,
+  fromStage: ProcessingStage,
+  toStage: ProcessingStage,
+  data?: Record<string, any>
+): void {
+  ctxLog.info({
+    fromStage,
+    toStage,
+    ...data
+  }, `[Flow] ${fromStage} → ${toStage}`, ['processing']);
+
+  ctxLog.checkpoint(toStage);
+}
+
+/** Создать summary лог в конце обработки */
+export function logProcessingSummary(
+  ctxLog: ContextLogger,
+  data: {
+    success: boolean;
+    finalStage: ProcessingStage;
+    responseLength?: number;
+    tokensUsed?: number;
+    costCents?: number;
+    errorMessage?: string;
+  }
+): void {
+  const timings = ctxLog.getTimings();
+
+  if (data.success) {
+    ctxLog.info({
+      finalStage: data.finalStage,
+      responseLen: data.responseLength,
+      tokensUsed: data.tokensUsed,
+      costCents: data.costCents,
+      ...timings
+    }, '[Flow] === PROCESSING COMPLETED SUCCESSFULLY ===', ['processing']);
+  } else {
+    ctxLog.error(new Error(data.errorMessage || 'Unknown error'),
+      '[Flow] === PROCESSING FAILED ===',
+      {
+        finalStage: data.finalStage,
+        ...timings
+      },
+      ['processing']
+    );
+  }
+}
+
+// ============ SAFE JSON PARSE ============
+
+/** Безопасный JSON.parse с логированием */
+export function safeJsonParse<T>(
+  json: string,
+  defaultValue: T,
+  ctxLog?: ContextLogger,
+  context?: string
+): T {
+  try {
+    return JSON.parse(json) as T;
+  } catch (error: any) {
+    ctxLog?.warn({
+      jsonPreview: truncateText(json, 100),
+      context,
+      errorMessage: error?.message
+    }, '[JSON] Failed to parse JSON, using default', ['validation']);
+    return defaultValue;
+  }
+}

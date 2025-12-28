@@ -2,12 +2,17 @@
  * AI Bot Engine - обработка сообщений с использованием настроек из конструктора
  * Использует таблицу ai_bot_configurations для получения настроек бота
  *
- * Logging features:
- * - Correlation ID для трассировки запросов
- * - Маскирование чувствительных данных (телефоны, API ключи)
- * - Структурированные теги для фильтрации
- * - Метрики производительности
- * - Классификация ошибок
+ * Features:
+ * - Correlation ID для трассировки запросов через все этапы
+ * - Маскирование чувствительных данных (телефоны, API ключи, UUID)
+ * - Структурированные теги для фильтрации логов
+ * - Метрики производительности с checkpoints
+ * - Классификация ошибок с retry hints
+ * - Rate limiting для защиты от спама
+ * - Duplicate detection для предотвращения повторной обработки
+ * - Retry логика для transient errors
+ * - Подсчёт стоимости API вызовов
+ * - Сохранение ответов бота в историю
  */
 
 import { FastifyInstance } from 'fastify';
@@ -25,16 +30,35 @@ import {
   maskUuid,
   truncateText,
   logDbOperation,
-  logOpenAiCall,
   logWebhookCall,
   logIncomingMessage,
   logOutgoingMessage,
-  LogTag
+  LogTag,
+  // Новые утилиты
+  withRetry,
+  DEFAULT_RETRY_CONFIG,
+  checkRateLimit,
+  RateLimitConfig,
+  logOpenAiCallWithCost,
+  validateMessage,
+  isDuplicateMessage,
+  logStageTransition,
+  logProcessingSummary,
+  ProcessingStage,
+  safeJsonParse,
+  LIMITS
 } from './logUtils.js';
 
 const baseLog = createLogger({ module: 'aiBotEngine' });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+
+// Rate limit конфигурация: 20 сообщений в минуту на телефон
+const MESSAGE_RATE_LIMIT: RateLimitConfig = {
+  maxTokens: 20,
+  refillRate: 0.333, // ~20 в минуту
+  tokensPerRequest: 1
+};
 
 // Типы для настроек бота из конструктора
 export interface AIBotConfig {
@@ -676,6 +700,60 @@ async function processAIBotResponse(
       success: true
     });
 
+    // === Сохранить сообщения в историю ===
+    ctxLog.checkpoint('save_history');
+    ctxLog.debug({}, '[processAIBotResponse] Saving messages to history', ['db']);
+
+    try {
+      // Получить текущую историю
+      const { data: currentLead } = await supabase
+        .from('dialog_analysis')
+        .select('messages')
+        .eq('id', lead.id)
+        .single();
+
+      const currentMessages = Array.isArray(currentLead?.messages) ? currentLead.messages : [];
+      const now = new Date().toISOString();
+
+      // Добавить входящее сообщение пользователя
+      currentMessages.push({
+        sender: 'user',
+        content: messageText,
+        timestamp: now
+      });
+
+      // Добавить ответ бота
+      currentMessages.push({
+        sender: 'bot',
+        content: finalText,
+        timestamp: now
+      });
+
+      // Ограничить историю по количеству (последние 100 сообщений)
+      const trimmedMessages = currentMessages.slice(-LIMITS.MAX_HISTORY_MESSAGES);
+
+      // Сохранить обновлённую историю
+      const { error: historyError } = await supabase
+        .from('dialog_analysis')
+        .update({ messages: trimmedMessages })
+        .eq('id', lead.id);
+
+      if (historyError) {
+        ctxLog.warn({
+          errorCode: historyError.code
+        }, '[processAIBotResponse] Failed to save message history (non-fatal)', ['db']);
+      } else {
+        ctxLog.debug({
+          totalMessages: trimmedMessages.length,
+          addedMessages: 2
+        }, '[processAIBotResponse] Message history saved', ['db']);
+      }
+    } catch (histError) {
+      ctxLog.warn({
+        error: (histError as any)?.message
+      }, '[processAIBotResponse] Error saving history (non-fatal)', ['db']);
+    }
+
     // Обновить этап воронки если нужно
     if (response.moveToStage) {
       ctxLog.info({
@@ -717,6 +795,7 @@ async function processAIBotResponse(
     ctxLog.info({
       responseLen: finalText.length,
       chunksCount: chunks.length,
+      historyUpdated: true,
       ...ctxLog.getTimings()
     }, '[processAIBotResponse] Bot response sent successfully');
 
@@ -1033,7 +1112,8 @@ async function generateAIResponse(
 
     const choice = completion.choices[0];
 
-    logOpenAiCall(log, {
+    // Используем расширенный лог с подсчётом стоимости
+    logOpenAiCallWithCost(log, {
       model,
       promptTokens: completion.usage?.prompt_tokens,
       completionTokens: completion.usage?.completion_tokens,
@@ -1046,15 +1126,27 @@ async function generateAIResponse(
       finishReason: choice.finish_reason,
       hasContent: !!choice.message.content,
       contentLen: choice.message.content?.length || 0,
-      hasToolCalls: !!choice.message.tool_calls?.length
+      hasToolCalls: !!choice.message.tool_calls?.length,
+      promptTokens: completion.usage?.prompt_tokens,
+      completionTokens: completion.usage?.completion_tokens
     }, '[generateAIResponse] OpenAI API response received', ['openai']);
 
     // Проверить вызов функции
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
       const toolCall = choice.message.tool_calls[0];
+
+      // Безопасный парсинг аргументов функции
+      const functionArgs = safeJsonParse<Record<string, any>>(
+        toolCall.function.arguments || '{}',
+        {},
+        log,
+        `function_call:${toolCall.function.name}`
+      );
+
       log.info({
         funcName: toolCall.function.name,
-        argsPreview: truncateText(toolCall.function.arguments, 80)
+        argsPreview: truncateText(toolCall.function.arguments, 80),
+        argsKeys: Object.keys(functionArgs)
       }, '[generateAIResponse] Function call detected', ['openai']);
 
       log.info({ ...log.getTimings() }, '[generateAIResponse] Completed with function call');
@@ -1063,7 +1155,7 @@ async function generateAIResponse(
         text: choice.message.content || '',
         functionCall: {
           name: toolCall.function.name,
-          arguments: JSON.parse(toolCall.function.arguments || '{}')
+          arguments: functionArgs
         }
       };
     }
@@ -1079,7 +1171,7 @@ async function generateAIResponse(
     };
 
   } catch (error: any) {
-    logOpenAiCall(log, {
+    logOpenAiCallWithCost(log, {
       model,
       latencyMs: 0,
       success: false,
@@ -1325,6 +1417,12 @@ function delay(ms: number): Promise<void> {
 /**
  * Главная точка входа - обработка входящего сообщения
  * Создаёт correlation ID для всей цепочки обработки
+ *
+ * Включает:
+ * - Rate limiting для защиты от спама
+ * - Duplicate detection для предотвращения повторной обработки
+ * - Валидацию и санитизацию сообщений
+ * - Полную трассировку через все этапы
  */
 export async function processIncomingMessage(
   phone: string,
@@ -1338,6 +1436,8 @@ export async function processIncomingMessage(
     phone,
     instanceName
   }, ['message', 'processing']);
+
+  let currentStage: ProcessingStage = 'received';
 
   ctxLog.info({
     msgType: messageType,
@@ -1353,34 +1453,115 @@ export async function processIncomingMessage(
   });
 
   try {
-    // Получить конфигурацию бота для этого инстанса
-    ctxLog.checkpoint('fetch_config');
+    // === ЭТАП 1: Rate Limiting ===
+    const rateLimitKey = `msg:${instanceName}:${phone}`;
+    const rateCheck = checkRateLimit(rateLimitKey, MESSAGE_RATE_LIMIT, ctxLog);
+
+    if (!rateCheck.allowed) {
+      ctxLog.warn({
+        reason: 'rate_limited',
+        retryAfterMs: rateCheck.retryAfterMs,
+        remainingTokens: rateCheck.remainingTokens
+      }, '[processIncomingMessage] Rate limit exceeded, dropping message', ['validation']);
+
+      logProcessingSummary(ctxLog, {
+        success: false,
+        finalStage: 'received',
+        errorMessage: 'Rate limit exceeded'
+      });
+
+      return { processed: false, reason: 'rate_limited', correlationId: ctxLog.context.correlationId };
+    }
+
+    // === ЭТАП 2: Duplicate Detection ===
+    if (messageText && isDuplicateMessage(phone, instanceName, messageText, ctxLog)) {
+      logProcessingSummary(ctxLog, {
+        success: false,
+        finalStage: 'received',
+        errorMessage: 'Duplicate message'
+      });
+
+      return { processed: false, reason: 'duplicate_message', correlationId: ctxLog.context.correlationId };
+    }
+
+    // === ЭТАП 3: Validation ===
+    logStageTransition(ctxLog, currentStage, 'validated');
+    currentStage = 'validated';
+
+    const validation = validateMessage(messageText, ctxLog);
+    if (!validation.valid) {
+      ctxLog.warn({
+        warnings: validation.warnings,
+        reason: 'invalid_message'
+      }, '[processIncomingMessage] Message validation failed', ['validation']);
+
+      logProcessingSummary(ctxLog, {
+        success: false,
+        finalStage: 'validated',
+        errorMessage: 'Invalid message'
+      });
+
+      return { processed: false, reason: 'invalid_message', correlationId: ctxLog.context.correlationId };
+    }
+
+    // Используем санитизированный текст
+    const sanitizedText = validation.sanitized;
+    if (validation.warnings.length > 0) {
+      ctxLog.debug({
+        warnings: validation.warnings,
+        originalLen: messageText?.length,
+        sanitizedLen: sanitizedText.length
+      }, '[processIncomingMessage] Message sanitized with warnings', ['validation']);
+    }
+
+    // === ЭТАП 4: Получить конфигурацию бота ===
+    logStageTransition(ctxLog, currentStage, 'config_loaded');
+    currentStage = 'config_loaded';
+
     ctxLog.debug({ instance: instanceName }, '[processIncomingMessage] Fetching bot configuration', ['config']);
-    const botConfig = await getBotConfigForInstance(instanceName, ctxLog);
+
+    const botConfig = await withRetry(
+      () => getBotConfigForInstance(instanceName, ctxLog),
+      ctxLog,
+      'getBotConfigForInstance',
+      { ...DEFAULT_RETRY_CONFIG, maxRetries: 2 }
+    ).catch(() => null);
 
     if (!botConfig) {
       ctxLog.warn({
         reason: 'no_bot_config',
         ...ctxLog.getTimings()
       }, '[processIncomingMessage] No bot config found, message will not be processed', ['config']);
+
+      logProcessingSummary(ctxLog, {
+        success: false,
+        finalStage: currentStage,
+        errorMessage: 'No bot config found'
+      });
+
       return { processed: false, reason: 'no_bot_config', correlationId: ctxLog.context.correlationId };
     }
 
     // Обновляем контекст с данными бота
     ctxLog.updateContext({
       botId: botConfig.id,
-      botName: botConfig.name
+      botName: botConfig.name,
+      userAccountId: botConfig.user_account_id
     });
 
     ctxLog.info({
       botId: maskUuid(botConfig.id),
       botName: botConfig.name,
       model: botConfig.model,
-      isActive: botConfig.is_active
+      isActive: botConfig.is_active,
+      bufferSec: botConfig.message_buffer_seconds,
+      scheduleEnabled: botConfig.schedule_enabled
     }, '[processIncomingMessage] Bot config loaded', ['config']);
 
-    // Получить информацию о лиде
-    ctxLog.checkpoint('fetch_lead');
+    // === ЭТАП 5: Получить информацию о лиде ===
+    logStageTransition(ctxLog, currentStage, 'lead_loaded');
+    currentStage = 'lead_loaded';
+
     ctxLog.debug({ phone: maskPhone(phone) }, '[processIncomingMessage] Fetching lead info', ['db']);
 
     const { data: lead, error: leadError } = await supabase
@@ -1395,6 +1576,13 @@ export async function processIncomingMessage(
         phone: maskPhone(phone),
         instance: instanceName
       }, ['db']);
+
+      logProcessingSummary(ctxLog, {
+        success: false,
+        finalStage: currentStage,
+        errorMessage: 'Lead fetch error'
+      });
+
       return { processed: false, reason: 'lead_fetch_error', correlationId: ctxLog.context.correlationId };
     }
 
@@ -1404,6 +1592,13 @@ export async function processIncomingMessage(
         reason: 'lead_not_found',
         ...ctxLog.getTimings()
       }, '[processIncomingMessage] Lead not found in dialog_analysis', ['db']);
+
+      logProcessingSummary(ctxLog, {
+        success: false,
+        finalStage: currentStage,
+        errorMessage: 'Lead not found'
+      });
+
       return { processed: false, reason: 'lead_not_found', correlationId: ctxLog.context.correlationId };
     }
 
@@ -1413,27 +1608,38 @@ export async function processIncomingMessage(
     logDbOperation(ctxLog, 'select', 'dialog_analysis', {
       leadId: maskUuid(lead.id),
       contactName: lead.contact_name,
-      funnelStage: lead.funnel_stage
+      funnelStage: lead.funnel_stage,
+      botPaused: lead.bot_paused,
+      assignedToHuman: lead.assigned_to_human
     }, true);
 
-    // Проверить, должен ли бот ответить
-    ctxLog.checkpoint('check_respond');
-    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig, undefined, ctxLog);
+    // === ЭТАП 6: Проверить условия ответа ===
+    logStageTransition(ctxLog, currentStage, 'conditions_checked');
+    currentStage = 'conditions_checked';
+
+    const { shouldRespond, reason } = shouldBotRespondWithConfig(lead, botConfig, sanitizedText, ctxLog);
     if (!shouldRespond) {
       ctxLog.info({
         reason,
         ...ctxLog.getTimings()
       }, '[processIncomingMessage] Bot should not respond');
+
+      logProcessingSummary(ctxLog, {
+        success: true, // Успешно обработали, но решили не отвечать
+        finalStage: currentStage
+      });
+
       return { processed: false, reason, correlationId: ctxLog.context.correlationId };
     }
 
     // Обработка разных типов сообщений
-    let textToProcess = messageText;
+    // Используем sanitizedText вместо messageText
+    let textToProcess = sanitizedText;
 
     ctxLog.debug({
       msgType: messageType,
-      hasText: !!messageText,
-      textLength: messageText?.length || 0
+      hasText: !!sanitizedText,
+      textLength: sanitizedText?.length || 0
     }, '[processIncomingMessage] Processing message by type');
 
     switch (messageType) {
@@ -1482,11 +1688,11 @@ export async function processIncomingMessage(
           }
           return { processed: true, reason: 'image_not_supported', correlationId: ctxLog.context.correlationId };
         }
-        if (!messageText || messageText.trim() === '') {
+        if (!sanitizedText || sanitizedText.trim() === '') {
           ctxLog.warn({}, '[processIncomingMessage] Empty image message (no caption)');
           return { processed: false, reason: 'empty_image_message', correlationId: ctxLog.context.correlationId };
         }
-        ctxLog.debug({ captionLen: messageText.length }, '[processIncomingMessage] Image has caption');
+        ctxLog.debug({ captionLen: sanitizedText.length }, '[processIncomingMessage] Image has caption');
         break;
 
       case 'document':
@@ -1508,11 +1714,11 @@ export async function processIncomingMessage(
           }
           return { processed: true, reason: 'document_not_supported', correlationId: ctxLog.context.correlationId };
         }
-        if (!messageText || messageText.trim() === '') {
+        if (!sanitizedText || sanitizedText.trim() === '') {
           ctxLog.warn({}, '[processIncomingMessage] Empty document message (no caption)');
           return { processed: false, reason: 'empty_document_message', correlationId: ctxLog.context.correlationId };
         }
-        ctxLog.debug({ captionLen: messageText.length }, '[processIncomingMessage] Document has caption');
+        ctxLog.debug({ captionLen: sanitizedText.length }, '[processIncomingMessage] Document has caption');
         break;
 
       case 'file':
@@ -1539,22 +1745,29 @@ export async function processIncomingMessage(
 
       case 'text':
       default:
-        if (!messageText || messageText.trim() === '') {
+        if (!sanitizedText || sanitizedText.trim() === '') {
           ctxLog.warn({ msgType: messageType }, '[processIncomingMessage] Empty text message');
           return { processed: false, reason: 'empty_message', correlationId: ctxLog.context.correlationId };
         }
-        ctxLog.debug({ textLen: messageText.length }, '[processIncomingMessage] Text message validated');
+        ctxLog.debug({ textLen: sanitizedText.length }, '[processIncomingMessage] Text message validated');
         break;
     }
 
-    // Склеить сообщения с настраиваемым буфером
-    ctxLog.checkpoint('buffer');
+    // === ЭТАП 7: Буферизация ===
+    logStageTransition(ctxLog, currentStage, 'buffered');
+    currentStage = 'buffered';
+
     ctxLog.info({
       textLen: textToProcess.length,
       bufferSec: botConfig.message_buffer_seconds
     }, '[processIncomingMessage] Adding to message buffer', ['redis']);
 
     await collectMessagesWithConfig(phone, instanceName, textToProcess, botConfig, app, ctxLog.context);
+
+    logProcessingSummary(ctxLog, {
+      success: true,
+      finalStage: currentStage
+    });
 
     ctxLog.info({
       msgType: messageType,
@@ -1567,6 +1780,13 @@ export async function processIncomingMessage(
       msgType: messageType,
       ...ctxLog.getTimings()
     });
+
+    logProcessingSummary(ctxLog, {
+      success: false,
+      finalStage: currentStage,
+      errorMessage: error?.message
+    });
+
     return { processed: false, reason: 'error', correlationId: ctxLog.context.correlationId };
   }
 }

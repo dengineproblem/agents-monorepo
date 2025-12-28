@@ -191,3 +191,82 @@ export function createTimingData(startTime: number, additionalData?: Record<stri
     ...additionalData
   };
 }
+
+// ============ ВАЛИДАЦИЯ ============
+
+/** Максимальные размеры */
+export const LIMITS = {
+  MAX_BOT_NAME_LENGTH: 100,
+  MAX_SYSTEM_PROMPT_LENGTH: 50000,
+  MAX_FUNCTION_NAME_LENGTH: 64,
+  MAX_FUNCTION_DESCRIPTION_LENGTH: 1000
+};
+
+/** Валидировать имя бота */
+export function validateBotName(name: string | undefined): { valid: boolean; error?: string } {
+  if (!name || name.trim().length === 0) {
+    return { valid: false, error: 'Bot name is required' };
+  }
+  if (name.length > LIMITS.MAX_BOT_NAME_LENGTH) {
+    return { valid: false, error: `Bot name exceeds ${LIMITS.MAX_BOT_NAME_LENGTH} characters` };
+  }
+  return { valid: true };
+}
+
+/** Валидировать системный промпт */
+export function validateSystemPrompt(prompt: string | undefined): { valid: boolean; error?: string; truncated?: boolean } {
+  if (!prompt) {
+    return { valid: true }; // Пустой промпт допустим
+  }
+  if (prompt.length > LIMITS.MAX_SYSTEM_PROMPT_LENGTH) {
+    return {
+      valid: true,
+      truncated: true,
+      error: `System prompt truncated from ${prompt.length} to ${LIMITS.MAX_SYSTEM_PROMPT_LENGTH} characters`
+    };
+  }
+  return { valid: true };
+}
+
+// ============ БЕЗОПАСНЫЙ JSON ============
+
+/** Безопасно обрезать текст для логов */
+export function truncateText(text: string | undefined, maxLength: number = 100): string {
+  if (!text) return '[empty]';
+  if (text.length <= maxLength) return text;
+  return `${text.substring(0, maxLength)}...[+${text.length - maxLength}]`;
+}
+
+/** Безопасный JSON.parse с fallback */
+export function safeJsonParse<T>(json: string, defaultValue: T): T {
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return defaultValue;
+  }
+}
+
+// ============ RESPONSE HELPERS ============
+
+/** Создать успешный ответ */
+export function createSuccessResponse<T>(data: T, meta?: Record<string, any>): { success: true; data: T; meta?: Record<string, any> } {
+  return {
+    success: true,
+    data,
+    ...(meta && { meta })
+  };
+}
+
+/** Создать ответ с ошибкой */
+export function createErrorResponse(
+  error: string,
+  code?: string,
+  details?: Record<string, any>
+): { success: false; error: string; code?: string; details?: Record<string, any> } {
+  return {
+    success: false,
+    error,
+    ...(code && { code }),
+    ...(details && { details })
+  };
+}
