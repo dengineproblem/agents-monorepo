@@ -3,6 +3,7 @@ import { Sidebar } from './components/Sidebar';
 import { WhatsAppCRM } from './pages/WhatsAppCRM';
 import { ChatbotSettings } from './pages/ChatbotSettings';
 import { ReactivationCampaigns } from './pages/ReactivationCampaigns';
+import { Consultations } from './pages/Consultations';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 
@@ -14,10 +15,11 @@ function App() {
       <BrowserRouter>
         <div className="flex h-screen bg-background">
           <Sidebar />
-          
+
           <main className="flex-1 overflow-y-auto bg-background">
             <Routes>
               <Route path="/" element={<WhatsAppCRM />} />
+              <Route path="/consultations" element={<Consultations />} />
               <Route path="/chatbot" element={<ChatbotSettings />} />
               <Route path="/reactivation" element={<ReactivationCampaigns />} />
             </Routes>
