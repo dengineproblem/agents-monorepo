@@ -1,9 +1,18 @@
 /**
  * Генерация и управление слотами консультаций
  * Используется AI-ботом для показа доступного времени клиентам
+ *
+ * Features:
+ * - Генерация доступных слотов из расписания консультантов
+ * - Проверка занятости слотов
+ * - Получение записей клиента
+ * - Структурированное логирование
  */
 
 import { supabase } from './supabase.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger({ module: 'consultationSlots' });
 
 export interface AvailableSlot {
   consultant_id: string;
@@ -180,7 +189,11 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
     .in('status', ['scheduled', 'confirmed']);
 
   if (consultationsError) {
-    console.error('Error fetching existing consultations:', consultationsError);
+    log.error({
+      error: consultationsError,
+      consultantIds: consultantIds.length,
+      dateRange: `${startDateStr} - ${endDateStr}`
+    }, '[getAvailableSlots] Error fetching existing consultations');
   }
 
   // Создаём set занятых слотов
@@ -309,7 +322,12 @@ export async function isSlotAvailable(
     .or(`and(start_time.lt.${endTime},end_time.gt.${startTime})`);
 
   if (existingError) {
-    console.error('Error checking slot availability:', existingError);
+    log.error({
+      error: existingError,
+      consultantId,
+      date,
+      startTime
+    }, '[isSlotAvailable] Error checking slot availability');
     return false;
   }
 
@@ -332,7 +350,10 @@ export async function getClientConsultations(dialogAnalysisId: string): Promise<
     .order('start_time', { ascending: true });
 
   if (error) {
-    console.error('Error fetching client consultations:', error);
+    log.error({
+      error,
+      dialogAnalysisId
+    }, '[getClientConsultations] Error fetching client consultations');
     return [];
   }
 

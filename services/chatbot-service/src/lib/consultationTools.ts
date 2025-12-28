@@ -6,16 +6,114 @@
  * - Записывать клиентов на консультации
  * - Отменять и переносить записи
  * - Показывать текущие записи клиента
+ *
+ * Features:
+ * - Retry logic с exponential backoff для HTTP запросов
+ * - Таймауты для защиты от зависших запросов
+ * - Валидация ответов API
+ * - Структурированное логирование с тегами
  */
 
 import OpenAI from 'openai';
 import { createLogger } from './logger.js';
-import { ContextLogger, createContextLogger, maskPhone } from './logUtils.js';
+import { ContextLogger, createContextLogger, maskPhone, maskUuid, classifyError } from './logUtils.js';
 
 const baseLog = createLogger({ module: 'consultationTools' });
 
 // URL CRM Backend
 const CRM_BACKEND_URL = process.env.CRM_BACKEND_URL || 'http://localhost:8084';
+
+// Конфигурация HTTP запросов
+const HTTP_CONFIG = {
+  timeoutMs: 10000,        // 10 секунд таймаут
+  maxRetries: 2,           // 2 попытки (всего 3 запроса)
+  baseDelayMs: 500,        // начальная задержка 500мс
+  backoffMultiplier: 2     // множитель для exponential backoff
+};
+
+/**
+ * Обёртка для fetch с таймаутом и retry логикой
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  log: ContextLogger,
+  operationName: string
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= HTTP_CONFIG.maxRetries; attempt++) {
+    try {
+      // Создаём AbortController для таймаута
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), HTTP_CONFIG.timeoutMs);
+
+      const startTime = Date.now();
+
+      log.debug({
+        attempt: attempt + 1,
+        maxAttempts: HTTP_CONFIG.maxRetries + 1,
+        url: url.split('?')[0],  // URL без query params для безопасности
+        method: options.method || 'GET'
+      }, `[${operationName}] HTTP request attempt ${attempt + 1}`, ['api', 'consultation']);
+
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+
+      const latencyMs = Date.now() - startTime;
+
+      log.debug({
+        status: response.status,
+        latencyMs,
+        attempt: attempt + 1
+      }, `[${operationName}] HTTP response received`, ['api', 'consultation']);
+
+      return response;
+
+    } catch (error: any) {
+      lastError = error;
+
+      const errorType = classifyError(error);
+
+      // Не ретраим если это не retryable ошибка
+      if (!errorType.isRetryable) {
+        log.warn({
+          errorType: errorType.type,
+          message: error.message,
+          isRetryable: false
+        }, `[${operationName}] Non-retryable error, giving up`, ['api', 'consultation']);
+        throw error;
+      }
+
+      // Если это последняя попытка - бросаем ошибку
+      if (attempt >= HTTP_CONFIG.maxRetries) {
+        log.error(error, `[${operationName}] All retry attempts exhausted`, {
+          attempts: attempt + 1,
+          errorType: errorType.type
+        }, ['api', 'consultation']);
+        throw error;
+      }
+
+      // Вычисляем задержку с exponential backoff
+      const delayMs = HTTP_CONFIG.baseDelayMs * Math.pow(HTTP_CONFIG.backoffMultiplier, attempt);
+
+      log.warn({
+        attempt: attempt + 1,
+        nextAttemptIn: delayMs,
+        errorType: errorType.type,
+        message: error.message
+      }, `[${operationName}] Request failed, retrying after ${delayMs}ms`, ['api', 'consultation']);
+
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError || new Error('Unknown error in fetchWithRetry');
+}
 
 /**
  * Настройки интеграции с консультациями
@@ -187,8 +285,10 @@ export async function handleGetAvailableSlots(
 
   log.info({
     date: args.date,
-    consultantIds: settings.consultant_ids?.length || 'all'
-  }, '[handleGetAvailableSlots] Fetching available slots');
+    consultantIds: settings.consultant_ids?.length || 'all',
+    slotsToShow: settings.slots_to_show,
+    daysAhead: settings.days_ahead_limit
+  }, '[handleGetAvailableSlots] Fetching available slots', ['consultation']);
 
   try {
     const params = new URLSearchParams({
@@ -205,24 +305,51 @@ export async function handleGetAvailableSlots(
       params.append('consultant_ids', settings.consultant_ids.join(','));
     }
 
-    const response = await fetch(`${CRM_BACKEND_URL}/consultations/available-slots?${params}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
+    const url = `${CRM_BACKEND_URL}/consultations/available-slots?${params}`;
+
+    const response = await fetchWithRetry(
+      url,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      log,
+      'handleGetAvailableSlots'
+    );
 
     if (!response.ok) {
-      log.error({ status: response.status }, '[handleGetAvailableSlots] API error');
+      const errorBody = await response.text().catch(() => 'unknown');
+      log.error({
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorBody.substring(0, 200)
+      }, '[handleGetAvailableSlots] API returned error status', {}, ['api', 'consultation']);
       return 'К сожалению, не удалось получить доступные слоты. Попробуйте позже.';
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleGetAvailableSlots] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке данных. Попробуйте позже.';
+    }
+
+    // Валидация ответа
+    if (!data || typeof data !== 'object') {
+      log.warn({ dataType: typeof data }, '[handleGetAvailableSlots] Invalid response format', ['api', 'consultation']);
+      return 'Получен некорректный ответ от сервера. Попробуйте позже.';
+    }
 
     if (!data.slots?.length) {
-      log.info({}, '[handleGetAvailableSlots] No slots available');
+      log.info({
+        hasSlots: !!data.slots,
+        slotsCount: data.slots?.length || 0
+      }, '[handleGetAvailableSlots] No slots available', ['consultation']);
       return 'К сожалению, сейчас нет доступных слотов для записи. Попробуйте выбрать другую дату.';
     }
 
-    log.info({ slotsCount: data.slots.length }, '[handleGetAvailableSlots] Slots found');
+    log.info({
+      slotsCount: data.slots.length,
+      firstSlot: data.slots[0]?.formatted
+    }, '[handleGetAvailableSlots] Slots found successfully', ['consultation']);
 
     // Формируем текстовый ответ со слотами
     const slotsText = data.slots.map((slot: any, idx: number) => {
@@ -231,7 +358,11 @@ export async function handleGetAvailableSlots(
 
     return `Доступные слоты для записи:\n\n${slotsText}\n\nКакое время вам подходит?`;
   } catch (error: any) {
-    log.error(error, '[handleGetAvailableSlots] Error fetching slots');
+    const errorType = classifyError(error);
+    log.error(error, '[handleGetAvailableSlots] Error fetching slots', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
     return 'Произошла ошибка при получении доступных слотов. Попробуйте позже.';
   }
 }
@@ -247,40 +378,76 @@ export async function handleBookConsultation(
 ): Promise<string> {
   const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
 
+  // Валидация обязательных параметров
+  if (!args.consultant_id || !args.date || !args.start_time) {
+    log.warn({
+      hasConsultantId: !!args.consultant_id,
+      hasDate: !!args.date,
+      hasStartTime: !!args.start_time
+    }, '[handleBookConsultation] Missing required parameters', ['consultation', 'validation']);
+    return 'Не указаны обязательные параметры для записи. Пожалуйста, выберите слот из списка.';
+  }
+
   log.info({
-    consultantId: args.consultant_id,
+    consultantId: maskUuid(args.consultant_id),
     date: args.date,
     time: args.start_time,
-    clientName: args.client_name || lead.contact_name
-  }, '[handleBookConsultation] Booking consultation');
+    clientName: args.client_name || lead.contact_name,
+    duration: settings.default_duration_minutes
+  }, '[handleBookConsultation] Booking consultation', ['consultation']);
 
   try {
-    const response = await fetch(`${CRM_BACKEND_URL}/consultations/book-from-bot`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dialog_analysis_id: lead.id,
-        consultant_id: args.consultant_id,
-        date: args.date,
-        start_time: args.start_time,
-        duration_minutes: settings.default_duration_minutes,
-        client_name: args.client_name || lead.contact_name,
-        auto_summarize: settings.auto_summarize_dialog
-      })
-    });
+    const url = `${CRM_BACKEND_URL}/consultations/book-from-bot`;
+    const requestBody = {
+      dialog_analysis_id: lead.id,
+      consultant_id: args.consultant_id,
+      date: args.date,
+      start_time: args.start_time,
+      duration_minutes: settings.default_duration_minutes,
+      client_name: args.client_name || lead.contact_name,
+      auto_summarize: settings.auto_summarize_dialog
+    };
 
-    const data = await response.json();
+    const response = await fetchWithRetry(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      log,
+      'handleBookConsultation'
+    );
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleBookConsultation] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке ответа сервера. Попробуйте позже.';
+    }
 
     if (!response.ok) {
-      log.warn({ status: response.status, message: data.message }, '[handleBookConsultation] Booking failed');
+      log.warn({
+        status: response.status,
+        message: data.message,
+        code: data.code
+      }, '[handleBookConsultation] Booking failed', ['api', 'consultation']);
       return data.message || 'Не удалось записать на это время. Пожалуйста, выберите другой слот.';
     }
 
-    log.info({ consultationId: data.consultation?.id }, '[handleBookConsultation] Consultation booked successfully');
+    log.info({
+      consultationId: data.consultation?.id ? maskUuid(data.consultation.id) : null,
+      confirmed: !!data.confirmation_message
+    }, '[handleBookConsultation] Consultation booked successfully', ['consultation']);
 
     return data.confirmation_message || 'Вы успешно записаны на консультацию!';
   } catch (error: any) {
-    log.error(error, '[handleBookConsultation] Error booking consultation');
+    const errorType = classifyError(error);
+    log.error(error, '[handleBookConsultation] Error booking consultation', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
     return 'Произошла ошибка при записи. Попробуйте позже.';
   }
 }
@@ -295,30 +462,59 @@ export async function handleCancelConsultation(
 ): Promise<string> {
   const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
 
-  log.info({ reason: args.reason }, '[handleCancelConsultation] Cancelling consultation');
+  log.info({
+    leadId: maskUuid(lead.id),
+    reason: args.reason || 'not specified',
+    phone: maskPhone(lead.contact_phone)
+  }, '[handleCancelConsultation] Cancelling consultation', ['consultation']);
 
   try {
-    const response = await fetch(`${CRM_BACKEND_URL}/consultations/cancel-from-bot`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dialog_analysis_id: lead.id,
-        reason: args.reason
-      })
-    });
+    const url = `${CRM_BACKEND_URL}/consultations/cancel-from-bot`;
+    const requestBody = {
+      dialog_analysis_id: lead.id,
+      reason: args.reason
+    };
 
-    const data = await response.json();
+    const response = await fetchWithRetry(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      log,
+      'handleCancelConsultation'
+    );
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleCancelConsultation] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке ответа сервера. Попробуйте позже.';
+    }
 
     if (!response.ok) {
-      log.warn({ status: response.status, message: data.message }, '[handleCancelConsultation] Cancel failed');
+      log.warn({
+        status: response.status,
+        message: data.message,
+        code: data.code
+      }, '[handleCancelConsultation] Cancel failed', ['api', 'consultation']);
       return data.message || 'Не удалось отменить запись.';
     }
 
-    log.info({}, '[handleCancelConsultation] Consultation cancelled successfully');
+    log.info({
+      cancelled: true,
+      message: data.message
+    }, '[handleCancelConsultation] Consultation cancelled successfully', ['consultation']);
 
     return data.message || 'Ваша запись отменена.';
   } catch (error: any) {
-    log.error(error, '[handleCancelConsultation] Error cancelling consultation');
+    const errorType = classifyError(error);
+    log.error(error, '[handleCancelConsultation] Error cancelling consultation', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
     return 'Произошла ошибка при отмене записи. Попробуйте позже.';
   }
 }
@@ -334,35 +530,72 @@ export async function handleRescheduleConsultation(
 ): Promise<string> {
   const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
 
+  // Валидация обязательных параметров
+  if (!args.new_date || !args.new_start_time) {
+    log.warn({
+      hasNewDate: !!args.new_date,
+      hasNewTime: !!args.new_start_time
+    }, '[handleRescheduleConsultation] Missing required parameters', ['consultation', 'validation']);
+    return 'Не указаны новые дата и время для переноса. Пожалуйста, выберите слот из списка.';
+  }
+
   log.info({
+    leadId: maskUuid(lead.id),
     newDate: args.new_date,
-    newTime: args.new_start_time
-  }, '[handleRescheduleConsultation] Rescheduling consultation');
+    newTime: args.new_start_time,
+    duration: settings.default_duration_minutes
+  }, '[handleRescheduleConsultation] Rescheduling consultation', ['consultation']);
 
   try {
-    const response = await fetch(`${CRM_BACKEND_URL}/consultations/reschedule-from-bot`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dialog_analysis_id: lead.id,
-        new_date: args.new_date,
-        new_start_time: args.new_start_time,
-        duration_minutes: settings.default_duration_minutes
-      })
-    });
+    const url = `${CRM_BACKEND_URL}/consultations/reschedule-from-bot`;
+    const requestBody = {
+      dialog_analysis_id: lead.id,
+      new_date: args.new_date,
+      new_start_time: args.new_start_time,
+      duration_minutes: settings.default_duration_minutes
+    };
 
-    const data = await response.json();
+    const response = await fetchWithRetry(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      },
+      log,
+      'handleRescheduleConsultation'
+    );
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleRescheduleConsultation] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке ответа сервера. Попробуйте позже.';
+    }
 
     if (!response.ok) {
-      log.warn({ status: response.status, message: data.message }, '[handleRescheduleConsultation] Reschedule failed');
+      log.warn({
+        status: response.status,
+        message: data.message,
+        code: data.code
+      }, '[handleRescheduleConsultation] Reschedule failed', ['api', 'consultation']);
       return data.message || 'Не удалось перенести запись на это время. Выберите другой слот.';
     }
 
-    log.info({}, '[handleRescheduleConsultation] Consultation rescheduled successfully');
+    log.info({
+      rescheduled: true,
+      newDate: args.new_date,
+      newTime: args.new_start_time
+    }, '[handleRescheduleConsultation] Consultation rescheduled successfully', ['consultation']);
 
     return data.message || 'Ваша консультация перенесена.';
   } catch (error: any) {
-    log.error(error, '[handleRescheduleConsultation] Error rescheduling consultation');
+    const errorType = classifyError(error);
+    log.error(error, '[handleRescheduleConsultation] Error rescheduling consultation', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
     return 'Произошла ошибка при переносе записи. Попробуйте позже.';
   }
 }
@@ -376,27 +609,65 @@ export async function handleGetMyConsultations(
 ): Promise<string> {
   const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
 
-  log.info({}, '[handleGetMyConsultations] Fetching client consultations');
+  log.info({
+    leadId: maskUuid(lead.id),
+    phone: maskPhone(lead.contact_phone)
+  }, '[handleGetMyConsultations] Fetching client consultations', ['consultation']);
 
   try {
-    const response = await fetch(`${CRM_BACKEND_URL}/consultations/by-lead/${lead.id}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
+    const url = `${CRM_BACKEND_URL}/consultations/by-lead/${lead.id}`;
+
+    const response = await fetchWithRetry(
+      url,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      log,
+      'handleGetMyConsultations'
+    );
 
     if (!response.ok) {
-      log.error({ status: response.status }, '[handleGetMyConsultations] API error');
+      const errorBody = await response.text().catch(() => 'unknown');
+      log.error({
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorBody.substring(0, 200)
+      }, '[handleGetMyConsultations] API returned error status', {}, ['api', 'consultation']);
       return 'Не удалось получить информацию о записях.';
     }
 
-    const data = await response.json();
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleGetMyConsultations] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке данных. Попробуйте позже.';
+    }
+
+    // Валидация ответа
+    if (!data || typeof data !== 'object') {
+      log.warn({ dataType: typeof data }, '[handleGetMyConsultations] Invalid response format', ['api', 'consultation']);
+      return 'Получен некорректный ответ от сервера. Попробуйте позже.';
+    }
 
     if (!data.has_consultations) {
-      log.info({}, '[handleGetMyConsultations] No consultations found');
+      log.info({
+        hasConsultations: false,
+        message: data.message
+      }, '[handleGetMyConsultations] No consultations found', ['consultation']);
       return data.message || 'У вас пока нет записей на консультацию.';
     }
 
-    log.info({ count: data.consultations.length }, '[handleGetMyConsultations] Consultations found');
+    // Проверяем что consultations это массив
+    if (!Array.isArray(data.consultations)) {
+      log.warn({
+        consultationsType: typeof data.consultations
+      }, '[handleGetMyConsultations] Consultations is not an array', ['api', 'consultation']);
+      return 'Получен некорректный формат данных о записях.';
+    }
+
+    log.info({
+      count: data.consultations.length,
+      statuses: data.consultations.map((c: any) => c.status)
+    }, '[handleGetMyConsultations] Consultations found', ['consultation']);
 
     const consultationsText = data.consultations.map((c: any, idx: number) => {
       return `${idx + 1}. ${c.formatted} (статус: ${c.status})`;
@@ -404,7 +675,11 @@ export async function handleGetMyConsultations(
 
     return `Ваши записи на консультацию:\n\n${consultationsText}`;
   } catch (error: any) {
-    log.error(error, '[handleGetMyConsultations] Error fetching consultations');
+    const errorType = classifyError(error);
+    log.error(error, '[handleGetMyConsultations] Error fetching consultations', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
     return 'Произошла ошибка при получении записей. Попробуйте позже.';
   }
 }

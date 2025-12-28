@@ -1,10 +1,18 @@
 /**
  * Саммаризация диалога для примечаний к консультации
  * Использует OpenAI для создания краткого резюме разговора
+ *
+ * Features:
+ * - AI-powered саммаризация диалогов
+ * - Извлечение информации о клиенте
+ * - Структурированное логирование
  */
 
 import OpenAI from 'openai';
 import { supabase } from './supabase.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger({ module: 'dialogSummarizer' });
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -55,10 +63,18 @@ export async function summarizeDialog(
   dialogAnalysisId: string,
   maxLength: number = 500
 ): Promise<string> {
+  const startTime = Date.now();
+
+  log.info({
+    dialogAnalysisId,
+    maxLength
+  }, '[summarizeDialog] Starting dialog summarization');
+
   try {
     const messages = await getDialogHistory(dialogAnalysisId);
 
     if (messages.length === 0) {
+      log.warn({ dialogAnalysisId }, '[summarizeDialog] No dialog history found');
       return 'История диалога недоступна';
     }
 
@@ -66,8 +82,19 @@ export async function summarizeDialog(
     const recentMessages = messages.slice(-20);
     const dialogText = recentMessages.join('\n');
 
+    log.debug({
+      totalMessages: messages.length,
+      usedMessages: recentMessages.length,
+      dialogTextLength: dialogText.length
+    }, '[summarizeDialog] Dialog history loaded');
+
     // Если диалог короткий, возвращаем как есть
     if (dialogText.length <= maxLength) {
+      log.info({
+        dialogAnalysisId,
+        elapsedMs: Date.now() - startTime,
+        action: 'returned_as_is'
+      }, '[summarizeDialog] Dialog is short, returning as is');
       return dialogText;
     }
 
@@ -100,8 +127,22 @@ export async function summarizeDialog(
     const summary = response.choices[0]?.message?.content?.trim();
 
     if (!summary) {
+      log.warn({
+        dialogAnalysisId,
+        hasResponse: !!response.choices[0],
+        elapsedMs: Date.now() - startTime
+      }, '[summarizeDialog] OpenAI returned empty summary');
       return 'Не удалось создать резюме';
     }
+
+    log.info({
+      dialogAnalysisId,
+      summaryLength: summary.length,
+      truncated: summary.length > maxLength,
+      promptTokens: response.usage?.prompt_tokens,
+      completionTokens: response.usage?.completion_tokens,
+      elapsedMs: Date.now() - startTime
+    }, '[summarizeDialog] Dialog summarized successfully');
 
     // Обрезаем если превышает лимит
     if (summary.length > maxLength) {
@@ -109,8 +150,12 @@ export async function summarizeDialog(
     }
 
     return summary;
-  } catch (error) {
-    console.error('Error summarizing dialog:', error);
+  } catch (error: any) {
+    log.error({
+      error: error?.message || error,
+      dialogAnalysisId,
+      maxLength
+    }, '[summarizeDialog] Error summarizing dialog');
     return 'Ошибка при создании резюме';
   }
 }
