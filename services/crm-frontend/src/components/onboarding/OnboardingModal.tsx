@@ -458,16 +458,26 @@ export function OnboardingModal({ open, userAccountId, onComplete }: OnboardingM
         </div>
 
         <div className="flex justify-between items-center pt-4 border-t">
-          {step > 1 && (
-            <Button 
-              variant="outline" 
-              onClick={() => setStep(step - 1)}
+          <div className="flex gap-2">
+            {step > 1 && (
+              <Button
+                variant="outline"
+                onClick={() => setStep(step - 1)}
+                disabled={loading}
+              >
+                ← Назад
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              onClick={onComplete}
               disabled={loading}
+              className="text-muted-foreground"
             >
-              ← Назад
+              Пропустить
             </Button>
-          )}
-          
+          </div>
+
           <div className="flex-1" />
           
           {step < 3 ? (

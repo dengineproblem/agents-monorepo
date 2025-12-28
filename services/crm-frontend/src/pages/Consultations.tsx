@@ -52,6 +52,14 @@ export function Consultations() {
   const [editingConsultant, setEditingConsultant] = useState<Consultant | null>(null);
   const [editingSchedules, setEditingSchedules] = useState<WorkingScheduleInput[]>([]);
   const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
+  const [isEditConsultantOpen, setIsEditConsultantOpen] = useState(false);
+  const [editingConsultantData, setEditingConsultantData] = useState<CreateConsultantData>({
+    name: '',
+    email: '',
+    phone: '',
+    specialization: ''
+  });
+  const [editingConsultantId, setEditingConsultantId] = useState<string | null>(null);
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -211,6 +219,46 @@ export function Consultations() {
       toast({
         title: 'Ошибка',
         description: 'Не удалось удалить консультанта',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleOpenEditConsultant = (consultant: Consultant) => {
+    setEditingConsultantId(consultant.id);
+    setEditingConsultantData({
+      name: consultant.name,
+      email: consultant.email,
+      phone: consultant.phone || '',
+      specialization: consultant.specialization || ''
+    });
+    setIsEditConsultantOpen(true);
+  };
+
+  const handleUpdateConsultant = async () => {
+    if (!editingConsultantId) return;
+
+    try {
+      if (!editingConsultantData.name || !editingConsultantData.email) {
+        toast({
+          title: 'Ошибка',
+          description: 'Укажите имя и email консультанта',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      await consultationService.updateConsultant(editingConsultantId, editingConsultantData);
+
+      toast({ title: 'Консультант обновлён' });
+      setIsEditConsultantOpen(false);
+      setEditingConsultantId(null);
+      await loadData();
+    } catch (error) {
+      console.error('Ошибка обновления консультанта:', error);
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось обновить консультанта',
         variant: 'destructive'
       });
     }
@@ -833,6 +881,14 @@ export function Consultations() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        onClick={() => handleOpenEditConsultant(consultant)}
+                        title="Редактировать"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => handleOpenScheduleModal(consultant)}
                         title="Настроить расписание"
                       >
@@ -843,6 +899,7 @@ export function Consultations() {
                         size="sm"
                         onClick={() => handleDeleteConsultant(consultant.id)}
                         className="text-destructive hover:text-destructive"
+                        title="Удалить"
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -901,6 +958,59 @@ export function Consultations() {
                 Добавить
               </Button>
               <Button variant="outline" onClick={() => setIsNewConsultantOpen(false)}>
+                Отмена
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно редактирования консультанта */}
+      <Dialog open={isEditConsultantOpen} onOpenChange={setIsEditConsultantOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Редактировать консультанта</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Имя *</Label>
+              <Input
+                value={editingConsultantData.name}
+                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="Иван Иванов"
+              />
+            </div>
+            <div>
+              <Label>Email *</Label>
+              <Input
+                type="email"
+                value={editingConsultantData.email}
+                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, email: e.target.value }))}
+                placeholder="ivan@example.com"
+              />
+            </div>
+            <div>
+              <Label>Телефон</Label>
+              <Input
+                value={editingConsultantData.phone}
+                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="+7 (999) 123-45-67"
+              />
+            </div>
+            <div>
+              <Label>Специализация</Label>
+              <Input
+                value={editingConsultantData.specialization}
+                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, specialization: e.target.value }))}
+                placeholder="Продажи, Консультации..."
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <Button onClick={handleUpdateConsultant} className="flex-1">
+                Сохранить
+              </Button>
+              <Button variant="outline" onClick={() => setIsEditConsultantOpen(false)}>
                 Отмена
               </Button>
             </div>

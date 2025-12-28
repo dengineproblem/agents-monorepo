@@ -25,11 +25,11 @@ export function startNotificationCron(): void {
   // Логирование статистики
   startStatsJob();
 
-  logger.info('[NotificationCron] All cron jobs started', {
+  logger.info({
     processInterval: `${PROCESS_INTERVAL_MS / 1000}s`,
     retryInterval: `${RETRY_INTERVAL_MS / 1000}s`,
     statsInterval: `${STATS_INTERVAL_MS / 1000}s`
-  });
+  }, '[NotificationCron] All cron jobs started');
 }
 
 /**
@@ -54,10 +54,10 @@ async function runProcessing(): Promise<void> {
     const duration = Date.now() - startTime;
 
     if (stats.processed > 0) {
-      logger.info('[NotificationCron] Processing completed', {
+      logger.info({
         ...stats,
         durationMs: duration
-      });
+      }, '[NotificationCron] Processing completed');
     } else {
       logger.debug('[NotificationCron] No pending notifications');
     }
@@ -88,7 +88,7 @@ async function runRetry(): Promise<void> {
     const count = await retryFailedNotifications();
 
     if (count > 0) {
-      logger.info('[NotificationCron] Notifications queued for retry', { count });
+      logger.info({ count }, '[NotificationCron] Notifications queued for retry');
     }
   } catch (error: any) {
     logger.error({
@@ -112,7 +112,7 @@ async function runStats(): Promise<void> {
   try {
     const stats = await getNotificationStats();
 
-    logger.info('[NotificationCron] Notification statistics', {
+    logger.info({
       pending: stats.pending,
       sent: stats.sent,
       failed: stats.failed,
@@ -121,7 +121,7 @@ async function runStats(): Promise<void> {
       successRate: stats.total > 0
         ? `${((stats.sent / (stats.sent + stats.failed)) * 100).toFixed(1)}%`
         : 'N/A'
-    });
+    }, '[NotificationCron] Notification statistics');
   } catch (error: any) {
     logger.error({
       error: error.message
