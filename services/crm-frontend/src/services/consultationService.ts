@@ -14,6 +14,8 @@ import {
   NotificationHistory
 } from '@/types/consultation';
 
+export type { Consultant } from '@/types/consultation';
+
 const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 
 export const consultationService = {

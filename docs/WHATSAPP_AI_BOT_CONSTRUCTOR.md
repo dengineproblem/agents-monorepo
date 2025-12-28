@@ -298,6 +298,7 @@ const correlationId = generateCorrelationId();
 | `schedule` | Расписание/таймеры |
 | `config` | Конфигурация бота |
 | `validation` | Валидация данных |
+| `consultation` | Интеграция с консультациями |
 
 #### 3. Маскирование данных
 
@@ -542,6 +543,90 @@ const trimmedMessages = currentMessages.slice(-LIMITS.MAX_HISTORY_MESSAGES);
 
 ---
 
+## Интеграция с консультациями
+
+Бот может автоматически записывать клиентов на консультации через встроенную интеграцию с системой консультаций.
+
+### Включение интеграции
+
+1. В редакторе бота перейдите на вкладку "Консультации"
+2. Включите опцию "Интеграция с консультациями"
+3. Настройте параметры:
+   - **Консультанты** — выберите одного, нескольких или всех консультантов
+   - **Слотов для показа** — количество предлагаемых слотов (3-10)
+   - **Длительность** — продолжительность консультации (30, 60, 90, 120 мин)
+   - **Дней вперёд** — глубина поиска слотов (7, 14, 30 дней)
+   - **Авто-саммаризация** — создание краткого резюме диалога для консультанта
+
+### Consultation Tools
+
+При включённой интеграции бот получает 5 функций:
+
+| Функция | Описание |
+|---------|----------|
+| `get_available_consultation_slots` | Показать свободные слоты |
+| `book_consultation` | Записать клиента на время |
+| `cancel_consultation` | Отменить запись |
+| `reschedule_consultation` | Перенести запись |
+| `get_my_consultations` | Показать записи клиента |
+
+### Настройки в БД
+
+```sql
+ALTER TABLE ai_bot_configurations ADD COLUMN IF NOT EXISTS
+  consultation_integration_enabled BOOLEAN DEFAULT false;
+
+ALTER TABLE ai_bot_configurations ADD COLUMN IF NOT EXISTS
+  consultation_settings JSONB DEFAULT '{
+    "consultant_ids": [],
+    "slots_to_show": 5,
+    "default_duration_minutes": 60,
+    "days_ahead_limit": 14,
+    "auto_summarize_dialog": true,
+    "collect_client_name": true
+  }'::jsonb;
+```
+
+### API Endpoints для бота
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| GET | `/consultations/available-slots` | Получить свободные слоты |
+| POST | `/consultations/book-from-bot` | Записать клиента |
+| POST | `/consultations/cancel-from-bot` | Отменить запись |
+| POST | `/consultations/reschedule-from-bot` | Перенести запись |
+| GET | `/consultations/by-lead/:id` | Записи клиента |
+
+### Пример использования
+
+**Запрос слотов:**
+```
+GET /consultations/available-slots?duration_minutes=60&limit=5&days_ahead=14
+```
+
+**Бронирование:**
+```json
+POST /consultations/book-from-bot
+{
+  "dialog_analysis_id": "uuid-...",
+  "consultant_id": "uuid-...",
+  "date": "2024-12-30",
+  "start_time": "14:00",
+  "duration_minutes": 60,
+  "client_name": "Иван",
+  "auto_summarize": true
+}
+```
+
+### Файлы
+
+- `services/chatbot-service/src/lib/consultationTools.ts` — tool definitions и handlers
+- `services/crm-backend/src/lib/consultationSlots.ts` — генерация слотов
+- `services/crm-backend/src/lib/dialogSummarizer.ts` — AI-саммаризация диалога
+- `services/crm-backend/src/routes/consultations.ts` — API endpoints
+
+---
+
 ## Типы функций бота
 
 ### 1. forward_to_manager
@@ -728,6 +813,22 @@ redis-cli lrange "pending_messages:instance:phone" 0 -1
   - Метрики производительности
   - Классификация ошибок
   - Context propagation через Redis
+
+### v1.4.0 (2024-12-28)
+- Интеграция с консультациями:
+  - 5 новых AI tools для работы с консультациями
+  - Автоматический показ свободных слотов клиентам
+  - Бронирование, отмена и перенос записей через бота
+  - AI-саммаризация диалога для примечаний к консультации
+  - Настраиваемые параметры: консультанты, длительность, глубина поиска
+- Улучшения надёжности consultation tools:
+  - Retry логика с exponential backoff для HTTP запросов
+  - Таймауты (10 сек) для защиты от зависших запросов
+  - Валидация ответов API
+  - Структурированное логирование с тегами `consultation`, `api`
+- Улучшенное логирование в backend:
+  - consultationSlots.ts — логирование ошибок с контекстом
+  - dialogSummarizer.ts — метрики производительности OpenAI
 
 ### v1.3.0 (2024-12-28)
 - Защита и надёжность:

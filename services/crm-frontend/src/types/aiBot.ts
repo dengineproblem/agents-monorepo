@@ -16,6 +16,24 @@ export interface DelayedMessage {
   offHoursTime?: string; // HH:MM format
 }
 
+export interface ConsultationIntegrationSettings {
+  consultantIds: string[];           // пустой = все консультанты
+  slotsToShow: number;               // кол-во слотов для показа (3-10)
+  defaultDurationMinutes: number;    // длительность консультации (30, 60, 90, 120)
+  daysAheadLimit: number;            // дней вперёд для поиска (7, 14, 30)
+  autoSummarizeDialog: boolean;      // авто-саммаризация диалога
+  collectClientName: boolean;        // спрашивать имя если нет
+}
+
+export const DEFAULT_CONSULTATION_SETTINGS: ConsultationIntegrationSettings = {
+  consultantIds: [],
+  slotsToShow: 5,
+  defaultDurationMinutes: 60,
+  daysAheadLimit: 14,
+  autoSummarizeDialog: true,
+  collectClientName: true
+};
+
 export interface AIBotConfiguration {
   id: string;
   userAccountId: string;
@@ -104,6 +122,10 @@ export interface AIBotConfiguration {
 
   // Свой API ключ
   customOpenaiApiKey: string | null;
+
+  // Интеграция с консультациями
+  consultationIntegrationEnabled: boolean;
+  consultationSettings: ConsultationIntegrationSettings;
 
   // Метаданные
   createdAt: string;
