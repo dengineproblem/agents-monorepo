@@ -50,8 +50,8 @@ const DEFAULT_SETTINGS: NotificationSettings = {
   reminder_1h_template: 'Через час у вас консультация в {{time}}. До скорой встречи!'
 };
 
-// Московский часовой пояс (UTC+3)
-const MOSCOW_OFFSET_MS = 3 * 60 * 60 * 1000;
+// Казахстанский часовой пояс (UTC+5)
+const TIMEZONE_OFFSET_MS = 5 * 60 * 60 * 1000;
 
 // Максимум попыток для failed уведомлений
 const MAX_RETRY_ATTEMPTS = 3;
@@ -62,22 +62,22 @@ const MIN_SCHEDULE_AHEAD_MS = 5 * 60 * 1000;
 // ==================== UTILITY FUNCTIONS ====================
 
 /**
- * Get current time in Moscow timezone
+ * Get current time in local timezone (UTC+5)
  */
-function getMoscowTime(): Date {
-  return new Date(Date.now() + MOSCOW_OFFSET_MS);
+function getLocalTime(): Date {
+  return new Date(Date.now() + TIMEZONE_OFFSET_MS);
 }
 
 /**
- * Parse consultation datetime with Moscow timezone
+ * Parse consultation datetime with local timezone (UTC+5)
  */
 function parseConsultationDateTime(dateStr: string, timeStr: string): Date {
-  // Предполагаем что дата/время в московском времени
+  // Предполагаем что дата/время в локальном времени (Казахстан UTC+5)
   const [year, month, day] = dateStr.split('-').map(Number);
   const [hours, minutes] = timeStr.split(':').map(Number);
 
-  // Создаём дату как UTC, но с учётом что это московское время
-  const utcDate = new Date(Date.UTC(year, month - 1, day, hours - 3, minutes));
+  // Создаём дату как UTC, но с учётом что это локальное время (UTC+5)
+  const utcDate = new Date(Date.UTC(year, month - 1, day, hours - 5, minutes));
   return utcDate;
 }
 
