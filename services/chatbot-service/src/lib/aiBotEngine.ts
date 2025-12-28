@@ -48,6 +48,13 @@ import {
   safeJsonParse,
   LIMITS
 } from './logUtils.js';
+import {
+  ConsultationIntegrationSettings,
+  getConsultationToolDefinitions,
+  getConsultationPromptAddition,
+  isConsultationTool,
+  handleConsultationTool
+} from './consultationTools.js';
 
 const baseLog = createLogger({ module: 'aiBotEngine' });
 
@@ -118,6 +125,10 @@ export interface AIBotConfig {
   start_message: string;
   error_message: string;
   custom_openai_api_key: string | null;
+
+  // Интеграция с консультациями
+  consultation_integration_enabled?: boolean;
+  consultation_settings?: ConsultationIntegrationSettings;
 }
 
 export interface LeadInfo {
@@ -1026,6 +1037,15 @@ async function generateAIResponse(
     funnelStage: lead.funnel_stage
   }, '[generateAIResponse] Client info added to prompt');
 
+  // Добавить инструкции для консультаций если интеграция включена
+  if (config.consultation_integration_enabled && config.consultation_settings) {
+    const consultationPrompt = getConsultationPromptAddition(config.consultation_settings);
+    systemPrompt += consultationPrompt;
+    log.debug({
+      consultationEnabled: true
+    }, '[generateAIResponse] Added consultation integration prompt');
+  }
+
   // Подготовить tools для OpenAI
   const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
 
@@ -1044,6 +1064,16 @@ async function generateAIResponse(
       toolsCount: tools.length,
       toolNames: tools.map(t => t.function.name)
     }, '[generateAIResponse] Prepared OpenAI tools', ['openai']);
+  }
+
+  // Добавить consultation tools если интеграция включена
+  if (config.consultation_integration_enabled && config.consultation_settings) {
+    const consultationTools = getConsultationToolDefinitions(config.consultation_settings);
+    tools.push(...consultationTools);
+    log.debug({
+      consultationToolsCount: consultationTools.length,
+      consultationToolNames: consultationTools.map(t => t.function.name)
+    }, '[generateAIResponse] Added consultation tools', ['openai']);
   }
 
   // Маппинг моделей
@@ -1211,6 +1241,42 @@ async function handleFunctionCall(
   }, '[handleFunctionCall] Starting function execution');
 
   try {
+    // Проверить, является ли это consultation tool
+    if (isConsultationTool(functionCall.name)) {
+      if (!botConfig.consultation_integration_enabled || !botConfig.consultation_settings) {
+        log.warn({
+          funcName: functionCall.name
+        }, '[handleFunctionCall] Consultation tool called but integration is disabled');
+        return;
+      }
+
+      log.info({
+        funcName: functionCall.name
+      }, '[handleFunctionCall] Processing consultation tool', ['consultation']);
+
+      const result = await handleConsultationTool(
+        functionCall.name,
+        functionCall.arguments,
+        {
+          id: lead.id,
+          contact_phone: lead.contact_phone,
+          contact_name: lead.contact_name
+        },
+        botConfig.consultation_settings,
+        log
+      );
+
+      log.info({
+        funcName: functionCall.name,
+        resultLen: result.length,
+        ...log.getTimings()
+      }, '[handleFunctionCall] Consultation tool completed', ['consultation']);
+
+      // Результат consultation tool уже содержит текст для ответа
+      // AI использует этот результат для формирования ответа клиенту
+      return;
+    }
+
     // Получить конфигурацию функции
     log.debug({
       funcName: functionCall.name

@@ -18,6 +18,7 @@ import {
   Link2,
   Smartphone,
   Unlink,
+  Calendar,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,10 +39,271 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { aiBotApi, type LinkedInstance, type WhatsAppInstance } from '@/services/aiBotApi';
-import type { AIBotConfiguration, UpdateBotRequest } from '@/types/aiBot';
-import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK } from '@/types/aiBot';
+import type { AIBotConfiguration, UpdateBotRequest, ConsultationIntegrationSettings } from '@/types/aiBot';
+import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK, DEFAULT_CONSULTATION_SETTINGS } from '@/types/aiBot';
+import { consultationService, type Consultant } from '@/services/consultationService';
 
 const USER_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
+
+// Consultations Integration Tab component
+function ConsultationsIntegrationTab({
+  enabled,
+  settings,
+  onEnabledChange,
+  onSettingsChange,
+}: {
+  enabled: boolean;
+  settings: ConsultationIntegrationSettings;
+  onEnabledChange: (enabled: boolean) => void;
+  onSettingsChange: (settings: ConsultationIntegrationSettings) => void;
+}) {
+  const { data: consultantsData } = useQuery({
+    queryKey: ['consultants'],
+    queryFn: () => consultationService.getConsultants(),
+  });
+
+  const consultants = consultantsData || [];
+
+  const updateSetting = <K extends keyof ConsultationIntegrationSettings>(
+    key: K,
+    value: ConsultationIntegrationSettings[K]
+  ) => {
+    onSettingsChange({ ...settings, [key]: value });
+  };
+
+  const toggleConsultant = (consultantId: string) => {
+    const currentIds = settings.consultantIds || [];
+    if (currentIds.includes(consultantId)) {
+      updateSetting('consultantIds', currentIds.filter(id => id !== consultantId));
+    } else {
+      updateSetting('consultantIds', [...currentIds, consultantId]);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calendar className="w-5 h-5" />
+            Интеграция с консультациями
+          </CardTitle>
+          <CardDescription>
+            Позволяет боту записывать клиентов на консультации, показывать свободные слоты и управлять записями
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="consultation-enabled">Включить интеграцию</Label>
+              <p className="text-sm text-muted-foreground">
+                Бот сможет записывать клиентов на консультации
+              </p>
+            </div>
+            <Switch
+              id="consultation-enabled"
+              checked={enabled}
+              onCheckedChange={onEnabledChange}
+            />
+          </div>
+
+          {enabled && (
+            <>
+              <Separator />
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Консультанты</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Выберите консультантов, к которым бот будет записывать клиентов.
+                    Если никто не выбран — используются все активные консультанты.
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {consultants.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Нет доступных консультантов. Добавьте их в разделе Консультации.
+                      </p>
+                    ) : (
+                      consultants.map((consultant: Consultant) => (
+                        <Badge
+                          key={consultant.id}
+                          variant={settings.consultantIds?.includes(consultant.id) ? 'default' : 'outline'}
+                          className="cursor-pointer"
+                          onClick={() => toggleConsultant(consultant.id)}
+                        >
+                          {consultant.name}
+                          {settings.consultantIds?.includes(consultant.id) && (
+                            <span className="ml-1">&times;</span>
+                          )}
+                        </Badge>
+                      ))
+                    )}
+                  </div>
+                  {(settings.consultantIds?.length || 0) === 0 && consultants.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Сейчас используются все консультанты ({consultants.length})
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Длительность консультации</Label>
+                    <Select
+                      value={String(settings.defaultDurationMinutes || 60)}
+                      onValueChange={(v) => updateSetting('defaultDurationMinutes', Number(v))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="30">30 минут</SelectItem>
+                        <SelectItem value="60">1 час</SelectItem>
+                        <SelectItem value="90">1.5 часа</SelectItem>
+                        <SelectItem value="120">2 часа</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Слотов для показа</Label>
+                    <Select
+                      value={String(settings.slotsToShow || 5)}
+                      onValueChange={(v) => updateSetting('slotsToShow', Number(v))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="3">3 слота</SelectItem>
+                        <SelectItem value="5">5 слотов</SelectItem>
+                        <SelectItem value="7">7 слотов</SelectItem>
+                        <SelectItem value="10">10 слотов</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Сколько вариантов времени показывать клиенту
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Поиск слотов вперёд</Label>
+                  <Select
+                    value={String(settings.daysAheadLimit || 14)}
+                    onValueChange={(v) => updateSetting('daysAheadLimit', Number(v))}
+                  >
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7">1 неделя</SelectItem>
+                      <SelectItem value="14">2 недели</SelectItem>
+                      <SelectItem value="30">1 месяц</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    На сколько дней вперёд искать свободные слоты
+                  </p>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Саммаризация диалога</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Автоматически создавать краткое резюме разговора в примечании к консультации
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.autoSummarizeDialog ?? true}
+                      onCheckedChange={(v) => updateSetting('autoSummarizeDialog', v)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Запрашивать имя</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Спрашивать имя клиента, если оно не указано в WhatsApp
+                      </p>
+                    </div>
+                    <Switch
+                      checked={settings.collectClientName ?? true}
+                      onCheckedChange={(v) => updateSetting('collectClientName', v)}
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {enabled && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Доступные функции бота</CardTitle>
+            <CardDescription>
+              При включённой интеграции бот автоматически получает следующие возможности
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
+                <div>
+                  <p className="font-medium">Показ свободных слотов</p>
+                  <p className="text-sm text-muted-foreground">
+                    Бот покажет клиенту доступное время для записи
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
+                <div>
+                  <p className="font-medium">Запись на консультацию</p>
+                  <p className="text-sm text-muted-foreground">
+                    Клиент может выбрать время и записаться
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
+                <div>
+                  <p className="font-medium">Отмена записи</p>
+                  <p className="text-sm text-muted-foreground">
+                    Клиент может отменить свою запись
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
+                <div>
+                  <p className="font-medium">Перенос консультации</p>
+                  <p className="text-sm text-muted-foreground">
+                    Клиент может перенести запись на другое время
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
+                <div>
+                  <p className="font-medium">Просмотр записей</p>
+                  <p className="text-sm text-muted-foreground">
+                    Клиент может узнать когда у него консультация
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
 
 // Tags input component for phrases
 function TagsInput({
@@ -222,7 +484,7 @@ export function BotEditor() {
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-9">
+        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-10">
           <TabsTrigger value="general" className="flex items-center gap-1">
             <Bot className="w-4 h-4" />
             <span className="hidden lg:inline">Основное</span>
@@ -250,6 +512,10 @@ export function BotEditor() {
           <TabsTrigger value="media" className="flex items-center gap-1">
             <Image className="w-4 h-4" />
             <span className="hidden lg:inline">Медиа</span>
+          </TabsTrigger>
+          <TabsTrigger value="consultations" className="flex items-center gap-1">
+            <Calendar className="w-4 h-4" />
+            <span className="hidden lg:inline">Консультации</span>
           </TabsTrigger>
           <TabsTrigger value="delayed" className="flex items-center gap-1">
             <Bell className="w-4 h-4" />
@@ -1011,6 +1277,16 @@ export function BotEditor() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Consultations Tab */}
+        <TabsContent value="consultations">
+          <ConsultationsIntegrationTab
+            enabled={formData.consultationIntegrationEnabled ?? false}
+            settings={formData.consultationSettings ?? DEFAULT_CONSULTATION_SETTINGS}
+            onEnabledChange={(enabled) => updateField('consultationIntegrationEnabled', enabled)}
+            onSettingsChange={(settings) => updateField('consultationSettings', settings)}
+          />
         </TabsContent>
 
         {/* Delayed Tab */}
