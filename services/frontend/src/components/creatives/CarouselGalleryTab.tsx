@@ -52,11 +52,8 @@ export const CarouselGalleryTab: React.FC<CarouselGalleryTabProps> = ({ onUseAsR
       });
 
       if (response.success) {
-        // Фильтруем только карусели (по visual_style)
-        const carouselStyles = response.styles.filter(s =>
-          CAROUSEL_STYLE_LABELS[s.style_id] !== undefined
-        );
-        setStyleGroups(carouselStyles);
+        // Бэкенд уже возвращает только карусели (creative_type: 'carousel')
+        setStyleGroups(response.styles);
       } else {
         toast.error('Не удалось загрузить галерею');
       }

@@ -9,12 +9,13 @@ export const API_BASE_URL =
     : (import.meta.env.DEV ? 'http://localhost:8082' : 'https://app.performanteaiagency.com/api');
 
 // Analytics API (отдельный сервис на порту 7081)
-// Локально: http://localhost:7081
-// Продакшн: https://agents.performanteaiagency.com
+// Локально: пустая строка (запросы идут на localhost через Vite proxy)
+// Продакшн: пустая строка (запросы идут через nginx /api/analyzer/ на том же домене)
+// Это избегает CORS проблем при кросс-доменных запросах
 export const ANALYTICS_API_BASE_URL =
   import.meta.env.VITE_ANALYTICS_API_BASE_URL !== undefined
     ? import.meta.env.VITE_ANALYTICS_API_BASE_URL
-    : (import.meta.env.DEV ? '' : 'https://agents.performanteaiagency.com');
+    : '';
 
 // Brain API (agent-brain сервис на порту 7080)
 // Локально: http://localhost:7080
