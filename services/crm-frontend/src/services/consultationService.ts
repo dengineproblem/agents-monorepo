@@ -5,7 +5,9 @@ import {
   CreateConsultantData,
   CreateConsultationData,
   UpdateConsultationData,
-  ConsultationStats
+  ConsultationStats,
+  WorkingSchedule,
+  WorkingScheduleInput
 } from '@/types/consultation';
 
 const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
@@ -134,6 +136,33 @@ export const consultationService = {
       })
     });
     if (!response.ok) throw new Error('Failed to book consultation from lead');
+    return response.json();
+  },
+
+  // ==================== WORKING SCHEDULES ====================
+
+  // Получение расписания консультанта
+  async getSchedules(consultantId: string): Promise<WorkingSchedule[]> {
+    const response = await fetch(`${API_BASE_URL}/consultants/${consultantId}/schedules`);
+    if (!response.ok) throw new Error('Failed to fetch schedules');
+    return response.json();
+  },
+
+  // Обновление расписания консультанта (полная замена)
+  async updateSchedules(consultantId: string, schedules: WorkingScheduleInput[]): Promise<WorkingSchedule[]> {
+    const response = await fetch(`${API_BASE_URL}/consultants/${consultantId}/schedules`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ schedules })
+    });
+    if (!response.ok) throw new Error('Failed to update schedules');
+    return response.json();
+  },
+
+  // Получение всех расписаний всех консультантов
+  async getAllSchedules(): Promise<WorkingSchedule[]> {
+    const response = await fetch(`${API_BASE_URL}/schedules/all`);
+    if (!response.ok) throw new Error('Failed to fetch all schedules');
     return response.json();
   }
 };

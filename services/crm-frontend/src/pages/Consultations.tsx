@@ -13,7 +13,10 @@ import { consultationService } from '@/services/consultationService';
 import {
   Consultant,
   ConsultationWithDetails,
-  CreateConsultantData
+  CreateConsultantData,
+  WorkingSchedule,
+  WorkingScheduleInput,
+  DAYS_OF_WEEK
 } from '@/types/consultation';
 
 export function Consultations() {
@@ -31,12 +34,18 @@ export function Consultations() {
     no_show: 0
   });
 
+  // Расписания консультантов
+  const [allSchedules, setAllSchedules] = useState<WorkingSchedule[]>([]);
+
   // Модальные окна
   const [isNewConsultationOpen, setIsNewConsultationOpen] = useState(false);
   const [isConsultantsModalOpen, setIsConsultantsModalOpen] = useState(false);
   const [isNewConsultantOpen, setIsNewConsultantOpen] = useState(false);
   const [selectedConsultation, setSelectedConsultation] = useState<ConsultationWithDetails | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [editingConsultant, setEditingConsultant] = useState<Consultant | null>(null);
+  const [editingSchedules, setEditingSchedules] = useState<WorkingScheduleInput[]>([]);
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -76,15 +85,17 @@ export function Consultations() {
     try {
       const dateStr = selectedDate.toISOString().split('T')[0];
 
-      const [consultantsData, consultationsData, statsData] = await Promise.all([
+      const [consultantsData, consultationsData, statsData, schedulesData] = await Promise.all([
         consultationService.getConsultants(),
         consultationService.getConsultations(dateStr),
-        consultationService.getStats()
+        consultationService.getStats(),
+        consultationService.getAllSchedules().catch(() => [])
       ]);
 
       setConsultants(consultantsData);
       setConsultations(consultationsData);
       setStats(statsData);
+      setAllSchedules(schedulesData);
     } catch (error) {
       console.error('Ошибка загрузки данных:', error);
       toast({
@@ -197,6 +208,89 @@ export function Consultations() {
         variant: 'destructive'
       });
     }
+  };
+
+  const handleOpenScheduleModal = async (consultant: Consultant) => {
+    setEditingConsultant(consultant);
+    try {
+      const schedules = await consultationService.getSchedules(consultant.id);
+      // Преобразуем в WorkingScheduleInput[]
+      const scheduleInputs: WorkingScheduleInput[] = schedules.map(s => ({
+        day_of_week: s.day_of_week,
+        start_time: s.start_time.slice(0, 5),
+        end_time: s.end_time.slice(0, 5),
+        is_active: s.is_active
+      }));
+      setEditingSchedules(scheduleInputs);
+    } catch {
+      setEditingSchedules([]);
+    }
+    setIsScheduleModalOpen(true);
+  };
+
+  const handleSaveSchedules = async () => {
+    if (!editingConsultant) return;
+
+    try {
+      await consultationService.updateSchedules(editingConsultant.id, editingSchedules);
+      toast({ title: 'Расписание сохранено' });
+      setIsScheduleModalOpen(false);
+      setEditingConsultant(null);
+      await loadData();
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось сохранить расписание',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const toggleDaySchedule = (dayOfWeek: number) => {
+    const existingIndex = editingSchedules.findIndex(s => s.day_of_week === dayOfWeek);
+    if (existingIndex >= 0) {
+      // Удаляем день
+      setEditingSchedules(prev => prev.filter((_, i) => i !== existingIndex));
+    } else {
+      // Добавляем день с дефолтным временем
+      setEditingSchedules(prev => [...prev, {
+        day_of_week: dayOfWeek,
+        start_time: '09:00',
+        end_time: '18:00',
+        is_active: true
+      }]);
+    }
+  };
+
+  const updateDaySchedule = (dayOfWeek: number, field: 'start_time' | 'end_time', value: string) => {
+    setEditingSchedules(prev => prev.map(s =>
+      s.day_of_week === dayOfWeek ? { ...s, [field]: value } : s
+    ));
+  };
+
+  // Проверка, находится ли слот вне рабочего времени консультанта
+  const isSlotOutsideWorkingHours = (consultantId: string, timeSlot: string): boolean => {
+    const dayOfWeek = selectedDate.getDay(); // 0 = воскресенье
+    const schedule = allSchedules.find(
+      s => s.consultant_id === consultantId && s.day_of_week === dayOfWeek && s.is_active
+    );
+
+    // Если нет расписания на этот день — всё доступно (или можно сделать наоборот)
+    if (!schedule) return false;
+
+    const slotMinutes = parseInt(timeSlot.split(':')[0]) * 60 + parseInt(timeSlot.split(':')[1]);
+    const startMinutes = parseInt(schedule.start_time.split(':')[0]) * 60 + parseInt(schedule.start_time.split(':')[1]);
+    const endMinutes = parseInt(schedule.end_time.split(':')[0]) * 60 + parseInt(schedule.end_time.split(':')[1]);
+
+    return slotMinutes < startMinutes || slotMinutes >= endMinutes;
+  };
+
+  // Проверка, есть ли расписание у консультанта на выбранный день
+  const hasScheduleForDay = (consultantId: string): boolean => {
+    const dayOfWeek = selectedDate.getDay();
+    return allSchedules.some(
+      s => s.consultant_id === consultantId && s.day_of_week === dayOfWeek && s.is_active
+    );
   };
 
   const handleUpdateStatus = async (id: string, status: string) => {
@@ -446,6 +540,7 @@ export function Consultations() {
                       const consultation = getConsultationForSlot(consultant.id, timeSlot);
                       const isBlocked = isSlotBlocked(consultant.id, timeSlot);
                       const blockReason = getBlockedReason(consultant.id, timeSlot);
+                      const isOutsideHours = isSlotOutsideWorkingHours(consultant.id, timeSlot);
 
                       return (
                         <div key={consultant.id} className="p-1 border-r last:border-r-0 min-h-[40px]">
@@ -475,6 +570,8 @@ export function Consultations() {
                                 <div className="text-xs">{blockReason}</div>
                               </div>
                             </div>
+                          ) : isOutsideHours ? (
+                            <div className="w-full h-full rounded bg-muted/50" title="Нерабочее время" />
                           ) : (
                             <button
                               onClick={() => {
@@ -721,14 +818,24 @@ export function Consultations() {
                         <Badge variant="secondary" className="mt-1">{consultant.specialization}</Badge>
                       )}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteConsultant(consultant.id)}
-                      className="text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleOpenScheduleModal(consultant)}
+                        title="Настроить расписание"
+                      >
+                        <Clock className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteConsultant(consultant.id)}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               ))
@@ -783,6 +890,74 @@ export function Consultations() {
                 Добавить
               </Button>
               <Button variant="outline" onClick={() => setIsNewConsultantOpen(false)}>
+                Отмена
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно редактирования расписания */}
+      <Dialog open={isScheduleModalOpen} onOpenChange={setIsScheduleModalOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Расписание: {editingConsultant?.name}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Выберите рабочие дни и укажите время работы
+            </p>
+
+            <div className="space-y-3">
+              {[1, 2, 3, 4, 5, 6, 0].map(dayOfWeek => {
+                const schedule = editingSchedules.find(s => s.day_of_week === dayOfWeek);
+                const isActive = !!schedule;
+
+                return (
+                  <div key={dayOfWeek} className="flex items-center gap-3">
+                    <button
+                      onClick={() => toggleDaySchedule(dayOfWeek)}
+                      className={`
+                        w-24 py-2 px-3 rounded text-sm font-medium transition-colors
+                        ${isActive
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        }
+                      `}
+                    >
+                      {DAYS_OF_WEEK[dayOfWeek]}
+                    </button>
+
+                    {isActive && (
+                      <div className="flex items-center gap-2 flex-1">
+                        <Input
+                          type="time"
+                          value={schedule.start_time}
+                          onChange={(e) => updateDaySchedule(dayOfWeek, 'start_time', e.target.value)}
+                          className="w-28"
+                        />
+                        <span className="text-muted-foreground">—</span>
+                        <Input
+                          type="time"
+                          value={schedule.end_time}
+                          onChange={(e) => updateDaySchedule(dayOfWeek, 'end_time', e.target.value)}
+                          className="w-28"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-2 pt-4">
+              <Button onClick={handleSaveSchedules} className="flex-1">
+                Сохранить
+              </Button>
+              <Button variant="outline" onClick={() => setIsScheduleModalOpen(false)}>
                 Отмена
               </Button>
             </div>

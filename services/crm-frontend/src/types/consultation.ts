@@ -20,6 +20,13 @@ export interface WorkingSchedule {
   updated_at: string;
 }
 
+export interface WorkingScheduleInput {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  is_active?: boolean;
+}
+
 export interface ConsultationSlot {
   id: string;
   consultant_id: string;

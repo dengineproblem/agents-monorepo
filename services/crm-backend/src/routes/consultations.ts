@@ -49,6 +49,17 @@ const BookFromLeadSchema = z.object({
   notes: z.string().optional()
 });
 
+const WorkingScheduleSchema = z.object({
+  day_of_week: z.number().int().min(0).max(6),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/),
+  is_active: z.boolean().optional().default(true)
+});
+
+const UpdateWorkingSchedulesSchema = z.object({
+  schedules: z.array(WorkingScheduleSchema)
+});
+
 export async function consultationsRoutes(app: FastifyInstance) {
 
   // ==================== CONSULTANTS ====================
@@ -158,6 +169,107 @@ export async function consultationsRoutes(app: FastifyInstance) {
       return reply.status(204).send();
     } catch (error: any) {
       app.log.error({ error }, 'Error deleting consultant');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ==================== WORKING SCHEDULES ====================
+
+  /**
+   * GET /consultants/:id/schedules
+   * Get working schedules for a consultant
+   */
+  app.get('/consultants/:id/schedules', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+
+      const { data, error } = await supabase
+        .from('working_schedules')
+        .select('*')
+        .eq('consultant_id', id)
+        .order('day_of_week');
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch working schedules');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching working schedules');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * PUT /consultants/:id/schedules
+   * Update all working schedules for a consultant (replace)
+   */
+  app.put('/consultants/:id/schedules', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const body = UpdateWorkingSchedulesSchema.parse(request.body);
+
+      // Delete existing schedules
+      await supabase
+        .from('working_schedules')
+        .delete()
+        .eq('consultant_id', id);
+
+      // Insert new schedules
+      if (body.schedules.length > 0) {
+        const schedulesWithConsultant = body.schedules.map(s => ({
+          ...s,
+          consultant_id: id
+        }));
+
+        const { data, error } = await supabase
+          .from('working_schedules')
+          .insert(schedulesWithConsultant)
+          .select();
+
+        if (error) {
+          app.log.error({ error }, 'Failed to update working schedules');
+          return reply.status(500).send({ error: error.message });
+        }
+
+        return reply.send(data);
+      }
+
+      return reply.send([]);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: 'Validation error', details: error.errors });
+      }
+      app.log.error({ error }, 'Error updating working schedules');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /schedules/all
+   * Get all working schedules for all active consultants
+   */
+  app.get('/schedules/all', async (request, reply) => {
+    try {
+      const { data, error } = await supabase
+        .from('working_schedules')
+        .select(`
+          *,
+          consultant:consultants!inner(id, name, is_active)
+        `)
+        .eq('consultant.is_active', true)
+        .order('consultant_id')
+        .order('day_of_week');
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch all working schedules');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching all working schedules');
       return reply.status(500).send({ error: error.message });
     }
   });
