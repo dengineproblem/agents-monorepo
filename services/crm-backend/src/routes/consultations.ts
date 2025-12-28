@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import {
   sendConfirmationNotification,
-  scheduleReminderNotifications
+  scheduleReminderNotifications,
+  cancelPendingNotifications
 } from '../lib/consultationNotifications.js';
 
 // Validation schemas
@@ -514,6 +515,13 @@ export async function consultationsRoutes(app: FastifyInstance) {
           .from('dialog_analysis')
           .update({ funnel_stage: 'consultation_completed' })
           .eq('id', data.dialog_analysis_id);
+      }
+
+      // If status changed to cancelled, cancel pending notifications
+      if (body.status === 'cancelled') {
+        cancelPendingNotifications(id).catch(err => {
+          app.log.error({ error: err.message, consultationId: id }, 'Failed to cancel pending notifications');
+        });
       }
 
       return reply.send(data);

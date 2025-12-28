@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS consultation_notifications (
 
     status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'sent', 'failed', 'skipped'
     error_message TEXT,
+    retry_count INTEGER DEFAULT 0, -- количество попыток отправки
 
     scheduled_at TIMESTAMP WITH TIME ZONE, -- когда должно быть отправлено
     sent_at TIMESTAMP WITH TIME ZONE, -- когда реально отправлено
