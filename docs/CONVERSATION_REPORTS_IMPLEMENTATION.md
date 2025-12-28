@@ -405,6 +405,108 @@ const newDialogs = allDialogs.filter(d => {
 
 ---
 
+## Мульти-направления (миграции 129, 130)
+
+### Обзор
+
+Начиная с миграций 129-130, отчёты поддерживают несколько WhatsApp направлений с разными настройками CAPI.
+
+### Миграция 129: direction_id в dialog_analysis
+
+```sql
+-- Прямая связь диалога с направлением
+ALTER TABLE dialog_analysis ADD COLUMN IF NOT EXISTS direction_id UUID REFERENCES account_directions(id);
+
+-- Триггер для автоматического заполнения direction_id
+CREATE OR REPLACE FUNCTION set_dialog_direction_id() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.direction_id IS NULL AND NEW.instance_name IS NOT NULL THEN
+    SELECT direction_id INTO NEW.direction_id
+    FROM whatsapp_phone_numbers
+    WHERE instance_name = NEW.instance_name
+    LIMIT 1;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### Миграция 130: directions_data в conversation_reports
+
+```sql
+-- JSONB массив с метриками по каждому направлению
+ALTER TABLE conversation_reports ADD COLUMN IF NOT EXISTS directions_data JSONB DEFAULT '[]'::jsonb;
+```
+
+### Структура directions_data
+
+```typescript
+interface DirectionReportData {
+  direction_id: string;
+  direction_name: string;
+  total_dialogs: number;
+  new_dialogs: number;
+  capi_enabled: boolean;
+  capi_has_data: boolean;
+  capi_distribution: { interest: number; qualified: number; scheduled: number };
+  interest_distribution: { hot: number; warm: number; cold: number };
+  incoming_messages: number;
+  outgoing_messages: number;
+  avg_response_time_minutes: number | null;
+  funnel_distribution: Record<string, number>;
+  drop_points: Array<{ point: string; count: number }>;
+  hidden_objections: Array<{ type: string; count: number }>;
+  engagement_trends: { falling: number; stable: number; rising: number };
+}
+```
+
+### Формат отчёта с направлениями
+
+```
+📊 Отчёт по перепискам за 28 декабря 2025
+━━━━━━━━━━━━━━━━━━━━━━
+
+📈 ОБЩАЯ СТАТИСТИКА
+• Всего диалогов: 150
+• Новых: 25
+• Сообщений: 📥 420 / 📤 380
+
+━━━━━━━━━━━━━━━━━━━━━━
+📁 ПО НАПРАВЛЕНИЯМ (2)
+
+📌 Косметология
+• Диалогов: 85 (новых: 15)
+• Сообщений: 📥 240 / 📤 200
+
+🎯 Воронка CAPI:
+  👋 Интерес: 45
+  ✅ Квалиф.: 12
+  📅 Записался: 5
+  📊 Конверсия: 27%
+
+📌 Стоматология
+• Диалогов: 65 (новых: 10)
+• Сообщений: 📥 180 / 📤 180
+
+🌡️ Интерес: 🔥15 ☀️30 ❄️20
+⏱️ Среднее время ответа: 45 сек
+```
+
+### Логика группировки
+
+1. Диалоги группируются по `direction_id` (если заполнен)
+2. Fallback: `instance_name` → `whatsapp_phone_numbers` → `direction_id`
+3. Диалоги без направления попадают в категорию "Без направления"
+
+### Обратная совместимость
+
+Legacy поля сохраняются для старых отчётов:
+- `capi_distribution` — агрегированные CAPI метрики
+- `capi_source_used` — флаг использования CAPI
+- `capi_direction_id` — ID первого направления с CAPI
+
+---
+
 ## Следующие шаги
 
 ### Обязательные
@@ -533,6 +635,8 @@ curl -X POST "http://localhost:8083/conversation-reports/generate-all" \
 ## Связанные файлы
 
 - `migrations/106_conversation_reports.sql`
+- `migrations/129_dialog_analysis_direction_id.sql`
+- `migrations/130_conversation_reports_directions_data.sql`
 - `services/crm-backend/src/scripts/generateConversationReport.ts`
 - `services/crm-backend/src/routes/conversationReports.ts`
 - `services/crm-backend/src/server.ts`

@@ -9,6 +9,33 @@ export interface CommonObjection {
   suggested_response?: string;
 }
 
+// Метрики для одного направления
+export interface DirectionReportData {
+  direction_id: string;
+  direction_name: string;
+  total_dialogs: number;
+  new_dialogs: number;
+  capi_enabled: boolean;
+  capi_has_data: boolean;
+  capi_distribution: {
+    interest: number;
+    qualified: number;
+    scheduled: number;
+  };
+  interest_distribution: {
+    hot: number;
+    warm: number;
+    cold: number;
+  };
+  incoming_messages: number;
+  outgoing_messages: number;
+  avg_response_time_minutes: number | null;
+  funnel_distribution: Record<string, number>;
+  drop_points: Array<{ point: string; count: number }>;
+  hidden_objections: Array<{ type: string; count: number }>;
+  engagement_trends: { falling: number; stable: number; rising: number };
+}
+
 export interface ConversationReport {
   id: string;
   user_account_id: string;
@@ -50,6 +77,19 @@ export interface ConversationReport {
 
   // Текст отчёта
   report_text: string;
+
+  // CAPI интеграция (Meta Pixel) - legacy для обратной совместимости
+  capi_distribution?: {
+    interest: number;
+    qualified: number;
+    scheduled: number;
+  };
+  capi_source_used: boolean;
+  capi_has_data: boolean;
+  capi_direction_id: string | null;
+
+  // Метрики по направлениям (новое)
+  directions_data?: DirectionReportData[];
 
   // Метаданные
   generated_at: string;

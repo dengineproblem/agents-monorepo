@@ -67,6 +67,8 @@ interface DialogAnalysis {
   outgoing_count: number;
   first_message: string;
   last_message: string;
+  instance_name: string | null;
+  direction_id: string | null; // Прямая связь с direction (migration 129)
   messages: Array<{
     text: string;
     from_me: boolean;
@@ -81,6 +83,37 @@ interface DialogAnalysis {
   drop_point: string | null;
   hidden_objections: string[];
   engagement_trend: 'falling' | 'stable' | 'rising' | null;
+  // CAPI tracking fields
+  capi_interest_sent: boolean;
+  capi_qualified_sent: boolean;
+  capi_scheduled_sent: boolean;
+}
+
+// Метрики для одного направления
+interface DirectionMetrics {
+  direction_id: string;
+  direction_name: string;
+  total_dialogs: number;
+  new_dialogs: number;
+  capi_enabled: boolean;
+  capi_has_data: boolean;
+  capi_distribution: { interest: number; qualified: number; scheduled: number };
+  interest_distribution: { hot: number; warm: number; cold: number };
+  incoming_messages: number;
+  outgoing_messages: number;
+  avg_response_time_minutes: number | null;
+  funnel_distribution: Record<string, number>;
+  drop_points: Array<{ point: string; count: number }>;
+  hidden_objections: Array<{ type: string; count: number }>;
+  engagement_trends: { falling: number; stable: number; rising: number };
+}
+
+// Направление с WhatsApp номерами
+interface DirectionWithPhones {
+  id: string;
+  name: string;
+  capi_enabled: boolean;
+  whatsapp_phone_numbers: Array<{ instance_name: string }>;
 }
 
 interface ConversationReportData {
@@ -110,6 +143,13 @@ interface ConversationReportData {
   drop_points_summary: Array<{ point: string; count: number }>;
   hidden_objections_summary: Array<{ type: string; count: number }>;
   engagement_trends: { falling: number; stable: number; rising: number };
+  // CAPI интеграция (legacy для обратной совместимости - агрегированные данные)
+  capi_distribution: { interest: number; qualified: number; scheduled: number };
+  capi_source_used: boolean;
+  capi_has_data: boolean;
+  capi_direction_id: string | null;
+  // Новое: метрики по каждому направлению
+  directions_data: DirectionMetrics[];
 }
 
 // Промпт для анализа переписок через LLM
@@ -193,6 +233,158 @@ function calculateResponseTimes(messages: DialogAnalysis['messages']): number[] 
 }
 
 /**
+ * Рассчитывает метрики для одного направления
+ */
+function calculateDirectionMetrics(
+  direction: DirectionWithPhones,
+  dialogs: DialogAnalysis[],
+  newDialogsSet: Set<string>
+): DirectionMetrics {
+  // CAPI распределение
+  const capiDistribution = { interest: 0, qualified: 0, scheduled: 0 };
+  dialogs.forEach(d => {
+    if (d.capi_interest_sent) capiDistribution.interest++;
+    if (d.capi_qualified_sent) capiDistribution.qualified++;
+    if (d.capi_scheduled_sent) capiDistribution.scheduled++;
+  });
+  const capiHasData = capiDistribution.interest > 0 || capiDistribution.qualified > 0 || capiDistribution.scheduled > 0;
+
+  // Interest distribution (hot/warm/cold)
+  const interestDistribution = { hot: 0, warm: 0, cold: 0 };
+  dialogs.forEach(d => {
+    if (d.interest_level === 'hot') interestDistribution.hot++;
+    else if (d.interest_level === 'warm') interestDistribution.warm++;
+    else if (d.interest_level === 'cold') interestDistribution.cold++;
+  });
+
+  // Сообщения и время ответа
+  let incomingMessages = 0;
+  let outgoingMessages = 0;
+  const allResponseTimes: number[] = [];
+  dialogs.forEach(d => {
+    incomingMessages += d.incoming_count || 0;
+    outgoingMessages += d.outgoing_count || 0;
+    if (d.messages && Array.isArray(d.messages)) {
+      allResponseTimes.push(...calculateResponseTimes(d.messages));
+    }
+  });
+
+  // Funnel distribution
+  const funnelDistribution: Record<string, number> = {};
+  dialogs.forEach(d => {
+    if (d.funnel_stage) {
+      funnelDistribution[d.funnel_stage] = (funnelDistribution[d.funnel_stage] || 0) + 1;
+    }
+  });
+
+  // Drop points
+  const dropPointCounts: Record<string, number> = {};
+  dialogs.forEach(d => {
+    if (d.drop_point) {
+      dropPointCounts[d.drop_point] = (dropPointCounts[d.drop_point] || 0) + 1;
+    }
+  });
+  const dropPoints = Object.entries(dropPointCounts)
+    .map(([point, count]) => ({ point, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  // Hidden objections
+  const hiddenObjectionCounts: Record<string, number> = {};
+  dialogs.forEach(d => {
+    if (d.hidden_objections && Array.isArray(d.hidden_objections)) {
+      d.hidden_objections.forEach(obj => {
+        const type = obj.split(' ')[0] || obj;
+        hiddenObjectionCounts[type] = (hiddenObjectionCounts[type] || 0) + 1;
+      });
+    }
+  });
+  const hiddenObjections = Object.entries(hiddenObjectionCounts)
+    .map(([type, count]) => ({ type, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  // Engagement trends
+  const engagementTrends = { falling: 0, stable: 0, rising: 0 };
+  dialogs.forEach(d => {
+    if (d.engagement_trend && engagementTrends.hasOwnProperty(d.engagement_trend)) {
+      engagementTrends[d.engagement_trend]++;
+    }
+  });
+
+  // Новые диалоги в этом направлении
+  const newDialogsCount = dialogs.filter(d => newDialogsSet.has(d.id)).length;
+
+  return {
+    direction_id: direction.id,
+    direction_name: direction.name,
+    total_dialogs: dialogs.length,
+    new_dialogs: newDialogsCount,
+    capi_enabled: direction.capi_enabled || false,
+    capi_has_data: capiHasData,
+    capi_distribution: capiDistribution,
+    interest_distribution: interestDistribution,
+    incoming_messages: incomingMessages,
+    outgoing_messages: outgoingMessages,
+    avg_response_time_minutes: allResponseTimes.length > 0
+      ? allResponseTimes.reduce((a, b) => a + b, 0) / allResponseTimes.length
+      : null,
+    funnel_distribution: funnelDistribution,
+    drop_points: dropPoints,
+    hidden_objections: hiddenObjections,
+    engagement_trends: engagementTrends,
+  };
+}
+
+/**
+ * Генерирует секцию отчёта для одного направления
+ */
+function generateDirectionSection(dir: DirectionMetrics): string {
+  let section = `\n📌 ${dir.direction_name}\n`;
+
+  // Статистика диалогов
+  section += `• Диалогов: ${dir.total_dialogs}`;
+  if (dir.new_dialogs > 0) {
+    section += ` (новых: ${dir.new_dialogs})`;
+  }
+  section += `\n`;
+  section += `• Сообщений: 📥 ${dir.incoming_messages} / 📤 ${dir.outgoing_messages}\n`;
+
+  // CAPI или hot/warm/cold
+  if (dir.capi_enabled && dir.capi_has_data) {
+    // CAPI метрики
+    const capi = dir.capi_distribution;
+    section += `\n🎯 Воронка CAPI:\n`;
+    section += `  👋 Интерес: ${capi.interest}\n`;
+    section += `  ✅ Квалиф.: ${capi.qualified}\n`;
+    section += `  📅 Записался: ${capi.scheduled}\n`;
+
+    // Конверсии
+    if (capi.interest > 0) {
+      const qualifiedRate = Math.round((capi.qualified / capi.interest) * 100);
+      section += `  📊 Конверсия: ${qualifiedRate}%\n`;
+    }
+  } else if (dir.capi_enabled && !dir.capi_has_data) {
+    // CAPI включен, но данных нет
+    section += `\n🎯 CAPI: пиксель подключен, событий пока нет\n`;
+    // Fallback на hot/warm/cold
+    const i = dir.interest_distribution;
+    section += `🌡️ Интерес: 🔥${i.hot} ☀️${i.warm} ❄️${i.cold}\n`;
+  } else {
+    // Без CAPI - hot/warm/cold
+    const i = dir.interest_distribution;
+    section += `\n🌡️ Интерес: 🔥${i.hot} ☀️${i.warm} ❄️${i.cold}\n`;
+  }
+
+  // Время ответа
+  if (dir.avg_response_time_minutes) {
+    section += `⏱️ Среднее время ответа: ${Math.round(dir.avg_response_time_minutes * 60)} сек\n`;
+  }
+
+  return section;
+}
+
+/**
  * Генерирует текст отчета для Telegram
  */
 function generateReportText(data: Omit<ConversationReportData, 'report_text'>): string {
@@ -205,32 +397,51 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
   let report = `📊 Отчёт по перепискам за ${date}\n`;
   report += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
 
-  // Основная статистика
-  report += `📈 СТАТИСТИКА ДИАЛОГОВ\n`;
-  report += `• Активных диалогов: ${data.total_dialogs}\n`;
+  // Общая статистика
+  report += `📈 ОБЩАЯ СТАТИСТИКА\n`;
+  report += `• Всего диалогов: ${data.total_dialogs}\n`;
   if (data.new_dialogs > 0) {
     report += `• Новых: ${data.new_dialogs}\n`;
   }
-  report += `• Сообщений: 📥 ${data.total_incoming_messages} / 📤 ${data.total_outgoing_messages}\n\n`;
+  report += `• Сообщений: 📥 ${data.total_incoming_messages} / 📤 ${data.total_outgoing_messages}\n`;
 
-  // Распределение по интересу
-  const interest = data.interest_distribution;
-  report += `🎯 ИНТЕРЕС КЛИЕНТОВ\n`;
-  report += `• 🔥 Горячие: ${interest.hot || 0}\n`;
-  report += `• ☀️ Тёплые: ${interest.warm || 0}\n`;
-  report += `• ❄️ Холодные: ${interest.cold || 0}\n`;
+  // Если есть directions_data - показываем секции по направлениям
+  if (data.directions_data && data.directions_data.length > 0) {
+    report += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+    report += `📁 ПО НАПРАВЛЕНИЯМ (${data.directions_data.length})\n`;
 
-  // Тренды интереса (новое)
-  const trends = data.engagement_trends;
-  if (trends && (trends.falling > 0 || trends.stable > 0 || trends.rising > 0)) {
-    report += `\n📉 ДИНАМИКА ИНТЕРЕСА\n`;
-    if (trends.rising > 0) report += `• 📈 Растёт: ${trends.rising}\n`;
-    if (trends.stable > 0) report += `• ➡️ Стабильный: ${trends.stable}\n`;
-    if (trends.falling > 0) report += `• 📉 Падает: ${trends.falling}\n`;
+    data.directions_data.forEach(dir => {
+      report += generateDirectionSection(dir);
+    });
+
+    report += `\n━━━━━━━━━━━━━━━━━━━━━━\n`;
+  } else {
+    // Legacy режим - без разбивки по направлениям
+    report += `\n`;
+
+    // Распределение: CAPI воронка или hot/warm/cold
+    if (data.capi_source_used && data.capi_distribution && data.capi_has_data) {
+      const capi = data.capi_distribution;
+      report += `🎯 ВОРОНКА CAPI (Meta Pixel)\n`;
+      report += `• 👋 Интерес (Lead): ${capi.interest}\n`;
+      report += `• ✅ Квалифицирован: ${capi.qualified}\n`;
+      report += `• 📅 Записался: ${capi.scheduled}\n`;
+
+      if (capi.interest > 0) {
+        const qualifiedRate = Math.round((capi.qualified / capi.interest) * 100);
+        report += `\n📊 Конверсия интерес → квалиф.: ${qualifiedRate}%\n`;
+      }
+    } else {
+      const interest = data.interest_distribution;
+      report += `🎯 ИНТЕРЕС КЛИЕНТОВ\n`;
+      report += `• 🔥 Горячие: ${interest.hot || 0}\n`;
+      report += `• ☀️ Тёплые: ${interest.warm || 0}\n`;
+      report += `• ❄️ Холодные: ${interest.cold || 0}\n`;
+    }
+    report += `\n`;
   }
-  report += `\n`;
 
-  // Источник трафика (новое)
+  // Источник трафика
   const traffic = data.traffic_source;
   if (traffic && (traffic.from_ads > 0 || traffic.smart_match > 0 || traffic.organic > 0)) {
     const total = traffic.from_ads + traffic.smart_match + traffic.organic;
@@ -240,24 +451,10 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
     report += `• Органика: ${traffic.organic} (${100 - adsPercent}%)\n\n`;
   }
 
-  // Конверсии
-  const conv = data.conversions;
-  if (Object.keys(conv).length > 0) {
-    report += `📊 КОНВЕРСИИ\n`;
-    if (conv.new_to_qualified) report += `• Новый → Квалифицирован: ${conv.new_to_qualified}\n`;
-    if (conv.qualified_to_booked) report += `• Квалифицирован → Запись: ${conv.qualified_to_booked}\n`;
-    if (conv.booked_to_completed) report += `• Запись → Консультация: ${conv.booked_to_completed}\n`;
-    if (conv.completed_to_closed) report += `• Консультация → Сделка: ${conv.completed_to_closed}\n`;
-    if (conv.deal_lost) report += `• ❌ Потеряно: ${conv.deal_lost}\n`;
-    report += `\n`;
-  }
-
-  // Скорость ответов (конвертируем минуты в секунды)
+  // Скорость ответов
   if (data.avg_response_time_minutes) {
     report += `⏱️ СКОРОСТЬ ОТВЕТОВ\n`;
     report += `• Средняя: ${Math.round(data.avg_response_time_minutes * 60)} сек\n`;
-    if (data.min_response_time_minutes) report += `• Минимальная: ${Math.round(data.min_response_time_minutes * 60)} сек\n`;
-    if (data.max_response_time_minutes) report += `• Максимальная: ${Math.round(data.max_response_time_minutes * 60)} сек\n`;
     report += `\n`;
   }
 
@@ -288,20 +485,11 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
     report += `\n`;
   }
 
-  // Drop points - где теряем клиентов (новое)
+  // Drop points
   if (data.drop_points_summary && data.drop_points_summary.length > 0) {
     report += `🚫 ГДЕ ТЕРЯЕМ КЛИЕНТОВ\n`;
     data.drop_points_summary.slice(0, 3).forEach((dp) => {
       report += `• ${dp.point}: ${dp.count}x\n`;
-    });
-    report += `\n`;
-  }
-
-  // Скрытые возражения (новое)
-  if (data.hidden_objections_summary && data.hidden_objections_summary.length > 0) {
-    report += `🔇 СКРЫТЫЕ СИГНАЛЫ\n`;
-    data.hidden_objections_summary.slice(0, 3).forEach((ho) => {
-      report += `• ${ho.type}: ${ho.count}x\n`;
     });
     report += `\n`;
   }
@@ -353,60 +541,92 @@ export async function generateConversationReport(params: {
       log.error({ error: userError.message, userAccountId }, 'Failed to get user account');
     }
 
-    // Получаем WhatsApp instance через direction → whatsapp_phone_numbers
-    // Это правильная связь: direction привязан к конкретному whatsapp номеру
-    const { data: direction, error: directionError } = await supabase
+    // Получаем ВСЕ WhatsApp направления с их телефонными номерами
+    const { data: directionsRaw, error: directionError } = await supabase
       .from('account_directions')
-      .select('id, name, whatsapp_phone_number_id')
+      .select(`
+        id, name, capi_enabled,
+        whatsapp_phone_numbers!account_directions_whatsapp_phone_number_id_fkey(instance_name)
+      `)
       .eq('user_account_id', userAccountId)
-      .eq('objective', 'whatsapp')
-      .limit(1)
-      .single();
+      .eq('objective', 'whatsapp');
 
-    let instanceName: string | null = null;
+    if (directionError) {
+      log.warn({ userAccountId, error: directionError.message }, 'Failed to fetch directions');
+    }
 
-    if (directionError || !direction?.whatsapp_phone_number_id) {
-      log.warn({ userAccountId, error: directionError?.message }, 'No WhatsApp direction found, skipping dialog analysis');
-    } else {
-      // Получаем instance_name из whatsapp_phone_numbers
-      const { data: phoneNumber, error: phoneError } = await supabase
-        .from('whatsapp_phone_numbers')
-        .select('instance_name')
-        .eq('id', direction.whatsapp_phone_number_id)
-        .single();
+    // Преобразуем в удобный формат
+    const directions: DirectionWithPhones[] = (directionsRaw || []).map(d => {
+      const phones = d.whatsapp_phone_numbers as any;
+      let phonesList: Array<{ instance_name: string }> = [];
 
-      if (phoneError || !phoneNumber?.instance_name) {
-        log.warn({ userAccountId, whatsappPhoneNumberId: direction.whatsapp_phone_number_id }, 'No instance_name in whatsapp_phone_numbers');
-      } else {
-        instanceName = phoneNumber.instance_name;
+      if (phones) {
+        if (Array.isArray(phones)) {
+          phonesList = phones.filter((p: any) => p?.instance_name);
+        } else if (phones.instance_name) {
+          phonesList = [phones];
+        }
+      }
+
+      return {
+        id: d.id,
+        name: d.name,
+        capi_enabled: d.capi_enabled || false,
+        whatsapp_phone_numbers: phonesList
+      };
+    });
+
+    log.info({
+      userAccountId,
+      totalDirections: directions.length,
+      directionsInfo: directions.map(d => ({
+        id: d.id,
+        name: d.name,
+        capi_enabled: d.capi_enabled,
+        instances: d.whatsapp_phone_numbers.map(p => p.instance_name)
+      }))
+    }, 'Fetched all WhatsApp directions for report');
+
+    // Строим маппинг instance_name → direction
+    const instanceToDirection = new Map<string, DirectionWithPhones>();
+    for (const dir of directions) {
+      for (const phone of dir.whatsapp_phone_numbers) {
+        if (phone.instance_name) {
+          instanceToDirection.set(phone.instance_name, dir);
+        }
       }
     }
 
-    if (!instanceName) {
-      log.warn({ userAccountId }, 'No active WhatsApp instance found, skipping dialog analysis');
-    } else {
-      // Запускаем анализ диалогов для обновления данных
-      log.info({ instanceName }, 'Running dialog analysis before report generation');
-
-      try {
-        const analysisResult = await analyzeDialogs({
-          instanceName,
-          userAccountId,
-          minIncoming: 3,
-          startDate: startOfDay,
-          endDate: endOfDay
-          // maxDialogs убран — анализируем все диалоги за период
-        });
-
-        log.info({
-          analyzed: analysisResult.analyzed,
-          new_leads: analysisResult.new_leads,
-          errors: analysisResult.errors
-        }, 'Dialog analysis completed');
-      } catch (analysisError: any) {
-        log.error({ error: analysisError.message }, 'Dialog analysis failed, continuing with existing data');
+    // Запускаем анализ диалогов для каждого направления
+    for (const dir of directions) {
+      for (const phone of dir.whatsapp_phone_numbers) {
+        if (phone.instance_name) {
+          try {
+            log.info({ instanceName: phone.instance_name, directionName: dir.name }, 'Running dialog analysis for direction');
+            const analysisResult = await analyzeDialogs({
+              instanceName: phone.instance_name,
+              userAccountId,
+              minIncoming: 3,
+              startDate: startOfDay,
+              endDate: endOfDay
+            });
+            log.info({
+              directionName: dir.name,
+              analyzed: analysisResult.analyzed,
+              new_leads: analysisResult.new_leads,
+              errors: analysisResult.errors
+            }, 'Dialog analysis completed for direction');
+          } catch (analysisError: any) {
+            log.error({ directionName: dir.name, error: analysisError.message }, 'Dialog analysis failed for direction');
+          }
+        }
       }
     }
+
+    // Legacy переменные для обратной совместимости
+    const primaryDirection = directions.find(d => d.capi_enabled) || directions[0] || null;
+    const capiEnabled = primaryDirection?.capi_enabled || false;
+    const capiDirectionId = capiEnabled ? primaryDirection?.id || null : null;
 
     // Получаем ВСЕ диалоги пользователя (пагинация)
     const PAGE_SIZE = 1000;
@@ -451,6 +671,76 @@ export async function generateConversationReport(params: {
       const firstMsg = new Date(d.first_message);
       return firstMsg >= startOfDay && firstMsg <= endOfDay;
     });
+    const newDialogsSet = new Set(newDialogs.map(d => d.id));
+
+    // === ГРУППИРОВКА ДИАЛОГОВ ПО НАПРАВЛЕНИЯМ ===
+    const dialogsByDirection = new Map<string, DialogAnalysis[]>();
+    const unknownDirectionDialogs: DialogAnalysis[] = [];
+
+    for (const dialog of activeDialogs) {
+      let directionId: string | null = null;
+
+      // Сначала пробуем direction_id (если миграция 129 применена)
+      if (dialog.direction_id) {
+        directionId = dialog.direction_id;
+      }
+      // Fallback на маппинг через instance_name
+      else if (dialog.instance_name) {
+        const direction = instanceToDirection.get(dialog.instance_name);
+        if (direction) {
+          directionId = direction.id;
+        }
+      }
+
+      if (directionId) {
+        if (!dialogsByDirection.has(directionId)) {
+          dialogsByDirection.set(directionId, []);
+        }
+        dialogsByDirection.get(directionId)!.push(dialog);
+      } else {
+        unknownDirectionDialogs.push(dialog);
+      }
+    }
+
+    log.info({
+      totalActiveDialogs: activeDialogs.length,
+      groupedByDirection: dialogsByDirection.size,
+      unknownDirection: unknownDirectionDialogs.length,
+      perDirection: Array.from(dialogsByDirection.entries()).map(([id, dialogs]) => ({
+        directionId: id,
+        directionName: directions.find(d => d.id === id)?.name || 'Unknown',
+        dialogsCount: dialogs.length
+      }))
+    }, 'Grouped dialogs by direction');
+
+    // Рассчитываем метрики для каждого направления
+    const directionsData: DirectionMetrics[] = [];
+    for (const dir of directions) {
+      const dirDialogs = dialogsByDirection.get(dir.id) || [];
+      if (dirDialogs.length > 0) {
+        const metrics = calculateDirectionMetrics(dir, dirDialogs, newDialogsSet);
+        directionsData.push(metrics);
+      }
+    }
+
+    // Добавляем "Без направления" если есть такие диалоги
+    if (unknownDirectionDialogs.length > 0) {
+      const unknownDir: DirectionWithPhones = {
+        id: 'unknown',
+        name: 'Без направления',
+        capi_enabled: false,
+        whatsapp_phone_numbers: []
+      };
+      const metrics = calculateDirectionMetrics(unknownDir, unknownDirectionDialogs, newDialogsSet);
+      directionsData.push(metrics);
+    }
+
+    log.info({
+      directionsDataCount: directionsData.length,
+      directionsNames: directionsData.map(d => d.direction_name)
+    }, 'Calculated metrics for all directions');
+
+    // === КОНЕЦ ГРУППИРОВКИ ===
 
     // Распределение по интересу (только активные за период)
     const interestDistribution: Record<string, number> = {
@@ -463,6 +753,38 @@ export async function generateConversationReport(params: {
         interestDistribution[d.interest_level] = (interestDistribution[d.interest_level] || 0) + 1;
       }
     });
+
+    // CAPI распределение по воронке (если CAPI включен)
+    const capiDistribution = { interest: 0, qualified: 0, scheduled: 0 };
+    let capiHasData = false;
+
+    if (capiEnabled) {
+      activeDialogs.forEach(d => {
+        if (d.capi_interest_sent) capiDistribution.interest++;
+        if (d.capi_qualified_sent) capiDistribution.qualified++;
+        if (d.capi_scheduled_sent) capiDistribution.scheduled++;
+      });
+
+      // Проверяем есть ли хотя бы одно CAPI событие
+      capiHasData = capiDistribution.interest > 0 || capiDistribution.qualified > 0 || capiDistribution.scheduled > 0;
+
+      log.info({
+        capiDistribution,
+        capiHasData,
+        activeDialogsCount: activeDialogs.length,
+        dialogsWithCapiInterest: capiDistribution.interest,
+        dialogsWithCapiQualified: capiDistribution.qualified,
+        dialogsWithCapiScheduled: capiDistribution.scheduled
+      }, 'CAPI: Distribution calculated');
+
+      if (!capiHasData) {
+        log.warn({
+          userAccountId,
+          directionId: capiDirectionId,
+          activeDialogsCount: activeDialogs.length
+        }, 'CAPI: Enabled but no CAPI events found in active dialogs, will show both CAPI and hot/warm/cold');
+      }
+    }
 
     // Распределение по воронке (только активные за период)
     const funnelDistribution: Record<string, number> = {};
@@ -663,6 +985,13 @@ export async function generateConversationReport(params: {
       drop_points_summary: dropPointsSummary,
       hidden_objections_summary: hiddenObjectionsSummary,
       engagement_trends: engagementTrends,
+      // CAPI интеграция (legacy для обратной совместимости)
+      capi_distribution: capiDistribution,
+      capi_source_used: capiEnabled,
+      capi_has_data: capiHasData,
+      capi_direction_id: capiDirectionId,
+      // Новое: метрики по каждому направлению
+      directions_data: directionsData,
     };
 
     // Генерируем текст отчёта
@@ -700,6 +1029,13 @@ export async function generateConversationReport(params: {
       drop_points_summary: fullReportData.drop_points_summary,
       hidden_objections_summary: fullReportData.hidden_objections_summary,
       engagement_trends: fullReportData.engagement_trends,
+      // CAPI интеграция
+      capi_distribution: fullReportData.capi_distribution,
+      capi_source_used: fullReportData.capi_source_used,
+      capi_has_data: fullReportData.capi_has_data,
+      capi_direction_id: fullReportData.capi_direction_id,
+      // Метрики по направлениям
+      directions_data: fullReportData.directions_data,
       generated_at: new Date().toISOString(),
     };
 

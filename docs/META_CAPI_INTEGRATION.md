@@ -263,6 +263,88 @@ POST /v20.0/{pixel_id}/events
 }
 ```
 
+## Мульти-направления в отчётах
+
+### Архитектура (миграции 129, 130)
+
+Система поддерживает несколько WhatsApp направлений с разными пикселями в одном отчёте.
+
+**Миграция 129** — добавляет `direction_id` в `dialog_analysis`:
+```sql
+ALTER TABLE dialog_analysis ADD COLUMN direction_id UUID REFERENCES account_directions(id);
+-- Триггер автоматически заполняет direction_id через instance_name
+```
+
+**Миграция 130** — добавляет `directions_data` в `conversation_reports`:
+```sql
+ALTER TABLE conversation_reports ADD COLUMN directions_data JSONB DEFAULT '[]'::jsonb;
+```
+
+### Структура directions_data
+
+```typescript
+interface DirectionReportData {
+  direction_id: string;
+  direction_name: string;
+  total_dialogs: number;
+  new_dialogs: number;
+  capi_enabled: boolean;
+  capi_has_data: boolean;
+  capi_distribution: { interest, qualified, scheduled };
+  interest_distribution: { hot, warm, cold };
+  incoming_messages: number;
+  outgoing_messages: number;
+  avg_response_time_minutes: number | null;
+}
+```
+
+### Формат отчёта
+
+Отчёт с секциями по направлениям:
+
+```
+📊 Отчёт по перепискам за 28 декабря 2025
+━━━━━━━━━━━━━━━━━━━━━━
+
+📈 ОБЩАЯ СТАТИСТИКА
+• Всего диалогов: 150
+• Новых: 25
+• Сообщений: 📥 420 / 📤 380
+
+━━━━━━━━━━━━━━━━━━━━━━
+📁 ПО НАПРАВЛЕНИЯМ (2)
+
+📌 Косметология
+• Диалогов: 85 (новых: 15)
+• Сообщений: 📥 240 / 📤 200
+
+🎯 Воронка CAPI:
+  👋 Интерес: 45
+  ✅ Квалиф.: 12
+  📅 Записался: 5
+  📊 Конверсия: 27%
+
+📌 Стоматология
+• Диалогов: 65 (новых: 10)
+• Сообщений: 📥 180 / 📤 180
+
+🌡️ Интерес: 🔥15 ☀️30 ❄️20
+⏱️ Среднее время ответа: 45 сек
+```
+
+### Логика группировки
+
+1. Диалоги группируются по `direction_id` (если миграция 129 применена)
+2. Fallback: группировка по `instance_name` → `whatsapp_phone_numbers` → `direction`
+3. Диалоги без направления попадают в категорию "Без направления"
+
+### Обратная совместимость
+
+Legacy поля сохраняются для старых отчётов:
+- `capi_distribution` — агрегированные CAPI метрики
+- `capi_source_used` — флаг использования CAPI
+- `capi_direction_id` — ID первого направления с CAPI
+
 ## ROI Analytics
 
 В разделе ROI Analytics (`/roi`) отображаются CAPI события для каждого лида:
