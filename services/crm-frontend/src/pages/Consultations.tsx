@@ -57,10 +57,11 @@ export function Consultations() {
     specialization: ''
   });
 
-  // Временные слоты (с 9:00 до 21:00 с интервалом 60 минут)
+  // Временные слоты (с 00:00 до 23:30 с интервалом 30 минут)
   const timeSlots: string[] = [];
-  for (let hour = 9; hour <= 21; hour++) {
+  for (let hour = 0; hour < 24; hour++) {
     timeSlots.push(`${hour.toString().padStart(2, '0')}:00`);
+    timeSlots.push(`${hour.toString().padStart(2, '0')}:30`);
   }
 
   // Заблокированные слоты (обеды, перерывы)
@@ -215,8 +216,10 @@ export function Consultations() {
 
   const calculateEndTime = (startTime: string): string => {
     const [hours, minutes] = startTime.split(':').map(Number);
-    const endHours = hours + 1;
-    return `${endHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    const totalMinutes = hours * 60 + minutes + 30;
+    const endHours = Math.floor(totalMinutes / 60) % 24;
+    const endMinutes = totalMinutes % 60;
+    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
   };
 
   const getConsultationForSlot = (consultantId: string, timeSlot: string) => {
