@@ -37,9 +37,11 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
-import { aiBotApi, type LinkedInstance } from '@/services/aiBotApi';
+import { aiBotApi, type LinkedInstance, type WhatsAppInstance } from '@/services/aiBotApi';
 import type { AIBotConfiguration, UpdateBotRequest } from '@/types/aiBot';
 import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK } from '@/types/aiBot';
+
+const USER_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
 
 // Tags input component for phrases
 function TagsInput({
@@ -110,6 +112,37 @@ export function BotEditor() {
   });
 
   const linkedInstances = linkedInstancesData?.instances || [];
+
+  // Fetch all user's WhatsApp instances
+  const { data: allInstancesData } = useQuery({
+    queryKey: ['whatsapp-instances', USER_ID],
+    queryFn: () => aiBotApi.getWhatsAppInstances(USER_ID),
+  });
+
+  const allInstances = allInstancesData?.instances || [];
+  // Только подключённые инстансы, которые не привязаны к этому боту
+  const unlinkedInstances = allInstances.filter(
+    (inst) => inst.status === 'connected' && (!inst.aiBotId || inst.aiBotId !== botId)
+  );
+
+  // Link/unlink bot to instance mutation
+  const linkMutation = useMutation({
+    mutationFn: ({ instanceId, newBotId }: { instanceId: string; newBotId: string | null }) =>
+      aiBotApi.linkBotToInstance(instanceId, newBotId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['ai-bot-linked-instances', botId] });
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-instances'] });
+      toast({
+        title: variables.newBotId ? 'Инстанс привязан' : 'Инстанс отвязан',
+        description: variables.newBotId
+          ? 'Бот теперь будет отвечать в этом WhatsApp'
+          : 'Бот больше не отвечает в этом WhatsApp',
+      });
+    },
+    onError: () => {
+      toast({ title: 'Ошибка', description: 'Не удалось изменить привязку', variant: 'destructive' });
+    },
+  });
 
   const updateMutation = useMutation({
     mutationFn: (updates: UpdateBotRequest) => aiBotApi.updateBot(botId!, updates),
@@ -337,7 +370,7 @@ export function BotEditor() {
                     Нет привязанных WhatsApp инстансов
                   </p>
                   <p className="text-sm text-muted-foreground mt-2">
-                    Привяжите этого бота к WhatsApp инстансу на странице настройки инстансов
+                    Выберите инстанс ниже, чтобы привязать к этому боту
                   </p>
                 </div>
               ) : (
@@ -345,39 +378,84 @@ export function BotEditor() {
                   {linkedInstances.map((instance: LinkedInstance) => (
                     <div
                       key={instance.id}
-                      className="flex items-center justify-between p-4 rounded-lg border bg-muted/30"
+                      className="flex items-center justify-between p-4 rounded-lg border bg-green-50 dark:bg-green-950/30"
                     >
                       <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-full bg-green-100 text-green-700">
+                        <div className="p-2 rounded-full bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
                           <Smartphone className="w-4 h-4" />
                         </div>
-                        <div>
-                          <div className="font-medium">{instance.instanceName}</div>
-                          {instance.phoneNumber && (
-                            <div className="text-sm text-muted-foreground">
-                              {instance.phoneNumber}
-                            </div>
-                          )}
+                        <div className="font-medium">
+                          {instance.phoneNumber || instance.instanceName}
                         </div>
                       </div>
-                      <Badge variant={instance.status === 'connected' ? 'default' : 'secondary'}>
-                        {instance.status === 'connected' ? 'Подключён' : instance.status}
-                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => linkMutation.mutate({ instanceId: instance.id, newBotId: null })}
+                        disabled={linkMutation.isPending}
+                      >
+                        <Unlink className="w-4 h-4 mr-1" />
+                        Отвязать
+                      </Button>
                     </div>
                   ))}
                 </div>
               )}
 
-              <Separator className="my-6" />
+              {/* Available instances to link */}
+              {unlinkedInstances.length > 0 && (
+                <>
+                  <Separator className="my-6" />
+                  <div>
+                    <h4 className="font-medium mb-3">Доступные для привязки</h4>
+                    <div className="space-y-3">
+                      {unlinkedInstances.map((instance: WhatsAppInstance) => (
+                        <div
+                          key={instance.id}
+                          className="flex items-center justify-between p-4 rounded-lg border bg-muted/30"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-full bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                              <Smartphone className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <div className="font-medium">
+                                {instance.phoneNumber || instance.instanceName}
+                              </div>
+                              {instance.linkedBot && (
+                                <div className="text-xs text-orange-600 dark:text-orange-400">
+                                  Привязан к: {instance.linkedBot.name}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => linkMutation.mutate({ instanceId: instance.id, newBotId: botId! })}
+                            disabled={linkMutation.isPending}
+                          >
+                            <Link2 className="w-4 h-4 mr-1" />
+                            Привязать
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
-              <div className="bg-muted/50 rounded-lg p-4">
-                <h4 className="font-medium mb-2">Как привязать бота к WhatsApp?</h4>
-                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                  <li>Перейдите в раздел "WhatsApp" в меню</li>
-                  <li>Выберите нужный инстанс</li>
-                  <li>В настройках инстанса выберите этого бота</li>
-                </ol>
-              </div>
+              {allInstances.length === 0 && (
+                <>
+                  <Separator className="my-6" />
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Нет WhatsApp инстансов</h4>
+                    <p className="text-sm text-muted-foreground">
+                      Сначала подключите WhatsApp аккаунт в разделе "WhatsApp"
+                    </p>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

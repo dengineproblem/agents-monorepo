@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { WhatsAppCRM } from './pages/WhatsAppCRM';
-import { ChatbotSettings } from './pages/ChatbotSettings';
 import { ReactivationCampaigns } from './pages/ReactivationCampaigns';
 import { Consultations } from './pages/Consultations';
 import { BotsList } from './pages/BotsList';
@@ -22,7 +21,6 @@ function App() {
             <Routes>
               <Route path="/" element={<WhatsAppCRM />} />
               <Route path="/consultations" element={<Consultations />} />
-              <Route path="/chatbot" element={<ChatbotSettings />} />
               <Route path="/reactivation" element={<ReactivationCampaigns />} />
               <Route path="/bots" element={<BotsList />} />
               <Route path="/bots/:botId" element={<BotEditor />} />

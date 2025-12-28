@@ -1,4 +1,4 @@
-import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight, Calendar, Cpu } from 'lucide-react';
+import { MessageSquare, Send, ChevronLeft, ChevronRight, Calendar, Cpu } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
@@ -13,7 +13,6 @@ export function Sidebar() {
     { path: '/', icon: MessageSquare, label: 'CRM' },
     { path: '/consultations', icon: Calendar, label: 'Консультации' },
     { path: '/bots', icon: Cpu, label: 'AI-боты' },
-    { path: '/chatbot', icon: Bot, label: 'Настройки бота' },
     { path: '/reactivation', icon: Send, label: 'Рассылки' }
   ];
 

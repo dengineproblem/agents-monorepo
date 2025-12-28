@@ -1016,6 +1016,7 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       app.log.debug({ userId }, '[GET /whatsapp-instances] Querying instances with bot info');
 
+      // Fetch instances
       const { data: instances, error } = await supabase
         .from('whatsapp_instances')
         .select(`
@@ -1044,14 +1045,34 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         throw error;
       }
 
+      // Fetch phone numbers from whatsapp_phone_numbers to get actual phone
+      const instanceNames = (instances || []).map((i: any) => i.instance_name).filter(Boolean);
+      let phoneNumbersMap: Record<string, string> = {};
+
+      if (instanceNames.length > 0) {
+        const { data: phoneNumbers } = await supabase
+          .from('whatsapp_phone_numbers')
+          .select('instance_name, phone_number')
+          .in('instance_name', instanceNames);
+
+        if (phoneNumbers) {
+          phoneNumbersMap = phoneNumbers.reduce((acc: Record<string, string>, pn: any) => {
+            if (pn.instance_name && pn.phone_number) {
+              acc[pn.instance_name] = pn.phone_number;
+            }
+            return acc;
+          }, {});
+        }
+      }
+
       const instancesCount = instances?.length || 0;
       const linkedCount = instances?.filter((i: any) => i.ai_bot_id).length || 0;
 
-      // Transform response
+      // Transform response - use phone from whatsapp_phone_numbers if available
       const result = (instances || []).map((inst: any) => ({
         id: inst.id,
         instanceName: inst.instance_name,
-        phoneNumber: inst.phone_number,
+        phoneNumber: phoneNumbersMap[inst.instance_name] || inst.phone_number,
         status: inst.status,
         aiBotId: inst.ai_bot_id,
         createdAt: inst.created_at,
