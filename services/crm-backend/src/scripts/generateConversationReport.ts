@@ -240,6 +240,13 @@ function calculateDirectionMetrics(
   dialogs: DialogAnalysis[],
   newDialogsSet: Set<string>
 ): DirectionMetrics {
+  log.debug({
+    directionId: direction.id,
+    directionName: direction.name,
+    dialogsCount: dialogs.length,
+    capiEnabled: direction.capi_enabled
+  }, 'Calculating metrics for direction');
+
   // CAPI распределение
   const capiDistribution = { interest: 0, qualified: 0, scheduled: 0 };
   dialogs.forEach(d => {
@@ -315,7 +322,7 @@ function calculateDirectionMetrics(
   // Новые диалоги в этом направлении
   const newDialogsCount = dialogs.filter(d => newDialogsSet.has(d.id)).length;
 
-  return {
+  const metrics: DirectionMetrics = {
     direction_id: direction.id,
     direction_name: direction.name,
     total_dialogs: dialogs.length,
@@ -334,6 +341,20 @@ function calculateDirectionMetrics(
     hidden_objections: hiddenObjections,
     engagement_trends: engagementTrends,
   };
+
+  log.debug({
+    directionId: direction.id,
+    directionName: direction.name,
+    totalDialogs: metrics.total_dialogs,
+    newDialogs: metrics.new_dialogs,
+    capiEnabled: metrics.capi_enabled,
+    capiHasData: metrics.capi_has_data,
+    capiDistribution: metrics.capi_distribution,
+    interestDistribution: metrics.interest_distribution,
+    messages: { incoming: incomingMessages, outgoing: outgoingMessages }
+  }, 'Direction metrics calculated');
+
+  return metrics;
 }
 
 /**
@@ -555,26 +576,42 @@ export async function generateConversationReport(params: {
       log.warn({ userAccountId, error: directionError.message }, 'Failed to fetch directions');
     }
 
-    // Преобразуем в удобный формат
-    const directions: DirectionWithPhones[] = (directionsRaw || []).map(d => {
+    // Преобразуем в удобный формат с подробным логированием
+    const directions: DirectionWithPhones[] = [];
+    for (const d of (directionsRaw || [])) {
       const phones = d.whatsapp_phone_numbers as any;
       let phonesList: Array<{ instance_name: string }> = [];
 
-      if (phones) {
-        if (Array.isArray(phones)) {
-          phonesList = phones.filter((p: any) => p?.instance_name);
-        } else if (phones.instance_name) {
-          phonesList = [phones];
+      try {
+        if (phones) {
+          if (Array.isArray(phones)) {
+            phonesList = phones.filter((p: any) => p?.instance_name);
+          } else if (typeof phones === 'object' && phones.instance_name) {
+            phonesList = [phones];
+          } else {
+            log.warn({
+              directionId: d.id,
+              directionName: d.name,
+              phonesType: typeof phones,
+              phonesValue: JSON.stringify(phones).substring(0, 100)
+            }, 'Unexpected whatsapp_phone_numbers format');
+          }
         }
+      } catch (parseError: any) {
+        log.error({
+          directionId: d.id,
+          directionName: d.name,
+          error: parseError.message
+        }, 'Failed to parse whatsapp_phone_numbers');
       }
 
-      return {
+      directions.push({
         id: d.id,
         name: d.name,
         capi_enabled: d.capi_enabled || false,
         whatsapp_phone_numbers: phonesList
-      };
-    });
+      });
+    }
 
     log.info({
       userAccountId,
@@ -873,12 +910,18 @@ export async function generateConversationReport(params: {
     const activePhones = activeDialogs.map(d => d.contact_phone);
 
     if (activePhones.length > 0) {
+      log.debug({ activePhonesCount: activePhones.length }, 'Calculating traffic source');
+
       // Ищем соответствующие leads
-      const { data: matchedLeads } = await supabase
+      const { data: matchedLeads, error: leadsError } = await supabase
         .from('leads')
         .select('phone, source_id, needs_manual_match')
         .eq('user_account_id', userAccountId)
         .in('phone', activePhones);
+
+      if (leadsError) {
+        log.warn({ error: leadsError.message }, 'Failed to fetch leads for traffic source');
+      }
 
       if (matchedLeads) {
         const leadsMap = new Map(matchedLeads.map(l => [l.phone, l]));
@@ -901,9 +944,15 @@ export async function generateConversationReport(params: {
             trafficSource.organic++;
           }
         });
+
+        log.info({
+          matchedLeadsCount: matchedLeads.length,
+          trafficSource
+        }, 'Traffic source calculated');
       } else {
         // Все органика если нет данных leads
         trafficSource.organic = activePhones.length;
+        log.info({ organic: trafficSource.organic }, 'No leads found, all traffic marked as organic');
       }
     }
 
@@ -926,6 +975,12 @@ export async function generateConversationReport(params: {
     };
 
     if (activeDialogs.length > 0) {
+      log.info({
+        activeDialogsCount: activeDialogs.length,
+        objectionsCount: Object.keys(objectionCounts).length,
+        dialogSamplesLength: dialogSamples.length
+      }, 'Starting LLM analysis');
+
       try {
         const prompt = REPORT_ANALYSIS_PROMPT
           .replace('{{total_dialogs}}', activeDialogs.length.toString())
@@ -952,10 +1007,25 @@ export async function generateConversationReport(params: {
         const content = response.choices[0]?.message?.content;
         if (content) {
           llmAnalysis = JSON.parse(content);
+          log.info({
+            insightsCount: llmAnalysis.insights?.length || 0,
+            rejectionReasonsCount: llmAnalysis.rejection_reasons?.length || 0,
+            objectionsCount: llmAnalysis.common_objections?.length || 0,
+            recommendationsCount: llmAnalysis.recommendations?.length || 0,
+            tokensUsed: response.usage?.total_tokens
+          }, 'LLM analysis completed successfully');
+        } else {
+          log.warn('LLM returned empty content');
         }
       } catch (llmError: any) {
-        log.error({ error: llmError.message }, 'LLM analysis failed, using default values');
+        log.error({
+          error: llmError.message,
+          errorName: llmError.name,
+          errorStack: llmError.stack?.substring(0, 200)
+        }, 'LLM analysis failed, using default values');
       }
+    } else {
+      log.info('No active dialogs, skipping LLM analysis');
     }
 
     // Собираем данные отчёта
