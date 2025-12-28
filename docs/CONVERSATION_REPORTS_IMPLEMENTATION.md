@@ -631,6 +631,83 @@ curl -X POST "http://localhost:8083/conversation-reports/generate-all" \
 
 ---
 
+## Дедупликация инсайтов (миграция 131)
+
+### Обзор
+
+Начиная с миграции 131, инсайты, возражения, причины отказа и рекомендации сохраняются в отдельную таблицу `conversation_insights` с семантическими embeddings. Это позволяет:
+- Находить похожие инсайты по смыслу (не только по тексту)
+- Помечать новые инсайты в отчёте как 🆕
+- Отслеживать частоту повторения инсайтов
+
+### Архитектура
+
+```
+LLM Analysis → getEmbeddings() → findSimilarInsight() → Save/Update
+                    ↓
+              OpenAI text-embedding-3-small (1536 dims)
+                    ↓
+              pgvector cosine similarity
+```
+
+### Таблица conversation_insights
+
+```sql
+CREATE TABLE conversation_insights (
+  id UUID PRIMARY KEY,
+  user_account_id UUID NOT NULL REFERENCES user_accounts(id),
+  category TEXT NOT NULL,  -- insight, rejection_reason, objection, recommendation
+  content TEXT NOT NULL,
+  embedding vector(1536),  -- OpenAI text-embedding-3-small
+  metadata JSONB DEFAULT '{}',
+  first_seen_at TIMESTAMPTZ,
+  last_seen_at TIMESTAMPTZ,
+  occurrence_count INTEGER DEFAULT 1,
+  first_report_id UUID REFERENCES conversation_reports(id)
+);
+```
+
+### Функция поиска похожих
+
+```sql
+CREATE FUNCTION find_similar_insight(
+  p_user_account_id UUID,
+  p_category TEXT,
+  p_embedding vector(1536),
+  p_threshold FLOAT DEFAULT 0.85  -- 85% схожесть
+)
+```
+
+### Порог схожести
+
+- **0.85** (85%) — по умолчанию
+- Если cosine similarity >= 0.85, считается дубликатом
+- Можно настроить через `SIMILARITY_THRESHOLD` в `insightDeduplication.ts`
+
+### Пример отчёта с пометками
+
+```
+💡 ИНСАЙТЫ
+1. Клиенты часто спрашивают о скидках 🆕
+2. Много вопросов о доставке
+3. Интерес к новой коллекции 🆕
+
+📊 Новых: 2, повторяющихся: 1
+```
+
+### Файлы
+
+- `migrations/131_conversation_insights.sql` — таблица + SQL функция
+- `services/crm-backend/src/lib/embeddings.ts` — получение embeddings
+- `services/crm-backend/src/lib/insightDeduplication.ts` — логика дедупликации
+
+### Стоимость
+
+- OpenAI text-embedding-3-small: ~$0.02 / 1M токенов
+- Средний отчёт: ~500 токенов = ~$0.00001
+
+---
+
 ## Коммиты
 
 | Хеш | Сообщение |
@@ -646,6 +723,9 @@ curl -X POST "http://localhost:8083/conversation-reports/generate-all" \
 - `migrations/106_conversation_reports.sql`
 - `migrations/129_dialog_analysis_direction_id.sql`
 - `migrations/130_conversation_reports_directions_data.sql`
+- `migrations/131_conversation_insights.sql`
+- `services/crm-backend/src/lib/embeddings.ts`
+- `services/crm-backend/src/lib/insightDeduplication.ts`
 - `services/crm-backend/src/scripts/generateConversationReport.ts`
 - `services/crm-backend/src/routes/conversationReports.ts`
 - `services/crm-backend/src/server.ts`

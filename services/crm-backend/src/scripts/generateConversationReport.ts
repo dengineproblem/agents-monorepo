@@ -2,6 +2,7 @@ import { OpenAI } from 'openai';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { analyzeDialogs } from './analyzeDialogs.js';
+import { deduplicateAllInsights, LabeledInsight } from '../lib/insightDeduplication.js';
 
 const log = createLogger({ module: 'conversationReport' });
 
@@ -405,10 +406,23 @@ function generateDirectionSection(dir: DirectionMetrics): string {
   return section;
 }
 
+// Labeled insights with isNew flag for deduplication
+interface LabeledInsightsData {
+  insights?: LabeledInsight[];
+  rejection_reasons?: LabeledInsight[];
+  objections?: LabeledInsight[];
+  recommendations?: LabeledInsight[];
+}
+
 /**
  * Генерирует текст отчета для Telegram
+ * @param data - данные отчёта
+ * @param labeled - опциональные labeled insights с пометкой isNew
  */
-function generateReportText(data: Omit<ConversationReportData, 'report_text'>): string {
+function generateReportText(
+  data: Omit<ConversationReportData, 'report_text'>,
+  labeled?: LabeledInsightsData
+): string {
   const date = new Date(data.report_date).toLocaleDateString('ru-RU', {
     day: 'numeric',
     month: 'long',
@@ -479,30 +493,51 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
     report += `\n`;
   }
 
-  // Инсайты
+  // Инсайты (с пометкой 🆕 для новых)
   if (data.insights.length > 0) {
     report += `💡 ИНСАЙТЫ\n`;
-    data.insights.forEach((insight, i) => {
-      report += `${i + 1}. ${insight}\n`;
-    });
+    if (labeled?.insights) {
+      labeled.insights.forEach((insight, i) => {
+        const newLabel = insight.isNew ? ' 🆕' : '';
+        report += `${i + 1}. ${insight.text}${newLabel}\n`;
+      });
+    } else {
+      data.insights.forEach((insight, i) => {
+        report += `${i + 1}. ${insight}\n`;
+      });
+    }
     report += `\n`;
   }
 
-  // Частые возражения
+  // Частые возражения (с пометкой 🆕 для новых)
   if (data.common_objections.length > 0) {
     report += `⚠️ ЧАСТЫЕ ВОЗРАЖЕНИЯ\n`;
-    data.common_objections.slice(0, 3).forEach((obj) => {
-      report += `• "${obj.objection}" (${obj.count}x)\n`;
-    });
+    if (labeled?.objections) {
+      labeled.objections.slice(0, 3).forEach((obj) => {
+        const newLabel = obj.isNew ? ' 🆕' : '';
+        report += `• "${obj.text}"${newLabel}\n`;
+      });
+    } else {
+      data.common_objections.slice(0, 3).forEach((obj) => {
+        report += `• "${obj.objection}" (${obj.count}x)\n`;
+      });
+    }
     report += `\n`;
   }
 
-  // Причины отказа
+  // Причины отказа (с пометкой 🆕 для новых)
   if (data.rejection_reasons.length > 0) {
     report += `❌ ПРИЧИНЫ ОТКАЗА\n`;
-    data.rejection_reasons.slice(0, 3).forEach((rej) => {
-      report += `• ${rej.reason}: ${rej.count}\n`;
-    });
+    if (labeled?.rejection_reasons) {
+      labeled.rejection_reasons.slice(0, 3).forEach((rej) => {
+        const newLabel = rej.isNew ? ' 🆕' : '';
+        report += `• ${rej.text}${newLabel}\n`;
+      });
+    } else {
+      data.rejection_reasons.slice(0, 3).forEach((rej) => {
+        report += `• ${rej.reason}: ${rej.count}\n`;
+      });
+    }
     report += `\n`;
   }
 
@@ -515,12 +550,34 @@ function generateReportText(data: Omit<ConversationReportData, 'report_text'>): 
     report += `\n`;
   }
 
-  // Рекомендации
+  // Рекомендации (с пометкой 🆕 для новых)
   if (data.recommendations.length > 0) {
     report += `✅ РЕКОМЕНДАЦИИ\n`;
-    data.recommendations.forEach((rec, i) => {
-      report += `${i + 1}. ${rec}\n`;
-    });
+    if (labeled?.recommendations) {
+      labeled.recommendations.forEach((rec, i) => {
+        const newLabel = rec.isNew ? ' 🆕' : '';
+        report += `${i + 1}. ${rec.text}${newLabel}\n`;
+      });
+    } else {
+      data.recommendations.forEach((rec, i) => {
+        report += `${i + 1}. ${rec}\n`;
+      });
+    }
+  }
+
+  // Статистика новых vs повторяющихся инсайтов
+  if (labeled) {
+    const allLabeled = [
+      ...(labeled.insights || []),
+      ...(labeled.rejection_reasons || []),
+      ...(labeled.objections || []),
+      ...(labeled.recommendations || [])
+    ];
+    const newCount = allLabeled.filter(i => i.isNew).length;
+    const repeatCount = allLabeled.length - newCount;
+    if (allLabeled.length > 0 && repeatCount > 0) {
+      report += `\n📊 Новых: ${newCount}, повторяющихся: ${repeatCount}\n`;
+    }
   }
 
   return report;
@@ -1064,14 +1121,14 @@ export async function generateConversationReport(params: {
       directions_data: directionsData,
     };
 
-    // Генерируем текст отчёта
-    const reportText = generateReportText(reportData);
+    // Генерируем временный текст отчёта (без пометок)
+    const initialReportText = generateReportText(reportData);
     const fullReportData: ConversationReportData = {
       ...reportData,
-      report_text: reportText
+      report_text: initialReportText
     };
 
-    // Сохраняем в БД
+    // Сохраняем в БД (чтобы получить ID для дедупликации)
     const dataToSave = {
       user_account_id: userAccountId,
       telegram_id: fullReportData.telegram_id,
@@ -1146,12 +1203,48 @@ export async function generateConversationReport(params: {
 
     log.info({ savedCount: savedData?.length }, 'Report saved');
 
+    const reportId = savedData?.[0]?.id;
+
+    // Дедупликация инсайтов (если есть данные от LLM)
+    let finalReportText = fullReportData.report_text;
+    if (reportId && llmAnalysis.insights.length > 0) {
+      try {
+        log.info({ reportId }, 'Starting insight deduplication');
+
+        const labeledData = await deduplicateAllInsights(
+          userAccountId,
+          reportId,
+          llmAnalysis
+        );
+
+        // Генерируем финальный текст с пометками 🆕
+        finalReportText = generateReportText(reportData, labeledData);
+
+        // Обновляем report_text в БД
+        await supabase
+          .from('conversation_reports')
+          .update({ report_text: finalReportText })
+          .eq('id', reportId);
+
+        log.info({
+          reportId,
+          newInsights: labeledData.insights.filter(i => i.isNew).length,
+          totalInsights: labeledData.insights.length
+        }, 'Report text updated with insight labels');
+
+        fullReportData.report_text = finalReportText;
+      } catch (dedupError: any) {
+        log.error({ error: dedupError.message, reportId }, 'Insight deduplication failed, using original text');
+        // Продолжаем с оригинальным текстом
+      }
+    }
+
     // Отправляем отчёт в Telegram, если есть telegram_id
-    if (fullReportData.telegram_id && savedData?.[0]?.id) {
+    if (fullReportData.telegram_id && reportId) {
       await sendReportToTelegram(
         fullReportData.telegram_id,
-        fullReportData.report_text,
-        savedData[0].id
+        finalReportText,
+        reportId
       );
     }
 
