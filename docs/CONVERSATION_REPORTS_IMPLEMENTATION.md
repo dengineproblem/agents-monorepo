@@ -417,13 +417,22 @@ const newDialogs = allDialogs.filter(d => {
 -- Прямая связь диалога с направлением
 ALTER TABLE dialog_analysis ADD COLUMN IF NOT EXISTS direction_id UUID REFERENCES account_directions(id);
 
+-- Миграция существующих данных
+-- Связь: instance_name -> whatsapp_phone_numbers -> account_directions
+UPDATE dialog_analysis da
+SET direction_id = ad.id
+FROM whatsapp_phone_numbers wpn
+JOIN account_directions ad ON ad.whatsapp_phone_number_id = wpn.id
+WHERE da.instance_name = wpn.instance_name AND da.direction_id IS NULL;
+
 -- Триггер для автоматического заполнения direction_id
 CREATE OR REPLACE FUNCTION set_dialog_direction_id() RETURNS TRIGGER AS $$
 BEGIN
   IF NEW.direction_id IS NULL AND NEW.instance_name IS NOT NULL THEN
-    SELECT direction_id INTO NEW.direction_id
-    FROM whatsapp_phone_numbers
-    WHERE instance_name = NEW.instance_name
+    SELECT ad.id INTO NEW.direction_id
+    FROM whatsapp_phone_numbers wpn
+    JOIN account_directions ad ON ad.whatsapp_phone_number_id = wpn.id
+    WHERE wpn.instance_name = NEW.instance_name
     LIMIT 1;
   END IF;
   RETURN NEW;

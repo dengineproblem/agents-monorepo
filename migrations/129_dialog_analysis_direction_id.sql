@@ -15,13 +15,14 @@ CREATE INDEX IF NOT EXISTS idx_dialog_analysis_direction_id ON dialog_analysis(d
 -- ============================================
 -- 2. Migrate existing data
 -- ============================================
--- Link dialogs to directions through instance_name -> whatsapp_phone_numbers
+-- Link dialogs to directions through instance_name -> whatsapp_phone_numbers -> account_directions
+-- Relationship: account_directions.whatsapp_phone_number_id -> whatsapp_phone_numbers.id
 UPDATE dialog_analysis da
-SET direction_id = wpn.direction_id
+SET direction_id = ad.id
 FROM whatsapp_phone_numbers wpn
+JOIN account_directions ad ON ad.whatsapp_phone_number_id = wpn.id
 WHERE da.instance_name = wpn.instance_name
-  AND da.direction_id IS NULL
-  AND wpn.direction_id IS NOT NULL;
+  AND da.direction_id IS NULL;
 
 -- ============================================
 -- 3. Create trigger for future dialogs
@@ -32,9 +33,10 @@ RETURNS TRIGGER AS $$
 BEGIN
   -- Only set if direction_id is NULL and instance_name is provided
   IF NEW.direction_id IS NULL AND NEW.instance_name IS NOT NULL THEN
-    SELECT direction_id INTO NEW.direction_id
-    FROM whatsapp_phone_numbers
-    WHERE instance_name = NEW.instance_name
+    SELECT ad.id INTO NEW.direction_id
+    FROM whatsapp_phone_numbers wpn
+    JOIN account_directions ad ON ad.whatsapp_phone_number_id = wpn.id
+    WHERE wpn.instance_name = NEW.instance_name
     LIMIT 1;
   END IF;
   RETURN NEW;
