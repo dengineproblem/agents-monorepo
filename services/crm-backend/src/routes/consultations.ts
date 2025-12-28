@@ -1,13 +1,18 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import {
+  sendConfirmationNotification,
+  scheduleReminderNotifications
+} from '../lib/consultationNotifications.js';
 
 // Validation schemas
 const CreateConsultantSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   phone: z.string().optional(),
-  specialization: z.string().optional()
+  specialization: z.string().optional(),
+  user_account_id: z.string().uuid().optional()
 });
 
 const UpdateConsultantSchema = z.object({
@@ -25,6 +30,7 @@ const CreateConsultationSchema = z.object({
   client_name: z.string().optional(),
   client_chat_id: z.string().optional(),
   dialog_analysis_id: z.string().uuid().optional(),
+  user_account_id: z.string().uuid().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   end_time: z.string().regex(/^\d{2}:\d{2}$/),
@@ -398,12 +404,24 @@ export async function consultationsRoutes(app: FastifyInstance) {
     try {
       const body = CreateConsultationSchema.parse(request.body);
 
+      // Get user_account_id from consultant if not provided
+      let userAccountId = body.user_account_id;
+      if (!userAccountId) {
+        const { data: consultant } = await supabase
+          .from('consultants')
+          .select('user_account_id')
+          .eq('id', body.consultant_id)
+          .single();
+        userAccountId = consultant?.user_account_id;
+      }
+
       const consultationData: any = {
         consultant_id: body.consultant_id,
         client_phone: body.client_phone,
         client_name: body.client_name || null,
         client_chat_id: body.client_chat_id || null,
         dialog_analysis_id: body.dialog_analysis_id || null,
+        user_account_id: userAccountId || null,
         date: body.date,
         start_time: body.start_time,
         end_time: body.end_time,
@@ -433,6 +451,30 @@ export async function consultationsRoutes(app: FastifyInstance) {
           .from('dialog_analysis')
           .update({ funnel_stage: 'consultation_booked' })
           .eq('id', body.dialog_analysis_id);
+      }
+
+      // Send confirmation notification and schedule reminders (async, don't block response)
+      if (data && userAccountId) {
+        const consultation = {
+          id: data.id,
+          consultant_id: data.consultant_id,
+          user_account_id: userAccountId,
+          client_phone: data.client_phone,
+          client_name: data.client_name,
+          dialog_analysis_id: data.dialog_analysis_id,
+          date: data.date,
+          start_time: data.start_time,
+          end_time: data.end_time
+        };
+
+        // Fire and forget - don't wait for notifications
+        sendConfirmationNotification(consultation).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to send confirmation notification');
+        });
+
+        scheduleReminderNotifications(consultation).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to schedule reminder notifications');
+        });
       }
 
       return reply.status(201).send(data);
@@ -520,12 +562,23 @@ export async function consultationsRoutes(app: FastifyInstance) {
       // Get lead info
       const { data: lead, error: leadError } = await supabase
         .from('dialog_analysis')
-        .select('contact_phone, contact_name, id')
+        .select('contact_phone, contact_name, id, user_account_id, instance_name')
         .eq('id', body.dialog_analysis_id)
         .single();
 
       if (leadError || !lead) {
         return reply.status(404).send({ error: 'Lead not found' });
+      }
+
+      // Get user_account_id from consultant or lead
+      let userAccountId = lead.user_account_id;
+      if (!userAccountId) {
+        const { data: consultant } = await supabase
+          .from('consultants')
+          .select('user_account_id')
+          .eq('id', body.consultant_id)
+          .single();
+        userAccountId = consultant?.user_account_id;
       }
 
       // Create consultation
@@ -534,6 +587,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
         client_phone: lead.contact_phone,
         client_name: lead.contact_name || null,
         dialog_analysis_id: body.dialog_analysis_id,
+        user_account_id: userAccountId || null,
         date: body.date,
         start_time: body.start_time,
         end_time: body.end_time,
@@ -558,6 +612,29 @@ export async function consultationsRoutes(app: FastifyInstance) {
         .from('dialog_analysis')
         .update({ funnel_stage: 'consultation_booked' })
         .eq('id', body.dialog_analysis_id);
+
+      // Send confirmation notification and schedule reminders
+      if (consultation && userAccountId) {
+        const consultationForNotification = {
+          id: consultation.id,
+          consultant_id: consultation.consultant_id,
+          user_account_id: userAccountId,
+          client_phone: consultation.client_phone,
+          client_name: consultation.client_name,
+          dialog_analysis_id: consultation.dialog_analysis_id,
+          date: consultation.date,
+          start_time: consultation.start_time,
+          end_time: consultation.end_time
+        };
+
+        sendConfirmationNotification(consultationForNotification).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to send confirmation notification');
+        });
+
+        scheduleReminderNotifications(consultationForNotification).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to schedule reminder notifications');
+        });
+      }
 
       return reply.status(201).send(consultation);
     } catch (error: any) {

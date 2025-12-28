@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee, Settings, Edit, Trash2 } from 'lucide-react';
+import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee, Settings, Edit, Trash2, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -18,9 +18,14 @@ import {
   WorkingScheduleInput,
   DAYS_OF_WEEK
 } from '@/types/consultation';
+import { NotificationSettings } from '@/components/NotificationSettings';
 
 export function Consultations() {
   const { toast } = useToast();
+
+  // Hardcoded user account ID - в реальном приложении получать из auth
+  const userAccountId = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
+
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [consultants, setConsultants] = useState<Consultant[]>([]);
   const [consultations, setConsultations] = useState<ConsultationWithDetails[]>([]);
@@ -46,6 +51,7 @@ export function Consultations() {
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [editingConsultant, setEditingConsultant] = useState<Consultant | null>(null);
   const [editingSchedules, setEditingSchedules] = useState<WorkingScheduleInput[]>([]);
+  const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -399,6 +405,11 @@ export function Consultations() {
           <Button variant="outline" size="sm" onClick={() => setIsConsultantsModalOpen(true)}>
             <Settings className="w-4 h-4 mr-1" />
             Консультанты
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={() => setIsNotificationSettingsOpen(true)}>
+            <Bell className="w-4 h-4 mr-1" />
+            Уведомления
           </Button>
 
           <Button size="sm" onClick={handleOpenNewConsultationModal}>
@@ -964,6 +975,13 @@ export function Consultations() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Модальное окно настроек уведомлений */}
+      <NotificationSettings
+        userAccountId={userAccountId}
+        isOpen={isNotificationSettingsOpen}
+        onClose={() => setIsNotificationSettingsOpen(false)}
+      />
     </div>
   );
 }

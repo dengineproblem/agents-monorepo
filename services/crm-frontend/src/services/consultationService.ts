@@ -7,7 +7,11 @@ import {
   UpdateConsultationData,
   ConsultationStats,
   WorkingSchedule,
-  WorkingScheduleInput
+  WorkingScheduleInput,
+  NotificationSettings,
+  NotificationTemplate,
+  CreateNotificationTemplate,
+  NotificationHistory
 } from '@/types/consultation';
 
 const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
@@ -163,6 +167,74 @@ export const consultationService = {
   async getAllSchedules(): Promise<WorkingSchedule[]> {
     const response = await fetch(`${API_BASE_URL}/schedules/all`);
     if (!response.ok) throw new Error('Failed to fetch all schedules');
+    return response.json();
+  },
+
+  // ==================== NOTIFICATION SETTINGS ====================
+
+  // Получение настроек уведомлений
+  async getNotificationSettings(userAccountId: string): Promise<NotificationSettings> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/settings?userAccountId=${userAccountId}`);
+    if (!response.ok) throw new Error('Failed to fetch notification settings');
+    return response.json();
+  },
+
+  // Обновление настроек уведомлений
+  async updateNotificationSettings(userAccountId: string, data: Partial<NotificationSettings>): Promise<NotificationSettings> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/settings?userAccountId=${userAccountId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update notification settings');
+    return response.json();
+  },
+
+  // ==================== CUSTOM TEMPLATES ====================
+
+  // Получение кастомных шаблонов
+  async getNotificationTemplates(userAccountId: string): Promise<NotificationTemplate[]> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/templates?userAccountId=${userAccountId}`);
+    if (!response.ok) throw new Error('Failed to fetch notification templates');
+    return response.json();
+  },
+
+  // Создание кастомного шаблона
+  async createNotificationTemplate(userAccountId: string, data: CreateNotificationTemplate): Promise<NotificationTemplate> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/templates?userAccountId=${userAccountId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to create notification template');
+    return response.json();
+  },
+
+  // Обновление кастомного шаблона
+  async updateNotificationTemplate(id: string, data: Partial<CreateNotificationTemplate>): Promise<NotificationTemplate> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/templates/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update notification template');
+    return response.json();
+  },
+
+  // Удаление кастомного шаблона
+  async deleteNotificationTemplate(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/templates/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete notification template');
+  },
+
+  // ==================== NOTIFICATION HISTORY ====================
+
+  // Получение истории уведомлений для консультации
+  async getNotificationHistory(consultationId: string): Promise<NotificationHistory[]> {
+    const response = await fetch(`${API_BASE_URL}/consultation-notifications/history/${consultationId}`);
+    if (!response.ok) throw new Error('Failed to fetch notification history');
     return response.json();
   }
 };

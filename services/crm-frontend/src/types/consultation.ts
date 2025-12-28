@@ -158,3 +158,65 @@ export interface ConsultationStats {
   cancelled: number;
   no_show: number;
 }
+
+// ==================== NOTIFICATION TYPES ====================
+
+export interface NotificationSettings {
+  id?: string;
+  user_account_id: string;
+  confirmation_enabled: boolean;
+  confirmation_template: string;
+  reminder_24h_enabled: boolean;
+  reminder_24h_template: string;
+  reminder_1h_enabled: boolean;
+  reminder_1h_template: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface NotificationTemplate {
+  id: string;
+  user_account_id: string;
+  name: string;
+  minutes_before: number;
+  template: string;
+  is_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateNotificationTemplate {
+  name: string;
+  minutes_before: number;
+  template: string;
+  is_enabled?: boolean;
+}
+
+export interface NotificationHistory {
+  id: string;
+  consultation_id: string;
+  notification_type: 'confirmation' | 'reminder_24h' | 'reminder_1h' | 'custom';
+  template_id?: string;
+  message_text: string;
+  instance_name?: string;
+  phone: string;
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
+  error_message?: string;
+  scheduled_at?: string;
+  sent_at?: string;
+  created_at: string;
+}
+
+// Константы для шаблонов
+export const TEMPLATE_VARIABLES = [
+  { key: '{{client_name}}', description: 'Имя клиента' },
+  { key: '{{date}}', description: 'Дата консультации (15 января)' },
+  { key: '{{time}}', description: 'Время консультации (14:00)' },
+  { key: '{{consultant_name}}', description: 'Имя консультанта' }
+];
+
+export const DEFAULT_TEMPLATES = {
+  confirmation: 'Здравствуйте{{#client_name}}, {{client_name}}{{/client_name}}! Вы записаны на консультацию {{date}} в {{time}}. До встречи!',
+  reminder_24h: 'Напоминаем о вашей консультации завтра {{date}} в {{time}}. Ждём вас!',
+  reminder_1h: 'Через час у вас консультация в {{time}}. До скорой встречи!'
+};
