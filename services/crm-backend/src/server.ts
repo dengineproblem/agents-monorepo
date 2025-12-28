@@ -9,6 +9,9 @@ import { campaignSettingsRoutes } from './routes/campaignSettings.js';
 import { businessProfileRoutes } from './routes/businessProfile.js';
 import { campaignContextsRoutes } from './routes/campaignContexts.js';
 import { conversationReportsRoutes } from './routes/conversationReports.js';
+import { consultationsRoutes } from './routes/consultations.js';
+import { consultationNotificationsRoutes } from './routes/consultationNotifications.js';
+import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
 
 dotenv.config();
@@ -44,6 +47,11 @@ app.register(campaignSettingsRoutes);
 app.register(businessProfileRoutes);
 app.register(campaignContextsRoutes);
 app.register(conversationReportsRoutes);
+app.register(consultationsRoutes);
+app.register(consultationNotificationsRoutes);
+
+// Start notification cron job
+startNotificationCron();
 
 app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);

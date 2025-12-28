@@ -1,4 +1,4 @@
-import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
@@ -8,9 +8,10 @@ export function Sidebar() {
     const saved = localStorage.getItem('sidebar-collapsed');
     return saved === 'true';
   });
-  
+
   const navItems = [
     { path: '/', icon: MessageSquare, label: 'CRM' },
+    { path: '/consultations', icon: Calendar, label: 'Консультации' },
     { path: '/chatbot', icon: Bot, label: 'Настройки бота' },
     { path: '/reactivation', icon: Send, label: 'Рассылки' }
   ];
