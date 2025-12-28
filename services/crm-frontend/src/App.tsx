@@ -4,6 +4,8 @@ import { WhatsAppCRM } from './pages/WhatsAppCRM';
 import { ChatbotSettings } from './pages/ChatbotSettings';
 import { ReactivationCampaigns } from './pages/ReactivationCampaigns';
 import { Consultations } from './pages/Consultations';
+import { BotsList } from './pages/BotsList';
+import { BotEditor } from './pages/BotEditor';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 
@@ -22,6 +24,8 @@ function App() {
               <Route path="/consultations" element={<Consultations />} />
               <Route path="/chatbot" element={<ChatbotSettings />} />
               <Route path="/reactivation" element={<ReactivationCampaigns />} />
+              <Route path="/bots" element={<BotsList />} />
+              <Route path="/bots/:botId" element={<BotEditor />} />
             </Routes>
           </main>
         </div>
@@ -32,4 +36,3 @@ function App() {
 }
 
 export default App;
-

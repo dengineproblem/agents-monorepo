@@ -11,6 +11,7 @@ import { campaignContextsRoutes } from './routes/campaignContexts.js';
 import { conversationReportsRoutes } from './routes/conversationReports.js';
 import { consultationsRoutes } from './routes/consultations.js';
 import { consultationNotificationsRoutes } from './routes/consultationNotifications.js';
+import { aiBotConfigurationsRoutes } from './routes/aiBotConfigurations.js';
 import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
 
@@ -49,6 +50,7 @@ app.register(campaignContextsRoutes);
 app.register(conversationReportsRoutes);
 app.register(consultationsRoutes);
 app.register(consultationNotificationsRoutes);
+app.register(aiBotConfigurationsRoutes);
 
 // Start notification cron job
 startNotificationCron();
@@ -57,5 +59,3 @@ app.listen({ host: '0.0.0.0', port: PORT }).catch((e) => {
   app.log.error(e);
   process.exit(1);
 });
-
-

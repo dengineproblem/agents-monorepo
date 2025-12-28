@@ -1,4 +1,4 @@
-import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { MessageSquare, Bot, Send, ChevronLeft, ChevronRight, Calendar, Cpu } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
@@ -12,20 +12,21 @@ export function Sidebar() {
   const navItems = [
     { path: '/', icon: MessageSquare, label: 'CRM' },
     { path: '/consultations', icon: Calendar, label: 'Консультации' },
+    { path: '/bots', icon: Cpu, label: 'AI-боты' },
     { path: '/chatbot', icon: Bot, label: 'Настройки бота' },
     { path: '/reactivation', icon: Send, label: 'Рассылки' }
   ];
-  
+
   useEffect(() => {
     localStorage.setItem('sidebar-collapsed', String(isCollapsed));
   }, [isCollapsed]);
-  
+
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
   };
-  
+
   return (
-    <aside 
+    <aside
       className={`bg-sidebar text-sidebar-foreground p-4 transition-all duration-300 ease-in-out relative border-r ${
         isCollapsed ? 'w-20' : 'w-64'
       }`}
@@ -64,8 +65,8 @@ export function Sidebar() {
             key={path}
             to={path}
             className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-              location.pathname === path 
-                ? 'bg-accent' 
+              location.pathname === path
+                ? 'bg-accent'
                 : 'hover:bg-accent/50'
             }`}
             title={isCollapsed ? label : undefined}
@@ -78,6 +79,3 @@ export function Sidebar() {
     </aside>
   );
 }
-
-
-
