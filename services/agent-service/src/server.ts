@@ -7,6 +7,7 @@ import { actionsRoutes } from './routes/actions.js';
 import { videoRoutes } from './routes/video.js';
 import { imageRoutes } from './routes/image.js';
 import { creativeTestRoutes } from './routes/creativeTest.js';
+import { creativeAbTestRoutes } from './routes/creativeAbTest.js';
 import { campaignBuilderRoutes } from './routes/campaignBuilder.js';
 import { directionsRoutes } from './routes/directions.js';
 import directionAdSetsRoutes from './routes/directionAdSets.js';
@@ -51,6 +52,7 @@ import adInsightsRoutes from './routes/adInsights.js';
 import budgetForecastRoutes from './routes/budgetForecast.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
+import { startCreativeAbTestCron } from './cron/creativeAbTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
 import { startWhatsAppMonitorCron } from './cron/whatsappMonitorCron.js';
 import { startUserScoringCron } from './cron/userScoringCron.js';
@@ -121,6 +123,7 @@ app.register(actionsRoutes);
 app.register(videoRoutes);
 app.register(imageRoutes);
 app.register(creativeTestRoutes);
+app.register(creativeAbTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/campaign-builder' });
 app.register(directionsRoutes);
 app.register(directionAdSetsRoutes);
@@ -173,6 +176,9 @@ app.register(async (adminApp) => {
 
 // Запускаем cron для проверки тестов креативов (каждые 5 минут)
 startCreativeTestCron(app as any);
+
+// Запускаем cron для проверки A/B тестов креативов (каждые 5 минут)
+startCreativeAbTestCron(app as any);
 
 // Запускаем cron для мониторинга WhatsApp инстансов (каждые 5 минут)
 startWhatsAppMonitorCron(app as any);

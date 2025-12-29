@@ -15,6 +15,57 @@ import {
 import { onCreativeCreated, onCreativeGenerated } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 
+const CREATIVE_GENERATION_SERVICE_URL = process.env.CREATIVE_GENERATION_SERVICE_URL || 'http://creative-generation-service:8085';
+
+/**
+ * Асинхронно анализирует изображение: OCR + описание образа
+ * Результаты сохраняются в user_creatives
+ */
+async function analyzeImageAsync(creativeId: string, imageUrl: string, logger: any): Promise<void> {
+  try {
+    logger.info({ creativeId, imageUrl: imageUrl.substring(0, 100) }, '[Analyze Image] Starting async analysis');
+
+    const response = await fetch(`${CREATIVE_GENERATION_SERVICE_URL}/analyze-creative`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_url: imageUrl, image_type: 'url' })
+    });
+
+    if (!response.ok) {
+      logger.warn({ creativeId, status: response.status }, '[Analyze Image] Analysis service returned error');
+      return;
+    }
+
+    const result = await response.json() as { success: boolean; ocr_text?: string; image_description?: string };
+
+    if (!result.success) {
+      logger.warn({ creativeId }, '[Analyze Image] Analysis failed');
+      return;
+    }
+
+    // Сохраняем результаты в user_creatives
+    const { error: updateError } = await supabase
+      .from('user_creatives')
+      .update({
+        ocr_text: result.ocr_text || null,
+        image_description: result.image_description || null
+      })
+      .eq('id', creativeId);
+
+    if (updateError) {
+      logger.warn({ creativeId, error: updateError.message }, '[Analyze Image] Failed to save analysis results');
+    } else {
+      logger.info({
+        creativeId,
+        ocrLength: result.ocr_text?.length || 0,
+        descriptionLength: result.image_description?.length || 0
+      }, '[Analyze Image] Analysis completed and saved');
+    }
+  } catch (error: any) {
+    logger.warn({ creativeId, error: error.message }, '[Analyze Image] Async analysis failed');
+  }
+}
+
 const ProcessImageSchema = z.object({
   user_id: z.string().uuid(),
   account_id: z.string().uuid().optional(), // UUID из ad_accounts (для мультиаккаунтности)
@@ -344,6 +395,18 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         onCreativeGenerated(body.user_id, 'image').catch(err => {
           app.log.warn({ err, userId: body.user_id }, 'Failed to add onboarding tag');
         });
+
+        // Асинхронно анализируем изображение (OCR + описание образа) для A/B тестов
+        // Нужен URL изображения - получаем из Supabase Storage
+        const { data: createdCreative } = await supabase
+          .from('user_creatives')
+          .select('image_url')
+          .eq('id', creative.id)
+          .single();
+
+        if (createdCreative?.image_url) {
+          analyzeImageAsync(creative.id, createdCreative.image_url, app.log).catch(() => {});
+        }
 
         return reply.send({
           success: true,
@@ -704,6 +767,11 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       onCreativeGenerated(user_id, 'image').catch(err => {
         app.log.warn({ err, userId: user_id }, 'Failed to add onboarding tag');
       });
+
+      // Асинхронно анализируем изображение (OCR + описание образа) для A/B тестов
+      if (userCreative?.id && creative.image_url_4k) {
+        analyzeImageAsync(userCreative.id, creative.image_url_4k, app.log).catch(() => {});
+      }
 
       return reply.send({
         success: true,

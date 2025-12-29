@@ -470,6 +470,88 @@ export async function extractTextFromImage(
 }
 
 /**
+ * Описание образа/визуала на изображении через Gemini Vision
+ * Используется для A/B тестирования креативов
+ * @param imageUrl - URL изображения или base64
+ * @param imageType - Тип: 'url' или 'base64'
+ * @returns Краткое описание образа (люди, продукты, стиль, композиция)
+ */
+export async function describeImageContent(
+  imageUrl: string,
+  imageType: 'url' | 'base64' = 'url'
+): Promise<string> {
+  try {
+    console.log('[Gemini Vision] Starting image description...');
+    console.log('[Gemini Vision] Image type:', imageType);
+
+    const client = getGeminiClient();
+    const model = client.getGenerativeModel({
+      model: 'gemini-2.0-flash'
+    });
+
+    const contentParts: any[] = [];
+
+    // Промпт для описания образа
+    contentParts.push({
+      text: `Проанализируй это рекламное изображение и опиши ОБРАЗ (визуал), который на нём представлен.
+
+Опиши кратко (2-3 предложения):
+1. Кто или что изображено (люди, продукт, абстракция)
+2. Стиль и настроение (минимализм, lifestyle, premium, яркий, спокойный)
+3. Основные визуальные элементы (цвета, композиция)
+
+Примеры ответов:
+- "Молодая девушка с продуктом в руках. Lifestyle стиль, тёплые натуральные тона. Фон размыт, фокус на лице."
+- "Минималистичный дизайн с продуктом в центре. Белый фон, premium эстетика. Чистые линии, много воздуха."
+- "Яркий абстрактный градиент. Современный digital стиль. Неоновые цвета, динамичная композиция."
+
+Верни ТОЛЬКО описание образа, без анализа текста или дополнительных комментариев.`
+    });
+
+    // Добавляем изображение
+    if (imageType === 'url') {
+      console.log('[Gemini Vision] Fetching image from URL...');
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.statusText}`);
+      }
+      const buffer = await response.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      const mimeType = response.headers.get('content-type') || 'image/jpeg';
+
+      contentParts.push({
+        inlineData: {
+          mimeType,
+          data: base64
+        }
+      });
+      console.log('[Gemini Vision] Image fetched, size:', base64.length, 'bytes');
+    } else {
+      contentParts.push({
+        inlineData: {
+          mimeType: 'image/jpeg',
+          data: imageUrl
+        }
+      });
+    }
+
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: contentParts }]
+    });
+
+    const response = result.response;
+    const description = response.text() || '';
+
+    console.log('[Gemini Vision] Image described successfully, length:', description.length);
+
+    return description.trim();
+  } catch (error: any) {
+    console.error('[Gemini Vision] Error describing image:', error);
+    throw new Error(`Image description failed: ${error.message}`);
+  }
+}
+
+/**
  * Инициализация и проверка доступности Gemini API
  */
 export async function initializeGeminiImageAPI(): Promise<void> {

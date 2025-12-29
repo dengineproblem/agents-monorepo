@@ -1,5 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
-import { generateCreativeImage, upscaleImageTo4K, expandTo9x16, extractTextFromImage } from '../services/gemini-image';
+import { generateCreativeImage, upscaleImageTo4K, expandTo9x16, extractTextFromImage, describeImageContent } from '../services/gemini-image';
 import { supabase, logSupabaseError } from '../db/supabase';
 import { GenerateCreativeRequest, GenerateCreativeResponse } from '../types';
 import { addOnboardingTag } from '../lib/onboardingTags';
@@ -414,6 +414,110 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(500).send({
         success: false,
         error: 'Failed to extract text from image',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
+  /**
+   * POST /describe
+   *
+   * Описывает образ/визуал на изображении с помощью Gemini Vision
+   * Используется для A/B тестирования креативов
+   */
+  app.post<{
+    Body: {
+      image_url: string;
+      image_type?: 'url' | 'base64';
+    };
+  }>('/describe', async (request, reply) => {
+    const { image_url, image_type = 'url' } = request.body;
+
+    try {
+      app.log.info(`[Describe] Request for image: ${image_url.substring(0, 100)}...`);
+
+      if (!image_url) {
+        return reply.status(400).send({
+          success: false,
+          error: 'image_url is required'
+        });
+      }
+
+      const description = await describeImageContent(image_url, image_type);
+
+      app.log.info(`[Describe] Generated description: ${description.length} characters`);
+
+      return {
+        success: true,
+        description
+      };
+
+    } catch (error: any) {
+      app.log.error('[Describe] Error:', error);
+
+      // Логируем в централизованную систему ошибок
+      logImageGenerationError('unknown', error, 'describe_image').catch(() => {});
+
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to describe image',
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+  });
+
+  /**
+   * POST /analyze-creative
+   *
+   * Комбинированный анализ: OCR + описание образа
+   * Используется при загрузке картинок для A/B тестов
+   */
+  app.post<{
+    Body: {
+      image_url: string;
+      image_type?: 'url' | 'base64';
+    };
+  }>('/analyze-creative', async (request, reply) => {
+    const { image_url, image_type = 'url' } = request.body;
+
+    try {
+      app.log.info(`[Analyze Creative] Request for image: ${image_url.substring(0, 100)}...`);
+
+      if (!image_url) {
+        return reply.status(400).send({
+          success: false,
+          error: 'image_url is required'
+        });
+      }
+
+      // Запускаем OCR и описание образа параллельно
+      const [ocrText, imageDescription] = await Promise.all([
+        extractTextFromImage(image_url, image_type).catch(err => {
+          app.log.warn('[Analyze Creative] OCR failed:', err.message);
+          return '';
+        }),
+        describeImageContent(image_url, image_type).catch(err => {
+          app.log.warn('[Analyze Creative] Description failed:', err.message);
+          return '';
+        })
+      ]);
+
+      app.log.info(`[Analyze Creative] OCR: ${ocrText.length} chars, Description: ${imageDescription.length} chars`);
+
+      return {
+        success: true,
+        ocr_text: ocrText,
+        image_description: imageDescription
+      };
+
+    } catch (error: any) {
+      app.log.error('[Analyze Creative] Error:', error);
+
+      logImageGenerationError('unknown', error, 'analyze_creative').catch(() => {});
+
+      return reply.status(500).send({
+        success: false,
+        error: 'Failed to analyze creative',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       });
     }

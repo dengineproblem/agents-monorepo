@@ -10,9 +10,10 @@ import { Progress } from "@/components/ui/progress";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket } from "lucide-react";
+import { Upload, PlayCircle, Trash2, RefreshCw, CheckCircle2, XCircle, Sparkles, Loader2, TrendingUp, Target, Video, Image, Images, Pencil, Megaphone, Mic, Rocket, FlaskConical } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { manualLaunchAds, ManualLaunchResponse } from "@/services/manualLaunchApi";
+import { creativeAbTestApi, type AbTestResult } from "@/services/creativeAbTestApi";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -30,6 +31,7 @@ import { OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
 import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativeAnalyticsApi";
 import { TestStatusIndicator } from "@/components/TestStatusIndicator";
+import { AbTestInsights } from "@/components/AbTestInsights";
 import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { TooltipKeys } from "@/content/tooltips";
 
@@ -1377,6 +1379,13 @@ const Creatives: React.FC = () => {
   const [launchedBudget, setLaunchedBudget] = useState<number>(10);
   const [launchDirectionId, setLaunchDirectionId] = useState<string>('');
 
+  // Состояния для A/B Test модалки
+  const [abTestDialogOpen, setAbTestDialogOpen] = useState(false);
+  const [abTestBudget, setAbTestBudget] = useState<number>(20);
+  const [isStartingAbTest, setIsStartingAbTest] = useState(false);
+  const [abTestResult, setAbTestResult] = useState<AbTestResult | null>(null);
+  const [abTestResultDialogOpen, setAbTestResultDialogOpen] = useState(false);
+
   // Фильтрация креативов по типу медиа
   const filteredItems = useMemo(() => {
     if (mediaTypeFilter === 'all') return items;
@@ -1430,6 +1439,82 @@ const Creatives: React.FC = () => {
     } catch (error) {
       console.error('Ошибка при удалении креативов:', error);
       toast.error('Не удалось удалить креативы');
+    }
+  };
+
+  // Открыть модалку A/B теста
+  const handleOpenAbTest = () => {
+    if (selectedCreativeIds.size < 2) {
+      toast.error('Выберите минимум 2 креатива для A/B теста');
+      return;
+    }
+    if (selectedCreativeIds.size > 5) {
+      toast.error('Максимум 5 креативов для A/B теста');
+      return;
+    }
+
+    // Проверяем что все креативы из одного направления
+    const firstSelectedId = Array.from(selectedCreativeIds)[0];
+    const firstCreative = items.find(it => it.id === firstSelectedId);
+
+    if (!firstCreative?.direction_id) {
+      toast.error('Выберите креативы с назначенным направлением');
+      return;
+    }
+
+    const selectedItems = items.filter(it => selectedCreativeIds.has(it.id));
+    const differentDirections = selectedItems.some(it => it.direction_id !== firstCreative.direction_id);
+    if (differentDirections) {
+      toast.error('Все выбранные креативы должны быть из одного направления');
+      return;
+    }
+
+    // Проверяем что все креативы - картинки
+    const hasNonImage = selectedItems.some(it => it.media_type !== 'image');
+    if (hasNonImage) {
+      toast.error('A/B тест доступен только для картинок');
+      return;
+    }
+
+    setLaunchDirectionId(firstCreative.direction_id);
+    setAbTestDialogOpen(true);
+  };
+
+  // Запуск A/B теста
+  const handleStartAbTest = async () => {
+    if (selectedCreativeIds.size < 2 || selectedCreativeIds.size > 5) return;
+    if (!launchDirectionId) return;
+
+    const direction = directions.find(d => d.id === launchDirectionId);
+    if (!direction?.user_account_id) {
+      toast.error('Направление не связано с рекламным аккаунтом');
+      return;
+    }
+
+    setIsStartingAbTest(true);
+    try {
+      const result = await creativeAbTestApi.startTest({
+        user_account_id: direction.user_account_id,
+        account_id: currentAdAccountId || undefined,
+        direction_id: launchDirectionId,
+        creative_ids: Array.from(selectedCreativeIds),
+        total_budget_cents: Math.round(abTestBudget * 100),
+      });
+
+      if (result.success) {
+        setAbTestResult(result);
+        setAbTestDialogOpen(false);
+        setAbTestResultDialogOpen(true);
+        setSelectedCreativeIds(new Set());
+        toast.success('A/B тест запущен!');
+      } else {
+        toast.error(result.message || 'Не удалось запустить A/B тест');
+      }
+    } catch (error: any) {
+      console.error('Ошибка запуска A/B теста:', error);
+      toast.error(error.message || 'Ошибка запуска A/B теста');
+    } finally {
+      setIsStartingAbTest(false);
     }
   };
 
@@ -1837,6 +1922,9 @@ const Creatives: React.FC = () => {
             </CardContent>
           </Card>
 
+          {/* A/B Test Insights */}
+          <AbTestInsights onRefresh={reload} />
+
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>Загруженные креативы</CardTitle>
@@ -1892,6 +1980,24 @@ const Creatives: React.FC = () => {
                       )}
                       <span className="hidden sm:inline">Запустить</span>
                       <span className="sm:hidden">{selectedCreativeIds.size}</span>
+                    </Button>
+                  )}
+                  {/* Кнопка A/B тест */}
+                  {selectedCreativeIds.size >= 2 && selectedCreativeIds.size <= 5 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleOpenAbTest}
+                      disabled={isStartingAbTest}
+                      className="h-7 px-2 text-xs gap-1"
+                      title="A/B тест выбранных креативов"
+                    >
+                      {isStartingAbTest ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <FlaskConical className="h-3.5 w-3.5" />
+                      )}
+                      <span className="hidden sm:inline">A/B тест</span>
                     </Button>
                   )}
                   {/* Кнопка удалить выбранные */}
@@ -2255,6 +2361,202 @@ const Creatives: React.FC = () => {
                 onClick={() => {
                   setResultDialogOpen(false);
                   setLaunchResult(null);
+                }}
+              >
+                Закрыть
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Модальное окно для A/B теста */}
+        <Dialog open={abTestDialogOpen} onOpenChange={setAbTestDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>A/B тест креативов</DialogTitle>
+              <DialogDescription>
+                Тестирование {selectedCreativeIds.size} креативов с равным распределением бюджета
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-6 py-4">
+              {/* Информация о выбранных креативах */}
+              <div className="space-y-2">
+                <Label>Выбранные креативы ({selectedCreativeIds.size})</Label>
+                <div className="space-y-2 max-h-[150px] overflow-y-auto border rounded-lg p-3">
+                  {Array.from(selectedCreativeIds).map((id) => {
+                    const creative = items.find(it => it.id === id);
+                    return creative ? (
+                      <div
+                        key={id}
+                        className="flex items-center gap-3 p-2 bg-muted/30 rounded"
+                      >
+                        <div className="shrink-0 w-8 h-8 rounded overflow-hidden bg-muted flex items-center justify-center">
+                          {creative.image_url ? (
+                            <img
+                              src={getThumbnailUrl(creative.image_url, 64, 64) || creative.image_url}
+                              alt=""
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Image className="h-4 w-4 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{creative.title}</div>
+                        </div>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+
+              {/* Направление */}
+              <div className="space-y-2">
+                <Label>Направление</Label>
+                <div className="p-3 bg-muted/30 rounded-lg text-sm">
+                  {directions.find(d => d.id === launchDirectionId)?.name || 'Не выбрано'}
+                  {directions.find(d => d.id === launchDirectionId)?.objective && (
+                    <span className="text-muted-foreground ml-2">
+                      ({OBJECTIVE_LABELS[directions.find(d => d.id === launchDirectionId)!.objective]})
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Суммарный бюджет */}
+              <div className="space-y-2">
+                <Label htmlFor="ab-budget">Суммарный бюджет (USD)</Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">$</span>
+                  <input
+                    id="ab-budget"
+                    type="number"
+                    min="10"
+                    step="5"
+                    value={abTestBudget}
+                    onChange={(e) => setAbTestBudget(Number(e.target.value))}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={isStartingAbTest}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Бюджет на каждый креатив: ${selectedCreativeIds.size > 0 ? (abTestBudget / selectedCreativeIds.size).toFixed(2) : '0.00'}
+                </p>
+              </div>
+
+              {/* Информация о распределении */}
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm space-y-2">
+                <div className="font-medium text-blue-700 dark:text-blue-300">Как работает A/B тест:</div>
+                <ul className="list-disc list-inside text-blue-600 dark:text-blue-400 space-y-1">
+                  <li>Каждый креатив получит отдельный AdSet</li>
+                  <li>Бюджет распределяется равномерно</li>
+                  <li>Тест завершается после набора показов</li>
+                  <li>Результаты сохраняются в рейтинг инсайтов</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAbTestDialogOpen(false);
+                  setAbTestBudget(20);
+                }}
+                disabled={isStartingAbTest}
+              >
+                Отмена
+              </Button>
+              <Button
+                onClick={handleStartAbTest}
+                disabled={isStartingAbTest || selectedCreativeIds.size < 2}
+                variant="default"
+                className="dark:bg-gray-700 dark:hover:bg-gray-800"
+              >
+                {isStartingAbTest ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Запуск...
+                  </>
+                ) : (
+                  <>
+                    <FlaskConical className="h-4 w-4 mr-2" />
+                    Запустить A/B тест
+                  </>
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Модальное окно с результатом A/B теста */}
+        <Dialog open={abTestResultDialogOpen} onOpenChange={setAbTestResultDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>A/B тест запущен!</DialogTitle>
+              <DialogDescription>
+                {abTestResult?.message || 'A/B тест успешно запущен'}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {abTestResult && (
+                <>
+                  <div className="space-y-2">
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">ID теста:</span>{' '}
+                      <span className="font-mono text-xs">{abTestResult.test_id}</span>
+                    </div>
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                      <span className="font-mono text-xs">{abTestResult.campaign_id}</span>
+                    </div>
+                  </div>
+
+                  {/* Список созданных AdSets */}
+                  {abTestResult.items && abTestResult.items.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium">
+                        Создано AdSets: {abTestResult.items.length}
+                      </div>
+                      <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                        {abTestResult.items.map((item, index) => (
+                          <div
+                            key={item.id}
+                            className="p-3 border rounded-lg text-sm space-y-1"
+                          >
+                            <div className="font-medium">
+                              {index + 1}. Креатив #{index + 1}
+                            </div>
+                            <div className="text-xs text-muted-foreground font-mono">
+                              AdSet: {item.adset_id}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Лимит: {item.impressions_limit.toLocaleString()} показов
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg text-sm">
+                    <div className="text-amber-700 dark:text-amber-300">
+                      Тест будет автоматически завершён после достижения лимита показов.
+                      Результаты появятся в разделе "Инсайты".
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAbTestResultDialogOpen(false);
+                  setAbTestResult(null);
                 }}
               >
                 Закрыть
