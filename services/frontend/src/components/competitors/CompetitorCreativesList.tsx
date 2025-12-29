@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
@@ -87,6 +87,12 @@ export function CompetitorCreativesList({
   extractingCreativeId,
 }: CompetitorCreativesListProps) {
   const navigate = useNavigate();
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+
+  // Обработчик ошибки загрузки изображения
+  const handleImageError = (creativeId: string) => {
+    setImageErrors(prev => ({ ...prev, [creativeId]: true }));
+  };
 
   // Переход на страницу генерации текстов с текстом и ID креатива
   const handleRewriteScript = (creative: CompetitorCreative) => {
@@ -141,19 +147,20 @@ export function CompetitorCreativesList({
           const scoreCategory = getScoreCategory(creative.score);
           const isNew = isNewInTop10(creative.entered_top10_at);
           const analysisText = getAnalysisText(creative);
-          const previewUrl = creative.thumbnail_url || creative.media_urls?.[0];
+          const previewUrl = creative.cached_thumbnail_url || creative.thumbnail_url || creative.media_urls?.[0];
 
           return (
             <AccordionItem key={creative.id} value={creative.id}>
               <div className="flex items-center gap-3 py-2">
                 {/* Миниатюра */}
                 <div className="shrink-0 w-10 h-10 rounded overflow-hidden bg-muted flex items-center justify-center">
-                  {previewUrl ? (
+                  {previewUrl && !imageErrors[creative.id] ? (
                     <img
                       src={previewUrl}
                       alt=""
                       className="w-full h-full object-cover"
                       loading="lazy"
+                      onError={() => handleImageError(creative.id)}
                     />
                   ) : (
                     <MediaIcon className="w-5 h-5 text-muted-foreground" />
@@ -230,7 +237,7 @@ export function CompetitorCreativesList({
               <AccordionContent>
                 <div className="space-y-4 pt-2">
                   {/* Превью изображения/видео */}
-                  {previewUrl && (
+                  {previewUrl && !imageErrors[creative.id] && (
                     <Card className="bg-muted/30">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm flex items-center gap-2">
@@ -245,6 +252,7 @@ export function CompetitorCreativesList({
                             alt="Превью креатива"
                             className="max-w-full h-auto rounded-lg border max-h-[400px] object-contain cursor-pointer hover:opacity-90 transition-opacity"
                             onClick={() => handleOpenOriginal(creative)}
+                            onError={() => handleImageError(creative.id)}
                           />
                         </div>
                       </CardContent>

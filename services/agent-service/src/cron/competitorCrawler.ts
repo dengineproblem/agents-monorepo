@@ -17,6 +17,7 @@ import { supabase } from '../lib/supabase.js';
 import { fetchCompetitorCreatives, type CompetitorCreativeData } from '../lib/searchApi.js';
 import { calculateCreativeScore } from '../lib/competitorScoring.js';
 import { processVideoTranscription } from '../lib/transcription.js';
+import { cacheImageToStorage } from '../lib/imageCache.js';
 import { createWriteStream, promises as fs } from 'fs';
 import { pipeline } from 'stream/promises';
 import path from 'path';
@@ -104,6 +105,12 @@ async function saveCreativesWithScoring(
     }
 
     try {
+      // Кэшируем thumbnail в Supabase Storage (только для новых)
+      let cachedThumbnailUrl: string | null = null;
+      if (isNewInTop && creative.thumbnail_url) {
+        cachedThumbnailUrl = await cacheImageToStorage(creative.thumbnail_url, competitorId);
+      }
+
       const { error } = await supabase
         .from('competitor_creatives')
         .upsert(
@@ -113,6 +120,7 @@ async function saveCreativesWithScoring(
             media_type: creative.media_type,
             media_urls: creative.media_urls,
             thumbnail_url: creative.thumbnail_url,
+            cached_thumbnail_url: cachedThumbnailUrl || undefined,
             body_text: creative.body_text,
             headline: creative.headline,
             cta_type: creative.cta_type,
@@ -404,6 +412,7 @@ export function startCompetitorCrawlerCron(app: FastifyInstance) {
   app.log.info('📅 Competitor crawler cron started (ТОП-10 + лимит 50)');
   app.log.info('   - Weekly crawl: every Sunday at 03:00 UTC');
   app.log.info('   - Pending check: every 6 hours');
+  app.log.info('   - Image caching: enabled (lazy init)');
 
   // Каждое воскресенье в 03:00 UTC
   cron.schedule('0 3 * * 0', async () => {

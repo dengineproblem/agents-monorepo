@@ -33,6 +33,7 @@ export interface CompetitorCreative {
   media_type: 'video' | 'image' | 'carousel';
   media_urls: string[];
   thumbnail_url?: string;
+  cached_thumbnail_url?: string; // URL в Supabase Storage (не истекает)
   body_text?: string;
   headline?: string;
   cta_type?: string;

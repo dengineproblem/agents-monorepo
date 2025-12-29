@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { PlayCircle, Image, Images, Eye, Sparkles, ChevronDown, ChevronUp, FileText, ScanText, Loader2, HelpCircle } from 'lucide-react';
+import { PlayCircle, Image, Images, Eye, Sparkles, ChevronDown, ChevronUp, FileText, ScanText, Loader2 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -40,10 +40,11 @@ export function CompetitorCreativeCard({
   isExtracting = false,
 }: CompetitorCreativeCardProps) {
   const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
   const MediaIcon = mediaTypeIcon[creative.media_type];
 
-  // Получаем URL для превью
-  const previewUrl = creative.thumbnail_url || creative.media_urls?.[0] || null;
+  // Получаем URL для превью (приоритет: кэш -> оригинал -> первый media_url)
+  const previewUrl = creative.cached_thumbnail_url || creative.thumbnail_url || creative.media_urls?.[0] || null;
 
   // Получаем категорию score
   const scoreCategory = getScoreCategory(creative.score);
@@ -77,12 +78,13 @@ export function CompetitorCreativeCard({
     >
       {/* Превью изображения */}
       <div className="relative aspect-[4/5] bg-muted">
-        {previewUrl ? (
+        {previewUrl && !imageError ? (
           <img
             src={previewUrl}
             alt={creative.headline || 'Креатив'}
             className="w-full h-full object-cover"
             loading="lazy"
+            onError={() => setImageError(true)}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
