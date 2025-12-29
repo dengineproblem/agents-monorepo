@@ -637,6 +637,305 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     }
   });
 
+  // ========================================
+  // VALIDATION SCHEMA FOR ALL-STATS
+  // ========================================
+
+  const AllStatsQuerySchema = z.object({
+    since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional(),
+    until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional(),
+  });
+
+  // ========================================
+  // HELPER: Fetch Facebook stats for single account
+  // ========================================
+
+  interface FacebookStats {
+    spend: number;
+    leads: number;
+    impressions: number;
+    clicks: number;
+    cpl: number;
+  }
+
+  async function fetchFacebookStatsForAccount(
+    adAccountId: string,
+    accessToken: string,
+    since: string,
+    until: string,
+    accountDbId: string
+  ): Promise<FacebookStats | null> {
+    const startTime = Date.now();
+    const fbAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    log.debug({
+      accountDbId,
+      fbAccountId: fbAccountId.slice(0, 10) + '...',
+      dateRange: { since, until }
+    }, 'Fetching Facebook stats for account');
+
+    try {
+      const insightsUrl = new URL(`https://graph.facebook.com/v18.0/${fbAccountId}/insights`);
+      insightsUrl.searchParams.set('access_token', accessToken);
+      insightsUrl.searchParams.set('level', 'account');
+      insightsUrl.searchParams.set('fields', 'spend,impressions,clicks,actions');
+      insightsUrl.searchParams.set('time_range', JSON.stringify({ since, until }));
+
+      // Добавляем таймаут для fetch
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаут
+
+      const response = await fetch(insightsUrl.toString(), {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      const duration = Date.now() - startTime;
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        log.warn({
+          accountDbId,
+          fbAccountId: fbAccountId.slice(0, 10) + '...',
+          status: response.status,
+          durationMs: duration,
+          error: errorText.slice(0, 200)
+        }, 'Facebook API returned error');
+        return null;
+      }
+
+      const data = await response.json();
+
+      if (!data.data || data.data.length === 0) {
+        log.debug({
+          accountDbId,
+          durationMs: duration
+        }, 'No insights data returned from Facebook');
+        return null;
+      }
+
+      const insight = data.data[0];
+      const spend = parseFloat(insight.spend || '0');
+      const impressions = parseInt(insight.impressions || '0', 10);
+      const clicks = parseInt(insight.clicks || '0', 10);
+
+      // Подсчёт лидов из actions
+      let leads = 0;
+      if (insight.actions && Array.isArray(insight.actions)) {
+        for (const action of insight.actions) {
+          if (
+            action.action_type === 'onsite_conversion.total_messaging_connection' ||
+            action.action_type === 'offsite_conversion.fb_pixel_lead' ||
+            action.action_type === 'onsite_conversion.lead_grouped'
+          ) {
+            leads += parseInt(action.value || '0', 10);
+          }
+        }
+      }
+
+      const stats: FacebookStats = {
+        spend,
+        leads,
+        impressions,
+        clicks,
+        cpl: leads > 0 ? spend / leads : 0,
+      };
+
+      log.debug({
+        accountDbId,
+        durationMs: duration,
+        stats: { spend, leads, impressions }
+      }, 'Facebook stats fetched successfully');
+
+      return stats;
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+
+      if (error.name === 'AbortError') {
+        log.warn({
+          accountDbId,
+          durationMs: duration
+        }, 'Facebook API request timed out');
+      } else {
+        log.warn({
+          accountDbId,
+          durationMs: duration,
+          error: error.message
+        }, 'Failed to fetch Facebook stats');
+      }
+
+      return null;
+    }
+  }
+
+  /**
+   * GET /ad-accounts/:userAccountId/all-stats
+   * Получить статистику для всех рекламных аккаунтов пользователя
+   *
+   * @param userAccountId - UUID пользователя
+   * @query since - Начало периода (YYYY-MM-DD)
+   * @query until - Конец периода (YYYY-MM-DD)
+   *
+   * @returns { accounts: AccountStats[] }
+   */
+  app.get('/ad-accounts/:userAccountId/all-stats', async (
+    req: FastifyRequest<{
+      Params: { userAccountId: string };
+      Querystring: { since?: string; until?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    const requestStartTime = Date.now();
+    const { userAccountId } = req.params;
+    const { since, until } = req.query;
+
+    log.info({
+      userAccountId,
+      dateRange: { since, until },
+      requestId: req.id
+    }, '[all-stats] Starting request');
+
+    // Валидация userAccountId как UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(userAccountId)) {
+      log.warn({ userAccountId }, '[all-stats] Invalid userAccountId format');
+      return reply.status(400).send({ error: 'Invalid userAccountId format' });
+    }
+
+    // Валидация query параметров
+    const queryValidation = AllStatsQuerySchema.safeParse({ since, until });
+    if (!queryValidation.success) {
+      log.warn({
+        userAccountId,
+        errors: queryValidation.error.errors
+      }, '[all-stats] Invalid query parameters');
+      return reply.status(400).send({
+        error: 'Invalid date format',
+        details: queryValidation.error.errors
+      });
+    }
+
+    try {
+      // Получаем все аккаунты пользователя
+      log.debug({ userAccountId }, '[all-stats] Fetching ad accounts from database');
+
+      const { data: adAccounts, error: fetchError } = await supabase
+        .from('ad_accounts')
+        .select('id, name, page_picture_url, connection_status, is_active, ad_account_id, access_token')
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: true });
+
+      if (fetchError) {
+        log.error({
+          userAccountId,
+          error: fetchError.message,
+          code: fetchError.code
+        }, '[all-stats] Database error fetching ad accounts');
+        return reply.status(500).send({ error: 'Failed to fetch ad accounts' });
+      }
+
+      const accountCount = adAccounts?.length || 0;
+      log.info({
+        userAccountId,
+        accountCount
+      }, '[all-stats] Ad accounts fetched from database');
+
+      if (accountCount === 0) {
+        log.debug({ userAccountId }, '[all-stats] No accounts found, returning empty array');
+        return reply.send({ accounts: [] });
+      }
+
+      // Подготавливаем базовые данные аккаунтов
+      const accountsBase = (adAccounts || []).map(account => ({
+        id: account.id,
+        name: account.name,
+        page_picture_url: account.page_picture_url,
+        connection_status: account.connection_status || 'pending',
+        is_active: account.is_active !== false,
+        fb_ad_account_id: account.ad_account_id,
+        access_token: account.access_token,
+      }));
+
+      // Фильтруем аккаунты, для которых можно запросить статистику
+      const accountsToFetch = since && until
+        ? accountsBase.filter(acc => acc.access_token && acc.fb_ad_account_id)
+        : [];
+
+      log.info({
+        userAccountId,
+        totalAccounts: accountCount,
+        accountsWithCredentials: accountsToFetch.length,
+        hasDates: !!(since && until)
+      }, '[all-stats] Preparing to fetch Facebook stats');
+
+      // Запрашиваем статистику параллельно для всех аккаунтов с credentials
+      const statsPromises = accountsToFetch.map(async account => {
+        const stats = await fetchFacebookStatsForAccount(
+          account.fb_ad_account_id!,
+          account.access_token!,
+          since!,
+          until!,
+          account.id
+        );
+        return { accountId: account.id, stats };
+      });
+
+      const statsResults = await Promise.all(statsPromises);
+
+      // Создаём map для быстрого доступа к статистике
+      const statsMap = new Map<string, FacebookStats | null>();
+      for (const result of statsResults) {
+        statsMap.set(result.accountId, result.stats);
+      }
+
+      // Собираем финальный результат
+      const accountsWithStats = accountsBase.map(account => ({
+        id: account.id,
+        name: account.name,
+        page_picture_url: account.page_picture_url,
+        connection_status: account.connection_status,
+        is_active: account.is_active,
+        stats: statsMap.get(account.id) || null,
+      }));
+
+      // Считаем статистику для логирования
+      const accountsWithStatsCount = accountsWithStats.filter(a => a.stats !== null).length;
+      const totalDuration = Date.now() - requestStartTime;
+
+      log.info({
+        userAccountId,
+        totalAccounts: accountCount,
+        accountsWithStats: accountsWithStatsCount,
+        durationMs: totalDuration,
+        requestId: req.id
+      }, '[all-stats] Request completed successfully');
+
+      return reply.send({ accounts: accountsWithStats });
+    } catch (error: any) {
+      const totalDuration = Date.now() - requestStartTime;
+
+      log.error({
+        userAccountId,
+        error: error.message,
+        stack: error.stack?.slice(0, 500),
+        durationMs: totalDuration,
+        requestId: req.id
+      }, '[all-stats] Unexpected error');
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_all_account_stats',
+        endpoint: '/ad-accounts/:userAccountId/all-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
 }
 
 export default adAccountsRoutes;

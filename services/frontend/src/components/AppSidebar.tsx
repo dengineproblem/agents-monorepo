@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, Target, Upload, User, Users2, BookOpen, MessageSquare, FileText, Building2 } from 'lucide-react';
+import { useAppContext } from '../context/AppContext';
 import {
   Sidebar,
   SidebarContent,
@@ -79,6 +80,10 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t, language, setLanguage } = useTranslation();
+  const { multiAccountEnabled, adAccounts } = useAppContext();
+
+  // Показываем пункт "Все аккаунты" только для мультиаккаунтного режима с аккаунтами
+  const showAccountsPage = multiAccountEnabled && adAccounts.length > 0;
 
   // Фильтруем menuItems по флагу show
   const visibleMenuItems = menuItems.filter(item => item.show);
@@ -90,6 +95,19 @@ export function AppSidebar() {
           <SidebarGroupLabel>{t('sidebar.navigation')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
+              {/* Пункт "Все аккаунты" для мультиаккаунтного режима */}
+              {showAccountsPage && (
+                <SidebarMenuItem data-tour="sidebar-accounts">
+                  <SidebarMenuButton
+                    onClick={() => navigate('/accounts')}
+                    isActive={location.pathname === '/accounts'}
+                    tooltip="Все аккаунты"
+                  >
+                    <Building2 className="h-4 w-4" />
+                    <span>Все аккаунты</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
               {visibleMenuItems.map((item) => {
                 const translatedLabel = t(item.label);
                 return (

@@ -104,8 +104,10 @@ const Header: React.FC<HeaderProps> = ({
   const handleSignOut = async () => {
     try {
       localStorage.removeItem('user');
-      console.log('User signed out, localStorage cleared');
-      
+      // Очищаем флаг посещения Dashboard для корректного редиректа при следующем логине
+      sessionStorage.removeItem('hasVisitedDashboard');
+      console.log('User signed out, localStorage and sessionStorage cleared');
+
       toastT.success('loggedOut');
       navigate('/login');
     } catch (error) {
