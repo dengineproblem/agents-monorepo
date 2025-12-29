@@ -5,15 +5,34 @@ import { fetchAbTestInsights, analyzeAbTestResults } from '../workflows/creative
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { graph } from '../adapters/facebook.js';
 
+// Мьютекс для предотвращения параллельного выполнения
+let isProcessing = false;
+
+// Константы
+const MAX_TESTS_PER_RUN = 10; // Максимум тестов за один запуск
+const CRON_INTERVAL = '*/5 * * * *'; // Каждые 5 минут
+
 export function startCreativeAbTestCron(app: FastifyInstance) {
-  app.log.info('📅 Creative A/B test cron started (runs every 5 minutes)');
+  app.log.info({
+    interval: CRON_INTERVAL,
+    maxTestsPerRun: MAX_TESTS_PER_RUN
+  }, '[A/B Cron] Creative A/B test cron started');
 
   // Каждые 5 минут проверяем running A/B тесты
-  cron.schedule('*/5 * * * *', async () => {
-    try {
-      app.log.info('[A/B Cron] Checking running A/B tests...');
+  cron.schedule(CRON_INTERVAL, async () => {
+    // Проверяем мьютекс
+    if (isProcessing) {
+      app.log.warn('[A/B Cron] Previous run still in progress, skipping...');
+      return;
+    }
 
-      // Получаем все running A/B тесты с их items
+    isProcessing = true;
+    const cronStartTime = Date.now();
+
+    try {
+      app.log.info('[A/B Cron] Starting A/B tests check cycle');
+
+      // Получаем все running A/B тесты с их items (с лимитом)
       const { data: runningTests, error } = await supabase
         .from('creative_ab_tests')
         .select(`
@@ -23,21 +42,27 @@ export function startCreativeAbTestCron(app: FastifyInstance) {
           campaign_id,
           impressions_per_creative,
           creatives_count,
-          items:creative_ab_test_items(id, ad_id, adset_id, impressions_limit)
+          started_at,
+          items:creative_ab_test_items(id, ad_id, adset_id, impressions_limit, impressions)
         `)
-        .eq('status', 'running');
+        .eq('status', 'running')
+        .order('started_at', { ascending: true })
+        .limit(MAX_TESTS_PER_RUN);
 
       if (error) {
-        app.log.error({ error }, '[A/B Cron] Failed to fetch running A/B tests');
+        app.log.error({ error: error.message }, '[A/B Cron] Failed to fetch running A/B tests');
         return;
       }
 
       if (!runningTests || runningTests.length === 0) {
-        app.log.info('[A/B Cron] No running A/B tests found');
+        app.log.debug('[A/B Cron] No running A/B tests found');
         return;
       }
 
-      app.log.info(`[A/B Cron] Found ${runningTests.length} running A/B test(s)`);
+      app.log.info({
+        count: runningTests.length,
+        test_ids: runningTests.map(t => t.id)
+      }, '[A/B Cron] Found running A/B tests');
 
       // Проверяем каждый тест
       for (const test of runningTests) {
@@ -156,15 +181,26 @@ export function startCreativeAbTestCron(app: FastifyInstance) {
         } catch (testError: any) {
           app.log.error({
             testId: test.id,
-            error: testError.message
+            error: testError.message,
+            stack: testError.stack
           }, '[A/B Cron] Error checking test');
         }
       }
 
-      app.log.info('[A/B Cron] A/B test check completed');
+      const totalElapsed = Date.now() - cronStartTime;
+      app.log.info({
+        testsProcessed: runningTests.length,
+        elapsed_ms: totalElapsed
+      }, '[A/B Cron] A/B test check cycle completed');
 
     } catch (error: any) {
-      app.log.error({ error: error.message }, '[A/B Cron] A/B test checker error');
+      app.log.error({
+        error: error.message,
+        stack: error.stack
+      }, '[A/B Cron] A/B test checker critical error');
+    } finally {
+      // Всегда освобождаем мьютекс
+      isProcessing = false;
     }
   });
 }

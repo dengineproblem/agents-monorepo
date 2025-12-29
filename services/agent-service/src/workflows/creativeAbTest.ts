@@ -21,6 +21,8 @@ type StartAbTestParams = {
   user_id: string;
   db_ad_account_id?: string;
   direction_id: string;
+  total_budget_cents?: number;
+  total_impressions?: number;
 };
 
 type AbTestContext = {
@@ -59,20 +61,33 @@ export async function workflowStartAbTest(
   creatives: CreativeData[],
   direction: DirectionData
 ) {
-  const { creative_ids, user_id, db_ad_account_id, direction_id } = params;
+  const {
+    creative_ids,
+    user_id,
+    db_ad_account_id,
+    direction_id,
+    total_budget_cents = 2000,
+    total_impressions = 1000
+  } = params;
   const { ad_account_id, page_id, instagram_id } = context;
 
+  const workflowStartTime = Date.now();
   const creativesCount = creatives.length;
-  const totalBudgetCents = 2000; // $20
+  const totalBudgetCents = total_budget_cents;
   const budgetPerCreative = Math.floor(totalBudgetCents / creativesCount);
-  const impressionsPerCreative = Math.floor(1000 / creativesCount);
+  const impressionsPerCreative = Math.floor(total_impressions / creativesCount);
 
   log.info({
     user_id,
+    direction_id,
+    direction_name: direction.name,
     creatives_count: creativesCount,
+    total_budget_cents: totalBudgetCents,
     budget_per_creative: budgetPerCreative,
-    impressions_per_creative: impressionsPerCreative
-  }, 'Starting A/B test workflow');
+    total_impressions,
+    impressions_per_creative: impressionsPerCreative,
+    creative_ids
+  }, '[Workflow] Starting A/B test workflow');
 
   const normalized_ad_account_id = ad_account_id.startsWith('act_')
     ? ad_account_id
@@ -135,25 +150,46 @@ export async function workflowStartAbTest(
   // Создаём кампанию
   const campaign_name = `A/B ТЕСТ | ${direction.objective} | ${creativesCount} креативов | ${today}`;
 
-  const campaignResult = await graph(
-    'POST',
-    `${normalized_ad_account_id}/campaigns`,
-    accessToken,
-    toParams({
-      name: campaign_name,
-      objective: fb_objective,
-      special_ad_categories: [],
-      status: 'ACTIVE',
-      is_adset_budget_sharing_enabled: false
-    })
-  );
+  log.info({
+    campaign_name,
+    fb_objective,
+    optimization_goal,
+    destination_type: destination_type || 'none',
+    ad_account_id: normalized_ad_account_id
+  }, '[Workflow] Creating campaign');
 
-  const campaign_id = campaignResult?.id;
-  if (!campaign_id) {
-    throw new Error('Failed to create A/B test campaign');
+  let campaign_id: string;
+  try {
+    const campaignResult = await graph(
+      'POST',
+      `${normalized_ad_account_id}/campaigns`,
+      accessToken,
+      toParams({
+        name: campaign_name,
+        objective: fb_objective,
+        special_ad_categories: [],
+        status: 'ACTIVE',
+        is_adset_budget_sharing_enabled: false
+      })
+    );
+
+    campaign_id = campaignResult?.id;
+    if (!campaign_id) {
+      throw new Error('No campaign_id returned from Facebook API');
+    }
+  } catch (err: any) {
+    log.error({
+      error: err.message,
+      fb_error: err.fb,
+      elapsed_ms: Date.now() - workflowStartTime
+    }, '[Workflow] Failed to create campaign');
+    throw new Error(`Failed to create A/B test campaign: ${err.message}`);
   }
 
-  log.info({ campaign_id }, 'A/B test campaign created');
+  log.info({
+    campaign_id,
+    elapsed_ms: Date.now() - workflowStartTime
+  }, '[Workflow] Campaign created successfully');
 
   // Создаём запись теста в БД
   const { data: testRecord, error: testError } = await supabase
@@ -181,16 +217,52 @@ export async function workflowStartAbTest(
   log.info({ test_id }, 'A/B test record created');
 
   // Создаём adset и ad для каждого креатива
-  const createdItems = [];
+  const createdItems: Array<{
+    creative_id: string;
+    adset_id: string;
+    ad_id: string;
+    item_id?: string;
+  }> = [];
+
+  // Функция для rollback в случае ошибки
+  const rollbackCreatedItems = async () => {
+    log.warn({
+      campaign_id,
+      created_items_count: createdItems.length
+    }, '[Workflow] Rolling back created adsets/ads');
+
+    for (const item of createdItems) {
+      try {
+        if (item.adset_id) {
+          await graph('POST', item.adset_id, accessToken, { status: 'PAUSED' });
+          log.info({ adset_id: item.adset_id }, '[Workflow] Rollback: AdSet paused');
+        }
+      } catch (err: any) {
+        log.warn({ adset_id: item.adset_id, error: err.message }, '[Workflow] Rollback: Failed to pause AdSet');
+      }
+    }
+
+    // Паузим кампанию
+    try {
+      await graph('POST', campaign_id, accessToken, { status: 'PAUSED' });
+      log.info({ campaign_id }, '[Workflow] Rollback: Campaign paused');
+    } catch (err: any) {
+      log.warn({ campaign_id, error: err.message }, '[Workflow] Rollback: Failed to pause campaign');
+    }
+  };
 
   for (let i = 0; i < creatives.length; i++) {
     const creative = creatives[i];
     const itemIndex = i + 1;
+    const itemStartTime = Date.now();
 
     log.info({
       creative_id: creative.id,
-      item_index: itemIndex
-    }, 'Creating adset for creative');
+      creative_title: creative.title,
+      item_index: itemIndex,
+      total_items: creatives.length,
+      fb_creative_id: creative.fb_creative_id
+    }, '[Workflow] Creating adset for creative');
 
     // Создаём AdSet
     const adset_name = `${campaign_name} | Креатив ${itemIndex}`;
@@ -210,40 +282,78 @@ export async function workflowStartAbTest(
       adsetBody.destination_type = destination_type;
     }
 
-    const adsetResult = await graph(
-      'POST',
-      `${normalized_ad_account_id}/adsets`,
-      accessToken,
-      toParams(adsetBody)
-    );
+    let adset_id: string;
+    try {
+      const adsetResult = await graph(
+        'POST',
+        `${normalized_ad_account_id}/adsets`,
+        accessToken,
+        toParams(adsetBody)
+      );
 
-    const adset_id = adsetResult?.id;
-    if (!adset_id) {
-      throw new Error(`Failed to create adset for creative ${creative.id}`);
+      adset_id = adsetResult?.id;
+      if (!adset_id) {
+        throw new Error('No adset_id returned from Facebook API');
+      }
+    } catch (err: any) {
+      log.error({
+        creative_id: creative.id,
+        error: err.message,
+        fb_error: err.fb,
+        item_index: itemIndex
+      }, '[Workflow] Failed to create AdSet');
+
+      // Rollback previously created items
+      await rollbackCreatedItems();
+      throw new Error(`Failed to create adset for creative ${creative.id}: ${err.message}`);
     }
 
-    log.info({ adset_id, creative_id: creative.id }, 'AdSet created');
+    log.info({
+      adset_id,
+      creative_id: creative.id,
+      elapsed_ms: Date.now() - itemStartTime
+    }, '[Workflow] AdSet created');
 
     // Создаём Ad
     const ad_name = `${adset_name} - Ad`;
-    const adResult = await graph(
-      'POST',
-      `${normalized_ad_account_id}/ads`,
-      accessToken,
-      toParams({
-        name: ad_name,
-        adset_id,
-        status: 'ACTIVE',
-        creative: { creative_id: creative.fb_creative_id }
-      })
-    );
+    let ad_id: string;
+    try {
+      const adResult = await graph(
+        'POST',
+        `${normalized_ad_account_id}/ads`,
+        accessToken,
+        toParams({
+          name: ad_name,
+          adset_id,
+          status: 'ACTIVE',
+          creative: { creative_id: creative.fb_creative_id }
+        })
+      );
 
-    const ad_id = adResult?.id;
-    if (!ad_id) {
-      throw new Error(`Failed to create ad for creative ${creative.id}`);
+      ad_id = adResult?.id;
+      if (!ad_id) {
+        throw new Error('No ad_id returned from Facebook API');
+      }
+    } catch (err: any) {
+      log.error({
+        creative_id: creative.id,
+        adset_id,
+        error: err.message,
+        fb_error: err.fb
+      }, '[Workflow] Failed to create Ad');
+
+      // Rollback including the just-created adset
+      createdItems.push({ creative_id: creative.id, adset_id, ad_id: '' });
+      await rollbackCreatedItems();
+      throw new Error(`Failed to create ad for creative ${creative.id}: ${err.message}`);
     }
 
-    log.info({ ad_id, creative_id: creative.id }, 'Ad created');
+    log.info({
+      ad_id,
+      adset_id,
+      creative_id: creative.id,
+      elapsed_ms: Date.now() - itemStartTime
+    }, '[Workflow] Ad created');
 
     // Сохраняем маппинг
     await saveAdCreativeMapping({
@@ -255,7 +365,7 @@ export async function workflowStartAbTest(
       adset_id,
       campaign_id,
       fb_creative_id: creative.fb_creative_id,
-      source: 'ab_test'
+      source: 'creative_test'
     });
 
     // Создаём запись item в БД
@@ -284,19 +394,38 @@ export async function workflowStartAbTest(
       ad_id,
       item_id: itemRecord?.id
     });
+
+    log.info({
+      creative_id: creative.id,
+      item_index: itemIndex,
+      item_id: itemRecord?.id,
+      elapsed_ms: Date.now() - itemStartTime
+    }, '[Workflow] Item created and saved');
   }
+
+  const totalElapsed = Date.now() - workflowStartTime;
 
   log.info({
     test_id,
     campaign_id,
-    items_count: createdItems.length
-  }, 'A/B test started successfully');
+    items_count: createdItems.length,
+    total_budget_cents: totalBudgetCents,
+    budget_per_creative_cents: budgetPerCreative,
+    impressions_per_creative: impressionsPerCreative,
+    elapsed_ms: totalElapsed
+  }, '[Workflow] A/B test workflow completed successfully');
 
   return {
     success: true,
     test_id,
     campaign_id,
-    items: createdItems,
+    items: createdItems.map(item => ({
+      id: item.item_id,
+      user_creative_id: item.creative_id,
+      adset_id: item.adset_id,
+      ad_id: item.ad_id,
+      impressions_limit: impressionsPerCreative
+    })),
     budget_per_creative_cents: budgetPerCreative,
     impressions_per_creative: impressionsPerCreative,
     message: `A/B test started with ${creativesCount} creatives. Budget: $${(budgetPerCreative / 100).toFixed(2)}/creative, Target: ${impressionsPerCreative} impressions each`
@@ -307,6 +436,8 @@ export async function workflowStartAbTest(
  * Собирает метрики для одного ad
  */
 export async function fetchAbTestInsights(ad_id: string, accessToken: string) {
+  const fetchStartTime = Date.now();
+
   try {
     const fields = [
       'impressions',
@@ -318,6 +449,8 @@ export async function fetchAbTestInsights(ad_id: string, accessToken: string) {
       'cpc',
       'ctr'
     ].join(',');
+
+    log.debug({ ad_id }, '[Insights] Fetching insights for ad');
 
     const result = await graph(
       'GET',
@@ -353,7 +486,7 @@ export async function fetchAbTestInsights(ad_id: string, accessToken: string) {
     const cpc_cents = Math.round((parseFloat(data.cpc) || 0) * 100);
     const cpl_cents = leads > 0 ? Math.round(spend_cents / leads) : null;
 
-    return {
+    const insights = {
       impressions,
       reach: parseInt(data.reach, 10) || 0,
       clicks,
@@ -366,8 +499,23 @@ export async function fetchAbTestInsights(ad_id: string, accessToken: string) {
       cpc_cents,
       cpl_cents
     };
+
+    log.debug({
+      ad_id,
+      impressions,
+      clicks,
+      leads,
+      spend_cents,
+      elapsed_ms: Date.now() - fetchStartTime
+    }, '[Insights] Fetched insights successfully');
+
+    return insights;
   } catch (error: any) {
-    log.warn({ ad_id, error: error.message }, 'Failed to fetch A/B test insights');
+    log.warn({
+      ad_id,
+      error: error.message,
+      elapsed_ms: Date.now() - fetchStartTime
+    }, '[Insights] Failed to fetch insights');
     return {
       impressions: 0,
       reach: 0,
@@ -388,7 +536,9 @@ export async function fetchAbTestInsights(ad_id: string, accessToken: string) {
  * Анализирует результаты A/B теста и сохраняет инсайты
  */
 export async function analyzeAbTestResults(test_id: string) {
-  log.info({ test_id }, 'Analyzing A/B test results');
+  const analyzeStartTime = Date.now();
+
+  log.info({ test_id }, '[Analyze] Starting A/B test analysis');
 
   // Получаем тест с items
   const { data: test, error: testError } = await supabase
@@ -404,8 +554,15 @@ export async function analyzeAbTestResults(test_id: string) {
     .single();
 
   if (testError || !test) {
+    log.error({ test_id, error: testError?.message }, '[Analyze] A/B test not found');
     throw new Error('A/B test not found');
   }
+
+  log.info({
+    test_id,
+    items_count: test.items?.length,
+    total_impressions: test.items?.reduce((sum: number, i: any) => sum + (i.impressions || 0), 0)
+  }, '[Analyze] Test data loaded');
 
   // Ранжируем по CTR (или CPL если есть лиды)
   const hasLeads = test.items.some((item: any) => item.leads > 0);
@@ -433,6 +590,20 @@ export async function analyzeAbTestResults(test_id: string) {
 
   const winner = sortedItems[0];
   const winnerId = winner?.user_creative_id;
+
+  log.info({
+    test_id,
+    metric_used: hasLeads ? 'cpl' : 'ctr',
+    winner_creative_id: winnerId,
+    winner_ctr: winner?.ctr,
+    winner_cpl_cents: winner?.cpl_cents,
+    ranking: sortedItems.map((item: any, idx: number) => ({
+      rank: idx + 1,
+      creative_id: item.user_creative_id,
+      ctr: item.ctr,
+      cpl_cents: item.cpl_cents
+    }))
+  }, '[Analyze] Ranking calculated');
 
   // Формируем анализ
   const analysisJson = {
@@ -468,13 +639,18 @@ export async function analyzeAbTestResults(test_id: string) {
     .eq('id', test_id);
 
   // Сохраняем инсайты в conversation_insights
+  log.info({ test_id }, '[Analyze] Saving insights to conversation_insights');
   await saveAbTestInsights(test, sortedItems);
+
+  const totalElapsed = Date.now() - analyzeStartTime;
 
   log.info({
     test_id,
     winner_id: winnerId,
-    metric: hasLeads ? 'cpl' : 'ctr'
-  }, 'A/B test analysis completed');
+    metric: hasLeads ? 'cpl' : 'ctr',
+    insights_saved: sortedItems.length * 2, // offer_text + creative_image per item
+    elapsed_ms: totalElapsed
+  }, '[Analyze] A/B test analysis completed');
 
   return analysisJson;
 }

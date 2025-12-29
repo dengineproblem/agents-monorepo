@@ -7,10 +7,22 @@ import { workflowStartAbTest, fetchAbTestInsights, analyzeAbTestResults } from '
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
+// Константы конфигурации
+const DEFAULT_TOTAL_BUDGET_CENTS = 2000; // $20
+const DEFAULT_TOTAL_IMPRESSIONS = 1000;
+const MIN_BUDGET_CENTS = 500;  // $5 минимум
+const MAX_BUDGET_CENTS = 10000; // $100 максимум
+const MIN_CREATIVES = 2;
+const MAX_CREATIVES = 5;
+
 const StartAbTestSchema = z.object({
-  creative_ids: z.array(z.string().uuid()).min(2).max(5),
+  creative_ids: z.array(z.string().uuid()).min(MIN_CREATIVES).max(MAX_CREATIVES),
   user_id: z.string().uuid(),
-  account_id: z.string().uuid().optional()
+  user_account_id: z.string().uuid().optional(),
+  account_id: z.string().uuid().optional(),
+  direction_id: z.string().uuid().optional(),
+  total_budget_cents: z.number().min(MIN_BUDGET_CENTS).max(MAX_BUDGET_CENTS).optional(),
+  total_impressions: z.number().min(100).max(10000).optional()
 });
 
 export async function creativeAbTestRoutes(app: FastifyInstance) {
@@ -34,13 +46,25 @@ export async function creativeAbTestRoutes(app: FastifyInstance) {
         });
       }
 
-      const { creative_ids, user_id, account_id } = parsed.data;
+      const {
+        creative_ids,
+        user_id,
+        account_id,
+        direction_id: providedDirectionId,
+        total_budget_cents = DEFAULT_TOTAL_BUDGET_CENTS,
+        total_impressions = DEFAULT_TOTAL_IMPRESSIONS
+      } = parsed.data;
+
+      const startTime = Date.now();
 
       app.log.info({
         user_id,
         account_id,
-        creative_count: creative_ids.length
-      }, 'Starting A/B test');
+        creative_count: creative_ids.length,
+        total_budget_cents,
+        total_impressions,
+        creative_ids
+      }, '[A/B Test] Starting A/B test request');
 
       // Проверяем, что нет активных A/B тестов для этих креативов
       const { data: existingTests } = await supabase
@@ -125,13 +149,22 @@ export async function creativeAbTestRoutes(app: FastifyInstance) {
         });
       }
 
+      app.log.info({
+        directionId,
+        direction_name: direction.name,
+        direction_objective: direction.objective,
+        elapsed_ms: Date.now() - startTime
+      }, '[A/B Test] Direction validated, starting workflow');
+
       // Запускаем workflow
       const result = await workflowStartAbTest(
         {
           creative_ids,
           user_id,
           db_ad_account_id: account_id,
-          direction_id: directionId
+          direction_id: directionId,
+          total_budget_cents,
+          total_impressions
         },
         {
           ad_account_id: credentials.fbAdAccountId!,
@@ -143,7 +176,13 @@ export async function creativeAbTestRoutes(app: FastifyInstance) {
         direction
       );
 
-      app.log.info({ test_id: result.test_id }, 'A/B test started successfully');
+      const elapsed = Date.now() - startTime;
+      app.log.info({
+        test_id: result.test_id,
+        campaign_id: result.campaign_id,
+        items_count: result.items?.length,
+        elapsed_ms: elapsed
+      }, '[A/B Test] A/B test started successfully');
 
       return reply.send(result);
 
@@ -496,24 +535,21 @@ export async function creativeAbTestRoutes(app: FastifyInstance) {
         });
       }
 
-      // Получаем user_account_id для conversation_insights
-      const { data: userAccount } = await supabase
-        .from('user_accounts')
-        .select('id')
-        .eq('id', user_id)
-        .single();
+      app.log.info({
+        user_id,
+        account_id,
+        category,
+        limit
+      }, '[A/B Test] Fetching insights');
 
-      if (!userAccount) {
-        return reply.status(404).send({
-          success: false,
-          error: 'User account not found'
-        });
-      }
+      // Используем user_id напрямую как user_account_id
+      // (в conversation_insights хранится user_account_id = user_id)
+      const userAccountId = user_id;
 
       let query = supabase
         .from('conversation_insights')
         .select('*')
-        .eq('user_account_id', userAccount.id)
+        .eq('user_account_id', userAccountId)
         .in('category', category ? [category] : ['offer_text', 'creative_image'])
         .order('occurrence_count', { ascending: false })
         .limit(Number(limit));
