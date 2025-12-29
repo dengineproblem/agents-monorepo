@@ -929,9 +929,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
       }
 
       // Cancel pending notifications
-      cancelPendingNotifications(consultationId).catch(err => {
-        app.log.error({ error: err.message }, 'Failed to cancel pending notifications');
-      });
+      if (consultationId) {
+        cancelPendingNotifications(consultationId).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to cancel pending notifications');
+        });
+      }
 
       return reply.send({
         success: true,
@@ -1040,9 +1042,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
       }
 
       // Cancel old notifications and schedule new ones
-      cancelPendingNotifications(consultationId).catch(err => {
-        app.log.error({ error: err.message }, 'Failed to cancel pending notifications');
-      });
+      if (consultationId) {
+        cancelPendingNotifications(consultationId).catch(err => {
+          app.log.error({ error: err.message }, 'Failed to cancel pending notifications');
+        });
+      }
 
       if (consultation && currentConsultation.user_account_id) {
         const consultationForNotification = {

@@ -27,7 +27,8 @@ export type LogTag =
   | 'schedule'     // Расписание/таймеры
   | 'config'       // Конфигурация бота
   | 'validation'   // Валидация данных
-  | 'auth';        // Аутентификация
+  | 'auth'         // Аутентификация
+  | 'consultation'; // Интеграция консультаций
 
 /** Типы ошибок для классификации */
 export type ErrorType =

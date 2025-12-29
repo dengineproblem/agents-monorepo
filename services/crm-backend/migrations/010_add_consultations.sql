@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS consultations (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     consultant_id UUID REFERENCES consultants(id) ON DELETE CASCADE,
     slot_id UUID REFERENCES consultation_slots(id) ON DELETE SET NULL,
-    dialog_analysis_id UUID REFERENCES dialog_analysis(id) ON DELETE SET NULL, -- связь с лидом из CRM
+    dialog_analysis_id UUID, -- связь с лидом из CRM (FK добавляется позже если таблица существует)
     client_phone VARCHAR(50) NOT NULL,
     client_name VARCHAR(255),
     client_chat_id VARCHAR(255), -- связь с чатом из WhatsApp
@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS consultations (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Добавить колонку dialog_analysis_id если таблица уже существует
+ALTER TABLE consultations ADD COLUMN IF NOT EXISTS dialog_analysis_id UUID;
 
 -- Индексы для оптимизации запросов
 CREATE INDEX IF NOT EXISTS idx_consultants_active ON consultants(is_active);
