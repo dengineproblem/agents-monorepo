@@ -124,7 +124,7 @@ const DOMAIN_CONTEXT_BUILDERS = {
   ads: (context) => {
     const parts = ['\n## Контекст аккаунта'];
 
-    // Directions context
+    // Directions context (priority over manual mode)
     if (context.directions?.length > 0) {
       parts.push('\n### Активные направления:');
       for (const dir of context.directions) {
@@ -136,6 +136,34 @@ const DOMAIN_CONTEXT_BUILDERS = {
           parts.push(`  - FB Campaign: ${dir.fb_campaign_id}`);
         }
       }
+    } else if (context.campaignMapping?.length > 0) {
+      // Manual mode: user has campaign mappings from memory
+      parts.push('\n### Кампании (ручной режим):');
+      parts.push('⚠️ Пользователь управляет рекламой вручную, данные из памяти.');
+      parts.push('');
+      for (const m of context.campaignMapping) {
+        const cplDisplay = m.target_cpl_cents ? `$${(m.target_cpl_cents / 100).toFixed(2)}` : 'не указан';
+        parts.push(`- **${m.direction_name}** (Campaign: ${m.campaign_id})`);
+        parts.push(`  - Цель: ${m.goal || 'не указана'}`);
+        parts.push(`  - Target CPL: ${cplDisplay}`);
+        if (m.campaign_name) {
+          parts.push(`  - Название: ${m.campaign_name}`);
+        }
+      }
+      parts.push('');
+      parts.push('**При анализе:**');
+      parts.push('- Сравнивай фактический CPL с target_cpl из маппинга');
+      parts.push('- CPL > target × 1.3 → рекомендуй снижение бюджета или паузу');
+      parts.push('- CPL < target × 0.7 → рекомендуй масштабирование');
+    } else if (context.isManualMode) {
+      // Manual mode without mappings yet
+      parts.push('\n### Ручной режим (нет данных о кампаниях)');
+      parts.push('⚠️ У пользователя нет направлений в системе и нет сохранённых маппингов.');
+      parts.push('');
+      parts.push('**Что делать:**');
+      parts.push('1. Покажи список кампаний из кабинета');
+      parts.push('2. Спроси какие направления и какой плановый CPL');
+      parts.push('3. Сохрани через saveCampaignMapping');
     }
 
     // Account settings
@@ -145,8 +173,13 @@ const DOMAIN_CONTEXT_BUILDERS = {
 
     // Important business logic
     parts.push('\n### Важно:');
-    parts.push('- 1 направление = 1 FB кампания');
-    parts.push('- Если вопрос про направление — используй его fb_campaign_id для данных');
+    if (context.directions?.length > 0) {
+      parts.push('- 1 направление = 1 FB кампания');
+      parts.push('- Если вопрос про направление — используй его fb_campaign_id для данных');
+    } else {
+      parts.push('- В ручном режиме ориентируйся на campaign_id из маппинга');
+      parts.push('- НЕ создавай новые адсеты — нет загруженных креативов');
+    }
 
     // ROI-ориентация
     parts.push('\n### ROI-ориентация (КРИТИЧНО!)');

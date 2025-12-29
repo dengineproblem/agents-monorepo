@@ -63,6 +63,41 @@ export const MEMORY_TOOLS = [
       },
       required: []
     }
+  },
+  {
+    name: 'saveCampaignMapping',
+    description: 'Сохранить маппинг кампании для ручного режима. Вызывай после получения информации от пользователя о направлениях и целевом CPL. Используется когда у пользователя нет созданных направлений (directions) в системе. Если маппинг для этого campaign_id уже существует — он будет обновлён.',
+    parameters: {
+      type: 'object',
+      properties: {
+        campaign_id: {
+          type: 'string',
+          description: 'Facebook Campaign ID (например: 120212345678901234)',
+          minLength: 1
+        },
+        campaign_name: {
+          type: 'string',
+          description: 'Название кампании (для читаемости)'
+        },
+        direction_name: {
+          type: 'string',
+          description: 'Название направления/услуги (Имплантация, Ремонт квартир и т.д.)',
+          minLength: 1
+        },
+        goal: {
+          type: 'string',
+          enum: ['whatsapp', 'site', 'lead_form', 'other'],
+          description: 'Цель кампании: whatsapp (лиды в WhatsApp), site (лиды с сайта), lead_form (формы Facebook), other'
+        },
+        target_cpl_cents: {
+          type: 'number',
+          description: 'Целевой CPL в центах (5000 = $50, 1500 = $15). Диапазон: 10-100000 центов ($0.10 - $1000)',
+          minimum: 10,
+          maximum: 100000
+        }
+      },
+      required: ['campaign_id', 'direction_name', 'target_cpl_cents']
+    }
   }
 ];
 
@@ -188,6 +223,82 @@ export const memoryHandlers = {
       return {
         success: false,
         error: `Не удалось получить заметки: ${error.message}`
+      };
+    }
+  },
+
+  /**
+   * Save campaign mapping for manual mode (users without directions)
+   * Stores campaign → direction → target CPL mapping in agent_notes.ads
+   * If mapping for this campaign_id already exists, it will be updated (old removed, new added)
+   */
+  async saveCampaignMapping({ campaign_id, campaign_name, direction_name, goal, target_cpl_cents }, context) {
+    try {
+      // Validate target_cpl_cents
+      if (typeof target_cpl_cents !== 'number' || target_cpl_cents <= 0) {
+        return {
+          success: false,
+          error: 'Target CPL должен быть положительным числом (в центах, например 5000 = $50)'
+        };
+      }
+
+      // Reasonable bounds check: $0.10 - $1000
+      if (target_cpl_cents < 10 || target_cpl_cents > 100000) {
+        return {
+          success: false,
+          error: 'Target CPL должен быть от $0.10 до $1000 (10-100000 центов)'
+        };
+      }
+
+      // Remove existing mapping for this campaign_id if any (upsert behavior)
+      const existingMappingSearch = `CAMPAIGN_MAPPING:{"campaign_id":"${campaign_id}"`;
+      await memoryStore.removeNoteByText(
+        context.userAccountId,
+        context.adAccountDbId || null,
+        existingMappingSearch
+      );
+
+      const mapping = {
+        campaign_id,
+        campaign_name: campaign_name || null,
+        direction_name,
+        goal: goal || 'other',
+        target_cpl_cents
+      };
+
+      const noteText = `CAMPAIGN_MAPPING:${JSON.stringify(mapping)}`;
+
+      // Use adAccountDbId (UUID) for database queries
+      await memoryStore.addNote(
+        context.userAccountId,
+        context.adAccountDbId || null,
+        'ads',
+        {
+          text: noteText,
+          source: { type: 'user_input', ref: 'manual_mode_mapping' },
+          importance: 0.9
+        }
+      );
+
+      const cplDisplay = `$${(target_cpl_cents / 100).toFixed(2)}`;
+      const displayName = campaign_name || campaign_id;
+
+      logger.info({
+        userAccountId: context.userAccountId,
+        campaign_id,
+        direction_name,
+        target_cpl_cents
+      }, 'Campaign mapping saved for manual mode');
+
+      return {
+        success: true,
+        message: `Запомнил: ${displayName} = ${direction_name}, Target CPL ${cplDisplay}`
+      };
+    } catch (error) {
+      logger.error({ error: error.message }, 'Failed to save campaign mapping');
+      return {
+        success: false,
+        error: `Не удалось сохранить маппинг: ${error.message}`
       };
     }
   }

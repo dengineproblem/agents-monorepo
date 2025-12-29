@@ -2836,5 +2836,25 @@ ${errorMessage}
       user_request,
       suggestion: 'Попробуйте переформулировать запрос или использовать стандартные tools (getCampaigns, getSpendReport и т.д.)'
     };
+  },
+
+  // ============================================================
+  // MANUAL MODE HANDLERS (for users without directions)
+  // ============================================================
+
+  /**
+   * Save campaign mapping for manual mode
+   * Stores campaign → direction → target CPL mapping in agent_notes.ads
+   * Uses memoryHandlers from orchestrator for consistency
+   */
+  async saveCampaignMapping({ campaign_id, campaign_name, direction_name, goal, target_cpl_cents }, context) {
+    // Import memoryHandlers
+    const { memoryHandlers } = await import('../../orchestrator/memoryTools.js');
+
+    // Delegate to memoryHandlers.saveCampaignMapping
+    return memoryHandlers.saveCampaignMapping(
+      { campaign_id, campaign_name, direction_name, goal, target_cpl_cents },
+      context
+    );
   }
 };

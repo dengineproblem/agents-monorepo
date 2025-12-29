@@ -19,6 +19,8 @@ import {
   Smartphone,
   Unlink,
   Calendar,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -1293,15 +1295,189 @@ export function BotEditor() {
         <TabsContent value="delayed">
           <Card>
             <CardHeader>
-              <CardTitle>Отложенная отправка</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="w-5 h-5" />
+                Follow-up сообщения
+              </CardTitle>
               <CardDescription>
-                Автоматическая отправка напоминаний через заданное время
+                Автоматическая отправка напоминаний, если клиент не отвечает
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-center py-8">
-                Функция отложенной отправки будет доступна в следующем обновлении
-              </p>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="delayed-enabled">Включить follow-up</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Бот отправит напоминание, если клиент не ответил
+                  </p>
+                </div>
+                <Switch
+                  id="delayed-enabled"
+                  checked={formData.delayedScheduleEnabled || false}
+                  onCheckedChange={(checked) => updateField('delayedScheduleEnabled', checked)}
+                />
+              </div>
+
+              {formData.delayedScheduleEnabled && (
+                <>
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <div>
+                      <Label>Рабочие часы для отправки</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Сообщения вне рабочих часов будут отложены до утра
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm">Начало (час)</Label>
+                        <Input
+                          type="number"
+                          value={formData.delayedScheduleHoursStart ?? 9}
+                          onChange={(e) => updateField('delayedScheduleHoursStart', parseInt(e.target.value) || 9)}
+                          min={0}
+                          max={23}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm">Конец (час)</Label>
+                        <Input
+                          type="number"
+                          value={formData.delayedScheduleHoursEnd ?? 19}
+                          onChange={(e) => updateField('delayedScheduleHoursEnd', parseInt(e.target.value) || 19)}
+                          min={0}
+                          max={23}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label>Цепочка follow-up сообщений</Label>
+                        <p className="text-sm text-muted-foreground">
+                          До 3 сообщений. Каждое отправляется если клиент не ответил.
+                        </p>
+                      </div>
+                      {(formData.delayedMessages?.length || 0) < 3 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const current = formData.delayedMessages || [];
+                            updateField('delayedMessages', [
+                              ...current,
+                              { delay_minutes: 30, prompt: '' }
+                            ]);
+                          }}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Добавить
+                        </Button>
+                      )}
+                    </div>
+
+                    {(formData.delayedMessages?.length || 0) === 0 ? (
+                      <div className="text-center py-8 border-2 border-dashed rounded-lg">
+                        <Bell className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                        <p className="text-muted-foreground">
+                          Нет follow-up сообщений
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="mt-4"
+                          onClick={() => {
+                            updateField('delayedMessages', [
+                              { delay_minutes: 30, prompt: 'Напомни клиенту о себе, спроси не нужна ли помощь' }
+                            ]);
+                          }}
+                        >
+                          <Plus className="w-4 h-4 mr-1" />
+                          Добавить первый follow-up
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {formData.delayedMessages?.map((msg, index) => (
+                          <Card key={index} className="border-2">
+                            <CardHeader className="pb-3">
+                              <div className="flex items-center justify-between">
+                                <CardTitle className="text-base">
+                                  Follow-up #{index + 1}
+                                </CardTitle>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const current = formData.delayedMessages || [];
+                                    updateField('delayedMessages', current.filter((_, i) => i !== index));
+                                  }}
+                                >
+                                  <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              <div className="space-y-2">
+                                <Label>Задержка (минуты)</Label>
+                                <Input
+                                  type="number"
+                                  value={msg.delay_minutes}
+                                  onChange={(e) => {
+                                    const value = Math.max(15, parseInt(e.target.value) || 15);
+                                    const current = formData.delayedMessages || [];
+                                    const updated = [...current];
+                                    updated[index] = { ...updated[index], delay_minutes: value };
+                                    updateField('delayedMessages', updated);
+                                  }}
+                                  min={15}
+                                  max={1440}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Минимум 15 минут. Отсчёт от последнего сообщения бота.
+                                </p>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Промпт для генерации</Label>
+                                <Textarea
+                                  value={msg.prompt}
+                                  onChange={(e) => {
+                                    const current = formData.delayedMessages || [];
+                                    const updated = [...current];
+                                    updated[index] = { ...updated[index], prompt: e.target.value };
+                                    updateField('delayedMessages', updated);
+                                  }}
+                                  placeholder="Например: Напомни клиенту о предложении, спроси есть ли вопросы"
+                                  rows={3}
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                  Инструкция для AI, что написать в этом follow-up
+                                </p>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-muted/50 rounded-lg p-4">
+                    <h4 className="font-medium mb-2">Как это работает</h4>
+                    <ul className="text-sm text-muted-foreground space-y-1">
+                      <li>• После ответа бота запускается таймер первого follow-up</li>
+                      <li>• Если клиент ответил — все follow-ups отменяются</li>
+                      <li>• Если клиент молчит — бот отправляет follow-up</li>
+                      <li>• Цепочка продолжается пока клиент не ответит</li>
+                      <li>• Сообщения вне рабочих часов откладываются до утра</li>
+                    </ul>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

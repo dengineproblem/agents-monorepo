@@ -56,8 +56,21 @@ export async function gatherContext({ userAccountId, adAccountId, conversationId
 
     // Priority 9: Directions — critical for ads/creative context
     // LLM needs to know direction IDs, names, budgets, target CPL
-    if (directions.status === 'fulfilled' && directions.value?.length > 0) {
-      tokenBudget.addBlock('directions', directions.value, 9);
+    const directionsData = directions.status === 'fulfilled' ? directions.value : [];
+    const isManualMode = !directionsData || directionsData.length === 0;
+
+    if (directionsData?.length > 0) {
+      tokenBudget.addBlock('directions', directionsData, 9);
+    }
+
+    // Manual mode: load campaign mapping from notes if no directions
+    tokenBudget.addBlock('isManualMode', isManualMode, 9);
+
+    if (isManualMode) {
+      const campaignMapping = await getCampaignMappingFromNotes(userAccountId, adAccountId);
+      if (campaignMapping?.length > 0) {
+        tokenBudget.addBlock('campaignMapping', campaignMapping, 9);
+      }
     }
 
     // Priority 8: Today's metrics — current state
@@ -502,6 +515,49 @@ async function getCreativesSnapshot(userAccountId, adAccountId) {
 async function getNotesSnapshot(userAccountId, adAccountId) {
   const { memoryStore } = await import('./stores/memoryStore.js');
   return memoryStore.getNotesDigest(userAccountId, adAccountId, ['ads', 'creative'], 3);
+}
+
+/**
+ * Get campaign mapping from agent_notes for manual mode (users without directions)
+ * Returns parsed mappings with campaign_id → direction info
+ * Deduplicates by campaign_id, keeping the latest mapping (last in notes array)
+ * @param {string} userAccountId
+ * @param {string|null} adAccountId
+ * @returns {Promise<Array<{campaign_id, campaign_name, direction_name, goal, target_cpl_cents}>>}
+ */
+async function getCampaignMappingFromNotes(userAccountId, adAccountId) {
+  try {
+    const { memoryStore } = await import('./stores/memoryStore.js');
+    const notes = await memoryStore.getNotes(userAccountId, adAccountId, 'ads');
+
+    // Use Map for deduplication by campaign_id (later entries override earlier)
+    const mappingsByCampaignId = new Map();
+
+    for (const note of notes) {
+      if (note.text.startsWith('CAMPAIGN_MAPPING:')) {
+        try {
+          const json = note.text.replace('CAMPAIGN_MAPPING:', '').trim();
+          const mapping = JSON.parse(json);
+          mapping._noteId = note.id;
+          mapping._createdAt = note.created_at;
+
+          // Deduplicate: keep the latest mapping per campaign_id
+          mappingsByCampaignId.set(mapping.campaign_id, mapping);
+        } catch (e) {
+          // Ignore malformed JSON
+          logger.debug({ noteId: note.id }, 'Malformed campaign mapping note, skipping');
+        }
+      }
+    }
+
+    const mappings = Array.from(mappingsByCampaignId.values());
+    logger.debug({ userAccountId, mappingsCount: mappings.length }, 'Loaded campaign mappings from notes');
+    return mappings;
+
+  } catch (error) {
+    logger.warn({ error: error.message }, 'Failed to get campaign mappings from notes');
+    return [];
+  }
 }
 
 /**

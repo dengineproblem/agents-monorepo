@@ -12,6 +12,7 @@ import { startKeyStageTransitionCron } from './cron/keyStageTransitionCron.js';
 import { startLeadSnapshotCron } from './cron/leadSnapshotCron.js';
 import { startReactivationWorker } from './workers/reactivationWorker.js';
 import { startCampaignWorker } from './workers/campaignWorker.js';
+import { startDelayedFollowUpWorker } from './workers/delayedFollowUpWorker.js';
 import pino from 'pino';
 
 // Load env from Docker path or local path
@@ -193,6 +194,10 @@ startReactivationWorker(app);
 // Запускаем worker для автоматической отправки campaign сообщений (каждые 5 минут)
 // @ts-ignore
 startCampaignWorker();
+
+// Запускаем worker для отложенных follow-up сообщений (каждую минуту)
+// @ts-ignore
+startDelayedFollowUpWorker();
 
 app.listen({ host: '0.0.0.0', port: PORT }).then(() => {
   console.log(`🤖 Chatbot Service listening on http://0.0.0.0:${PORT}`);

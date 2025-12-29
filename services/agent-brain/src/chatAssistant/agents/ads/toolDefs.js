@@ -321,19 +321,17 @@ export const AdsToolDefs = {
   // ============================================================
 
   customFbQuery: {
-    description: `Выполнить кастомный запрос к Facebook API для нестандартных метрик.
+    description: `УНИВЕРСАЛЬНЫЙ запрос к Facebook Marketing API. Может получить ЛЮБЫЕ данные из FB API.
 
-Используй когда:
-- Пользователь спрашивает метрику, которой нет в стандартных tools
-- Нужен специфичный breakdown или фильтр
-- Требуется комбинация полей, которую не покрывают другие tools
+⚠️ ВАЖНО: Если ни один стандартный tool не подходит для запроса пользователя — ВСЕГДА используй customFbQuery.
+Не отказывай пользователю, если данные теоретически есть в Facebook API.
 
-Внутренняя логика:
-1. LLM анализирует запрос пользователя
-2. Строит корректный FB API запрос (fields, date_preset, filtering)
-3. Отправляет запрос к FB API
-4. При ошибке — 3 попытки с исправлением запроса
-5. Возвращает результат или сообщение об ошибке`,
+Этот tool умеет:
+- Запрашивать любые поля и метрики FB API (включая breakdowns, action_breakdowns)
+- Применять любые фильтры и группировки
+- Работать с любым уровнем (account, campaign, adset, ad)
+
+Просто передай user_request на естественном языке — внутренний LLM построит правильный API запрос.`,
     schema: z.object({
       user_request: z.string().describe('Описание того, что хочет узнать пользователь (на естественном языке)'),
       entity_type: z.enum(['account', 'campaign', 'adset', 'ad']).default('account').describe('Уровень сущности для запроса'),
@@ -341,6 +339,24 @@ export const AdsToolDefs = {
       period: periodSchema.optional().describe('Период для метрик (если применимо)')
     }),
     meta: { timeout: 60000, retryable: true }
+  },
+
+  // ============================================================
+  // MANUAL MODE TOOLS (for users without directions)
+  // ============================================================
+
+  saveCampaignMapping: {
+    description: `Сохранить маппинг кампании для ручного режима (пользователи без directions).
+Используй когда пользователь указал какое направление (услугу) рекламирует кампания и какой целевой CPL.
+Если маппинг для этого campaign_id уже существует — он будет обновлён.`,
+    schema: z.object({
+      campaign_id: z.string().min(1).describe('Facebook Campaign ID (например: 120212345678901234)'),
+      campaign_name: z.string().optional().describe('Название кампании (для читаемости)'),
+      direction_name: z.string().min(1).describe('Название направления/услуги (Имплантация, Ремонт квартир и т.д.)'),
+      goal: z.enum(['whatsapp', 'site', 'lead_form', 'other']).optional().describe('Цель кампании: whatsapp, site, lead_form, other'),
+      target_cpl_cents: z.number().min(10).max(100000).describe('Целевой CPL в центах (10-100000, т.е. $0.10 - $1000)')
+    }),
+    meta: { timeout: 10000, retryable: false }
   }
 };
 

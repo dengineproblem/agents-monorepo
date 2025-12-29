@@ -15,7 +15,8 @@
  * - Сохранение ответов бота в историю
  */
 
-import { FastifyInstance } from 'fastify';
+// Using 'any' for FastifyInstance to avoid type conflicts with custom pino logger
+type FastifyApp = any;
 import { supabase } from './supabase.js';
 import { redis } from './redis.js';
 import OpenAI from 'openai';
@@ -39,6 +40,7 @@ import {
   DEFAULT_RETRY_CONFIG,
   checkRateLimit,
   RateLimitConfig,
+  logOpenAiCall,
   logOpenAiCallWithCost,
   validateMessage,
   isDuplicateMessage,
@@ -55,6 +57,10 @@ import {
   isConsultationTool,
   handleConsultationTool
 } from './consultationTools.js';
+import {
+  cancelPendingFollowUps,
+  scheduleFirstFollowUp
+} from './delayedFollowUps.js';
 
 const baseLog = createLogger({ module: 'aiBotEngine' });
 
@@ -434,7 +440,7 @@ export async function collectMessagesWithConfig(
   instanceName: string,
   newMessage: string,
   botConfig: AIBotConfig,
-  app: FastifyInstance,
+  app: FastifyApp,
   ctx?: RequestContext
 ): Promise<void> {
   const ctxLog = createContextLogger(baseLog, ctx || { phone, instanceName }, ['redis', 'processing']);
@@ -535,7 +541,7 @@ async function processAIBotResponse(
   instanceName: string,
   messageText: string,
   botConfig: AIBotConfig,
-  app: FastifyInstance,
+  app: FastifyApp,
   ctx?: RequestContext
 ): Promise<void> {
   const ctxLog = createContextLogger(baseLog, {
@@ -809,6 +815,29 @@ async function processAIBotResponse(
       historyUpdated: true,
       ...ctxLog.getTimings()
     }, '[processAIBotResponse] Bot response sent successfully');
+
+    // === Планирование follow-up если функция включена ===
+    try {
+      const scheduled = await scheduleFirstFollowUp(
+        {
+          id: botConfig.id,
+          is_active: botConfig.is_active,
+          delayed_schedule_enabled: botConfig.delayed_schedule_enabled,
+          delayed_schedule_hours_start: botConfig.delayed_schedule_hours_start,
+          delayed_schedule_hours_end: botConfig.delayed_schedule_hours_end,
+          delayed_messages: botConfig.delayed_messages || [],
+          timezone: botConfig.timezone
+        },
+        lead.id,
+        instanceName,
+        phone
+      );
+      if (scheduled) {
+        ctxLog.info({ leadId: maskUuid(lead.id) }, '[processAIBotResponse] Follow-up scheduled');
+      }
+    } catch (e) {
+      ctxLog.warn({ error: (e as any)?.message }, '[processAIBotResponse] Failed to schedule follow-up (non-fatal)');
+    }
 
   } catch (error: any) {
     ctxLog.error(error, '[processAIBotResponse] Error processing message', {
@@ -1192,7 +1221,7 @@ async function generateAIResponse(
 
     log.info({
       responseLen: choice.message.content?.length || 0,
-      responsePreview: truncateText(choice.message.content, 100),
+      responsePreview: truncateText(choice.message.content || '', 100),
       ...log.getTimings()
     }, '[generateAIResponse] Completed with text response', ['openai']);
 
@@ -1226,7 +1255,7 @@ async function handleFunctionCall(
   functionCall: { name: string; arguments: any },
   lead: LeadInfo,
   botConfig: AIBotConfig,
-  app: FastifyInstance,
+  app: FastifyApp,
   ctxLog?: ContextLogger
 ): Promise<void> {
   const log = ctxLog || createContextLogger(baseLog, {
@@ -1495,7 +1524,7 @@ export async function processIncomingMessage(
   instanceName: string,
   messageText: string,
   messageType: 'text' | 'image' | 'audio' | 'document' | 'file',
-  app: FastifyInstance
+  app: FastifyApp
 ): Promise<{ processed: boolean; reason?: string; correlationId?: string }> {
   // Создаём контекстный логгер с correlation ID
   const ctxLog = createContextLogger(baseLog, {
@@ -1678,6 +1707,16 @@ export async function processIncomingMessage(
       botPaused: lead.bot_paused,
       assignedToHuman: lead.assigned_to_human
     }, true);
+
+    // === Отмена pending follow-ups при входящем сообщении ===
+    try {
+      const cancelledCount = await cancelPendingFollowUps(lead.id);
+      if (cancelledCount > 0) {
+        ctxLog.info({ cancelledCount, leadId: maskUuid(lead.id) }, '[processIncomingMessage] Cancelled pending follow-ups');
+      }
+    } catch (e) {
+      ctxLog.warn({ error: (e as any)?.message }, '[processIncomingMessage] Failed to cancel follow-ups (non-fatal)');
+    }
 
     // === ЭТАП 6: Проверить условия ответа ===
     logStageTransition(ctxLog, currentStage, 'conditions_checked');

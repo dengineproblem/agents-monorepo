@@ -29,6 +29,7 @@ export function buildMetaSystemPrompt(context = {}) {
   const integrationsSection = formatIntegrations(context.integrations);
   const userContextSection = formatUserContext(context);
   const directionsSection = formatDirections(context.directions);
+  const manualModeSection = formatManualModeContext(context);
   const businessInstructionsSection = formatBusinessInstructions(context.businessInstructions);
 
   return `# AI-ассистент для управления бизнесом
@@ -128,6 +129,8 @@ ${businessInstructionsSection}
 - ✅ "Покажи CPL по направлению X за неделю" — конкретный запрос, 1-2 tools, выполняй сразу
 
 ${directionsSection}
+
+${manualModeSection}
 
 ${adAccountSection}
 
@@ -289,6 +292,77 @@ function formatBusinessInstructions(instructions) {
     lines.push(instructions.prompt4);
     lines.push('');
   }
+
+  return lines.join('\n');
+}
+
+/**
+ * Format manual mode section (for users without directions)
+ * When user has 0 directions, they manage ads manually via Facebook Ads Manager
+ */
+function formatManualModeContext(context) {
+  // Only show if manual mode is active
+  if (!context.isManualMode) return '';
+
+  const lines = [
+    '## Ручной режим (без Directions)',
+    '',
+    '**Пользователь управляет рекламой вручную через Facebook Ads Manager.**',
+    'У него нет созданных направлений в системе Performante.',
+    ''
+  ];
+
+  if (context.campaignMapping?.length > 0) {
+    lines.push('### Известные кампании (из памяти):');
+    lines.push('');
+
+    for (const m of context.campaignMapping) {
+      const cplDisplay = m.target_cpl_cents ? `$${(m.target_cpl_cents / 100).toFixed(2)}` : 'не указан';
+      const goalDisplay = {
+        'whatsapp': 'WhatsApp лиды',
+        'site': 'Лиды с сайта',
+        'lead_form': 'Facebook формы',
+        'other': 'Другое'
+      }[m.goal] || m.goal || 'не указана';
+
+      lines.push(`- **${m.direction_name}** (Campaign: \`${m.campaign_id}\`)`);
+      lines.push(`  - Цель: ${goalDisplay}`);
+      lines.push(`  - Target CPL: ${cplDisplay}`);
+      if (m.campaign_name) {
+        lines.push(`  - Название в FB: ${m.campaign_name}`);
+      }
+    }
+
+    lines.push('');
+    lines.push('**Используй эту информацию для анализа CPL:**');
+    lines.push('- Сравнивай фактический CPL с target_cpl');
+    lines.push('- Если CPL > target_cpl на 30%+ → рекомендуй снизить бюджет или паузу');
+    lines.push('- Если CPL < target_cpl на 30%+ → рекомендуй масштабирование');
+  } else {
+    lines.push('### Нет информации о кампаниях');
+    lines.push('');
+    lines.push('**При запросе о рекламном кабинете:**');
+    lines.push('1. Получи список кампаний через **getCampaigns**');
+    lines.push('2. Покажи пользователю список');
+    lines.push('3. Спроси: "Какие направления (услуги) рекламируются в этих кампаниях и какой плановый CPL для каждой?"');
+    lines.push('4. После ответа сохрани через **saveCampaignMapping** для каждой кампании');
+    lines.push('');
+    lines.push('**Пример вопроса:**');
+    lines.push('> Вижу у вас 3 активные кампании:');
+    lines.push('> 1. [Имплантация] WhatsApp (ID: 120212...)');
+    lines.push('> 2. [Протезирование] WhatsApp (ID: 120213...)');
+    lines.push('> 3. [Отбеливание] Site (ID: 120214...)');
+    lines.push('> ');
+    lines.push('> Какие направления они рекламируют и какой плановый CPL (стоимость заявки) для каждой?');
+  }
+
+  lines.push('');
+  lines.push('### Доступные действия в ручном режиме:');
+  lines.push('- ✅ Анализ метрик кампаний (getCampaigns, getAdSets, getAds)');
+  lines.push('- ✅ Изменение бюджетов (updateBudget)');
+  lines.push('- ✅ Пауза/запуск (pause/resume Campaign, AdSet, Ad)');
+  lines.push('- ❌ **НЕ создавай новые адсеты/объявления** — нет загруженных креативов');
+  lines.push('');
 
   return lines.join('\n');
 }
