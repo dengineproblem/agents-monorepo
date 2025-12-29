@@ -238,6 +238,52 @@ export function getConsultationToolDefinitions(
           required: []
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_consultant_info',
+        description: 'Получить информацию о консультанте: имя, специализация, описание. Используй когда клиент спрашивает кто будет проводить консультацию.',
+        parameters: {
+          type: 'object',
+          properties: {
+            consultant_id: {
+              type: 'string',
+              description: 'UUID консультанта из списка слотов'
+            }
+          },
+          required: ['consultant_id']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_consultant_schedule',
+        description: 'Получить расписание работы консультанта по дням недели. Используй когда клиент хочет узнать в какие дни работает консультант.',
+        parameters: {
+          type: 'object',
+          properties: {
+            consultant_id: {
+              type: 'string',
+              description: 'UUID консультанта'
+            }
+          },
+          required: ['consultant_id']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_consultation_history',
+        description: 'Получить историю всех консультаций клиента включая прошедшие, отменённые и завершённые. Используй чтобы понять взаимодействие клиента с компанией.',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
     }
   ];
 }
@@ -258,6 +304,9 @@ export function getConsultationPromptAddition(settings: ConsultationIntegrationS
 - cancel_consultation — отменить запись
 - reschedule_consultation — перенести запись на другое время
 - get_my_consultations — показать текущие записи клиента
+- get_consultant_info — информация о консультанте
+- get_consultant_schedule — расписание работы консультанта
+- get_consultation_history — история всех консультаций клиента
 
 Правила работы:
 1. Если клиент хочет записаться — сначала покажи доступные слоты
@@ -685,6 +734,265 @@ export async function handleGetMyConsultations(
 }
 
 /**
+ * Обработчик: Получить информацию о консультанте
+ */
+export async function handleGetConsultantInfo(
+  args: { consultant_id: string },
+  lead: LeadInfo,
+  ctxLog?: ContextLogger
+): Promise<string> {
+  const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
+
+  if (!args.consultant_id) {
+    log.warn({}, '[handleGetConsultantInfo] Missing consultant_id', ['consultation', 'validation']);
+    return 'Не указан ID консультанта.';
+  }
+
+  log.info({
+    consultantId: maskUuid(args.consultant_id)
+  }, '[handleGetConsultantInfo] Fetching consultant info', ['consultation']);
+
+  try {
+    const url = `${CRM_BACKEND_URL}/consultants/${args.consultant_id}`;
+
+    const response = await fetchWithRetry(
+      url,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      log,
+      'handleGetConsultantInfo'
+    );
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        log.warn({ consultantId: maskUuid(args.consultant_id) }, '[handleGetConsultantInfo] Consultant not found', ['consultation']);
+        return 'Консультант не найден.';
+      }
+      log.error({
+        status: response.status,
+        statusText: response.statusText
+      }, '[handleGetConsultantInfo] API returned error status', {}, ['api', 'consultation']);
+      return 'Не удалось получить информацию о консультанте.';
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleGetConsultantInfo] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке данных.';
+    }
+
+    log.info({
+      consultantId: maskUuid(args.consultant_id),
+      hasName: !!data.name,
+      hasSpecialization: !!data.specialization
+    }, '[handleGetConsultantInfo] Consultant info fetched successfully', ['consultation']);
+
+    // Формируем ответ
+    const parts: string[] = [];
+    if (data.name) {
+      parts.push(`Консультант: ${data.name}`);
+    }
+    if (data.specialization) {
+      parts.push(`Специализация: ${data.specialization}`);
+    }
+    if (data.description) {
+      parts.push(`Описание: ${data.description}`);
+    }
+
+    if (parts.length === 0) {
+      return 'Информация о консультанте недоступна.';
+    }
+
+    return parts.join('\n');
+  } catch (error: any) {
+    const errorType = classifyError(error);
+    log.error(error, '[handleGetConsultantInfo] Error fetching consultant info', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
+    return 'Произошла ошибка при получении информации о консультанте.';
+  }
+}
+
+/**
+ * Обработчик: Получить расписание консультанта
+ */
+export async function handleGetConsultantSchedule(
+  args: { consultant_id: string },
+  lead: LeadInfo,
+  ctxLog?: ContextLogger
+): Promise<string> {
+  const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
+
+  if (!args.consultant_id) {
+    log.warn({}, '[handleGetConsultantSchedule] Missing consultant_id', ['consultation', 'validation']);
+    return 'Не указан ID консультанта.';
+  }
+
+  log.info({
+    consultantId: maskUuid(args.consultant_id)
+  }, '[handleGetConsultantSchedule] Fetching consultant schedule', ['consultation']);
+
+  try {
+    const url = `${CRM_BACKEND_URL}/consultants/${args.consultant_id}/schedules`;
+
+    const response = await fetchWithRetry(
+      url,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      log,
+      'handleGetConsultantSchedule'
+    );
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        log.warn({ consultantId: maskUuid(args.consultant_id) }, '[handleGetConsultantSchedule] Consultant not found', ['consultation']);
+        return 'Консультант не найден.';
+      }
+      log.error({
+        status: response.status,
+        statusText: response.statusText
+      }, '[handleGetConsultantSchedule] API returned error status', {}, ['api', 'consultation']);
+      return 'Не удалось получить расписание консультанта.';
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleGetConsultantSchedule] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке данных.';
+    }
+
+    // data может быть массивом расписаний или объектом с schedules
+    const schedules = Array.isArray(data) ? data : data.schedules || [];
+
+    if (schedules.length === 0) {
+      log.info({ consultantId: maskUuid(args.consultant_id) }, '[handleGetConsultantSchedule] No schedules found', ['consultation']);
+      return 'Расписание консультанта не настроено.';
+    }
+
+    log.info({
+      consultantId: maskUuid(args.consultant_id),
+      schedulesCount: schedules.length
+    }, '[handleGetConsultantSchedule] Schedule fetched successfully', ['consultation']);
+
+    // Название дней недели
+    const dayNames: Record<number, string> = {
+      0: 'Воскресенье',
+      1: 'Понедельник',
+      2: 'Вторник',
+      3: 'Среда',
+      4: 'Четверг',
+      5: 'Пятница',
+      6: 'Суббота'
+    };
+
+    // Группируем по дням и формируем ответ
+    const scheduleText = schedules
+      .filter((s: any) => s.is_active !== false)
+      .map((s: any) => {
+        const dayName = dayNames[s.day_of_week] || `День ${s.day_of_week}`;
+        return `${dayName}: ${s.start_time} - ${s.end_time}`;
+      })
+      .join('\n');
+
+    if (!scheduleText) {
+      return 'Расписание консультанта не настроено.';
+    }
+
+    return `Расписание работы консультанта:\n\n${scheduleText}`;
+  } catch (error: any) {
+    const errorType = classifyError(error);
+    log.error(error, '[handleGetConsultantSchedule] Error fetching schedule', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
+    return 'Произошла ошибка при получении расписания.';
+  }
+}
+
+/**
+ * Обработчик: Получить историю консультаций клиента
+ */
+export async function handleGetConsultationHistory(
+  lead: LeadInfo,
+  ctxLog?: ContextLogger
+): Promise<string> {
+  const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
+
+  log.info({
+    leadId: maskUuid(lead.id),
+    phone: maskPhone(lead.contact_phone)
+  }, '[handleGetConsultationHistory] Fetching consultation history', ['consultation']);
+
+  try {
+    // Запрашиваем все консультации включая завершённые и отменённые
+    const url = `${CRM_BACKEND_URL}/consultations/by-lead/${lead.id}?include_all=true`;
+
+    const response = await fetchWithRetry(
+      url,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      log,
+      'handleGetConsultationHistory'
+    );
+
+    if (!response.ok) {
+      log.error({
+        status: response.status,
+        statusText: response.statusText
+      }, '[handleGetConsultationHistory] API returned error status', {}, ['api', 'consultation']);
+      return 'Не удалось получить историю консультаций.';
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleGetConsultationHistory] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке данных.';
+    }
+
+    const consultations = data.consultations || [];
+
+    if (consultations.length === 0) {
+      log.info({ leadId: maskUuid(lead.id) }, '[handleGetConsultationHistory] No consultation history', ['consultation']);
+      return 'У клиента нет истории консультаций.';
+    }
+
+    log.info({
+      leadId: maskUuid(lead.id),
+      count: consultations.length
+    }, '[handleGetConsultationHistory] History fetched successfully', ['consultation']);
+
+    // Группируем по статусу для удобства
+    const statusLabels: Record<string, string> = {
+      'scheduled': 'Запланирована',
+      'confirmed': 'Подтверждена',
+      'completed': 'Проведена',
+      'cancelled': 'Отменена',
+      'no_show': 'Клиент не пришёл',
+      'rescheduled': 'Перенесена'
+    };
+
+    const historyText = consultations.map((c: any, idx: number) => {
+      const status = statusLabels[c.status] || c.status;
+      const date = c.formatted || `${c.date} ${c.start_time}`;
+      return `${idx + 1}. ${date} — ${status}`;
+    }).join('\n');
+
+    return `История консультаций клиента:\n\n${historyText}`;
+  } catch (error: any) {
+    const errorType = classifyError(error);
+    log.error(error, '[handleGetConsultationHistory] Error fetching history', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
+    return 'Произошла ошибка при получении истории консультаций.';
+  }
+}
+
+/**
  * Проверить, является ли функция consultation tool
  */
 export function isConsultationTool(functionName: string): boolean {
@@ -693,7 +1001,10 @@ export function isConsultationTool(functionName: string): boolean {
     'book_consultation',
     'cancel_consultation',
     'reschedule_consultation',
-    'get_my_consultations'
+    'get_my_consultations',
+    'get_consultant_info',
+    'get_consultant_schedule',
+    'get_consultation_history'
   ];
   return consultationTools.includes(functionName);
 }
@@ -723,6 +1034,15 @@ export async function handleConsultationTool(
 
     case 'get_my_consultations':
       return handleGetMyConsultations(lead, ctxLog);
+
+    case 'get_consultant_info':
+      return handleGetConsultantInfo(args, lead, ctxLog);
+
+    case 'get_consultant_schedule':
+      return handleGetConsultantSchedule(args, lead, ctxLog);
+
+    case 'get_consultation_history':
+      return handleGetConsultationHistory(lead, ctxLog);
 
     default:
       return 'Неизвестная функция консультаций.';

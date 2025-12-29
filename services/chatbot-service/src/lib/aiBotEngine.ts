@@ -58,6 +58,21 @@ import {
   handleConsultationTool
 } from './consultationTools.js';
 import {
+  getCapiToolDefinitions,
+  isCapiTool,
+  handleCapiTool
+} from './capiTools.js';
+import {
+  getLeadManagementToolDefinitions,
+  isLeadManagementTool,
+  handleLeadManagementTool
+} from './leadManagementTools.js';
+import {
+  getBotControlToolDefinitions,
+  isBotControlTool,
+  handleBotControlTool
+} from './botControlTools.js';
+import {
   cancelPendingFollowUps,
   scheduleFirstFollowUp
 } from './delayedFollowUps.js';
@@ -1105,6 +1120,30 @@ async function generateAIResponse(
     }, '[generateAIResponse] Added consultation tools', ['openai']);
   }
 
+  // Добавить CAPI tools (всегда включены)
+  const capiTools = getCapiToolDefinitions();
+  tools.push(...capiTools);
+  log.debug({
+    capiToolsCount: capiTools.length,
+    capiToolNames: capiTools.map(t => t.function.name)
+  }, '[generateAIResponse] Added CAPI tools', ['openai']);
+
+  // Добавить Lead Management tools (всегда включены)
+  const leadManagementTools = getLeadManagementToolDefinitions();
+  tools.push(...leadManagementTools);
+  log.debug({
+    leadToolsCount: leadManagementTools.length,
+    leadToolNames: leadManagementTools.map(t => t.function.name)
+  }, '[generateAIResponse] Added Lead Management tools', ['openai']);
+
+  // Добавить Bot Control tools (всегда включены)
+  const botControlTools = getBotControlToolDefinitions();
+  tools.push(...botControlTools);
+  log.debug({
+    botControlToolsCount: botControlTools.length,
+    botControlToolNames: botControlTools.map(t => t.function.name)
+  }, '[generateAIResponse] Added Bot Control tools', ['openai']);
+
   // Маппинг моделей
   const modelMap: Record<string, string> = {
     'gpt-5.2': 'gpt-4o',
@@ -1270,6 +1309,85 @@ async function handleFunctionCall(
   }, '[handleFunctionCall] Starting function execution');
 
   try {
+    // Проверить, является ли это CAPI tool
+    if (isCapiTool(functionCall.name)) {
+      log.info({
+        funcName: functionCall.name
+      }, '[handleFunctionCall] Processing CAPI tool', ['api']);
+
+      const result = await handleCapiTool(
+        functionCall.name,
+        functionCall.arguments,
+        lead.id,
+        log
+      );
+
+      log.info({
+        funcName: functionCall.name,
+        resultLen: result.length,
+        ...log.getTimings()
+      }, '[handleFunctionCall] CAPI tool completed', ['api']);
+
+      return;
+    }
+
+    // Проверить, является ли это Lead Management tool
+    if (isLeadManagementTool(functionCall.name)) {
+      log.info({
+        funcName: functionCall.name
+      }, '[handleFunctionCall] Processing Lead Management tool', ['processing']);
+
+      const result = await handleLeadManagementTool(
+        functionCall.name,
+        functionCall.arguments,
+        {
+          id: lead.id,
+          contact_phone: lead.contact_phone,
+          contact_name: lead.contact_name,
+          funnel_stage: lead.funnel_stage,
+          interest_level: lead.interest_level
+        },
+        log
+      );
+
+      log.info({
+        funcName: functionCall.name,
+        resultLen: result.length,
+        ...log.getTimings()
+      }, '[handleFunctionCall] Lead Management tool completed', ['processing']);
+
+      return;
+    }
+
+    // Проверить, является ли это Bot Control tool
+    if (isBotControlTool(functionCall.name)) {
+      log.info({
+        funcName: functionCall.name
+      }, '[handleFunctionCall] Processing Bot Control tool', ['processing']);
+
+      const result = await handleBotControlTool(
+        functionCall.name,
+        functionCall.arguments,
+        {
+          id: lead.id,
+          contact_phone: lead.contact_phone,
+          contact_name: lead.contact_name,
+          messages: lead.messages,
+          funnel_stage: lead.funnel_stage,
+          interest_level: lead.interest_level
+        },
+        log
+      );
+
+      log.info({
+        funcName: functionCall.name,
+        resultLen: result.length,
+        ...log.getTimings()
+      }, '[handleFunctionCall] Bot Control tool completed', ['processing']);
+
+      return;
+    }
+
     // Проверить, является ли это consultation tool
     if (isConsultationTool(functionCall.name)) {
       if (!botConfig.consultation_integration_enabled || !botConfig.consultation_settings) {
