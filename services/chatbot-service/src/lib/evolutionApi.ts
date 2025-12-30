@@ -88,6 +88,51 @@ export async function sendWhatsAppMessage(
 }
 
 /**
+ * Send presence status (typing, recording, etc.)
+ * Used to show "typing..." indicator before sending messages
+ */
+export async function sendPresence(
+  instanceName: string,
+  phone: string,
+  presence: 'composing' | 'recording' | 'paused' = 'composing',
+  delayMs: number = 1500
+): Promise<boolean> {
+  try {
+    // Format phone number
+    let formattedPhone = phone.replace(/\D/g, '');
+    if (!formattedPhone.startsWith('7') && formattedPhone.length === 10) {
+      formattedPhone = '7' + formattedPhone;
+    }
+
+    const url = `${EVOLUTION_API_URL}/chat/sendPresence/${instanceName}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': EVOLUTION_API_KEY
+      },
+      body: JSON.stringify({
+        number: formattedPhone,
+        presence,
+        delay: delayMs
+      })
+    });
+
+    if (!response.ok) {
+      log.warn({ instanceName, phone, presence }, 'Failed to send presence');
+      return false;
+    }
+
+    log.debug({ instanceName, phone, presence, delayMs }, 'Presence sent');
+    return true;
+  } catch (error: any) {
+    log.warn({ error: error.message, instanceName, phone }, 'Error sending presence');
+    return false;
+  }
+}
+
+/**
  * Check if instance is connected and ready
  */
 export async function checkInstanceStatus(instanceName: string): Promise<boolean> {

@@ -637,6 +637,22 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      // Подробное логирование данных направления для диагностики
+      const userAccountsData = existingDirection.user_accounts as any;
+      log.info({
+        directionId: id,
+        user_account_id: existingDirection.user_account_id,
+        account_id: existingDirection.account_id,
+        fb_campaign_id: existingDirection.fb_campaign_id,
+        user_accounts_data: {
+          has_access_token: !!userAccountsData?.access_token,
+          access_token_preview: userAccountsData?.access_token
+            ? `${userAccountsData.access_token.slice(0, 10)}...${userAccountsData.access_token.slice(-5)}`
+            : null,
+          multi_account_enabled: userAccountsData?.multi_account_enabled,
+        }
+      }, 'Direction data for token determination');
+
       // Получаем access_token в зависимости от режима
       let accessToken: string | null = null;
       const isMultiAccount = (existingDirection.user_accounts as any).multi_account_enabled;
@@ -662,11 +678,21 @@ export async function directionsRoutes(app: FastifyInstance) {
         }
 
         accessToken = adAccount?.access_token || null;
-        log.info({ directionId: id, tokenSource: 'ad_accounts', hasToken: !!accessToken }, 'Using multi-account token');
+        log.info({
+          directionId: id,
+          tokenSource: 'ad_accounts',
+          hasToken: !!accessToken,
+          tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
+        }, 'Using multi-account token');
       } else {
         // Legacy режим: токен в user_accounts
         accessToken = (existingDirection.user_accounts as any).access_token;
-        log.info({ directionId: id, tokenSource: 'user_accounts', hasToken: !!accessToken }, 'Using legacy token');
+        log.info({
+          directionId: id,
+          tokenSource: 'user_accounts',
+          hasToken: !!accessToken,
+          tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
+        }, 'Using legacy token');
       }
 
       // Обрабатываем WhatsApp номер если он передан
@@ -731,8 +757,9 @@ export async function directionsRoutes(app: FastifyInstance) {
             directionId: id,
             campaignId: existingDirection.fb_campaign_id,
             oldStatus: existingDirection.is_active ? 'ACTIVE' : 'PAUSED',
-            newStatus: newCampaignStatus
-          }, 'Updating Facebook campaign status due to direction is_active change');
+            newStatus: newCampaignStatus,
+            tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
+          }, 'About to update Facebook campaign status');
 
           if (!accessToken) {
             throw new Error('Access token not found');

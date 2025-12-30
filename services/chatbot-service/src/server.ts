@@ -67,6 +67,30 @@ app.register(documentsRoutes);
 app.register(reactivationRoutes);
 app.register(campaignRoutes);
 
+// Test bot endpoint - для тестирования бота без WhatsApp
+app.post('/test-message', async (request, reply) => {
+  try {
+    const { botId, messageText, conversationHistory = [] } = request.body as {
+      botId: string;
+      messageText: string;
+      conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    };
+
+    if (!botId || !messageText) {
+      return reply.status(400).send({ error: 'Missing required fields: botId, messageText' });
+    }
+
+    const { testBotResponse } = await import('./lib/aiBotEngine.js');
+
+    const result = await testBotResponse(botId, messageText, conversationHistory);
+
+    return reply.send(result);
+  } catch (error: any) {
+    app.log.error({ error: error.message }, 'Error in test message');
+    return reply.status(500).send({ error: error.message });
+  }
+});
+
 // Internal API endpoint for processing messages from agent-service
 app.post('/process-message', async (request, reply) => {
   try {

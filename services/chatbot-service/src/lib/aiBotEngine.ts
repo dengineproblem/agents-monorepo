@@ -20,7 +20,7 @@ type FastifyApp = any;
 import { supabase } from './supabase.js';
 import { redis } from './redis.js';
 import OpenAI from 'openai';
-import { sendWhatsAppMessage as sendMessage } from './evolutionApi.js';
+import { sendWhatsAppMessage as sendMessage, sendPresence } from './evolutionApi.js';
 import { createLogger } from './logger.js';
 import {
   createContextLogger,
@@ -150,6 +150,19 @@ export interface AIBotConfig {
   // Интеграция с консультациями
   consultation_integration_enabled?: boolean;
   consultation_settings?: ConsultationIntegrationSettings;
+
+  // Отложенные сообщения (follow-up)
+  delayed_schedule_enabled?: boolean;
+  delayed_schedule_hours_start?: number;
+  delayed_schedule_hours_end?: number;
+  delayed_messages?: Array<{
+    hours: number;
+    minutes: number;
+    prompt: string;
+    repeatCount?: number;
+    offHoursBehavior?: string;
+    offHoursTime?: string;
+  }>;
 }
 
 export interface LeadInfo {
@@ -708,6 +721,28 @@ async function processAIBotResponse(
     const sendStartTime = Date.now();
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
+
+      // Отправить статус "печатает..." перед каждым сообщением (кроме первого)
+      if (i > 0) {
+        // Показать "печатает..." на 1.5-2.5 секунды
+        const typingDelay = 1500 + Math.floor(Math.random() * 1000);
+
+        ctxLog.info({
+          chunkIdx: i + 1,
+          totalChunks: chunks.length,
+          typingDelay
+        }, '[processAIBotResponse] Sending typing presence before chunk', ['message']);
+
+        const presenceResult = await sendPresence(instanceName, phone, 'composing', typingDelay);
+
+        ctxLog.info({
+          presenceResult,
+          typingDelay
+        }, '[processAIBotResponse] Presence sent, waiting before sending message');
+
+        await delay(typingDelay);
+      }
+
       ctxLog.debug({
         chunkIdx: i + 1,
         totalChunks: chunks.length,
@@ -720,8 +755,9 @@ async function processAIBotResponse(
         message: chunk
       });
 
+      // Пауза после отправки сообщения для естественности
       if (chunks.length > 1 && i < chunks.length - 1) {
-        await delay(2000);
+        await delay(300);
       }
     }
 
@@ -1625,6 +1661,240 @@ function splitMessage(text: string, maxLength: number = 500): string[] {
  */
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Тестирование бота - генерация ответа без WhatsApp
+ * Используется для UI тестирования в конструкторе ботов
+ * Поддерживает все настройки бота: буфер, расписание, разделение сообщений и т.д.
+ */
+export async function testBotResponse(
+  botId: string,
+  messageText: string,
+  conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = []
+): Promise<{
+  success: boolean;
+  response?: string;
+  responses?: string[]; // Для split_messages - несколько сообщений
+  error?: string;
+  bufferApplied?: number; // Сколько секунд буфера применено
+  scheduleBlocked?: boolean; // Заблокировано расписанием
+}> {
+  const ctxLog = createContextLogger(baseLog, { botId }, ['processing', 'openai']);
+
+  ctxLog.info({
+    msgLen: messageText.length,
+    historyLen: conversationHistory.length
+  }, '[testBotResponse] Starting test bot response');
+
+  try {
+    // Получить конфигурацию бота напрямую по ID
+    const { data: botConfig, error: botError } = await supabase
+      .from('ai_bot_configurations')
+      .select('*')
+      .eq('id', botId)
+      .single();
+
+    if (botError || !botConfig) {
+      ctxLog.warn({ botId }, '[testBotResponse] Bot not found');
+      return { success: false, error: 'Bot not found' };
+    }
+
+    ctxLog.info({
+      botName: botConfig.name,
+      model: botConfig.model,
+      temp: botConfig.temperature,
+      bufferSec: botConfig.message_buffer_seconds,
+      scheduleEnabled: botConfig.schedule_enabled,
+      splitMessages: botConfig.split_messages
+    }, '[testBotResponse] Bot config loaded');
+
+    // Проверить расписание работы бота
+    if (botConfig.schedule_enabled) {
+      const now = new Date();
+      const timezone = botConfig.timezone || 'Asia/Yekaterinburg';
+
+      // Получить текущее время в таймзоне бота
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: 'numeric',
+        hour12: false,
+        weekday: 'short'
+      });
+      const parts = formatter.formatToParts(now);
+      const currentHour = parseInt(parts.find(p => p.type === 'hour')?.value || '0');
+      const dayName = parts.find(p => p.type === 'weekday')?.value || '';
+
+      // Преобразовать день недели в число (1=Пн, 7=Вс)
+      const dayMap: Record<string, number> = { 'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6, 'Sun': 7 };
+      const currentDay = dayMap[dayName] || 1;
+
+      const scheduleDays = botConfig.schedule_days || [1, 2, 3, 4, 5, 6, 7];
+      const startHour = botConfig.schedule_hours_start ?? 9;
+      const endHour = botConfig.schedule_hours_end ?? 21;
+
+      const isDayAllowed = scheduleDays.includes(currentDay);
+      const isHourAllowed = currentHour >= startHour && currentHour < endHour;
+
+      if (!isDayAllowed || !isHourAllowed) {
+        ctxLog.info({
+          currentDay,
+          currentHour,
+          scheduleDays,
+          startHour,
+          endHour
+        }, '[testBotResponse] Schedule blocked');
+
+        return {
+          success: true,
+          response: `[Бот не работает по расписанию. Текущее время: ${currentHour}:00, день: ${currentDay}. Расписание: ${startHour}:00-${endHour}:00, дни: ${scheduleDays.join(', ')}]`,
+          scheduleBlocked: true
+        };
+      }
+    }
+
+    // Применить буфер сообщений (эмуляция задержки)
+    const bufferSeconds = botConfig.message_buffer_seconds || 0;
+    if (bufferSeconds > 0) {
+      ctxLog.info({ bufferSeconds }, '[testBotResponse] Applying message buffer delay');
+      await delay(bufferSeconds * 1000);
+    }
+
+    // Создать клиент OpenAI
+    const apiKey = botConfig.custom_openai_api_key || OPENAI_API_KEY;
+    if (!apiKey) {
+      return { success: false, error: 'No OpenAI API key configured' };
+    }
+
+    const openai = new OpenAI({ apiKey });
+
+    // Построить системный промпт
+    let systemPrompt = botConfig.system_prompt || 'Ты — AI-ассистент.';
+
+    // Добавить текущую дату/время если включено
+    if (botConfig.pass_current_datetime) {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('ru-RU', {
+        timeZone: botConfig.timezone || 'Asia/Yekaterinburg',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+      systemPrompt += `\n\nТекущая дата и время: ${formatter.format(now)}`;
+    }
+
+    // Добавить тестовую информацию о клиенте
+    systemPrompt += `\n\nЭто тестовый режим. Информация о клиенте недоступна.`;
+
+    // Ограничить историю по количеству сообщений
+    let limitedHistory = [...conversationHistory];
+    if (botConfig.history_message_limit && limitedHistory.length > botConfig.history_message_limit) {
+      limitedHistory = limitedHistory.slice(-botConfig.history_message_limit);
+      ctxLog.debug({
+        originalLen: conversationHistory.length,
+        limitedLen: limitedHistory.length,
+        limit: botConfig.history_message_limit
+      }, '[testBotResponse] History limited by message count');
+    }
+
+    // Маппинг моделей
+    const modelMap: Record<string, string> = {
+      'gpt-5.2': 'gpt-4o',
+      'gpt-5.1': 'gpt-4o',
+      'gpt-5': 'gpt-4o',
+      'gpt-5-mini': 'gpt-4o-mini',
+      'gpt-5-nano': 'gpt-4o-mini',
+      'gpt-4.1': 'gpt-4o',
+      'gpt-4.1-mini': 'gpt-4o-mini',
+      'gpt-4.1-nano': 'gpt-4o-mini',
+      'gpt-4o': 'gpt-4o',
+      'gpt-4o-mini': 'gpt-4o-mini',
+      'gpt-o3': 'gpt-4o'
+    };
+
+    const model = modelMap[botConfig.model] || 'gpt-4o-mini';
+
+    // Собрать массив сообщений
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      ...limitedHistory.map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      })),
+      { role: 'user', content: messageText }
+    ];
+
+    ctxLog.info({
+      model,
+      msgsCount: messages.length,
+      temp: botConfig.temperature
+    }, '[testBotResponse] Calling OpenAI');
+
+    const completion = await openai.chat.completions.create({
+      model,
+      messages,
+      temperature: botConfig.temperature,
+      max_tokens: 1000
+    });
+
+    let responseText = completion.choices[0]?.message?.content || '';
+
+    // Очистить markdown если нужно
+    if (botConfig.clean_markdown) {
+      responseText = responseText
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/_/g, '')
+        .replace(/`/g, '')
+        .replace(/#{1,6}\s/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    }
+
+    // Разбить на части если включено split_messages
+    let responses: string[] = [responseText];
+    const splitEnabled = botConfig.split_messages === true;
+    const maxLength = botConfig.split_max_length || 500;
+
+    ctxLog.info({
+      splitEnabled,
+      maxLength,
+      responseLen: responseText.length,
+      shouldSplit: splitEnabled && responseText.length > maxLength
+    }, '[testBotResponse] Split check');
+
+    if (splitEnabled && responseText.length > maxLength) {
+      responses = splitMessage(responseText, maxLength);
+      ctxLog.info({
+        originalLen: responseText.length,
+        chunksCount: responses.length,
+        maxLen: maxLength
+      }, '[testBotResponse] Response split into chunks');
+    }
+
+    ctxLog.info({
+      responseLen: responseText.length,
+      tokens: completion.usage?.total_tokens,
+      chunksCount: responses.length,
+      bufferApplied: bufferSeconds
+    }, '[testBotResponse] Response generated');
+
+    return {
+      success: true,
+      response: responses.join('\n\n---\n\n'), // Объединить с разделителем для UI
+      responses, // Массив отдельных сообщений
+      bufferApplied: bufferSeconds
+    };
+
+  } catch (error: any) {
+    ctxLog.error(error, '[testBotResponse] Error generating test response');
+    return {
+      success: false,
+      error: error.message || 'Unknown error'
+    };
+  }
 }
 
 /**

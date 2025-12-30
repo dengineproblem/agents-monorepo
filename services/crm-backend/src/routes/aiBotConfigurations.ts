@@ -48,8 +48,8 @@ const UpdateBotSchema = z.object({
 
   // Оптимизация истории диалога
   historyTokenLimit: z.number().int().min(0).max(128000).optional(),
-  historyMessageLimit: z.number().int().min(1).max(100).nullable().optional(),
-  historyTimeLimitHours: z.number().int().min(1).max(168).nullable().optional(),
+  historyMessageLimit: z.number().int().min(1).max(100).nullish(),
+  historyTimeLimitHours: z.number().int().min(1).max(168).nullish(),
 
   // Контроль вмешательства оператора
   operatorPauseEnabled: z.boolean().optional(),
@@ -70,8 +70,8 @@ const UpdateBotSchema = z.object({
   splitMaxLength: z.number().int().min(100).max(2000).optional(),
 
   // Лимиты расходов
-  dailyCostLimitCents: z.number().int().min(0).nullable().optional(),
-  userCostLimitCents: z.number().int().min(0).nullable().optional(),
+  dailyCostLimitCents: z.number().int().min(0).nullish(),
+  userCostLimitCents: z.number().int().min(0).nullish(),
 
   // Форматирование текста
   adaptiveFormatting: z.boolean().optional(),
@@ -89,23 +89,23 @@ const UpdateBotSchema = z.object({
 
   // Голосовые сообщения
   voiceRecognitionEnabled: z.boolean().optional(),
-  voiceRecognitionModel: z.string().optional(),
+  voiceRecognitionModel: z.string().nullish(),
   voiceResponseMode: z.enum(['never', 'on_voice', 'always']).optional(),
-  voiceDefaultResponse: z.string().optional(),
+  voiceDefaultResponse: z.string().nullish(),
 
   // Изображения
   imageRecognitionEnabled: z.boolean().optional(),
-  imageDefaultResponse: z.string().optional(),
+  imageDefaultResponse: z.string().nullish(),
   imageSendFromLinks: z.boolean().optional(),
 
   // Документы
   documentRecognitionEnabled: z.boolean().optional(),
-  documentDefaultResponse: z.string().optional(),
+  documentDefaultResponse: z.string().nullish(),
   documentSendFromLinks: z.boolean().optional(),
 
   // Файлы
   fileHandlingMode: z.enum(['ignore', 'respond']).optional(),
-  fileDefaultResponse: z.string().optional(),
+  fileDefaultResponse: z.string().nullish(),
 
   // Отложенная отправка
   delayedMessages: z.array(DelayedMessageSchema).optional(),
@@ -114,29 +114,67 @@ const UpdateBotSchema = z.object({
   delayedScheduleHoursEnd: z.number().int().min(0).max(23).optional(),
 
   // Сообщения
-  startMessage: z.string().optional(),
-  errorMessage: z.string().optional(),
+  startMessage: z.string().nullish(),
+  errorMessage: z.string().nullish(),
 
   // Свой API ключ
-  customOpenaiApiKey: z.string().nullable().optional(),
+  customOpenaiApiKey: z.string().nullish(),
+
+  // Интеграция с записью на консультации
+  consultationIntegrationEnabled: z.boolean().optional(),
+  consultationSettings: z.object({
+    consultantIds: z.array(z.string().uuid()).optional(),
+    defaultDurationMinutes: z.number().int().min(15).max(480).optional(),
+    slotsToShow: z.number().int().min(1).max(20).optional(),
+  }).optional(),
 });
 
-// Helper to convert camelCase to snake_case
-function toSnakeCase(obj: Record<string, any>): Record<string, any> {
+// Helper to convert camelCase to snake_case (recursive for nested objects)
+function toSnakeCase(obj: Record<string, any>, deep: boolean = false): Record<string, any> {
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-    result[snakeKey] = value;
+    // Recursively convert nested objects if deep=true
+    if (deep && value && typeof value === 'object' && !Array.isArray(value)) {
+      result[snakeKey] = toSnakeCase(value, true);
+    } else {
+      result[snakeKey] = value;
+    }
   }
   return result;
 }
 
-// Helper to convert snake_case to camelCase
-function toCamelCase(obj: Record<string, any>): Record<string, any> {
+// Helper to convert nested objects to snake_case (for JSON fields like consultation_settings)
+function convertNestedToSnakeCase(obj: Record<string, any>): Record<string, any> {
+  const result = toSnakeCase(obj);
+  // Convert nested objects that are stored as JSONB in the database
+  if (result.consultation_settings && typeof result.consultation_settings === 'object') {
+    result.consultation_settings = toSnakeCase(result.consultation_settings, true);
+  }
+  return result;
+}
+
+// Helper to convert snake_case to camelCase (recursive for nested objects)
+function toCamelCase(obj: Record<string, any>, deep: boolean = false): Record<string, any> {
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-    result[camelKey] = value;
+    // Recursively convert nested objects if deep=true
+    if (deep && value && typeof value === 'object' && !Array.isArray(value)) {
+      result[camelKey] = toCamelCase(value, true);
+    } else {
+      result[camelKey] = value;
+    }
+  }
+  return result;
+}
+
+// Helper to convert nested objects from snake_case to camelCase (for JSON fields)
+function convertNestedToCamelCase(obj: Record<string, any>): Record<string, any> {
+  const result = toCamelCase(obj);
+  // Convert nested objects that are stored as JSONB in the database
+  if (result.consultationSettings && typeof result.consultationSettings === 'object') {
+    result.consultationSettings = toCamelCase(result.consultationSettings, true);
   }
   return result;
 }
@@ -200,7 +238,7 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       return reply.send({
         success: true,
-        bots: (bots || []).map(toCamelCase),
+        bots: (bots || []).map(bot => convertNestedToCamelCase(bot)),
       });
     } catch (error: any) {
       const errorLog = createErrorLog(error, { correlationId: cid, method: 'GET', path: '/ai-bots', userId });
@@ -298,8 +336,8 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       return reply.send({
         success: true,
-        bot: toCamelCase(bot),
-        functions: (functions || []).map(toCamelCase),
+        bot: convertNestedToCamelCase(bot),
+        functions: (functions || []).map(fn => toCamelCase(fn)),
       });
     } catch (error: any) {
       const errorLog = createErrorLog(error, { correlationId: cid, method: 'GET', path: '/ai-bots/:botId', botId });
@@ -434,8 +472,8 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         tags: ['db']
       }, '[PUT /ai-bots/:botId] Updating bot configuration');
 
-      // Build update object
-      const updateData = toSnakeCase(body);
+      // Build update object (with nested object conversion for JSONB fields)
+      const updateData = convertNestedToSnakeCase(body);
       updateData.updated_at = new Date().toISOString();
 
       const { data: bot, error } = await supabase
@@ -785,7 +823,7 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       return reply.send({
         success: true,
-        functions: (functions || []).map(toCamelCase),
+        functions: (functions || []).map(fn => toCamelCase(fn)),
       });
     } catch (error: any) {
       app.log.error({

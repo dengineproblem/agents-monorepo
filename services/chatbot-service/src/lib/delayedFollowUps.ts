@@ -11,20 +11,38 @@
 import { supabase } from './supabase.js';
 import { createLogger } from './logger.js';
 
-const log = createLogger('delayedFollowUps');
+const log = createLogger({ module: 'delayedFollowUps' });
 
 // Тип конфигурации бота (минимальный для follow-ups)
+interface DelayedMessage {
+  hours?: number;
+  minutes?: number;
+  delay_minutes?: number;
+  prompt: string;
+  repeatCount?: number;
+  offHoursBehavior?: string;
+  offHoursTime?: string;
+}
+
 interface BotConfigForFollowUp {
   id: string;
   is_active: boolean;
-  delayed_schedule_enabled: boolean;
-  delayed_schedule_hours_start: number;
-  delayed_schedule_hours_end: number;
-  delayed_messages: Array<{
-    delay_minutes: number;
-    prompt: string;
-  }>;
+  delayed_schedule_enabled?: boolean;
+  delayed_schedule_hours_start?: number;
+  delayed_schedule_hours_end?: number;
+  delayed_messages?: DelayedMessage[];
   timezone: string;
+}
+
+/**
+ * Получить delay_minutes из конфигурации сообщения
+ * Поддерживает и новый формат (hours/minutes), и старый (delay_minutes)
+ */
+function getDelayMinutes(msg: DelayedMessage): number {
+  if (msg.delay_minutes !== undefined) {
+    return msg.delay_minutes;
+  }
+  return (msg.hours || 0) * 60 + (msg.minutes || 0);
 }
 
 /**
@@ -83,7 +101,8 @@ export async function scheduleFirstFollowUp(
     }
 
     const firstMessage = botConfig.delayed_messages[0];
-    if (!firstMessage || firstMessage.delay_minutes < 15) {
+    const delayMinutes = getDelayMinutes(firstMessage);
+    if (!firstMessage || delayMinutes < 15) {
       log.warn({ botId: botConfig.id }, 'Invalid first follow-up message config');
       return false;
     }
@@ -93,9 +112,9 @@ export async function scheduleFirstFollowUp(
 
     // Рассчитываем время отправки
     const scheduledAt = calculateScheduledTime(
-      firstMessage.delay_minutes,
-      botConfig.delayed_schedule_hours_start,
-      botConfig.delayed_schedule_hours_end,
+      delayMinutes,
+      botConfig.delayed_schedule_hours_start || 9,
+      botConfig.delayed_schedule_hours_end || 21,
       botConfig.timezone || 'Europe/Moscow'
     );
 
@@ -157,16 +176,17 @@ export async function scheduleNextFollowUp(
     }
 
     const nextMessage = botConfig.delayed_messages[nextStep];
-    if (!nextMessage || nextMessage.delay_minutes < 15) {
+    const nextDelayMinutes = getDelayMinutes(nextMessage);
+    if (!nextMessage || nextDelayMinutes < 15) {
       log.warn({ botId: botConfig.id, nextStep }, 'Invalid next follow-up message config');
       return false;
     }
 
     // Рассчитываем время отправки
     const scheduledAt = calculateScheduledTime(
-      nextMessage.delay_minutes,
-      botConfig.delayed_schedule_hours_start,
-      botConfig.delayed_schedule_hours_end,
+      nextDelayMinutes,
+      botConfig.delayed_schedule_hours_start || 9,
+      botConfig.delayed_schedule_hours_end || 21,
       botConfig.timezone || 'Europe/Moscow'
     );
 

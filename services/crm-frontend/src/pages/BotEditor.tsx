@@ -21,6 +21,7 @@ import {
   Calendar,
   Plus,
   Trash2,
+  MessagesSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,268 +45,9 @@ import { aiBotApi, type LinkedInstance, type WhatsAppInstance } from '@/services
 import type { AIBotConfiguration, UpdateBotRequest, ConsultationIntegrationSettings } from '@/types/aiBot';
 import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK, DEFAULT_CONSULTATION_SETTINGS } from '@/types/aiBot';
 import { consultationService, type Consultant } from '@/services/consultationService';
+import { BotTestChat } from '@/components/bots/BotTestChat';
 
 const USER_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
-
-// Consultations Integration Tab component
-function ConsultationsIntegrationTab({
-  enabled,
-  settings,
-  onEnabledChange,
-  onSettingsChange,
-}: {
-  enabled: boolean;
-  settings: ConsultationIntegrationSettings;
-  onEnabledChange: (enabled: boolean) => void;
-  onSettingsChange: (settings: ConsultationIntegrationSettings) => void;
-}) {
-  const { data: consultantsData } = useQuery({
-    queryKey: ['consultants'],
-    queryFn: () => consultationService.getConsultants(),
-  });
-
-  const consultants = consultantsData || [];
-
-  const updateSetting = <K extends keyof ConsultationIntegrationSettings>(
-    key: K,
-    value: ConsultationIntegrationSettings[K]
-  ) => {
-    onSettingsChange({ ...settings, [key]: value });
-  };
-
-  const toggleConsultant = (consultantId: string) => {
-    const currentIds = settings.consultantIds || [];
-    if (currentIds.includes(consultantId)) {
-      updateSetting('consultantIds', currentIds.filter(id => id !== consultantId));
-    } else {
-      updateSetting('consultantIds', [...currentIds, consultantId]);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calendar className="w-5 h-5" />
-            Интеграция с консультациями
-          </CardTitle>
-          <CardDescription>
-            Позволяет боту записывать клиентов на консультации, показывать свободные слоты и управлять записями
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="consultation-enabled">Включить интеграцию</Label>
-              <p className="text-sm text-muted-foreground">
-                Бот сможет записывать клиентов на консультации
-              </p>
-            </div>
-            <Switch
-              id="consultation-enabled"
-              checked={enabled}
-              onCheckedChange={onEnabledChange}
-            />
-          </div>
-
-          {enabled && (
-            <>
-              <Separator />
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Консультанты</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Выберите консультантов, к которым бот будет записывать клиентов.
-                    Если никто не выбран — используются все активные консультанты.
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {consultants.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        Нет доступных консультантов. Добавьте их в разделе Консультации.
-                      </p>
-                    ) : (
-                      consultants.map((consultant: Consultant) => (
-                        <Badge
-                          key={consultant.id}
-                          variant={settings.consultantIds?.includes(consultant.id) ? 'default' : 'outline'}
-                          className="cursor-pointer"
-                          onClick={() => toggleConsultant(consultant.id)}
-                        >
-                          {consultant.name}
-                          {settings.consultantIds?.includes(consultant.id) && (
-                            <span className="ml-1">&times;</span>
-                          )}
-                        </Badge>
-                      ))
-                    )}
-                  </div>
-                  {(settings.consultantIds?.length || 0) === 0 && consultants.length > 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Сейчас используются все консультанты ({consultants.length})
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Длительность консультации</Label>
-                    <Select
-                      value={String(settings.defaultDurationMinutes || 60)}
-                      onValueChange={(v) => updateSetting('defaultDurationMinutes', Number(v))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="30">30 минут</SelectItem>
-                        <SelectItem value="60">1 час</SelectItem>
-                        <SelectItem value="90">1.5 часа</SelectItem>
-                        <SelectItem value="120">2 часа</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Слотов для показа</Label>
-                    <Select
-                      value={String(settings.slotsToShow || 5)}
-                      onValueChange={(v) => updateSetting('slotsToShow', Number(v))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="3">3 слота</SelectItem>
-                        <SelectItem value="5">5 слотов</SelectItem>
-                        <SelectItem value="7">7 слотов</SelectItem>
-                        <SelectItem value="10">10 слотов</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      Сколько вариантов времени показывать клиенту
-                    </p>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Поиск слотов вперёд</Label>
-                  <Select
-                    value={String(settings.daysAheadLimit || 14)}
-                    onValueChange={(v) => updateSetting('daysAheadLimit', Number(v))}
-                  >
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="7">1 неделя</SelectItem>
-                      <SelectItem value="14">2 недели</SelectItem>
-                      <SelectItem value="30">1 месяц</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    На сколько дней вперёд искать свободные слоты
-                  </p>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Саммаризация диалога</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Автоматически создавать краткое резюме разговора в примечании к консультации
-                      </p>
-                    </div>
-                    <Switch
-                      checked={settings.autoSummarizeDialog ?? true}
-                      onCheckedChange={(v) => updateSetting('autoSummarizeDialog', v)}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Запрашивать имя</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Спрашивать имя клиента, если оно не указано в WhatsApp
-                      </p>
-                    </div>
-                    <Switch
-                      checked={settings.collectClientName ?? true}
-                      onCheckedChange={(v) => updateSetting('collectClientName', v)}
-                    />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {enabled && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Доступные функции бота</CardTitle>
-            <CardDescription>
-              При включённой интеграции бот автоматически получает следующие возможности
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
-                <div>
-                  <p className="font-medium">Показ свободных слотов</p>
-                  <p className="text-sm text-muted-foreground">
-                    Бот покажет клиенту доступное время для записи
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
-                <div>
-                  <p className="font-medium">Запись на консультацию</p>
-                  <p className="text-sm text-muted-foreground">
-                    Клиент может выбрать время и записаться
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
-                <div>
-                  <p className="font-medium">Отмена записи</p>
-                  <p className="text-sm text-muted-foreground">
-                    Клиент может отменить свою запись
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
-                <div>
-                  <p className="font-medium">Перенос консультации</p>
-                  <p className="text-sm text-muted-foreground">
-                    Клиент может перенести запись на другое время
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
-                <div>
-                  <p className="font-medium">Просмотр записей</p>
-                  <p className="text-sm text-muted-foreground">
-                    Клиент может узнать когда у него консультация
-                  </p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
 
 // Tags input component for phrases
 function TagsInput({
@@ -384,10 +126,16 @@ export function BotEditor() {
   });
 
   const allInstances = allInstancesData?.instances || [];
-  // Только подключённые инстансы, которые не привязаны к этому боту
   const unlinkedInstances = allInstances.filter(
     (inst) => inst.status === 'connected' && (!inst.aiBotId || inst.aiBotId !== botId)
   );
+
+  // Consultants for integrations
+  const { data: consultantsData } = useQuery({
+    queryKey: ['consultants'],
+    queryFn: () => consultationService.getConsultants(),
+  });
+  const consultants = consultantsData || [];
 
   // Link/unlink bot to instance mutation
   const linkMutation = useMutation({
@@ -441,6 +189,16 @@ export function BotEditor() {
     updateMutation.mutate(updates);
   };
 
+  const toggleConsultant = (consultantId: string) => {
+    const settings = formData.consultationSettings || DEFAULT_CONSULTATION_SETTINGS;
+    const currentIds = settings.consultantIds || [];
+    if (currentIds.includes(consultantId)) {
+      updateField('consultationSettings', { ...settings, consultantIds: currentIds.filter(id => id !== consultantId) });
+    } else {
+      updateField('consultationSettings', { ...settings, consultantIds: [...currentIds, consultantId] });
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="container mx-auto p-6 flex items-center justify-center min-h-[400px]">
@@ -456,6 +214,8 @@ export function BotEditor() {
       </div>
     );
   }
+
+  const consultationSettings = formData.consultationSettings || DEFAULT_CONSULTATION_SETTINGS;
 
   return (
     <div className="container mx-auto p-6 max-w-5xl">
@@ -486,56 +246,36 @@ export function BotEditor() {
       </div>
 
       <Tabs defaultValue="general" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5 lg:grid-cols-10">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="general" className="flex items-center gap-1">
             <Bot className="w-4 h-4" />
-            <span className="hidden lg:inline">Основное</span>
+            <span className="hidden sm:inline">Основное</span>
           </TabsTrigger>
-          <TabsTrigger value="instances" className="flex items-center gap-1">
+          <TabsTrigger value="whatsapp" className="flex items-center gap-1">
             <Smartphone className="w-4 h-4" />
-            <span className="hidden lg:inline">WhatsApp</span>
+            <span className="hidden sm:inline">WhatsApp</span>
           </TabsTrigger>
-          <TabsTrigger value="prompt" className="flex items-center gap-1">
-            <MessageSquare className="w-4 h-4" />
-            <span className="hidden lg:inline">Промпт</span>
-          </TabsTrigger>
-          <TabsTrigger value="history" className="flex items-center gap-1">
+          <TabsTrigger value="behavior" className="flex items-center gap-1">
             <Settings2 className="w-4 h-4" />
-            <span className="hidden lg:inline">История</span>
+            <span className="hidden sm:inline">Поведение</span>
           </TabsTrigger>
-          <TabsTrigger value="operator" className="flex items-center gap-1">
-            <Shield className="w-4 h-4" />
-            <span className="hidden lg:inline">Оператор</span>
-          </TabsTrigger>
-          <TabsTrigger value="schedule" className="flex items-center gap-1">
-            <Clock className="w-4 h-4" />
-            <span className="hidden lg:inline">Время</span>
-          </TabsTrigger>
-          <TabsTrigger value="media" className="flex items-center gap-1">
-            <Image className="w-4 h-4" />
-            <span className="hidden lg:inline">Медиа</span>
-          </TabsTrigger>
-          <TabsTrigger value="consultations" className="flex items-center gap-1">
-            <Calendar className="w-4 h-4" />
-            <span className="hidden lg:inline">Консультации</span>
-          </TabsTrigger>
-          <TabsTrigger value="delayed" className="flex items-center gap-1">
-            <Bell className="w-4 h-4" />
-            <span className="hidden lg:inline">Отложенные</span>
-          </TabsTrigger>
-          <TabsTrigger value="advanced" className="flex items-center gap-1">
+          <TabsTrigger value="integrations" className="flex items-center gap-1">
             <Zap className="w-4 h-4" />
-            <span className="hidden lg:inline">Дополнительно</span>
+            <span className="hidden sm:inline">Интеграции</span>
+          </TabsTrigger>
+          <TabsTrigger value="test" className="flex items-center gap-1">
+            <MessagesSquare className="w-4 h-4" />
+            <span className="hidden sm:inline">Тест</span>
           </TabsTrigger>
         </TabsList>
 
-        {/* General Tab */}
+        {/* ===== TAB 1: GENERAL - Основное ===== */}
         <TabsContent value="general">
           <div className="space-y-6">
+            {/* Имя и статус */}
             <Card>
               <CardHeader>
                 <CardTitle>Основные настройки</CardTitle>
-                <CardDescription>Имя бота и выбор модели</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
@@ -562,10 +302,10 @@ export function BotEditor() {
               </CardContent>
             </Card>
 
+            {/* Модель */}
             <Card>
               <CardHeader>
-                <CardTitle>Выбор языковой модели</CardTitle>
-                <CardDescription>Выберите AI модель для генерации ответов</CardDescription>
+                <CardTitle>Языковая модель</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -581,26 +321,22 @@ export function BotEditor() {
                     >
                       <div className="font-medium">{model.name}</div>
                       <div className="text-sm text-muted-foreground">{model.description}</div>
-                      <div className="text-xs text-muted-foreground mt-2">
-                        Вход: {model.inputCost} / Выход: {model.outputCost} Botcoin/1000 токенов
-                      </div>
                     </div>
                   ))}
                 </div>
               </CardContent>
             </Card>
 
+            {/* Температура */}
             <Card>
               <CardHeader>
                 <CardTitle>Температура</CardTitle>
-                <CardDescription>
-                  Контролирует креативность ответов. Низкая температура = предсказуемые ответы.
-                </CardDescription>
+                <CardDescription>Контролирует креативность ответов</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Значение: {Math.round((formData.temperature || 0.24) * 100)}%</span>
+                  <div className="flex justify-between text-sm">
+                    <span>Значение: {Math.round((formData.temperature || 0.24) * 100)}%</span>
                   </div>
                   <Slider
                     value={[(formData.temperature || 0.24) * 100]}
@@ -615,11 +351,57 @@ export function BotEditor() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Системный промпт */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Инструкция для ИИ-агента</CardTitle>
+                <CardDescription>Системный промпт определяет поведение и знания бота</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  value={formData.systemPrompt || ''}
+                  onChange={(e) => updateField('systemPrompt', e.target.value)}
+                  placeholder="Опишите роль бота, его знания, правила ответов..."
+                  className="min-h-[300px] font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground mt-2">
+                  Символов: {(formData.systemPrompt || '').length}
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Сообщения */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Сообщения</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Стартовое сообщение</Label>
+                  <Textarea
+                    value={formData.startMessage || ''}
+                    onChange={(e) => updateField('startMessage', e.target.value)}
+                    placeholder="Сообщение при начале диалога (оставьте пустым, если не нужно)"
+                    rows={2}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Сообщение об ошибке</Label>
+                  <Textarea
+                    value={formData.errorMessage || ''}
+                    onChange={(e) => updateField('errorMessage', e.target.value)}
+                    placeholder="Сообщение при ошибке сервиса"
+                    rows={2}
+                  />
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
 
-        {/* Instances Tab */}
-        <TabsContent value="instances">
+        {/* ===== TAB 2: WHATSAPP ===== */}
+        <TabsContent value="whatsapp">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -634,9 +416,7 @@ export function BotEditor() {
               {linkedInstances.length === 0 ? (
                 <div className="text-center py-8">
                   <Smartphone className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">
-                    Нет привязанных WhatsApp инстансов
-                  </p>
+                  <p className="text-muted-foreground">Нет привязанных WhatsApp инстансов</p>
                   <p className="text-sm text-muted-foreground mt-2">
                     Выберите инстанс ниже, чтобы привязать к этому боту
                   </p>
@@ -670,7 +450,6 @@ export function BotEditor() {
                 </div>
               )}
 
-              {/* Available instances to link */}
               {unlinkedInstances.length > 0 && (
                 <>
                   <Separator className="my-6" />
@@ -712,213 +491,97 @@ export function BotEditor() {
                   </div>
                 </>
               )}
-
-              {allInstances.length === 0 && (
-                <>
-                  <Separator className="my-6" />
-                  <div className="bg-muted/50 rounded-lg p-4">
-                    <h4 className="font-medium mb-2">Нет WhatsApp инстансов</h4>
-                    <p className="text-sm text-muted-foreground">
-                      Сначала подключите WhatsApp аккаунт в разделе "WhatsApp"
-                    </p>
-                  </div>
-                </>
-              )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Prompt Tab */}
-        <TabsContent value="prompt">
-          <Card>
-            <CardHeader>
-              <CardTitle>Инструкция для ИИ-агента</CardTitle>
-              <CardDescription>
-                Системный промпт определяет поведение и знания бота
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                value={formData.systemPrompt || ''}
-                onChange={(e) => updateField('systemPrompt', e.target.value)}
-                placeholder="Опишите роль бота, его знания, правила ответов..."
-                className="min-h-[400px] font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground mt-2">
-                Символов: {(formData.systemPrompt || '').length}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Сообщения</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Стартовое сообщение</Label>
-                <Textarea
-                  value={formData.startMessage || ''}
-                  onChange={(e) => updateField('startMessage', e.target.value)}
-                  placeholder="Сообщение при начале диалога (оставьте пустым, если не нужно)"
-                  rows={3}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Сообщение об ошибке</Label>
-                <Textarea
-                  value={formData.errorMessage || ''}
-                  onChange={(e) => updateField('errorMessage', e.target.value)}
-                  placeholder="Сообщение при ошибке сервиса"
-                  rows={2}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* History Tab */}
-        <TabsContent value="history">
-          <Card>
-            <CardHeader>
-              <CardTitle>Оптимизация истории диалога</CardTitle>
-              <CardDescription>
-                Ограничьте объем контекста для экономии токенов
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Ограничение по токенам</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Максимальное количество токенов в контексте
-                    </p>
-                  </div>
-                </div>
-                <Input
-                  type="number"
-                  value={formData.historyTokenLimit || 10000}
-                  onChange={(e) => updateField('historyTokenLimit', parseInt(e.target.value) || 10000)}
-                  min={0}
-                  max={128000}
-                />
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Ограничение по количеству сообщений</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Оставьте пустым для отключения
-                    </p>
-                  </div>
-                </div>
-                <Input
-                  type="number"
-                  value={formData.historyMessageLimit || ''}
-                  onChange={(e) => updateField('historyMessageLimit', e.target.value ? parseInt(e.target.value) : null)}
-                  min={1}
-                  max={100}
-                  placeholder="Без ограничения"
-                />
-              </div>
-
-              <Separator />
-
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Ограничение по времени (часы)</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Учитывать только сообщения за последние N часов
-                    </p>
-                  </div>
-                </div>
-                <Input
-                  type="number"
-                  value={formData.historyTimeLimitHours || ''}
-                  onChange={(e) => updateField('historyTimeLimitHours', e.target.value ? parseInt(e.target.value) : null)}
-                  min={1}
-                  max={168}
-                  placeholder="Без ограничения"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Буфер сообщений</CardTitle>
-              <CardDescription>
-                Склеивает несколько быстрых сообщений в одно перед ответом
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span>Время ожидания: {formData.messageBufferSeconds || 7} сек</span>
-                </div>
-                <Slider
-                  value={[formData.messageBufferSeconds || 7]}
-                  onValueChange={([value]) => updateField('messageBufferSeconds', value)}
-                  min={1}
-                  max={60}
-                  step={1}
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Operator Tab */}
-        <TabsContent value="operator">
-          <Card>
-            <CardHeader>
-              <CardTitle>Контроль вмешательства оператора</CardTitle>
-              <CardDescription>
-                Настройте поведение бота при вмешательстве менеджера
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Пауза при вмешательстве</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Бот приостанавливается когда оператор пишет в диалог
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.operatorPauseEnabled ?? true}
-                  onCheckedChange={(checked) => updateField('operatorPauseEnabled', checked)}
-                />
-              </div>
-
-              {formData.operatorPauseEnabled && (
-                <>
-                  <Separator />
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Игнорировать первое сообщение</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Полезно для рассылок
-                      </p>
-                    </div>
-                    <Switch
-                      checked={formData.operatorPauseIgnoreFirstMessage || false}
-                      onCheckedChange={(checked) => updateField('operatorPauseIgnoreFirstMessage', checked)}
+        {/* ===== TAB 3: BEHAVIOR - Поведение ===== */}
+        <TabsContent value="behavior">
+          <div className="space-y-6">
+            {/* История и буфер */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Settings2 className="w-5 h-5" />
+                  История диалога
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Лимит токенов</Label>
+                    <Input
+                      type="number"
+                      value={formData.historyTokenLimit || 10000}
+                      onChange={(e) => updateField('historyTokenLimit', parseInt(e.target.value) || 10000)}
+                      min={0}
+                      max={128000}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Лимит сообщений</Label>
+                    <Input
+                      type="number"
+                      value={formData.historyMessageLimit || ''}
+                      onChange={(e) => updateField('historyMessageLimit', e.target.value ? parseInt(e.target.value) : null)}
+                      placeholder="Без лимита"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Лимит часов</Label>
+                    <Input
+                      type="number"
+                      value={formData.historyTimeLimitHours || ''}
+                      onChange={(e) => updateField('historyTimeLimitHours', e.target.value ? parseInt(e.target.value) : null)}
+                      placeholder="Без лимита"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Буфер сообщений: {formData.messageBufferSeconds || 7} сек</Label>
+                  <Slider
+                    value={[formData.messageBufferSeconds || 7]}
+                    onValueChange={([value]) => updateField('messageBufferSeconds', value)}
+                    min={1}
+                    max={60}
+                    step={1}
+                  />
+                  <p className="text-xs text-muted-foreground">Склеивает несколько быстрых сообщений в одно</p>
+                </div>
+              </CardContent>
+            </Card>
 
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <Label>Автовозобновление работы агента</Label>
+            {/* Оператор */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="w-5 h-5" />
+                  Контроль оператора
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Пауза при вмешательстве</Label>
+                    <p className="text-sm text-muted-foreground">Бот приостанавливается когда оператор пишет</p>
+                  </div>
+                  <Switch
+                    checked={formData.operatorPauseEnabled ?? true}
+                    onCheckedChange={(checked) => updateField('operatorPauseEnabled', checked)}
+                  />
+                </div>
+                {formData.operatorPauseEnabled && (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <Label>Игнорировать первое сообщение</Label>
+                      <Switch
+                        checked={formData.operatorPauseIgnoreFirstMessage || false}
+                        onCheckedChange={(checked) => updateField('operatorPauseIgnoreFirstMessage', checked)}
+                      />
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label className="text-sm">Часы</Label>
+                        <Label>Автовозобновление (часы)</Label>
                         <Input
                           type="number"
                           value={formData.operatorAutoResumeHours || 1}
@@ -928,7 +591,7 @@ export function BotEditor() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-sm">Минуты</Label>
+                        <Label>Минуты</Label>
                         <Input
                           type="number"
                           value={formData.operatorAutoResumeMinutes || 0}
@@ -938,141 +601,95 @@ export function BotEditor() {
                         />
                       </div>
                     </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <Label>Фразы-исключения</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Бот не встанет на паузу, если сообщение оператора содержит эти фразы
-                    </p>
-                    <TagsInput
-                      value={formData.operatorPauseExceptions || []}
-                      onChange={(tags) => updateField('operatorPauseExceptions', tags)}
-                      placeholder="Например: продолжай"
-                    />
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Управление по ключевым фразам</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <Label>Фразы для остановки бота</Label>
-                <TagsInput
-                  value={formData.stopPhrases || []}
-                  onChange={(tags) => updateField('stopPhrases', tags)}
-                  placeholder="Например: стоп"
-                />
-              </div>
-              <div className="space-y-4">
-                <Label>Фразы для возобновления</Label>
-                <TagsInput
-                  value={formData.resumePhrases || []}
-                  onChange={(tags) => updateField('resumePhrases', tags)}
-                  placeholder="Например: продолжай"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Schedule Tab */}
-        <TabsContent value="schedule">
-          <Card>
-            <CardHeader>
-              <CardTitle>Дата и время</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Передавать текущую дату</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Бот будет знать текущее время для записи и консультаций
-                  </p>
+                  </>
+                )}
+                <Separator />
+                <div className="space-y-2">
+                  <Label>Фразы для остановки бота</Label>
+                  <TagsInput
+                    value={formData.stopPhrases || []}
+                    onChange={(tags) => updateField('stopPhrases', tags)}
+                    placeholder="Например: стоп"
+                  />
                 </div>
-                <Switch
-                  checked={formData.passCurrentDatetime ?? true}
-                  onCheckedChange={(checked) => updateField('passCurrentDatetime', checked)}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Часовой пояс</Label>
-                <Select
-                  value={formData.timezone || 'Asia/Yekaterinburg'}
-                  onValueChange={(value) => updateField('timezone', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TIMEZONES.map((tz) => (
-                      <SelectItem key={tz.value} value={tz.value}>
-                        {tz.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Расписание работы агента</CardTitle>
-              <CardDescription>
-                Ограничьте время работы бота определёнными часами
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Включить расписание</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Бот будет работать только в указанное время
-                  </p>
+                <div className="space-y-2">
+                  <Label>Фразы для возобновления</Label>
+                  <TagsInput
+                    value={formData.resumePhrases || []}
+                    onChange={(tags) => updateField('resumePhrases', tags)}
+                    placeholder="Например: продолжай"
+                  />
                 </div>
-                <Switch
-                  checked={formData.scheduleEnabled || false}
-                  onCheckedChange={(checked) => updateField('scheduleEnabled', checked)}
-                />
-              </div>
+              </CardContent>
+            </Card>
 
-              {formData.scheduleEnabled && (
-                <>
-                  <Separator />
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Начало (час)</Label>
-                      <Input
-                        type="number"
-                        value={formData.scheduleHoursStart ?? 9}
-                        onChange={(e) => updateField('scheduleHoursStart', parseInt(e.target.value) || 0)}
-                        min={0}
-                        max={23}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Конец (час)</Label>
-                      <Input
-                        type="number"
-                        value={formData.scheduleHoursEnd ?? 19}
-                        onChange={(e) => updateField('scheduleHoursEnd', parseInt(e.target.value) || 0)}
-                        min={0}
-                        max={23}
-                      />
-                    </div>
+            {/* Время */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="w-5 h-5" />
+                  Расписание
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label>Передавать текущую дату боту</Label>
+                  <Switch
+                    checked={formData.passCurrentDatetime ?? true}
+                    onCheckedChange={(checked) => updateField('passCurrentDatetime', checked)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Часовой пояс</Label>
+                  <Select
+                    value={formData.timezone || 'Asia/Yekaterinburg'}
+                    onValueChange={(value) => updateField('timezone', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TIMEZONES.map((tz) => (
+                        <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Включить расписание</Label>
+                    <p className="text-sm text-muted-foreground">Бот работает только в указанное время</p>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label>Рабочие дни</Label>
+                  <Switch
+                    checked={formData.scheduleEnabled || false}
+                    onCheckedChange={(checked) => updateField('scheduleEnabled', checked)}
+                  />
+                </div>
+                {formData.scheduleEnabled && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Начало (час)</Label>
+                        <Input
+                          type="number"
+                          value={formData.scheduleHoursStart ?? 9}
+                          onChange={(e) => updateField('scheduleHoursStart', parseInt(e.target.value) || 0)}
+                          min={0}
+                          max={23}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Конец (час)</Label>
+                        <Input
+                          type="number"
+                          value={formData.scheduleHoursEnd ?? 19}
+                          onChange={(e) => updateField('scheduleHoursEnd', parseInt(e.target.value) || 0)}
+                          min={0}
+                          max={23}
+                        />
+                      </div>
+                    </div>
                     <div className="flex flex-wrap gap-2">
                       {DAYS_OF_WEEK.map((day) => (
                         <Badge
@@ -1091,247 +708,187 @@ export function BotEditor() {
                         </Badge>
                       ))}
                     </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Медиа */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Image className="w-5 h-5" />
+                  Медиа
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Распознавать голосовые</Label>
+                    <p className="text-sm text-muted-foreground">Через Whisper</p>
                   </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                  <Switch
+                    checked={formData.voiceRecognitionEnabled ?? true}
+                    onCheckedChange={(checked) => updateField('voiceRecognitionEnabled', checked)}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Распознавать изображения</Label>
+                    <p className="text-sm text-muted-foreground">Через Vision API</p>
+                  </div>
+                  <Switch
+                    checked={formData.imageRecognitionEnabled ?? true}
+                    onCheckedChange={(checked) => updateField('imageRecognitionEnabled', checked)}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Распознавать документы</Label>
+                    <p className="text-sm text-muted-foreground">PDF, DOCX, TXT</p>
+                  </div>
+                  <Switch
+                    checked={formData.documentRecognitionEnabled || false}
+                    onCheckedChange={(checked) => updateField('documentRecognitionEnabled', checked)}
+                  />
+                </div>
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <Label>Очистка Markdown</Label>
+                  <Switch
+                    checked={formData.cleanMarkdown ?? true}
+                    onCheckedChange={(checked) => updateField('cleanMarkdown', checked)}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label>Деление длинных сообщений</Label>
+                  <Switch
+                    checked={formData.splitMessages || false}
+                    onCheckedChange={(checked) => updateField('splitMessages', checked)}
+                  />
+                </div>
+                {formData.splitMessages && (
+                  <div className="space-y-2">
+                    <Label>Максимальная длина сообщения (символов)</Label>
+                    <Input
+                      type="number"
+                      min={100}
+                      max={2000}
+                      value={formData.splitMaxLength || 500}
+                      onChange={(e) => updateField('splitMaxLength', parseInt(e.target.value) || 500)}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Сообщения длиннее будут разделены на части (100-2000)
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
-        {/* Media Tab */}
-        <TabsContent value="media">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Mic className="w-5 h-5" />
-                Голосовые сообщения
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Распознавать голосовые</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Конвертировать голос в текст через Whisper
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.voiceRecognitionEnabled ?? true}
-                  onCheckedChange={(checked) => updateField('voiceRecognitionEnabled', checked)}
-                />
-              </div>
-
-              {!formData.voiceRecognitionEnabled && (
-                <div className="space-y-2">
-                  <Label>Ответ на голосовое</Label>
-                  <Textarea
-                    value={formData.voiceDefaultResponse || ''}
-                    onChange={(e) => updateField('voiceDefaultResponse', e.target.value)}
-                    rows={2}
+        {/* ===== TAB 4: INTEGRATIONS ===== */}
+        <TabsContent value="integrations">
+          <div className="space-y-6">
+            {/* Консультации */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Calendar className="w-5 h-5" />
+                  Запись на консультации
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Включить интеграцию</Label>
+                    <p className="text-sm text-muted-foreground">Бот сможет записывать клиентов</p>
+                  </div>
+                  <Switch
+                    checked={formData.consultationIntegrationEnabled ?? false}
+                    onCheckedChange={(enabled) => updateField('consultationIntegrationEnabled', enabled)}
                   />
                 </div>
-              )}
-
-              <Separator />
-
-              <div className="space-y-2">
-                <Label>Голосовой ответ</Label>
-                <Select
-                  value={formData.voiceResponseMode || 'never'}
-                  onValueChange={(value: any) => updateField('voiceResponseMode', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="never">Никогда</SelectItem>
-                    <SelectItem value="on_voice">На голосовые сообщения</SelectItem>
-                    <SelectItem value="always">На любые сообщения</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Image className="w-5 h-5" />
-                Изображения
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Распознавать изображения</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Анализировать изображения через Vision API
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.imageRecognitionEnabled ?? true}
-                  onCheckedChange={(checked) => updateField('imageRecognitionEnabled', checked)}
-                />
-              </div>
-
-              {!formData.imageRecognitionEnabled && (
-                <div className="space-y-2">
-                  <Label>Ответ на изображение</Label>
-                  <Textarea
-                    value={formData.imageDefaultResponse || ''}
-                    onChange={(e) => updateField('imageDefaultResponse', e.target.value)}
-                    rows={2}
-                  />
-                </div>
-              )}
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Отправлять изображения из ссылок</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Автоматически отправлять изображения если бот вставил ссылку
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.imageSendFromLinks || false}
-                  onCheckedChange={(checked) => updateField('imageSendFromLinks', checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Документы
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Распознавать документы</Label>
-                  <p className="text-sm text-muted-foreground">
-                    PDF, DOCX, TXT и другие форматы
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.documentRecognitionEnabled || false}
-                  onCheckedChange={(checked) => updateField('documentRecognitionEnabled', checked)}
-                />
-              </div>
-
-              {!formData.documentRecognitionEnabled && (
-                <div className="space-y-2">
-                  <Label>Ответ на документ</Label>
-                  <Textarea
-                    value={formData.documentDefaultResponse || ''}
-                    onChange={(e) => updateField('documentDefaultResponse', e.target.value)}
-                    rows={2}
-                  />
-                </div>
-              )}
-
-              <Separator />
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Отправлять документы из ссылок</Label>
-                </div>
-                <Switch
-                  checked={formData.documentSendFromLinks || false}
-                  onCheckedChange={(checked) => updateField('documentSendFromLinks', checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Файлы</CardTitle>
-              <CardDescription>Реакция на другие типы файлов</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <Select
-                value={formData.fileHandlingMode || 'ignore'}
-                onValueChange={(value: any) => updateField('fileHandlingMode', value)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ignore">Ничего не делать</SelectItem>
-                  <SelectItem value="respond">Ответить стандартным сообщением</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {formData.fileHandlingMode === 'respond' && (
-                <div className="space-y-2">
-                  <Label>Стандартный ответ</Label>
-                  <Textarea
-                    value={formData.fileDefaultResponse || ''}
-                    onChange={(e) => updateField('fileDefaultResponse', e.target.value)}
-                    rows={2}
-                  />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Consultations Tab */}
-        <TabsContent value="consultations">
-          <ConsultationsIntegrationTab
-            enabled={formData.consultationIntegrationEnabled ?? false}
-            settings={formData.consultationSettings ?? DEFAULT_CONSULTATION_SETTINGS}
-            onEnabledChange={(enabled) => updateField('consultationIntegrationEnabled', enabled)}
-            onSettingsChange={(settings) => updateField('consultationSettings', settings)}
-          />
-        </TabsContent>
-
-        {/* Delayed Tab */}
-        <TabsContent value="delayed">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bell className="w-5 h-5" />
-                Follow-up сообщения
-              </CardTitle>
-              <CardDescription>
-                Автоматическая отправка напоминаний, если клиент не отвечает
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="delayed-enabled">Включить follow-up</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Бот отправит напоминание, если клиент не ответил
-                  </p>
-                </div>
-                <Switch
-                  id="delayed-enabled"
-                  checked={formData.delayedScheduleEnabled || false}
-                  onCheckedChange={(checked) => updateField('delayedScheduleEnabled', checked)}
-                />
-              </div>
-
-              {formData.delayedScheduleEnabled && (
-                <>
-                  <Separator />
-
-                  <div className="space-y-4">
-                    <div>
-                      <Label>Рабочие часы для отправки</Label>
-                      <p className="text-sm text-muted-foreground">
-                        Сообщения вне рабочих часов будут отложены до утра
-                      </p>
+                {formData.consultationIntegrationEnabled && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Консультанты</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {consultants.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Нет консультантов</p>
+                        ) : (
+                          consultants.map((consultant: Consultant) => (
+                            <Badge
+                              key={consultant.id}
+                              variant={consultationSettings.consultantIds?.includes(consultant.id) ? 'default' : 'outline'}
+                              className="cursor-pointer"
+                              onClick={() => toggleConsultant(consultant.id)}
+                            >
+                              {consultant.name}
+                            </Badge>
+                          ))
+                        )}
+                      </div>
                     </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Длительность (мин)</Label>
+                        <Select
+                          value={String(consultationSettings.defaultDurationMinutes || 60)}
+                          onValueChange={(v) => updateField('consultationSettings', { ...consultationSettings, defaultDurationMinutes: Number(v) })}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="30">30 минут</SelectItem>
+                            <SelectItem value="60">1 час</SelectItem>
+                            <SelectItem value="90">1.5 часа</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Слотов показывать</Label>
+                        <Select
+                          value={String(consultationSettings.slotsToShow || 5)}
+                          onValueChange={(v) => updateField('consultationSettings', { ...consultationSettings, slotsToShow: Number(v) })}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="3">3</SelectItem>
+                            <SelectItem value="5">5</SelectItem>
+                            <SelectItem value="7">7</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Follow-up */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bell className="w-5 h-5" />
+                  Follow-up сообщения
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label>Включить follow-up</Label>
+                    <p className="text-sm text-muted-foreground">Напоминание если клиент не ответил</p>
+                  </div>
+                  <Switch
+                    checked={formData.delayedScheduleEnabled || false}
+                    onCheckedChange={(checked) => updateField('delayedScheduleEnabled', checked)}
+                  />
+                </div>
+                {formData.delayedScheduleEnabled && (
+                  <>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label className="text-sm">Начало (час)</Label>
+                        <Label>Рабочие часы: начало</Label>
                         <Input
                           type="number"
                           value={formData.delayedScheduleHoursStart ?? 9}
@@ -1341,7 +898,7 @@ export function BotEditor() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-sm">Конец (час)</Label>
+                        <Label>Конец</Label>
                         <Input
                           type="number"
                           value={formData.delayedScheduleHoursEnd ?? 19}
@@ -1351,18 +908,8 @@ export function BotEditor() {
                         />
                       </div>
                     </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <div>
-                        <Label>Цепочка follow-up сообщений</Label>
-                        <p className="text-sm text-muted-foreground">
-                          До 3 сообщений. Каждое отправляется если клиент не ответил.
-                        </p>
-                      </div>
+                      <Label>Цепочка follow-up (до 3)</Label>
                       {(formData.delayedMessages?.length || 0) < 3 && (
                         <Button
                           variant="outline"
@@ -1380,219 +927,111 @@ export function BotEditor() {
                         </Button>
                       )}
                     </div>
-
-                    {(formData.delayedMessages?.length || 0) === 0 ? (
-                      <div className="text-center py-8 border-2 border-dashed rounded-lg">
-                        <Bell className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                        <p className="text-muted-foreground">
-                          Нет follow-up сообщений
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-4"
-                          onClick={() => {
-                            updateField('delayedMessages', [
-                              { delay_minutes: 30, prompt: 'Напомни клиенту о себе, спроси не нужна ли помощь' }
-                            ]);
-                          }}
-                        >
-                          <Plus className="w-4 h-4 mr-1" />
-                          Добавить первый follow-up
-                        </Button>
+                    {formData.delayedMessages?.map((msg, index) => (
+                      <div key={index} className="p-4 border rounded-lg space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">Follow-up #{index + 1}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              const current = formData.delayedMessages || [];
+                              updateField('delayedMessages', current.filter((_, i) => i !== index));
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4 text-destructive" />
+                          </Button>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Задержка (мин, мин 15)</Label>
+                          <Input
+                            type="number"
+                            value={msg.delay_minutes}
+                            onChange={(e) => {
+                              const value = Math.max(15, parseInt(e.target.value) || 15);
+                              const current = formData.delayedMessages || [];
+                              const updated = [...current];
+                              updated[index] = { ...updated[index], delay_minutes: value };
+                              updateField('delayedMessages', updated);
+                            }}
+                            min={15}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Промпт</Label>
+                          <Textarea
+                            value={msg.prompt}
+                            onChange={(e) => {
+                              const current = formData.delayedMessages || [];
+                              const updated = [...current];
+                              updated[index] = { ...updated[index], prompt: e.target.value };
+                              updateField('delayedMessages', updated);
+                            }}
+                            placeholder="Напомни клиенту о себе..."
+                            rows={2}
+                          />
+                        </div>
                       </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {formData.delayedMessages?.map((msg, index) => (
-                          <Card key={index} className="border-2">
-                            <CardHeader className="pb-3">
-                              <div className="flex items-center justify-between">
-                                <CardTitle className="text-base">
-                                  Follow-up #{index + 1}
-                                </CardTitle>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    const current = formData.delayedMessages || [];
-                                    updateField('delayedMessages', current.filter((_, i) => i !== index));
-                                  }}
-                                >
-                                  <Trash2 className="w-4 h-4 text-destructive" />
-                                </Button>
-                              </div>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                              <div className="space-y-2">
-                                <Label>Задержка (минуты)</Label>
-                                <Input
-                                  type="number"
-                                  value={msg.delay_minutes}
-                                  onChange={(e) => {
-                                    const value = Math.max(15, parseInt(e.target.value) || 15);
-                                    const current = formData.delayedMessages || [];
-                                    const updated = [...current];
-                                    updated[index] = { ...updated[index], delay_minutes: value };
-                                    updateField('delayedMessages', updated);
-                                  }}
-                                  min={15}
-                                  max={1440}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  Минимум 15 минут. Отсчёт от последнего сообщения бота.
-                                </p>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Промпт для генерации</Label>
-                                <Textarea
-                                  value={msg.prompt}
-                                  onChange={(e) => {
-                                    const current = formData.delayedMessages || [];
-                                    const updated = [...current];
-                                    updated[index] = { ...updated[index], prompt: e.target.value };
-                                    updateField('delayedMessages', updated);
-                                  }}
-                                  placeholder="Например: Напомни клиенту о предложении, спроси есть ли вопросы"
-                                  rows={3}
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                  Инструкция для AI, что написать в этом follow-up
-                                </p>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    ))}
+                  </>
+                )}
+              </CardContent>
+            </Card>
 
-                  <div className="bg-muted/50 rounded-lg p-4">
-                    <h4 className="font-medium mb-2">Как это работает</h4>
-                    <ul className="text-sm text-muted-foreground space-y-1">
-                      <li>• После ответа бота запускается таймер первого follow-up</li>
-                      <li>• Если клиент ответил — все follow-ups отменяются</li>
-                      <li>• Если клиент молчит — бот отправляет follow-up</li>
-                      <li>• Цепочка продолжается пока клиент не ответит</li>
-                      <li>• Сообщения вне рабочих часов откладываются до утра</li>
-                    </ul>
+            {/* Лимиты и API */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Лимиты и API</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Лимит на агента (центы/день)</Label>
+                    <Input
+                      type="number"
+                      value={formData.dailyCostLimitCents || ''}
+                      onChange={(e) => updateField('dailyCostLimitCents', e.target.value ? parseInt(e.target.value) : null)}
+                      placeholder="Без лимита"
+                    />
                   </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Advanced Tab */}
-        <TabsContent value="advanced">
-          <Card>
-            <CardHeader>
-              <CardTitle>Деление сообщений</CardTitle>
-              <CardDescription>
-                Разделять длинные сообщения на части для естественного общения
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Включить деление</Label>
+                  <div className="space-y-2">
+                    <Label>Лимит на пользователя (центы)</Label>
+                    <Input
+                      type="number"
+                      value={formData.userCostLimitCents || ''}
+                      onChange={(e) => updateField('userCostLimitCents', e.target.value ? parseInt(e.target.value) : null)}
+                      placeholder="Без лимита"
+                    />
+                  </div>
                 </div>
-                <Switch
-                  checked={formData.splitMessages || false}
-                  onCheckedChange={(checked) => updateField('splitMessages', checked)}
-                />
-              </div>
-
-              {formData.splitMessages && (
                 <div className="space-y-2">
-                  <Label>Максимальная длина части</Label>
+                  <Label>Свой OpenAI API Key</Label>
                   <Input
-                    type="number"
-                    value={formData.splitMaxLength || 500}
-                    onChange={(e) => updateField('splitMaxLength', parseInt(e.target.value) || 500)}
-                    min={100}
-                    max={2000}
+                    type="password"
+                    value={formData.customOpenaiApiKey || ''}
+                    onChange={(e) => updateField('customOpenaiApiKey', e.target.value || null)}
+                    placeholder="sk-..."
                   />
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-          <Card className="mt-6">
+        {/* ===== TAB 5: TEST ===== */}
+        <TabsContent value="test">
+          <Card>
             <CardHeader>
-              <CardTitle>Форматирование текста</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Адаптивное форматирование</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Автоматически адаптировать под мессенджер
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.adaptiveFormatting || false}
-                  onCheckedChange={(checked) => updateField('adaptiveFormatting', checked)}
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label>Очистка Markdown</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Удалять символы **, *, _, ` из ответов
-                  </p>
-                </div>
-                <Switch
-                  checked={formData.cleanMarkdown ?? true}
-                  onCheckedChange={(checked) => updateField('cleanMarkdown', checked)}
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Лимиты расходов</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label>Лимит на агента (центы/день)</Label>
-                <Input
-                  type="number"
-                  value={formData.dailyCostLimitCents || ''}
-                  onChange={(e) => updateField('dailyCostLimitCents', e.target.value ? parseInt(e.target.value) : null)}
-                  min={0}
-                  placeholder="Без ограничения"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Лимит на пользователя (центы)</Label>
-                <Input
-                  type="number"
-                  value={formData.userCostLimitCents || ''}
-                  onChange={(e) => updateField('userCostLimitCents', e.target.value ? parseInt(e.target.value) : null)}
-                  min={0}
-                  placeholder="Без ограничения"
-                />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="mt-6">
-            <CardHeader>
-              <CardTitle>Свой OpenAI API Key</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <MessagesSquare className="w-5 h-5" />
+                Тестирование бота
+              </CardTitle>
               <CardDescription>
-                Используйте свой ключ для снижения стоимости
+                Протестируйте бота в реальном времени с учётом всех настроек
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Input
-                type="password"
-                value={formData.customOpenaiApiKey || ''}
-                onChange={(e) => updateField('customOpenaiApiKey', e.target.value || null)}
-                placeholder="sk-..."
-              />
+              <BotTestChat botId={botId || ''} botName={formData.name} />
             </CardContent>
           </Card>
         </TabsContent>
