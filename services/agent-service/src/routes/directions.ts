@@ -42,7 +42,7 @@ const CreateDirectionSchema = z.object({
     instagram_url: z.string().url().optional(),
     // Site Leads specific
     site_url: z.string().url().optional(),
-    pixel_id: z.string().optional(),
+    pixel_id: z.string().nullable().optional(),
     utm_tag: z.string().optional(),
     // Lead Forms specific
     lead_form_id: z.string().optional(),
