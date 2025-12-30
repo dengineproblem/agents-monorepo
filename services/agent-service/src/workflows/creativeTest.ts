@@ -248,6 +248,25 @@ export async function workflowStartCreativeTest(
       log.info({ lead_form_id: defaultSettings.lead_form_id }, 'Using lead_form_id for lead_forms (in creative CTA)');
       break;
 
+    case 'app_installs': {
+      fb_objective = 'OUTCOME_APP_PROMOTION';
+      optimization_goal = 'APP_INSTALLS';
+
+      const appId = defaultSettings?.app_id;
+      const appStoreUrl = defaultSettings?.app_store_url_android || defaultSettings?.app_store_url_ios;
+
+      if (!appId || !appStoreUrl) {
+        throw new Error('No app_id or app_store_url found in default settings for app_installs objective');
+      }
+
+      promoted_object = {
+        application_id: String(appId),
+        object_store_url: appStoreUrl
+      };
+      log.info({ app_id: appId, app_store_url: appStoreUrl }, 'Using app_id and app_store_url for app_installs');
+      break;
+    }
+
     default:
       throw new Error(`Unsupported objective for creative test: ${direction.objective}`);
   }
@@ -501,6 +520,11 @@ export async function fetchCreativeTestInsights(
     const form_leads = actions.find((a: any) => a.action_type === 'lead')?.value || 0;
     leads = form_leads;
     baseLog.debug({ ad_id, objective, form_leads, leads }, 'Lead form leads extracted from insights');
+  } else if (objective === 'app_installs') {
+    // Для app_installs используем mobile_app_install
+    const app_installs = actions.find((a: any) => a.action_type === 'mobile_app_install' || a.action_type === 'app_install')?.value || 0;
+    leads = app_installs;
+    baseLog.debug({ ad_id, objective, app_installs, leads }, 'App installs extracted from insights');
   } else if (objective === 'whatsapp') {
     // Для WhatsApp используем messaging connection
     const messaging_connection = actions.find((a: any) => a.action_type === 'onsite_conversion.total_messaging_connection')?.value || 0;

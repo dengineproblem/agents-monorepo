@@ -9,7 +9,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const CreateDefaultSettingsSchema = z.object({
   direction_id: z.string().uuid(),
-  campaign_goal: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms']),
+  campaign_goal: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs']),
   cities: z.array(z.string()).optional(),
   age_min: z.number().int().min(18).max(65).optional(),
   age_max: z.number().int().min(18).max(65).optional(),
@@ -25,6 +25,10 @@ const CreateDefaultSettingsSchema = z.object({
   utm_tag: z.string().optional(),
   // Lead Forms specific
   lead_form_id: z.string().optional(),
+  // App Installs specific
+  app_id: z.string().optional(),
+  app_store_url_ios: z.string().url().optional(),
+  app_store_url_android: z.string().url().optional(),
 });
 
 const UpdateDefaultSettingsSchema = z.object({
@@ -38,6 +42,10 @@ const UpdateDefaultSettingsSchema = z.object({
   site_url: z.string().url().optional(),
   pixel_id: z.string().optional(),
   utm_tag: z.string().optional(),
+  // App Installs specific
+  app_id: z.string().optional(),
+  app_store_url_ios: z.string().url().optional(),
+  app_store_url_android: z.string().url().optional(),
 });
 
 type CreateDefaultSettingsInput = z.infer<typeof CreateDefaultSettingsSchema>;
@@ -177,6 +185,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             site_url: input.site_url,
             pixel_id: input.pixel_id,
             utm_tag: input.utm_tag,
+            // App Installs
+            app_id: input.app_id,
+            app_store_url_ios: input.app_store_url_ios,
+            app_store_url_android: input.app_store_url_android,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id)
@@ -210,6 +222,10 @@ export async function defaultSettingsRoutes(app: FastifyInstance) {
             site_url: input.site_url,
             pixel_id: input.pixel_id,
             utm_tag: input.utm_tag ?? 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}',
+            // App Installs
+            app_id: input.app_id,
+            app_store_url_ios: input.app_store_url_ios,
+            app_store_url_android: input.app_store_url_android,
           })
           .select()
           .single();

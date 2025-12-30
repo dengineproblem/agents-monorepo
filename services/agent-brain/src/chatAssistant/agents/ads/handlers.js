@@ -708,7 +708,8 @@ export const adsHandlers = {
       whatsapp: { optimization_goal: 'CONVERSATIONS', billing_event: 'IMPRESSIONS', destination_type: 'WHATSAPP' },
       instagram_traffic: { optimization_goal: 'LINK_CLICKS', billing_event: 'IMPRESSIONS', destination_type: 'INSTAGRAM_PROFILE' },
       site_leads: { optimization_goal: 'OFFSITE_CONVERSIONS', billing_event: 'IMPRESSIONS', destination_type: 'WEBSITE' },
-      lead_forms: { optimization_goal: 'LEAD_GENERATION', billing_event: 'IMPRESSIONS', destination_type: 'ON_AD' }
+      lead_forms: { optimization_goal: 'LEAD_GENERATION', billing_event: 'IMPRESSIONS', destination_type: 'ON_AD' },
+      app_installs: { optimization_goal: 'APP_INSTALLS', billing_event: 'IMPRESSIONS', destination_type: null }
     };
     const objectiveSettings = objectiveMap[direction.objective] || objectiveMap.whatsapp;
 
@@ -726,6 +727,18 @@ export const adsHandlers = {
     } else if (direction.objective === 'lead_forms') {
       // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
       promoted_object = { page_id: pageId };
+    } else if (direction.objective === 'app_installs') {
+      // Для app_installs нужны application_id и object_store_url
+      const appId = settings.app_id;
+      const appStoreUrl = settings.app_store_url_android || settings.app_store_url_ios;
+      if (appId && appStoreUrl) {
+        promoted_object = {
+          application_id: String(appId),
+          object_store_url: appStoreUrl
+        };
+      } else {
+        logger.warn({ direction_id }, 'createAdSet: no app_id or app_store_url for app_installs objective');
+      }
     }
 
     const finalBudget = daily_budget_cents || direction.daily_budget_cents || 500;
@@ -785,6 +798,7 @@ export const adsHandlers = {
       const creativeIdField = direction.objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
         : direction.objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
         : direction.objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
+        : direction.objective === 'app_installs' ? 'fb_creative_id_app_installs'
         : 'fb_creative_id_site_leads';
 
       const fbCreativeId = creative[creativeIdField];
@@ -860,7 +874,7 @@ export const adsHandlers = {
     // 1. Get creative
     const { data: creative, error: creativeError } = await supabase
       .from('user_creatives')
-      .select('id, title, direction_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms')
+      .select('id, title, direction_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, fb_creative_id_app_installs')
       .eq('id', creative_id)
       .eq('user_id', userAccountId)
       .eq('status', 'ready')
@@ -883,7 +897,8 @@ export const adsHandlers = {
       'CONVERSATIONS': 'whatsapp',
       'LINK_CLICKS': 'instagram_traffic',
       'OFFSITE_CONVERSIONS': 'site_leads',
-      'LEAD_GENERATION': 'lead_forms'
+      'LEAD_GENERATION': 'lead_forms',
+      'APP_INSTALLS': 'app_installs'
     };
     const objective = goalToObjective[adsetInfo.optimization_goal] || 'whatsapp';
 
@@ -891,6 +906,7 @@ export const adsHandlers = {
     const creativeIdField = objective === 'whatsapp' ? 'fb_creative_id_whatsapp'
       : objective === 'instagram_traffic' ? 'fb_creative_id_instagram_traffic'
       : objective === 'lead_forms' ? 'fb_creative_id_lead_forms'
+      : objective === 'app_installs' ? 'fb_creative_id_app_installs'
       : 'fb_creative_id_site_leads';
 
     const fbCreativeId = creative[creativeIdField];

@@ -1151,6 +1151,88 @@ export async function createLeadFormCarouselCreative(
   return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
 }
 
+/**
+ * Создает App Install видео креатив
+ * Для продвижения мобильных приложений
+ */
+export async function createAppInstallVideoCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    videoId: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    appStoreUrl: string;  // URL в App Store или Google Play
+    thumbnailHash?: string;
+  }
+): Promise<{ id: string }> {
+  const videoData: any = {
+    video_id: params.videoId,
+    message: params.message,
+    call_to_action: {
+      type: "INSTALL_MOBILE_APP",
+      value: {
+        link: params.appStoreUrl
+      }
+    }
+  };
+
+  if (params.thumbnailHash) {
+    videoData.image_hash = params.thumbnailHash;
+  }
+
+  const payload: any = {
+    name: "App Install Video Creative",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_actor_id: params.instagramId,
+      video_data: videoData
+    }
+  };
+
+  log.debug({ adAccountId, videoId: params.videoId, appStoreUrl: params.appStoreUrl }, 'Creating App Install video creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
+/**
+ * Создает App Install image креатив
+ * Для продвижения мобильных приложений
+ */
+export async function createAppInstallImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    appStoreUrl: string;  // URL в App Store или Google Play
+  }
+): Promise<{ id: string }> {
+  const payload: any = {
+    name: "App Install Image Creative",
+    object_story_spec: {
+      page_id: params.pageId,
+      instagram_user_id: params.instagramId,
+      link_data: {
+        image_hash: params.imageHash,
+        message: params.message,
+        call_to_action: {
+          type: "INSTALL_MOBILE_APP",
+          value: {
+            link: params.appStoreUrl
+          }
+        },
+        link: params.appStoreUrl
+      }
+    }
+  };
+
+  log.debug({ adAccountId, imageHash: params.imageHash, appStoreUrl: params.appStoreUrl }, 'Creating App Install image creative');
+  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+}
+
 export async function createLookalikeAudience(
   adAccountId: string,
   seedAudienceId: string,

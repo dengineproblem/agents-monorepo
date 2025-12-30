@@ -18,15 +18,16 @@ const log = createLogger({ module: 'campaignBuilder' });
 // TYPES
 // ========================================
 
-export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 // Конвертация lowercase objective в формат для LLM
-export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Instagram' | 'SiteLeads' | 'LeadForms' {
+export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Instagram' | 'SiteLeads' | 'LeadForms' | 'AppInstalls' {
   const mapping = {
     whatsapp: 'WhatsApp' as const,
     instagram_traffic: 'Instagram' as const,
     site_leads: 'SiteLeads' as const,
     lead_forms: 'LeadForms' as const,
+    app_installs: 'AppInstalls' as const,
   };
   return mapping[objective];
 }
@@ -38,6 +39,7 @@ export type AvailableCreative = {
   fb_creative_id_instagram_traffic: string | null;
   fb_creative_id_site_leads: string | null;
   fb_creative_id_lead_forms: string | null;
+  fb_creative_id_app_installs: string | null;
   created_at: string;
   // Scoring data (если есть)
   risk_score?: number;

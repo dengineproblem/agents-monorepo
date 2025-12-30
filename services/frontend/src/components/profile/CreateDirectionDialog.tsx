@@ -308,6 +308,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [leadForms, setLeadForms] = useState<Array<{ id: string; name: string; status: string }>>([]);
   const [isLoadingLeadForms, setIsLoadingLeadForms] = useState(false);
 
+  // App Installs специфичные
+  const [appId, setAppId] = useState('');
+  const [appStoreUrlIos, setAppStoreUrlIos] = useState('');
+  const [appStoreUrlAndroid, setAppStoreUrlAndroid] = useState('');
+
   // CAPI Configuration (direction-level)
   const [capiEnabled, setCapiEnabled] = useState(false);
   const [capiSource, setCapiSource] = useState<CapiSource>('whatsapp');
@@ -569,6 +574,17 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       return;
     }
 
+    if (objective === 'app_installs') {
+      if (!appId.trim()) {
+        setError('Введите Facebook App ID');
+        return;
+      }
+      if (!appStoreUrlIos.trim() && !appStoreUrlAndroid.trim()) {
+        setError('Введите хотя бы один URL магазина приложений (iOS или Android)');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -592,6 +608,11 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         }),
         ...(objective === 'lead_forms' && {
           lead_form_id: leadFormId,
+        }),
+        ...(objective === 'app_installs' && {
+          app_id: appId.trim(),
+          app_store_url_ios: appStoreUrlIos.trim() || undefined,
+          app_store_url_android: appStoreUrlAndroid.trim() || undefined,
         }),
       };
 
@@ -642,6 +663,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setPixelId('');
     setUtmTag(DEFAULT_UTM);
     setLeadFormId('');
+    // App Installs
+    setAppId('');
+    setAppStoreUrlIos('');
+    setAppStoreUrlAndroid('');
     // CAPI settings
     setCapiEnabled(false);
     setCapiSource('whatsapp');
@@ -817,6 +842,12 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   <RadioGroupItem value="lead_forms" id="obj-lead-forms" />
                   <Label htmlFor="obj-lead-forms" className="font-normal cursor-pointer">
                     {OBJECTIVE_DESCRIPTIONS.lead_forms}
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="app_installs" id="obj-app-installs" />
+                  <Label htmlFor="obj-app-installs" className="font-normal cursor-pointer">
+                    {OBJECTIVE_DESCRIPTIONS.app_installs}
                   </Label>
                 </div>
               </RadioGroup>
@@ -1238,6 +1269,60 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                   </p>
                 )}
               </div>
+            </div>
+          )}
+
+          {objective === 'app_installs' && (
+            <div className="space-y-4">
+              <h3 className="font-semibold text-sm">📱 Установки приложений</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="app-id">
+                  Facebook App ID <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="app-id"
+                  placeholder="123456789012345"
+                  value={appId}
+                  onChange={(e) => setAppId(e.target.value)}
+                  disabled={isSubmitting}
+                />
+                <p className="text-xs text-muted-foreground">
+                  ID вашего приложения из Facebook Developers
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="app-store-url-ios">
+                  App Store URL (iOS)
+                </Label>
+                <Input
+                  id="app-store-url-ios"
+                  type="url"
+                  placeholder="https://apps.apple.com/app/id123456789"
+                  value={appStoreUrlIos}
+                  onChange={(e) => setAppStoreUrlIos(e.target.value)}
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="app-store-url-android">
+                  Google Play URL (Android)
+                </Label>
+                <Input
+                  id="app-store-url-android"
+                  type="url"
+                  placeholder="https://play.google.com/store/apps/details?id=com.example.app"
+                  value={appStoreUrlAndroid}
+                  onChange={(e) => setAppStoreUrlAndroid(e.target.value)}
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Укажите хотя бы один URL магазина приложений. Рекомендуется указать оба для максимального охвата.
+              </p>
             </div>
           )}
 

@@ -6,29 +6,29 @@
 import { supabase } from './supabase.js';
 import { buildTargeting } from './settingsHelpers.js';
 
-export type CampaignGoal = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignGoal = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 export interface DefaultAdSettings {
   id: string;
   user_id: string;
   campaign_goal: CampaignGoal;
-  
+
   // Таргетинг
   cities?: string[]; // Может содержать коды стран (RU, KZ) или ID городов (2420877) - автоопределение
   geo_locations?: any; // Опционально: готовый Facebook geo_locations JSON (если передан - используется напрямую)
   age_min: number;
   age_max: number;
   gender: 'all' | 'male' | 'female';
-  
+
   // Общие
   description: string;
-  
+
   // WhatsApp
   client_question?: string;
-  
+
   // Instagram Traffic
   instagram_url?: string;
-  
+
   // Site Leads
   site_url?: string;
   pixel_id?: string;
@@ -36,6 +36,11 @@ export interface DefaultAdSettings {
 
   // Lead Forms
   lead_form_id?: string;
+
+  // App Installs
+  app_id?: string;
+  app_store_url_ios?: string;
+  app_store_url_android?: string;
 
   created_at: string;
   updated_at: string;

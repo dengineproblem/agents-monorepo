@@ -551,6 +551,19 @@ function calculateMultiPeriodTrends(dailyData, actionsData = [], campaignObjecti
           all_action_types: allActionTypes
         }
       };
+    } else if (objective === 'app_installs') {
+      // App Installs метрики
+      const appInstalls = extractActionValue(actions, 'mobile_app_install') || extractActionValue(actions, 'app_install');
+      const totalSpend = last7d?.spend || 0;
+      const costPerInstall = appInstalls > 0 ? totalSpend / appInstalls : 0;
+
+      objectiveMetrics = {
+        app_installs_metrics: {
+          installs: appInstalls,
+          cost_per_install: costPerInstall.toFixed(2),
+          all_action_types: allActionTypes
+        }
+      };
     }
 
     result.push({
@@ -877,7 +890,7 @@ async function getActiveCreatives(supabase, userAccountId) {
   // Также включаем креативы БЕЗ направления (legacy)
   const { data: legacyCreatives, error: legacyError } = await supabase
     .from('user_creatives')
-    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, is_active, status, created_at, direction_id')
+    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, fb_creative_id_app_installs, is_active, status, created_at, direction_id')
     .eq('user_id', userAccountId)
     .eq('is_active', true)
     .eq('status', 'ready')
@@ -1454,7 +1467,25 @@ export async function runScoringAgent(userAccount, options = {}) {
           has_data: stats !== null  // НОВОЕ: флаг наличия данных
         });
       }
-      
+
+      // App Installs (OUTCOME_APP_PROMOTION)
+      if (uc.fb_creative_id_app_installs) {
+        const stats = await getCreativeMetricsFromDB(
+          supabase,
+          userAccountId,
+          uc.fb_creative_id_app_installs,
+          30,
+          accountUUID // UUID из ad_accounts.id для мультиаккаунтности
+        );
+
+        creatives.push({
+          objective: 'OUTCOME_APP_PROMOTION',
+          fb_creative_id: uc.fb_creative_id_app_installs,
+          performance: stats,
+          has_data: stats !== null  // НОВОЕ: флаг наличия данных
+        });
+      }
+
       if (creatives.length > 0) {
         // Добавляем ROI данные если есть
         const roiData = creativeROIMap.get(uc.id) || null;
@@ -1476,6 +1507,7 @@ export async function runScoringAgent(userAccount, options = {}) {
           fb_creative_id_whatsapp: uc.fb_creative_id_whatsapp,
           fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
+          fb_creative_id_app_installs: uc.fb_creative_id_app_installs,
           creatives: creatives,
           roi_data: roiData, // { revenue, spend, roi, conversions, leads }
           risk_score: riskScore, // 0-100, с учетом ROI или null если нет данных
@@ -1578,7 +1610,8 @@ export async function runScoringAgent(userAccount, options = {}) {
       const creativeIds = [
         uc.fb_creative_id_whatsapp,
         uc.fb_creative_id_instagram_traffic,
-        uc.fb_creative_id_site_leads
+        uc.fb_creative_id_site_leads,
+        uc.fb_creative_id_app_installs
       ].filter(id => id);
       
       // Проверяем есть ли этот креатив в ready_creatives и есть ли у него данные
@@ -1596,13 +1629,15 @@ export async function runScoringAgent(userAccount, options = {}) {
         if (uc.fb_creative_id_whatsapp) recommendedObjective = 'WhatsApp';
         else if (uc.fb_creative_id_instagram_traffic) recommendedObjective = 'Instagram';
         else if (uc.fb_creative_id_site_leads) recommendedObjective = 'SiteLeads';
-        
+        else if (uc.fb_creative_id_app_installs) recommendedObjective = 'AppInstalls';
+
         unusedCreatives.push({
           id: uc.id,
           title: uc.title,
           fb_creative_id_whatsapp: uc.fb_creative_id_whatsapp,
           fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
+          fb_creative_id_app_installs: uc.fb_creative_id_app_installs,
           recommended_objective: recommendedObjective,
           created_at: uc.created_at,
           direction_id: uc.direction_id,  // ВАЖНО: привязка к направлению

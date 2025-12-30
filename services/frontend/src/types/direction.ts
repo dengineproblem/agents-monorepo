@@ -1,6 +1,6 @@
 // Типы данных для направлений бизнеса
 
-export type DirectionObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type DirectionObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' | 'app_installs';
 
 // CAPI settings types
 export type CapiSource = 'whatsapp' | 'crm';
@@ -65,6 +65,10 @@ export interface CreateDirectionPayload {
     utm_tag?: string;
     // Lead Forms специфичные
     lead_form_id?: string;
+    // App Installs специфичные
+    app_id?: string;
+    app_store_url_ios?: string;
+    app_store_url_android?: string;
   };
   // CAPI settings (direction-level)
   capi_enabled?: boolean;
@@ -104,6 +108,10 @@ export interface DefaultAdSettings {
   utm_tag: string | null;
   // Lead Forms специфичные
   lead_form_id: string | null;
+  // App Installs специфичные
+  app_id: string | null;
+  app_store_url_ios: string | null;
+  app_store_url_android: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -122,6 +130,9 @@ export interface CreateDefaultSettingsInput {
   pixel_id?: string;
   utm_tag?: string;
   lead_form_id?: string;
+  app_id?: string;
+  app_store_url_ios?: string;
+  app_store_url_android?: string;
 }
 
 export interface UpdateDefaultSettingsInput {
@@ -136,6 +147,9 @@ export interface UpdateDefaultSettingsInput {
   pixel_id?: string;
   utm_tag?: string;
   lead_form_id?: string;
+  app_id?: string;
+  app_store_url_ios?: string;
+  app_store_url_android?: string;
 }
 
 // Маппинг objective в читаемые названия
@@ -144,6 +158,7 @@ export const OBJECTIVE_LABELS: Record<DirectionObjective, string> = {
   instagram_traffic: 'Instagram Traffic',
   site_leads: 'Site Leads',
   lead_forms: 'Lead Forms',
+  app_installs: 'App Installs',
 };
 
 export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
@@ -151,5 +166,6 @@ export const OBJECTIVE_DESCRIPTIONS: Record<DirectionObjective, string> = {
   instagram_traffic: 'Instagram Traffic (переходы)',
   site_leads: 'Site Leads (заявки на сайте)',
   lead_forms: 'Lead Forms (лидформы Facebook)',
+  app_installs: 'App Installs (установки приложений)',
 };
 

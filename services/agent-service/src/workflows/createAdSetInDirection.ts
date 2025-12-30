@@ -181,6 +181,10 @@ export async function workflowCreateAdSetInDirection(
       optimization_goal = 'LEAD_GENERATION';
       destination_type = 'ON_AD';
       break;
+    case 'app_installs':
+      fb_objective = 'OUTCOME_APP_PROMOTION';
+      optimization_goal = 'APP_INSTALLS';
+      break;
     default:
       throw new Error(`Unknown objective: ${direction.objective}`);
   }
@@ -205,6 +209,9 @@ export async function workflowCreateAdSetInDirection(
           break;
         case 'lead_forms':
           fb_creative_id = creative.fb_creative_id_lead_forms;
+          break;
+        case 'app_installs':
+          fb_creative_id = creative.fb_creative_id_app_installs;
           break;
       }
     }
@@ -441,6 +448,30 @@ export async function workflowCreateAdSetInDirection(
       page_id: userAccount.page_id,
       lead_form_id: leadFormId
     }, 'Using lead_form for lead_forms objective (form_id in creative CTA)');
+  }
+
+  // Для App Installs добавляем promoted_object с application_id и object_store_url
+  if (direction.objective === 'app_installs') {
+    const appId = defaultSettings?.app_id;
+    // Используем android URL по умолчанию, если есть
+    const appStoreUrl = defaultSettings?.app_store_url_android || defaultSettings?.app_store_url_ios;
+
+    if (!appId || !appStoreUrl) {
+      throw new Error(
+        `Cannot create app_installs adset for direction "${direction.name}": ` +
+        `app_id and app_store_url are required. Please configure them in direction settings.`
+      );
+    }
+
+    adsetBody.promoted_object = {
+      application_id: String(appId),
+      object_store_url: appStoreUrl
+    };
+
+    log.info({
+      app_id: appId,
+      app_store_url: appStoreUrl
+    }, 'Using app_id and app_store_url for app_installs objective');
   }
 
   // ===================================================
