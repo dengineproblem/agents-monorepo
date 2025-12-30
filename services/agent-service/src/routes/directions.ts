@@ -639,17 +639,34 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       // Получаем access_token в зависимости от режима
       let accessToken: string | null = null;
-      if ((existingDirection.user_accounts as any).multi_account_enabled && existingDirection.account_id) {
+      const isMultiAccount = (existingDirection.user_accounts as any).multi_account_enabled;
+      const hasAccountId = !!existingDirection.account_id;
+
+      log.info({
+        directionId: id,
+        isMultiAccount,
+        hasAccountId,
+        accountId: existingDirection.account_id,
+      }, 'Determining access token source');
+
+      if (isMultiAccount && hasAccountId) {
         // Мультиаккаунтный режим: токен в ad_accounts
-        const { data: adAccount } = await supabase
+        const { data: adAccount, error: adAccountError } = await supabase
           .from('ad_accounts')
           .select('access_token')
           .eq('id', existingDirection.account_id)
           .single();
+
+        if (adAccountError) {
+          log.error({ err: adAccountError, accountId: existingDirection.account_id }, 'Failed to fetch ad_account for token');
+        }
+
         accessToken = adAccount?.access_token || null;
+        log.info({ directionId: id, tokenSource: 'ad_accounts', hasToken: !!accessToken }, 'Using multi-account token');
       } else {
         // Legacy режим: токен в user_accounts
         accessToken = (existingDirection.user_accounts as any).access_token;
+        log.info({ directionId: id, tokenSource: 'user_accounts', hasToken: !!accessToken }, 'Using legacy token');
       }
 
       // Обрабатываем WhatsApp номер если он передан
