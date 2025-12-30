@@ -1,4 +1,4 @@
-import { graph } from '../adapters/facebook.js';
+import { graph, validateAppStoreUrl, validateFacebookAppId } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
@@ -456,10 +456,62 @@ export async function workflowCreateAdSetInDirection(
     // Используем android URL по умолчанию, если есть
     const appStoreUrl = defaultSettings?.app_store_url_android || defaultSettings?.app_store_url_ios;
 
-    if (!appId || !appStoreUrl) {
+    log.info({
+      direction_id,
+      direction_name: direction.name,
+      app_id: appId || 'NOT_SET',
+      app_store_url_ios: defaultSettings?.app_store_url_ios || 'NOT_SET',
+      app_store_url_android: defaultSettings?.app_store_url_android || 'NOT_SET',
+      selected_url: appStoreUrl || 'NONE'
+    }, 'app_installs: Checking configuration');
+
+    if (!appId) {
+      log.error({
+        direction_id,
+        direction_name: direction.name
+      }, 'app_installs: Missing app_id');
       throw new Error(
         `Cannot create app_installs adset for direction "${direction.name}": ` +
-        `app_id and app_store_url are required. Please configure them in direction settings.`
+        `app_id is required. Please configure it in direction settings.`
+      );
+    }
+
+    if (!appStoreUrl) {
+      log.error({
+        direction_id,
+        direction_name: direction.name
+      }, 'app_installs: Missing app_store_url');
+      throw new Error(
+        `Cannot create app_installs adset for direction "${direction.name}": ` +
+        `app_store_url (iOS or Android) is required. Please configure it in direction settings.`
+      );
+    }
+
+    // Валидация App ID
+    const appIdValidation = validateFacebookAppId(appId);
+    if (!appIdValidation.valid) {
+      log.error({
+        direction_id,
+        direction_name: direction.name,
+        app_id: appId,
+        error: appIdValidation.error
+      }, 'app_installs: Invalid app_id format');
+      throw new Error(
+        `Invalid Facebook App ID for direction "${direction.name}": ${appIdValidation.error}`
+      );
+    }
+
+    // Валидация URL магазина
+    const urlValidation = validateAppStoreUrl(appStoreUrl);
+    if (!urlValidation.valid) {
+      log.error({
+        direction_id,
+        direction_name: direction.name,
+        app_store_url: appStoreUrl,
+        error: urlValidation.error
+      }, 'app_installs: Invalid app_store_url format');
+      throw new Error(
+        `Invalid app store URL for direction "${direction.name}": ${urlValidation.error}`
       );
     }
 
@@ -469,9 +521,13 @@ export async function workflowCreateAdSetInDirection(
     };
 
     log.info({
+      direction_id,
+      direction_name: direction.name,
       app_id: appId,
-      app_store_url: appStoreUrl
-    }, 'Using app_id and app_store_url for app_installs objective');
+      app_store_url: appStoreUrl,
+      platform: urlValidation.platform,
+      promoted_object: adsetBody.promoted_object
+    }, 'app_installs: Configuration validated successfully');
   }
 
   // ===================================================

@@ -1152,8 +1152,70 @@ export async function createLeadFormCarouselCreative(
 }
 
 /**
+ * Валидирует URL магазина приложений (App Store или Google Play)
+ * @returns { valid: boolean, platform: 'ios' | 'android' | null, error?: string }
+ */
+export function validateAppStoreUrl(url: string): { valid: boolean; platform: 'ios' | 'android' | null; error?: string } {
+  if (!url || typeof url !== 'string') {
+    return { valid: false, platform: null, error: 'URL is required' };
+  }
+
+  const trimmedUrl = url.trim();
+
+  // App Store patterns
+  const appStorePatterns = [
+    /^https?:\/\/apps\.apple\.com\/.+\/app\/.+\/id\d+/i,
+    /^https?:\/\/itunes\.apple\.com\/.+\/app\/.+\/id\d+/i,
+  ];
+
+  // Google Play patterns
+  const googlePlayPatterns = [
+    /^https?:\/\/play\.google\.com\/store\/apps\/details\?id=[\w.]+/i,
+    /^https?:\/\/market\.android\.com\/details\?id=[\w.]+/i,
+  ];
+
+  for (const pattern of appStorePatterns) {
+    if (pattern.test(trimmedUrl)) {
+      return { valid: true, platform: 'ios' };
+    }
+  }
+
+  for (const pattern of googlePlayPatterns) {
+    if (pattern.test(trimmedUrl)) {
+      return { valid: true, platform: 'android' };
+    }
+  }
+
+  return {
+    valid: false,
+    platform: null,
+    error: 'Invalid app store URL. Must be a valid App Store or Google Play URL'
+  };
+}
+
+/**
+ * Валидирует Facebook App ID (должен быть числовой строкой 15-16 символов)
+ */
+export function validateFacebookAppId(appId: string): { valid: boolean; error?: string } {
+  if (!appId || typeof appId !== 'string') {
+    return { valid: false, error: 'App ID is required' };
+  }
+
+  const trimmedId = appId.trim();
+
+  // Facebook App ID - числовая строка, обычно 15-16 цифр
+  if (!/^\d{10,20}$/.test(trimmedId)) {
+    return { valid: false, error: 'Invalid Facebook App ID. Must be a numeric string (10-20 digits)' };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Создает App Install видео креатив
  * Для продвижения мобильных приложений
+ *
+ * @throws {Error} Если appStoreUrl невалиден
  */
 export async function createAppInstallVideoCreative(
   adAccountId: string,
@@ -1167,6 +1229,27 @@ export async function createAppInstallVideoCreative(
     thumbnailHash?: string;
   }
 ): Promise<{ id: string }> {
+  // Валидация URL магазина
+  const urlValidation = validateAppStoreUrl(params.appStoreUrl);
+  if (!urlValidation.valid) {
+    log.error({
+      adAccountId,
+      appStoreUrl: params.appStoreUrl,
+      error: urlValidation.error
+    }, 'Invalid app store URL for video creative');
+    throw new Error(`Invalid app store URL: ${urlValidation.error}`);
+  }
+
+  log.info({
+    adAccountId,
+    videoId: params.videoId,
+    pageId: params.pageId,
+    instagramId: params.instagramId,
+    appStoreUrl: params.appStoreUrl,
+    platform: urlValidation.platform,
+    hasThumbnail: !!params.thumbnailHash
+  }, 'Creating App Install video creative');
+
   const videoData: any = {
     video_id: params.videoId,
     message: params.message,
@@ -1183,7 +1266,7 @@ export async function createAppInstallVideoCreative(
   }
 
   const payload: any = {
-    name: "App Install Video Creative",
+    name: `App Install Video Creative (${urlValidation.platform})`,
     object_story_spec: {
       page_id: params.pageId,
       instagram_actor_id: params.instagramId,
@@ -1191,13 +1274,31 @@ export async function createAppInstallVideoCreative(
     }
   };
 
-  log.debug({ adAccountId, videoId: params.videoId, appStoreUrl: params.appStoreUrl }, 'Creating App Install video creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  try {
+    const result = await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    log.info({
+      adAccountId,
+      creativeId: result.id,
+      platform: urlValidation.platform
+    }, 'App Install video creative created successfully');
+    return result;
+  } catch (error: any) {
+    log.error({
+      adAccountId,
+      videoId: params.videoId,
+      appStoreUrl: params.appStoreUrl,
+      error: error.message,
+      fbError: error.fb
+    }, 'Failed to create App Install video creative');
+    throw error;
+  }
 }
 
 /**
  * Создает App Install image креатив
  * Для продвижения мобильных приложений
+ *
+ * @throws {Error} Если appStoreUrl невалиден
  */
 export async function createAppInstallImageCreative(
   adAccountId: string,
@@ -1210,11 +1311,31 @@ export async function createAppInstallImageCreative(
     appStoreUrl: string;  // URL в App Store или Google Play
   }
 ): Promise<{ id: string }> {
+  // Валидация URL магазина
+  const urlValidation = validateAppStoreUrl(params.appStoreUrl);
+  if (!urlValidation.valid) {
+    log.error({
+      adAccountId,
+      appStoreUrl: params.appStoreUrl,
+      error: urlValidation.error
+    }, 'Invalid app store URL for image creative');
+    throw new Error(`Invalid app store URL: ${urlValidation.error}`);
+  }
+
+  log.info({
+    adAccountId,
+    imageHash: params.imageHash,
+    pageId: params.pageId,
+    instagramId: params.instagramId,
+    appStoreUrl: params.appStoreUrl,
+    platform: urlValidation.platform
+  }, 'Creating App Install image creative');
+
   const payload: any = {
-    name: "App Install Image Creative",
+    name: `App Install Image Creative (${urlValidation.platform})`,
     object_story_spec: {
       page_id: params.pageId,
-      instagram_user_id: params.instagramId,
+      instagram_actor_id: params.instagramId, // Исправлено: используем instagram_actor_id для консистентности
       link_data: {
         image_hash: params.imageHash,
         message: params.message,
@@ -1229,8 +1350,24 @@ export async function createAppInstallImageCreative(
     }
   };
 
-  log.debug({ adAccountId, imageHash: params.imageHash, appStoreUrl: params.appStoreUrl }, 'Creating App Install image creative');
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+  try {
+    const result = await graph('POST', `${adAccountId}/adcreatives`, token, payload);
+    log.info({
+      adAccountId,
+      creativeId: result.id,
+      platform: urlValidation.platform
+    }, 'App Install image creative created successfully');
+    return result;
+  } catch (error: any) {
+    log.error({
+      adAccountId,
+      imageHash: params.imageHash,
+      appStoreUrl: params.appStoreUrl,
+      error: error.message,
+      fbError: error.fb
+    }, 'Failed to create App Install image creative');
+    throw error;
+  }
 }
 
 export async function createLookalikeAudience(

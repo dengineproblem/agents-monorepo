@@ -15,6 +15,20 @@
 **Новый objective:**
 - `app_installs` → **OUTCOME_APP_PROMOTION**, **APP_INSTALLS**
 
+## Статус реализации: ✅ ЗАВЕРШЕНО
+
+### Что реализовано:
+- ✅ Миграция БД (`migrations/134_add_app_installs_objective.sql`)
+- ✅ Backend типы и роуты
+- ✅ Facebook adapter (createAppInstallVideoCreative, createAppInstallImageCreative)
+- ✅ Workflows (createAdSetInDirection, creativeTest)
+- ✅ Agent Brain (handlers.js, scoring.js)
+- ✅ Frontend (CreateDirectionDialog с валидацией)
+- ✅ Валидация URL и App ID
+- ✅ Подробное логирование
+
+---
+
 ## Требования Facebook Marketing API
 
 ### Campaign Level
@@ -58,13 +72,7 @@
 }
 ```
 
-### Получение доступных приложений
-```javascript
-// GET /{ad_account_id}/advertisable_applications
-const apps = await graph('GET', `act_${adAccountId}/advertisable_applications`, accessToken, {
-  fields: 'id,name,object_store_urls,supported_platforms'
-});
-```
+---
 
 ## Архитектура
 
@@ -74,12 +82,28 @@ const apps = await graph('GET', `act_${adAccountId}/advertisable_applications`, 
 └─────────────────────────────────────────────────────────────────────────────┘
 
 1. Пользователь выбирает objective = 'app_installs'
-2. Выбирает приложение из списка (getAdvertisableApplications API)
-3. Указывает URL в App Store / Google Play
+2. Вводит Facebook App ID (10-20 цифр)
+3. Указывает URL в App Store / Google Play (или оба)
 4. Создаётся креатив с fb_creative_id_app_installs
 5. При запуске создаётся AdSet с:
    - optimization_goal: APP_INSTALLS
    - promoted_object: { application_id, object_store_url }
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        ВАЛИДАЦИЯ                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Frontend (CreateDirectionDialog.tsx):
+  ├── App ID: /^\d{10,20}$/
+  ├── iOS URL: /^https?:\/\/(apps|itunes)\.apple\.com\/.+\/app\/.+\/id\d+/i
+  └── Android URL: /^https?:\/\/play\.google\.com\/store\/apps\/details\?id=[\w.]+/i
+
+Backend (facebook.ts):
+  ├── validateFacebookAppId() → { valid, error }
+  └── validateAppStoreUrl() → { valid, platform, error }
+
+Workflow (createAdSetInDirection.ts):
+  └── Полная валидация перед созданием AdSet
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        ТРЕКИНГ УСТАНОВОК                                     │
@@ -92,33 +116,29 @@ Facebook → SDK Events → Insights API
                       { action_type: "app_custom_event.fb_mobile_purchase", value: "Y" }
                     ]
                             ↓
-              analytics & ROI tracking
+              analytics & ROI tracking (cost_per_install)
 ```
 
-## План изменений
+---
 
-### Миграции БД
+## Файлы и изменения
 
-| Файл | Описание |
-|------|----------|
-| `migrations/XXX_add_app_installs_objective.sql` | Добавление полей для app_installs |
+### Миграция БД
+
+**Файл:** `migrations/134_add_app_installs_objective.sql`
 
 ```sql
--- 1. Добавить поля в default_ad_settings
+-- Добавить поля в default_ad_settings
 ALTER TABLE default_ad_settings
   ADD COLUMN IF NOT EXISTS app_id TEXT,
-  ADD COLUMN IF NOT EXISTS app_store_url TEXT;
+  ADD COLUMN IF NOT EXISTS app_store_url_ios TEXT,
+  ADD COLUMN IF NOT EXISTS app_store_url_android TEXT;
 
-COMMENT ON COLUMN default_ad_settings.app_id IS 'Facebook Application ID для app_installs objective';
-COMMENT ON COLUMN default_ad_settings.app_store_url IS 'URL в App Store/Google Play для app_installs objective';
-
--- 2. Добавить fb_creative_id_app_installs в user_creatives
+-- Добавить fb_creative_id_app_installs в user_creatives
 ALTER TABLE user_creatives
   ADD COLUMN IF NOT EXISTS fb_creative_id_app_installs TEXT;
 
-COMMENT ON COLUMN user_creatives.fb_creative_id_app_installs IS 'Facebook Creative ID для App Install кампаний';
-
--- 3. Обновить CHECK constraint на account_directions
+-- Обновить CHECK constraint на account_directions
 ALTER TABLE account_directions
   DROP CONSTRAINT IF EXISTS check_objective;
 
@@ -126,61 +146,23 @@ ALTER TABLE account_directions
   ADD CONSTRAINT check_objective CHECK (
     objective IN ('whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs')
   );
-
--- 4. Обновить CHECK constraint на default_ad_settings
-ALTER TABLE default_ad_settings
-  DROP CONSTRAINT IF EXISTS default_ad_settings_campaign_goal_check;
-
-ALTER TABLE default_ad_settings
-  ADD CONSTRAINT default_ad_settings_campaign_goal_check CHECK (
-    campaign_goal IN ('whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms', 'app_installs')
-  );
 ```
 
 ---
 
 ### Backend (agent-service)
 
-#### Типы и настройки
-
 | Файл | Изменения |
 |------|-----------|
-| `src/lib/settingsHelpers.ts` | Добавить `'app_installs'` в `CampaignObjective` |
-| `src/lib/defaultSettings.ts` | Добавить `'app_installs'` в `CampaignGoal`, дефолтные настройки |
-| `src/routes/defaultSettings.ts` | Обновить Zod схему для `app_installs` |
-
-#### Campaign Builder
-
-| Файл | Изменения |
-|------|-----------|
-| `src/lib/campaignBuilder.ts` | `getOptimizationGoal`: app_installs → APP_INSTALLS |
-|  | `getBillingEvent`: app_installs → IMPRESSIONS |
-|  | `objectiveToLLMFormat`: добавить 'AppInstalls' |
-| `src/routes/campaignBuilder.ts` | promoted_object с application_id + object_store_url |
-
-#### Креативы
-
-| Файл | Изменения |
-|------|-----------|
-| `src/routes/image.ts` | Создание image creative для app_installs |
-| `src/routes/video.ts` | Создание video creative для app_installs |
-| `src/routes/carouselCreative.ts` | Поддержка для app_installs |
-| `src/routes/actions.ts` | Выбор fb_creative_id_app_installs |
-| `src/adapters/facebook.ts` | `createAppInstallVideoCreative()`, `createAppInstallImageCreative()` |
-
-#### Workflows
-
-| Файл | Изменения |
-|------|-----------|
-| `src/workflows/createAdSetInDirection.ts` | Полная поддержка app_installs objective |
-| `src/workflows/createCampaignWithCreative.ts` | AppInstalls в ObjectiveType |
-| `src/workflows/creativeTest.ts` | Поддержка app_installs в creative test |
-
-#### API Endpoints
-
-| Файл | Изменения |
-|------|-----------|
-| `src/routes/facebook.ts` или новый файл | **НОВОЕ**: GET /facebook/advertisable-apps для получения списка приложений |
+| `src/lib/settingsHelpers.ts` | `'app_installs'` в `CampaignObjective` |
+| `src/lib/defaultSettings.ts` | `'app_installs'` в `CampaignGoal`, поля app_id, app_store_url_ios/android |
+| `src/lib/campaignBuilder.ts` | `objectiveToLLMFormat`: 'AppInstalls', `AvailableCreative`: fb_creative_id_app_installs |
+| `src/routes/defaultSettings.ts` | Zod схема с валидацией app_installs |
+| `src/adapters/facebook.ts` | `validateAppStoreUrl()`, `validateFacebookAppId()`, `createAppInstallVideoCreative()`, `createAppInstallImageCreative()` |
+| `src/routes/video.ts` | Создание video creative для app_installs с логированием |
+| `src/routes/image.ts` | Создание image creative для app_installs с логированием |
+| `src/workflows/createAdSetInDirection.ts` | Полная поддержка app_installs с валидацией и promoted_object |
+| `src/workflows/creativeTest.ts` | Поддержка app_installs в creative test, метрики mobile_app_install |
 
 ---
 
@@ -189,9 +171,38 @@ ALTER TABLE default_ad_settings
 | Файл | Изменения |
 |------|-----------|
 | `src/chatAssistant/agents/ads/handlers.js` | objectiveMap, creativeIdField, goalToObjective для app_installs |
-| `src/scoring.js` | Метрики для app_installs objective (installs вместо leads) |
-| `src/chatAssistant/agents/creative/toolDefs.js` | app_installs в допустимых objectives |
-| `src/server.js` | appInstalls в computeLeadsFromActions |
+| `src/scoring.js` | Метрики для app_installs (installs, cost_per_install) |
+
+**objectiveMap:**
+```javascript
+app_installs: {
+  optimization_goal: 'APP_INSTALLS',
+  billing_event: 'IMPRESSIONS',
+  destination_type: null
+}
+```
+
+**goalToObjective:**
+```javascript
+'APP_INSTALLS': 'app_installs'
+```
+
+**Metrics (scoring.js):**
+```javascript
+} else if (objective === 'app_installs') {
+  const appInstalls = extractActionValue(actions, 'mobile_app_install') ||
+                      extractActionValue(actions, 'app_install');
+  const costPerInstall = appInstalls > 0 ? totalSpend / appInstalls : 0;
+
+  objectiveMetrics = {
+    app_installs_metrics: {
+      installs: appInstalls,
+      cost_per_install: costPerInstall.toFixed(2),
+      all_action_types: allActionTypes
+    }
+  };
+}
+```
 
 ---
 
@@ -200,23 +211,84 @@ ALTER TABLE default_ad_settings
 | Файл | Изменения |
 |------|-----------|
 | `src/types/direction.ts` | `'app_installs'` в DirectionObjective, OBJECTIVE_LABELS, OBJECTIVE_DESCRIPTIONS |
-| `src/context/AppContext.tsx` | `'app_installs'` в DirectionObjective |
-| `src/components/VideoUpload.tsx` | `'app_installs'` в типах |
-| `src/components/profile/CreateDirectionDialog.tsx` | Форма с полями для app_installs (app_id, app_store_url) |
-| `src/components/profile/EditDirectionDialog.tsx` | Валидация для app_installs |
-| `src/services/facebookApi.ts` | `getAdvertisableApplications()` API |
+| `src/components/profile/CreateDirectionDialog.tsx` | Форма с полями app_id, app_store_url_ios, app_store_url_android, валидация |
+
+**Валидация на фронтенде:**
+```typescript
+if (objective === 'app_installs') {
+  // App ID: 10-20 цифр
+  if (!/^\d{10,20}$/.test(appId.trim())) {
+    setError('Неверный формат Facebook App ID. Должен содержать 10-20 цифр');
+    return;
+  }
+
+  // iOS URL валидация
+  if (appStoreUrlIos.trim()) {
+    const iosPattern = /^https?:\/\/(apps|itunes)\.apple\.com\/.+\/app\/.+\/id\d+/i;
+    if (!iosPattern.test(appStoreUrlIos.trim())) {
+      setError('Неверный формат App Store URL');
+      return;
+    }
+  }
+
+  // Android URL валидация
+  if (appStoreUrlAndroid.trim()) {
+    const androidPattern = /^https?:\/\/play\.google\.com\/store\/apps\/details\?id=[\w.]+/i;
+    if (!androidPattern.test(appStoreUrlAndroid.trim())) {
+      setError('Неверный формат Google Play URL');
+      return;
+    }
+  }
+}
+```
 
 ---
 
-## Детали реализации
+## API функции
 
-### 1. Новая функция в facebook.ts
+### validateAppStoreUrl()
 
 ```typescript
 /**
- * Создает App Install видео креатив
- * Для продвижения мобильных приложений
+ * Валидирует URL магазина приложений (App Store или Google Play)
+ * @returns { valid: boolean, platform: 'ios' | 'android' | null, error?: string }
  */
+export function validateAppStoreUrl(url: string): {
+  valid: boolean;
+  platform: 'ios' | 'android' | null;
+  error?: string
+}
+
+// Примеры:
+validateAppStoreUrl('https://apps.apple.com/ru/app/myapp/id123456789')
+// → { valid: true, platform: 'ios' }
+
+validateAppStoreUrl('https://play.google.com/store/apps/details?id=com.example.app')
+// → { valid: true, platform: 'android' }
+
+validateAppStoreUrl('https://example.com')
+// → { valid: false, platform: null, error: 'Invalid app store URL...' }
+```
+
+### validateFacebookAppId()
+
+```typescript
+/**
+ * Валидирует Facebook App ID (должен быть числовой строкой 10-20 символов)
+ */
+export function validateFacebookAppId(appId: string): {
+  valid: boolean;
+  error?: string
+}
+
+// Примеры:
+validateFacebookAppId('1234567890123456')  // → { valid: true }
+validateFacebookAppId('abc123')             // → { valid: false, error: '...' }
+```
+
+### createAppInstallVideoCreative()
+
+```typescript
 export async function createAppInstallVideoCreative(
   adAccountId: string,
   token: string,
@@ -225,156 +297,126 @@ export async function createAppInstallVideoCreative(
     pageId: string;
     instagramId: string;
     message: string;
-    appStoreUrl: string;  // URL в App Store или Google Play
+    appStoreUrl: string;
     thumbnailHash?: string;
   }
-): Promise<{ id: string }> {
-  const videoData: any = {
-    video_id: params.videoId,
-    message: params.message,
-    call_to_action: {
-      type: "INSTALL_MOBILE_APP",
-      value: {
-        link: params.appStoreUrl
-      }
-    }
-  };
-
-  if (params.thumbnailHash) {
-    videoData.image_hash = params.thumbnailHash;
-  }
-
-  const payload: any = {
-    name: "App Install Video Creative",
-    object_story_spec: {
-      page_id: params.pageId,
-      instagram_actor_id: params.instagramId,
-      video_data: videoData
-    }
-  };
-
-  return await graph('POST', `${adAccountId}/adcreatives`, token, payload);
-}
+): Promise<{ id: string }>
 ```
 
-### 2. Обновление createAdSetInDirection.ts
+### createAppInstallImageCreative()
 
 ```typescript
-// В switch (direction.objective)
-case 'app_installs':
-  fb_objective = 'OUTCOME_APP_PROMOTION';
-  optimization_goal = 'APP_INSTALLS';
-  break;
-
-// В формировании adsetBody для app_installs
-if (direction.objective === 'app_installs') {
-  const appId = defaultSettings?.app_id;
-  const appStoreUrl = defaultSettings?.app_store_url;
-
-  if (!appId || !appStoreUrl) {
-    throw new Error(
-      `Cannot create app_installs adset for direction "${direction.name}": ` +
-      `app_id and app_store_url are required. Please configure them in direction settings.`
-    );
+export async function createAppInstallImageCreative(
+  adAccountId: string,
+  token: string,
+  params: {
+    imageHash: string;
+    pageId: string;
+    instagramId: string;
+    message: string;
+    appStoreUrl: string;
   }
-
-  adsetBody.promoted_object = {
-    application_id: String(appId),
-    object_store_url: appStoreUrl
-  };
-}
+): Promise<{ id: string }>
 ```
 
-### 3. Получение списка приложений
+---
 
-```typescript
-// В facebookApi.ts (frontend)
-export const getAdvertisableApplications = async (adAccountId: string, accessToken: string) => {
-  const response = await fetch(
-    `${API_BASE_URL}/facebook/advertisable-apps?adAccountId=${adAccountId}`,
-    {
-      headers: { 'Authorization': `Bearer ${accessToken}` }
+## Логирование
+
+### facebook.ts
+```
+INFO  Creating App Install video creative
+      { adAccountId, videoId, pageId, instagramId, appStoreUrl, platform, hasThumbnail }
+
+INFO  App Install video creative created successfully
+      { adAccountId, creativeId, platform }
+
+ERROR Invalid app store URL for video creative
+      { adAccountId, appStoreUrl, error }
+
+ERROR Failed to create App Install video creative
+      { adAccountId, videoId, appStoreUrl, error, fbError }
+```
+
+### createAdSetInDirection.ts
+```
+INFO  app_installs: Checking configuration
+      { direction_id, direction_name, app_id, app_store_url_ios, app_store_url_android, selected_url }
+
+ERROR app_installs: Missing app_id
+      { direction_id, direction_name }
+
+ERROR app_installs: Invalid app_id format
+      { direction_id, direction_name, app_id, error }
+
+ERROR app_installs: Invalid app_store_url format
+      { direction_id, direction_name, app_store_url, error }
+
+INFO  app_installs: Configuration validated successfully
+      { direction_id, direction_name, app_id, app_store_url, platform, promoted_object }
+```
+
+---
+
+## Тестирование
+
+### Создание direction с app_installs
+
+```bash
+curl -X POST "https://performanteaiagency.com/api/directions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userAccountId": "USER_UUID",
+    "name": "App Install Campaign",
+    "objective": "app_installs",
+    "daily_budget_cents": 2000,
+    "target_cpl_cents": 100,
+    "default_settings": {
+      "app_id": "1234567890123456",
+      "app_store_url_android": "https://play.google.com/store/apps/details?id=com.example.app",
+      "app_store_url_ios": "https://apps.apple.com/ru/app/myapp/id123456789",
+      "cities": ["RU"],
+      "age_min": 18,
+      "age_max": 45
     }
-  );
-  return response.json();
-};
-
-// В backend routes/facebook.ts
-app.get('/facebook/advertisable-apps', async (request, reply) => {
-  const { adAccountId } = request.query;
-  const accessToken = request.headers.authorization?.replace('Bearer ', '');
-
-  const normalizedAdAccountId = adAccountId.startsWith('act_')
-    ? adAccountId
-    : `act_${adAccountId}`;
-
-  const result = await graph('GET', `${normalizedAdAccountId}/advertisable_applications`, accessToken, {
-    fields: 'id,name,object_store_urls,supported_platforms'
-  });
-
-  return { success: true, applications: result.data || [] };
-});
+  }'
 ```
 
-### 4. Метрики для app_installs (Agent Brain)
+### SQL запросы для мониторинга
 
-```javascript
-// В scoring.js / handlers.js
-// Для app_installs вместо leads считаем installs
+```sql
+-- Directions с app_installs objective
+SELECT id, name, objective, created_at
+FROM account_directions
+WHERE objective = 'app_installs'
+ORDER BY created_at DESC;
 
-if (insights.actions && Array.isArray(insights.actions)) {
-  for (const action of insights.actions) {
-    if (action.action_type === 'mobile_app_install' ||
-        action.action_type === 'app_install') {
-      appInstalls = parseInt(action.value || '0', 10);
-    }
-    // Также можно отслеживать in-app events
-    if (action.action_type === 'app_custom_event.fb_mobile_purchase') {
-      appPurchases = parseInt(action.value || '0', 10);
-    }
-  }
-}
+-- Креативы с app_installs
+SELECT id, title, fb_creative_id_app_installs, created_at
+FROM user_creatives
+WHERE fb_creative_id_app_installs IS NOT NULL
+ORDER BY created_at DESC;
+
+-- Настройки app_installs
+SELECT ds.id, ds.app_id, ds.app_store_url_ios, ds.app_store_url_android, ad.name
+FROM default_ad_settings ds
+JOIN account_directions ad ON ds.direction_id = ad.id
+WHERE ad.objective = 'app_installs';
 ```
 
-### 5. UI компоненты
+---
 
-В `CreateDirectionDialog.tsx` добавить:
+## Сравнение с другими objectives
 
-```tsx
-{objective === 'app_installs' && (
-  <>
-    <div className="space-y-2">
-      <Label>Приложение</Label>
-      <Select
-        value={appId}
-        onValueChange={setAppId}
-        disabled={isLoadingApps}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Выберите приложение" />
-        </SelectTrigger>
-        <SelectContent>
-          {applications.map((app) => (
-            <SelectItem key={app.id} value={app.id}>
-              {app.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-
-    <div className="space-y-2">
-      <Label>URL в App Store / Google Play</Label>
-      <Input
-        type="url"
-        value={appStoreUrl}
-        onChange={(e) => setAppStoreUrl(e.target.value)}
-        placeholder="https://play.google.com/store/apps/details?id=..."
-      />
-    </div>
-  </>
-)}
-```
+| Аспект | Lead Forms | App Installs |
+|--------|------------|--------------|
+| Objective | OUTCOME_LEADS | OUTCOME_APP_PROMOTION |
+| Optimization | LEAD_GENERATION | APP_INSTALLS |
+| Destination | ON_AD | - |
+| Promoted Object | page_id, lead_gen_form_id | application_id, object_store_url |
+| CTA | SIGN_UP | INSTALL_MOBILE_APP |
+| Tracking | Webhook (leadgen) | SDK Events |
+| Metrics | leads, cpl | installs, cpi |
 
 ---
 
@@ -392,111 +434,31 @@ if (insights.actions && Array.isArray(insights.actions)) {
 - `ads_management` — создание и управление рекламой
 - `ads_read` — чтение статистики
 
-### Проверка доступа
+### Поддерживаемые URL форматы
 
-```bash
-# Получить список приложений доступных для рекламы
-curl -X GET "https://graph.facebook.com/v20.0/act_{AD_ACCOUNT_ID}/advertisable_applications?fields=id,name,object_store_urls&access_token={ACCESS_TOKEN}"
-```
+**iOS (App Store):**
+- `https://apps.apple.com/{country}/app/{app-name}/id{app-id}`
+- `https://itunes.apple.com/{country}/app/{app-name}/id{app-id}`
 
----
-
-## Что нужно сделать для запуска
-
-### 1. Применить миграции
-
-```bash
-psql -h YOUR_SUPABASE_HOST -U postgres -d postgres -f migrations/XXX_add_app_installs_objective.sql
-```
-
-### 2. Деплой backend
-
-```bash
-cd services/agent-service
-npm run build
-# Рестарт сервиса
-```
-
-### 3. Деплой agent-brain
-
-```bash
-cd services/agent-brain
-npm run build
-# Рестарт сервиса
-```
-
-### 4. Деплой frontend
-
-```bash
-cd services/frontend
-npm run build
-# Обновить static файлы
-```
+**Android (Google Play):**
+- `https://play.google.com/store/apps/details?id={package-name}`
 
 ---
 
-## Тестирование
+## Changelog
 
-### 1. Проверка API приложений
+### v1.1.0 (2024-12-30) — ТЕКУЩАЯ ВЕРСИЯ
+- ✅ Добавлена валидация App ID и App Store URLs
+- ✅ Добавлено подробное логирование во все компоненты
+- ✅ Исправлена консистентность instagram_actor_id vs instagram_user_id
+- ✅ Улучшены сообщения об ошибках
+- ✅ Добавлена валидация на фронтенде
 
-```bash
-curl "https://performanteaiagency.com/api/facebook/advertisable-apps?adAccountId=YOUR_AD_ACCOUNT" \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-### 2. Создание direction с app_installs
-
-```bash
-curl -X POST "https://performanteaiagency.com/api/directions" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userAccountId": "USER_UUID",
-    "name": "App Install Campaign",
-    "objective": "app_installs",
-    "daily_budget_cents": 2000,
-    "target_cpl_cents": 100,
-    "default_settings": {
-      "app_id": "YOUR_APP_ID",
-      "app_store_url": "https://play.google.com/store/apps/details?id=com.example.app",
-      "cities": ["RU"],
-      "age_min": 18,
-      "age_max": 45
-    }
-  }'
-```
-
----
-
-## Мониторинг
-
-### SQL запросы
-
-```sql
--- Directions с app_installs objective
-SELECT * FROM account_directions
-WHERE objective = 'app_installs'
-ORDER BY created_at DESC;
-
--- Креативы с app_installs
-SELECT id, title, fb_creative_id_app_installs, created_at
-FROM user_creatives
-WHERE fb_creative_id_app_installs IS NOT NULL
-ORDER BY created_at DESC;
-```
-
----
-
-## Сравнение с Lead Forms
-
-| Аспект | Lead Forms | App Installs |
-|--------|------------|--------------|
-| Objective | OUTCOME_LEADS | OUTCOME_APP_PROMOTION |
-| Optimization | LEAD_GENERATION | APP_INSTALLS |
-| Destination | ON_AD | - |
-| Promoted Object | page_id, lead_gen_form_id | application_id, object_store_url |
-| CTA | SIGN_UP | INSTALL_MOBILE_APP |
-| Tracking | Webhook (leadgen) | SDK Events |
-| Metrics | leads, cpl | installs, cpi |
+### v1.0.0 (2024-12-30)
+- Добавлена поддержка app_installs objective во всех workflows
+- Миграции для app_id, app_store_url_ios, app_store_url_android, fb_creative_id_app_installs
+- UI формы для создания направлений с app_installs
+- Метрики installs/cost_per_install в Agent Brain
 
 ---
 
@@ -505,30 +467,3 @@ ORDER BY created_at DESC;
 - [LEAD_FORMS_INTEGRATION.md](./LEAD_FORMS_INTEGRATION.md) — Аналогичная интеграция Lead Forms
 - [INFRASTRUCTURE.md](./INFRASTRUCTURE.md) — Деплой и инфраструктура
 - [FRONTEND_API_CONVENTIONS.md](./FRONTEND_API_CONVENTIONS.md) — API конвенции
-
----
-
-## Changelog
-
-### v1.0.0 (TBD)
-- Добавлена поддержка app_installs objective во всех workflows
-- Миграции для app_id, app_store_url, fb_creative_id_app_installs
-- API endpoint для получения списка приложений
-- UI формы для создания направлений с app_installs
-- Метрики installs/cpi в Agent Brain
-
----
-
-## Вопросы для уточнения
-
-1. **Нужна ли поддержка iOS и Android раздельно?**
-   - Facebook позволяет указать разные object_store_url для разных платформ
-   - Можно добавить поля: `app_store_url_ios`, `app_store_url_android`
-
-2. **Нужен ли tracking in-app events?**
-   - Можно отслеживать: purchases, registrations, add_to_cart и т.д.
-   - Требует дополнительной интеграции с Facebook SDK
-
-3. **Re-engagement кампании?**
-   - CTA: "USE_MOBILE_APP" вместо "INSTALL_MOBILE_APP"
-   - Таргетинг на пользователей которые уже установили приложение

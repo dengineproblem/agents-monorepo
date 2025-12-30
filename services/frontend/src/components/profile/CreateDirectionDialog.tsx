@@ -579,9 +579,30 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         setError('Введите Facebook App ID');
         return;
       }
+      // Валидация формата App ID (10-20 цифр)
+      if (!/^\d{10,20}$/.test(appId.trim())) {
+        setError('Неверный формат Facebook App ID. Должен содержать 10-20 цифр');
+        return;
+      }
       if (!appStoreUrlIos.trim() && !appStoreUrlAndroid.trim()) {
         setError('Введите хотя бы один URL магазина приложений (iOS или Android)');
         return;
+      }
+      // Валидация iOS URL
+      if (appStoreUrlIos.trim()) {
+        const iosPattern = /^https?:\/\/(apps|itunes)\.apple\.com\/.+\/app\/.+\/id\d+/i;
+        if (!iosPattern.test(appStoreUrlIos.trim())) {
+          setError('Неверный формат App Store URL. Пример: https://apps.apple.com/app/myapp/id123456789');
+          return;
+        }
+      }
+      // Валидация Android URL
+      if (appStoreUrlAndroid.trim()) {
+        const androidPattern = /^https?:\/\/play\.google\.com\/store\/apps\/details\?id=[\w.]+/i;
+        if (!androidPattern.test(appStoreUrlAndroid.trim())) {
+          setError('Неверный формат Google Play URL. Пример: https://play.google.com/store/apps/details?id=com.example.app');
+          return;
+        }
       }
     }
 
