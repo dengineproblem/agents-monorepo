@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import {
   DropdownMenu,
@@ -36,6 +36,28 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
     setCurrentAdAccountId,
   } = useAppContext();
 
+  // Трекинг ошибок загрузки изображений
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  const handleImageError = (accountId: string) => {
+    setImageErrors(prev => ({ ...prev, [accountId]: true }));
+  };
+
+  // Фильтруем только активные аккаунты для выбора
+  const activeAccounts = adAccounts.filter(a => a.is_active);
+  const currentAccount = adAccounts.find(a => a.id === currentAdAccountId);
+  const canAddMore = adAccounts.length < 5;
+
+  // Debug: логируем при изменении аккаунта (до условных return!)
+  useEffect(() => {
+    if (currentAdAccountId) {
+      console.log('[AdAccountSwitcher] ACCOUNT CHANGED:', {
+        currentAdAccountId,
+        currentAccountName: currentAccount?.name,
+        currentAccountId: currentAccount?.id,
+      });
+    }
+  }, [currentAdAccountId, currentAccount]);
+
   // Открыть полный онбординг для создания нового аккаунта
   const handleAddAccount = () => {
     window.dispatchEvent(new CustomEvent('openOnboarding'));
@@ -50,20 +72,6 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
   if (adAccounts.length === 0) {
     return null;
   }
-
-  // Фильтруем только активные аккаунты для выбора
-  const activeAccounts = adAccounts.filter(a => a.is_active);
-  const currentAccount = adAccounts.find(a => a.id === currentAdAccountId);
-  const canAddMore = adAccounts.length < 5;
-
-  // Debug: логируем при изменении аккаунта
-  useEffect(() => {
-    console.log('[AdAccountSwitcher] ACCOUNT CHANGED:', {
-      currentAdAccountId,
-      currentAccountName: currentAccount?.name,
-      currentAccountId: currentAccount?.id,
-    });
-  }, [currentAdAccountId, currentAccount]);
 
   // Если нет активных аккаунтов - показываем предупреждение
   if (activeAccounts.length === 0) {
@@ -106,7 +114,7 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
             {currentAccount ? (
               <div key={currentAccount.id} className="flex items-center gap-2 flex-1 min-w-0">
                 {/* Простой img вместо Avatar для избежания кэширования */}
-                {currentAccount.page_picture_url ? (
+                {currentAccount.page_picture_url && !imageErrors[currentAccount.id] ? (
                   <img
                     key={`${currentAccount.id}-${timestamp}`}
                     src={getAvatarSrc(currentAccount.page_picture_url, currentAccount.id)}
@@ -114,6 +122,7 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
                     className="h-5 w-5 rounded-full flex-shrink-0 object-cover"
                     referrerPolicy="no-referrer"
                     loading="eager"
+                    onError={() => handleImageError(currentAccount.id)}
                   />
                 ) : (
                   <div className="h-5 w-5 rounded-full flex-shrink-0 bg-muted flex items-center justify-center text-[10px]">
@@ -152,11 +161,12 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
               >
                 <div className="flex items-center gap-2 flex-1">
                   <Avatar className="h-5 w-5">
-                    {account.page_picture_url ? (
+                    {account.page_picture_url && !imageErrors[account.id] ? (
                       <AvatarImage
                         src={getAvatarSrc(account.page_picture_url, account.id)}
                         alt={account.name}
                         referrerPolicy="no-referrer"
+                        onError={() => handleImageError(account.id)}
                       />
                     ) : null}
                     <AvatarFallback className="text-[10px] bg-muted">

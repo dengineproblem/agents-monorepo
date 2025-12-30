@@ -345,7 +345,7 @@ const getAdsetsByCampaign = async (campaignId: string) => {
   const endpoint = `${campaignId}/adsets`;
   const params = {
     fields: 'id,name,daily_budget,campaign_id,status',
-    limit: '50',
+    limit: '200',
   };
   
   console.log(`[facebookApi] Запрос ad sets для кампании ${campaignId}:`, {
@@ -736,7 +736,7 @@ export const facebookApi = {
       const endpoint = `${accountId}/campaigns`;
       const params = {
         fields: 'id,name,status,objective,budget_remaining,start_time',
-        limit: '50'
+        limit: '200'
       };
       
       const response = await fetchFromFacebookAPI(endpoint, params);
@@ -998,6 +998,107 @@ export const facebookApi = {
   updateAdsetStatus,
   getAccountStatus,
   getCurrentDailySpend,
+
+  /**
+   * Получить объявления для адсета
+   */
+  getAdsByAdset: async (adsetId: string): Promise<Array<{ id: string; name: string; status: string }>> => {
+    if (!await hasValidConfig()) {
+      return [];
+    }
+    try {
+      const endpoint = `${adsetId}/ads`;
+      const params = {
+        fields: 'id,name,status',
+        limit: '200',
+      };
+      const data = await fetchFromFacebookAPI(endpoint, params);
+      return (data?.data || []).map((ad: any) => ({
+        id: ad.id,
+        name: ad.name,
+        status: ad.status,
+      }));
+    } catch (e) {
+      console.error('getAdsByAdset error', e);
+      return [];
+    }
+  },
+
+  /**
+   * Получить статистику объявлений для адсета за период
+   */
+  getAdStatsByAdset: async (adsetId: string, dateRange: DateRange): Promise<Array<{
+    ad_id: string;
+    ad_name: string;
+    spend: number;
+    leads: number;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    cpl: number;
+  }>> => {
+    if (!await hasValidConfig()) {
+      return [];
+    }
+    try {
+      const FB_API_CONFIG = await getCurrentUserConfig();
+      const endpoint = `${FB_API_CONFIG.ad_account_id}/insights`;
+      const params = {
+        level: 'ad',
+        fields: 'ad_id,ad_name,spend,impressions,clicks,actions',
+        time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
+        filtering: JSON.stringify([{ field: 'adset.id', operator: 'EQUAL', value: adsetId }]),
+        action_breakdowns: 'action_type',
+        limit: '500',
+      };
+
+      const response = await fetchFromFacebookAPI(endpoint, params);
+
+      if (response.data && response.data.length > 0) {
+        return response.data.map((stat: any) => {
+          // Используем ту же логику подсчёта лидов
+          let messagingLeads = 0;
+          let siteLeads = 0;
+          let leadFormLeads = 0;
+
+          if (stat.actions && Array.isArray(stat.actions)) {
+            for (const action of stat.actions) {
+              if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+                messagingLeads = parseInt(action.value || "0", 10);
+              } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+                siteLeads = parseInt(action.value || "0", 10);
+              } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+                siteLeads = parseInt(action.value || "0", 10);
+              } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+                leadFormLeads = parseInt(action.value || "0", 10);
+              }
+            }
+          }
+
+          const leads = messagingLeads + Math.max(siteLeads, leadFormLeads);
+          const spend = parseFloat(stat.spend || '0');
+          const impressions = parseInt(stat.impressions || '0', 10);
+          const clicks = parseInt(stat.clicks || '0', 10);
+
+          return {
+            ad_id: stat.ad_id,
+            ad_name: stat.ad_name,
+            spend,
+            leads,
+            impressions,
+            clicks,
+            ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+            cpl: leads > 0 ? spend / leads : 0,
+          };
+        });
+      }
+      return [];
+    } catch (e) {
+      console.error('getAdStatsByAdset error', e);
+      return [];
+    }
+  },
+
   /**
    * Получить список объявлений, использующих указанный creativeId
    */

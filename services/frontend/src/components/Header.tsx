@@ -284,8 +284,10 @@ const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Ad Account Switcher - показывается только для мультиаккаунтов */}
-            <AdAccountSwitcher className="hidden sm:flex ml-4" />
+            {/* Ad Account Switcher - скрыт на /dashboard (там свой выбор аккаунтов) */}
+            {location.pathname !== '/dashboard' && (
+              <AdAccountSwitcher className="hidden sm:flex ml-4" />
+            )}
           </div>
         
         <TooltipProvider>

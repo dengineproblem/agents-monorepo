@@ -5,6 +5,7 @@ import { createLogger } from '../lib/logger.js';
 import { getPagePictureUrl } from '../adapters/facebook.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getPageAccessToken } from '../lib/facebookHelpers.js';
+import { cachePageAvatarToStorage } from '../lib/imageCache.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -194,6 +195,221 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         stack_trace: error.stack,
         action: 'list_ad_accounts',
         endpoint: '/ad-accounts/:userAccountId',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * GET /ad-accounts/:userAccountId/all-stats
+   * Получить статистику для всех рекламных аккаунтов пользователя
+   *
+   * @param userAccountId - UUID пользователя
+   * @query since - Начало периода (YYYY-MM-DD)
+   * @query until - Конец периода (YYYY-MM-DD)
+   *
+   * @returns { accounts: AccountStats[] }
+   */
+  app.get('/ad-accounts/:userAccountId/all-stats', async (
+    req: FastifyRequest<{
+      Params: { userAccountId: string };
+      Querystring: { since?: string; until?: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    const requestStartTime = Date.now();
+    const { userAccountId } = req.params;
+    const { since, until } = req.query;
+
+    log.info({
+      userAccountId,
+      dateRange: { since, until },
+      requestId: req.id
+    }, '[all-stats] Starting request');
+
+    // Валидация userAccountId как UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(userAccountId)) {
+      log.warn({ userAccountId }, '[all-stats] Invalid userAccountId format');
+      return reply.status(400).send({ error: 'Invalid userAccountId format' });
+    }
+
+    // Валидация query параметров
+    const queryValidation = AllStatsQuerySchema.safeParse({ since, until });
+    if (!queryValidation.success) {
+      log.warn({
+        userAccountId,
+        errors: queryValidation.error.errors
+      }, '[all-stats] Invalid query parameters');
+      return reply.status(400).send({
+        error: 'Invalid date format',
+        details: queryValidation.error.errors
+      });
+    }
+
+    try {
+      // Получаем все аккаунты пользователя
+      log.debug({ userAccountId }, '[all-stats] Fetching ad accounts from database');
+
+      const { data: adAccounts, error: fetchError } = await supabase
+        .from('ad_accounts')
+        .select('id, name, page_picture_url, cached_page_picture_url, connection_status, is_active, ad_account_id, access_token')
+        .eq('user_account_id', userAccountId)
+        .order('created_at', { ascending: true });
+
+      if (fetchError) {
+        log.error({
+          userAccountId,
+          error: fetchError.message,
+          code: fetchError.code
+        }, '[all-stats] Database error fetching ad accounts');
+        return reply.status(500).send({ error: 'Failed to fetch ad accounts' });
+      }
+
+      const accountCount = adAccounts?.length || 0;
+      log.info({
+        userAccountId,
+        accountCount
+      }, '[all-stats] Ad accounts fetched from database');
+
+      if (accountCount === 0) {
+        log.debug({ userAccountId }, '[all-stats] No accounts found, returning empty array');
+        return reply.send({ accounts: [] });
+      }
+
+      // Подготавливаем базовые данные аккаунтов
+      const accountsBase = (adAccounts || []).map(account => ({
+        id: account.id,
+        name: account.name,
+        // Используем кэшированный URL если есть, иначе оригинальный FB URL
+        page_picture_url: account.cached_page_picture_url || account.page_picture_url,
+        connection_status: account.connection_status || 'pending',
+        is_active: account.is_active !== false,
+        fb_ad_account_id: account.ad_account_id,
+        access_token: account.access_token,
+        // Сохраняем для фонового кэширования
+        _original_page_picture_url: account.page_picture_url,
+        _has_cached_avatar: !!account.cached_page_picture_url,
+      }));
+
+      // Кэшируем аватарки в фоне для аккаунтов без кэша
+      const accountsNeedingAvatarCache = accountsBase.filter(
+        acc => acc._original_page_picture_url && !acc._has_cached_avatar
+      );
+
+      if (accountsNeedingAvatarCache.length > 0) {
+        log.info({
+          count: accountsNeedingAvatarCache.length
+        }, '[all-stats] Starting background avatar caching');
+
+        // Кэшируем асинхронно в фоне (не блокируем ответ)
+        Promise.all(
+          accountsNeedingAvatarCache.map(async (account) => {
+            try {
+              const cachedUrl = await cachePageAvatarToStorage(
+                account._original_page_picture_url!,
+                account.id
+              );
+
+              if (cachedUrl) {
+                // Обновляем в базе данных
+                await supabase
+                  .from('ad_accounts')
+                  .update({ cached_page_picture_url: cachedUrl })
+                  .eq('id', account.id);
+
+                log.info({
+                  accountId: account.id,
+                  accountName: account.name
+                }, '[all-stats] Avatar cached successfully');
+              }
+            } catch (err) {
+              log.warn({
+                accountId: account.id,
+                error: err
+              }, '[all-stats] Failed to cache avatar');
+            }
+          })
+        ).catch(err => {
+          log.warn({ error: err }, '[all-stats] Background avatar caching failed');
+        });
+      }
+
+      // Фильтруем аккаунты, для которых можно запросить статистику
+      const accountsToFetch = since && until
+        ? accountsBase.filter(acc => acc.access_token && acc.fb_ad_account_id)
+        : [];
+
+      log.info({
+        userAccountId,
+        totalAccounts: accountCount,
+        accountsWithCredentials: accountsToFetch.length,
+        hasDates: !!(since && until)
+      }, '[all-stats] Preparing to fetch Facebook stats');
+
+      // Запрашиваем статистику параллельно для всех аккаунтов с credentials
+      const statsPromises = accountsToFetch.map(async account => {
+        const stats = await fetchFacebookStatsForAccount(
+          account.fb_ad_account_id!,
+          account.access_token!,
+          since!,
+          until!,
+          account.id
+        );
+        return { accountId: account.id, stats };
+      });
+
+      const statsResults = await Promise.all(statsPromises);
+
+      // Создаём map для быстрого доступа к статистике
+      const statsMap = new Map<string, FacebookStats | null>();
+      for (const result of statsResults) {
+        statsMap.set(result.accountId, result.stats);
+      }
+
+      // Собираем финальный результат
+      const accountsWithStats = accountsBase.map(account => ({
+        id: account.id,
+        name: account.name,
+        page_picture_url: account.page_picture_url,
+        connection_status: account.connection_status,
+        is_active: account.is_active,
+        stats: statsMap.get(account.id) || null,
+      }));
+
+      // Считаем статистику для логирования
+      const accountsWithStatsCount = accountsWithStats.filter(a => a.stats !== null).length;
+      const totalDuration = Date.now() - requestStartTime;
+
+      log.info({
+        userAccountId,
+        totalAccounts: accountCount,
+        accountsWithStats: accountsWithStatsCount,
+        durationMs: totalDuration,
+        requestId: req.id
+      }, '[all-stats] Request completed successfully');
+
+      return reply.send({ accounts: accountsWithStats });
+    } catch (error: any) {
+      const totalDuration = Date.now() - requestStartTime;
+
+      log.error({
+        userAccountId,
+        error: error.message,
+        stack: error.stack?.slice(0, 500),
+        durationMs: totalDuration,
+        requestId: req.id
+      }, '[all-stats] Unexpected error');
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'get_all_account_stats',
+        endpoint: '/ad-accounts/:userAccountId/all-stats',
         severity: 'warning'
       }).catch(() => {});
 
@@ -536,13 +752,17 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       }
 
       // Получаем URL аватара через Graph API
-      const pictureUrl = await getPagePictureUrl(adAccount.page_id, adAccount.access_token);
+      const fbPictureUrl = await getPagePictureUrl(adAccount.page_id, adAccount.access_token);
 
-      if (!pictureUrl) {
+      if (!fbPictureUrl) {
         return reply.status(400).send({ error: 'Could not get page picture' });
       }
 
-      // Сохраняем URL в БД
+      // Кэшируем аватар в Supabase Storage
+      const cachedUrl = await cachePageAvatarToStorage(fbPictureUrl, adAccountId);
+      const pictureUrl = cachedUrl || fbPictureUrl;
+
+      // Сохраняем URL в БД (кэшированный или оригинальный)
       const { error: updateError } = await supabase
         .from('ad_accounts')
         .update({ page_picture_url: pictureUrl })
@@ -553,7 +773,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: 'Failed to update page picture' });
       }
 
-      log.info({ adAccountId, pictureUrl }, 'Page picture updated');
+      log.info({ adAccountId, pictureUrl, cached: !!cachedUrl }, 'Page picture updated');
       return reply.send({ success: true, page_picture_url: pictureUrl });
     } catch (error: any) {
       log.error({ error }, 'Error refreshing page picture');
@@ -601,9 +821,13 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       for (const account of adAccounts || []) {
         try {
-          const pictureUrl = await getPagePictureUrl(account.page_id, account.access_token);
+          const fbPictureUrl = await getPagePictureUrl(account.page_id, account.access_token);
 
-          if (pictureUrl) {
+          if (fbPictureUrl) {
+            // Кэшируем аватар в Supabase Storage
+            const cachedUrl = await cachePageAvatarToStorage(fbPictureUrl, account.id);
+            const pictureUrl = cachedUrl || fbPictureUrl;
+
             await supabase
               .from('ad_accounts')
               .update({ page_picture_url: pictureUrl })
@@ -656,6 +880,8 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     impressions: number;
     clicks: number;
     cpl: number;
+    ctr: number; // Click-through rate (%)
+    cpm: number; // Cost per mille (cost per 1000 impressions)
   }
 
   async function fetchFacebookStatsForAccount(
@@ -739,6 +965,8 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         impressions,
         clicks,
         cpl: leads > 0 ? spend / leads : 0,
+        ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+        cpm: impressions > 0 ? (spend / impressions) * 1000 : 0,
       };
 
       log.debug({
@@ -767,174 +995,6 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       return null;
     }
   }
-
-  /**
-   * GET /ad-accounts/:userAccountId/all-stats
-   * Получить статистику для всех рекламных аккаунтов пользователя
-   *
-   * @param userAccountId - UUID пользователя
-   * @query since - Начало периода (YYYY-MM-DD)
-   * @query until - Конец периода (YYYY-MM-DD)
-   *
-   * @returns { accounts: AccountStats[] }
-   */
-  app.get('/ad-accounts/:userAccountId/all-stats', async (
-    req: FastifyRequest<{
-      Params: { userAccountId: string };
-      Querystring: { since?: string; until?: string };
-    }>,
-    reply: FastifyReply
-  ) => {
-    const requestStartTime = Date.now();
-    const { userAccountId } = req.params;
-    const { since, until } = req.query;
-
-    log.info({
-      userAccountId,
-      dateRange: { since, until },
-      requestId: req.id
-    }, '[all-stats] Starting request');
-
-    // Валидация userAccountId как UUID
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!uuidRegex.test(userAccountId)) {
-      log.warn({ userAccountId }, '[all-stats] Invalid userAccountId format');
-      return reply.status(400).send({ error: 'Invalid userAccountId format' });
-    }
-
-    // Валидация query параметров
-    const queryValidation = AllStatsQuerySchema.safeParse({ since, until });
-    if (!queryValidation.success) {
-      log.warn({
-        userAccountId,
-        errors: queryValidation.error.errors
-      }, '[all-stats] Invalid query parameters');
-      return reply.status(400).send({
-        error: 'Invalid date format',
-        details: queryValidation.error.errors
-      });
-    }
-
-    try {
-      // Получаем все аккаунты пользователя
-      log.debug({ userAccountId }, '[all-stats] Fetching ad accounts from database');
-
-      const { data: adAccounts, error: fetchError } = await supabase
-        .from('ad_accounts')
-        .select('id, name, page_picture_url, connection_status, is_active, ad_account_id, access_token')
-        .eq('user_account_id', userAccountId)
-        .order('created_at', { ascending: true });
-
-      if (fetchError) {
-        log.error({
-          userAccountId,
-          error: fetchError.message,
-          code: fetchError.code
-        }, '[all-stats] Database error fetching ad accounts');
-        return reply.status(500).send({ error: 'Failed to fetch ad accounts' });
-      }
-
-      const accountCount = adAccounts?.length || 0;
-      log.info({
-        userAccountId,
-        accountCount
-      }, '[all-stats] Ad accounts fetched from database');
-
-      if (accountCount === 0) {
-        log.debug({ userAccountId }, '[all-stats] No accounts found, returning empty array');
-        return reply.send({ accounts: [] });
-      }
-
-      // Подготавливаем базовые данные аккаунтов
-      const accountsBase = (adAccounts || []).map(account => ({
-        id: account.id,
-        name: account.name,
-        page_picture_url: account.page_picture_url,
-        connection_status: account.connection_status || 'pending',
-        is_active: account.is_active !== false,
-        fb_ad_account_id: account.ad_account_id,
-        access_token: account.access_token,
-      }));
-
-      // Фильтруем аккаунты, для которых можно запросить статистику
-      const accountsToFetch = since && until
-        ? accountsBase.filter(acc => acc.access_token && acc.fb_ad_account_id)
-        : [];
-
-      log.info({
-        userAccountId,
-        totalAccounts: accountCount,
-        accountsWithCredentials: accountsToFetch.length,
-        hasDates: !!(since && until)
-      }, '[all-stats] Preparing to fetch Facebook stats');
-
-      // Запрашиваем статистику параллельно для всех аккаунтов с credentials
-      const statsPromises = accountsToFetch.map(async account => {
-        const stats = await fetchFacebookStatsForAccount(
-          account.fb_ad_account_id!,
-          account.access_token!,
-          since!,
-          until!,
-          account.id
-        );
-        return { accountId: account.id, stats };
-      });
-
-      const statsResults = await Promise.all(statsPromises);
-
-      // Создаём map для быстрого доступа к статистике
-      const statsMap = new Map<string, FacebookStats | null>();
-      for (const result of statsResults) {
-        statsMap.set(result.accountId, result.stats);
-      }
-
-      // Собираем финальный результат
-      const accountsWithStats = accountsBase.map(account => ({
-        id: account.id,
-        name: account.name,
-        page_picture_url: account.page_picture_url,
-        connection_status: account.connection_status,
-        is_active: account.is_active,
-        stats: statsMap.get(account.id) || null,
-      }));
-
-      // Считаем статистику для логирования
-      const accountsWithStatsCount = accountsWithStats.filter(a => a.stats !== null).length;
-      const totalDuration = Date.now() - requestStartTime;
-
-      log.info({
-        userAccountId,
-        totalAccounts: accountCount,
-        accountsWithStats: accountsWithStatsCount,
-        durationMs: totalDuration,
-        requestId: req.id
-      }, '[all-stats] Request completed successfully');
-
-      return reply.send({ accounts: accountsWithStats });
-    } catch (error: any) {
-      const totalDuration = Date.now() - requestStartTime;
-
-      log.error({
-        userAccountId,
-        error: error.message,
-        stack: error.stack?.slice(0, 500),
-        durationMs: totalDuration,
-        requestId: req.id
-      }, '[all-stats] Unexpected error');
-
-      logErrorToAdmin({
-        user_account_id: userAccountId,
-        error_type: 'api',
-        raw_error: error.message || String(error),
-        stack_trace: error.stack,
-        action: 'get_all_account_stats',
-        endpoint: '/ad-accounts/:userAccountId/all-stats',
-        severity: 'warning'
-      }).catch(() => {});
-
-      return reply.status(500).send({ error: 'Internal server error' });
-    }
-  });
 
 }
 

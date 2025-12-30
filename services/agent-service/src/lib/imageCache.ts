@@ -7,11 +7,13 @@ import { supabase } from './supabase.js';
 import { randomUUID } from 'crypto';
 
 const BUCKET_NAME = 'competitor-creatives';
+const AVATARS_BUCKET_NAME = 'account-avatars';
 const FETCH_TIMEOUT_MS = 30000; // 30 секунд таймаут
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB лимит
 
-// Флаг для ленивой инициализации bucket
+// Флаги для ленивой инициализации buckets
 let bucketInitialized = false;
+let avatarsBucketInitialized = false;
 
 /**
  * Скачивает изображение по URL и загружает в Supabase Storage
@@ -188,5 +190,117 @@ export async function ensureBucketExists(): Promise<void> {
     }
   } catch (err) {
     console.warn(`[ImageCache] Error checking/creating bucket: ${err}`);
+  }
+}
+
+/**
+ * Создаёт bucket для аватаров если он не существует
+ */
+async function ensureAvatarsBucketExists(): Promise<void> {
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+
+    const bucketExists = buckets?.some(b => b.name === AVATARS_BUCKET_NAME);
+
+    if (!bucketExists) {
+      const { error } = await supabase.storage.createBucket(AVATARS_BUCKET_NAME, {
+        public: true,
+        fileSizeLimit: 1048576, // 1MB (аватары маленькие)
+        allowedMimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+      });
+
+      if (error && !error.message.includes('already exists')) {
+        console.error(`[ImageCache] Failed to create avatars bucket: ${error.message}`);
+      } else {
+        console.log(`[ImageCache] Bucket "${AVATARS_BUCKET_NAME}" created`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[ImageCache] Error checking/creating avatars bucket: ${err}`);
+  }
+}
+
+/**
+ * Кэширует аватар страницы Facebook в Supabase Storage
+ * @param imageUrl - URL аватара (Facebook CDN)
+ * @param accountId - ID рекламного аккаунта
+ * @returns URL изображения в Supabase Storage или null при ошибке
+ */
+export async function cachePageAvatarToStorage(
+  imageUrl: string,
+  accountId: string
+): Promise<string | null> {
+  try {
+    // Проверяем, является ли это FB CDN URL
+    if (!isFacebookCdnUrl(imageUrl)) {
+      return imageUrl; // Возвращаем оригинальный URL для других источников
+    }
+
+    // Ленивая инициализация bucket
+    if (!avatarsBucketInitialized) {
+      await ensureAvatarsBucketExists();
+      avatarsBucketInitialized = true;
+    }
+
+    // Скачиваем изображение с таймаутом
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(imageUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!response.ok) {
+      console.warn(`[ImageCache] Failed to fetch avatar: ${response.status} for account ${accountId}`);
+      return null;
+    }
+
+    // Определяем тип контента
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const extension = getExtensionFromContentType(contentType);
+
+    // Используем accountId как имя файла (перезаписываем при обновлении)
+    const fileName = `${accountId}.${extension}`;
+
+    // Получаем буфер изображения
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Загружаем в Supabase Storage (upsert: true для перезаписи)
+    const { error } = await supabase.storage
+      .from(AVATARS_BUCKET_NAME)
+      .upload(fileName, buffer, {
+        contentType,
+        cacheControl: '31536000', // Кэш на 1 год
+        upsert: true, // Перезаписываем если существует
+      });
+
+    if (error) {
+      console.warn(`[ImageCache] Failed to upload avatar for account ${accountId}: ${error.message}`);
+      return null;
+    }
+
+    // Получаем публичный URL
+    const { data: publicUrlData } = supabase.storage
+      .from(AVATARS_BUCKET_NAME)
+      .getPublicUrl(fileName);
+
+    console.log(`[ImageCache] Avatar cached for account ${accountId}`);
+    return publicUrlData.publicUrl;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      console.warn(`[ImageCache] Fetch timeout for account ${accountId}`);
+    } else {
+      console.warn(`[ImageCache] Error caching avatar for account ${accountId}: ${err}`);
+    }
+    return null;
   }
 }
