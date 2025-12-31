@@ -99,11 +99,13 @@ services:
       - NODE_ENV=production
       - REDIS_URL=redis://redis-chatbot:6379
       - EVOLUTION_API_URL=http://evolution-api:8080
+      - CRM_BACKEND_URL=http://crm-backend:8084
     ports:
       - "8083:8083"
     restart: unless-stopped
     depends_on:
       - redis-chatbot
+      - crm-backend
 
   # Redis for Chatbot (message queues, reactivation campaigns)
   redis-chatbot:

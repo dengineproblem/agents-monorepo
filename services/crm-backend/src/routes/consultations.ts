@@ -69,7 +69,8 @@ const GetAvailableSlotsSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   days_ahead: z.coerce.number().int().min(1).max(30).optional(),
   limit: z.coerce.number().int().min(1).max(20).optional(),
-  duration_minutes: z.coerce.number().int().min(15).max(240)
+  duration_minutes: z.coerce.number().int().min(15).max(240),
+  timezone: z.string().optional() // Таймзона для фильтрации прошедших слотов
 });
 
 const BookFromBotSchema = z.object({
@@ -79,6 +80,7 @@ const BookFromBotSchema = z.object({
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   duration_minutes: z.number().int().min(15).max(240),
   client_name: z.string().optional(),
+  client_phone: z.string().optional(), // Прямая передача телефона для тестового режима
   auto_summarize: z.boolean().optional().default(true)
 });
 
@@ -724,7 +726,8 @@ export async function consultationsRoutes(app: FastifyInstance) {
         date: params.date,
         days_ahead: params.days_ahead || 7,
         limit: params.limit || 5,
-        duration_minutes: params.duration_minutes
+        duration_minutes: params.duration_minutes,
+        timezone: params.timezone
       });
 
       return reply.send({ slots });
@@ -745,8 +748,19 @@ export async function consultationsRoutes(app: FastifyInstance) {
     try {
       const body = BookFromBotSchema.parse(request.body);
 
-      // Get client info from lead
-      const clientInfo = await getClientInfo(body.dialog_analysis_id);
+      // Get client info from lead or use provided phone (for test mode)
+      let clientInfo = await getClientInfo(body.dialog_analysis_id);
+
+      // Если лид не найден но передан телефон напрямую - используем его (тестовый режим)
+      if (!clientInfo.phone && body.client_phone) {
+        clientInfo = {
+          phone: body.client_phone,
+          name: body.client_name || 'Тестовый клиент',
+          chatId: null,
+          instanceName: null,
+          userAccountId: null
+        };
+      }
 
       if (!clientInfo.phone) {
         return reply.status(400).send({ error: 'Client phone not found in dialog_analysis' });

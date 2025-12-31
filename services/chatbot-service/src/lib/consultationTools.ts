@@ -124,6 +124,7 @@ export interface ConsultationIntegrationSettings {
   default_duration_minutes: number;   // длительность (по умолчанию 60)
   days_ahead_limit: number;           // дней вперёд (по умолчанию 14)
   auto_summarize_dialog: boolean;     // саммаризация диалога
+  timezone?: string;                  // таймзона для фильтрации слотов (по умолчанию Asia/Yekaterinburg)
   collect_client_name: boolean;       // спрашивать имя
 }
 
@@ -164,21 +165,21 @@ export function getConsultationToolDefinitions(
       type: 'function',
       function: {
         name: 'book_consultation',
-        description: `Записать клиента на консультацию. Используй после того как клиент выбрал конкретное время из предложенных слотов. Длительность консультации: ${settings.default_duration_minutes} минут.`,
+        description: `Записать клиента на консультацию. Используй значения из JSON объекта "Данные для записи" выбранного слота. Длительность: ${settings.default_duration_minutes} минут.`,
         parameters: {
           type: 'object',
           properties: {
             consultant_id: {
               type: 'string',
-              description: 'UUID консультанта из списка слотов'
+              description: 'Скопируй значение consultant_id из JSON выбранного слота.'
             },
             date: {
               type: 'string',
-              description: 'Дата в формате YYYY-MM-DD'
+              description: 'Скопируй значение date из JSON выбранного слота.'
             },
             start_time: {
               type: 'string',
-              description: 'Время начала в формате HH:MM'
+              description: 'Скопируй значение start_time из JSON выбранного слота.'
             },
             client_name: {
               type: 'string',
@@ -354,6 +355,11 @@ export async function handleGetAvailableSlots(
       params.append('consultant_ids', settings.consultant_ids.join(','));
     }
 
+    // Передаём таймзону для правильной фильтрации прошедших слотов
+    if (settings.timezone) {
+      params.append('timezone', settings.timezone);
+    }
+
     const url = `${CRM_BACKEND_URL}/consultations/available-slots?${params}`;
 
     const response = await fetchWithRetry(
@@ -401,11 +407,13 @@ export async function handleGetAvailableSlots(
     }, '[handleGetAvailableSlots] Slots found successfully', ['consultation']);
 
     // Формируем текстовый ответ со слотами
+    // Используем JSON формат чтобы GPT точно понял какие значения использовать
     const slotsText = data.slots.map((slot: any, idx: number) => {
-      return `${idx + 1}. ${slot.formatted} [ID: ${slot.consultant_id}, дата: ${slot.date}, время: ${slot.start_time}]`;
-    }).join('\n');
+      return `${idx + 1}. ${slot.formatted}
+   Данные для записи: {"consultant_id":"${slot.consultant_id}","date":"${slot.date}","start_time":"${slot.start_time}"}`;
+    }).join('\n\n');
 
-    return `Доступные слоты для записи:\n\n${slotsText}\n\nКакое время вам подходит?`;
+    return `Доступные слоты для записи:\n\n${slotsText}\n\nВыберите номер слота или время.`;
   } catch (error: any) {
     const errorType = classifyError(error);
     log.error(error, '[handleGetAvailableSlots] Error fetching slots', {
@@ -415,6 +423,9 @@ export async function handleGetAvailableSlots(
     return 'Произошла ошибка при получении доступных слотов. Попробуйте позже.';
   }
 }
+
+// Тестовый lead ID для UI тестирования
+const TEST_LEAD_ID = '00000000-0000-0000-0000-000000000000';
 
 /**
  * Обработчик: Записать на консультацию
@@ -437,17 +448,20 @@ export async function handleBookConsultation(
     return 'Не указаны обязательные параметры для записи. Пожалуйста, выберите слот из списка.';
   }
 
+  const isTestMode = lead.id === TEST_LEAD_ID;
+
   log.info({
     consultantId: maskUuid(args.consultant_id),
     date: args.date,
     time: args.start_time,
     clientName: args.client_name || lead.contact_name,
-    duration: settings.default_duration_minutes
+    duration: settings.default_duration_minutes,
+    testMode: isTestMode
   }, '[handleBookConsultation] Booking consultation', ['consultation']);
 
   try {
     const url = `${CRM_BACKEND_URL}/consultations/book-from-bot`;
-    const requestBody = {
+    const requestBody: Record<string, any> = {
       dialog_analysis_id: lead.id,
       consultant_id: args.consultant_id,
       date: args.date,
@@ -456,6 +470,11 @@ export async function handleBookConsultation(
       client_name: args.client_name || lead.contact_name,
       auto_summarize: settings.auto_summarize_dialog
     };
+
+    // В тестовом режиме передаём телефон напрямую
+    if (isTestMode) {
+      requestBody.client_phone = lead.contact_phone;
+    }
 
     const response = await fetchWithRetry(
       url,

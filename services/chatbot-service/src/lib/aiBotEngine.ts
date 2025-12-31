@@ -1666,7 +1666,7 @@ function delay(ms: number): Promise<void> {
 /**
  * Тестирование бота - генерация ответа без WhatsApp
  * Используется для UI тестирования в конструкторе ботов
- * Поддерживает все настройки бота: буфер, расписание, разделение сообщений и т.д.
+ * Поддерживает все настройки бота: буфер, расписание, разделение сообщений, consultation tools
  */
 export async function testBotResponse(
   botId: string,
@@ -1679,6 +1679,7 @@ export async function testBotResponse(
   error?: string;
   bufferApplied?: number; // Сколько секунд буфера применено
   scheduleBlocked?: boolean; // Заблокировано расписанием
+  toolCalls?: string[]; // Какие tools были вызваны
 }> {
   const ctxLog = createContextLogger(baseLog, { botId }, ['processing', 'openai']);
 
@@ -1706,7 +1707,8 @@ export async function testBotResponse(
       temp: botConfig.temperature,
       bufferSec: botConfig.message_buffer_seconds,
       scheduleEnabled: botConfig.schedule_enabled,
-      splitMessages: botConfig.split_messages
+      splitMessages: botConfig.split_messages,
+      consultationEnabled: botConfig.consultation_integration_enabled
     }, '[testBotResponse] Bot config loaded');
 
     // Проверить расписание работы бота
@@ -1787,7 +1789,40 @@ export async function testBotResponse(
     }
 
     // Добавить тестовую информацию о клиенте
-    systemPrompt += `\n\nЭто тестовый режим. Информация о клиенте недоступна.`;
+    systemPrompt += `\n\nЭто тестовый режим. Телефон клиента: +7 999 000 0000 (тест).`;
+
+    // Подготовить tools
+    const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [];
+
+    // Подготовить consultation settings если включено
+    let consultationSettings: ConsultationIntegrationSettings | null = null;
+    if (botConfig.consultation_integration_enabled && botConfig.consultation_settings) {
+      // consultation_settings хранится в snake_case в БД
+      const dbSettings = botConfig.consultation_settings;
+      consultationSettings = {
+        consultant_ids: dbSettings.consultant_ids || [],
+        slots_to_show: dbSettings.slots_to_show || 5,
+        default_duration_minutes: dbSettings.default_duration_minutes || 60,
+        days_ahead_limit: dbSettings.days_ahead_limit || 14,
+        auto_summarize_dialog: dbSettings.auto_summarize_dialog ?? true,
+        collect_client_name: dbSettings.collect_client_name ?? true,
+        timezone: botConfig.timezone || 'Asia/Yekaterinburg'
+      };
+
+      // Добавить промпт для консультаций
+      const consultationPrompt = getConsultationPromptAddition(consultationSettings);
+      systemPrompt += consultationPrompt;
+
+      // Добавить tools для консультаций
+      const consultationTools = getConsultationToolDefinitions(consultationSettings);
+      tools.push(...consultationTools);
+
+      ctxLog.info({
+        consultationToolsCount: consultationTools.length,
+        slotsToShow: consultationSettings.slots_to_show,
+        daysAhead: consultationSettings.days_ahead_limit
+      }, '[testBotResponse] Added consultation tools');
+    }
 
     // Ограничить историю по количеству сообщений
     let limitedHistory = [...conversationHistory];
@@ -1827,20 +1862,137 @@ export async function testBotResponse(
       { role: 'user', content: messageText }
     ];
 
-    ctxLog.info({
-      model,
-      msgsCount: messages.length,
-      temp: botConfig.temperature
-    }, '[testBotResponse] Calling OpenAI');
-
-    const completion = await openai.chat.completions.create({
+    // Параметры запроса
+    const completionParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model,
       messages,
       temperature: botConfig.temperature,
       max_tokens: 1000
-    });
+    };
 
-    let responseText = completion.choices[0]?.message?.content || '';
+    // Добавить tools если есть
+    if (tools.length > 0) {
+      completionParams.tools = tools;
+      completionParams.tool_choice = 'auto';
+    }
+
+    ctxLog.info({
+      model,
+      msgsCount: messages.length,
+      temp: botConfig.temperature,
+      toolsCount: tools.length
+    }, '[testBotResponse] Calling OpenAI');
+
+    let completion = await openai.chat.completions.create(completionParams);
+    let choice = completion.choices[0];
+    const toolCallsExecuted: string[] = [];
+
+    // Обработка tool calls (до 3 итераций)
+    let iterations = 0;
+    const maxIterations = 3;
+
+    while (choice.message.tool_calls && choice.message.tool_calls.length > 0 && iterations < maxIterations) {
+      iterations++;
+      ctxLog.info({
+        iteration: iterations,
+        toolCallsCount: choice.message.tool_calls.length,
+        toolNames: choice.message.tool_calls.map(tc => tc.function.name)
+      }, '[testBotResponse] Processing tool calls');
+
+      // Добавить assistant message с tool_calls
+      messages.push({
+        role: 'assistant',
+        content: choice.message.content || null,
+        tool_calls: choice.message.tool_calls
+      } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+
+      // Обработать каждый tool call
+      for (const toolCall of choice.message.tool_calls) {
+        const functionName = toolCall.function.name;
+        const args = JSON.parse(toolCall.function.arguments || '{}');
+        toolCallsExecuted.push(functionName);
+
+        ctxLog.info({
+          functionName,
+          args
+        }, '[testBotResponse] Executing tool call');
+
+        let toolResult = '';
+
+        // Обработать consultation tools
+        if (isConsultationTool(functionName) && consultationSettings) {
+          // Создать тестовый lead для consultation tools
+          const testLead = {
+            id: '00000000-0000-0000-0000-000000000000', // Тестовый UUID
+            contact_phone: '+79990000000',
+            contact_name: 'Тестовый клиент'
+          };
+
+          toolResult = await handleConsultationTool(
+            functionName,
+            args,
+            testLead,
+            consultationSettings,
+            ctxLog
+          );
+        } else {
+          toolResult = `[Функция ${functionName} недоступна в тестовом режиме]`;
+        }
+
+        ctxLog.info({
+          functionName,
+          resultLen: toolResult.length
+        }, '[testBotResponse] Tool call completed');
+
+        // Добавить результат как tool message
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: toolResult
+        } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      }
+
+      // Сделать следующий запрос к OpenAI с результатами tool calls
+      ctxLog.info({
+        iteration: iterations,
+        msgsCount: messages.length
+      }, '[testBotResponse] Calling OpenAI with tool results');
+
+      completion = await openai.chat.completions.create({
+        model,
+        messages,
+        temperature: botConfig.temperature,
+        max_tokens: 1000,
+        tools: tools.length > 0 ? tools : undefined,
+        tool_choice: tools.length > 0 ? 'auto' : undefined
+      });
+
+      choice = completion.choices[0];
+    }
+
+    let responseText = choice.message?.content || '';
+
+    // Если после tool calls получили пустой ответ, делаем ещё один запрос без tools
+    if (!responseText && toolCallsExecuted.length > 0) {
+      ctxLog.warn({
+        toolCallsExecuted,
+        finishReason: choice.finish_reason,
+        hasToolCalls: !!choice.message?.tool_calls?.length
+      }, '[testBotResponse] Empty response after tool calls, retrying without tools');
+
+      const retryCompletion = await openai.chat.completions.create({
+        model,
+        messages,
+        temperature: botConfig.temperature,
+        max_tokens: 1000
+        // Без tools - просто текстовый ответ
+      });
+
+      responseText = retryCompletion.choices[0]?.message?.content || '';
+      ctxLog.info({
+        retryResponseLen: responseText.length
+      }, '[testBotResponse] Retry response received');
+    }
 
     // Очистить markdown если нужно
     if (botConfig.clean_markdown) {
@@ -1862,7 +2014,8 @@ export async function testBotResponse(
       splitEnabled,
       maxLength,
       responseLen: responseText.length,
-      shouldSplit: splitEnabled && responseText.length > maxLength
+      shouldSplit: splitEnabled && responseText.length > maxLength,
+      toolCallsCount: toolCallsExecuted.length
     }, '[testBotResponse] Split check');
 
     if (splitEnabled && responseText.length > maxLength) {
@@ -1878,14 +2031,16 @@ export async function testBotResponse(
       responseLen: responseText.length,
       tokens: completion.usage?.total_tokens,
       chunksCount: responses.length,
-      bufferApplied: bufferSeconds
+      bufferApplied: bufferSeconds,
+      toolCalls: toolCallsExecuted
     }, '[testBotResponse] Response generated');
 
     return {
       success: true,
       response: responses.join('\n\n---\n\n'), // Объединить с разделителем для UI
       responses, // Массив отдельных сообщений
-      bufferApplied: bufferSeconds
+      bufferApplied: bufferSeconds,
+      toolCalls: toolCallsExecuted.length > 0 ? toolCallsExecuted : undefined
     };
 
   } catch (error: any) {

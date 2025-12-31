@@ -29,6 +29,7 @@ export interface GetAvailableSlotsParams {
   days_ahead?: number;          // дней вперёд (по умолчанию 7)
   limit?: number;               // максимум слотов (по умолчанию 5)
   duration_minutes: number;     // длительность консультации
+  timezone?: string;            // таймзона для фильтрации (по умолчанию Asia/Yekaterinburg)
 }
 
 const DAYS_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
@@ -113,7 +114,8 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
     date,
     days_ahead = 7,
     limit = 5,
-    duration_minutes
+    duration_minutes,
+    timezone = 'Asia/Yekaterinburg'
   } = params;
 
   // 1. Получаем консультантов
@@ -206,7 +208,20 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
   // 5. Генерируем доступные слоты
   const availableSlots: AvailableSlot[] = [];
   const currentDate = new Date(startDate);
-  const now = new Date();
+
+  // Получаем текущее время в указанной таймзоне
+  const nowInTimezone = new Date().toLocaleString('en-US', { timeZone: timezone });
+  const nowTz = new Date(nowInTimezone);
+  const todayInTimezone = nowTz.toISOString().split('T')[0];
+  const currentHourInTz = nowTz.getHours();
+  const currentMinInTz = nowTz.getMinutes();
+
+  log.debug({
+    timezone,
+    todayInTimezone,
+    currentTime: `${currentHourInTz}:${currentMinInTz}`,
+    utcNow: new Date().toISOString()
+  }, '[getAvailableSlots] Timezone filtering setup');
 
   while (currentDate <= endDate && availableSlots.length < limit) {
     const dateStr = currentDate.toISOString().split('T')[0];
@@ -236,17 +251,16 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
         // Пропускаем занятые слоты
         if (busySlots.has(slotKey)) continue;
 
-        // Пропускаем прошедшие слоты (для сегодняшнего дня)
-        if (dateStr === now.toISOString().split('T')[0]) {
+        // Пропускаем прошедшие слоты (для сегодняшнего дня в таймзоне клиента)
+        if (dateStr === todayInTimezone) {
           const [slotHour, slotMin] = slot.start.split(':').map(Number);
-          const slotTime = new Date(currentDate);
-          slotTime.setHours(slotHour, slotMin, 0, 0);
 
-          // Добавляем буфер 30 минут
-          const bufferTime = new Date(now);
-          bufferTime.setMinutes(bufferTime.getMinutes() + 30);
+          // Сравниваем время слота с текущим временем + 30 минут буфера
+          const bufferMinutes = 30;
+          const currentMinutesTotal = currentHourInTz * 60 + currentMinInTz + bufferMinutes;
+          const slotMinutesTotal = slotHour * 60 + slotMin;
 
-          if (slotTime <= bufferTime) continue;
+          if (slotMinutesTotal <= currentMinutesTotal) continue;
         }
 
         const consultantName = consultantMap.get(consultantId) || 'Консультант';
