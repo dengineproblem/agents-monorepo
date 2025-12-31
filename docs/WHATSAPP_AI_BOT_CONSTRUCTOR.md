@@ -814,6 +814,20 @@ redis-cli lrange "pending_messages:instance:phone" 0 -1
   - Классификация ошибок
   - Context propagation через Redis
 
+### v1.5.0 (2024-12-31)
+- Тестовый режим бота в UI:
+  - Полная поддержка OpenAI function calling (tools) в testBotResponse
+  - Тестовый lead ID `00000000-0000-0000-0000-000000000000` для UI тестирования
+  - Прямая передача телефона (`client_phone`) для бронирования в тестовом режиме
+  - Retry логика для пустых ответов GPT после tool calls
+- Таймзона для консультаций:
+  - Параметр `timezone` в настройках бота (по умолчанию Asia/Yekaterinburg)
+  - Фильтрация прошедших слотов с учётом таймзоны клиента
+  - Буфер 30 минут для слотов на сегодня
+- Docker networking:
+  - `CRM_BACKEND_URL` env var для chatbot-service
+  - Зависимость chatbot-service от crm-backend
+
 ### v1.4.0 (2024-12-28)
 - Интеграция с консультациями:
   - 5 новых AI tools для работы с консультациями

@@ -17,6 +17,8 @@
 9. [Конфигурация](#конфигурация)
 10. [Troubleshooting](#troubleshooting)
 
+11. [Интеграция с AI-ботом](#интеграция-с-ai-ботом)
+
 ---
 
 ## 🏗️ АРХИТЕКТУРА СИСТЕМЫ
@@ -259,17 +261,41 @@ curl -X POST http://localhost:8084/consultants/{id}/schedules \
 ### Получение доступных слотов
 
 ```bash
-# GET /consultations/available-slots?date=2024-01-15&consultant_id=uuid
-curl "http://localhost:8084/consultations/available-slots?date=2024-01-15&consultant_id={id}"
+# GET /consultations/available-slots?date=2024-01-15&consultant_id=uuid&timezone=Asia/Yekaterinburg
+curl "http://localhost:8084/consultations/available-slots?date=2024-01-15&consultant_id={id}&timezone=Asia/Yekaterinburg"
 ```
+
+**Параметры запроса:**
+
+| Параметр | Тип | Обязательный | Описание |
+|----------|-----|--------------|----------|
+| `date` | string | Нет | Конкретная дата (YYYY-MM-DD). Если не указана — ближайшие N дней |
+| `consultant_id` | UUID | Нет | ID консультанта. Если не указан — все активные |
+| `days_ahead` | number | Нет | Дней вперёд (по умолчанию 7) |
+| `limit` | number | Нет | Максимум слотов (по умолчанию 5) |
+| `duration_minutes` | number | Да | Длительность консультации в минутах |
+| `timezone` | string | Нет | Таймзона для фильтрации прошедших слотов (по умолчанию `Asia/Yekaterinburg`) |
 
 **Ответ:**
 ```json
 {
   "slots": [
-    { "start_time": "09:00", "end_time": "09:30" },
-    { "start_time": "09:30", "end_time": "10:00" },
-    { "start_time": "10:00", "end_time": "10:30" }
+    {
+      "consultant_id": "uuid",
+      "consultant_name": "Иван Петров",
+      "date": "2024-01-15",
+      "start_time": "09:00",
+      "end_time": "09:30",
+      "formatted": "Сегодня в 09:00 — Иван Петров"
+    },
+    {
+      "consultant_id": "uuid",
+      "consultant_name": "Иван Петров",
+      "date": "2024-01-15",
+      "start_time": "09:30",
+      "end_time": "10:00",
+      "formatted": "Сегодня в 09:30 — Иван Петров"
+    }
   ]
 }
 ```
@@ -277,6 +303,7 @@ curl "http://localhost:8084/consultations/available-slots?date=2024-01-15&consul
 Слоты генерируются с интервалом **30 минут** на основе:
 - Расписания работы консультанта на этот день недели
 - Уже забронированных консультаций
+- Текущего времени в указанной таймзоне (прошедшие слоты фильтруются)
 
 ---
 
@@ -434,6 +461,47 @@ curl -X PUT http://localhost:8084/consultations/{id} \
 | PUT | `/consultations/:id` | Обновить консультацию |
 | DELETE | `/consultations/:id` | Удалить консультацию |
 | GET | `/consultations/available-slots` | Доступные слоты |
+| POST | `/consultations/book-from-bot` | Бронирование через AI-бота |
+
+### API для AI-бота
+
+#### POST `/consultations/book-from-bot`
+
+Специальный endpoint для бронирования консультаций из AI-бота (chatbot-service).
+
+```bash
+curl -X POST http://localhost:8084/consultations/book-from-bot \
+  -H "Content-Type: application/json" \
+  -d '{
+    "dialog_analysis_id": "uuid",
+    "consultant_id": "uuid",
+    "date": "2024-01-15",
+    "start_time": "10:00",
+    "duration_minutes": 30,
+    "client_name": "Мария Иванова",
+    "client_phone": "+79001234567",
+    "notes": "Запись через бота"
+  }'
+```
+
+**Параметры:**
+
+| Параметр | Тип | Обязательный | Описание |
+|----------|-----|--------------|----------|
+| `dialog_analysis_id` | UUID | Да | ID диалога из dialog_analysis |
+| `consultant_id` | UUID | Да | ID консультанта |
+| `date` | string | Да | Дата (YYYY-MM-DD) |
+| `start_time` | string | Да | Время начала (HH:MM) |
+| `duration_minutes` | number | Да | Длительность в минутах |
+| `client_name` | string | Нет | Имя клиента |
+| `client_phone` | string | Нет | Телефон для тестового режима (когда lead_id не существует) |
+| `notes` | string | Нет | Заметки |
+
+**Логика определения телефона клиента:**
+
+1. Получаем `dialog_analysis` по `dialog_analysis_id`
+2. Из него берём `phone` клиента
+3. Если телефон не найден и передан `client_phone` — используем его (для тестового режима)
 
 ### Консультанты
 
@@ -733,6 +801,132 @@ WHERE cn.status = 'pending'
 - [ ] Cron job запущен (`startNotificationCron()` в server.ts)
 - [ ] Настройки уведомлений проверены в UI
 - [ ] Тестовая консультация создана и уведомление получено
+
+---
+
+## 🤖 ИНТЕГРАЦИЯ С AI-БОТОМ
+
+### Обзор
+
+Система консультаций интегрирована с AI-ботом через `chatbot-service`. Бот может:
+- Показывать клиентам доступные слоты для записи
+- Записывать клиентов на консультации
+- Показывать текущие записи клиента
+
+### Архитектура
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  КЛИЕНТ (WhatsApp)                                          │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  CHATBOT-SERVICE (Fastify)                                  │
+│  ├─ lib/aiBotEngine.ts (обработка сообщений)                │
+│  └─ lib/consultationTools.ts (инструменты консультаций)     │
+└──────────────────────┬──────────────────────────────────────┘
+                       │ HTTP (CRM_BACKEND_URL)
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│  CRM-BACKEND                                                │
+│  ├─ GET /consultations/available-slots                      │
+│  └─ POST /consultations/book-from-bot                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Инструменты бота (OpenAI Function Calling)
+
+Бот использует следующие инструменты:
+
+| Tool | Описание |
+|------|----------|
+| `get_available_slots` | Получить доступные слоты для записи |
+| `book_consultation` | Записать клиента на консультацию |
+| `get_my_consultations` | Показать записи текущего клиента |
+
+### Настройка в конфигурации бота
+
+```json
+{
+  "consultation_integration": {
+    "enabled": true,
+    "duration_minutes": 60,
+    "timezone": "Asia/Yekaterinburg",
+    "consultant_ids": []
+  }
+}
+```
+
+| Параметр | Описание |
+|----------|----------|
+| `enabled` | Включить интеграцию с консультациями |
+| `duration_minutes` | Длительность консультации по умолчанию |
+| `timezone` | Таймзона для фильтрации прошедших слотов |
+| `consultant_ids` | Ограничить список консультантов (пустой = все) |
+
+### Тестовый режим
+
+В UI бота есть кнопка "Тестировать" для проверки ответов бота. В тестовом режиме:
+
+1. Используется фиктивный `dialog_analysis_id`: `00000000-0000-0000-0000-000000000000`
+2. Телефон клиента передаётся напрямую через параметр `client_phone`
+3. Все операции выполняются как в боевом режиме (реальные запросы к API)
+
+### Docker-сетевое взаимодействие
+
+```yaml
+# docker-compose.yml
+chatbot-service:
+  environment:
+    - CRM_BACKEND_URL=http://crm-backend:8084
+  depends_on:
+    - crm-backend
+```
+
+### Пример диалога
+
+```
+Клиент: Хочу записаться на консультацию
+
+Бот: [вызывает get_available_slots]
+     Вот доступные слоты:
+     1. Сегодня в 14:00 — Иван Петров
+     2. Завтра в 10:00 — Иван Петров
+     3. 3 января (пятница) в 11:00 — Мария Сидорова
+
+     На какое время вас записать?
+
+Клиент: На завтра в 10
+
+Бот: [вызывает book_consultation]
+     Отлично! Вы записаны на консультацию:
+     📅 Дата: 2 января 2025
+     ⏰ Время: 10:00
+     👨‍💼 Консультант: Иван Петров
+
+     До встречи!
+```
+
+### Troubleshooting
+
+**Бот не показывает слоты:**
+```bash
+# Проверить доступность crm-backend из chatbot-service
+docker exec chatbot-service curl http://crm-backend:8084/health
+```
+
+**Ошибка "fetch failed":**
+- Проверить `CRM_BACKEND_URL` в environment
+- Проверить `depends_on: crm-backend` в docker-compose
+
+**Слоты показывают прошедшее время:**
+- Проверить параметр `timezone` в настройках интеграции
+- Убедиться, что сервер использует правильную таймзону
+
+**Запись не удалась (400 error):**
+- Проверить существование `dialog_analysis_id` в базе
+- В тестовом режиме — убедиться что передаётся `client_phone`
 
 ---
 
