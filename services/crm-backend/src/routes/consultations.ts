@@ -33,6 +33,7 @@ const UpdateConsultantSchema = z.object({
 const CreateConsultationSchema = z.object({
   consultant_id: z.string().uuid(),
   slot_id: z.string().uuid().optional(),
+  service_id: z.string().uuid().optional(),
   client_phone: z.string().min(1),
   client_name: z.string().optional(),
   client_chat_id: z.string().optional(),
@@ -43,7 +44,8 @@ const CreateConsultationSchema = z.object({
   end_time: z.string().regex(/^\d{2}:\d{2}$/),
   status: z.enum(['scheduled', 'confirmed', 'completed', 'cancelled', 'no_show']).optional().default('scheduled'),
   notes: z.string().optional(),
-  consultation_type: z.string().optional().default('general')
+  consultation_type: z.string().optional().default('general'),
+  price: z.number().min(0).optional()
 });
 
 const UpdateConsultationSchema = z.object({
@@ -337,7 +339,8 @@ export async function consultationsRoutes(app: FastifyInstance) {
         .from('consultations')
         .select(`
           *,
-          consultant:consultants(*)
+          consultant:consultants(*),
+          service:consultation_services(*)
         `)
         .order('date', { ascending: true })
         .order('start_time', { ascending: true });
@@ -357,6 +360,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
       const consultations = (data || []).map(item => ({
         ...item,
         consultant: Array.isArray(item.consultant) ? item.consultant[0] : item.consultant,
+        service: Array.isArray(item.service) ? item.service[0] : item.service,
         slot: item.slot_id ? {
           id: item.slot_id,
           consultant_id: item.consultant_id,
@@ -440,6 +444,185 @@ export async function consultationsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /consultations/stats/extended
+   * Get extended consultation statistics with revenue and conversion data
+   */
+  app.get('/consultations/stats/extended', async (request, reply) => {
+    try {
+      const { period, user_account_id } = request.query as {
+        period?: 'week' | 'month' | 'quarter' | 'year';
+        user_account_id?: string;
+      };
+
+      // Calculate date range based on period
+      const now = new Date();
+      let startDate: Date;
+      switch (period) {
+        case 'week':
+          startDate = new Date(now);
+          startDate.setDate(startDate.getDate() - 7);
+          break;
+        case 'quarter':
+          startDate = new Date(now);
+          startDate.setMonth(startDate.getMonth() - 3);
+          break;
+        case 'year':
+          startDate = new Date(now);
+          startDate.setFullYear(startDate.getFullYear() - 1);
+          break;
+        case 'month':
+        default:
+          startDate = new Date(now);
+          startDate.setMonth(startDate.getMonth() - 1);
+      }
+
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = now.toISOString().split('T')[0];
+
+      // Build query
+      let query = supabase
+        .from('consultations')
+        .select(`
+          id,
+          status,
+          is_sale_closed,
+          price,
+          date,
+          start_time,
+          consultant_id,
+          service_id,
+          consultation_type,
+          consultant:consultants(name),
+          service:consultation_services(name, price)
+        `)
+        .gte('date', startDateStr)
+        .lte('date', endDateStr);
+
+      if (user_account_id) {
+        query = query.eq('user_account_id', user_account_id);
+      }
+
+      const { data: consultations, error } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch extended stats');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      // Calculate basic stats
+      const total = consultations?.length || 0;
+      const completed = consultations?.filter(c => c.status === 'completed').length || 0;
+      const cancelled = consultations?.filter(c => c.status === 'cancelled').length || 0;
+      const noShow = consultations?.filter(c => c.status === 'no_show').length || 0;
+      const salesClosed = consultations?.filter(c => c.is_sale_closed).length || 0;
+
+      // Revenue calculation
+      const totalRevenue = consultations?.reduce((sum, c) => {
+        if (c.status === 'completed' && c.price) {
+          return sum + Number(c.price);
+        }
+        return sum;
+      }, 0) || 0;
+
+      // Conversion rates
+      const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+      const salesConversionRate = completed > 0 ? Math.round((salesClosed / completed) * 100) : 0;
+      const noShowRate = total > 0 ? Math.round((noShow / total) * 100) : 0;
+      const cancellationRate = total > 0 ? Math.round((cancelled / total) * 100) : 0;
+
+      // Stats by consultant
+      const byConsultant: Record<string, { name: string; total: number; completed: number; revenue: number; sales: number }> = {};
+      consultations?.forEach(c => {
+        const consultantName = (c.consultant as any)?.name || 'Неизвестно';
+        const consultantId = c.consultant_id;
+        if (!byConsultant[consultantId]) {
+          byConsultant[consultantId] = { name: consultantName, total: 0, completed: 0, revenue: 0, sales: 0 };
+        }
+        byConsultant[consultantId].total++;
+        if (c.status === 'completed') {
+          byConsultant[consultantId].completed++;
+          if (c.price) byConsultant[consultantId].revenue += Number(c.price);
+        }
+        if (c.is_sale_closed) byConsultant[consultantId].sales++;
+      });
+
+      // Stats by service
+      const byService: Record<string, { name: string; total: number; revenue: number }> = {};
+      consultations?.forEach(c => {
+        if (c.service_id) {
+          const serviceName = (c.service as any)?.name || 'Неизвестно';
+          if (!byService[c.service_id]) {
+            byService[c.service_id] = { name: serviceName, total: 0, revenue: 0 };
+          }
+          byService[c.service_id].total++;
+          if (c.status === 'completed' && c.price) {
+            byService[c.service_id].revenue += Number(c.price);
+          }
+        }
+      });
+
+      // Stats by day of week
+      const byDayOfWeek: number[] = [0, 0, 0, 0, 0, 0, 0]; // Sun-Sat
+      consultations?.forEach(c => {
+        const day = new Date(c.date).getDay();
+        byDayOfWeek[day]++;
+      });
+
+      // Stats by hour
+      const byHour: number[] = new Array(24).fill(0);
+      consultations?.forEach(c => {
+        if (c.start_time) {
+          const hour = parseInt(c.start_time.split(':')[0]);
+          byHour[hour]++;
+        }
+      });
+
+      // Stats by source (consultation_type)
+      const bySource: Record<string, number> = {};
+      consultations?.forEach(c => {
+        const type = c.consultation_type || 'unknown';
+        bySource[type] = (bySource[type] || 0) + 1;
+      });
+
+      return reply.send({
+        period: {
+          start: startDateStr,
+          end: endDateStr
+        },
+        summary: {
+          total,
+          completed,
+          cancelled,
+          no_show: noShow,
+          sales_closed: salesClosed,
+          total_revenue: totalRevenue
+        },
+        rates: {
+          completion_rate: completionRate,
+          sales_conversion_rate: salesConversionRate,
+          no_show_rate: noShowRate,
+          cancellation_rate: cancellationRate
+        },
+        by_consultant: Object.entries(byConsultant).map(([id, data]) => ({
+          consultant_id: id,
+          ...data,
+          conversion_rate: data.total > 0 ? Math.round((data.completed / data.total) * 100) : 0
+        })),
+        by_service: Object.entries(byService).map(([id, data]) => ({
+          service_id: id,
+          ...data
+        })),
+        by_day_of_week: byDayOfWeek,
+        by_hour: byHour,
+        by_source: bySource
+      });
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching extended stats');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
    * POST /consultations
    * Create a new consultation
    */
@@ -465,12 +648,14 @@ export async function consultationsRoutes(app: FastifyInstance) {
         client_chat_id: body.client_chat_id || null,
         dialog_analysis_id: body.dialog_analysis_id || null,
         user_account_id: userAccountId || null,
+        service_id: body.service_id || null,
         date: body.date,
         start_time: body.start_time,
         end_time: body.end_time,
         status: body.status,
         consultation_type: body.consultation_type,
-        notes: body.notes || null
+        notes: body.notes || null,
+        price: body.price || null
       };
 
       if (body.slot_id) {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee, Settings, Edit, Trash2, Bell } from 'lucide-react';
+import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee, Settings, Edit, Trash2, Bell, Package, BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,9 +16,12 @@ import {
   CreateConsultantData,
   WorkingSchedule,
   WorkingScheduleInput,
+  ConsultationService,
   DAYS_OF_WEEK
 } from '@/types/consultation';
 import { NotificationSettings } from '@/components/NotificationSettings';
+import { ServiceSettings } from '@/components/ServiceSettings';
+import { ExtendedStats } from '@/components/ExtendedStats';
 
 export function Consultations() {
   const { toast } = useToast();
@@ -52,6 +55,9 @@ export function Consultations() {
   const [editingConsultant, setEditingConsultant] = useState<Consultant | null>(null);
   const [editingSchedules, setEditingSchedules] = useState<WorkingScheduleInput[]>([]);
   const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
+  const [isServiceSettingsOpen, setIsServiceSettingsOpen] = useState(false);
+  const [isExtendedStatsOpen, setIsExtendedStatsOpen] = useState(false);
+  const [services, setServices] = useState<ConsultationService[]>([]);
   const [isEditConsultantOpen, setIsEditConsultantOpen] = useState(false);
   const [editingConsultantData, setEditingConsultantData] = useState<CreateConsultantData>({
     name: '',
@@ -64,6 +70,7 @@ export function Consultations() {
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
     consultant_id: '',
+    service_id: '',
     client_name: '',
     client_phone: '',
     date: '',
@@ -99,17 +106,19 @@ export function Consultations() {
     try {
       const dateStr = selectedDate.toISOString().split('T')[0];
 
-      const [consultantsData, consultationsData, statsData, schedulesData] = await Promise.all([
+      const [consultantsData, consultationsData, statsData, schedulesData, servicesData] = await Promise.all([
         consultationService.getConsultants(),
         consultationService.getConsultations(dateStr),
         consultationService.getStats(),
-        consultationService.getAllSchedules().catch(() => [])
+        consultationService.getAllSchedules().catch(() => []),
+        consultationService.getServices(userAccountId).catch(() => [])
       ]);
 
       setConsultants(consultantsData);
       setConsultations(consultationsData);
       setStats(statsData);
       setAllSchedules(schedulesData);
+      setServices(servicesData);
     } catch (error) {
       console.error('Ошибка загрузки данных:', error);
       toast({
@@ -141,16 +150,25 @@ export function Consultations() {
         return;
       }
 
+      // Получить цену услуги если выбрана
+      const selectedService = services.find(s => s.id === newConsultation.service_id);
+      const endTime = newConsultation.end_time ||
+        (selectedService
+          ? calculateEndTimeWithDuration(newConsultation.start_time, selectedService.duration_minutes)
+          : calculateEndTime(newConsultation.start_time));
+
       await consultationService.createConsultation({
         consultant_id: newConsultation.consultant_id,
+        service_id: newConsultation.service_id || undefined,
         client_phone: newConsultation.client_phone,
         client_name: newConsultation.client_name || undefined,
         date: newConsultation.date,
         start_time: newConsultation.start_time,
-        end_time: newConsultation.end_time || calculateEndTime(newConsultation.start_time),
+        end_time: endTime,
         status: 'scheduled',
         consultation_type: 'general',
-        notes: newConsultation.notes || undefined
+        notes: newConsultation.notes || undefined,
+        price: selectedService?.price
       });
 
       toast({
@@ -160,6 +178,7 @@ export function Consultations() {
       setIsNewConsultationOpen(false);
       setNewConsultation({
         consultant_id: '',
+        service_id: '',
         client_name: '',
         client_phone: '',
         date: '',
@@ -363,8 +382,12 @@ export function Consultations() {
   };
 
   const calculateEndTime = (startTime: string): string => {
+    return calculateEndTimeWithDuration(startTime, 30);
+  };
+
+  const calculateEndTimeWithDuration = (startTime: string, durationMinutes: number): string => {
     const [hours, minutes] = startTime.split(':').map(Number);
-    const totalMinutes = hours * 60 + minutes + 30;
+    const totalMinutes = hours * 60 + minutes + durationMinutes;
     const endHours = Math.floor(totalMinutes / 60) % 24;
     const endMinutes = totalMinutes % 60;
     return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
@@ -455,9 +478,19 @@ export function Consultations() {
             Консультанты
           </Button>
 
+          <Button variant="outline" size="sm" onClick={() => setIsServiceSettingsOpen(true)}>
+            <Package className="w-4 h-4 mr-1" />
+            Услуги
+          </Button>
+
           <Button variant="outline" size="sm" onClick={() => setIsNotificationSettingsOpen(true)}>
             <Bell className="w-4 h-4 mr-1" />
             Уведомления
+          </Button>
+
+          <Button variant="outline" size="sm" onClick={() => setIsExtendedStatsOpen(true)}>
+            <BarChart3 className="w-4 h-4 mr-1" />
+            Аналитика
           </Button>
 
           <Button size="sm" onClick={handleOpenNewConsultationModal}>
@@ -683,6 +716,47 @@ export function Consultations() {
                 </SelectContent>
               </Select>
             </div>
+
+            {services.length > 0 && (
+              <div>
+                <Label>Услуга</Label>
+                <Select
+                  value={newConsultation.service_id}
+                  onValueChange={(value) => {
+                    const service = services.find(s => s.id === value);
+                    setNewConsultation(prev => ({
+                      ...prev,
+                      service_id: value,
+                      // Автозаполнение времени окончания на основе длительности услуги
+                      end_time: prev.start_time && service
+                        ? calculateEndTimeWithDuration(prev.start_time, service.duration_minutes)
+                        : prev.end_time
+                    }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Выберите услугу (опционально)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {services.map(service => (
+                      <SelectItem key={service.id} value={service.id}>
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: service.color }}
+                          />
+                          <span>{service.name}</span>
+                          <span className="text-muted-foreground text-xs">
+                            ({service.duration_minutes} мин
+                            {service.price > 0 && `, ${service.price} ₽`})
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div>
               <Label>Имя клиента</Label>
@@ -1091,6 +1165,23 @@ export function Consultations() {
         userAccountId={userAccountId}
         isOpen={isNotificationSettingsOpen}
         onClose={() => setIsNotificationSettingsOpen(false)}
+      />
+
+      {/* Модальное окно настроек услуг */}
+      <ServiceSettings
+        userAccountId={userAccountId}
+        isOpen={isServiceSettingsOpen}
+        onClose={() => {
+          setIsServiceSettingsOpen(false);
+          loadData(); // Перезагрузить данные после изменения услуг
+        }}
+      />
+
+      {/* Модальное окно расширенной статистики */}
+      <ExtendedStats
+        userAccountId={userAccountId}
+        isOpen={isExtendedStatsOpen}
+        onClose={() => setIsExtendedStatsOpen(false)}
       />
     </div>
   );
