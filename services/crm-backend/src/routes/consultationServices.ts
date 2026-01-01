@@ -2,42 +2,60 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 
+/**
+ * Routes for managing consultation services and consultant-service assignments.
+ *
+ * Услуги консультаций:
+ * - CRUD для услуг (consultation_services)
+ * - Назначение услуг консультантам (consultant_services)
+ * - Поддержка кастомных цен и длительности для консультантов
+ */
+
+// Helper: Generate request ID for tracing
+const generateRequestId = () => `svc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
 // Validation schemas
+const UUIDSchema = z.string().uuid();
+
 const CreateServiceSchema = z.object({
   user_account_id: z.string().uuid(),
-  name: z.string().min(1),
-  description: z.string().optional(),
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
   duration_minutes: z.number().int().min(15).max(480).default(60),
-  price: z.number().min(0).default(0),
+  price: z.number().min(0).max(1000000).default(0),
   currency: z.string().length(3).default('RUB'),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default('#3B82F6'),
   is_active: z.boolean().default(true),
-  sort_order: z.number().int().default(0)
+  sort_order: z.number().int().min(0).max(1000).default(0)
 });
 
 const UpdateServiceSchema = z.object({
-  name: z.string().min(1).optional(),
-  description: z.string().nullable().optional(),
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).nullable().optional(),
   duration_minutes: z.number().int().min(15).max(480).optional(),
-  price: z.number().min(0).optional(),
+  price: z.number().min(0).max(1000000).optional(),
   currency: z.string().length(3).optional(),
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   is_active: z.boolean().optional(),
-  sort_order: z.number().int().optional()
+  sort_order: z.number().int().min(0).max(1000).optional()
 });
 
 const AssignServiceToConsultantSchema = z.object({
   consultant_id: z.string().uuid(),
   service_id: z.string().uuid(),
-  custom_price: z.number().min(0).nullable().optional(),
+  custom_price: z.number().min(0).max(1000000).nullable().optional(),
   custom_duration: z.number().int().min(15).max(480).nullable().optional(),
   is_active: z.boolean().default(true)
 });
 
 const UpdateConsultantServiceSchema = z.object({
-  custom_price: z.number().min(0).nullable().optional(),
+  custom_price: z.number().min(0).max(1000000).nullable().optional(),
   custom_duration: z.number().int().min(15).max(480).nullable().optional(),
   is_active: z.boolean().optional()
+});
+
+const BulkUpdateSchema = z.object({
+  service_ids: z.array(z.string().uuid()).max(50)
 });
 
 export async function consultationServicesRoutes(app: FastifyInstance) {
@@ -49,6 +67,9 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Get all services for a user account
    */
   app.get('/consultation-services', async (request, reply) => {
+    const requestId = generateRequestId();
+    const startTime = Date.now();
+
     try {
       const { user_account_id, include_inactive } = request.query as {
         user_account_id: string;
@@ -56,8 +77,22 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
       };
 
       if (!user_account_id) {
+        app.log.warn({ requestId }, 'Missing user_account_id parameter');
         return reply.status(400).send({ error: 'user_account_id is required' });
       }
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(user_account_id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, user_account_id }, 'Invalid user_account_id format');
+        return reply.status(400).send({ error: 'Invalid user_account_id format' });
+      }
+
+      app.log.info({
+        requestId,
+        userAccountId: user_account_id,
+        includeInactive: include_inactive === 'true'
+      }, 'Fetching consultation services');
 
       let query = supabase
         .from('consultation_services')
@@ -73,13 +108,20 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
       const { data, error } = await query;
 
       if (error) {
-        app.log.error({ error }, 'Failed to fetch consultation services');
+        app.log.error({ requestId, error: error.message, code: error.code }, 'Failed to fetch consultation services');
         return reply.status(500).send({ error: error.message });
       }
 
+      const duration = Date.now() - startTime;
+      app.log.info({
+        requestId,
+        count: data?.length || 0,
+        durationMs: duration
+      }, 'Consultation services fetched successfully');
+
       return reply.send(data || []);
     } catch (error: any) {
-      app.log.error({ error }, 'Error fetching consultation services');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error fetching consultation services');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -89,8 +131,19 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Get a single service by ID
    */
   app.get('/consultation-services/:id', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
       const { id } = request.params as { id: string };
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, id }, 'Invalid service ID format');
+        return reply.status(400).send({ error: 'Invalid service ID format' });
+      }
+
+      app.log.info({ requestId, serviceId: id }, 'Fetching consultation service');
 
       const { data, error } = await supabase
         .from('consultation_services')
@@ -100,15 +153,17 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          app.log.warn({ requestId, serviceId: id }, 'Service not found');
           return reply.status(404).send({ error: 'Service not found' });
         }
-        app.log.error({ error }, 'Failed to fetch consultation service');
+        app.log.error({ requestId, error: error.message }, 'Failed to fetch consultation service');
         return reply.status(500).send({ error: error.message });
       }
 
+      app.log.info({ requestId, serviceId: id, serviceName: data.name }, 'Service fetched successfully');
       return reply.send(data);
     } catch (error: any) {
-      app.log.error({ error }, 'Error fetching consultation service');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error fetching consultation service');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -118,8 +173,24 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Create a new service
    */
   app.post('/consultation-services', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
-      const body = CreateServiceSchema.parse(request.body);
+      const parseResult = CreateServiceSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        app.log.warn({ requestId, errors: parseResult.error.errors }, 'Service creation validation failed');
+        return reply.status(400).send({ error: 'Validation error', details: parseResult.error.errors });
+      }
+
+      const body = parseResult.data;
+
+      app.log.info({
+        requestId,
+        userAccountId: body.user_account_id,
+        serviceName: body.name,
+        durationMinutes: body.duration_minutes,
+        price: body.price
+      }, 'Creating consultation service');
 
       const { data, error } = await supabase
         .from('consultation_services')
@@ -128,16 +199,23 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .single();
 
       if (error) {
-        app.log.error({ error }, 'Failed to create consultation service');
+        app.log.error({ requestId, error: error.message, code: error.code }, 'Failed to create consultation service');
         return reply.status(500).send({ error: error.message });
       }
+
+      app.log.info({
+        requestId,
+        serviceId: data.id,
+        serviceName: data.name
+      }, 'Consultation service created successfully');
 
       return reply.status(201).send(data);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        app.log.warn({ requestId, errors: error.errors }, 'Service creation validation failed');
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
       }
-      app.log.error({ error }, 'Error creating consultation service');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error creating consultation service');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -147,9 +225,31 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Update a service
    */
   app.patch('/consultation-services/:id', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
       const { id } = request.params as { id: string };
-      const body = UpdateServiceSchema.parse(request.body);
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, id }, 'Invalid service ID format');
+        return reply.status(400).send({ error: 'Invalid service ID format' });
+      }
+
+      const parseResult = UpdateServiceSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        app.log.warn({ requestId, errors: parseResult.error.errors }, 'Service update validation failed');
+        return reply.status(400).send({ error: 'Validation error', details: parseResult.error.errors });
+      }
+
+      const body = parseResult.data;
+
+      app.log.info({
+        requestId,
+        serviceId: id,
+        updates: Object.keys(body)
+      }, 'Updating consultation service');
 
       const { data, error } = await supabase
         .from('consultation_services')
@@ -160,42 +260,82 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          app.log.warn({ requestId, serviceId: id }, 'Service not found for update');
           return reply.status(404).send({ error: 'Service not found' });
         }
-        app.log.error({ error }, 'Failed to update consultation service');
+        app.log.error({ requestId, error: error.message }, 'Failed to update consultation service');
         return reply.status(500).send({ error: error.message });
       }
+
+      app.log.info({
+        requestId,
+        serviceId: id,
+        serviceName: data.name
+      }, 'Consultation service updated successfully');
 
       return reply.send(data);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        app.log.warn({ requestId, errors: error.errors }, 'Service update validation failed');
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
       }
-      app.log.error({ error }, 'Error updating consultation service');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error updating consultation service');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
    * DELETE /consultation-services/:id
-   * Soft delete a service (set is_active = false)
+   * Soft delete a service (set is_active = false) or hard delete with ?hard=true
    */
   app.delete('/consultation-services/:id', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
       const { id } = request.params as { id: string };
       const { hard } = request.query as { hard?: string };
 
-      if (hard === 'true') {
-        // Hard delete
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, id }, 'Invalid service ID format');
+        return reply.status(400).send({ error: 'Invalid service ID format' });
+      }
+
+      const isHardDelete = hard === 'true';
+
+      app.log.info({
+        requestId,
+        serviceId: id,
+        hardDelete: isHardDelete
+      }, 'Deleting consultation service');
+
+      if (isHardDelete) {
+        // Check for existing consultations using this service
+        const { data: consultations } = await supabase
+          .from('consultations')
+          .select('id')
+          .eq('service_id', id)
+          .limit(1);
+
+        if (consultations && consultations.length > 0) {
+          app.log.warn({ requestId, serviceId: id }, 'Cannot hard delete service with existing consultations');
+          return reply.status(409).send({
+            error: 'Cannot delete service with existing consultations. Use soft delete instead.'
+          });
+        }
+
         const { error } = await supabase
           .from('consultation_services')
           .delete()
           .eq('id', id);
 
         if (error) {
-          app.log.error({ error }, 'Failed to delete consultation service');
+          app.log.error({ requestId, error: error.message }, 'Failed to hard delete consultation service');
           return reply.status(500).send({ error: error.message });
         }
+
+        app.log.info({ requestId, serviceId: id }, 'Consultation service hard deleted');
       } else {
         // Soft delete
         const { error } = await supabase
@@ -204,14 +344,16 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
           .eq('id', id);
 
         if (error) {
-          app.log.error({ error }, 'Failed to deactivate consultation service');
+          app.log.error({ requestId, error: error.message }, 'Failed to deactivate consultation service');
           return reply.status(500).send({ error: error.message });
         }
+
+        app.log.info({ requestId, serviceId: id }, 'Consultation service deactivated (soft delete)');
       }
 
       return reply.status(204).send();
     } catch (error: any) {
-      app.log.error({ error }, 'Error deleting consultation service');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error deleting consultation service');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -223,8 +365,20 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Get all services assigned to a consultant
    */
   app.get('/consultant-services/:consultantId', async (request, reply) => {
+    const requestId = generateRequestId();
+    const startTime = Date.now();
+
     try {
       const { consultantId } = request.params as { consultantId: string };
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(consultantId);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, consultantId }, 'Invalid consultant ID format');
+        return reply.status(400).send({ error: 'Invalid consultant ID format' });
+      }
+
+      app.log.info({ requestId, consultantId }, 'Fetching consultant services');
 
       const { data, error } = await supabase
         .from('consultant_services')
@@ -236,13 +390,21 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .eq('is_active', true);
 
       if (error) {
-        app.log.error({ error }, 'Failed to fetch consultant services');
+        app.log.error({ requestId, error: error.message }, 'Failed to fetch consultant services');
         return reply.status(500).send({ error: error.message });
       }
 
+      const duration = Date.now() - startTime;
+      app.log.info({
+        requestId,
+        consultantId,
+        count: data?.length || 0,
+        durationMs: duration
+      }, 'Consultant services fetched successfully');
+
       return reply.send(data || []);
     } catch (error: any) {
-      app.log.error({ error }, 'Error fetching consultant services');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error fetching consultant services');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -252,8 +414,24 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Assign a service to a consultant
    */
   app.post('/consultant-services', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
-      const body = AssignServiceToConsultantSchema.parse(request.body);
+      const parseResult = AssignServiceToConsultantSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        app.log.warn({ requestId, errors: parseResult.error.errors }, 'Assignment validation failed');
+        return reply.status(400).send({ error: 'Validation error', details: parseResult.error.errors });
+      }
+
+      const body = parseResult.data;
+
+      app.log.info({
+        requestId,
+        consultantId: body.consultant_id,
+        serviceId: body.service_id,
+        customPrice: body.custom_price,
+        customDuration: body.custom_duration
+      }, 'Assigning service to consultant');
 
       const { data, error } = await supabase
         .from('consultant_services')
@@ -265,16 +443,24 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .single();
 
       if (error) {
-        app.log.error({ error }, 'Failed to assign service to consultant');
+        app.log.error({ requestId, error: error.message }, 'Failed to assign service to consultant');
         return reply.status(500).send({ error: error.message });
       }
+
+      app.log.info({
+        requestId,
+        assignmentId: data.id,
+        consultantId: body.consultant_id,
+        serviceId: body.service_id
+      }, 'Service assigned to consultant successfully');
 
       return reply.status(201).send(data);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        app.log.warn({ requestId, errors: error.errors }, 'Assignment validation failed');
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
       }
-      app.log.error({ error }, 'Error assigning service to consultant');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error assigning service to consultant');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -284,9 +470,31 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Update a consultant-service assignment
    */
   app.patch('/consultant-services/:id', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
       const { id } = request.params as { id: string };
-      const body = UpdateConsultantServiceSchema.parse(request.body);
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, id }, 'Invalid assignment ID format');
+        return reply.status(400).send({ error: 'Invalid assignment ID format' });
+      }
+
+      const parseResult = UpdateConsultantServiceSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        app.log.warn({ requestId, errors: parseResult.error.errors }, 'Assignment update validation failed');
+        return reply.status(400).send({ error: 'Validation error', details: parseResult.error.errors });
+      }
+
+      const body = parseResult.data;
+
+      app.log.info({
+        requestId,
+        assignmentId: id,
+        updates: Object.keys(body)
+      }, 'Updating consultant service assignment');
 
       const { data, error } = await supabase
         .from('consultant_services')
@@ -299,16 +507,19 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .single();
 
       if (error) {
-        app.log.error({ error }, 'Failed to update consultant service');
+        app.log.error({ requestId, error: error.message }, 'Failed to update consultant service');
         return reply.status(500).send({ error: error.message });
       }
+
+      app.log.info({ requestId, assignmentId: id }, 'Consultant service assignment updated successfully');
 
       return reply.send(data);
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        app.log.warn({ requestId, errors: error.errors }, 'Assignment update validation failed');
         return reply.status(400).send({ error: 'Validation error', details: error.errors });
       }
-      app.log.error({ error }, 'Error updating consultant service');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error updating consultant service');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -318,8 +529,19 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Remove a service assignment from a consultant
    */
   app.delete('/consultant-services/:id', async (request, reply) => {
+    const requestId = generateRequestId();
+
     try {
       const { id } = request.params as { id: string };
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, id }, 'Invalid assignment ID format');
+        return reply.status(400).send({ error: 'Invalid assignment ID format' });
+      }
+
+      app.log.info({ requestId, assignmentId: id }, 'Deleting consultant service assignment');
 
       const { error } = await supabase
         .from('consultant_services')
@@ -327,35 +549,61 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .eq('id', id);
 
       if (error) {
-        app.log.error({ error }, 'Failed to delete consultant service');
+        app.log.error({ requestId, error: error.message }, 'Failed to delete consultant service');
         return reply.status(500).send({ error: error.message });
       }
 
+      app.log.info({ requestId, assignmentId: id }, 'Consultant service assignment deleted successfully');
+
       return reply.status(204).send();
     } catch (error: any) {
-      app.log.error({ error }, 'Error deleting consultant service');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error deleting consultant service');
       return reply.status(500).send({ error: error.message });
     }
   });
 
   /**
    * PUT /consultant-services/bulk/:consultantId
-   * Bulk update services for a consultant
+   * Bulk update services for a consultant (replace all)
    */
   app.put('/consultant-services/bulk/:consultantId', async (request, reply) => {
+    const requestId = generateRequestId();
+    const startTime = Date.now();
+
     try {
       const { consultantId } = request.params as { consultantId: string };
-      const { service_ids } = request.body as { service_ids: string[] };
 
-      if (!Array.isArray(service_ids)) {
-        return reply.status(400).send({ error: 'service_ids must be an array' });
+      // Validate consultant UUID
+      const consultantUuidResult = UUIDSchema.safeParse(consultantId);
+      if (!consultantUuidResult.success) {
+        app.log.warn({ requestId, consultantId }, 'Invalid consultant ID format');
+        return reply.status(400).send({ error: 'Invalid consultant ID format' });
       }
 
+      const parseResult = BulkUpdateSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        app.log.warn({ requestId, errors: parseResult.error.errors }, 'Bulk update validation failed');
+        return reply.status(400).send({ error: 'Validation error', details: parseResult.error.errors });
+      }
+
+      const { service_ids } = parseResult.data;
+
+      app.log.info({
+        requestId,
+        consultantId,
+        serviceCount: service_ids.length
+      }, 'Bulk updating consultant services');
+
       // Delete existing assignments
-      await supabase
+      const { error: deleteError } = await supabase
         .from('consultant_services')
         .delete()
         .eq('consultant_id', consultantId);
+
+      if (deleteError) {
+        app.log.error({ requestId, error: deleteError.message }, 'Failed to delete existing assignments');
+        return reply.status(500).send({ error: deleteError.message });
+      }
 
       // Insert new assignments
       if (service_ids.length > 0) {
@@ -374,16 +622,31 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
           `);
 
         if (error) {
-          app.log.error({ error }, 'Failed to bulk update consultant services');
+          app.log.error({ requestId, error: error.message }, 'Failed to bulk insert consultant services');
           return reply.status(500).send({ error: error.message });
         }
+
+        const duration = Date.now() - startTime;
+        app.log.info({
+          requestId,
+          consultantId,
+          assignedCount: data?.length || 0,
+          durationMs: duration
+        }, 'Consultant services bulk updated successfully');
 
         return reply.send(data);
       }
 
+      const duration = Date.now() - startTime;
+      app.log.info({
+        requestId,
+        consultantId,
+        durationMs: duration
+      }, 'All consultant services removed (bulk update with empty list)');
+
       return reply.send([]);
     } catch (error: any) {
-      app.log.error({ error }, 'Error bulk updating consultant services');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error bulk updating consultant services');
       return reply.status(500).send({ error: error.message });
     }
   });
@@ -393,12 +656,25 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
    * Get all services grouped by consultant (for booking widget)
    */
   app.get('/services-by-consultant', async (request, reply) => {
+    const requestId = generateRequestId();
+    const startTime = Date.now();
+
     try {
       const { user_account_id } = request.query as { user_account_id: string };
 
       if (!user_account_id) {
+        app.log.warn({ requestId }, 'Missing user_account_id parameter');
         return reply.status(400).send({ error: 'user_account_id is required' });
       }
+
+      // Validate UUID
+      const uuidResult = UUIDSchema.safeParse(user_account_id);
+      if (!uuidResult.success) {
+        app.log.warn({ requestId, user_account_id }, 'Invalid user_account_id format');
+        return reply.status(400).send({ error: 'Invalid user_account_id format' });
+      }
+
+      app.log.info({ requestId, userAccountId: user_account_id }, 'Fetching services by consultant');
 
       // Get all active consultants
       const { data: consultants, error: consultantsError } = await supabase
@@ -409,6 +685,7 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .order('name');
 
       if (consultantsError) {
+        app.log.error({ requestId, error: consultantsError.message }, 'Failed to fetch consultants');
         throw consultantsError;
       }
 
@@ -419,12 +696,15 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
           *,
           service:consultation_services!inner(*)
         `)
-        .eq('is_active', true)
-        .eq('service.is_active', true);
+        .eq('is_active', true);
 
       if (assignmentsError) {
+        app.log.error({ requestId, error: assignmentsError.message }, 'Failed to fetch service assignments');
         throw assignmentsError;
       }
+
+      // Filter assignments to only include active services
+      const activeAssignments = assignments?.filter(a => (a.service as any)?.is_active) || [];
 
       // Get all active services for the account
       const { data: services, error: servicesError } = await supabase
@@ -436,12 +716,13 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .order('name');
 
       if (servicesError) {
+        app.log.error({ requestId, error: servicesError.message }, 'Failed to fetch services');
         throw servicesError;
       }
 
       // Group services by consultant
       const result = consultants?.map(consultant => {
-        const consultantAssignments = assignments?.filter(a => a.consultant_id === consultant.id) || [];
+        const consultantAssignments = activeAssignments?.filter(a => a.consultant_id === consultant.id) || [];
 
         // If consultant has specific assignments, use those
         // Otherwise, return all services (consultant can do everything)
@@ -459,9 +740,17 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         };
       }) || [];
 
+      const duration = Date.now() - startTime;
+      app.log.info({
+        requestId,
+        consultantsCount: consultants?.length || 0,
+        servicesCount: services?.length || 0,
+        durationMs: duration
+      }, 'Services by consultant fetched successfully');
+
       return reply.send(result);
     } catch (error: any) {
-      app.log.error({ error }, 'Error fetching services by consultant');
+      app.log.error({ requestId, error: error.message, stack: error.stack }, 'Error fetching services by consultant');
       return reply.status(500).send({ error: error.message });
     }
   });

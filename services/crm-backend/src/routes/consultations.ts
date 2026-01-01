@@ -448,11 +448,36 @@ export async function consultationsRoutes(app: FastifyInstance) {
    * Get extended consultation statistics with revenue and conversion data
    */
   app.get('/consultations/stats/extended', async (request, reply) => {
+    const requestId = `stats_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const startTime = Date.now();
+
     try {
       const { period, user_account_id } = request.query as {
         period?: 'week' | 'month' | 'quarter' | 'year';
         user_account_id?: string;
       };
+
+      // Validate period if provided
+      const validPeriods = ['week', 'month', 'quarter', 'year'];
+      if (period && !validPeriods.includes(period)) {
+        app.log.warn({ requestId, period }, 'Invalid period parameter');
+        return reply.status(400).send({ error: 'Invalid period. Use: week, month, quarter, year' });
+      }
+
+      // Validate user_account_id if provided
+      if (user_account_id) {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(user_account_id)) {
+          app.log.warn({ requestId, user_account_id }, 'Invalid user_account_id format');
+          return reply.status(400).send({ error: 'Invalid user_account_id format' });
+        }
+      }
+
+      app.log.info({
+        requestId,
+        period: period || 'month',
+        userAccountId: user_account_id || 'all'
+      }, 'Fetching extended consultation stats');
 
       // Calculate date range based on period
       const now = new Date();
@@ -478,6 +503,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
 
       const startDateStr = startDate.toISOString().split('T')[0];
       const endDateStr = now.toISOString().split('T')[0];
+
+      app.log.debug({
+        requestId,
+        dateRange: { start: startDateStr, end: endDateStr }
+      }, 'Calculated date range for stats');
 
       // Build query
       let query = supabase
@@ -505,7 +535,11 @@ export async function consultationsRoutes(app: FastifyInstance) {
       const { data: consultations, error } = await query;
 
       if (error) {
-        app.log.error({ error }, 'Failed to fetch extended stats');
+        app.log.error({
+          requestId,
+          error: error.message,
+          code: error.code
+        }, 'Failed to fetch extended stats');
         return reply.status(500).send({ error: error.message });
       }
 
@@ -573,7 +607,9 @@ export async function consultationsRoutes(app: FastifyInstance) {
       consultations?.forEach(c => {
         if (c.start_time) {
           const hour = parseInt(c.start_time.split(':')[0]);
-          byHour[hour]++;
+          if (hour >= 0 && hour < 24) {
+            byHour[hour]++;
+          }
         }
       });
 
@@ -583,6 +619,17 @@ export async function consultationsRoutes(app: FastifyInstance) {
         const type = c.consultation_type || 'unknown';
         bySource[type] = (bySource[type] || 0) + 1;
       });
+
+      const duration = Date.now() - startTime;
+      app.log.info({
+        requestId,
+        total,
+        completed,
+        totalRevenue,
+        consultantsCount: Object.keys(byConsultant).length,
+        servicesCount: Object.keys(byService).length,
+        durationMs: duration
+      }, 'Extended stats calculated successfully');
 
       return reply.send({
         period: {
