@@ -11,6 +11,7 @@ import {
   getElapsedMs,
   LogTag
 } from '../lib/logUtils.js';
+import { checkInstanceStatus } from '../lib/evolutionApi.js';
 
 // Validation schemas
 const DelayedMessageSchema = z.object({
@@ -1107,11 +1108,56 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         }
       }
 
-      const instancesCount = instances?.length || 0;
-      const linkedCount = instances?.filter((i: any) => i.ai_bot_id).length || 0;
+      // Check real status via Evolution API and update DB
+      const instancesWithRealStatus = await Promise.all(
+        (instances || []).map(async (inst: any) => {
+          try {
+            const statusResult = await checkInstanceStatus(inst.instance_name);
+
+            // If Evolution API returned error, keep original status from DB
+            if (statusResult.error) {
+              app.log.warn({
+                instanceName: inst.instance_name,
+                error: statusResult.error
+              }, '[GET /whatsapp-instances] Evolution API error, keeping DB status');
+              return inst;
+            }
+
+            const newStatus = statusResult.connected ? 'connected' : 'disconnected';
+
+            // Update status in DB if changed
+            if (inst.status !== newStatus) {
+              await supabase
+                .from('whatsapp_instances')
+                .update({ status: newStatus })
+                .eq('id', inst.id);
+
+              app.log.debug({
+                instanceName: inst.instance_name,
+                oldStatus: inst.status,
+                newStatus
+              }, '[GET /whatsapp-instances] Status updated');
+            }
+
+            return { ...inst, status: newStatus };
+          } catch (err: any) {
+            app.log.warn({
+              instanceName: inst.instance_name,
+              error: err.message
+            }, '[GET /whatsapp-instances] Failed to check instance status');
+            return inst; // Keep original status on error
+          }
+        })
+      );
+
+      // Filter only connected instances
+      const connectedInstances = instancesWithRealStatus.filter((inst: any) => inst.status === 'connected');
+
+      const instancesCount = connectedInstances.length;
+      const linkedCount = connectedInstances.filter((i: any) => i.ai_bot_id).length;
 
       // Transform response - use phone from whatsapp_phone_numbers if available
-      const result = (instances || []).map((inst: any) => ({
+      const result = connectedInstances.map((inst: any) => ({
         id: inst.id,
         instanceName: inst.instance_name,
         phoneNumber: phoneNumbersMap[inst.instance_name] || inst.phone_number,
@@ -1127,7 +1173,8 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
 
       app.log.info({
         userId,
-        instancesCount,
+        totalInstances: instances?.length || 0,
+        connectedInstances: instancesCount,
         linkedCount,
         elapsed: Date.now() - startTime
       }, '[GET /whatsapp-instances] Successfully fetched instances');
