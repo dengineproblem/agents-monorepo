@@ -2231,16 +2231,18 @@ export async function processIncomingMessage(
         instance: instanceName
       }, '[processIncomingMessage] Lead not found, creating new one', ['db']);
 
+      const now = new Date().toISOString();
       const { data: newLead, error: createError } = await supabase
         .from('dialog_analysis')
         .insert({
           user_account_id: botConfig.user_account_id,
           instance_name: instanceName,
           contact_phone: phone,
-          last_message: messageText,
+          first_message: now,
+          last_message: now,
           funnel_stage: 'new_lead',
           interest_level: 'unknown',
-          analyzed_at: new Date().toISOString()
+          analyzed_at: now
         })
         .select()
         .single();
