@@ -1241,10 +1241,10 @@ async function generateAIResponse(
     }, '[generateAIResponse] Calling OpenAI API', ['openai', 'api']);
 
     const apiStartTime = Date.now();
-    const completion = await openai.chat.completions.create(completionParams);
-    const apiElapsed = Date.now() - apiStartTime;
+    let completion = await openai.chat.completions.create(completionParams);
+    let apiElapsed = Date.now() - apiStartTime;
 
-    const choice = completion.choices[0];
+    let choice = completion.choices[0];
 
     // Используем расширенный лог с подсчётом стоимости
     logOpenAiCallWithCost(log, {
@@ -1265,33 +1265,173 @@ async function generateAIResponse(
       completionTokens: completion.usage?.completion_tokens
     }, '[generateAIResponse] OpenAI API response received', ['openai']);
 
-    // Проверить вызов функции
-    if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-      const toolCall = choice.message.tool_calls[0];
+    // Обработка tool_calls в цикле (до 3 итераций)
+    const toolCallsExecuted: string[] = [];
+    let iterations = 0;
+    const maxIterations = 3;
 
-      // Безопасный парсинг аргументов функции
-      const functionArgs = safeJsonParse<Record<string, any>>(
-        toolCall.function.arguments || '{}',
-        {},
-        log,
-        `function_call:${toolCall.function.name}`
-      );
+    while (choice.message.tool_calls && choice.message.tool_calls.length > 0 && iterations < maxIterations) {
+      iterations++;
+      log.info({
+        iteration: iterations,
+        toolCallsCount: choice.message.tool_calls.length,
+        toolNames: choice.message.tool_calls.map(tc => tc.function.name)
+      }, '[generateAIResponse] Processing tool calls');
+
+      // Добавить assistant message с tool_calls
+      messages.push({
+        role: 'assistant',
+        content: choice.message.content || null,
+        tool_calls: choice.message.tool_calls
+      } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+
+      // Обработать каждый tool call
+      for (const toolCall of choice.message.tool_calls) {
+        const functionName = toolCall.function.name;
+        const args = safeJsonParse<Record<string, any>>(
+          toolCall.function.arguments || '{}',
+          {},
+          log,
+          `function_call:${functionName}`
+        );
+        toolCallsExecuted.push(functionName);
+
+        log.info({
+          functionName,
+          args
+        }, '[generateAIResponse] Executing tool call');
+
+        let toolResult = '';
+
+        // Обработать consultation tools
+        if (isConsultationTool(functionName) && config.consultation_settings) {
+          toolResult = await handleConsultationTool(
+            functionName,
+            args,
+            {
+              id: lead.id,
+              contact_phone: lead.contact_phone,
+              contact_name: lead.contact_name
+            },
+            config.consultation_settings,
+            log
+          );
+        }
+        // Обработать CAPI tools
+        else if (isCapiTool(functionName)) {
+          toolResult = await handleCapiTool(
+            functionName,
+            args,
+            lead.id,
+            log
+          );
+        }
+        // Обработать Lead Management tools
+        else if (isLeadManagementTool(functionName)) {
+          toolResult = await handleLeadManagementTool(
+            functionName,
+            args,
+            {
+              id: lead.id,
+              contact_phone: lead.contact_phone,
+              contact_name: lead.contact_name,
+              funnel_stage: lead.funnel_stage,
+              interest_level: lead.interest_level
+            },
+            log
+          );
+        }
+        // Обработать Bot Control tools
+        else if (isBotControlTool(functionName)) {
+          toolResult = await handleBotControlTool(
+            functionName,
+            args,
+            { id: lead.id },
+            log
+          );
+        }
+        // Неизвестная функция
+        else {
+          toolResult = `[Функция ${functionName} не найдена]`;
+          log.warn({ functionName }, '[generateAIResponse] Unknown function called');
+        }
+
+        log.info({
+          functionName,
+          resultLen: toolResult.length
+        }, '[generateAIResponse] Tool call completed');
+
+        // Добавить результат как tool message
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: toolResult
+        } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      }
+
+      // Сделать следующий запрос к OpenAI с результатами tool calls
+      log.info({
+        iteration: iterations,
+        msgsCount: messages.length
+      }, '[generateAIResponse] Calling OpenAI with tool results');
+
+      const followUpStartTime = Date.now();
+      completion = await openai.chat.completions.create({
+        model,
+        messages,
+        temperature: config.temperature,
+        max_tokens: 1000,
+        tools: tools.length > 0 ? tools : undefined,
+        tool_choice: tools.length > 0 ? 'auto' : undefined
+      });
+      apiElapsed = Date.now() - followUpStartTime;
+
+      choice = completion.choices[0];
+
+      logOpenAiCallWithCost(log, {
+        model,
+        promptTokens: completion.usage?.prompt_tokens,
+        completionTokens: completion.usage?.completion_tokens,
+        totalTokens: completion.usage?.total_tokens,
+        latencyMs: apiElapsed,
+        success: true
+      });
 
       log.info({
-        funcName: toolCall.function.name,
-        argsPreview: truncateText(toolCall.function.arguments, 80),
-        argsKeys: Object.keys(functionArgs)
-      }, '[generateAIResponse] Function call detected', ['openai']);
+        iteration: iterations,
+        finishReason: choice.finish_reason,
+        hasContent: !!choice.message.content,
+        hasToolCalls: !!choice.message.tool_calls?.length
+      }, '[generateAIResponse] Follow-up response received');
+    }
 
-      log.info({ ...log.getTimings() }, '[generateAIResponse] Completed with function call');
+    // Если после tool calls получили пустой ответ, делаем ещё один запрос без tools
+    if (!choice.message.content && toolCallsExecuted.length > 0) {
+      log.warn({
+        toolCallsExecuted,
+        finishReason: choice.finish_reason
+      }, '[generateAIResponse] Empty response after tool calls, retrying without tools');
 
-      return {
-        text: choice.message.content || '',
-        functionCall: {
-          name: toolCall.function.name,
-          arguments: functionArgs
-        }
-      };
+      const retryCompletion = await openai.chat.completions.create({
+        model,
+        messages,
+        temperature: config.temperature,
+        max_tokens: 1000
+        // Без tools - просто текстовый ответ
+      });
+
+      choice = retryCompletion.choices[0];
+      log.info({
+        retryResponseLen: choice.message.content?.length || 0
+      }, '[generateAIResponse] Retry response received');
+    }
+
+    if (toolCallsExecuted.length > 0) {
+      log.info({
+        toolCallsExecuted,
+        iterations,
+        finalResponseLen: choice.message.content?.length || 0
+      }, '[generateAIResponse] Completed with tool calls executed');
     }
 
     log.info({
