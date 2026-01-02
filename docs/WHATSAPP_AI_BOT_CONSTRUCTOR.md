@@ -1000,6 +1000,15 @@ redis-cli lrange "pending_messages:instance:phone" 0 -1
 
 ## История изменений
 
+### v1.8.0 (2025-01-02)
+- Исправления интеграции с консультациями:
+  - Добавлен цикл обработки tool_calls в `generateAIResponse` (до 3 итераций)
+  - Бот теперь корректно выполняет функции (get_available_consultation_slots, book_consultation и др.) и возвращает текстовый ответ
+  - Добавлены дефолтные значения для consultation settings: `slots_to_show=5`, `days_ahead_limit=14`, `default_duration_minutes=60`
+  - Исправлен `getClientInfo` — убрана несуществующая колонка `chat_id` из запроса к `dialog_analysis`
+  - Исправлен frontend: при включении интеграции консультаций устанавливаются DEFAULT_CONSULTATION_SETTINGS
+  - Исправлен backend Zod schema: добавлены поля `daysAheadLimit`, `autoSummarizeDialog`, `collectClientName`, `timezone`
+
 ### v1.7.0 (2025-01-02)
 - Раздел "Чаты" в AI-боты:
   - Новый UI для просмотра и отправки сообщений WhatsApp
