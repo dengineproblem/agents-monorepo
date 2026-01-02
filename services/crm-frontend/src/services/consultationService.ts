@@ -11,7 +11,12 @@ import {
   NotificationSettings,
   NotificationTemplate,
   CreateNotificationTemplate,
-  NotificationHistory
+  NotificationHistory,
+  ConsultationService,
+  ConsultantService,
+  CreateServiceData,
+  UpdateServiceData,
+  ExtendedStats
 } from '@/types/consultation';
 
 export type { Consultant } from '@/types/consultation';
@@ -237,6 +242,116 @@ export const consultationService = {
   async getNotificationHistory(consultationId: string): Promise<NotificationHistory[]> {
     const response = await fetch(`${API_BASE_URL}/consultation-notifications/history/${consultationId}`);
     if (!response.ok) throw new Error('Failed to fetch notification history');
+    return response.json();
+  },
+
+  // ==================== CONSULTATION SERVICES ====================
+
+  // Получение списка услуг
+  async getServices(userAccountId: string, includeInactive = false): Promise<ConsultationService[]> {
+    const params = new URLSearchParams({ user_account_id: userAccountId });
+    if (includeInactive) params.append('include_inactive', 'true');
+
+    const response = await fetch(`${API_BASE_URL}/consultation-services?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch services');
+    return response.json();
+  },
+
+  // Получение одной услуги
+  async getService(id: string): Promise<ConsultationService> {
+    const response = await fetch(`${API_BASE_URL}/consultation-services/${id}`);
+    if (!response.ok) throw new Error('Failed to fetch service');
+    return response.json();
+  },
+
+  // Создание услуги
+  async createService(data: CreateServiceData): Promise<ConsultationService> {
+    const response = await fetch(`${API_BASE_URL}/consultation-services`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to create service');
+    return response.json();
+  },
+
+  // Обновление услуги
+  async updateService(id: string, data: UpdateServiceData): Promise<ConsultationService> {
+    const response = await fetch(`${API_BASE_URL}/consultation-services/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to update service');
+    return response.json();
+  },
+
+  // Удаление услуги
+  async deleteService(id: string, hard = false): Promise<void> {
+    const params = hard ? '?hard=true' : '';
+    const response = await fetch(`${API_BASE_URL}/consultation-services/${id}${params}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete service');
+  },
+
+  // ==================== CONSULTANT-SERVICE ASSIGNMENTS ====================
+
+  // Получение услуг консультанта
+  async getConsultantServices(consultantId: string): Promise<ConsultantService[]> {
+    const response = await fetch(`${API_BASE_URL}/consultant-services/${consultantId}`);
+    if (!response.ok) throw new Error('Failed to fetch consultant services');
+    return response.json();
+  },
+
+  // Назначение услуги консультанту
+  async assignServiceToConsultant(data: {
+    consultant_id: string;
+    service_id: string;
+    custom_price?: number;
+    custom_duration?: number;
+  }): Promise<ConsultantService> {
+    const response = await fetch(`${API_BASE_URL}/consultant-services`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) throw new Error('Failed to assign service to consultant');
+    return response.json();
+  },
+
+  // Массовое обновление услуг консультанта
+  async bulkUpdateConsultantServices(consultantId: string, serviceIds: string[]): Promise<ConsultantService[]> {
+    const response = await fetch(`${API_BASE_URL}/consultant-services/bulk/${consultantId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service_ids: serviceIds })
+    });
+    if (!response.ok) throw new Error('Failed to bulk update consultant services');
+    return response.json();
+  },
+
+  // Удаление назначения услуги
+  async removeServiceFromConsultant(assignmentId: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/consultant-services/${assignmentId}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to remove service from consultant');
+  },
+
+  // ==================== EXTENDED STATISTICS ====================
+
+  // Получение расширенной статистики
+  async getExtendedStats(params?: {
+    period?: 'week' | 'month' | 'quarter' | 'year';
+    user_account_id?: string;
+  }): Promise<ExtendedStats> {
+    const searchParams = new URLSearchParams();
+    if (params?.period) searchParams.append('period', params.period);
+    if (params?.user_account_id) searchParams.append('user_account_id', params.user_account_id);
+
+    const response = await fetch(`${API_BASE_URL}/consultations/stats/extended?${searchParams}`);
+    if (!response.ok) throw new Error('Failed to fetch extended stats');
     return response.json();
   }
 };

@@ -9,6 +9,57 @@ export interface Consultant {
   updated_at: string;
 }
 
+// ==================== SERVICES ====================
+
+export interface ConsultationService {
+  id: string;
+  user_account_id: string;
+  name: string;
+  description?: string;
+  duration_minutes: number;
+  price: number;
+  currency: string;
+  color: string;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConsultantService {
+  id: string;
+  consultant_id: string;
+  service_id: string;
+  custom_price?: number;
+  custom_duration?: number;
+  is_active: boolean;
+  created_at: string;
+  service?: ConsultationService;
+}
+
+export interface CreateServiceData {
+  user_account_id: string;
+  name: string;
+  description?: string;
+  duration_minutes?: number;
+  price?: number;
+  currency?: string;
+  color?: string;
+  is_active?: boolean;
+  sort_order?: number;
+}
+
+export interface UpdateServiceData {
+  name?: string;
+  description?: string | null;
+  duration_minutes?: number;
+  price?: number;
+  currency?: string;
+  color?: string;
+  is_active?: boolean;
+  sort_order?: number;
+}
+
 export interface WorkingSchedule {
   id: string;
   consultant_id: string;
@@ -43,6 +94,7 @@ export interface Consultation {
   id: string;
   consultant_id: string;
   slot_id?: string;
+  service_id?: string;
   client_phone: string;
   client_name?: string;
   client_chat_id?: string;
@@ -55,6 +107,7 @@ export interface Consultation {
   consultation_type: string;
   actual_duration_minutes?: number;
   is_sale_closed?: boolean;
+  price?: number;
   created_at: string;
   updated_at: string;
 }
@@ -69,6 +122,7 @@ export interface ConsultantWithSchedule extends Consultant {
 export interface ConsultationWithDetails extends Consultation {
   consultant?: Consultant;
   slot?: ConsultationSlot;
+  service?: ConsultationService;
 }
 
 export interface DaySchedule {
@@ -89,6 +143,7 @@ export interface CreateConsultantData {
 export interface CreateConsultationData {
   consultant_id: string;
   slot_id?: string;
+  service_id?: string;
   client_phone: string;
   client_name?: string;
   client_chat_id?: string;
@@ -99,6 +154,7 @@ export interface CreateConsultationData {
   status?: ConsultationStatus;
   notes?: string;
   consultation_type?: string;
+  price?: number;
 }
 
 export interface UpdateConsultationData {
@@ -220,3 +276,41 @@ export const DEFAULT_TEMPLATES = {
   reminder_24h: 'Напоминаем о вашей консультации завтра {{date}} в {{time}}. Ждём вас!',
   reminder_1h: 'Через час у вас консультация в {{time}}. До скорой встречи!'
 };
+
+// ==================== EXTENDED STATISTICS ====================
+
+export interface ExtendedStats {
+  period: {
+    start: string;
+    end: string;
+  };
+  summary: {
+    total: number;
+    completed: number;
+    cancelled: number;
+    no_show: number;
+    sales_closed: number;
+    total_revenue: number;
+  };
+  rates: {
+    completion_rate: number;
+    sales_conversion_rate: number;
+    no_show_rate: number;
+    cancellation_rate: number;
+  };
+  by_consultant: Record<string, {
+    name: string;
+    total: number;
+    completed: number;
+    revenue: number;
+    sales: number;
+  }>;
+  by_service: Record<string, {
+    name: string;
+    total: number;
+    revenue: number;
+  }>;
+  by_day_of_week: number[];
+  by_hour: number[];
+  by_source: Record<string, number>;
+}
