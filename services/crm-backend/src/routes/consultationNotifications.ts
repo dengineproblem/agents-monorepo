@@ -51,11 +51,33 @@ export async function consultationNotificationsRoutes(app: FastifyInstance) {
         return reply.send({
           user_account_id: userAccountId,
           confirmation_enabled: true,
-          confirmation_template: 'Здравствуйте{{#client_name}}, {{client_name}}{{/client_name}}! Вы записаны на консультацию {{date}} в {{time}}. До встречи!',
+          confirmation_template: `*{{#client_name}}{{client_name}}, {{/client_name}}подтверждаем запись:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ`,
           reminder_24h_enabled: true,
-          reminder_24h_template: 'Напоминаем о вашей консультации завтра {{date}} в {{time}}. Ждём вас!',
+          reminder_24h_template: `*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем о Вашей онлайн консультации завтра:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ`,
           reminder_1h_enabled: true,
-          reminder_1h_template: 'Через час у вас консультация в {{time}}. До скорой встречи!'
+          reminder_1h_template: `*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем Вам об онлайн консультации, маркетолог скоро свяжется с вами:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+До Вашего визита осталось {{time_remaining}}
+-------------------------------------------
+*PERFORMANTE AI AGENCY*`
         });
       }
 

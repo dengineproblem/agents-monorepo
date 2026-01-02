@@ -268,13 +268,37 @@ export const TEMPLATE_VARIABLES = [
   { key: '{{client_name}}', description: 'Имя клиента' },
   { key: '{{date}}', description: 'Дата консультации (15 января)' },
   { key: '{{time}}', description: 'Время консультации (14:00)' },
-  { key: '{{consultant_name}}', description: 'Имя консультанта' }
+  { key: '{{consultant_name}}', description: 'Имя консультанта' },
+  { key: '{{service_name}}', description: 'Название услуги' },
+  { key: '{{time_remaining}}', description: 'Оставшееся время (1 час)' }
 ];
 
 export const DEFAULT_TEMPLATES = {
-  confirmation: 'Здравствуйте{{#client_name}}, {{client_name}}{{/client_name}}! Вы записаны на консультацию {{date}} в {{time}}. До встречи!',
-  reminder_24h: 'Напоминаем о вашей консультации завтра {{date}} в {{time}}. Ждём вас!',
-  reminder_1h: 'Через час у вас консультация в {{time}}. До скорой встречи!'
+  confirmation: `*{{#client_name}}{{client_name}}, {{/client_name}}подтверждаем запись:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ`,
+  reminder_24h: `*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем о Вашей онлайн консультации завтра:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ`,
+  reminder_1h: `*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем Вам об онлайн консультации, маркетолог скоро свяжется с вами:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+До Вашего визита осталось {{time_remaining}}
+-------------------------------------------
+*PERFORMANTE AI AGENCY*`
 };
 
 // ==================== EXTENDED STATISTICS ====================

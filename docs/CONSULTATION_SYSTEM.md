@@ -160,15 +160,37 @@ CREATE TABLE consultation_notification_settings (
 
     -- Подтверждение записи
     confirmation_enabled BOOLEAN DEFAULT true,
-    confirmation_template TEXT DEFAULT 'Здравствуйте{{#client_name}}, {{client_name}}{{/client_name}}! Вы записаны на консультацию {{date}} в {{time}}. До встречи!',
+    confirmation_template TEXT DEFAULT '*{{#client_name}}{{client_name}}, {{/client_name}}подтверждаем запись:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ',
 
     -- Напоминание за 24 часа
     reminder_24h_enabled BOOLEAN DEFAULT true,
-    reminder_24h_template TEXT DEFAULT 'Напоминаем о вашей консультации завтра {{date}} в {{time}}. Ждём вас!',
+    reminder_24h_template TEXT DEFAULT '*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем о Вашей онлайн консультации завтра:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ',
 
     -- Напоминание за 1 час
     reminder_1h_enabled BOOLEAN DEFAULT true,
-    reminder_1h_template TEXT DEFAULT 'Через час у вас консультация в {{time}}. До скорой встречи!',
+    reminder_1h_template TEXT DEFAULT '*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем Вам об онлайн консультации, маркетолог скоро свяжется с вами:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+До Вашего визита осталось {{time_remaining}}
+-------------------------------------------
+*PERFORMANTE AI AGENCY*',
 
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -383,6 +405,8 @@ curl -X PUT http://localhost:8084/consultations/{id} \
 | `{{date}}` | Дата в русском формате | 15 января |
 | `{{time}}` | Время начала | 10:00 |
 | `{{consultant_name}}` | Имя консультанта | Иван Петров |
+| `{{service_name}}` | Название услуги | Консультация по маркетингу |
+| `{{time_remaining}}` | Оставшееся время до визита | 1 час |
 
 ### Условные секции
 

@@ -74,13 +74,13 @@ export function getLeadManagementToolDefinitions(): OpenAI.Chat.Completions.Chat
       type: 'function',
       function: {
         name: 'update_lead_info',
-        description: 'Обновить информацию о клиенте когда он сообщает важные данные: имя, название компании, тип бизнеса, примерный бюджет или заметки.',
+        description: 'Обновить информацию о клиенте когда он сообщает важные данные. ВАЖНО: Используй эту функцию СРАЗУ когда клиент называет своё имя — это сохранит его в карточку клиента для будущих обращений и уведомлений.',
         parameters: {
           type: 'object',
           properties: {
             contact_name: {
               type: 'string',
-              description: 'Имя клиента'
+              description: 'Имя клиента. Сохрани сразу когда клиент представляется или отвечает на вопрос "как к вам обращаться"'
             },
             company_name: {
               type: 'string',

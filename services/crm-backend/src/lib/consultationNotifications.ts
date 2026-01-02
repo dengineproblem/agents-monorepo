@@ -14,6 +14,7 @@ interface Consultation {
   date: string;
   start_time: string;
   end_time: string;
+  service_id?: string;
 }
 
 interface NotificationSettings {
@@ -43,11 +44,33 @@ interface NotificationResult {
 
 const DEFAULT_SETTINGS: NotificationSettings = {
   confirmation_enabled: true,
-  confirmation_template: 'Здравствуйте{{#client_name}}, {{client_name}}{{/client_name}}! Вы записаны на консультацию {{date}} в {{time}}. До встречи!',
+  confirmation_template: `*{{#client_name}}{{client_name}}, {{/client_name}}подтверждаем запись:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ`,
   reminder_24h_enabled: true,
-  reminder_24h_template: 'Напоминаем о вашей консультации завтра {{date}} в {{time}}. Ждём вас!',
+  reminder_24h_template: `*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем о Вашей онлайн консультации завтра:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+*PERFORMANTE AI AGENCY*
+Увеличиваем прибыль при помощи ИИ`,
   reminder_1h_enabled: true,
-  reminder_1h_template: 'Через час у вас консультация в {{time}}. До скорой встречи!'
+  reminder_1h_template: `*{{#client_name}}{{client_name}}, {{/client_name}}напоминаем Вам об онлайн консультации, маркетолог скоро свяжется с вами:*
+
+*Дата:* {{date}}
+*Время:* {{time}}{{#service_name}}
+*Услуга:* {{service_name}}{{/service_name}}
+
+До Вашего визита осталось {{time_remaining}}
+-------------------------------------------
+*PERFORMANTE AI AGENCY*`
 };
 
 // Казахстанский часовой пояс (UTC+5)
@@ -59,7 +82,43 @@ const MAX_RETRY_ATTEMPTS = 3;
 // Минимальное время до консультации для планирования (5 минут)
 const MIN_SCHEDULE_AHEAD_MS = 5 * 60 * 1000;
 
+// Имена которые считаются "мусорными" и не должны использоваться в уведомлениях
+// (обычно это дефолтные имена WhatsApp или бессмысленные значения)
+const INVALID_NAMES = [
+  'voce', 'você', 'user', 'usuario', 'usuário',
+  'cliente', 'client', 'guest', 'visitante',
+  'whatsapp', 'wa', 'undefined', 'null', 'test',
+  'unknown', 'desconhecido', 'anônimo', 'anonimo'
+];
+
 // ==================== UTILITY FUNCTIONS ====================
+
+/**
+ * Validate client name - filter out garbage/default WhatsApp names
+ * Returns cleaned name or undefined if invalid
+ */
+function validateClientName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+
+  const trimmed = name.trim();
+  if (!trimmed) return undefined;
+
+  // Слишком короткое имя (1-2 символа) скорее всего мусор
+  if (trimmed.length < 3) return undefined;
+
+  // Проверяем на "мусорные" имена (без учёта регистра)
+  const lowerName = trimmed.toLowerCase();
+  if (INVALID_NAMES.includes(lowerName)) {
+    return undefined;
+  }
+
+  // Проверяем что имя содержит хотя бы одну букву
+  if (!/[a-zA-Zа-яА-ЯёЁ]/.test(trimmed)) {
+    return undefined;
+  }
+
+  return trimmed;
+}
 
 /**
  * Get current time in local timezone (UTC+5)
@@ -148,8 +207,13 @@ function renderTemplate(template: string, variables: Record<string, string | und
     result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value || '');
   }
 
-  // Убираем лишние пробелы
-  return result.replace(/\s+/g, ' ').trim();
+  // Убираем лишние пустые строки (больше 2 подряд) но сохраняем переносы
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  // Убираем пробелы в начале и конце строк
+  result = result.split('\n').map(line => line.trim()).join('\n');
+
+  return result.trim();
 }
 
 /**
@@ -238,6 +302,67 @@ async function getConsultantName(consultantId: string): Promise<string> {
   }
 
   return data?.name || '';
+}
+
+/**
+ * Get service name by ID
+ */
+async function getServiceName(serviceId: string | undefined): Promise<string> {
+  if (!serviceId) return '';
+
+  const { data, error } = await supabase
+    .from('consultation_services')
+    .select('name')
+    .eq('id', serviceId)
+    .single();
+
+  if (error) {
+    logger.warn({ serviceId, error: error.message }, '[Notification] Failed to get service name');
+    return '';
+  }
+
+  return data?.name || '';
+}
+
+/**
+ * Format remaining time until consultation in Russian
+ * e.g., "1 час", "30 минут", "2 часа 15 минут"
+ */
+function formatTimeRemaining(minutesRemaining: number): string {
+  if (minutesRemaining <= 0) return 'скоро';
+
+  const hours = Math.floor(minutesRemaining / 60);
+  const minutes = minutesRemaining % 60;
+
+  const parts: string[] = [];
+
+  if (hours > 0) {
+    if (hours === 1) {
+      parts.push('1 час');
+    } else if (hours >= 2 && hours <= 4) {
+      parts.push(`${hours} часа`);
+    } else {
+      parts.push(`${hours} часов`);
+    }
+  }
+
+  if (minutes > 0) {
+    if (minutes === 1) {
+      parts.push('1 минута');
+    } else if (minutes >= 2 && minutes <= 4) {
+      parts.push(`${minutes} минуты`);
+    } else if (minutes >= 5 && minutes <= 20) {
+      parts.push(`${minutes} минут`);
+    } else if (minutes % 10 === 1) {
+      parts.push(`${minutes} минута`);
+    } else if (minutes % 10 >= 2 && minutes % 10 <= 4) {
+      parts.push(`${minutes} минуты`);
+    } else {
+      parts.push(`${minutes} минут`);
+    }
+  }
+
+  return parts.join(' ') || 'скоро';
 }
 
 /**
@@ -442,16 +567,21 @@ export async function sendConfirmationNotification(
 
     log.debug('Instance found', { instanceName });
 
-    // Получение имени консультанта
-    const consultantName = await getConsultantName(consultation.consultant_id);
-    log.debug('Consultant name loaded', { consultantName });
+    // Получение имени консультанта и услуги
+    const [consultantName, serviceName] = await Promise.all([
+      getConsultantName(consultation.consultant_id),
+      getServiceName(consultation.service_id)
+    ]);
+    log.debug('Consultant and service names loaded', { consultantName, serviceName });
 
-    // Рендеринг шаблона
+    // Рендеринг шаблона (валидируем имя клиента)
+    const validatedClientName = validateClientName(consultation.client_name);
     const messageText = renderTemplate(settings.confirmation_template, {
-      client_name: consultation.client_name,
+      client_name: validatedClientName,
       date: formatDateRussian(consultation.date),
       time: formatTime(consultation.start_time),
-      consultant_name: consultantName
+      consultant_name: consultantName,
+      service_name: serviceName
     });
 
     log.debug('Message rendered', { messageLength: messageText.length });
@@ -522,7 +652,10 @@ export async function scheduleReminderNotifications(
     }
 
     const settings = await getNotificationSettings(consultation.user_account_id);
-    const consultantName = await getConsultantName(consultation.consultant_id);
+    const [consultantName, serviceName] = await Promise.all([
+      getConsultantName(consultation.consultant_id),
+      getServiceName(consultation.service_id)
+    ]);
 
     // Расчёт времени консультации
     const consultationDateTime = parseConsultationDateTime(consultation.date, consultation.start_time);
@@ -533,11 +666,15 @@ export async function scheduleReminderNotifications(
       now: now.toISOString()
     });
 
-    const variables = {
-      client_name: consultation.client_name,
+    // Валидируем имя клиента для уведомлений
+    const validatedClientName = validateClientName(consultation.client_name);
+
+    const baseVariables = {
+      client_name: validatedClientName,
       date: formatDateRussian(consultation.date),
       time: formatTime(consultation.start_time),
-      consultant_name: consultantName
+      consultant_name: consultantName,
+      service_name: serviceName
     };
 
     // Функция для добавления напоминания
@@ -564,6 +701,12 @@ export async function scheduleReminderNotifications(
         skipped++;
         return;
       }
+
+      // Добавляем time_remaining для каждого напоминания
+      const variables = {
+        ...baseVariables,
+        time_remaining: formatTimeRemaining(minutesBefore)
+      };
 
       const messageText = renderTemplate(template, variables);
 

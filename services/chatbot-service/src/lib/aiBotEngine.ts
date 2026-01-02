@@ -88,6 +88,48 @@ const MESSAGE_RATE_LIMIT: RateLimitConfig = {
   tokensPerRequest: 1
 };
 
+// Имена которые считаются "мусорными" (дефолтные имена WhatsApp или бессмысленные значения)
+const INVALID_CLIENT_NAMES = [
+  'voce', 'você', 'user', 'usuario', 'usuário',
+  'cliente', 'client', 'guest', 'visitante',
+  'whatsapp', 'wa', 'undefined', 'null', 'test',
+  'unknown', 'desconhecido', 'anônimo', 'anonimo',
+  'меня легко найти', 'меня сложно потерять', 'привет',
+  'hi', 'hello', 'hola', 'oi', 'olá'
+];
+
+/**
+ * Validate client name - filter out garbage/default WhatsApp names
+ * Returns object with validated name and flag indicating if name looks invalid
+ */
+function validateClientName(name: string | undefined): { name: string | undefined; isInvalid: boolean } {
+  if (!name) return { name: undefined, isInvalid: true };
+
+  const trimmed = name.trim();
+  if (!trimmed) return { name: undefined, isInvalid: true };
+
+  // Слишком короткое имя (1-2 символа) скорее всего мусор
+  if (trimmed.length < 3) return { name: undefined, isInvalid: true };
+
+  // Проверяем на "мусорные" имена (без учёта регистра)
+  const lowerName = trimmed.toLowerCase();
+  if (INVALID_CLIENT_NAMES.includes(lowerName)) {
+    return { name: undefined, isInvalid: true };
+  }
+
+  // Имя состоит только из цифр или спецсимволов
+  if (!/[a-zA-Zа-яА-ЯёЁ]/.test(trimmed)) {
+    return { name: undefined, isInvalid: true };
+  }
+
+  // Слишком длинное "имя" скорее всего фраза, а не имя (>30 символов)
+  if (trimmed.length > 30) {
+    return { name: undefined, isInvalid: true };
+  }
+
+  return { name: trimmed, isInvalid: false };
+}
+
 // Типы для настроек бота из конструктора
 export interface AIBotConfig {
   id: string;
@@ -1103,16 +1145,25 @@ async function generateAIResponse(
   }
 
   // Добавить информацию о клиенте (маскируем телефон)
+  // Валидируем имя клиента - фильтруем мусорные имена WhatsApp
+  const { name: validatedName, isInvalid: nameIsInvalid } = validateClientName(lead.contact_name);
+
   const clientInfo = `
 Информация о клиенте:
-- Имя: ${lead.contact_name || 'неизвестно'}
+- Имя: ${validatedName || 'НЕ ИЗВЕСТНО'}${nameIsInvalid ? ' (требуется уточнить!)' : ''}
 - Телефон: ${lead.contact_phone}
 - Тип бизнеса: ${lead.business_type || 'неизвестно'}
 - Уровень интереса: ${lead.interest_level || 'неизвестно'}
-- Этап воронки: ${lead.funnel_stage}`;
+- Этап воронки: ${lead.funnel_stage}
+
+${nameIsInvalid ? `ВАЖНО: Имя клиента неизвестно или выглядит как мусор из WhatsApp.
+При возможности естественно спроси как к нему обращаться и сохрани имя через функцию update_lead_info.
+НЕ используй обращение "уважаемый клиент" - лучше общайся без имени до уточнения.` : ''}`;
 
   log.debug({
     clientName: lead.contact_name,
+    validatedName,
+    nameIsInvalid,
     businessType: lead.business_type,
     funnelStage: lead.funnel_stage
   }, '[generateAIResponse] Client info added to prompt');
