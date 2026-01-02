@@ -11,7 +11,7 @@ import {
   getElapsedMs,
   LogTag
 } from '../lib/logUtils.js';
-import { fetchAllInstances } from '../lib/evolutionApi.js';
+import { getEvolutionInstances } from '../lib/evolutionDb.js';
 
 // Validation schemas
 const DelayedMessageSchema = z.object({
@@ -1108,34 +1108,15 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         }
       }
 
-      // Fetch all instances from Evolution API (single request)
-      const evolutionResult = await fetchAllInstances();
-
-      // Create a map of instance statuses from Evolution API
-      const evolutionStatusMap = new Map<string, boolean>();
-      if (!evolutionResult.error) {
-        for (const inst of evolutionResult.instances) {
-          evolutionStatusMap.set(inst.instanceName, inst.connected);
-        }
-        app.log.debug({
-          evolutionInstancesCount: evolutionResult.instances.length,
-          connectedInEvolution: evolutionResult.instances.filter(i => i.connected).length
-        }, '[GET /whatsapp-instances] Fetched Evolution API instances');
-      } else {
-        app.log.warn({
-          error: evolutionResult.error
-        }, '[GET /whatsapp-instances] Failed to fetch Evolution instances, using DB status');
-      }
+      // Get instance statuses from Evolution PostgreSQL
+      const evolutionInstances = await getEvolutionInstances();
+      const evolutionStatusMap = new Map(
+        evolutionInstances.map(inst => [inst.instanceName, inst.connected])
+      );
 
       // Update statuses in DB and filter connected instances
       const instancesWithRealStatus = await Promise.all(
         (instances || []).map(async (inst: any) => {
-          // If Evolution API failed, keep DB status
-          if (evolutionResult.error) {
-            return inst;
-          }
-
-          // Check if instance exists in Evolution API
           const isConnected = evolutionStatusMap.get(inst.instance_name);
           const newStatus = isConnected === true ? 'connected' : 'disconnected';
 
@@ -1145,13 +1126,6 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
               .from('whatsapp_instances')
               .update({ status: newStatus })
               .eq('id', inst.id);
-
-            app.log.debug({
-              instanceName: inst.instance_name,
-              oldStatus: inst.status,
-              newStatus,
-              existsInEvolution: evolutionStatusMap.has(inst.instance_name)
-            }, '[GET /whatsapp-instances] Status updated');
           }
 
           return { ...inst, status: newStatus };

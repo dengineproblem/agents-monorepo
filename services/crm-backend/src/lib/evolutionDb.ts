@@ -341,6 +341,32 @@ export async function getNewLeads(
 }
 
 /**
+ * Get all instances with their connection status from Evolution PostgreSQL
+ * @returns Array of instances with their status
+ */
+export async function getEvolutionInstances(): Promise<Array<{
+  instanceName: string;
+  status: string;
+  connected: boolean;
+}>> {
+  const query = `
+    SELECT
+      name as instance_name,
+      "connectionStatus" as status
+    FROM "Instance"
+    ORDER BY "createdAt" DESC
+  `;
+
+  const result = await evolutionQuery(query, []);
+
+  return result.rows.map(row => ({
+    instanceName: row.instance_name,
+    status: row.status || 'unknown',
+    connected: row.status === 'open'
+  }));
+}
+
+/**
  * Close the Evolution PostgreSQL connection pool
  * (Should be called on application shutdown)
  */
