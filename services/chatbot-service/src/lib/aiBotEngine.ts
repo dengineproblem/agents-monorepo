@@ -2241,7 +2241,6 @@ export async function processIncomingMessage(
           first_message: now,
           last_message: now,
           funnel_stage: 'new_lead',
-          interest_level: 'unknown',
           analyzed_at: now
         })
         .select()
