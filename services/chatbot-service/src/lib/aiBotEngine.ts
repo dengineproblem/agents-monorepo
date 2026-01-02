@@ -2202,7 +2202,7 @@ export async function processIncomingMessage(
 
     ctxLog.debug({ phone: maskPhone(phone) }, '[processIncomingMessage] Fetching lead info', ['db']);
 
-    const { data: lead, error: leadError } = await supabase
+    let { data: lead, error: leadError } = await supabase
       .from('dialog_analysis')
       .select('*')
       .eq('contact_phone', phone)
@@ -2224,20 +2224,44 @@ export async function processIncomingMessage(
       return { processed: false, reason: 'lead_fetch_error', correlationId: ctxLog.context.correlationId };
     }
 
+    // Если лид не найден - создаём автоматически
     if (!lead) {
-      ctxLog.warn({
+      ctxLog.info({
         phone: maskPhone(phone),
-        reason: 'lead_not_found',
-        ...ctxLog.getTimings()
-      }, '[processIncomingMessage] Lead not found in dialog_analysis', ['db']);
+        instance: instanceName
+      }, '[processIncomingMessage] Lead not found, creating new one', ['db']);
 
-      logProcessingSummary(ctxLog, {
-        success: false,
-        finalStage: currentStage,
-        errorMessage: 'Lead not found'
-      });
+      const { data: newLead, error: createError } = await supabase
+        .from('dialog_analysis')
+        .insert({
+          user_account_id: botConfig.user_account_id,
+          instance_name: instanceName,
+          contact_phone: phone,
+          last_message: messageText,
+          funnel_stage: 'new_lead',
+          interest_level: 'unknown',
+          analyzed_at: new Date().toISOString()
+        })
+        .select()
+        .single();
 
-      return { processed: false, reason: 'lead_not_found', correlationId: ctxLog.context.correlationId };
+      if (createError || !newLead) {
+        ctxLog.error(createError, '[processIncomingMessage] Failed to create lead', {
+          phone: maskPhone(phone),
+          instance: instanceName
+        }, ['db']);
+
+        logProcessingSummary(ctxLog, {
+          success: false,
+          finalStage: currentStage,
+          errorMessage: 'Failed to create lead'
+        });
+
+        return { processed: false, reason: 'lead_create_error', correlationId: ctxLog.context.correlationId };
+      }
+
+      lead = newLead;
+      ctxLog.info({ leadId: maskUuid(newLead.id) }, '[processIncomingMessage] New lead created', ['db']);
     }
 
     // Обновляем контекст с данными лида
