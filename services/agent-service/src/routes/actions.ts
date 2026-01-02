@@ -121,7 +121,7 @@ export async function actionsRoutes(app: FastifyInstance) {
           if (act.type === 'PauseAd') {
             result = await handleAction(act as any, accessToken, {
               pageId: tokenInfo.pageId,
-              userAccountId: account.userAccountId,
+              userAccountId: account.userAccountId || undefined,
               adAccountId: resolvedAdAccountId ?? undefined,
               accountId: tokenInfo.accountId, // UUID из ad_accounts
               whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
@@ -132,7 +132,7 @@ export async function actionsRoutes(app: FastifyInstance) {
           } else {
             result = await handleAction(act as any, accessToken, {
               pageId: tokenInfo.pageId,
-              userAccountId: account.userAccountId,
+              userAccountId: account.userAccountId || undefined,
               adAccountId: resolvedAdAccountId ?? undefined,
               accountId: tokenInfo.accountId, // UUID из ad_accounts
               instagramId: tokenInfo.instagramId,
@@ -191,9 +191,9 @@ export async function actionsRoutes(app: FastifyInstance) {
 type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; accountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean };
 type ResolveErr = { ok: false; message: string };
 
-async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string; accountId?: string; pageId?: string }): Promise<ResolveOk | ResolveErr> {
+async function resolveAccessToken(account: { userAccountId?: string | null; accessToken?: string | null; adAccountId?: string | null; whatsappPhoneNumber?: string | null; accountId?: string | null; pageId?: string | null }): Promise<ResolveOk | ResolveErr> {
   if (account.accessToken && account.accessToken.length >= 10) {
-    return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId, accountId: account.accountId, whatsappPhoneNumber: account.whatsappPhoneNumber, pageId: account.pageId };
+    return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId || undefined, accountId: account.accountId || undefined, whatsappPhoneNumber: account.whatsappPhoneNumber || undefined, pageId: account.pageId || undefined };
   }
   if (!account.userAccountId) {
     return { ok: false, message: 'Provide accessToken or userAccountId' };

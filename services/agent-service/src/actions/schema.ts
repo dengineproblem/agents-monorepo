@@ -1,11 +1,12 @@
 import { z } from 'zod';
 
 export const AccountSchema = z.object({
-  userAccountId: z.string().uuid().optional(),
-  adAccountId: z.string().min(5).optional(),
-  accessToken: z.string().min(10).optional(),
-  whatsappPhoneNumber: z.string().optional(), // WhatsApp phone number from Supabase
-  accountId: z.string().uuid().optional(), // UUID из ad_accounts для мультиаккаунтного режима
+  userAccountId: z.string().uuid().nullish(),
+  adAccountId: z.string().min(5).nullish(),
+  accessToken: z.string().min(10).nullish(),
+  whatsappPhoneNumber: z.string().nullish(), // WhatsApp phone number from Supabase
+  accountId: z.string().uuid().nullish(), // UUID из ad_accounts для мультиаккаунтного режима
+  pageId: z.string().nullish(), // Facebook Page ID
 }).refine(
   (data) => Boolean(data.accessToken || data.userAccountId),
   { message: 'Either accessToken or userAccountId must be provided' }
