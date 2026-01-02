@@ -173,10 +173,10 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, message, app);
 
     // ✅ Вызываем бота для обычных сообщений (не из рекламы)
-    const clientPhone = (remoteJidAlt || remoteJid)
+    // Важно: используем remoteJid (реальный номер), а не remoteJidAlt (LID)
+    const clientPhone = remoteJid
       .replace('@s.whatsapp.net', '')
-      .replace('@c.us', '')
-      .replace('@lid', '');
+      .replace('@c.us', '');
     await tryBotResponse(clientPhone, instance, messageText, app);
 
     return;
