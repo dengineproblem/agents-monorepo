@@ -171,6 +171,14 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
     // Пробуем умный матчинг по client_question
     await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, message, app);
+
+    // ✅ Вызываем бота для обычных сообщений (не из рекламы)
+    const clientPhone = (remoteJidAlt || remoteJid)
+      .replace('@s.whatsapp.net', '')
+      .replace('@c.us', '')
+      .replace('@lid', '');
+    await tryBotResponse(clientPhone, instance, messageText, app);
+
     return;
   }
 
