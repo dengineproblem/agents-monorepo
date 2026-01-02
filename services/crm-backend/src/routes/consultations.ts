@@ -339,8 +339,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
         .from('consultations')
         .select(`
           *,
-          consultant:consultants(*),
-          service:consultation_services(*)
+          consultant:consultants(*)
         `)
         .order('date', { ascending: true })
         .order('start_time', { ascending: true });
@@ -360,7 +359,6 @@ export async function consultationsRoutes(app: FastifyInstance) {
       const consultations = (data || []).map(item => ({
         ...item,
         consultant: Array.isArray(item.consultant) ? item.consultant[0] : item.consultant,
-        service: Array.isArray(item.service) ? item.service[0] : item.service,
         slot: item.slot_id ? {
           id: item.slot_id,
           consultant_id: item.consultant_id,
@@ -522,8 +520,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
           consultant_id,
           service_id,
           consultation_type,
-          consultant:consultants(name),
-          service:consultation_services(name, price)
+          consultant:consultants(name)
         `)
         .gte('date', startDateStr)
         .lte('date', endDateStr);
@@ -580,20 +577,8 @@ export async function consultationsRoutes(app: FastifyInstance) {
         if (c.is_sale_closed) byConsultant[consultantId].sales++;
       });
 
-      // Stats by service
+      // Stats by service (временно отключено до обновления схемы)
       const byService: Record<string, { name: string; total: number; revenue: number }> = {};
-      consultations?.forEach(c => {
-        if (c.service_id) {
-          const serviceName = (c.service as any)?.name || 'Неизвестно';
-          if (!byService[c.service_id]) {
-            byService[c.service_id] = { name: serviceName, total: 0, revenue: 0 };
-          }
-          byService[c.service_id].total++;
-          if (c.status === 'completed' && c.price) {
-            byService[c.service_id].revenue += Number(c.price);
-          }
-        }
-      });
 
       // Stats by day of week
       const byDayOfWeek: number[] = [0, 0, 0, 0, 0, 0, 0]; // Sun-Sat

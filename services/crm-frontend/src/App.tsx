@@ -3,6 +3,9 @@ import { Sidebar } from './components/Sidebar';
 import { WhatsAppCRM } from './pages/WhatsAppCRM';
 import { ReactivationCampaigns } from './pages/ReactivationCampaigns';
 import { Consultations } from './pages/Consultations';
+import { ConsultantsPage } from './pages/ConsultantsPage';
+import { ServicesPage } from './pages/ServicesPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import { BotsList } from './pages/BotsList';
 import { BotEditor } from './pages/BotEditor';
 import { PublicBooking } from './pages/PublicBooking';
@@ -41,6 +44,9 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<WhatsAppCRM />} />
         <Route path="/consultations" element={<Consultations />} />
+        <Route path="/consultations/consultants" element={<ConsultantsPage />} />
+        <Route path="/consultations/services" element={<ServicesPage />} />
+        <Route path="/consultations/analytics" element={<AnalyticsPage />} />
         <Route path="/reactivation" element={<ReactivationCampaigns />} />
         <Route path="/bots" element={<BotsList />} />
         <Route path="/bots/:botId" element={<BotEditor />} />

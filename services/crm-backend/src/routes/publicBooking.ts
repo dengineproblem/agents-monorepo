@@ -468,7 +468,7 @@ export async function publicBookingRoutes(app: FastifyInstance) {
           user_account_id: body.user_account_id,
           client_phone: consultation.client_phone,
           client_name: consultation.client_name,
-          dialog_analysis_id: null,
+          dialog_analysis_id: undefined,
           date: consultation.date,
           start_time: consultation.start_time,
           end_time: consultation.end_time

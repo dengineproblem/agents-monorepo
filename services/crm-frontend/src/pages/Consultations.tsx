@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee, Settings, Edit, Trash2, Bell, Package, BarChart3 } from 'lucide-react';
+import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -13,15 +13,9 @@ import { consultationService } from '@/services/consultationService';
 import {
   Consultant,
   ConsultationWithDetails,
-  CreateConsultantData,
   WorkingSchedule,
-  WorkingScheduleInput,
-  ConsultationService,
-  DAYS_OF_WEEK
+  ConsultationService
 } from '@/types/consultation';
-import { NotificationSettings } from '@/components/NotificationSettings';
-import { ServiceSettings } from '@/components/ServiceSettings';
-import { ExtendedStats } from '@/components/ExtendedStats';
 
 export function Consultations() {
   const { toast } = useToast();
@@ -47,25 +41,9 @@ export function Consultations() {
 
   // Модальные окна
   const [isNewConsultationOpen, setIsNewConsultationOpen] = useState(false);
-  const [isConsultantsModalOpen, setIsConsultantsModalOpen] = useState(false);
-  const [isNewConsultantOpen, setIsNewConsultantOpen] = useState(false);
   const [selectedConsultation, setSelectedConsultation] = useState<ConsultationWithDetails | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
-  const [editingConsultant, setEditingConsultant] = useState<Consultant | null>(null);
-  const [editingSchedules, setEditingSchedules] = useState<WorkingScheduleInput[]>([]);
-  const [isNotificationSettingsOpen, setIsNotificationSettingsOpen] = useState(false);
-  const [isServiceSettingsOpen, setIsServiceSettingsOpen] = useState(false);
-  const [isExtendedStatsOpen, setIsExtendedStatsOpen] = useState(false);
   const [services, setServices] = useState<ConsultationService[]>([]);
-  const [isEditConsultantOpen, setIsEditConsultantOpen] = useState(false);
-  const [editingConsultantData, setEditingConsultantData] = useState<CreateConsultantData>({
-    name: '',
-    email: '',
-    phone: '',
-    specialization: ''
-  });
-  const [editingConsultantId, setEditingConsultantId] = useState<string | null>(null);
 
   // Форма новой консультации
   const [newConsultation, setNewConsultation] = useState({
@@ -77,14 +55,6 @@ export function Consultations() {
     start_time: '',
     end_time: '',
     notes: ''
-  });
-
-  // Форма нового консультанта
-  const [newConsultant, setNewConsultant] = useState<CreateConsultantData>({
-    name: '',
-    email: '',
-    phone: '',
-    specialization: ''
   });
 
   // Временные слоты (с 00:00 до 23:30 с интервалом 30 минут)
@@ -195,150 +165,6 @@ export function Consultations() {
         variant: 'destructive'
       });
     }
-  };
-
-  const handleCreateConsultant = async () => {
-    try {
-      if (!newConsultant.name || !newConsultant.email) {
-        toast({
-          title: 'Ошибка',
-          description: 'Укажите имя и email консультанта',
-          variant: 'destructive'
-        });
-        return;
-      }
-
-      await consultationService.createConsultant(newConsultant);
-
-      toast({
-        title: 'Успешно',
-        description: 'Консультант добавлен'
-      });
-      setIsNewConsultantOpen(false);
-      setNewConsultant({ name: '', email: '', phone: '', specialization: '' });
-      await loadData();
-    } catch (error) {
-      console.error('Ошибка создания консультанта:', error);
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось добавить консультанта',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const handleDeleteConsultant = async (id: string) => {
-    if (!confirm('Удалить консультанта?')) return;
-
-    try {
-      await consultationService.deleteConsultant(id);
-      toast({ title: 'Консультант удалён' });
-      await loadData();
-    } catch (error) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось удалить консультанта',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const handleOpenEditConsultant = (consultant: Consultant) => {
-    setEditingConsultantId(consultant.id);
-    setEditingConsultantData({
-      name: consultant.name,
-      email: consultant.email,
-      phone: consultant.phone || '',
-      specialization: consultant.specialization || ''
-    });
-    setIsEditConsultantOpen(true);
-  };
-
-  const handleUpdateConsultant = async () => {
-    if (!editingConsultantId) return;
-
-    try {
-      if (!editingConsultantData.name || !editingConsultantData.email) {
-        toast({
-          title: 'Ошибка',
-          description: 'Укажите имя и email консультанта',
-          variant: 'destructive'
-        });
-        return;
-      }
-
-      await consultationService.updateConsultant(editingConsultantId, editingConsultantData);
-
-      toast({ title: 'Консультант обновлён' });
-      setIsEditConsultantOpen(false);
-      setEditingConsultantId(null);
-      await loadData();
-    } catch (error) {
-      console.error('Ошибка обновления консультанта:', error);
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось обновить консультанта',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const handleOpenScheduleModal = async (consultant: Consultant) => {
-    setEditingConsultant(consultant);
-    try {
-      const schedules = await consultationService.getSchedules(consultant.id);
-      // Преобразуем в WorkingScheduleInput[]
-      const scheduleInputs: WorkingScheduleInput[] = schedules.map(s => ({
-        day_of_week: s.day_of_week,
-        start_time: s.start_time.slice(0, 5),
-        end_time: s.end_time.slice(0, 5),
-        is_active: s.is_active
-      }));
-      setEditingSchedules(scheduleInputs);
-    } catch {
-      setEditingSchedules([]);
-    }
-    setIsScheduleModalOpen(true);
-  };
-
-  const handleSaveSchedules = async () => {
-    if (!editingConsultant) return;
-
-    try {
-      await consultationService.updateSchedules(editingConsultant.id, editingSchedules);
-      toast({ title: 'Расписание сохранено' });
-      setIsScheduleModalOpen(false);
-      setEditingConsultant(null);
-      await loadData();
-    } catch (error) {
-      toast({
-        title: 'Ошибка',
-        description: 'Не удалось сохранить расписание',
-        variant: 'destructive'
-      });
-    }
-  };
-
-  const toggleDaySchedule = (dayOfWeek: number) => {
-    const existingIndex = editingSchedules.findIndex(s => s.day_of_week === dayOfWeek);
-    if (existingIndex >= 0) {
-      // Удаляем день
-      setEditingSchedules(prev => prev.filter((_, i) => i !== existingIndex));
-    } else {
-      // Добавляем день с дефолтным временем
-      setEditingSchedules(prev => [...prev, {
-        day_of_week: dayOfWeek,
-        start_time: '09:00',
-        end_time: '18:00',
-        is_active: true
-      }]);
-    }
-  };
-
-  const updateDaySchedule = (dayOfWeek: number, field: 'start_time' | 'end_time', value: string) => {
-    setEditingSchedules(prev => prev.map(s =>
-      s.day_of_week === dayOfWeek ? { ...s, [field]: value } : s
-    ));
   };
 
   // Проверка, находится ли слот вне рабочего времени консультанта
@@ -471,26 +297,6 @@ export function Consultations() {
           <Button variant="outline" size="sm" onClick={loadData} disabled={isLoading}>
             <RefreshCw className={`w-4 h-4 mr-1 ${isLoading ? 'animate-spin' : ''}`} />
             Обновить
-          </Button>
-
-          <Button variant="outline" size="sm" onClick={() => setIsConsultantsModalOpen(true)}>
-            <Settings className="w-4 h-4 mr-1" />
-            Консультанты
-          </Button>
-
-          <Button variant="outline" size="sm" onClick={() => setIsServiceSettingsOpen(true)}>
-            <Package className="w-4 h-4 mr-1" />
-            Услуги
-          </Button>
-
-          <Button variant="outline" size="sm" onClick={() => setIsNotificationSettingsOpen(true)}>
-            <Bell className="w-4 h-4 mr-1" />
-            Уведомления
-          </Button>
-
-          <Button variant="outline" size="sm" onClick={() => setIsExtendedStatsOpen(true)}>
-            <BarChart3 className="w-4 h-4 mr-1" />
-            Аналитика
           </Button>
 
           <Button size="sm" onClick={handleOpenNewConsultationModal}>
@@ -925,267 +731,6 @@ export function Consultations() {
         </DialogContent>
       </Dialog>
 
-      {/* Модальное окно управления консультантами */}
-      <Dialog open={isConsultantsModalOpen} onOpenChange={setIsConsultantsModalOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <div className="flex items-center justify-between">
-              <DialogTitle>Управление консультантами</DialogTitle>
-              <Button size="sm" onClick={() => setIsNewConsultantOpen(true)}>
-                <Plus className="w-4 h-4 mr-1" />
-                Добавить
-              </Button>
-            </div>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            {consultants.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                Нет консультантов
-              </div>
-            ) : (
-              consultants.map(consultant => (
-                <Card key={consultant.id}>
-                  <CardContent className="p-3 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{consultant.name}</div>
-                      <div className="text-sm text-muted-foreground">{consultant.email}</div>
-                      {consultant.specialization && (
-                        <Badge variant="secondary" className="mt-1">{consultant.specialization}</Badge>
-                      )}
-                    </div>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenEditConsultant(consultant)}
-                        title="Редактировать"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleOpenScheduleModal(consultant)}
-                        title="Настроить расписание"
-                      >
-                        <Clock className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteConsultant(consultant.id)}
-                        className="text-destructive hover:text-destructive"
-                        title="Удалить"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Модальное окно нового консультанта */}
-      <Dialog open={isNewConsultantOpen} onOpenChange={setIsNewConsultantOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Новый консультант</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Имя *</Label>
-              <Input
-                value={newConsultant.name}
-                onChange={(e) => setNewConsultant(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Иван Иванов"
-              />
-            </div>
-            <div>
-              <Label>Email *</Label>
-              <Input
-                type="email"
-                value={newConsultant.email}
-                onChange={(e) => setNewConsultant(prev => ({ ...prev, email: e.target.value }))}
-                placeholder="ivan@example.com"
-              />
-            </div>
-            <div>
-              <Label>Телефон</Label>
-              <Input
-                value={newConsultant.phone}
-                onChange={(e) => setNewConsultant(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="+7 (999) 123-45-67"
-              />
-            </div>
-            <div>
-              <Label>Специализация</Label>
-              <Input
-                value={newConsultant.specialization}
-                onChange={(e) => setNewConsultant(prev => ({ ...prev, specialization: e.target.value }))}
-                placeholder="Продажи, Консультации..."
-              />
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button onClick={handleCreateConsultant} className="flex-1">
-                Добавить
-              </Button>
-              <Button variant="outline" onClick={() => setIsNewConsultantOpen(false)}>
-                Отмена
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Модальное окно редактирования консультанта */}
-      <Dialog open={isEditConsultantOpen} onOpenChange={setIsEditConsultantOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Редактировать консультанта</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Имя *</Label>
-              <Input
-                value={editingConsultantData.name}
-                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Иван Иванов"
-              />
-            </div>
-            <div>
-              <Label>Email *</Label>
-              <Input
-                type="email"
-                value={editingConsultantData.email}
-                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, email: e.target.value }))}
-                placeholder="ivan@example.com"
-              />
-            </div>
-            <div>
-              <Label>Телефон</Label>
-              <Input
-                value={editingConsultantData.phone}
-                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, phone: e.target.value }))}
-                placeholder="+7 (999) 123-45-67"
-              />
-            </div>
-            <div>
-              <Label>Специализация</Label>
-              <Input
-                value={editingConsultantData.specialization}
-                onChange={(e) => setEditingConsultantData(prev => ({ ...prev, specialization: e.target.value }))}
-                placeholder="Продажи, Консультации..."
-              />
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button onClick={handleUpdateConsultant} className="flex-1">
-                Сохранить
-              </Button>
-              <Button variant="outline" onClick={() => setIsEditConsultantOpen(false)}>
-                Отмена
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Модальное окно редактирования расписания */}
-      <Dialog open={isScheduleModalOpen} onOpenChange={setIsScheduleModalOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>
-              Расписание: {editingConsultant?.name}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Выберите рабочие дни и укажите время работы
-            </p>
-
-            <div className="space-y-3">
-              {[1, 2, 3, 4, 5, 6, 0].map(dayOfWeek => {
-                const schedule = editingSchedules.find(s => s.day_of_week === dayOfWeek);
-                const isActive = !!schedule;
-
-                return (
-                  <div key={dayOfWeek} className="flex items-center gap-3">
-                    <button
-                      onClick={() => toggleDaySchedule(dayOfWeek)}
-                      className={`
-                        w-24 py-2 px-3 rounded text-sm font-medium transition-colors
-                        ${isActive
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                        }
-                      `}
-                    >
-                      {DAYS_OF_WEEK[dayOfWeek]}
-                    </button>
-
-                    {isActive && (
-                      <div className="flex items-center gap-2 flex-1">
-                        <Input
-                          type="time"
-                          value={schedule.start_time}
-                          onChange={(e) => updateDaySchedule(dayOfWeek, 'start_time', e.target.value)}
-                          className="w-28"
-                        />
-                        <span className="text-muted-foreground">—</span>
-                        <Input
-                          type="time"
-                          value={schedule.end_time}
-                          onChange={(e) => updateDaySchedule(dayOfWeek, 'end_time', e.target.value)}
-                          className="w-28"
-                        />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex gap-2 pt-4">
-              <Button onClick={handleSaveSchedules} className="flex-1">
-                Сохранить
-              </Button>
-              <Button variant="outline" onClick={() => setIsScheduleModalOpen(false)}>
-                Отмена
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Модальное окно настроек уведомлений */}
-      <NotificationSettings
-        userAccountId={userAccountId}
-        isOpen={isNotificationSettingsOpen}
-        onClose={() => setIsNotificationSettingsOpen(false)}
-      />
-
-      {/* Модальное окно настроек услуг */}
-      <ServiceSettings
-        userAccountId={userAccountId}
-        isOpen={isServiceSettingsOpen}
-        onClose={() => {
-          setIsServiceSettingsOpen(false);
-          loadData(); // Перезагрузить данные после изменения услуг
-        }}
-      />
-
-      {/* Модальное окно расширенной статистики */}
-      <ExtendedStats
-        userAccountId={userAccountId}
-        isOpen={isExtendedStatsOpen}
-        onClose={() => setIsExtendedStatsOpen(false)}
-      />
     </div>
   );
 }
