@@ -246,15 +246,22 @@ export async function fetchAllInstances(): Promise<{
 
     const data = await response.json() as any[];
 
+    // Log raw response for debugging
+    logger.info({
+      rawResponse: JSON.stringify(data).slice(0, 1000),
+      firstInstance: data?.[0] ? JSON.stringify(data[0]).slice(0, 500) : null
+    }, '[EvolutionAPI] Raw fetchInstances response');
+
     const instances = (data || []).map((inst: any) => ({
-      instanceName: inst.name,
-      status: inst.connectionStatus || 'unknown',
-      connected: inst.connectionStatus === 'open'
+      instanceName: inst.instance?.instanceName || inst.name || inst.instanceName,
+      status: inst.instance?.status || inst.connectionStatus || 'unknown',
+      connected: (inst.instance?.status === 'open') || (inst.connectionStatus === 'open')
     }));
 
-    logger.debug({
+    logger.info({
       count: instances.length,
-      connected: instances.filter(i => i.connected).length
+      connected: instances.filter(i => i.connected).length,
+      instanceNames: instances.map(i => i.instanceName)
     }, '[EvolutionAPI] Fetched all instances');
 
     return { instances };
