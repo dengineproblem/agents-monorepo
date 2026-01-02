@@ -247,9 +247,9 @@ export async function fetchAllInstances(): Promise<{
     const data = await response.json() as any[];
 
     const instances = (data || []).map((inst: any) => ({
-      instanceName: inst.instance?.instanceName || inst.name,
-      status: inst.instance?.status || inst.status || 'unknown',
-      connected: inst.instance?.status === 'open' || inst.status === 'open'
+      instanceName: inst.name,
+      status: inst.connectionStatus || 'unknown',
+      connected: inst.connectionStatus === 'open'
     }));
 
     logger.debug({
