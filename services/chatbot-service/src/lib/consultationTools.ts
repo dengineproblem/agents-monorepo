@@ -165,21 +165,21 @@ export function getConsultationToolDefinitions(
       type: 'function',
       function: {
         name: 'book_consultation',
-        description: `Записать клиента на консультацию. Используй значения из JSON объекта "Данные для записи" выбранного слота. Длительность: ${settings.default_duration_minutes} минут.`,
+        description: `Записать клиента на консультацию. ВАЖНО: Используй consultant_id из списка в системном промпте (раздел "Доступные консультанты и их ID"). Длительность: ${settings.default_duration_minutes} минут.`,
         parameters: {
           type: 'object',
           properties: {
             consultant_id: {
               type: 'string',
-              description: 'Скопируй значение consultant_id из JSON выбранного слота.'
+              description: 'ID консультанта из системного промпта (6 символов). НЕ выдумывай — бери из списка "Доступные консультанты и их ID"!'
             },
             date: {
               type: 'string',
-              description: 'Скопируй значение date из JSON выбранного слота.'
+              description: 'Дата слота в формате YYYY-MM-DD из результата get_available_consultation_slots'
             },
             start_time: {
               type: 'string',
-              description: 'Скопируй значение start_time из JSON выбранного слота.'
+              description: 'Время слота в формате HH:MM из результата get_available_consultation_slots'
             },
             client_name: {
               type: 'string',
@@ -290,14 +290,81 @@ export function getConsultationToolDefinitions(
 }
 
 /**
+ * Информация о консультанте для промпта
+ */
+interface ConsultantInfo {
+  id: string;
+  name: string;
+  short_id: string;  // первые 6 символов UUID консультанта
+}
+
+/**
+ * Загрузить информацию о консультантах
+ */
+export async function loadConsultantsInfo(consultantIds?: string[]): Promise<ConsultantInfo[]> {
+  try {
+    const url = new URL(`${CRM_BACKEND_URL}/consultants`);
+    if (consultantIds?.length) {
+      url.searchParams.set('ids', consultantIds.join(','));
+    }
+    url.searchParams.set('active_only', 'true');
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (!response.ok) {
+      baseLog.warn({ status: response.status }, '[loadConsultantsInfo] Failed to load consultants');
+      return [];
+    }
+
+    const data = await response.json() as { consultants?: any[] } | any[];
+    const consultants = Array.isArray(data) ? data : (data.consultants || []);
+
+    return consultants.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      short_id: c.id.substring(0, 6)
+    }));
+  } catch (error) {
+    baseLog.error(error, '[loadConsultantsInfo] Error loading consultants');
+    return [];
+  }
+}
+
+/**
  * Получить промпт-инструкцию для AI о работе с консультациями
  */
-export function getConsultationPromptAddition(settings: ConsultationIntegrationSettings): string {
+export async function getConsultationPromptAddition(
+  settings: ConsultationIntegrationSettings,
+  consultants?: ConsultantInfo[]
+): Promise<string> {
+  // Загружаем консультантов если не переданы
+  const consultantsList = consultants || await loadConsultantsInfo(settings.consultant_ids);
+
+  // Формируем список консультантов с их ID
+  let consultantsSection = '';
+  if (consultantsList.length > 0) {
+    const consultantsText = consultantsList.map(c =>
+      `- ${c.name}: consultant_id = "${c.short_id}"`
+    ).join('\n');
+    consultantsSection = `
+
+## Доступные консультанты и их ID
+
+ВАЖНО: При записи на консультацию используй ТОЛЬКО эти consultant_id:
+${consultantsText}
+
+Когда клиент выбирает слот, бери consultant_id из этого списка!`;
+  }
+
   return `
 
 ## Запись на консультацию
 
 У тебя есть возможность записывать клиентов на консультацию.
+${consultantsSection}
 
 Доступные функции:
 - get_available_consultation_slots — показать свободные слоты для записи
@@ -313,7 +380,7 @@ export function getConsultationPromptAddition(settings: ConsultationIntegrationS
 1. Если клиент хочет записаться — сначала покажи доступные слоты
 2. Предложи клиенту выбрать удобное время из списка
 3. После выбора времени — уточни имя клиента (если не знаешь)
-4. Запиши клиента и подтверди запись
+4. Для записи используй consultant_id из списка выше + date + start_time из слота
 5. Если клиент хочет отменить или перенести — используй соответствующие функции
 
 Параметры:
@@ -407,13 +474,16 @@ export async function handleGetAvailableSlots(
     }, '[handleGetAvailableSlots] Slots found successfully', ['consultation']);
 
     // Формируем текстовый ответ со слотами
-    // Используем JSON формат чтобы GPT точно понял какие значения использовать
+    // consultant_id уже в системном промпте, здесь только дата и время
     const slotsText = data.slots.map((slot: any, idx: number) => {
-      return `${idx + 1}. ${slot.formatted}
-   Данные для записи: {"consultant_id":"${slot.consultant_id}","date":"${slot.date}","start_time":"${slot.start_time}"}`;
+      return `[Слот ${idx + 1}]
+Консультант: ${slot.consultant_name}
+Время: ${slot.formatted}
+date: ${slot.date}
+start_time: ${slot.start_time}`;
     }).join('\n\n');
 
-    return `Доступные слоты для записи:\n\n${slotsText}\n\nВыберите номер слота или время.`;
+    return `Доступные слоты для записи:\n\n${slotsText}\n\nДля записи используй consultant_id из списка консультантов в начале промпта + date и start_time из выбранного слота.`;
   } catch (error: any) {
     const errorType = classifyError(error);
     log.error(error, '[handleGetAvailableSlots] Error fetching slots', {
@@ -451,7 +521,7 @@ export async function handleBookConsultation(
   const isTestMode = lead.id === TEST_LEAD_ID;
 
   log.info({
-    consultantId: maskUuid(args.consultant_id),
+    consultantId: args.consultant_id,
     date: args.date,
     time: args.start_time,
     clientName: args.client_name || lead.contact_name,

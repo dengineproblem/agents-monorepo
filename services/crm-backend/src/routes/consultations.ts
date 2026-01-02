@@ -75,7 +75,7 @@ const GetAvailableSlotsSchema = z.object({
 
 const BookFromBotSchema = z.object({
   dialog_analysis_id: z.string().uuid(),
-  consultant_id: z.string().uuid(),
+  consultant_id: z.string().min(6).max(6),  // 6 символов от UUID консультанта
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   start_time: z.string().regex(/^\d{2}:\d{2}$/),
   duration_minutes: z.number().int().min(15).max(240),
@@ -766,6 +766,30 @@ export async function consultationsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Client phone not found in dialog_analysis' });
       }
 
+      // Find consultant by short consultant_id (first 6 chars of UUID)
+      // Supabase ilike не работает с UUID типом, поэтому получаем всех активных и фильтруем
+      const { data: allConsultants, error: consultantError } = await supabase
+        .from('consultants')
+        .select('id, name, user_account_id')
+        .eq('is_active', true);
+
+      if (consultantError) {
+        app.log.error({ error: consultantError }, 'Error fetching consultants');
+        return reply.status(500).send({ error: 'Database error' });
+      }
+
+      // Ищем консультанта по началу UUID
+      const consultant = allConsultants?.find(c => c.id.startsWith(body.consultant_id));
+
+      if (!consultant) {
+        app.log.warn({ consultant_id: body.consultant_id }, 'Consultant not found by short ID');
+        return reply.status(400).send({
+          error: 'Consultant not found',
+          message: 'Консультант не найден. Пожалуйста, выберите слот из списка заново.'
+        });
+      }
+      const consultantId = consultant.id;
+
       // Calculate end time
       const [startHour, startMin] = body.start_time.split(':').map(Number);
       const endMinTotal = startHour * 60 + startMin + body.duration_minutes;
@@ -775,7 +799,7 @@ export async function consultationsRoutes(app: FastifyInstance) {
 
       // Check slot availability
       const available = await isSlotAvailable(
-        body.consultant_id,
+        consultantId,
         body.date,
         body.start_time,
         body.duration_minutes
@@ -794,19 +818,12 @@ export async function consultationsRoutes(app: FastifyInstance) {
         notes = await summarizeDialog(body.dialog_analysis_id);
       }
 
-      // Get consultant name for response
-      const { data: consultant } = await supabase
-        .from('consultants')
-        .select('name, user_account_id')
-        .eq('id', body.consultant_id)
-        .single();
-
       const consultantName = consultant?.name || 'консультант';
       const userAccountId = clientInfo.userAccountId || consultant?.user_account_id;
 
       // Create consultation
       const consultationData = {
-        consultant_id: body.consultant_id,
+        consultant_id: consultantId,
         client_phone: clientInfo.phone,
         client_name: body.client_name || clientInfo.name || null,
         client_chat_id: clientInfo.chatId || null,

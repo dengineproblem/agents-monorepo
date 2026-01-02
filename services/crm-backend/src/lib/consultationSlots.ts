@@ -15,6 +15,7 @@ import { createLogger } from './logger.js';
 const log = createLogger({ module: 'consultationSlots' });
 
 export interface AvailableSlot {
+  slot_id: string;        // первые 6 символов consultant_id (для GPT)
   consultant_id: string;
   consultant_name: string;
   date: string;           // YYYY-MM-DD
@@ -266,6 +267,7 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
         const consultantName = consultantMap.get(consultantId) || 'Консультант';
 
         availableSlots.push({
+          slot_id: consultantId.substring(0, 6),  // первые 6 символов UUID для GPT
           consultant_id: consultantId,
           consultant_name: consultantName,
           date: dateStr,

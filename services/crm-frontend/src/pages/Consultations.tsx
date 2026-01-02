@@ -329,8 +329,8 @@ export function Consultations() {
       s => s.consultant_id === consultantId && s.day_of_week === dayOfWeek && s.is_active
     );
 
-    // Если нет расписания на этот день — всё доступно (или можно сделать наоборот)
-    if (!schedule) return false;
+    // Если нет расписания на этот день — слот недоступен
+    if (!schedule) return true;
 
     const slotMinutes = parseInt(timeSlot.split(':')[0]) * 60 + parseInt(timeSlot.split(':')[1]);
     const startMinutes = parseInt(schedule.start_time.split(':')[0]) * 60 + parseInt(schedule.start_time.split(':')[1]);
@@ -339,13 +339,13 @@ export function Consultations() {
     return slotMinutes < startMinutes || slotMinutes >= endMinutes;
   };
 
-  // Проверка, есть ли расписание у консультанта на выбранный день
-  const hasScheduleForDay = (consultantId: string): boolean => {
-    const dayOfWeek = selectedDate.getDay();
-    return allSchedules.some(
-      s => s.consultant_id === consultantId && s.day_of_week === dayOfWeek && s.is_active
-    );
+  // Проверка, доступен ли слот хотя бы для одного консультанта
+  const isSlotAvailableForAnyConsultant = (timeSlot: string): boolean => {
+    return consultants.some(consultant => !isSlotOutsideWorkingHours(consultant.id, timeSlot));
   };
+
+  // Отфильтрованные слоты - только те, где есть хотя бы один работающий консультант
+  const availableTimeSlots = timeSlots.filter(slot => isSlotAvailableForAnyConsultant(slot));
 
   const handleUpdateStatus = async (id: string, status: string) => {
     try {
@@ -584,8 +584,13 @@ export function Consultations() {
                   ))}
                 </div>
 
-                {/* Временные слоты */}
-                {timeSlots.map(timeSlot => (
+                {/* Временные слоты (только доступные для записи) */}
+                {availableTimeSlots.length === 0 ? (
+                  <div className="p-8 text-center text-muted-foreground">
+                    <div className="text-lg font-medium mb-1">Расписание не установлено</div>
+                    <div className="text-sm">Настройте рабочие часы консультантов на этот день</div>
+                  </div>
+                ) : availableTimeSlots.map(timeSlot => (
                   <div
                     key={timeSlot}
                     className="grid border-b hover:bg-muted/30"
@@ -629,9 +634,7 @@ export function Consultations() {
                                 <div className="text-xs">{blockReason}</div>
                               </div>
                             </div>
-                          ) : isOutsideHours ? (
-                            <div className="w-full h-full rounded bg-muted/50" title="Нерабочее время" />
-                          ) : (
+                          ) : isOutsideHours ? null : (
                             <button
                               onClick={() => {
                                 setNewConsultation(prev => ({

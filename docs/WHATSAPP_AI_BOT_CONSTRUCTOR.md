@@ -597,6 +597,25 @@ ALTER TABLE ai_bot_configurations ADD COLUMN IF NOT EXISTS
 | POST | `/consultations/reschedule-from-bot` | Перенести запись |
 | GET | `/consultations/by-lead/:id` | Записи клиента |
 
+### Короткий ID консультанта
+
+GPT не может надёжно копировать длинные UUID (36 символов). Поэтому используются **короткие ID** — первые 6 символов UUID:
+
+```
+Полный UUID:    4d71d287-582b-446e-9ee0-be4a6dee5144
+Короткий ID:    4d71d2
+```
+
+При включении интеграции консультанты загружаются в системный промпт бота:
+
+```
+## Доступные консультанты и их ID
+
+ВАЖНО: При записи на консультацию используй ТОЛЬКО эти consultant_id:
+- Анатолий: consultant_id = "4d71d2"
+- Мария: consultant_id = "7a3bc5"
+```
+
 ### Пример использования
 
 **Запрос слотов:**
@@ -604,12 +623,12 @@ ALTER TABLE ai_bot_configurations ADD COLUMN IF NOT EXISTS
 GET /consultations/available-slots?duration_minutes=60&limit=5&days_ahead=14
 ```
 
-**Бронирование:**
+**Бронирование (короткий consultant_id):**
 ```json
 POST /consultations/book-from-bot
 {
   "dialog_analysis_id": "uuid-...",
-  "consultant_id": "uuid-...",
+  "consultant_id": "4d71d2",
   "date": "2024-12-30",
   "start_time": "14:00",
   "duration_minutes": 60,
@@ -617,6 +636,8 @@ POST /consultations/book-from-bot
   "auto_summarize": true
 }
 ```
+
+**Примечание:** `consultant_id` — это первые 6 символов UUID консультанта. CRM ищет консультанта по началу UUID.
 
 ### Файлы
 
@@ -813,6 +834,13 @@ redis-cli lrange "pending_messages:instance:phone" 0 -1
   - Метрики производительности
   - Классификация ошибок
   - Context propagation через Redis
+
+### v1.6.0 (2024-12-31)
+- Короткий ID консультанта:
+  - Использование первых 6 символов UUID вместо полного (GPT не может надёжно копировать длинные UUID)
+  - Консультанты загружаются в системный промпт бота с их короткими ID
+  - При бронировании GPT передаёт `consultant_id` (6 символов) + `date` + `start_time`
+  - CRM ищет консультанта по началу UUID
 
 ### v1.5.0 (2024-12-31)
 - Тестовый режим бота в UI:

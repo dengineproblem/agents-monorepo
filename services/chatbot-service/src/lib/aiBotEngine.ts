@@ -1119,7 +1119,7 @@ async function generateAIResponse(
 
   // Добавить инструкции для консультаций если интеграция включена
   if (config.consultation_integration_enabled && config.consultation_settings) {
-    const consultationPrompt = getConsultationPromptAddition(config.consultation_settings);
+    const consultationPrompt = await getConsultationPromptAddition(config.consultation_settings);
     systemPrompt += consultationPrompt;
     log.debug({
       consultationEnabled: true
@@ -1810,7 +1810,7 @@ export async function testBotResponse(
       };
 
       // Добавить промпт для консультаций
-      const consultationPrompt = getConsultationPromptAddition(consultationSettings);
+      const consultationPrompt = await getConsultationPromptAddition(consultationSettings);
       systemPrompt += consultationPrompt;
 
       // Добавить tools для консультаций
