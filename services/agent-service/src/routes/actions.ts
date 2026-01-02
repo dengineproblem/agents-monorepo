@@ -123,6 +123,7 @@ export async function actionsRoutes(app: FastifyInstance) {
               pageId: tokenInfo.pageId,
               userAccountId: account.userAccountId,
               adAccountId: resolvedAdAccountId ?? undefined,
+              accountId: tokenInfo.accountId, // UUID из ad_accounts
               whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
               skipWhatsAppNumberInApi: tokenInfo.skipWhatsAppNumberInApi
             });
@@ -133,6 +134,7 @@ export async function actionsRoutes(app: FastifyInstance) {
               pageId: tokenInfo.pageId,
               userAccountId: account.userAccountId,
               adAccountId: resolvedAdAccountId ?? undefined,
+              accountId: tokenInfo.accountId, // UUID из ad_accounts
               instagramId: tokenInfo.instagramId,
               whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
               skipWhatsAppNumberInApi: tokenInfo.skipWhatsAppNumberInApi
@@ -186,12 +188,12 @@ export async function actionsRoutes(app: FastifyInstance) {
   });
 }
 
-type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean };
+type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; accountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean };
 type ResolveErr = { ok: false; message: string };
 
-async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string; accountId?: string }): Promise<ResolveOk | ResolveErr> {
+async function resolveAccessToken(account: { userAccountId?: string; accessToken?: string; adAccountId?: string; whatsappPhoneNumber?: string; accountId?: string; pageId?: string }): Promise<ResolveOk | ResolveErr> {
   if (account.accessToken && account.accessToken.length >= 10) {
-    return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId, whatsappPhoneNumber: account.whatsappPhoneNumber };
+    return { ok: true, accessToken: account.accessToken, adAccountId: account.adAccountId, accountId: account.accountId, whatsappPhoneNumber: account.whatsappPhoneNumber, pageId: account.pageId };
   }
   if (!account.userAccountId) {
     return { ok: false, message: 'Provide accessToken or userAccountId' };
@@ -214,6 +216,7 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
       ok: true,
       accessToken: adAccount.access_token as string,
       adAccountId: (adAccount as any).ad_account_id || account.adAccountId,
+      accountId: account.accountId, // UUID из ad_accounts
       pageId: (adAccount as any).page_id || undefined,
       whatsappPhoneNumber: account.whatsappPhoneNumber || (adAccount as any).whatsapp_phone_number || undefined
     };
@@ -238,7 +241,7 @@ async function resolveAccessToken(account: { userAccountId?: string; accessToken
   };
 }
 
-async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean }) {
+async function handleAction(action: ActionInput, token: string, ctx?: { pageId?: string; userAccountId?: string; adAccountId?: string; accountId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean }) {
   switch ((action as any).type) {
     case 'GetCampaignStatus': {
       const p = (action as any).params as { campaign_id: string };
@@ -451,7 +454,9 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         },
         {
           user_account_id: ctx.userAccountId,
-          ad_account_id: ctx.adAccountId
+          ad_account_id: ctx.adAccountId,
+          account_id: ctx.accountId, // UUID из ad_accounts для multi-account
+          page_id: ctx.pageId
         },
         token
       );
@@ -512,7 +517,9 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
             },
             {
               user_account_id: ctx.userAccountId,
-              ad_account_id: ctx.adAccountId
+              ad_account_id: ctx.adAccountId,
+              account_id: ctx.accountId, // UUID из ad_accounts для multi-account
+              page_id: ctx.pageId
             },
             token
           );

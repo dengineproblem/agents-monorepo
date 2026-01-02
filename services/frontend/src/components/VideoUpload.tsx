@@ -3013,7 +3013,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
         {/* Модальное окно с результатом запуска */}
         <Dialog open={resultDialogOpen} onOpenChange={setResultDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Реклама запущена!</DialogTitle>
               <DialogDescription>
@@ -3092,7 +3092,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
         {/* Модальное окно с результатами auto-launch (идентично manual launch) */}
         <Dialog open={autoLaunchResultDialogOpen} onOpenChange={setAutoLaunchResultDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Реклама запущена!</DialogTitle>
               <DialogDescription>

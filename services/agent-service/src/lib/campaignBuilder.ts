@@ -772,19 +772,29 @@ export async function pauseActiveCampaigns(
 
 export async function getActiveAdSets(
   campaignId: string,
-  accessToken: string
+  accessToken: string,
+  retryCount = 0
 ): Promise<Array<{ adset_id: string; name?: string; status?: string; effective_status?: string; optimized_goal?: string }>> {
-  log.info({ campaignId }, 'Fetching active ad sets for campaign');
+  log.info({ campaignId, retryCount }, 'Fetching active ad sets for campaign');
 
   try {
     const url = `https://graph.facebook.com/${FB_API_VERSION}/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`;
-    console.log(`[getActiveAdSets] campaignId=${campaignId}, tokenLength=${accessToken?.length}, FB_API_VERSION=${FB_API_VERSION}`);
+    console.log(`[getActiveAdSets] campaignId=${campaignId}, tokenLength=${accessToken?.length}, FB_API_VERSION=${FB_API_VERSION}, retry=${retryCount}`);
 
     const response = await fetch(url);
 
     if (!response.ok) {
       const errorBody = await response.text();
       console.error(`[getActiveAdSets] Error ${response.status}:`, errorBody);
+
+      // Rate limiting - retry с задержкой
+      if (response.status === 400 && errorBody.includes('User request limit reached') && retryCount < 3) {
+        const delay = (retryCount + 1) * 5000; // 5s, 10s, 15s
+        log.warn({ campaignId, retryCount, delay }, 'Rate limited, retrying after delay...');
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return getActiveAdSets(campaignId, accessToken, retryCount + 1);
+      }
+
       throw new Error(`Facebook API error: ${response.status} - ${errorBody}`);
     }
 
@@ -814,33 +824,54 @@ export async function getActiveAdSets(
 export async function pauseAdSetsForCampaign(
   campaignId: string,
   accessToken: string
-): Promise<void> {
+): Promise<number> {
   const adsets = await getActiveAdSets(campaignId, accessToken);
   log.info({ campaignId, count: adsets.length }, 'Pausing ad sets for campaign');
 
+  let pausedCount = 0;
+
   for (const adset of adsets) {
-    try {
-      const response = await fetch(
-        `https://graph.facebook.com/${FB_API_VERSION}/${adset.adset_id}?access_token=${accessToken}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ status: 'PAUSED' }),
+    let success = false;
+    for (let retry = 0; retry < 3 && !success; retry++) {
+      try {
+        const response = await fetch(
+          `https://graph.facebook.com/${FB_API_VERSION}/${adset.adset_id}?access_token=${accessToken}`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ status: 'PAUSED' }),
+          }
+        );
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+
+          // Rate limiting - retry с задержкой
+          if (response.status === 400 && errorBody.includes('User request limit reached') && retry < 2) {
+            const delay = (retry + 1) * 5000;
+            log.warn({ adsetId: adset.adset_id, retry, delay }, 'Rate limited on pause, retrying...');
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          throw new Error(`Facebook API error: ${errorBody}`);
         }
-      );
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`Facebook API error: ${JSON.stringify(errorData)}`);
+        log.info({ adsetId: adset.adset_id, campaignId }, 'Paused ad set');
+        pausedCount++;
+        success = true;
+      } catch (error: any) {
+        if (retry === 2) {
+          log.warn({ err: error, adsetId: adset.adset_id, campaignId }, 'Failed to pause ad set after retries');
+        }
       }
-
-      log.info({ adsetId: adset.adset_id, campaignId }, 'Paused ad set');
-    } catch (error: any) {
-      log.warn({ err: error, adsetId: adset.adset_id, campaignId }, 'Failed to pause ad set');
     }
   }
+
+  log.info({ campaignId, pausedCount, totalAdsets: adsets.length }, 'Finished pausing ad sets');
+  return pausedCount;
 }
 
 /**
@@ -868,6 +899,7 @@ export async function getAvailableCreatives(
         fb_creative_id_whatsapp,
         fb_creative_id_instagram_traffic,
         fb_creative_id_site_leads,
+        fb_creative_id_lead_forms,
         status,
         is_active,
         created_at,
@@ -931,6 +963,8 @@ export async function getAvailableCreatives(
           return !!c.fb_creative_id_instagram_traffic;
         case 'site_leads':
           return !!c.fb_creative_id_site_leads;
+        case 'lead_forms':
+          return !!c.fb_creative_id_lead_forms;
         default:
           return false;
       }

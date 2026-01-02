@@ -288,11 +288,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 userAccountId: user_account_id,
                 accessToken: credentials.fbAccessToken,
                 adAccountId: credentials.fbAdAccountId,
+                accountId: credentials.adAccountId, // UUID из ad_accounts для multi-account
+                pageId: credentials.fbPageId,
                 ...(credentials.whatsappPhoneNumber && { whatsappPhoneNumber: credentials.whatsappPhoneNumber }),
               },
               actions: [action],
               source: 'ai-campaign-builder-v2',
             };
+
 
             const actionsResponse = await request.server.inject({
               method: 'POST',
@@ -1168,6 +1171,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                   userAccountId: user_account_id,
                   accessToken: userAccount.access_token,
                   adAccountId: userAccount.ad_account_id,
+                  pageId: userAccount.page_id, // Передаём page_id для корректной работы
                   whatsappPhoneNumber: userAccount.whatsapp_phone_number,
                 },
                 actions: [action],
@@ -1247,9 +1251,10 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
         log.info({ userAccountId: userAccount.id }, 'Executing action through actions system...');
 
         const envelope = convertActionToEnvelope(action, user_account_id, objective, userAccount.whatsapp_phone_number) as any;
-        // Добавляем accessToken и adAccountId для корректной работы actions API
+        // Добавляем accessToken, adAccountId и pageId для корректной работы actions API
         envelope.account.accessToken = userAccount.access_token;
         envelope.account.adAccountId = userAccount.ad_account_id;
+        envelope.account.pageId = userAccount.page_id;
 
         // Вызываем POST /agent/actions через внутренний механизм
         let executionResult;

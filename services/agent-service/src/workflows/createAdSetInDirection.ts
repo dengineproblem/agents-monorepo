@@ -8,6 +8,7 @@ import {
   activateAdSet,
   incrementAdsCount
 } from '../lib/directionAdSets.js';
+import { getCredentials } from '../lib/adAccountHelper.js';
 
 const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -27,6 +28,8 @@ type CreateAdSetInDirectionParams = {
 type CreateAdSetInDirectionContext = {
   user_account_id: string;
   ad_account_id: string;
+  account_id?: string; // UUID из ad_accounts для multi-account режима
+  page_id?: string; // Передаётся из resolveAccessToken (для поддержки multi-account режима)
 };
 
 /**
@@ -78,7 +81,7 @@ export async function workflowCreateAdSetInDirection(
     start_mode = 'now'
   } = params;
 
-  const { user_account_id, ad_account_id } = context;
+  const { user_account_id, ad_account_id, account_id: context_account_id, page_id: context_page_id } = context;
 
   const { data: userAccountProfile } = await supabase
     .from('user_accounts')
@@ -274,17 +277,23 @@ export async function workflowCreateAdSetInDirection(
   const budget = daily_budget_cents || direction.daily_budget_cents;
   const final_adset_name = adset_name || `${direction.name} - AdSet ${new Date().toISOString().split('T')[0]}`;
 
-  // Получаем page_id и режим создания ad sets из user_accounts ПЕРЕД формированием adsetBody
+  // Получаем настройки из user_accounts (default_adset_mode)
   const { data: userAccount } = await supabase
     .from('user_accounts')
-    .select('page_id, whatsapp_phone_number, default_adset_mode')
+    .select('whatsapp_phone_number, default_adset_mode')
     .eq('id', user_account_id)
     .single();
 
-  // КРИТИЧЕСКАЯ ПРОВЕРКА: для WhatsApp кампаний ОБЯЗАТЕЛЬНО нужен page_id
-  if (direction.objective === 'whatsapp' && !userAccount?.page_id) {
+  // Получаем page_id через getCredentials - ТОЧНО ТАК ЖЕ КАК В FALLBACK
+  // getCredentials автоматически определяет: мультиаккаунт -> ad_accounts, legacy -> user_accounts
+  // Приоритет: context_account_id (UUID из envelope) -> direction.ad_account_id
+  const credentials = await getCredentials(user_account_id, context_account_id || direction.ad_account_id);
+  const effective_page_id = credentials.fbPageId;
+
+  // КРИТИЧЕСКАЯ ПРОВЕРКА: для WhatsApp и lead_forms кампаний ОБЯЗАТЕЛЬНО нужен page_id
+  if ((direction.objective === 'whatsapp' || direction.objective === 'lead_forms') && !effective_page_id) {
     throw new Error(
-      `Cannot create WhatsApp adset for direction "${direction.name}": page_id not configured for user account ${user_account_id}. ` +
+      `Cannot create ${direction.objective} adset for direction "${direction.name}": page_id not configured. ` +
       `Please connect Facebook Page in settings.`
     );
   }
@@ -374,13 +383,13 @@ export async function workflowCreateAdSetInDirection(
 
   // Для WhatsApp добавляем destination_type и promoted_object ВМЕСТЕ
   // Это критично! Facebook требует promoted_object если указан destination_type
-  if (direction.objective === 'whatsapp' && userAccount?.page_id) {
+  if (direction.objective === 'whatsapp' && effective_page_id) {
     adsetBody.destination_type = 'WHATSAPP';
 
     // Всегда включаем номер из направления (если есть)
     // Если получим ошибку 2446885, повторим запрос без номера (см. try-catch ниже)
     adsetBody.promoted_object = {
-      page_id: String(userAccount.page_id),
+      page_id: String(effective_page_id),
       ...(whatsapp_phone_number && { whatsapp_phone_number })
     };
   }
@@ -425,20 +434,15 @@ export async function workflowCreateAdSetInDirection(
       );
     }
 
-    if (!userAccount?.page_id) {
-      throw new Error(
-        `Cannot create lead_forms adset for direction "${direction.name}": page_id not configured for user account ${user_account_id}. ` +
-        `Please connect Facebook Page in settings.`
-      );
-    }
+    // page_id уже проверен выше в effective_page_id
 
     // lead_gen_form_id НЕ добавляем в promoted_object - он передаётся только в креативе (call_to_action)
     adsetBody.promoted_object = {
-      page_id: String(userAccount.page_id)
+      page_id: String(effective_page_id)
     };
 
     log.info({
-      page_id: userAccount.page_id,
+      page_id: effective_page_id,
       lead_form_id: leadFormId
     }, 'Using lead_form for lead_forms objective (form_id in creative CTA)');
   }
@@ -543,7 +547,7 @@ export async function workflowCreateAdSetInDirection(
       const errorSubcode = error?.error?.error_subcode || error?.error_subcode;
       const isWhatsAppError = errorSubcode === 2446885;
 
-      if (isWhatsAppError && direction.objective === 'whatsapp' && whatsapp_phone_number && userAccount?.page_id) {
+      if (isWhatsAppError && direction.objective === 'whatsapp' && whatsapp_phone_number && effective_page_id) {
         log.warn({
           error_subcode: errorSubcode,
           error_message: error?.error?.message || error?.message,
@@ -554,7 +558,7 @@ export async function workflowCreateAdSetInDirection(
         const adsetBodyWithoutNumber = {
           ...adsetBody,
           promoted_object: {
-            page_id: String(userAccount.page_id)
+            page_id: String(effective_page_id)
             // whatsapp_phone_number убран
           }
         };
