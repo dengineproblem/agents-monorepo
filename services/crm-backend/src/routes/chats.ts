@@ -135,7 +135,7 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.get('/chats', async (request, reply) => {
     const startTime = Date.now();
     const cid = generateCorrelationId();
-    const tags: LogTag[] = ['api', 'db', 'message'];
+    const tags: LogTag[] = ['api', 'db', 'chats'];
 
     app.log.info({
       cid: shortCorrelationId(cid),
@@ -245,7 +245,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         errorType: errorInfo.type,
         isRetryable: errorInfo.isRetryable,
         elapsedMs: getElapsedMs(startTime),
-        tags: ['api', 'db', 'error']
+        tags: ['api', 'db', 'chats']
       }, '[GET /chats] Failed to fetch chats');
 
       return reply.status(500).send({
@@ -263,7 +263,7 @@ export async function chatsRoutes(app: FastifyInstance) {
     const startTime = Date.now();
     const cid = generateCorrelationId();
     const { remoteJid } = request.params as { remoteJid: string };
-    const tags: LogTag[] = ['api', 'db', 'message'];
+    const tags: LogTag[] = ['api', 'db', 'chats'];
 
     const maskedPhone = maskPhone(extractPhoneFromJid(remoteJid));
 
@@ -359,8 +359,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       const errorLog = createErrorLog(error, {
         correlationId: cid,
         method: 'GET',
-        path: '/chats/:remoteJid/messages',
-        remoteJid: maskedPhone
+        path: '/chats/:remoteJid/messages'
       });
 
       app.log.error({
@@ -368,7 +367,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         errorType: errorInfo.type,
         isRetryable: errorInfo.isRetryable,
         elapsedMs: getElapsedMs(startTime),
-        tags: ['api', 'db', 'error']
+        tags: ['api', 'db', 'chats']
       }, '[GET /chats/:remoteJid/messages] Failed to fetch messages');
 
       return reply.status(500).send({
@@ -386,7 +385,7 @@ export async function chatsRoutes(app: FastifyInstance) {
     const startTime = Date.now();
     const cid = generateCorrelationId();
     const { remoteJid } = request.params as { remoteJid: string };
-    const tags: LogTag[] = ['api', 'message', 'webhook'];
+    const tags: LogTag[] = ['api', 'chats', 'external'];
 
     const phone = extractPhoneFromJid(remoteJid);
     const maskedPhone = maskPhone(phone);
@@ -419,7 +418,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         instanceName,
         phone: maskedPhone,
         textLength: text.length,
-        tags: ['webhook']
+        tags: ['external']
       }, '[POST /chats/:remoteJid/send] Sending message via Evolution API');
 
       const result = await sendWhatsAppMessage({
@@ -435,7 +434,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           phone: maskedPhone,
           error: result.error,
           elapsedMs: getElapsedMs(startTime),
-          tags: ['api', 'webhook', 'error']
+          tags: ['api', 'chats', 'external']
         }, '[POST /chats/:remoteJid/send] Evolution API returned error');
 
         return reply.status(500).send({
@@ -464,8 +463,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       const errorLog = createErrorLog(error, {
         correlationId: cid,
         method: 'POST',
-        path: '/chats/:remoteJid/send',
-        remoteJid: maskedPhone
+        path: '/chats/:remoteJid/send'
       });
 
       app.log.error({
@@ -473,7 +471,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         errorType: errorInfo.type,
         isRetryable: errorInfo.isRetryable,
         elapsedMs: getElapsedMs(startTime),
-        tags: ['api', 'webhook', 'error']
+        tags: ['api', 'chats', 'external']
       }, '[POST /chats/:remoteJid/send] Failed to send message');
 
       return reply.status(500).send({
@@ -490,7 +488,7 @@ export async function chatsRoutes(app: FastifyInstance) {
   app.get('/chats/search', async (request, reply) => {
     const startTime = Date.now();
     const cid = generateCorrelationId();
-    const tags: LogTag[] = ['api', 'db', 'message'];
+    const tags: LogTag[] = ['api', 'db', 'chats'];
 
     app.log.info({
       cid: shortCorrelationId(cid),
@@ -583,7 +581,7 @@ export async function chatsRoutes(app: FastifyInstance) {
         errorType: errorInfo.type,
         isRetryable: errorInfo.isRetryable,
         elapsedMs: getElapsedMs(startTime),
-        tags: ['api', 'db', 'error']
+        tags: ['api', 'db', 'chats']
       }, '[GET /chats/search] Search failed');
 
       return reply.status(500).send({

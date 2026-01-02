@@ -22,7 +22,9 @@ export type LogTag =
   | 'auth'         // Аутентификация
   | 'bot'          // Операции с ботами
   | 'function'     // Функции бота
-  | 'instance';    // WhatsApp инстансы
+  | 'instance'     // WhatsApp инстансы
+  | 'chats'        // Операции с чатами
+  | 'external';    // Внешние API вызовы
 
 /** Типы ошибок для классификации */
 export type ErrorType =
