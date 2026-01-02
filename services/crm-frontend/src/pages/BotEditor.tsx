@@ -806,7 +806,13 @@ export function BotEditor() {
                   </div>
                   <Switch
                     checked={formData.consultationIntegrationEnabled ?? false}
-                    onCheckedChange={(enabled) => updateField('consultationIntegrationEnabled', enabled)}
+                    onCheckedChange={(enabled) => {
+                      updateField('consultationIntegrationEnabled', enabled);
+                      // При включении устанавливаем дефолтные настройки если их нет
+                      if (enabled && !formData.consultationSettings) {
+                        updateField('consultationSettings', DEFAULT_CONSULTATION_SETTINGS);
+                      }
+                    }}
                   />
                 </div>
                 {formData.consultationIntegrationEnabled && (

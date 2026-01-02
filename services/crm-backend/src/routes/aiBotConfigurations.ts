@@ -126,6 +126,10 @@ const UpdateBotSchema = z.object({
     consultantIds: z.array(z.string().uuid()).optional(),
     defaultDurationMinutes: z.number().int().min(15).max(480).optional(),
     slotsToShow: z.number().int().min(1).max(20).optional(),
+    daysAheadLimit: z.number().int().min(1).max(90).optional(),
+    autoSummarizeDialog: z.boolean().optional(),
+    collectClientName: z.boolean().optional(),
+    timezone: z.string().optional(),
   }).optional(),
 });
 
