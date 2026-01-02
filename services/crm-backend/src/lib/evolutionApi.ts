@@ -213,6 +213,65 @@ export async function checkInstanceStatus(instanceName: string): Promise<{
 }
 
 /**
+ * Fetch all instances from Evolution API with their connection status
+ */
+export async function fetchAllInstances(): Promise<{
+  instances: Array<{
+    instanceName: string;
+    status: string;
+    connected: boolean;
+  }>;
+  error?: string;
+}> {
+  logger.debug({}, '[EvolutionAPI] Fetching all instances');
+
+  try {
+    const url = `${EVOLUTION_API_URL}/instance/fetchInstances`;
+    const controller = createTimeoutController(10000);
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': EVOLUTION_API_KEY
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      return {
+        instances: [],
+        error: `HTTP ${response.status}`
+      };
+    }
+
+    const data = await response.json() as any[];
+
+    const instances = (data || []).map((inst: any) => ({
+      instanceName: inst.instance?.instanceName || inst.name,
+      status: inst.instance?.status || inst.status || 'unknown',
+      connected: inst.instance?.status === 'open' || inst.status === 'open'
+    }));
+
+    logger.debug({
+      count: instances.length,
+      connected: instances.filter(i => i.connected).length
+    }, '[EvolutionAPI] Fetched all instances');
+
+    return { instances };
+
+  } catch (error: any) {
+    logger.warn({
+      error: error.message
+    }, '[EvolutionAPI] Failed to fetch instances');
+
+    return {
+      instances: [],
+      error: error.message
+    };
+  }
+}
+
+/**
  * Send message with retry logic and exponential backoff
  */
 export async function sendWhatsAppMessageWithRetry(

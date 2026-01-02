@@ -11,7 +11,7 @@ import {
   getElapsedMs,
   LogTag
 } from '../lib/logUtils.js';
-import { checkInstanceStatus } from '../lib/evolutionApi.js';
+import { fetchAllInstances } from '../lib/evolutionApi.js';
 
 // Validation schemas
 const DelayedMessageSchema = z.object({
@@ -1108,45 +1108,53 @@ export async function aiBotConfigurationsRoutes(app: FastifyInstance) {
         }
       }
 
-      // Check real status via Evolution API and update DB
+      // Fetch all instances from Evolution API (single request)
+      const evolutionResult = await fetchAllInstances();
+
+      // Create a map of instance statuses from Evolution API
+      const evolutionStatusMap = new Map<string, boolean>();
+      if (!evolutionResult.error) {
+        for (const inst of evolutionResult.instances) {
+          evolutionStatusMap.set(inst.instanceName, inst.connected);
+        }
+        app.log.debug({
+          evolutionInstancesCount: evolutionResult.instances.length,
+          connectedInEvolution: evolutionResult.instances.filter(i => i.connected).length
+        }, '[GET /whatsapp-instances] Fetched Evolution API instances');
+      } else {
+        app.log.warn({
+          error: evolutionResult.error
+        }, '[GET /whatsapp-instances] Failed to fetch Evolution instances, using DB status');
+      }
+
+      // Update statuses in DB and filter connected instances
       const instancesWithRealStatus = await Promise.all(
         (instances || []).map(async (inst: any) => {
-          try {
-            const statusResult = await checkInstanceStatus(inst.instance_name);
-
-            // If Evolution API returned error, keep original status from DB
-            if (statusResult.error) {
-              app.log.warn({
-                instanceName: inst.instance_name,
-                error: statusResult.error
-              }, '[GET /whatsapp-instances] Evolution API error, keeping DB status');
-              return inst;
-            }
-
-            const newStatus = statusResult.connected ? 'connected' : 'disconnected';
-
-            // Update status in DB if changed
-            if (inst.status !== newStatus) {
-              await supabase
-                .from('whatsapp_instances')
-                .update({ status: newStatus })
-                .eq('id', inst.id);
-
-              app.log.debug({
-                instanceName: inst.instance_name,
-                oldStatus: inst.status,
-                newStatus
-              }, '[GET /whatsapp-instances] Status updated');
-            }
-
-            return { ...inst, status: newStatus };
-          } catch (err: any) {
-            app.log.warn({
-              instanceName: inst.instance_name,
-              error: err.message
-            }, '[GET /whatsapp-instances] Failed to check instance status');
-            return inst; // Keep original status on error
+          // If Evolution API failed, keep DB status
+          if (evolutionResult.error) {
+            return inst;
           }
+
+          // Check if instance exists in Evolution API
+          const isConnected = evolutionStatusMap.get(inst.instance_name);
+          const newStatus = isConnected === true ? 'connected' : 'disconnected';
+
+          // Update status in DB if changed
+          if (inst.status !== newStatus) {
+            await supabase
+              .from('whatsapp_instances')
+              .update({ status: newStatus })
+              .eq('id', inst.id);
+
+            app.log.debug({
+              instanceName: inst.instance_name,
+              oldStatus: inst.status,
+              newStatus,
+              existsInEvolution: evolutionStatusMap.has(inst.instance_name)
+            }, '[GET /whatsapp-instances] Status updated');
+          }
+
+          return { ...inst, status: newStatus };
         })
       );
 
