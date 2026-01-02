@@ -408,10 +408,15 @@ export async function handleGetAvailableSlots(
   }, '[handleGetAvailableSlots] Fetching available slots', ['consultation']);
 
   try {
+    // Дефолтные значения если не заданы в настройках
+    const slotsToShow = settings.slots_to_show || 5;
+    const daysAhead = settings.days_ahead_limit || 14;
+    const durationMinutes = settings.default_duration_minutes || 60;
+
     const params = new URLSearchParams({
-      duration_minutes: String(settings.default_duration_minutes),
-      limit: String(settings.slots_to_show),
-      days_ahead: String(settings.days_ahead_limit)
+      duration_minutes: String(durationMinutes),
+      limit: String(slotsToShow),
+      days_ahead: String(daysAhead)
     });
 
     if (args.date) {
