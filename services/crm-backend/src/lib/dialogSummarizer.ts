@@ -172,11 +172,15 @@ export async function getClientInfo(dialogAnalysisId: string): Promise<{
 }> {
   const { data, error } = await supabase
     .from('dialog_analysis')
-    .select('contact_name, contact_phone, chat_id, instance_name, user_account_id')
+    .select('contact_name, contact_phone, instance_name, user_account_id')
     .eq('id', dialogAnalysisId)
     .single();
 
   if (error || !data) {
+    log.warn({
+      dialogAnalysisId,
+      error: error?.message || 'No data returned'
+    }, '[getClientInfo] Failed to get client info');
     return {
       name: null,
       phone: null,
@@ -189,7 +193,7 @@ export async function getClientInfo(dialogAnalysisId: string): Promise<{
   return {
     name: data.contact_name || null,
     phone: data.contact_phone || null,
-    chatId: data.chat_id || null,
+    chatId: null, // chat_id not in dialog_analysis table
     instanceName: data.instance_name || null,
     userAccountId: data.user_account_id || null
   };
