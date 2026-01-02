@@ -14,6 +14,7 @@ import { consultationNotificationsRoutes } from './routes/consultationNotificati
 import { consultationServicesRoutes } from './routes/consultationServices.js';
 import { publicBookingRoutes } from './routes/publicBooking.js';
 import { aiBotConfigurationsRoutes } from './routes/aiBotConfigurations.js';
+import { chatsRoutes } from './routes/chats.js';
 import { startNotificationCron } from './cron/notificationCron.js';
 import { logger } from './lib/logger.js';
 
@@ -55,6 +56,7 @@ app.register(consultationNotificationsRoutes);
 app.register(consultationServicesRoutes);
 app.register(publicBookingRoutes);
 app.register(aiBotConfigurationsRoutes);
+app.register(chatsRoutes);
 
 // Start notification cron job
 startNotificationCron();

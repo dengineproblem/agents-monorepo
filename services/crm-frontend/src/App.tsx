@@ -8,6 +8,7 @@ import { ServicesPage } from './pages/ServicesPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { BotsList } from './pages/BotsList';
 import { BotEditor } from './pages/BotEditor';
+import { ChatsPage } from './pages/ChatsPage';
 import { PublicBooking } from './pages/PublicBooking';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
@@ -49,6 +50,7 @@ function AppRoutes() {
         <Route path="/consultations/analytics" element={<AnalyticsPage />} />
         <Route path="/reactivation" element={<ReactivationCampaigns />} />
         <Route path="/bots" element={<BotsList />} />
+        <Route path="/bots/chats" element={<ChatsPage />} />
         <Route path="/bots/:botId" element={<BotEditor />} />
       </Routes>
     </MainLayout>

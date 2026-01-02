@@ -1,5 +1,5 @@
 import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3 } from 'lucide-react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 
 interface NavItem {
@@ -11,16 +11,21 @@ interface NavItem {
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('sidebar-collapsed');
     return saved === 'true';
   });
   const [expandedItems, setExpandedItems] = useState<string[]>(() => {
     // Auto-expand if we're on a child route
+    const expanded: string[] = [];
     if (location.pathname.startsWith('/consultations')) {
-      return ['/consultations'];
+      expanded.push('/consultations');
     }
-    return [];
+    if (location.pathname.startsWith('/bots')) {
+      expanded.push('/bots');
+    }
+    return expanded;
   });
 
   const navItems: NavItem[] = [
@@ -36,7 +41,15 @@ export function Sidebar() {
         { path: '/consultations/analytics', icon: BarChart3, label: 'Аналитика' },
       ]
     },
-    { path: '/bots', icon: Cpu, label: 'AI-боты' },
+    {
+      path: '/bots',
+      icon: Cpu,
+      label: 'AI-боты',
+      children: [
+        { path: '/bots', icon: Cpu, label: 'Боты' },
+        { path: '/bots/chats', icon: MessageSquare, label: 'Чаты' },
+      ]
+    },
     { path: '/reactivation', icon: Send, label: 'Рассылки' }
   ];
 
@@ -49,13 +62,17 @@ export function Sidebar() {
     if (location.pathname.startsWith('/consultations') && !expandedItems.includes('/consultations')) {
       setExpandedItems(prev => [...prev, '/consultations']);
     }
+    if (location.pathname.startsWith('/bots') && !expandedItems.includes('/bots')) {
+      setExpandedItems(prev => [...prev, '/bots']);
+    }
   }, [location.pathname]);
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
   };
 
-  const toggleExpanded = (path: string) => {
+  const toggleExpanded = (path: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     setExpandedItems(prev =>
       prev.includes(path)
         ? prev.filter(p => p !== path)
@@ -63,9 +80,20 @@ export function Sidebar() {
     );
   };
 
+  const handleParentClick = (path: string) => {
+    // Navigate to the page and expand the submenu
+    navigate(path);
+    if (!expandedItems.includes(path)) {
+      setExpandedItems(prev => [...prev, path]);
+    }
+  };
+
   const isActive = (path: string) => {
     if (path === '/consultations') {
       return location.pathname === '/consultations';
+    }
+    if (path === '/bots') {
+      return location.pathname === '/bots';
     }
     return location.pathname === path;
   };
@@ -120,7 +148,7 @@ export function Sidebar() {
             return (
               <div key={path}>
                 <button
-                  onClick={() => toggleExpanded(path)}
+                  onClick={() => handleParentClick(path)}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                     parentActive
                       ? 'bg-accent'
@@ -132,7 +160,10 @@ export function Sidebar() {
                   {!isCollapsed && (
                     <>
                       <span className="font-medium flex-1 text-left">{label}</span>
-                      <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      <ChevronDown
+                        className={`w-4 h-4 transition-transform hover:scale-125 ${isExpanded ? 'rotate-180' : ''}`}
+                        onClick={(e) => toggleExpanded(path, e)}
+                      />
                     </>
                   )}
                 </button>
