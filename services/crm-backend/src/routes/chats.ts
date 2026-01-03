@@ -167,13 +167,19 @@ export async function chatsRoutes(app: FastifyInstance) {
       }, '[GET /chats] Querying Evolution DB for chats');
 
       // Get all messages grouped by contact with latest message info
+      // IMPORTANT: Use remoteJidAlt for LID messages (@lid) to group with real phone
       const query = `
         WITH instance_data AS (
           SELECT id FROM "Instance" WHERE name = $1
         ),
         chat_summary AS (
           SELECT
-            "key"->>'remoteJid' as remote_jid,
+            -- If remoteJid ends with @lid, use remoteJidAlt (real phone), otherwise use remoteJid
+            CASE
+              WHEN "key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+              ELSE "key"->>'remoteJid'
+            END as remote_jid,
             MAX("pushName") as contact_name,
             MAX("messageTimestamp") as last_message_time,
             COUNT(*) as message_count
@@ -182,19 +188,36 @@ export async function chatsRoutes(app: FastifyInstance) {
             AND "key"->>'remoteJid' NOT LIKE '%@g.us'
             AND "key"->>'remoteJid' NOT LIKE '%@broadcast'
             AND "key"->>'remoteJid' NOT LIKE 'status@%'
-          GROUP BY "key"->>'remoteJid'
+          GROUP BY CASE
+              WHEN "key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+              ELSE "key"->>'remoteJid'
+            END
           ORDER BY last_message_time DESC
           LIMIT 100
         ),
         latest_messages AS (
-          SELECT DISTINCT ON (m."key"->>'remoteJid')
-            m."key"->>'remoteJid' as remote_jid,
+          SELECT DISTINCT ON (
+            CASE
+              WHEN m."key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
+              ELSE m."key"->>'remoteJid'
+            END
+          )
+            CASE
+              WHEN m."key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
+              ELSE m."key"->>'remoteJid'
+            END as remote_jid,
             m."message" as message_data,
             m."key"->>'fromMe' as from_me
           FROM "Message" m
           WHERE m."instanceId" IN (SELECT id FROM instance_data)
-            AND m."key"->>'remoteJid' IN (SELECT remote_jid FROM chat_summary)
-          ORDER BY m."key"->>'remoteJid', m."messageTimestamp" DESC
+          ORDER BY CASE
+              WHEN m."key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE(m."key"->>'remoteJidAlt', m."key"->>'remoteJid')
+              ELSE m."key"->>'remoteJid'
+            END, m."messageTimestamp" DESC
         )
         SELECT
           cs.remote_jid,
@@ -300,6 +323,7 @@ export async function chatsRoutes(app: FastifyInstance) {
       }, '[GET /chats/:remoteJid/messages] Querying messages');
 
       // Get messages for this contact
+      // Include messages where remoteJid matches OR remoteJidAlt matches (for LID messages)
       const query = `
         SELECT
           m."key"->>'id' as message_id,
@@ -311,7 +335,10 @@ export async function chatsRoutes(app: FastifyInstance) {
         WHERE m."instanceId" = (
           SELECT id FROM "Instance" WHERE name = $1
         )
-        AND m."key"->>'remoteJid' = $2
+        AND (
+          m."key"->>'remoteJid' = $2
+          OR m."key"->>'remoteJidAlt' = $2
+        )
         ORDER BY m."messageTimestamp" DESC
         LIMIT $3 OFFSET $4
       `;
@@ -529,7 +556,12 @@ export async function chatsRoutes(app: FastifyInstance) {
         ),
         matching_chats AS (
           SELECT DISTINCT
-            "key"->>'remoteJid' as remote_jid,
+            -- Use remoteJidAlt for LID messages to group with real phone
+            CASE
+              WHEN "key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+              ELSE "key"->>'remoteJid'
+            END as remote_jid,
             MAX("pushName") as contact_name,
             MAX("messageTimestamp") as last_message_time
           FROM "Message"
@@ -539,8 +571,13 @@ export async function chatsRoutes(app: FastifyInstance) {
             AND (
               "pushName" ILIKE $2 ESCAPE '\\'
               OR "key"->>'remoteJid' LIKE $2 ESCAPE '\\'
+              OR "key"->>'remoteJidAlt' LIKE $2 ESCAPE '\\'
             )
-          GROUP BY "key"->>'remoteJid'
+          GROUP BY CASE
+              WHEN "key"->>'remoteJid' LIKE '%@lid'
+              THEN COALESCE("key"->>'remoteJidAlt', "key"->>'remoteJid')
+              ELSE "key"->>'remoteJid'
+            END
           ORDER BY last_message_time DESC
           LIMIT 20
         )

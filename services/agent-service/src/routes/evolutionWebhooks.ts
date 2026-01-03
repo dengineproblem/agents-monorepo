@@ -221,10 +221,18 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     }
 
     // ✅ Вызываем бота для обычных сообщений (не из рекламы)
-    // Важно: используем remoteJid (реальный номер), а не remoteJidAlt (LID)
-    const clientPhone = remoteJid
-      .replace('@s.whatsapp.net', '')
-      .replace('@c.us', '');
+    // Важно: проверяем @lid и используем remoteJidAlt если это Lead ID
+    let clientPhone: string;
+    if (remoteJid.endsWith('@lid')) {
+      clientPhone = (remoteJidAlt || remoteJid)
+        .replace('@s.whatsapp.net', '')
+        .replace('@c.us', '')
+        .replace('@lid', '');
+    } else {
+      clientPhone = remoteJid
+        .replace('@s.whatsapp.net', '')
+        .replace('@c.us', '');
+    }
 
     // Для текстовых сообщений пробуем умный матчинг по client_question
     // handleSmartMatching возвращает instanceData если нашёл инстанс (и возможно создал dialog_analysis)
