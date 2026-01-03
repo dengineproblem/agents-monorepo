@@ -76,8 +76,22 @@ const AppRoutes = () => {
   // Check if current path is admin route
   const isAdminRoute = location.pathname.startsWith('/admin');
 
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  // Синхронная инициализация user из localStorage для мгновенного рендера без "моргания"
+  const [user, setUser] = useState<any>(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        if (parsedUser && parsedUser.username) {
+          return parsedUser;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  });
+  const [loading, setLoading] = useState(false); // Сразу false, т.к. user уже прочитан синхронно
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showFacebookManualModal, setShowFacebookManualModal] = useState(false);
 
@@ -320,7 +334,12 @@ const AppRoutes = () => {
                   <AppSidebar />
                   <SidebarAwareContent>
                     <Routes>
-                      <Route path="/" element={<Dashboard />} />
+                      <Route path="/" element={
+                        // Мгновенный редирект на /accounts для мультиаккаунта при первом входе
+                        (multiAccountEnabled && adAccounts.length > 0 && !sessionStorage.getItem('hasVisitedDashboard'))
+                          ? (() => { sessionStorage.setItem('hasVisitedDashboard', 'true'); return <Navigate to="/accounts" replace />; })()
+                          : <Dashboard />
+                      } />
                       <Route path="/accounts" element={<MultiAccountDashboard />} />
                       <Route path="/oauth/callback" element={<OAuthCallback />} />
                       <Route path="/campaign/:id" element={<CampaignDetail />} />

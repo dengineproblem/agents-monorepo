@@ -9,11 +9,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   BarChart3,
+  Building2,
   ChevronRight,
   ChevronDown,
   Plus,
   AlertCircle,
-  TrendingUp,
   RefreshCw,
   Loader2,
   Megaphone,
@@ -712,19 +712,6 @@ const MultiAccountDashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Help Tip */}
-        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-          <div className="flex items-start gap-3">
-            <TrendingUp className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5" />
-            <div>
-              <p className="font-medium text-blue-900 dark:text-blue-100">Совет</p>
-              <p className="text-sm text-blue-700 dark:text-blue-300">
-                Нажмите на любой аккаунт, чтобы перейти к детальной статистике и управлению
-                рекламными кампаниями.
-              </p>
-            </div>
-          </div>
-        </div>
       </div>
 
       <DateRangePicker open={datePickerOpen} onOpenChange={setDatePickerOpen} />
@@ -842,46 +829,43 @@ const AccountRow: React.FC<AccountRowProps> = ({
               {account.name.charAt(0).toUpperCase()}
             </AvatarFallback>
           </Avatar>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="font-medium truncate text-sm">{account.name}</p>
+            {/* Мобильная версия — компактная строка метрик */}
+            {stats && (
+              <p className="md:hidden text-xs text-muted-foreground truncate">
+                {formatCurrency(stats.spend)} • {formatNumber(stats.leads)} лидов • {formatCurrency(stats.cpl)} CPL
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Spend */}
-        <div className="col-span-2 flex items-center justify-between md:justify-end">
-          <span className="text-sm text-muted-foreground md:hidden">Расходы:</span>
+        {/* Десктопная версия — отдельные колонки */}
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="font-medium text-sm">
             {stats ? formatCurrency(stats.spend) : '—'}
           </span>
         </div>
 
-        {/* Leads */}
-        <div className="col-span-1 flex items-center justify-between md:justify-end">
-          <span className="text-sm text-muted-foreground md:hidden">Лиды:</span>
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="font-medium text-sm">
             {stats ? formatNumber(stats.leads) : '—'}
           </span>
         </div>
 
-        {/* CPL */}
-        <div className="col-span-2 flex items-center justify-between md:justify-end">
-          <span className="text-sm text-muted-foreground md:hidden">CPL:</span>
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="font-medium text-sm">
             {stats ? formatCurrency(stats.cpl) : '—'}
           </span>
         </div>
 
-        {/* CTR */}
-        <div className="col-span-1 flex items-center justify-between md:justify-end">
-          <span className="text-sm text-muted-foreground md:hidden">CTR:</span>
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="font-medium text-sm">
             {stats ? formatCtr(stats.ctr) : '—'}
           </span>
         </div>
 
-        {/* CPM */}
-        <div className="col-span-2 flex items-center justify-between md:justify-end">
-          <span className="text-sm text-muted-foreground md:hidden">CPM:</span>
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="font-medium text-sm">
             {stats ? formatCpm(stats.cpm) : '—'}
           </span>
@@ -960,7 +944,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
       <div
         className={cn(
           'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-3 cursor-pointer transition-colors',
-          'hover:bg-muted/40 pl-12',
+          'hover:bg-muted/40 pl-4 md:pl-12',
           isExpanded && 'bg-muted/30'
         )}
         onClick={onExpand}
@@ -976,32 +960,34 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
           ) : (
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
-          <Megaphone className="h-4 w-4 text-blue-500" />
-          <span className="font-medium text-sm truncate">{campaign.campaign_name}</span>
+          <Megaphone className="h-4 w-4 text-blue-500 flex-shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium text-sm truncate">{campaign.campaign_name}</p>
+            {/* Мобильная версия — компактная строка метрик */}
+            <p className="md:hidden text-xs text-muted-foreground truncate">
+              {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL
+            </p>
+          </div>
         </div>
 
-        {/* Spend */}
-        <div className="col-span-2 flex items-center justify-end">
+        {/* Десктопная версия — отдельные колонки */}
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm">{formatCurrency(campaign.spend)}</span>
         </div>
 
-        {/* Leads */}
-        <div className="col-span-1 flex items-center justify-end">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">{formatNumber(campaign.leads)}</span>
         </div>
 
-        {/* CPL */}
-        <div className="col-span-2 flex items-center justify-end">
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm">{formatCurrency(campaign.cpl)}</span>
         </div>
 
-        {/* CTR */}
-        <div className="col-span-1 flex items-center justify-end">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">{formatCtr(campaign.ctr)}</span>
         </div>
 
-        {/* CPM */}
-        <div className="col-span-2 flex items-center justify-end">
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm">{formatCpm(campaign.impressions, campaign.spend)}</span>
         </div>
       </div>
@@ -1010,12 +996,12 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
       {isExpanded && (
         <div className="bg-muted/10">
           {isLoading ? (
-            <div className="flex items-center justify-center py-3 pl-16">
+            <div className="flex items-center justify-center py-3 pl-4 md:pl-16">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
               <span className="text-sm text-muted-foreground">Загрузка адсетов...</span>
             </div>
           ) : adsets.length === 0 ? (
-            <div className="flex items-center justify-center py-3 pl-16">
+            <div className="flex items-center justify-center py-3 pl-4 md:pl-16">
               <span className="text-sm text-muted-foreground">Нет адсетов за выбранный период</span>
             </div>
           ) : (
@@ -1066,7 +1052,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
       <div
         className={cn(
           'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-2 cursor-pointer transition-colors',
-          'hover:bg-muted/30 pl-20',
+          'hover:bg-muted/30 pl-6 md:pl-20',
           isExpanded && 'bg-muted/20'
         )}
         onClick={onExpand}
@@ -1082,34 +1068,36 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
           ) : (
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800">
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 flex-shrink-0">
             adset
           </Badge>
-          <span className="text-sm truncate">{adset.adset_name}</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm truncate">{adset.adset_name}</p>
+            {/* Мобильная версия — компактная строка метрик */}
+            <p className="md:hidden text-xs text-muted-foreground truncate">
+              {formatCurrency(adset.spend)} • {formatNumber(adset.leads)} лидов • {formatCurrency(adset.cpl)} CPL
+            </p>
+          </div>
         </div>
 
-        {/* Spend */}
-        <div className="col-span-2 flex items-center justify-end">
+        {/* Десктопная версия — отдельные колонки */}
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCurrency(adset.spend)}</span>
         </div>
 
-        {/* Leads */}
-        <div className="col-span-1 flex items-center justify-end">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatNumber(adset.leads)}</span>
         </div>
 
-        {/* CPL */}
-        <div className="col-span-2 flex items-center justify-end">
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCurrency(adset.cpl)}</span>
         </div>
 
-        {/* CTR */}
-        <div className="col-span-1 flex items-center justify-end">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCtr(adset.ctr)}</span>
         </div>
 
-        {/* CPM */}
-        <div className="col-span-2 flex items-center justify-end">
+        <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCpm(adset.impressions, adset.spend)}</span>
         </div>
       </div>
@@ -1118,12 +1106,12 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
       {isExpanded && (
         <div className="bg-muted/5">
           {isLoading ? (
-            <div className="flex items-center justify-center py-2 pl-24">
+            <div className="flex items-center justify-center py-2 pl-6 md:pl-24">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
               <span className="text-sm text-muted-foreground">Загрузка объявлений...</span>
             </div>
           ) : ads.length === 0 ? (
-            <div className="flex items-center justify-center py-2 pl-24">
+            <div className="flex items-center justify-center py-2 pl-6 md:pl-24">
               <span className="text-sm text-muted-foreground">Нет объявлений за выбранный период</span>
             </div>
           ) : (
@@ -1156,39 +1144,41 @@ const AdRow: React.FC<AdRowProps> = ({ ad }) => {
     <div
       className={cn(
         'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-2 transition-colors',
-        'hover:bg-muted/20 pl-28'
+        'hover:bg-muted/20 pl-8 md:pl-28'
       )}
     >
       {/* Ad Info */}
       <div className="col-span-3 flex items-center gap-2">
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800">
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800 flex-shrink-0">
           ad
         </Badge>
-        <span className="text-xs truncate text-muted-foreground">{ad.ad_name}</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs truncate text-muted-foreground">{ad.ad_name}</p>
+          {/* Мобильная версия — компактная строка метрик */}
+          <p className="md:hidden text-[10px] text-muted-foreground/70 truncate">
+            {formatCurrency(ad.spend)} • {formatNumber(ad.leads)} лидов • {formatCurrency(ad.cpl)} CPL
+          </p>
+        </div>
       </div>
 
-      {/* Spend */}
-      <div className="col-span-2 flex items-center justify-end">
+      {/* Десктопная версия — отдельные колонки */}
+      <div className="hidden md:flex col-span-2 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCurrency(ad.spend)}</span>
       </div>
 
-      {/* Leads */}
-      <div className="col-span-1 flex items-center justify-end">
+      <div className="hidden md:flex col-span-1 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatNumber(ad.leads)}</span>
       </div>
 
-      {/* CPL */}
-      <div className="col-span-2 flex items-center justify-end">
+      <div className="hidden md:flex col-span-2 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCurrency(ad.cpl)}</span>
       </div>
 
-      {/* CTR */}
-      <div className="col-span-1 flex items-center justify-end">
+      <div className="hidden md:flex col-span-1 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCtr(ad.ctr)}</span>
       </div>
 
-      {/* CPM */}
-      <div className="col-span-2 flex items-center justify-end">
+      <div className="hidden md:flex col-span-2 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCpm(ad.impressions, ad.spend)}</span>
       </div>
     </div>

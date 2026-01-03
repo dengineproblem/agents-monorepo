@@ -63,10 +63,24 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [platform, setPlatform] = useState<'instagram' | 'tiktok'>('instagram');
   const [tiktokConnected, setTiktokConnected] = useState<boolean>(false);
 
-  // Multi-account state
-  const [multiAccountEnabled, setMultiAccountEnabled] = useState<boolean>(false);
-  const [adAccounts, setAdAccounts] = useState<AdAccountSummary[]>([]);
-  const [currentAdAccountId, setCurrentAdAccountIdState] = useState<string | null>(null);
+  // Multi-account state - инициализируем из localStorage для мгновенного редиректа
+  const [multiAccountEnabled, setMultiAccountEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('multiAccountEnabled') === 'true';
+  });
+  const [adAccounts, setAdAccounts] = useState<AdAccountSummary[]>(() => {
+    const stored = localStorage.getItem('adAccounts');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+  const [currentAdAccountId, setCurrentAdAccountIdState] = useState<string | null>(() => {
+    return localStorage.getItem('currentAdAccountId');
+  });
 
   // Обёртка для setCurrentAdAccountId — сохраняет в localStorage
   const setCurrentAdAccountId = useCallback((id: string | null) => {
