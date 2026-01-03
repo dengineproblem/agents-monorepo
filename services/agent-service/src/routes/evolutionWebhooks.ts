@@ -112,6 +112,9 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const remoteJid = message.key.remoteJid;
   const remoteJidAlt = message.key.remoteJidAlt;  // Альтернативный JID (для лидов с рекламы)
 
+  // Извлекаем pushName (имя контакта из WhatsApp)
+  const pushName = message.pushName || data.pushName;
+
   // Определяем тип сообщения и извлекаем текст
   let messageText = message.message?.conversation ||
                     message.message?.extendedTextMessage?.text || '';
@@ -217,7 +220,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
     // Для текстовых сообщений пробуем умный матчинг по client_question
     if (messageType === 'text' && messageText.trim().length > 0) {
-      await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, message, app);
+      await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, pushName, message, app);
     }
 
     // ✅ Вызываем бота для обычных сообщений (не из рекламы)
@@ -225,6 +228,29 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     const clientPhone = remoteJid
       .replace('@s.whatsapp.net', '')
       .replace('@c.us', '');
+
+    // ✅ НОВОЕ: Сохраняем pushName в dialog_analysis для обычных сообщений
+    // Это нужно чтобы бот знал имя клиента из WhatsApp
+    if (pushName) {
+      const { data: instanceData } = await supabase
+        .from('whatsapp_instances')
+        .select('user_account_id, account_id')
+        .eq('instance_name', instance)
+        .single();
+
+      if (instanceData) {
+        await upsertDialogAnalysis({
+          userAccountId: instanceData.user_account_id,
+          accountId: instanceData.account_id || null,
+          instanceName: instance,
+          contactPhone: clientPhone,
+          contactName: pushName,
+          messageText,
+          timestamp: new Date(message.messageTimestamp * 1000 || Date.now())
+        }, app);
+      }
+    }
+
     await tryBotResponse(clientPhone, instance, messageText, messageType, app);
 
     return;
@@ -324,6 +350,7 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     instancePhone: instanceData.phone_number,
     instanceName: instance,
     clientPhone,
+    contactName: pushName,  // ✅ НОВОЕ: имя из WhatsApp (pushName)
     sourceId: finalSourceId,
     creativeId,      // Pass resolved value
     directionId,     // Pass resolved value
@@ -347,6 +374,7 @@ async function processAdLead(params: {
   instancePhone: string;
   instanceName: string;
   clientPhone: string;
+  contactName?: string;  // ✅ НОВОЕ: имя контакта из WhatsApp (pushName)
   sourceId: string;
   creativeId: string | null;
   directionId: string | null;
@@ -363,6 +391,7 @@ async function processAdLead(params: {
     instancePhone,
     instanceName,
     clientPhone,
+    contactName,  // ✅ НОВОЕ: имя из WhatsApp
     sourceId,
     creativeId,
     directionId,
@@ -441,6 +470,7 @@ async function processAdLead(params: {
     accountId,
     instanceName,
     contactPhone: clientPhone,
+    contactName,  // ✅ НОВОЕ: имя из WhatsApp (pushName)
     messageText,
     ctwaClid: ctwaClid || null,  // ✅ НОВОЕ: передаём ctwa_clid для CAPI
     timestamp
@@ -458,29 +488,38 @@ async function upsertDialogAnalysis(params: {
   accountId?: string | null;  // UUID для мультиаккаунтности
   instanceName: string;
   contactPhone: string;
+  contactName?: string;  // ✅ НОВОЕ: имя контакта из WhatsApp (pushName)
   messageText: string;
   ctwaClid?: string | null;  // ✅ НОВОЕ: Click-to-WhatsApp Click ID для CAPI
   timestamp: Date;
 }, app: FastifyInstance) {
-  const { userAccountId, accountId, instanceName, contactPhone, messageText, ctwaClid, timestamp } = params;
+  const { userAccountId, accountId, instanceName, contactPhone, contactName, messageText, ctwaClid, timestamp } = params;
 
   // Проверить существование записи
   const { data: existing } = await supabase
     .from('dialog_analysis')
-    .select('id, ctwa_clid')  // ✅ НОВОЕ: получаем ctwa_clid для сохранения
+    .select('id, ctwa_clid, contact_name')  // ✅ НОВОЕ: получаем contact_name для проверки
     .eq('contact_phone', contactPhone)
     .eq('instance_name', instanceName)
     .maybeSingle();
 
   if (existing) {
     // Обновить существующую запись
+    // НЕ перезаписываем contact_name если оно уже есть (клиент мог сам назвать имя)
+    const updateData: Record<string, any> = {
+      last_message: messageText,
+      ctwa_clid: ctwaClid || existing.ctwa_clid,
+      analyzed_at: timestamp.toISOString()
+    };
+
+    // Обновляем имя только если его нет и пришло новое
+    if (!existing.contact_name && contactName) {
+      updateData.contact_name = contactName;
+    }
+
     await supabase
       .from('dialog_analysis')
-      .update({
-        last_message: messageText,
-        ctwa_clid: ctwaClid || existing.ctwa_clid,  // ✅ НОВОЕ: сохраняем ctwa_clid (не перезаписываем если уже есть)
-        analyzed_at: timestamp.toISOString()
-      })
+      .update(updateData)
       .eq('id', existing.id);
   } else {
     // Создать новую запись
@@ -491,6 +530,7 @@ async function upsertDialogAnalysis(params: {
         account_id: accountId || null,  // UUID для мультиаккаунтности
         instance_name: instanceName,
         contact_phone: contactPhone,
+        contact_name: contactName || null,  // ✅ НОВОЕ: сохраняем имя из WhatsApp
         last_message: messageText,
         ctwa_clid: ctwaClid || null,  // ✅ НОВОЕ: сохраняем ctwa_clid для CAPI
         funnel_stage: 'new_lead',
@@ -639,6 +679,7 @@ async function handleSmartMatching(
   remoteJid: string,
   remoteJidAlt: string | undefined,
   messageText: string,
+  pushName: string | undefined,  // ✅ НОВОЕ: имя из WhatsApp
   message: any,
   app: FastifyInstance
 ) {
@@ -739,6 +780,7 @@ async function handleSmartMatching(
     instancePhone: instanceData.phone_number,
     instanceName: instance,
     clientPhone,
+    contactName: pushName,  // ✅ НОВОЕ: имя из WhatsApp
     directionId: matchResult.directionId!,
     directionName: matchResult.directionName!,
     similarity: matchResult.similarity,
@@ -763,6 +805,7 @@ async function createLeadWithoutCreative(params: {
   instancePhone: string;
   instanceName: string;
   clientPhone: string;
+  contactName?: string;  // ✅ НОВОЕ: имя контакта из WhatsApp (pushName)
   directionId: string;
   directionName: string;
   similarity: number;
@@ -776,6 +819,7 @@ async function createLeadWithoutCreative(params: {
     instancePhone,
     instanceName,
     clientPhone,
+    contactName,  // ✅ НОВОЕ: имя из WhatsApp
     directionId,
     similarity,
     messageText,
@@ -816,6 +860,7 @@ async function createLeadWithoutCreative(params: {
       accountId,
       instanceName,
       contactPhone: clientPhone,
+      contactName,  // ✅ НОВОЕ: имя из WhatsApp
       messageText,
       timestamp
     }, app);
@@ -855,6 +900,7 @@ async function createLeadWithoutCreative(params: {
     accountId,
     instanceName,
     contactPhone: clientPhone,
+    contactName,  // ✅ НОВОЕ: имя из WhatsApp
     messageText,
     timestamp
   }, app);
