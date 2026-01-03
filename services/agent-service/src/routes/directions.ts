@@ -277,6 +277,16 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       log.info({ userAccountId, accountId }, 'Fetching directions for user');
 
+      // Проверяем флаг multi_account_enabled у пользователя
+      const { data: userAccount } = await supabase
+        .from('user_accounts')
+        .select('multi_account_enabled')
+        .eq('id', userAccountId)
+        .maybeSingle();
+
+      const isMultiAccountMode = userAccount?.multi_account_enabled === true;
+      log.info({ userAccountId, isMultiAccountMode, accountId }, 'Multi-account mode check');
+
       let query = supabase
         .from('account_directions')
         .select(`
@@ -285,8 +295,8 @@ export async function directionsRoutes(app: FastifyInstance) {
         `)
         .eq('user_account_id', userAccountId);
 
-      // Фильтрация по рекламному аккаунту для мультиаккаунтного режима
-      if (accountId) {
+      // Фильтрация по рекламному аккаунту ТОЛЬКО в мультиаккаунтном режиме
+      if (isMultiAccountMode && accountId) {
         query = query.eq('account_id', accountId);
       }
 
