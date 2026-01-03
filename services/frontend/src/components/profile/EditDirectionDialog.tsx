@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 export interface EditDirectionCapiSettings {
   capi_enabled: boolean;
   capi_source: CapiSource | null;
+  pixel_id: string | null;
 }
 
 interface EditDirectionDialogProps {
@@ -84,13 +85,20 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   // CAPI settings
   const [capiEnabled, setCapiEnabled] = useState(false);
   const [capiSource, setCapiSource] = useState<CapiSource>('whatsapp');
+  const [capiPixelId, setCapiPixelId] = useState<string>('');
 
-  // Загрузка пикселей при выборе цели "Site Leads"
+  // Загрузка пикселей - для site_leads или для CAPI
   useEffect(() => {
     const loadPixels = async () => {
-      if (!direction || direction.objective !== 'site_leads') {
-        // Сброс пикселей при переключении на другую цель
-        setPixels([]);
+      // Загружаем пиксели если site_leads ИЛИ если CAPI включен для других целей
+      const needPixels = direction?.objective === 'site_leads' ||
+        (direction?.objective !== 'site_leads' && capiEnabled);
+
+      if (!direction || !needPixels) {
+        if (direction?.objective !== 'site_leads') {
+          // Не сбрасываем пиксели для site_leads
+          setPixels([]);
+        }
         return;
       }
       setIsLoadingPixels(true);
@@ -106,7 +114,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       }
     };
     loadPixels();
-  }, [direction?.objective]);
+  }, [direction?.objective, capiEnabled]);
 
   // Заполнение формы при открытии диалога
   useEffect(() => {
@@ -147,7 +155,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         if (settings.client_question) setClientQuestion(settings.client_question);
         if (settings.instagram_url) setInstagramUrl(settings.instagram_url);
         if (settings.site_url) setSiteUrl(settings.site_url);
-        if (settings.pixel_id) setPixelId(settings.pixel_id);
+        if (settings.pixel_id) {
+          setPixelId(settings.pixel_id);
+          setCapiPixelId(settings.pixel_id); // Используем тот же пиксель для CAPI
+        }
         if (settings.utm_tag) setUtmTag(settings.utm_tag);
       } else {
         console.log('[EditDirectionDialog] Настройки не найдены, используем дефолты');
@@ -170,6 +181,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setGender('all');
     setDescription('Напишите нам, чтобы узнать подробности');
     setClientQuestion('Здравствуйте! Хочу узнать об этом подробнее.');
+    setCapiPixelId('');
     setInstagramUrl('');
     setSiteUrl('');
     setPixelId('');
@@ -263,8 +275,9 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         is_active: isActive,
         whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
         capiSettings: {
-          capi_enabled: capiEnabled,
-          capi_source: capiEnabled ? capiSource : null,
+          capi_enabled: capiEnabled && !!capiPixelId, // CAPI требует пиксель
+          capi_source: capiEnabled && capiPixelId ? capiSource : null,
+          pixel_id: capiEnabled ? capiPixelId || null : null,
         },
       });
 
@@ -275,8 +288,16 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         age_max: ageMax,
         gender,
         description: description.trim(),
-        ...(direction.objective === 'whatsapp' && { client_question: clientQuestion.trim() }),
-        ...(direction.objective === 'instagram_traffic' && { instagram_url: instagramUrl.trim() }),
+        ...(direction.objective === 'whatsapp' && {
+          client_question: clientQuestion.trim(),
+          // Сохраняем pixel_id для CAPI
+          ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
+        }),
+        ...(direction.objective === 'instagram_traffic' && {
+          instagram_url: instagramUrl.trim(),
+          // Сохраняем pixel_id для CAPI
+          ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
+        }),
         ...(direction.objective === 'site_leads' && {
           site_url: siteUrl.trim(),
           pixel_id: pixelId || null,
@@ -734,39 +755,79 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   </div>
 
                   {capiEnabled && (
-                    <div className="space-y-3 pl-4 border-l-2 border-blue-200">
-                      <Label>Источник данных для событий</Label>
-                      <RadioGroup
-                        value={capiSource}
-                        onValueChange={(value) => setCapiSource(value as CapiSource)}
-                        disabled={isSubmitting}
-                      >
-                        <div className="flex items-start space-x-2">
-                          <RadioGroupItem value="whatsapp" id="edit-capi-source-whatsapp" className="mt-1" />
-                          <div>
-                            <Label htmlFor="edit-capi-source-whatsapp" className="font-normal cursor-pointer">
-                              WhatsApp (AI-анализ)
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                              ИИ анализирует диалоги и определяет уровень интереса
+                    <div className="space-y-4 pl-4 border-l-2 border-blue-200">
+                      {/* Выбор пикселя */}
+                      <div className="space-y-2">
+                        <Label>Facebook Pixel <span className="text-red-500">*</span></Label>
+                        <Select
+                          value={capiPixelId || 'none'}
+                          onValueChange={(value) => setCapiPixelId(value === 'none' ? '' : value)}
+                          disabled={isSubmitting || isLoadingPixels}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={
+                              isLoadingPixels
+                                ? 'Загрузка...'
+                                : pixels.length === 0
+                                  ? 'Нет доступных пикселей'
+                                  : 'Выберите пиксель'
+                            } />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Без пикселя</SelectItem>
+                            {pixels.map((pixel) => (
+                              <SelectItem key={pixel.id} value={pixel.id}>
+                                {pixel.name} ({pixel.id})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!capiPixelId && (
+                          <p className="text-xs text-amber-600">
+                            Выберите пиксель для отправки событий в Meta
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Источник данных - показываем только если выбран пиксель */}
+                      {capiPixelId && (
+                        <div className="space-y-2">
+                          <Label>Источник данных для событий</Label>
+                          <RadioGroup
+                            value={capiSource}
+                            onValueChange={(value) => setCapiSource(value as CapiSource)}
+                            disabled={isSubmitting}
+                          >
+                            <div className="flex items-start space-x-2">
+                              <RadioGroupItem value="whatsapp" id="edit-capi-source-whatsapp" className="mt-1" />
+                              <div>
+                                <Label htmlFor="edit-capi-source-whatsapp" className="font-normal cursor-pointer">
+                                  WhatsApp (AI-анализ)
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  ИИ анализирует диалоги и определяет уровень интереса
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-start space-x-2">
+                              <RadioGroupItem value="crm" id="edit-capi-source-crm" className="mt-1" />
+                              <div>
+                                <Label htmlFor="edit-capi-source-crm" className="font-normal cursor-pointer">
+                                  CRM (поля карточки)
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                  События отправляются при изменении полей в CRM
+                                </p>
+                              </div>
+                            </div>
+                          </RadioGroup>
+                          {capiSource === 'crm' && (
+                            <p className="text-xs text-amber-600">
+                              ⚠️ Настройка полей CRM производится при создании направления
                             </p>
-                          </div>
+                          )}
                         </div>
-                        <div className="flex items-start space-x-2">
-                          <RadioGroupItem value="crm" id="edit-capi-source-crm" className="mt-1" />
-                          <div>
-                            <Label htmlFor="edit-capi-source-crm" className="font-normal cursor-pointer">
-                              CRM (поля карточки)
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                              События отправляются при изменении полей в CRM
-                            </p>
-                          </div>
-                        </div>
-                      </RadioGroup>
-                      <p className="text-xs text-amber-600">
-                        ⚠️ Настройка полей CRM и Pixel доступна при создании направления
-                      </p>
+                      )}
                     </div>
                   )}
                 </div>
