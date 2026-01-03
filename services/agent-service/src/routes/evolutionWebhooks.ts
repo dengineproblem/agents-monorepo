@@ -454,6 +454,7 @@ async function upsertDialogAnalysis(params: {
 
 /**
  * Попытаться ответить через бота (вызов chatbot-service)
+ * С retry логикой и логированием ошибок в БД
  */
 async function tryBotResponse(
   contactPhone: string,
@@ -461,25 +462,61 @@ async function tryBotResponse(
   messageText: string,
   app: FastifyInstance
 ) {
-  try {
-    // Вызвать chatbot-service для обработки сообщения
-    await axios.post(`${CHATBOT_SERVICE_URL}/process-message`, {
-      contactPhone,
-      instanceName,
-      messageText
-    }, {
-      timeout: 5000,
-      validateStatus: () => true // Не бросать ошибку на любой статус
-    });
-    
-    app.log.debug({ contactPhone, instanceName }, 'Sent message to chatbot-service');
-  } catch (error: any) {
-    app.log.error({ 
-      error: error.message, 
-      contactPhone, 
-      instanceName 
-    }, 'Error calling chatbot-service');
+  const MAX_RETRIES = 3;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await axios.post(`${CHATBOT_SERVICE_URL}/process-message`, {
+        contactPhone,
+        instanceName,
+        messageText
+      }, {
+        timeout: 10000, // увеличено с 5 до 10 сек
+      });
+
+      if (response.status >= 200 && response.status < 300) {
+        app.log.debug({ contactPhone, instanceName, attempt }, 'Sent message to chatbot-service');
+        return;
+      }
+
+      lastError = new Error(`HTTP ${response.status}: ${JSON.stringify(response.data)}`);
+    } catch (error: any) {
+      lastError = error;
+
+      if (attempt < MAX_RETRIES) {
+        const delay = 1000 * attempt; // 1s, 2s, 3s
+        app.log.warn({
+          error: error.message,
+          contactPhone,
+          instanceName,
+          attempt,
+          maxRetries: MAX_RETRIES,
+          nextRetryIn: delay
+        }, 'Chatbot-service call failed, retrying...');
+
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
   }
+
+  // Все попытки исчерпаны - логируем критическую ошибку
+  app.log.error({
+    error: lastError?.message,
+    contactPhone,
+    instanceName,
+    attempts: MAX_RETRIES
+  }, 'All retry attempts failed for chatbot-service');
+
+  // Логируем в БД для видимости в админке
+  await logErrorToAdmin({
+    error_type: 'chatbot_service',
+    raw_error: lastError?.message || 'Unknown error after retries',
+    action: 'tryBotResponse',
+    endpoint: '/process-message',
+    request_data: { contactPhone, instanceName, messageText: messageText.substring(0, 200) },
+    severity: 'critical'
+  }).catch(() => {});
 }
 
 /**

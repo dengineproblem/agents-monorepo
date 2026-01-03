@@ -1247,6 +1247,21 @@ autossh -M 0 -L 5434:localhost:5433 root@147.182.186.15 -N -f
 
 ### **📊 ПОЛЕЗНЫЕ КОМАНДЫ ДЛЯ ДИАГНОСТИКИ**
 
+**Логи AI Bot / Chatbot Service:**
+```bash
+# Логи chatbot-service за последние 12 часов
+docker logs agents-monorepo-chatbot-service-1 --since "12h" 2>&1 | grep -E "NEW INCOMING|error|skip"
+
+# Последние 500 строк логов
+docker logs agents-monorepo-chatbot-service-1 --tail 500
+
+# Поиск по номеру телефона (последние 4 цифры)
+docker logs agents-monorepo-chatbot-service-1 --since "12h" 2>&1 | grep "1234"
+
+# Ошибки chatbot
+docker logs agents-monorepo-chatbot-service-1 --since "12h" 2>&1 | grep -i "error\|failed"
+```
+
 ```bash
 # Проверить все порты
 sudo lsof -i :80

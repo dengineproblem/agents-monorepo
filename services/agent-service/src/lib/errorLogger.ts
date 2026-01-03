@@ -23,6 +23,7 @@ export type ErrorType =
   | 'amocrm'
   | 'bitrix24'
   | 'evolution'
+  | 'chatbot_service'
   | 'creative_generation'
   | 'scoring'
   | 'webhook'
