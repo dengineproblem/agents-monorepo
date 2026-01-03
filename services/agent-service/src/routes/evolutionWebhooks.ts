@@ -220,37 +220,45 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
       return;
     }
 
-    // Для текстовых сообщений пробуем умный матчинг по client_question
-    if (messageType === 'text' && messageText.trim().length > 0) {
-      await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, pushName, message, app);
-    }
-
     // ✅ Вызываем бота для обычных сообщений (не из рекламы)
     // Важно: используем remoteJid (реальный номер), а не remoteJidAlt (LID)
     const clientPhone = remoteJid
       .replace('@s.whatsapp.net', '')
       .replace('@c.us', '');
 
-    // ✅ НОВОЕ: Сохраняем pushName в dialog_analysis для обычных сообщений
-    // Это нужно чтобы бот знал имя клиента из WhatsApp
-    if (pushName) {
-      const { data: instanceData } = await supabase
+    // Для текстовых сообщений пробуем умный матчинг по client_question
+    // handleSmartMatching возвращает instanceData если нашёл инстанс (и возможно создал dialog_analysis)
+    let instanceData: { user_account_id: string; account_id: string | null } | null = null;
+    if (messageType === 'text' && messageText.trim().length > 0) {
+      instanceData = await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, pushName, message, app);
+    }
+
+    // Сохраняем pushName в dialog_analysis (если ещё не сохранено через smart matching)
+    // Для аудио сообщений и текстовых без match нужно отдельно сохранить
+    if (pushName && !instanceData) {
+      // Получаем instanceData если ещё не получили
+      const { data: instData } = await supabase
         .from('whatsapp_instances')
         .select('user_account_id, account_id')
         .eq('instance_name', instance)
         .single();
 
-      if (instanceData) {
-        await upsertDialogAnalysis({
-          userAccountId: instanceData.user_account_id,
-          accountId: instanceData.account_id || null,
-          instanceName: instance,
-          contactPhone: clientPhone,
-          contactName: pushName,
-          messageText,
-          timestamp: new Date(message.messageTimestamp * 1000 || Date.now())
-        }, app);
+      if (instData) {
+        instanceData = { user_account_id: instData.user_account_id, account_id: instData.account_id };
       }
+    }
+
+    // Сохраняем pushName для всех сообщений (если есть instanceData)
+    if (pushName && instanceData) {
+      await upsertDialogAnalysis({
+        userAccountId: instanceData.user_account_id,
+        accountId: instanceData.account_id,
+        instanceName: instance,
+        contactPhone: clientPhone,
+        contactName: pushName,
+        messageText,
+        timestamp: new Date(message.messageTimestamp * 1000 || Date.now())
+      }, app);
     }
 
     await tryBotResponse(clientPhone, instance, messageText, messageType, app);
@@ -674,6 +682,7 @@ async function handleQRCodeUpdate(event: any, app: FastifyInstance) {
 /**
  * Умный матчинг для сообщений без FB метаданных
  * Сравнивает текст сообщения с client_question направлений пользователя
+ * @returns instanceData если нашли и обработали, null если не обработали
  */
 async function handleSmartMatching(
   event: any,
@@ -684,7 +693,7 @@ async function handleSmartMatching(
   pushName: string | undefined,  // ✅ НОВОЕ: имя из WhatsApp
   message: any,
   app: FastifyInstance
-) {
+): Promise<{ user_account_id: string; account_id: string | null } | null> {
   const currentTimestamp = message.messageTimestamp || Math.floor(Date.now() / 1000);
 
   // Проверяем, было ли предыдущее сообщение от этого контакта за последние N дней
@@ -703,7 +712,7 @@ async function handleSmartMatching(
         daysSinceLastMessage: daysSinceLastMessage.toFixed(1),
         silenceDays: SMART_MATCH_SILENCE_DAYS
       }, 'Recent message exists, skipping smart matching');
-      return;
+      return null;
     }
 
     app.log.info({
@@ -722,7 +731,7 @@ async function handleSmartMatching(
 
   if (instanceError || !instanceData) {
     app.log.debug({ instance }, 'Instance not found, ignoring message');
-    return;
+    return null;
   }
 
   // Пробуем найти направление по совпадению с client_question
@@ -739,8 +748,9 @@ async function handleSmartMatching(
       remoteJid,
       similarity: matchResult.similarity,
       messageText: messageText.substring(0, 50)
-    }, 'No match found via client_question, ignoring message');
-    return;
+    }, 'No match found via client_question');
+    // Возвращаем instanceData чтобы вызывающий код мог сохранить pushName
+    return { user_account_id: instanceData.user_account_id, account_id: instanceData.account_id };
   }
 
   app.log.info({
@@ -794,6 +804,9 @@ async function handleSmartMatching(
   if (isNew) {
     await notifyManualMatchRequired(instanceData.user_account_id, clientPhone, matchResult, app);
   }
+
+  // Вернуть instanceData - dialog_analysis уже создан в createLeadWithoutCreative
+  return { user_account_id: instanceData.user_account_id, account_id: instanceData.account_id };
 }
 
 /**
