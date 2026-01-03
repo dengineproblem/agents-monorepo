@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { User, Plus, Edit, Trash2, Clock, Calendar } from 'lucide-react';
+import { User, Plus, Edit, Trash2, Clock, Calendar, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import { consultationService } from '@/services/consultationService';
-import { Consultant, CreateConsultantData, WorkingSchedule, WorkingScheduleInput } from '@/types/consultation';
+import { Consultant, CreateConsultantData, WorkingSchedule, WorkingScheduleInput, ConsultationService, ConsultantService } from '@/types/consultation';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'Воскресенье', short: 'Вс' },
@@ -25,13 +26,18 @@ export function ConsultantsPage() {
 
   const [consultants, setConsultants] = useState<Consultant[]>([]);
   const [allSchedules, setAllSchedules] = useState<WorkingSchedule[]>([]);
+  const [allServices, setAllServices] = useState<ConsultationService[]>([]);
+  const [consultantServicesMap, setConsultantServicesMap] = useState<Record<string, string[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isNewConsultantOpen, setIsNewConsultantOpen] = useState(false);
   const [isEditConsultantOpen, setIsEditConsultantOpen] = useState(false);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [isServicesModalOpen, setIsServicesModalOpen] = useState(false);
   const [editingConsultant, setEditingConsultant] = useState<Consultant | null>(null);
   const [editingSchedules, setEditingSchedules] = useState<WorkingScheduleInput[]>([]);
   const [editingConsultantId, setEditingConsultantId] = useState<string | null>(null);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [isSavingServices, setIsSavingServices] = useState(false);
 
   const [newConsultant, setNewConsultant] = useState<CreateConsultantData>({
     name: '',
@@ -60,12 +66,28 @@ export function ConsultantsPage() {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [consultantsData, schedulesData] = await Promise.all([
-        consultationService.getConsultants(userAccountId),
-        consultationService.getAllSchedules(userAccountId)
+      const [consultantsData, schedulesData, servicesData] = await Promise.all([
+        consultationService.getConsultants(),
+        consultationService.getAllSchedules(),
+        consultationService.getServices(userAccountId)
       ]);
       setConsultants(consultantsData);
       setAllSchedules(schedulesData);
+      setAllServices(servicesData);
+
+      // Загружаем услуги для каждого консультанта
+      const servicesMap: Record<string, string[]> = {};
+      await Promise.all(
+        consultantsData.map(async (consultant) => {
+          try {
+            const services = await consultationService.getConsultantServices(consultant.id);
+            servicesMap[consultant.id] = services.map(s => s.service_id);
+          } catch {
+            servicesMap[consultant.id] = [];
+          }
+        })
+      );
+      setConsultantServicesMap(servicesMap);
     } catch (error) {
       toast({
         variant: 'destructive',
@@ -113,7 +135,7 @@ export function ConsultantsPage() {
     }
 
     try {
-      await consultationService.updateConsultant(editingConsultantId, editingConsultantData);
+      await consultationService.updateConsultant(editingConsultantId, { ...editingConsultantData, user_account_id: userAccountId });
       toast({ title: 'Консультант обновлён' });
       setIsEditConsultantOpen(false);
       setEditingConsultantId(null);
@@ -177,6 +199,43 @@ export function ConsultantsPage() {
         description: 'Не удалось сохранить расписание'
       });
     }
+  };
+
+  const openServicesModal = (consultant: Consultant) => {
+    setEditingConsultant(consultant);
+    // Фильтруем только существующие услуги (на случай если какие-то были удалены)
+    const existingServiceIds = new Set(allServices.map(s => s.id));
+    const validServiceIds = (consultantServicesMap[consultant.id] || []).filter(id => existingServiceIds.has(id));
+    setSelectedServiceIds(validServiceIds);
+    setIsServicesModalOpen(true);
+  };
+
+  const handleSaveServices = async () => {
+    if (!editingConsultant || isSavingServices) return;
+
+    setIsSavingServices(true);
+    try {
+      await consultationService.bulkUpdateConsultantServices(editingConsultant.id, selectedServiceIds);
+      toast({ title: 'Услуги сохранены' });
+      setIsServicesModalOpen(false);
+      loadData();
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: 'Ошибка',
+        description: 'Не удалось сохранить услуги'
+      });
+    } finally {
+      setIsSavingServices(false);
+    }
+  };
+
+  const toggleService = (serviceId: string) => {
+    setSelectedServiceIds(prev =>
+      prev.includes(serviceId)
+        ? prev.filter(id => id !== serviceId)
+        : [...prev, serviceId]
+    );
   };
 
   const openEditConsultant = (consultant: Consultant) => {
@@ -264,19 +323,22 @@ export function ConsultantsPage() {
           return (
             <Card key={consultant.id}>
               <CardHeader className="pb-2">
-                <CardTitle className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <User className="w-5 h-5" />
-                    <span>{consultant.name}</span>
+                <CardTitle className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <User className="w-5 h-5 flex-shrink-0" />
+                    <span className="truncate">{consultant.name}</span>
                   </div>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => openScheduleModal(consultant)}>
+                  <div className="flex gap-0.5 flex-shrink-0">
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openServicesModal(consultant)} title="Услуги">
+                      <Package className="w-4 h-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openScheduleModal(consultant)} title="Расписание">
                       <Clock className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => openEditConsultant(consultant)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditConsultant(consultant)} title="Редактировать">
                       <Edit className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDeleteConsultant(consultant.id)}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDeleteConsultant(consultant.id)} title="Удалить">
                       <Trash2 className="w-4 h-4 text-destructive" />
                     </Button>
                   </div>
@@ -305,6 +367,34 @@ export function ConsultantsPage() {
                         </span>
                       ))}
                     </div>
+                  </div>
+                )}
+                {consultantServicesMap[consultant.id]?.length > 0 && (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Package className="w-3 h-3" />
+                      Услуги:
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {consultantServicesMap[consultant.id].map(serviceId => {
+                        const service = allServices.find(s => s.id === serviceId);
+                        return service ? (
+                          <span
+                            key={serviceId}
+                            className="px-1.5 py-0.5 rounded text-white"
+                            style={{ backgroundColor: service.color }}
+                          >
+                            {service.name}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                )}
+                {(!consultantServicesMap[consultant.id] || consultantServicesMap[consultant.id].length === 0) && (
+                  <div className="mt-3 text-xs text-orange-500">
+                    <Package className="w-3 h-3 inline mr-1" />
+                    Нет назначенных услуг
                   </div>
                 )}
               </CardContent>
@@ -429,6 +519,53 @@ export function ConsultantsPage() {
               Отмена
             </Button>
             <Button onClick={handleSaveSchedules}>Сохранить</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Services Modal */}
+      <Dialog open={isServicesModalOpen} onOpenChange={setIsServicesModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Услуги: {editingConsultant?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+            {allServices.length === 0 ? (
+              <p className="text-center text-muted-foreground py-4">
+                Нет доступных услуг. Сначала создайте услуги в разделе "Услуги".
+              </p>
+            ) : (
+              allServices.map(service => (
+                <div
+                  key={service.id}
+                  className="flex items-center gap-3 p-3 border rounded-lg cursor-pointer hover:bg-accent/50"
+                  onClick={() => toggleService(service.id)}
+                >
+                  <Checkbox
+                    checked={selectedServiceIds.includes(service.id)}
+                    onCheckedChange={() => toggleService(service.id)}
+                  />
+                  <div
+                    className="w-4 h-4 rounded-full"
+                    style={{ backgroundColor: service.color }}
+                  />
+                  <div className="flex-1">
+                    <div className="font-medium">{service.name}</div>
+                    {service.description && (
+                      <div className="text-sm text-muted-foreground">{service.description}</div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsServicesModalOpen(false)}>
+              Отмена
+            </Button>
+            <Button onClick={handleSaveServices} disabled={allServices.length === 0 || isSavingServices}>
+              {isSavingServices ? 'Сохранение...' : 'Сохранить'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

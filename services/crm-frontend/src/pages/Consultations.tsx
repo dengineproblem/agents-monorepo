@@ -310,15 +310,14 @@ export function Consultations() {
       <div className="flex items-center justify-between bg-card p-3 rounded-lg border">
         <Button
           variant="outline"
-          size="sm"
+          size="icon"
           onClick={() => {
             const newDate = new Date(selectedDate);
             newDate.setDate(newDate.getDate() - 1);
             setSelectedDate(newDate);
           }}
         >
-          <ChevronLeft className="w-4 h-4 mr-1" />
-          Вчера
+          <ChevronLeft className="w-4 h-4" />
         </Button>
 
         <div className="flex items-center gap-2">
@@ -339,15 +338,14 @@ export function Consultations() {
 
         <Button
           variant="outline"
-          size="sm"
+          size="icon"
           onClick={() => {
             const newDate = new Date(selectedDate);
             newDate.setDate(newDate.getDate() + 1);
             setSelectedDate(newDate);
           }}
         >
-          Завтра
-          <ChevronRight className="w-4 h-4 ml-1" />
+          <ChevronRight className="w-4 h-4" />
         </Button>
       </div>
 

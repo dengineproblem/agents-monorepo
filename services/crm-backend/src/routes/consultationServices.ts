@@ -380,12 +380,10 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
 
       app.log.info({ requestId, consultantId }, 'Fetching consultant services');
 
+      // Простой запрос без join - frontend сам имеет список услуг
       const { data, error } = await supabase
         .from('consultant_services')
-        .select(`
-          *,
-          service:consultation_services(*)
-        `)
+        .select('*')
         .eq('consultant_id', consultantId)
         .eq('is_active', true);
 
@@ -436,10 +434,7 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
       const { data, error } = await supabase
         .from('consultant_services')
         .upsert([body], { onConflict: 'consultant_id,service_id' })
-        .select(`
-          *,
-          service:consultation_services(*)
-        `)
+        .select('*')
         .single();
 
       if (error) {
@@ -500,10 +495,7 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         .from('consultant_services')
         .update(body)
         .eq('id', id)
-        .select(`
-          *,
-          service:consultation_services(*)
-        `)
+        .select('*')
         .single();
 
       if (error) {
@@ -591,8 +583,42 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
       app.log.info({
         requestId,
         consultantId,
-        serviceCount: service_ids.length
+        serviceCount: service_ids.length,
+        serviceIds: service_ids
       }, 'Bulk updating consultant services');
+
+      // Verify all service IDs exist before proceeding
+      if (service_ids.length > 0) {
+        const { data: existingServices, error: verifyError } = await supabase
+          .from('consultation_services')
+          .select('id')
+          .in('id', service_ids);
+
+        app.log.info({
+          requestId,
+          existingServicesCount: existingServices?.length || 0,
+          existingServiceIds: existingServices?.map(s => s.id) || [],
+          requestedServiceIds: service_ids
+        }, 'Validation check result');
+
+        if (verifyError) {
+          app.log.error({ requestId, error: verifyError.message }, 'Failed to verify service IDs');
+          return reply.status(500).send({ error: verifyError.message });
+        }
+
+        const existingIds = new Set(existingServices?.map(s => s.id) || []);
+        const invalidIds = service_ids.filter(id => !existingIds.has(id));
+
+        if (invalidIds.length > 0) {
+          app.log.warn({ requestId, invalidIds }, 'Some service IDs do not exist');
+          return reply.status(400).send({
+            error: 'Some service IDs do not exist',
+            invalidIds
+          });
+        }
+
+        app.log.info({ requestId }, 'All service IDs validated successfully');
+      }
 
       // Delete existing assignments
       const { error: deleteError } = await supabase
@@ -605,7 +631,7 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: deleteError.message });
       }
 
-      // Insert new assignments
+      // Insert new assignments (upsert to handle race conditions)
       if (service_ids.length > 0) {
         const assignments = service_ids.map(service_id => ({
           consultant_id: consultantId,
@@ -615,11 +641,8 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
 
         const { data, error } = await supabase
           .from('consultant_services')
-          .insert(assignments)
-          .select(`
-            *,
-            service:consultation_services(*)
-          `);
+          .upsert(assignments, { onConflict: 'consultant_id,service_id' })
+          .select('*');
 
         if (error) {
           app.log.error({ requestId, error: error.message }, 'Failed to bulk insert consultant services');
@@ -689,23 +712,6 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         throw consultantsError;
       }
 
-      // Get all service assignments
-      const { data: assignments, error: assignmentsError } = await supabase
-        .from('consultant_services')
-        .select(`
-          *,
-          service:consultation_services!inner(*)
-        `)
-        .eq('is_active', true);
-
-      if (assignmentsError) {
-        app.log.error({ requestId, error: assignmentsError.message }, 'Failed to fetch service assignments');
-        throw assignmentsError;
-      }
-
-      // Filter assignments to only include active services
-      const activeAssignments = assignments?.filter(a => (a.service as any)?.is_active) || [];
-
       // Get all active services for the account
       const { data: services, error: servicesError } = await supabase
         .from('consultation_services')
@@ -720,19 +726,42 @@ export async function consultationServicesRoutes(app: FastifyInstance) {
         throw servicesError;
       }
 
+      // Get all service assignments (без join)
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('consultant_services')
+        .select('*')
+        .eq('is_active', true);
+
+      if (assignmentsError) {
+        app.log.error({ requestId, error: assignmentsError.message }, 'Failed to fetch service assignments');
+        throw assignmentsError;
+      }
+
+      // Create services map for quick lookup
+      const servicesMap = new Map(services?.map(s => [s.id, s]) || []);
+
       // Group services by consultant
       const result = consultants?.map(consultant => {
-        const consultantAssignments = activeAssignments?.filter(a => a.consultant_id === consultant.id) || [];
+        const consultantAssignments = assignments?.filter(a => a.consultant_id === consultant.id) || [];
 
         // If consultant has specific assignments, use those
         // Otherwise, return all services (consultant can do everything)
-        const consultantServices = consultantAssignments.length > 0
-          ? consultantAssignments.map(a => ({
-              ...a.service,
-              custom_price: a.custom_price,
-              custom_duration: a.custom_duration
-            }))
-          : services;
+        let consultantServices;
+        if (consultantAssignments.length > 0) {
+          consultantServices = consultantAssignments
+            .map(a => {
+              const service = servicesMap.get(a.service_id);
+              if (!service || !service.is_active) return null;
+              return {
+                ...service,
+                custom_price: a.custom_price,
+                custom_duration: a.custom_duration
+              };
+            })
+            .filter(Boolean);
+        } else {
+          consultantServices = services;
+        }
 
         return {
           consultant,

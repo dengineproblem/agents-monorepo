@@ -138,6 +138,7 @@ export interface CreateConsultantData {
   email: string;
   phone?: string;
   specialization?: string;
+  user_account_id?: string;
 }
 
 export interface CreateConsultationData {

@@ -20,24 +20,36 @@ const openai = new OpenAI({
 
 /**
  * Получает историю диалога из dialog_analysis
+ * Поле messages содержит массив объектов {sender, content, timestamp}
  */
 async function getDialogHistory(dialogAnalysisId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from('dialog_analysis')
-    .select('dialog_history')
+    .select('messages')
     .eq('id', dialogAnalysisId)
     .single();
 
-  if (error || !data?.dialog_history) {
+  if (error || !data?.messages) {
+    log.warn({
+      dialogAnalysisId,
+      error: error?.message,
+      hasData: !!data,
+      hasMessages: !!data?.messages
+    }, '[getDialogHistory] No messages found');
     return [];
   }
 
-  // dialog_history может быть массивом объектов {role, content} или строкой
-  const history = data.dialog_history;
+  const messages = data.messages;
 
-  if (Array.isArray(history)) {
-    return history.map((msg: any) => {
+  if (Array.isArray(messages)) {
+    return messages.map((msg: any) => {
       if (typeof msg === 'string') return msg;
+      // Формат из chatbot-service: {sender: 'user'|'bot', content, timestamp}
+      if (msg.sender && msg.content) {
+        const role = msg.sender === 'bot' ? 'Бот' : 'Клиент';
+        return `${role}: ${msg.content}`;
+      }
+      // Старый формат: {role, content}
       if (msg.role && msg.content) {
         const role = msg.role === 'assistant' ? 'Бот' : 'Клиент';
         return `${role}: ${msg.content}`;
@@ -46,8 +58,8 @@ async function getDialogHistory(dialogAnalysisId: string): Promise<string[]> {
     });
   }
 
-  if (typeof history === 'string') {
-    return [history];
+  if (typeof messages === 'string') {
+    return [messages];
   }
 
   return [];

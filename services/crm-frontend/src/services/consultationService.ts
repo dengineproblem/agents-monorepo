@@ -32,11 +32,11 @@ export const consultationService = {
   },
 
   // Создание консультанта
-  async createConsultant(data: CreateConsultantData): Promise<Consultant> {
+  async createConsultant(userAccountId: string, data: CreateConsultantData): Promise<Consultant> {
     const response = await fetch(`${API_BASE_URL}/consultants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify({ ...data, user_account_id: userAccountId })
     });
     if (!response.ok) throw new Error('Failed to create consultant');
     return response.json();

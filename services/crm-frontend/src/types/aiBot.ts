@@ -6,9 +6,15 @@ export type AIModel =
 export type VoiceResponseMode = 'never' | 'on_voice' | 'always';
 export type FileHandlingMode = 'ignore' | 'respond';
 
+export type OffHoursBehavior = 'send_immediately' | 'next_day_at_time' | 'skip';
+
 export interface DelayedMessage {
-  delay_minutes: number;  // минимум 15 минут
-  prompt: string;         // mini prompt для генерации LLM
+  hours: number;           // 0-23
+  minutes: number;         // 0-59
+  prompt: string;          // mini prompt для генерации LLM
+  repeatCount?: number;    // 1-10, default 1
+  offHoursBehavior?: OffHoursBehavior; // default 'next_day_at_time'
+  offHoursTime?: string;   // optional
 }
 
 export interface ConsultationIntegrationSettings {

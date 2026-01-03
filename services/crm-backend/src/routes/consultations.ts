@@ -27,7 +27,8 @@ const UpdateConsultantSchema = z.object({
   email: z.string().email().optional(),
   phone: z.string().optional(),
   specialization: z.string().optional(),
-  is_active: z.boolean().optional()
+  is_active: z.boolean().optional(),
+  user_account_id: z.string().uuid().optional()
 });
 
 const CreateConsultationSchema = z.object({

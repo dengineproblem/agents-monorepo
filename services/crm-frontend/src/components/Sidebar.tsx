@@ -1,6 +1,7 @@
-import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3 } from 'lucide-react';
+import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3, Moon, Sun, LogOut } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { useTheme } from '@/hooks/useTheme';
 
 interface NavItem {
   path: string;
@@ -12,6 +13,7 @@ interface NavItem {
 export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const [isCollapsed, setIsCollapsed] = useState(() => {
     const saved = localStorage.getItem('sidebar-collapsed');
     return saved === 'true';
@@ -134,6 +136,27 @@ export function Sidebar() {
             </h1>
           </div>
         )}
+      </div>
+
+      {/* Theme Toggle */}
+      <div className="mb-4">
+        <button
+          onClick={toggleTheme}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg hover:bg-accent/50 transition-all"
+          title={theme === 'dark' ? 'Светлая тема' : 'Темная тема'}
+        >
+          {theme === 'dark' ? (
+            <>
+              <Sun className="w-5 h-5" />
+              {!isCollapsed && <span className="text-sm">Светлая тема</span>}
+            </>
+          ) : (
+            <>
+              <Moon className="w-5 h-5" />
+              {!isCollapsed && <span className="text-sm">Темная тема</span>}
+            </>
+          )}
+        </button>
       </div>
 
       {/* Navigation */}

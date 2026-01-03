@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Sidebar } from './components/Sidebar';
 import { WhatsAppCRM } from './pages/WhatsAppCRM';
 import { ReactivationCampaigns } from './pages/ReactivationCampaigns';
@@ -10,8 +11,13 @@ import { BotsList } from './pages/BotsList';
 import { BotEditor } from './pages/BotEditor';
 import { ChatsPage } from './pages/ChatsPage';
 import { PublicBooking } from './pages/PublicBooking';
+import Login from './pages/Login';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
+import { initTheme } from './hooks/useTheme';
+
+// Инициализация темы до рендера
+initTheme();
 
 const queryClient = new QueryClient();
 
@@ -27,10 +33,56 @@ function MainLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+const PUBLIC_PATHS = ['/login'];
+
 function AppRoutes() {
   const location = useLocation();
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Public routes without sidebar
+  useEffect(() => {
+    const checkAuth = () => {
+      const storedUser = localStorage.getItem('user');
+      if (storedUser) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          if (parsedUser && parsedUser.username) {
+            setUser(parsedUser);
+          } else {
+            localStorage.removeItem('user');
+            setUser(null);
+          }
+        } catch (error) {
+          localStorage.removeItem('user');
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    };
+
+    checkAuth();
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'user') {
+        checkAuth();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [location.pathname]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  // Public booking route - no auth required
   if (location.pathname.startsWith('/book/')) {
     return (
       <Routes>
@@ -39,7 +91,28 @@ function AppRoutes() {
     );
   }
 
-  // Main app with sidebar
+  const isPublicRoute = PUBLIC_PATHS.includes(location.pathname);
+
+  // Not authenticated - show login
+  if (!user && !isPublicRoute) {
+    return <Navigate to="/login" replace />;
+  }
+
+  // Authenticated user on login page - redirect to home
+  if (user && isPublicRoute) {
+    return <Navigate to="/" replace />;
+  }
+
+  // Public routes
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+      </Routes>
+    );
+  }
+
+  // Main app with sidebar (authenticated)
   return (
     <MainLayout>
       <Routes>

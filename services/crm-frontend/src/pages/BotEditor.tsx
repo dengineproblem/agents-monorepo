@@ -308,22 +308,24 @@ export function BotEditor() {
                 <CardTitle>Языковая модель</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                  {AI_MODELS.map((model) => (
-                    <div
-                      key={model.id}
-                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                        formData.model === model.id
-                          ? 'border-primary bg-primary/5'
-                          : 'border-transparent bg-muted/50 hover:bg-muted'
-                      }`}
-                      onClick={() => updateField('model', model.id)}
-                    >
-                      <div className="font-medium">{model.name}</div>
-                      <div className="text-sm text-muted-foreground">{model.description}</div>
-                    </div>
-                  ))}
-                </div>
+                <Select
+                  value={formData.model}
+                  onValueChange={(value) => updateField('model', value)}
+                >
+                  <SelectTrigger className="w-full max-w-xs">
+                    <SelectValue placeholder="Выберите модель" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AI_MODELS.map((model) => (
+                      <SelectItem key={model.id} value={model.id}>
+                        <div className="flex flex-col">
+                          <span>{model.name}</span>
+                          <span className="text-xs text-muted-foreground">{model.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </CardContent>
             </Card>
 
@@ -584,20 +586,22 @@ export function BotEditor() {
                         <Label>Автовозобновление (часы)</Label>
                         <Input
                           type="number"
-                          value={formData.operatorAutoResumeHours || 1}
-                          onChange={(e) => updateField('operatorAutoResumeHours', parseInt(e.target.value) || 0)}
-                          min={0}
-                          max={72}
+                          value={formData.operatorAutoResumeHours ?? 1}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                            updateField('operatorAutoResumeHours', isNaN(val) ? 0 : Math.min(72, Math.max(0, val)));
+                          }}
                         />
                       </div>
                       <div className="space-y-2">
                         <Label>Минуты</Label>
                         <Input
                           type="number"
-                          value={formData.operatorAutoResumeMinutes || 0}
-                          onChange={(e) => updateField('operatorAutoResumeMinutes', parseInt(e.target.value) || 0)}
-                          min={0}
-                          max={59}
+                          value={formData.operatorAutoResumeMinutes ?? 0}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                            updateField('operatorAutoResumeMinutes', isNaN(val) ? 0 : Math.min(59, Math.max(0, val)));
+                          }}
                         />
                       </div>
                     </div>
@@ -924,7 +928,7 @@ export function BotEditor() {
                             const current = formData.delayedMessages || [];
                             updateField('delayedMessages', [
                               ...current,
-                              { delay_minutes: 30, prompt: '' }
+                              { hours: 0, minutes: 30, prompt: '', repeatCount: 1, offHoursBehavior: 'next_day_at_time' }
                             ]);
                           }}
                         >
@@ -948,20 +952,35 @@ export function BotEditor() {
                             <Trash2 className="w-4 h-4 text-destructive" />
                           </Button>
                         </div>
-                        <div className="space-y-2">
-                          <Label>Задержка (мин, мин 15)</Label>
-                          <Input
-                            type="number"
-                            value={msg.delay_minutes}
-                            onChange={(e) => {
-                              const value = Math.max(15, parseInt(e.target.value) || 15);
-                              const current = formData.delayedMessages || [];
-                              const updated = [...current];
-                              updated[index] = { ...updated[index], delay_minutes: value };
-                              updateField('delayedMessages', updated);
-                            }}
-                            min={15}
-                          />
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Часы (0-23)</Label>
+                            <Input
+                              type="number"
+                              value={msg.hours ?? 0}
+                              onChange={(e) => {
+                                const value = Math.min(23, Math.max(0, parseInt(e.target.value) || 0));
+                                const current = formData.delayedMessages || [];
+                                const updated = [...current];
+                                updated[index] = { ...updated[index], hours: value };
+                                updateField('delayedMessages', updated);
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Минуты (0-59)</Label>
+                            <Input
+                              type="number"
+                              value={msg.minutes ?? 0}
+                              onChange={(e) => {
+                                const value = Math.min(59, Math.max(0, parseInt(e.target.value) || 0));
+                                const current = formData.delayedMessages || [];
+                                const updated = [...current];
+                                updated[index] = { ...updated[index], minutes: value };
+                                updateField('delayedMessages', updated);
+                              }}
+                            />
+                          </div>
                         </div>
                         <div className="space-y-2">
                           <Label>Промпт</Label>
