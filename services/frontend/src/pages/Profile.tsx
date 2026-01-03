@@ -1096,71 +1096,73 @@ const Profile: React.FC = () => {
               {/* Ad Accounts Manager - только для мультиаккаунтности */}
               {multiAccountEnabled && <AdAccountsManager />}
 
-              {/* Telegram ID Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <MessageCircle className="h-5 w-5" />
-                    {t('profile.telegramReports')}
-                    <HelpTooltip tooltipKey={TooltipKeys.PROFILE_TELEGRAM_IDS} iconSize="sm" />
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {telegramIds.map((id, index) => {
-                      // Показываем только заполненные ID
-                      if (!id) return null;
-                      
-                      return (
-                        <div key={index} className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="text-sm text-muted-foreground mb-1">
-                              Telegram ID
+              {/* Telegram ID Card - только для обычного режима, в мультиаккаунтном настраивается через AdAccountsManager */}
+              {!multiAccountEnabled && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <MessageCircle className="h-5 w-5" />
+                      {t('profile.telegramReports')}
+                      <HelpTooltip tooltipKey={TooltipKeys.PROFILE_TELEGRAM_IDS} iconSize="sm" />
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {telegramIds.map((id, index) => {
+                        // Показываем только заполненные ID
+                        if (!id) return null;
+
+                        return (
+                          <div key={index} className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="text-sm text-muted-foreground mb-1">
+                                Telegram ID
+                              </div>
+                              <div className="font-medium">{id}</div>
                             </div>
-                            <div className="font-medium">{id}</div>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditingTelegramIndex(index);
+                                setNewTelegramId(id);
+                                setTelegramIdModal(true);
+                              }}
+                            >
+                              {t('action.change')}
+                            </Button>
                           </div>
-                          <Button 
-                            variant="outline"
+                        );
+                      })}
+
+                      {/* Кнопка добавить еще ID (показывается если есть свободный слот) */}
+                      {telegramIds.filter(id => id !== null).length < 4 && telegramIds[0] && (
+                        <div className="pt-2 border-t">
+                          <Button
+                            variant="ghost"
                             size="sm"
                             onClick={() => {
-                              setEditingTelegramIndex(index);
-                              setNewTelegramId(id);
-                              setTelegramIdModal(true);
+                              const emptyIndex = telegramIds.findIndex(id => id === null);
+                              if (emptyIndex !== -1) {
+                                setEditingTelegramIndex(emptyIndex);
+                                setNewTelegramId('');
+                                setTelegramIdModal(true);
+                              }
                             }}
+                            className="w-full"
                           >
-                            {t('action.change')}
+                            <Plus className="h-4 w-4 mr-2" />
+                            {t('profile.addTelegramId')}
                           </Button>
                         </div>
-                      );
-                    })}
-                    
-                    {/* Кнопка добавить еще ID (показывается если есть свободный слот) */}
-                    {telegramIds.filter(id => id !== null).length < 4 && telegramIds[0] && (
-                      <div className="pt-2 border-t">
-                        <Button 
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            const emptyIndex = telegramIds.findIndex(id => id === null);
-                            if (emptyIndex !== -1) {
-                              setEditingTelegramIndex(emptyIndex);
-                              setNewTelegramId('');
-                              setTelegramIdModal(true);
-                            }
-                          }}
-                          className="w-full"
-                        >
-                          <Plus className="h-4 w-4 mr-2" />
-                          {t('profile.addTelegramId')}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
-              {/* Audience ID Card - скрыто в preview версии */}
-              {!APP_REVIEW_MODE && (
+              {/* Audience ID Card - скрыто в preview версии и в мультиаккаунтном режиме (настраивается через AdAccountsManager) */}
+              {!APP_REVIEW_MODE && !multiAccountEnabled && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-lg flex items-center gap-2">

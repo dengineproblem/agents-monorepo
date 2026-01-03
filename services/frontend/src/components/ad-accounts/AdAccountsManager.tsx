@@ -66,6 +66,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
     fb_page_id: '',
     fb_instagram_id: '',
     fb_instagram_username: '',
+    ig_seed_audience_id: '',
     telegram_id: '',
     telegram_id_2: '',
     telegram_id_3: '',
@@ -191,6 +192,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       fb_page_id: '',
       fb_instagram_id: '',
       fb_instagram_username: '',
+      ig_seed_audience_id: '',
       telegram_id: '',
       telegram_id_2: '',
       telegram_id_3: '',
@@ -213,6 +215,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       fb_page_id: account.fb_page_id || '',
       fb_instagram_id: account.fb_instagram_id || '',
       fb_instagram_username: account.fb_instagram_username || '',
+      ig_seed_audience_id: account.ig_seed_audience_id || '',
       telegram_id: account.telegram_id || '',
       telegram_id_2: account.telegram_id_2 || '',
       telegram_id_3: account.telegram_id_3 || '',
@@ -500,6 +503,18 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
               onChange={(e) => updateField('fb_instagram_username', e.target.value)}
               placeholder="@username"
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="ig_seed_audience_id">Custom Audience ID</Label>
+            <Input
+              id="ig_seed_audience_id"
+              value={formData.ig_seed_audience_id || ''}
+              onChange={(e) => updateField('ig_seed_audience_id', e.target.value)}
+              placeholder="23851234567890123"
+            />
+            <p className="text-xs text-muted-foreground">
+              ID аудитории для дублирования кампаний
+            </p>
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-4">
