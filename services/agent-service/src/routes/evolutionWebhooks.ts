@@ -15,6 +15,7 @@ const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 const CHATBOT_SERVICE_URL = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
 
+
 export default async function evolutionWebhooks(app: FastifyInstance) {
 
   /**
@@ -113,7 +114,8 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
   const remoteJidAlt = message.key.remoteJidAlt;  // Альтернативный JID (для лидов с рекламы)
 
   // Извлекаем pushName (имя контакта из WhatsApp)
-  const pushName = message.pushName || data.pushName;
+  // AI сам решит - использовать это как имя или спросить клиента
+  const pushName = (message.pushName || data.pushName)?.trim() || undefined;
 
   // Определяем тип сообщения и извлекаем текст
   let messageText = message.message?.conversation ||
