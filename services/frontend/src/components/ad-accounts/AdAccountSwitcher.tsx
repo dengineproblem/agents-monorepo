@@ -94,11 +94,10 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
     );
   }
 
-  // Cache-bust для картинки - timestamp для полного сброса кэша
-  const timestamp = Date.now();
-  const getAvatarSrc = (url: string | undefined, accountId: string) => {
-    if (!url) return '';
-    return `${url}${url.includes('?') ? '&' : '?'}v=${accountId}&t=${timestamp}`;
+  // Получаем URL аватара напрямую с Facebook Graph API
+  const getAvatarSrc = (fbPageId: string | null | undefined) => {
+    if (!fbPageId) return '';
+    return `https://graph.facebook.com/${fbPageId}/picture?type=large`;
   };
 
   return (
@@ -113,11 +112,11 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
           >
             {currentAccount ? (
               <div key={currentAccount.id} className="flex items-center gap-2 flex-1 min-w-0">
-                {/* Простой img вместо Avatar для избежания кэширования */}
-                {currentAccount.page_picture_url && !imageErrors[currentAccount.id] ? (
+                {/* Аватар напрямую с Facebook Graph API */}
+                {currentAccount.fb_page_id && !imageErrors[currentAccount.id] ? (
                   <img
-                    key={`${currentAccount.id}-${timestamp}`}
-                    src={getAvatarSrc(currentAccount.page_picture_url, currentAccount.id)}
+                    key={currentAccount.id}
+                    src={getAvatarSrc(currentAccount.fb_page_id)}
                     alt={currentAccount.name}
                     className="h-5 w-5 rounded-full flex-shrink-0 object-cover"
                     referrerPolicy="no-referrer"
@@ -161,9 +160,9 @@ export function AdAccountSwitcher({ className, showAddButton = true }: AdAccount
               >
                 <div className="flex items-center gap-2 flex-1">
                   <Avatar className="h-5 w-5">
-                    {account.page_picture_url && !imageErrors[account.id] ? (
+                    {account.fb_page_id && !imageErrors[account.id] ? (
                       <AvatarImage
-                        src={getAvatarSrc(account.page_picture_url, account.id)}
+                        src={getAvatarSrc(account.fb_page_id)}
                         alt={account.name}
                         referrerPolicy="no-referrer"
                         onError={() => handleImageError(account.id)}

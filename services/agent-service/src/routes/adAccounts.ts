@@ -5,7 +5,6 @@ import { createLogger } from '../lib/logger.js';
 import { getPagePictureUrl } from '../adapters/facebook.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getPageAccessToken } from '../lib/facebookHelpers.js';
-import { cachePageAvatarToStorage } from '../lib/imageCache.js';
 
 const log = createLogger({ module: 'adAccountsRoutes' });
 
@@ -255,7 +254,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       const { data: adAccounts, error: fetchError } = await supabase
         .from('ad_accounts')
-        .select('id, name, page_picture_url, cached_page_picture_url, connection_status, is_active, ad_account_id, access_token')
+        .select('id, name, page_id, connection_status, is_active, ad_account_id, access_token')
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: true });
 
@@ -283,59 +282,13 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       const accountsBase = (adAccounts || []).map(account => ({
         id: account.id,
         name: account.name,
-        // Используем кэшированный URL если есть, иначе оригинальный FB URL
-        page_picture_url: account.cached_page_picture_url || account.page_picture_url,
+        // Передаём fb_page_id для формирования URL аватарки на клиенте
+        fb_page_id: account.page_id,
         connection_status: account.connection_status || 'pending',
         is_active: account.is_active !== false,
         fb_ad_account_id: account.ad_account_id,
         access_token: account.access_token,
-        // Сохраняем для фонового кэширования
-        _original_page_picture_url: account.page_picture_url,
-        _has_cached_avatar: !!account.cached_page_picture_url,
       }));
-
-      // Кэшируем аватарки в фоне для аккаунтов без кэша
-      const accountsNeedingAvatarCache = accountsBase.filter(
-        acc => acc._original_page_picture_url && !acc._has_cached_avatar
-      );
-
-      if (accountsNeedingAvatarCache.length > 0) {
-        log.info({
-          count: accountsNeedingAvatarCache.length
-        }, '[all-stats] Starting background avatar caching');
-
-        // Кэшируем асинхронно в фоне (не блокируем ответ)
-        Promise.all(
-          accountsNeedingAvatarCache.map(async (account) => {
-            try {
-              const cachedUrl = await cachePageAvatarToStorage(
-                account._original_page_picture_url!,
-                account.id
-              );
-
-              if (cachedUrl) {
-                // Обновляем в базе данных
-                await supabase
-                  .from('ad_accounts')
-                  .update({ cached_page_picture_url: cachedUrl })
-                  .eq('id', account.id);
-
-                log.info({
-                  accountId: account.id,
-                  accountName: account.name
-                }, '[all-stats] Avatar cached successfully');
-              }
-            } catch (err) {
-              log.warn({
-                accountId: account.id,
-                error: err
-              }, '[all-stats] Failed to cache avatar');
-            }
-          })
-        ).catch(err => {
-          log.warn({ error: err }, '[all-stats] Background avatar caching failed');
-        });
-      }
 
       // Фильтруем аккаунты, для которых можно запросить статистику
       const accountsToFetch = since && until
@@ -373,7 +326,7 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       const accountsWithStats = accountsBase.map(account => ({
         id: account.id,
         name: account.name,
-        page_picture_url: account.page_picture_url,
+        fb_page_id: account.fb_page_id,
         connection_status: account.connection_status,
         is_active: account.is_active,
         stats: statsMap.get(account.id) || null,

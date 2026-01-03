@@ -32,7 +32,7 @@ import { facebookApi } from '@/services/facebookApi';
 interface AccountStats {
   id: string;
   name: string;
-  page_picture_url: string | null;
+  fb_page_id: string | null;
   connection_status: 'pending' | 'connected' | 'error';
   is_active: boolean;
   stats: {
@@ -271,7 +271,7 @@ const MultiAccountDashboard: React.FC = () => {
       const fallbackStats: AccountStats[] = adAccounts.map((acc) => ({
         id: acc.id,
         name: acc.name,
-        page_picture_url: acc.page_picture_url || null,
+        fb_page_id: acc.fb_page_id || null,
         connection_status: (acc.connection_status as 'pending' | 'connected' | 'error') || 'pending',
         is_active: acc.is_active !== false,
         stats: null,
@@ -819,9 +819,9 @@ const AccountRow: React.FC<AccountRowProps> = ({
             )}
           </button>
           <Avatar className="h-8 w-8 border flex-shrink-0">
-            {!imageError && account.page_picture_url && (
+            {!imageError && account.fb_page_id && (
               <AvatarImage
-                src={account.page_picture_url}
+                src={`https://graph.facebook.com/${account.fb_page_id}/picture?type=large`}
                 onError={() => setImageError(true)}
               />
             )}
@@ -944,7 +944,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
       <div
         className={cn(
           'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-3 cursor-pointer transition-colors',
-          'hover:bg-muted/40 pl-4 md:pl-12',
+          'hover:bg-muted/40',
           isExpanded && 'bg-muted/30'
         )}
         onClick={onExpand}
@@ -952,7 +952,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
         tabIndex={0}
       >
         {/* Campaign Info */}
-        <div className="col-span-3 flex items-center gap-2">
+        <div className="col-span-3 flex items-center gap-2 pl-4 md:pl-6">
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : isExpanded ? (
@@ -1052,7 +1052,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
       <div
         className={cn(
           'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-2 cursor-pointer transition-colors',
-          'hover:bg-muted/30 pl-6 md:pl-20',
+          'hover:bg-muted/30',
           isExpanded && 'bg-muted/20'
         )}
         onClick={onExpand}
@@ -1060,7 +1060,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
         tabIndex={0}
       >
         {/* Adset Info */}
-        <div className="col-span-3 flex items-center gap-2">
+        <div className="col-span-3 flex items-center gap-2 pl-6 md:pl-14">
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : isExpanded ? (
@@ -1144,11 +1144,11 @@ const AdRow: React.FC<AdRowProps> = ({ ad }) => {
     <div
       className={cn(
         'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-2 transition-colors',
-        'hover:bg-muted/20 pl-8 md:pl-28'
+        'hover:bg-muted/20'
       )}
     >
       {/* Ad Info */}
-      <div className="col-span-3 flex items-center gap-2">
+      <div className="col-span-3 flex items-center gap-2 pl-8 md:pl-20">
         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800 flex-shrink-0">
           ad
         </Badge>

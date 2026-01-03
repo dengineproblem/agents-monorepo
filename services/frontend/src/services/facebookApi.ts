@@ -69,8 +69,7 @@ const getCurrentUserConfig = async () => {
         console.log('[facebookApi] === READING LOCALSTORAGE ===');
         console.log('[facebookApi] currentAdAccountId:', currentAdAccountId?.slice(0, 8));
         adAccounts.forEach((a: any, i: number) => {
-          const picType = a.page_picture_url?.includes('584580002') ? 'AMANAT' : a.page_picture_url?.includes('311879771') ? 'YOUTRADE' : '?';
-          console.log(`[facebookApi] LS[${i}]:`, a.id?.slice(0, 8), a.name, a.ad_account_id, picType);
+          console.log(`[facebookApi] LS[${i}]:`, a.id?.slice(0, 8), a.name, a.ad_account_id, a.fb_page_id);
         });
 
         // ВАЖНО: ищем только по точному совпадению id
@@ -79,8 +78,7 @@ const getCurrentUserConfig = async () => {
         if (!currentAcc) {
           console.error('[facebookApi] !!! НЕ НАЙДЕН по id:', currentAdAccountId);
         } else {
-          const picType = currentAcc.page_picture_url?.includes('584580002') ? 'AMANAT' : currentAcc.page_picture_url?.includes('311879771') ? 'YOUTRADE' : '?';
-          console.log('[facebookApi] НАЙДЕН:', currentAcc.name, currentAcc.ad_account_id, picType);
+          console.log('[facebookApi] НАЙДЕН:', currentAcc.name, currentAcc.ad_account_id, currentAcc.fb_page_id);
         }
 
         if (currentAcc && currentAcc.ad_account_id && currentAcc.access_token) {

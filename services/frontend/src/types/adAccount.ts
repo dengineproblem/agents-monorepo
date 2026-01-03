@@ -88,8 +88,7 @@ export interface AdAccountSummary {
   ad_account_id: string | null;   // из fb_ad_account_id
   access_token: string | null;    // из fb_access_token
   page_id: string | null;         // из fb_page_id (для Lead Forms)
-  // Аватар Facebook страницы
-  page_picture_url: string | null;
+  fb_page_id: string | null;      // из fb_page_id (для аватара)
 }
 
 export interface CreateAdAccountPayload {

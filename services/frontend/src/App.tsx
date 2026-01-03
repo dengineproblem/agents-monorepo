@@ -61,6 +61,33 @@ const queryClient = new QueryClient();
 
 const PUBLIC_PATHS = ['/login', '/signup', '/privacy', '/terms'];
 
+/**
+ * Компонент для корневого роута "/" с мгновенным редиректом для мультиаккаунта.
+ * Читает напрямую из localStorage для избежания задержки от context state.
+ */
+const HomeRoute = () => {
+  // Читаем напрямую из localStorage для мгновенного решения (без ожидания context)
+  const isMultiAccount = localStorage.getItem('multiAccountEnabled') === 'true';
+  const storedAccounts = localStorage.getItem('adAccounts');
+  let hasAccounts = false;
+  if (storedAccounts) {
+    try {
+      const parsed = JSON.parse(storedAccounts);
+      hasAccounts = Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      hasAccounts = false;
+    }
+  }
+  const hasVisited = sessionStorage.getItem('hasVisitedDashboard') === 'true';
+
+  if (isMultiAccount && hasAccounts && !hasVisited) {
+    sessionStorage.setItem('hasVisitedDashboard', 'true');
+    return <Navigate to="/accounts" replace />;
+  }
+
+  return <Dashboard />;
+};
+
 const AppRoutes = () => {
   const location = useLocation();
   const isPublic = PUBLIC_PATHS.includes(location.pathname);
@@ -334,12 +361,7 @@ const AppRoutes = () => {
                   <AppSidebar />
                   <SidebarAwareContent>
                     <Routes>
-                      <Route path="/" element={
-                        // Мгновенный редирект на /accounts для мультиаккаунта при первом входе
-                        (multiAccountEnabled && adAccounts.length > 0 && !sessionStorage.getItem('hasVisitedDashboard'))
-                          ? (() => { sessionStorage.setItem('hasVisitedDashboard', 'true'); return <Navigate to="/accounts" replace />; })()
-                          : <Dashboard />
-                      } />
+                      <Route path="/" element={<HomeRoute />} />
                       <Route path="/accounts" element={<MultiAccountDashboard />} />
                       <Route path="/oauth/callback" element={<OAuthCallback />} />
                       <Route path="/campaign/:id" element={<CampaignDetail />} />
