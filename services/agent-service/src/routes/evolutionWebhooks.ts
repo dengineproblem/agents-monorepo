@@ -5,6 +5,7 @@ import { matchMessageToDirection } from '../lib/textMatcher.js';
 import { sendTelegramNotification, formatManualMatchMessage } from '../lib/telegramNotifier.js';
 import { getLastMessageTime } from '../lib/evolutionDb.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { transcribeWhatsAppVoice, WhatsAppAudioMessage } from '../lib/whatsappVoiceHandler.js';
 import axios from 'axios';
 
 // Период "тишины" в днях - если последнее сообщение было раньше, считаем текущее "первым"
@@ -110,8 +111,12 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
   const remoteJid = message.key.remoteJid;
   const remoteJidAlt = message.key.remoteJidAlt;  // Альтернативный JID (для лидов с рекламы)
-  const messageText = message.message?.conversation ||
-                      message.message?.extendedTextMessage?.text || '';
+
+  // Определяем тип сообщения и извлекаем текст
+  let messageText = message.message?.conversation ||
+                    message.message?.extendedTextMessage?.text || '';
+  let messageType: 'text' | 'audio' | 'image' | 'video' | 'document' = 'text';
+  const audioMessage = message.message?.audioMessage as WhatsAppAudioMessage | undefined;
 
   // ИСПРАВЛЕНО: Извлекаем метаданные Facebook из contextInfo.externalAdReply
   // В реальных вебхуках Evolution API contextInfo приходит на верхнем уровне data
@@ -163,21 +168,64 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
       return;
     }
 
-    // Пропускаем нетекстовые сообщения (голосовые, картинки, видео и т.д.)
-    if (!messageText || messageText.trim().length === 0) {
-      app.log.debug({ instance, remoteJid }, 'Empty/non-text message, skipping smart matching');
+    // Обработка голосовых сообщений через Whisper транскрипцию
+    if (audioMessage) {
+      messageType = 'audio';
+      app.log.info({
+        instance,
+        remoteJid,
+        duration: audioMessage.seconds,
+        isPtt: audioMessage.ptt
+      }, 'Processing voice message');
+
+      // Транскрибируем голосовое через Whisper
+      const transcriptionResult = await transcribeWhatsAppVoice(
+        instance,
+        {
+          remoteJid: message.key.remoteJid,
+          fromMe: message.key.fromMe || false,
+          id: message.key.id
+        },
+        audioMessage,
+        app
+      );
+
+      if (transcriptionResult.success && transcriptionResult.text) {
+        messageText = transcriptionResult.text;
+        app.log.info({
+          instance,
+          remoteJid,
+          transcribedLength: messageText.length
+        }, 'Voice message transcribed successfully');
+      } else {
+        app.log.warn({
+          instance,
+          remoteJid,
+          error: transcriptionResult.error,
+          errorCode: transcriptionResult.errorCode
+        }, 'Voice transcription failed');
+        // Продолжаем обработку даже если транскрипция не удалась
+        // messageText останется пустым, и бот отправит voice_default_response
+      }
+    }
+
+    // Пропускаем нетекстовые сообщения (картинки, видео и т.д.) КРОМЕ голосовых
+    if (messageType !== 'audio' && (!messageText || messageText.trim().length === 0)) {
+      app.log.debug({ instance, remoteJid }, 'Empty/non-text message, skipping');
       return;
     }
 
-    // Пробуем умный матчинг по client_question
-    await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, message, app);
+    // Для текстовых сообщений пробуем умный матчинг по client_question
+    if (messageType === 'text' && messageText.trim().length > 0) {
+      await handleSmartMatching(event, instance, remoteJid, remoteJidAlt, messageText, message, app);
+    }
 
     // ✅ Вызываем бота для обычных сообщений (не из рекламы)
     // Важно: используем remoteJid (реальный номер), а не remoteJidAlt (LID)
     const clientPhone = remoteJid
       .replace('@s.whatsapp.net', '')
       .replace('@c.us', '');
-    await tryBotResponse(clientPhone, instance, messageText, app);
+    await tryBotResponse(clientPhone, instance, messageText, messageType, app);
 
     return;
   }
@@ -399,7 +447,7 @@ async function processAdLead(params: {
   }, app);
 
   // НОВОЕ: Проверить, должен ли бот ответить
-  await tryBotResponse(clientPhone, instanceName, messageText, app);
+  await tryBotResponse(clientPhone, instanceName, messageText, 'text', app);
 }
 
 /**
@@ -460,6 +508,7 @@ async function tryBotResponse(
   contactPhone: string,
   instanceName: string,
   messageText: string,
+  messageType: 'text' | 'audio' | 'image' | 'video' | 'document' = 'text',
   app: FastifyInstance
 ) {
   const MAX_RETRIES = 3;
@@ -470,7 +519,8 @@ async function tryBotResponse(
       const response = await axios.post(`${CHATBOT_SERVICE_URL}/process-message`, {
         contactPhone,
         instanceName,
-        messageText
+        messageText,
+        messageType  // ✅ Передаём тип сообщения для правильной обработки
       }, {
         timeout: 10000, // увеличено с 5 до 10 сек
       });

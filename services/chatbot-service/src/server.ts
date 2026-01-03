@@ -101,8 +101,12 @@ app.post('/process-message', async (request, reply) => {
       messageType?: 'text' | 'image' | 'audio' | 'document' | 'file';
     };
 
-    if (!contactPhone || !instanceName || !messageText) {
-      return reply.status(400).send({ error: 'Missing required fields' });
+    // Для аудио сообщений messageText может быть пустым (если транскрипция не удалась)
+    if (!contactPhone || !instanceName) {
+      return reply.status(400).send({ error: 'Missing required fields: contactPhone, instanceName' });
+    }
+    if (!messageText && messageType !== 'audio') {
+      return reply.status(400).send({ error: 'Missing messageText for non-audio message' });
     }
 
     // Импорт движков
