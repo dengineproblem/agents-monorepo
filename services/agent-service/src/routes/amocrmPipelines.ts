@@ -1720,12 +1720,22 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         });
       }
 
-      // Check if qualification fields are configured (new array format)
+      // Check if AmoCRM is connected AND qualification fields are configured
       const { data: account } = await supabase
         .from('user_accounts')
-        .select('amocrm_qualification_fields')
+        .select('amocrm_subdomain, amocrm_access_token, amocrm_qualification_fields')
         .eq('id', userAccountId)
         .maybeSingle();
+
+      // First check if AmoCRM integration is connected
+      const isAmocrmConnected = !!(account?.amocrm_subdomain && account?.amocrm_access_token);
+      if (!isAmocrmConnected) {
+        // AmoCRM not connected, fall back to Facebook data
+        return reply.send({
+          totalQualifiedLeads: null,
+          configured: false
+        });
+      }
 
       const qualificationFields = account?.amocrm_qualification_fields || [];
       if (!qualificationFields.length) {

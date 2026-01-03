@@ -70,7 +70,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         isZeroData: true
       };
     }
-    
+
     const hasRealData = campaignStats.some(stat => stat._is_real_data === true);
     if (!hasRealData) {
       return {
@@ -86,7 +86,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         isZeroData: true
       };
     }
-    
+
     const totalSpend = campaignStats.reduce((sum, stat) => sum + stat.spend, 0);
     const totalLeads = campaignStats.reduce((sum, stat) => sum + (stat.leads || 0), 0);
     const totalMessagingLeads = campaignStats.reduce((sum, stat) => sum + (stat.messagingLeads || 0), 0);
