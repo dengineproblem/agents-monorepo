@@ -143,12 +143,25 @@ interface LeadInfo {
 export function getConsultationToolDefinitions(
   settings: ConsultationIntegrationSettings
 ): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  // Получаем текущую дату в нужной таймзоне для описания функций
+  const now = new Date();
+  const timezone = settings.timezone || 'Europe/Moscow';
+  const formatter = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long'
+  });
+  const todayFormatted = formatter.format(now);
+  const todayISO = now.toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+
   return [
     {
       type: 'function',
       function: {
         name: 'get_available_consultation_slots',
-        description: `Получить список свободных слотов для записи на консультацию. Используй эту функцию когда клиент хочет записаться на консультацию или узнать доступное время. Показывает до ${settings.slots_to_show} ближайших слотов.`,
+        description: `Получить список свободных слотов для записи на консультацию. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй эту функцию когда клиент хочет записаться или узнать доступное время. Показывает до ${settings.slots_to_show} ближайших слотов.`,
         parameters: {
           type: 'object',
           properties: {
@@ -165,7 +178,7 @@ export function getConsultationToolDefinitions(
       type: 'function',
       function: {
         name: 'book_consultation',
-        description: `Записать клиента на консультацию. ВАЖНО: Используй consultant_id из списка в системном промпте (раздел "Доступные консультанты и их ID"). Длительность: ${settings.default_duration_minutes} минут.`,
+        description: `Записать клиента на консультацию. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй consultant_id из списка в системном промпте. Бери date и start_time ТОЛЬКО из результата get_available_consultation_slots! НЕ выдумывай даты. Длительность: ${settings.default_duration_minutes} минут.`,
         parameters: {
           type: 'object',
           properties: {
