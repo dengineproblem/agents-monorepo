@@ -2,7 +2,6 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
-import { getPagePictureUrl } from '../adapters/facebook.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { getPageAccessToken } from '../lib/facebookHelpers.js';
 
@@ -704,30 +703,12 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'Page ID or access token not configured' });
       }
 
-      // Получаем URL аватара через Graph API
-      const fbPictureUrl = await getPagePictureUrl(adAccount.page_id, adAccount.access_token);
+      // Возвращаем прямой URL с Facebook Graph API (без кэширования)
+      // Клиент использует https://graph.facebook.com/{page_id}/picture?type=large напрямую
+      const pictureUrl = `https://graph.facebook.com/${adAccount.page_id}/picture?type=large`;
 
-      if (!fbPictureUrl) {
-        return reply.status(400).send({ error: 'Could not get page picture' });
-      }
-
-      // Кэшируем аватар в Supabase Storage
-      const cachedUrl = await cachePageAvatarToStorage(fbPictureUrl, adAccountId);
-      const pictureUrl = cachedUrl || fbPictureUrl;
-
-      // Сохраняем URL в БД (кэшированный или оригинальный)
-      const { error: updateError } = await supabase
-        .from('ad_accounts')
-        .update({ page_picture_url: pictureUrl })
-        .eq('id', adAccountId);
-
-      if (updateError) {
-        log.error({ error: updateError }, 'Error updating page picture');
-        return reply.status(500).send({ error: 'Failed to update page picture' });
-      }
-
-      log.info({ adAccountId, pictureUrl, cached: !!cachedUrl }, 'Page picture updated');
-      return reply.send({ success: true, page_picture_url: pictureUrl });
+      log.info({ adAccountId, pictureUrl }, 'Page picture URL generated');
+      return reply.send({ success: true, page_picture_url: pictureUrl, fb_page_id: adAccount.page_id });
     } catch (error: any) {
       log.error({ error }, 'Error refreshing page picture');
 
@@ -770,30 +751,13 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         return reply.status(500).send({ error: 'Failed to fetch ad accounts' });
       }
 
-      const results: Array<{ id: string; success: boolean; page_picture_url?: string }> = [];
-
-      for (const account of adAccounts || []) {
-        try {
-          const fbPictureUrl = await getPagePictureUrl(account.page_id, account.access_token);
-
-          if (fbPictureUrl) {
-            // Кэшируем аватар в Supabase Storage
-            const cachedUrl = await cachePageAvatarToStorage(fbPictureUrl, account.id);
-            const pictureUrl = cachedUrl || fbPictureUrl;
-
-            await supabase
-              .from('ad_accounts')
-              .update({ page_picture_url: pictureUrl })
-              .eq('id', account.id);
-
-            results.push({ id: account.id, success: true, page_picture_url: pictureUrl });
-          } else {
-            results.push({ id: account.id, success: false });
-          }
-        } catch (err) {
-          results.push({ id: account.id, success: false });
-        }
-      }
+      // Возвращаем прямые URL с Facebook Graph API (без кэширования)
+      const results = (adAccounts || []).map(account => ({
+        id: account.id,
+        success: true,
+        page_picture_url: `https://graph.facebook.com/${account.page_id}/picture?type=large`,
+        fb_page_id: account.page_id,
+      }));
 
       log.info({ userAccountId, updated: results.filter(r => r.success).length }, 'Page pictures refreshed');
       return reply.send({ success: true, results });
