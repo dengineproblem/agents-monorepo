@@ -14,13 +14,20 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { ChevronDown, Loader2 } from 'lucide-react';
-import type { Direction, DefaultAdSettings, UpdateDefaultSettingsInput } from '@/types/direction';
+import type { Direction, DefaultAdSettings, UpdateDefaultSettingsInput, CapiSource, CapiFieldConfig } from '@/types/direction';
 import { OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { toast } from 'sonner';
+
+// CAPI settings for update
+export interface EditDirectionCapiSettings {
+  capi_enabled: boolean;
+  capi_source: CapiSource | null;
+}
 
 interface EditDirectionDialogProps {
   open: boolean;
@@ -32,6 +39,7 @@ interface EditDirectionDialogProps {
     target_cpl_cents: number;
     is_active: boolean;
     whatsapp_phone_number?: string | null;
+    capiSettings?: EditDirectionCapiSettings;
   }) => Promise<void>;
 }
 
@@ -73,6 +81,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // CAPI settings
+  const [capiEnabled, setCapiEnabled] = useState(false);
+  const [capiSource, setCapiSource] = useState<CapiSource>('whatsapp');
+
   // Загрузка пикселей при выборе цели "Site Leads"
   useEffect(() => {
     const loadPixels = async () => {
@@ -107,6 +119,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setIsActive(direction.is_active);
     setWhatsappPhoneNumber(direction.whatsapp_phone_number || '');
     setError(null);
+
+    // CAPI settings
+    setCapiEnabled(direction.capi_enabled || false);
+    setCapiSource(direction.capi_source || 'whatsapp');
 
     // Загружаем настройки рекламы
     loadAdSettings(direction.id);
@@ -239,13 +255,17 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     setError(null);
 
     try {
-      // Обновляем основную информацию направления
+      // Обновляем основную информацию направления + CAPI settings
       await onSubmit({
         name: name.trim(),
         daily_budget_cents: Math.round(budgetValue * 100),
         target_cpl_cents: Math.round(cplValue * 100),
         is_active: isActive,
         whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
+        capiSettings: {
+          capi_enabled: capiEnabled,
+          capi_source: capiEnabled ? capiSource : null,
+        },
       });
 
       // Обновляем или создаём настройки рекламы
@@ -692,6 +712,63 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       Используйте переменные: {'{'}{'{'} campaign.name {'}'}{'}' }, {'{'}{'{'}  adset.name {'}'}{'}'}, {'{'}{'{'}  ad.name {'}'}{'}'}
                     </p>
                   </div>
+                </div>
+              )}
+
+              {/* СЕКЦИЯ: Meta CAPI */}
+              {direction.objective !== 'site_leads' && (
+                <div className="space-y-4">
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-sm">📊 Meta Conversions API</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Отправка событий конверсий в Meta для оптимизации рекламы
+                      </p>
+                    </div>
+                    <Switch
+                      checked={capiEnabled}
+                      onCheckedChange={setCapiEnabled}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+
+                  {capiEnabled && (
+                    <div className="space-y-3 pl-4 border-l-2 border-blue-200">
+                      <Label>Источник данных для событий</Label>
+                      <RadioGroup
+                        value={capiSource}
+                        onValueChange={(value) => setCapiSource(value as CapiSource)}
+                        disabled={isSubmitting}
+                      >
+                        <div className="flex items-start space-x-2">
+                          <RadioGroupItem value="whatsapp" id="edit-capi-source-whatsapp" className="mt-1" />
+                          <div>
+                            <Label htmlFor="edit-capi-source-whatsapp" className="font-normal cursor-pointer">
+                              WhatsApp (AI-анализ)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              ИИ анализирует диалоги и определяет уровень интереса
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-start space-x-2">
+                          <RadioGroupItem value="crm" id="edit-capi-source-crm" className="mt-1" />
+                          <div>
+                            <Label htmlFor="edit-capi-source-crm" className="font-normal cursor-pointer">
+                              CRM (поля карточки)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                              События отправляются при изменении полей в CRM
+                            </p>
+                          </div>
+                        </div>
+                      </RadioGroup>
+                      <p className="text-xs text-amber-600">
+                        ⚠️ Настройка полей CRM и Pixel доступна при создании направления
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -81,6 +81,13 @@ export interface UpdateDirectionPayload {
   target_cpl_cents?: number;
   is_active?: boolean;
   whatsapp_phone_number?: string | null;
+  // CAPI settings (direction-level)
+  capi_enabled?: boolean;
+  capi_source?: CapiSource | null;
+  capi_crm_type?: CapiCrmType | null;
+  capi_interest_fields?: CapiFieldConfig[];
+  capi_qualified_fields?: CapiFieldConfig[];
+  capi_scheduled_fields?: CapiFieldConfig[];
 }
 
 // Дефолтные настройки рекламы для направления

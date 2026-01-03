@@ -8,7 +8,7 @@ import { Plus, Target, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDirections } from '@/hooks/useDirections';
 import { CreateDirectionDialog, type DirectionCapiSettings } from './CreateDirectionDialog';
-import { EditDirectionDialog } from './EditDirectionDialog';
+import { EditDirectionDialog, type EditDirectionCapiSettings } from './EditDirectionDialog';
 import { DeleteDirectionAlert } from './DeleteDirectionAlert';
 import { DirectionAdSets } from '../DirectionAdSets';
 import { supabase } from '@/integrations/supabase/client';
@@ -110,10 +110,25 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
     target_cpl_cents: number;
     is_active: boolean;
     whatsapp_phone_number?: string | null;
+    capiSettings?: EditDirectionCapiSettings;
   }) => {
     if (!selectedDirection) return;
 
-    const result = await updateDirection(selectedDirection.id, data);
+    // Подготавливаем данные для обновления, включая CAPI настройки
+    const updatePayload = {
+      name: data.name,
+      daily_budget_cents: data.daily_budget_cents,
+      target_cpl_cents: data.target_cpl_cents,
+      is_active: data.is_active,
+      whatsapp_phone_number: data.whatsapp_phone_number,
+      // CAPI settings
+      ...(data.capiSettings && {
+        capi_enabled: data.capiSettings.capi_enabled,
+        capi_source: data.capiSettings.capi_source,
+      }),
+    };
+
+    const result = await updateDirection(selectedDirection.id, updatePayload);
 
     if (result.success) {
       toast.success('Направление обновлено!');

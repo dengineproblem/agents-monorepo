@@ -62,6 +62,13 @@ const UpdateDirectionSchema = z.object({
   target_cpl_cents: z.number().int().min(50).optional(),
   is_active: z.boolean().optional(),
   whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую
+  // CAPI settings (direction-level)
+  capi_enabled: z.boolean().optional(),
+  capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
+  capi_crm_type: z.enum(['amocrm', 'bitrix24']).nullable().optional(),
+  capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
+  capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
+  capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
 });
 
 type CreateDirectionInput = z.infer<typeof CreateDirectionSchema>;
