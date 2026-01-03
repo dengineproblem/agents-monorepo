@@ -235,28 +235,79 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
 }
 
 /**
+ * Helper для axios запросов с retry
+ */
+async function axiosWithRetry<T>(
+  requestFn: () => Promise<T>,
+  options: { maxRetries?: number; baseDelay?: number; phase?: string } = {}
+): Promise<T> {
+  const { maxRetries = 5, baseDelay = 3000, phase = 'request' } = options;
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await requestFn();
+    } catch (error: any) {
+      lastError = error;
+
+      const isRetryable =
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'ECONNABORTED' ||
+        error.message?.includes('socket hang up') ||
+        error.message?.includes('network') ||
+        error.response?.status === 500 ||
+        error.response?.status === 502 ||
+        error.response?.status === 503 ||
+        error.response?.status === 504;
+
+      if (isRetryable && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+        log.warn({
+          phase,
+          attempt,
+          maxRetries,
+          delayMs: delay,
+          error: error.message
+        }, `Retrying ${phase} after error`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError;
+}
+
+/**
  * Chunked upload для больших видео
  * Протокол: start → transfer (loop) → finish
  */
 async function uploadVideoChunked(adAccountId: string, token: string, filePath: string, fileSize: number): Promise<string> {
   const base = `https://graph-video.facebook.com/${FB_API_VERSION}`;
   const url = `${base}/${adAccountId}/advideos`;
-  
+
   log.info({ adAccountId, fileSizeMB: Math.round(fileSize / 1024 / 1024) }, 'Starting chunked video upload');
-  
-  // 1) START phase
+
+  // 1) START phase с retry
   const startFormData = new FormData();
   startFormData.append('access_token', token);
   startFormData.append('upload_phase', 'start');
   startFormData.append('file_size', String(fileSize));
-  
-  const startRes = await axios.post(url, startFormData, {
-    headers: startFormData.getHeaders()
-  });
-  
+
+  const startRes = await axiosWithRetry(
+    () => axios.post(url, startFormData, {
+      headers: startFormData.getHeaders(),
+      timeout: 60000 // 60 секунд таймаут
+    }),
+    { phase: 'start' }
+  );
+
   let { upload_session_id, start_offset, end_offset, video_id } = startRes.data;
   log.debug({ uploadSessionId: upload_session_id, start_offset, end_offset }, 'Chunked upload session started');
-  
+
   // 2) TRANSFER phase (loop)
   let chunkNumber = 0;
   while (start_offset !== end_offset) {
@@ -264,55 +315,66 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
     const start = parseInt(start_offset, 10);
     const end = parseInt(end_offset, 10);
     const chunkSize = end - start;
-    
+
     log.debug({ chunkNumber, start, end, chunkSizeMB: Math.round(chunkSize / 1024 / 1024) }, 'Uploading video chunk');
-    
-    // Читаем chunk из файла
-    const chunk = fs.createReadStream(filePath, { 
-      start, 
-      end: end - 1  // end - 1 потому что end_offset не включается
-    });
-    
-    const transferFormData = new FormData();
-    transferFormData.append('access_token', token);
-    transferFormData.append('upload_phase', 'transfer');
-    transferFormData.append('upload_session_id', upload_session_id);
-    transferFormData.append('start_offset', String(start));
-    transferFormData.append('video_file_chunk', chunk, {
-      filename: path.basename(filePath),
-      contentType: 'application/octet-stream',
-      knownLength: chunkSize
-    });
-    
-    const transferRes = await axios.post(url, transferFormData, {
-      headers: transferFormData.getHeaders(),
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    });
-    
+
+    // Retry для каждого chunk
+    const transferRes = await axiosWithRetry(
+      () => {
+        // Создаём новый stream для каждой попытки (stream нельзя переиспользовать)
+        const chunk = fs.createReadStream(filePath, {
+          start,
+          end: end - 1
+        });
+
+        const transferFormData = new FormData();
+        transferFormData.append('access_token', token);
+        transferFormData.append('upload_phase', 'transfer');
+        transferFormData.append('upload_session_id', upload_session_id);
+        transferFormData.append('start_offset', String(start));
+        transferFormData.append('video_file_chunk', chunk, {
+          filename: path.basename(filePath),
+          contentType: 'application/octet-stream',
+          knownLength: chunkSize
+        });
+
+        return axios.post(url, transferFormData, {
+          headers: transferFormData.getHeaders(),
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+          timeout: 300000 // 5 минут для chunk
+        });
+      },
+      { phase: `transfer-chunk-${chunkNumber}` }
+    );
+
     // Сервер возвращает следующий диапазон
     start_offset = transferRes.data.start_offset;
     end_offset = transferRes.data.end_offset;
-    
+
     const progress = Math.round((start / fileSize) * 100);
     log.debug({ chunkNumber, progress }, 'Chunk uploaded');
   }
-  
+
   log.info({ uploadSessionId: upload_session_id }, 'All video chunks uploaded, finishing');
-  
-  // 3) FINISH phase
+
+  // 3) FINISH phase с retry
   const finishFormData = new FormData();
   finishFormData.append('access_token', token);
   finishFormData.append('upload_phase', 'finish');
   finishFormData.append('upload_session_id', upload_session_id);
-  
-  const finishRes = await axios.post(url, finishFormData, {
-    headers: finishFormData.getHeaders()
-  });
-  
+
+  const finishRes = await axiosWithRetry(
+    () => axios.post(url, finishFormData, {
+      headers: finishFormData.getHeaders(),
+      timeout: 60000
+    }),
+    { phase: 'finish' }
+  );
+
   const finalVideoId = finishRes.data.video_id || video_id;
   log.info({ adAccountId, videoId: finalVideoId }, 'Chunked video upload completed');
-  
+
   return finalVideoId;
 }
 
