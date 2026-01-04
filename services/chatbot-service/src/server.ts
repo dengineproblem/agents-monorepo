@@ -215,6 +215,109 @@ app.post('/process-message', async (request, reply) => {
   }
 });
 
+// Force resend CAPI events (for debugging/recovery)
+app.post('/capi/resend', async (request, reply) => {
+  try {
+    const { direction_id, dialog_ids, event_levels } = request.body as {
+      direction_id?: string;
+      dialog_ids?: string[];
+      event_levels?: number[]; // 1, 2, 3
+    };
+
+    if (!direction_id && !dialog_ids?.length) {
+      return reply.status(400).send({ error: 'Either direction_id or dialog_ids required' });
+    }
+
+    const levels = event_levels || [1, 2, 3];
+    const { sendCapiEvent, getDirectionPixelInfo, CAPI_EVENTS } = await import('./lib/metaCapiClient.js');
+    const { supabase } = await import('./lib/supabase.js');
+
+    // Get dialogs to resend
+    let query = supabase
+      .from('dialog_analysis')
+      .select('id, user_account_id, contact_phone, ctwa_clid, direction_id, capi_interest_sent, capi_qualified_sent, capi_scheduled_sent')
+      .not('direction_id', 'is', null);
+
+    if (dialog_ids?.length) {
+      query = query.in('id', dialog_ids);
+    } else if (direction_id) {
+      query = query.eq('direction_id', direction_id);
+    }
+
+    const { data: dialogs, error } = await query;
+
+    if (error) {
+      return reply.status(500).send({ error: error.message });
+    }
+
+    if (!dialogs?.length) {
+      return reply.send({ success: true, message: 'No dialogs found', sent: 0 });
+    }
+
+    app.log.info({ count: dialogs.length, levels }, 'Force resending CAPI events');
+
+    const results: Array<{ dialogId: string; level: number; success: boolean; error?: string }> = [];
+
+    for (const dialog of dialogs) {
+      // Get pixel info for this direction
+      const { pixelId, accessToken } = await getDirectionPixelInfo(dialog.direction_id!);
+
+      if (!pixelId || !accessToken) {
+        results.push({ dialogId: dialog.id, level: 0, success: false, error: 'No pixel or token' });
+        continue;
+      }
+
+      // Send events for requested levels
+      for (const level of levels) {
+        const eventName = level === 1 ? CAPI_EVENTS.INTEREST
+          : level === 2 ? CAPI_EVENTS.QUALIFIED
+          : CAPI_EVENTS.SCHEDULED;
+
+        const response = await sendCapiEvent({
+          pixelId,
+          accessToken,
+          eventName,
+          eventLevel: level as 1 | 2 | 3,
+          phone: dialog.contact_phone,
+          ctwaClid: dialog.ctwa_clid,
+          dialogAnalysisId: dialog.id,
+          userAccountId: dialog.user_account_id,
+          directionId: dialog.direction_id,
+        });
+
+        results.push({
+          dialogId: dialog.id,
+          level,
+          success: response.success,
+          error: response.error,
+        });
+
+        app.log.info({
+          dialogId: dialog.id,
+          level,
+          eventName,
+          success: response.success,
+          error: response.error,
+        }, 'Force resent CAPI event');
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    return reply.send({
+      success: true,
+      total: results.length,
+      successCount,
+      failCount,
+      results,
+    });
+  } catch (error: any) {
+    app.log.error({ error: error.message }, 'Error force resending CAPI');
+    return reply.status(500).send({ error: error.message });
+  }
+});
+
 // Запускаем cron для реанимационных рассылок (ежедневно в 00:00)
 // @ts-ignore
 startReactivationCron();
