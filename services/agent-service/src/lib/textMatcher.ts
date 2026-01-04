@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient.js';
 import { createLogger } from './logger.js';
+import { shouldFilterByAccountId } from './multiAccountHelper.js';
 
 const log = createLogger({ module: 'textMatcher' });
 
@@ -105,11 +106,10 @@ export async function matchMessageToDirection(
       .eq('is_active', true)
       .eq('objective', 'whatsapp');
 
-    // Фильтр по account_id для мультиаккаунтности (NULL для legacy)
-    if (accountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    // В legacy режиме возвращаем все направления пользователя
+    if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
       query = query.eq('account_id', accountId);
-    } else {
-      query = query.is('account_id', null);
     }
 
     const { data: directions, error } = await query;

@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { createLogger } from '../lib/logger.js';
 import {
   extractPageIdFromUrl,
@@ -1042,8 +1043,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         .eq('user_account_id', userAccountId)
         .eq('is_active', true);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         competitorsQuery = competitorsQuery.eq('account_id', accountId);
       }
 

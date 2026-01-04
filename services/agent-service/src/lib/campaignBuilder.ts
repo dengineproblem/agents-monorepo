@@ -10,6 +10,7 @@ import { supabase } from './supabase.js';
 import { createLogger } from './logger.js';
 import { resolveFacebookError } from './facebookErrors.js';
 import { saveAdCreativeMapping } from './adCreativeMapping.js';
+import { shouldFilterByAccountId } from './multiAccountHelper.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const log = createLogger({ module: 'campaignBuilder' });
@@ -1348,8 +1349,8 @@ export async function getCreativeMetrics(
     .eq('user_account_id', userAccountId)
     .gte('date', cutoffDate);
 
-  // Фильтр по account_id для мультиаккаунтности
-  if (accountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
     query = query.eq('account_id', accountId);
   }
 

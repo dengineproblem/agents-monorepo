@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 // Схемы валидации
 const PhoneNumberSchema = z.string().regex(/^\+[1-9][0-9]{7,14}$/, {
@@ -41,8 +42,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true });
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
       }
 

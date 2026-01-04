@@ -1,5 +1,6 @@
 import { DialogAnalysis, DialogStats, DialogFilters } from '@/types/dialogAnalysis';
 import { supabase } from '@/integrations/supabase/client';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export const dialogAnalysisService = {
   /**
@@ -14,8 +15,8 @@ export const dialogAnalysisService = {
       .order('score', { ascending: false })
       .order('last_message', { ascending: false });
 
-    // Фильтрация по аккаунту для multi-account режима
-    if (accountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (shouldFilterByAccountId(accountId)) {
       query = query.eq('account_id', accountId);
     }
 
@@ -58,8 +59,8 @@ export const dialogAnalysisService = {
       .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
       .eq('user_account_id', userAccountId);
 
-    // Фильтрация по аккаунту для multi-account режима
-    if (accountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (shouldFilterByAccountId(accountId)) {
       query = query.eq('account_id', accountId);
     }
 
@@ -125,8 +126,8 @@ export const dialogAnalysisService = {
       .eq('user_account_id', userAccountId)
       .order('score', { ascending: false });
 
-    // Фильтрация по аккаунту для multi-account режима
-    if (accountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (shouldFilterByAccountId(accountId)) {
       query = query.eq('account_id', accountId);
     }
 
@@ -325,8 +326,8 @@ export const dialogAnalysisService = {
       .eq('user_account_id', userAccountId)
       .order('instance_name');
 
-    // Фильтрация по аккаунту для multi-account режима
-    if (accountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (shouldFilterByAccountId(accountId)) {
       query = query.eq('account_id', accountId);
     }
 

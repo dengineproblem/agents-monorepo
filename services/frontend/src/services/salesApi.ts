@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { API_BASE_URL } from '@/config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export interface ROIData {
   totalRevenue: number;
@@ -75,8 +76,8 @@ class SalesApiService {
         .order('created_at', { ascending: false })
         .limit(10000);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
         purchasesQuery = purchasesQuery.eq('account_id', accountId);
       }
 
@@ -334,8 +335,8 @@ class SalesApiService {
         .order('created_at', { ascending: false })
         .limit(10000);
 
-      // Фильтрация по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
         creativesQuery = creativesQuery.eq('account_id', accountId);
       }
 
@@ -438,8 +439,8 @@ class SalesApiService {
         .eq('user_account_id', userAccountId)
         .in('creative_id', creativeIds);
 
-      // Фильтрация по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
         leadsQuery = leadsQuery.eq('account_id', accountId);
       }
 
@@ -467,8 +468,8 @@ class SalesApiService {
         .select('id, client_phone, amount, created_at')
         .eq('user_account_id', userAccountId);
 
-      // Фильтрация по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
         purchasesQuery = purchasesQuery.eq('account_id', accountId);
       }
 
@@ -1178,8 +1179,8 @@ class SalesApiService {
         .order('created_at', { ascending: false })
         .limit(10000);
 
-      // Фильтрация по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
         query = query.eq('account_id', accountId);
       }
 

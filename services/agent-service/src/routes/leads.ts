@@ -12,6 +12,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { eventLogger } from '../lib/eventLogger.js';
 import { onROIConfigured } from '../lib/onboardingHelper.js';
@@ -536,8 +537,8 @@ export default async function leadsRoutes(app: FastifyInstance) {
         .order('created_at', { ascending: false })
         .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         dbQuery = dbQuery.eq('account_id', accountId);
       }
 

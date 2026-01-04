@@ -13,6 +13,7 @@
 
 import { supabase } from './supabase.js';
 import { FastifyInstance } from 'fastify';
+import { shouldFilterByAccountId } from './multiAccountHelper.js';
 
 /**
  * Resolve creative_id, direction_id, and whatsapp_phone_number_id from Facebook Ad ID
@@ -78,11 +79,9 @@ export async function resolveCreativeAndDirection(
     .eq('ad_id', sourceId)
     .eq('user_id', userAccountId);
 
-  // Фильтр по account_id для мультиаккаунтности (NULL для legacy)
-  if (accountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
     mappingQuery = mappingQuery.eq('account_id', accountId);
-  } else {
-    mappingQuery = mappingQuery.is('account_id', null);
   }
 
   const { data: adMapping, error: mappingError } = await mappingQuery.maybeSingle();
@@ -120,11 +119,9 @@ export async function resolveCreativeAndDirection(
       .eq('user_id', userAccountId)
       .ilike('title', `%${sourceUrl}%`);
 
-    // Фильтр по account_id для мультиаккаунтности
-    if (accountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
       urlQuery = urlQuery.eq('account_id', accountId);
-    } else {
-      urlQuery = urlQuery.is('account_id', null);
     }
 
     const { data: creativeByUrl, error: urlError } = await urlQuery.maybeSingle();

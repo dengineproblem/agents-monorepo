@@ -9,6 +9,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { getValidAmoCRMToken } from '../lib/amocrmTokens.js';
 import { getPipelines, getLeadCustomFields, getContactCustomFields } from '../adapters/amocrm.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
@@ -546,8 +547,8 @@ export default async function amocrmPipelinesRoutes(app: FastifyInstance) {
         .not('amocrm_lead_id', 'is', null)
         .not('current_status_id', 'is', null);
 
-      // Filter by account_id for multi-account mode
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
       }
 

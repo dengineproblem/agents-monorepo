@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
 import { onDirectionCreated } from '../lib/onboardingHelper.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const log = createLogger({ module: 'directionsRoutes' });
 
@@ -291,16 +292,6 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       log.info({ userAccountId, accountId }, 'Fetching directions for user');
 
-      // Проверяем флаг multi_account_enabled у пользователя
-      const { data: userAccount } = await supabase
-        .from('user_accounts')
-        .select('multi_account_enabled')
-        .eq('id', userAccountId)
-        .maybeSingle();
-
-      const isMultiAccountMode = userAccount?.multi_account_enabled === true;
-      log.info({ userAccountId, isMultiAccountMode, accountId }, 'Multi-account mode check');
-
       let query = supabase
         .from('account_directions')
         .select(`
@@ -309,8 +300,8 @@ export async function directionsRoutes(app: FastifyInstance) {
         `)
         .eq('user_account_id', userAccountId);
 
-      // Фильтрация по рекламному аккаунту ТОЛЬКО в мультиаккаунтном режиме
-      if (isMultiAccountMode && accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
       }
 

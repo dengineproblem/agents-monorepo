@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const log = createLogger({ module: 'autopilotRoutes' });
 
@@ -35,8 +36,8 @@ export async function autopilotRoutes(app: FastifyInstance) {
         .select('id, user_account_id, account_id, plan_json, actions_json, report_text, status, duration_ms, created_at')
         .eq('user_account_id', userAccountId);
 
-      // Если указан accountId - фильтруем по нему
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
       }
 
@@ -156,8 +157,11 @@ export async function autopilotRoutes(app: FastifyInstance) {
 
       let autopilotEnabled = false;
 
-      // Если указан accountId - берём статус из ad_accounts
-      if (accountId) {
+      // Проверяем режим мультиаккаунтности (см. MULTI_ACCOUNT_GUIDE.md)
+      const useMultiAccount = await shouldFilterByAccountId(supabase, userAccountId, accountId);
+
+      if (useMultiAccount && accountId) {
+        // Multi-account режим: берём статус из ad_accounts
         const { data: adAccount, error: adError } = await supabase
           .from('ad_accounts')
           .select('autopilot')
@@ -168,7 +172,7 @@ export async function autopilotRoutes(app: FastifyInstance) {
           autopilotEnabled = !!adAccount.autopilot;
         }
       } else {
-        // Иначе из user_accounts (legacy)
+        // Legacy режим: берём из user_accounts
         const { data: userAccount, error: userError } = await supabase
           .from('user_accounts')
           .select('autopilot')
@@ -191,7 +195,8 @@ export async function autopilotRoutes(app: FastifyInstance) {
         .select('id, actions_json, report_text, status, duration_ms, created_at')
         .eq('user_account_id', userAccountId);
 
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме
+      if (useMultiAccount && accountId) {
         execQuery = execQuery.eq('account_id', accountId);
       }
 
@@ -214,7 +219,8 @@ export async function autopilotRoutes(app: FastifyInstance) {
         .eq('user_account_id', userAccountId)
         .gte('created_at', weekAgo.toISOString());
 
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме
+      if (useMultiAccount && accountId) {
         statsQuery = statsQuery.eq('account_id', accountId);
       }
 

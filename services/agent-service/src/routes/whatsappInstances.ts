@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { z } from 'zod';
 import { onROIConfigured } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -180,8 +181,8 @@ export default async function whatsappInstances(app: FastifyInstance) {
         .eq('user_account_id', userAccountId)
         .order('created_at', { ascending: false });
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         dbQuery = dbQuery.eq('account_id', accountId);
       }
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { analyzeDialogs } from '../scripts/analyzeDialogs.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 // Validation schemas
 const AnalyzeDialogsSchema = z.object({
@@ -117,8 +118,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .order('score', { ascending: false })
         .order('last_message', { ascending: false });
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         dbQuery = dbQuery.eq('account_id', accountId);
       }
 
@@ -195,8 +196,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .eq('user_account_id', userAccountId)
         .order('score', { ascending: false });
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         dbQuery = dbQuery.eq('account_id', accountId);
       }
 
@@ -311,8 +312,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .select('interest_level, score, incoming_count, funnel_stage, qualification_complete')
         .eq('user_account_id', userAccountId);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         dbQuery = dbQuery.eq('account_id', accountId);
       }
 
@@ -522,8 +523,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .eq('id', id)
         .eq('user_account_id', body.userAccountId);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, body.userAccountId, accountId)) {
         updateQuery = updateQuery.eq('account_id', accountId);
       }
 
@@ -591,8 +592,8 @@ export async function dialogsRoutes(app: FastifyInstance) {
         .eq('id', id)
         .eq('user_account_id', userAccountId);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         deleteQuery = deleteQuery.eq('account_id', accountId);
       }
 
