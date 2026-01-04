@@ -1204,26 +1204,9 @@ async function generateAIResponse(
     botControlToolNames: botControlTools.map(t => t.function.name)
   }, '[generateAIResponse] Added Bot Control tools', ['openai']);
 
-  // Маппинг моделей
-  const modelMap: Record<string, string> = {
-    'gpt-5.2': 'gpt-4o',
-    'gpt-5.1': 'gpt-4o',
-    'gpt-5': 'gpt-4o',
-    'gpt-5-mini': 'gpt-4o-mini',
-    'gpt-5-nano': 'gpt-4o-mini',
-    'gpt-4.1': 'gpt-4o',
-    'gpt-4.1-mini': 'gpt-4o-mini',
-    'gpt-4.1-nano': 'gpt-4o-mini',
-    'gpt-4o': 'gpt-4o',
-    'gpt-4o-mini': 'gpt-4o-mini',
-    'gpt-o3': 'gpt-4o'
-  };
-
-  const model = modelMap[config.model] || 'gpt-4o-mini';
-  log.debug({
-    configModel: config.model,
-    mappedModel: model
-  }, '[generateAIResponse] Model mapping', ['openai']);
+  // Используем модель напрямую из конфига
+  const model = config.model || 'gpt-4o-mini';
+  log.debug({ model }, '[generateAIResponse] Using model', ['openai']);
 
   try {
     // Загрузить историю сообщений
@@ -1243,11 +1226,16 @@ async function generateAIResponse(
       userMsgLen: messageText.length
     }, '[generateAIResponse] Messages array prepared', ['openai']);
 
+    // GPT-5 модели (reasoning) не поддерживают temperature и max_tokens
+    const isGpt5Model = model.startsWith('gpt-5') || model.startsWith('o3') || model.startsWith('o4');
+
     const completionParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
       model,
       messages,
-      temperature: config.temperature,
-      max_tokens: 1000
+      ...(isGpt5Model
+        ? { max_completion_tokens: 4096 }  // GPT-5: без temperature, используем max_completion_tokens
+        : { temperature: config.temperature, max_tokens: 1000 }  // GPT-4: стандартные параметры
+      )
     };
 
     if (tools.length > 0) {
@@ -1258,8 +1246,11 @@ async function generateAIResponse(
     log.checkpoint('api_call');
     log.info({
       model,
-      temp: config.temperature,
-      maxTokens: 1000,
+      isGpt5Model,
+      ...(isGpt5Model
+        ? { maxCompletionTokens: 4096 }
+        : { temp: config.temperature, maxTokens: 1000 }
+      ),
       msgsCount: messages.length,
       toolsCount: tools.length
     }, '[generateAIResponse] Calling OpenAI API', ['openai', 'api']);
