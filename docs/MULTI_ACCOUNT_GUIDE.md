@@ -1981,6 +1981,7 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-02 | 2.5 | - | Creative Generation Service: prompt1/prompt4 из ad_accounts, пропуск лимитов генераций |
 | 2025-12-08 | 2.6 | - | Исправление dispatch actions: sendActionsBatch + resolveAccessToken поддержка ad_accounts |
 | 2025-12-08 | 2.7 | - | Batch Monitoring Report: cron 9:00, explainError(), Telegram отчёт |
+| 2026-01-04 | 2.8 | - | Изоляция автопилота по аккаунтам: независимое включение/выключение для каждого ad_account |
 
 ### Версия 2.2 — Детали имплементации
 
@@ -2598,3 +2599,243 @@ CREATE TABLE batch_execution_results (
 ```
 
 **Тестирование:** `POST /api/brain/cron/batch-report`
+
+### Версия 2.8 — Изоляция автопилота по аккаунтам
+
+**Критические баги в мультиаккаунтном режиме:**
+
+До этого исправления включение автопилота для одного аккаунта активировало его для ВСЕХ аккаунтов пользователя. Направления из разных аккаунтов смешивались в отчётах.
+
+**Обнаруженные проблемы:**
+
+| Проблема | Корень проблемы | Решение |
+|----------|-----------------|---------|
+| Автопилот включается для ВСЕХ аккаунтов | `processDailyBatch()` загружал все `is_active` аккаунты без фильтра `autopilot` | Добавлен `.eq('autopilot', true)` |
+| Направления смешиваются между аккаунтами | `getUserDirections()` фильтровал только по `user_account_id` | Добавлен фильтр по `account_id` |
+| Telegram уведомления из глобальных настроек | `telegram_id` брался из `user_accounts` | Переопределяется из `ad_accounts` (без fallback) |
+| Frontend показывает все отчёты | `AutopilotSection` не передавал `accountId` | Добавлен параметр `currentAdAccountId` |
+| Переключатель работает глобально | `toggleAiAutopilot()` обновлял `user_accounts.autopilot` | Обновляет `ad_accounts.autopilot` в multi-account режиме |
+
+**Изменения в Backend (agent-brain):**
+
+| Функция | Изменение |
+|---------|-----------|
+| `getActiveUsers()` | Разделена на legacy (autopilot в user_accounts) и multi-account (autopilot проверяется позже) |
+| `processDailyBatch()` | Добавлен `.eq('autopilot', true)` для ad_accounts, telegram_id берётся из ad_accounts без fallback |
+| `getUserDirections()` | Добавлен параметр `accountId`, фильтрация `.eq('account_id', accountId)` для multi-account |
+| `/api/brain/run` | Передача `accountUUID` в `getUserDirections()`, пропуск аккаунтов без направлений |
+
+**Изменение getActiveUsers() (server.js:3609):**
+
+```javascript
+async function getActiveUsers() {
+  // 1. Legacy пользователи (multi_account_enabled = false/null, autopilot = true)
+  const legacyUsers = await supabaseQuery('user_accounts_legacy',
+    async () => await supabase
+      .from('user_accounts')
+      .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
+      .eq('is_active', true)
+      .eq('optimization', 'agent2')
+      .eq('autopilot', true)
+      .or('multi_account_enabled.eq.false,multi_account_enabled.is.null'),
+    { where: 'getActiveUsers_legacy' }
+  );
+
+  // 2. Мультиаккаунтные пользователи (фильтрация по autopilot будет в processDailyBatch)
+  const multiAccountUsers = await supabaseQuery('user_accounts_multi',
+    async () => await supabase
+      .from('user_accounts')
+      .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
+      .eq('is_active', true)
+      .eq('optimization', 'agent2')
+      .eq('multi_account_enabled', true),
+    { where: 'getActiveUsers_multi' }
+  );
+
+  return [...(legacyUsers || []), ...(multiAccountUsers || [])];
+}
+```
+
+**Изменение processDailyBatch() (server.js:3864):**
+
+```javascript
+if (user.multi_account_enabled) {
+  const { data: adAccounts } = await supabase
+    .from('ad_accounts')
+    .select('id, ad_account_id, name, autopilot, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, default_cpl_target_cents, plan_daily_budget_cents')
+    .eq('user_account_id', user.id)
+    .eq('is_active', true)
+    .eq('autopilot', true);  // ← ТОЛЬКО аккаунты с включённым автопилотом!
+
+  for (const adAccount of adAccounts) {
+    expandedUsers.push({
+      ...user,
+      accountId: adAccount.id,
+      accountName: adAccount.name,
+      // telegram_id из ad_accounts БЕЗ fallback на user_accounts
+      telegram_id: adAccount.telegram_id || null,
+      telegram_id_2: adAccount.telegram_id_2 || null,
+      telegram_id_3: adAccount.telegram_id_3 || null,
+      telegram_id_4: adAccount.telegram_id_4 || null,
+      default_cpl_target_cents: adAccount.default_cpl_target_cents,
+      plan_daily_budget_cents: adAccount.plan_daily_budget_cents
+    });
+  }
+}
+```
+
+**Изменение getUserDirections() (server.js:583):**
+
+```javascript
+async function getUserDirections(userAccountId, accountId = null) {
+  const mode = accountId ? 'multi_account' : 'legacy';
+
+  let query = supabase
+    .from('account_directions')
+    .select('*')
+    .eq('user_account_id', userAccountId)
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+
+  // В мультиаккаунтном режиме фильтруем по account_id
+  if (accountId) {
+    query = query.eq('account_id', accountId);
+  } else {
+    // Legacy режим — направления без account_id
+    query = query.is('account_id', null);
+  }
+
+  const data = await supabaseQuery('account_directions', async () => query, { userAccountId, accountId });
+  return data || [];
+}
+```
+
+**Изменение /api/brain/run (server.js:2465):**
+
+```javascript
+// Загружаем направления с фильтрацией по аккаунту
+const directions = await getUserDirections(userAccountId, accountUUID);
+
+// Если нет направлений — пропускаем аккаунт (по решению пользователя)
+if (accountUUID && (!directions || directions.length === 0)) {
+  fastify.log.warn({
+    where: 'brain_run',
+    phase: 'no_directions',
+    userId: userAccountId,
+    accountId: accountUUID,
+    message: 'No directions found for account, skipping autopilot'
+  });
+  return reply.send({
+    success: false,
+    skipped: true,
+    reason: 'no_directions',
+    message: 'Аккаунт пропущен: не создано ни одного направления'
+  });
+}
+```
+
+**Изменения в Frontend:**
+
+| Файл | Изменение |
+|------|-----------|
+| `AppContext.tsx` | `toggleAiAutopilot()` обновляет `ad_accounts.autopilot` в multi-account режиме |
+| `AppContext.tsx` | Добавлен `useEffect` для загрузки статуса autopilot при смене аккаунта |
+| `AutopilotSection.tsx` | Добавлен prop `currentAdAccountId`, фильтрация запросов по `accountId` |
+| `Dashboard.tsx` | Передача `currentAdAccountId` в `AutopilotSection` |
+
+**Изменение toggleAiAutopilot() в AppContext.tsx:**
+
+```typescript
+const toggleAiAutopilot = async (enabled: boolean) => {
+  setAiAutopilotLoading(true);
+  try {
+    const userData = JSON.parse(storedUser);
+
+    // В мультиаккаунтном режиме обновляем ad_accounts.autopilot
+    if (multiAccountEnabled && currentAdAccountId) {
+      const { error } = await (supabase as any)
+        .from('ad_accounts')
+        .update({ autopilot: enabled })
+        .eq('id', currentAdAccountId);
+      // ...
+    } else {
+      // Legacy режим - обновляем user_accounts.autopilot
+      const { error } = await supabase
+        .from('user_accounts')
+        .update({ autopilot: enabled })
+        .eq('id', userData.id);
+      // ...
+    }
+  } finally {
+    setAiAutopilotLoading(false);
+  }
+};
+```
+
+**Добавлен useEffect для загрузки статуса при смене аккаунта:**
+
+```typescript
+useEffect(() => {
+  const loadAutopilotStatus = async () => {
+    try {
+      if (multiAccountEnabled && currentAdAccountId) {
+        // Мультиаккаунтный режим — берём из ad_accounts
+        const { data } = await (supabase as any)
+          .from('ad_accounts')
+          .select('autopilot')
+          .eq('id', currentAdAccountId)
+          .single();
+        setAiAutopilot(data?.autopilot ?? false);
+      } else if (!multiAccountEnabled) {
+        // Legacy режим — берём из user_accounts
+        // ...
+      }
+    } catch (error) {
+      console.error('[loadAutopilotStatus] Error:', error);
+    }
+  };
+
+  loadAutopilotStatus();
+}, [currentAdAccountId, multiAccountEnabled]);
+```
+
+**Изменение AutopilotSection.tsx:**
+
+```typescript
+interface AutopilotSectionProps {
+  aiAutopilot: boolean;
+  toggleAiAutopilot: (enabled: boolean) => Promise<void>;
+  aiAutopilotLoading: boolean;
+  userAccountId: string;
+  currentAdAccountId?: string | null;  // ← ДОБАВЛЕНО
+}
+
+// В useEffect для загрузки executions:
+const url = new URL(`${API_BASE_URL}/autopilot/executions`);
+url.searchParams.set('userAccountId', userAccountId);
+url.searchParams.set('limit', '10');
+
+// В мультиаккаунтном режиме фильтруем по конкретному аккаунту
+if (currentAdAccountId) {
+  url.searchParams.set('accountId', currentAdAccountId);
+}
+```
+
+**Ожидаемый результат:**
+
+| Сценарий | До | После |
+|----------|-----|-------|
+| Включить автопилот для аккаунта A | Включается для ВСЕХ аккаунтов | Только для A |
+| Отчёты в UI | Ото всех аккаунтов | Только от выбранного |
+| Направления в отчёте | Смешаны из разных аккаунтов | Только от текущего |
+| Аккаунт без направлений | Работает с fallback CPL | Пропускается с логом |
+| Telegram уведомления | Из user_accounts (глобально) | Из ad_accounts (или не отправляется) |
+| Переключение аккаунта | Статус не меняется | Загружается статус выбранного |
+
+**Готовность к тестированию:** ✅
+
+- Автопилот изолирован по `ad_accounts.autopilot`
+- Направления фильтруются по `account_id`
+- Telegram берётся из `ad_accounts` без fallback
+- Frontend загружает статус при смене аккаунта
+- Legacy режим не затронут
