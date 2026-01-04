@@ -1239,7 +1239,7 @@ async function generateAIResponse(
       model,
       messages,
       ...(isGpt5Model
-        ? { max_completion_tokens: 4096 }  // GPT-5: без temperature, используем max_completion_tokens
+        ? { max_completion_tokens: 10000 }  // GPT-5: без temperature, используем max_completion_tokens
         : { temperature: config.temperature, max_tokens: 1000 }  // GPT-4: стандартные параметры
       )
     };
@@ -1397,14 +1397,17 @@ async function generateAIResponse(
       }, '[generateAIResponse] Calling OpenAI with tool results');
 
       const followUpStartTime = Date.now();
-      completion = await openai.chat.completions.create({
+      const followUpParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
         model,
         messages,
-        temperature: config.temperature,
-        max_tokens: 1000,
+        ...(isGpt5Model
+          ? { max_completion_tokens: 10000 }
+          : { temperature: config.temperature, max_tokens: 1000 }
+        ),
         tools: tools.length > 0 ? tools : undefined,
         tool_choice: tools.length > 0 ? 'auto' : undefined
-      });
+      };
+      completion = await openai.chat.completions.create(followUpParams);
       apiElapsed = Date.now() - followUpStartTime;
 
       choice = completion.choices[0];
@@ -1433,13 +1436,16 @@ async function generateAIResponse(
         finishReason: choice.finish_reason
       }, '[generateAIResponse] Empty response after tool calls, retrying without tools');
 
-      const retryCompletion = await openai.chat.completions.create({
+      const retryParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
         model,
         messages,
-        temperature: config.temperature,
-        max_tokens: 1000
+        ...(isGpt5Model
+          ? { max_completion_tokens: 10000 }
+          : { temperature: config.temperature, max_tokens: 1000 }
+        )
         // Без tools - просто текстовый ответ
-      });
+      };
+      const retryCompletion = await openai.chat.completions.create(retryParams);
 
       choice = retryCompletion.choices[0];
       log.info({
