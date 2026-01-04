@@ -18,7 +18,10 @@ interface BotTestChatProps {
   botName?: string;
 }
 
-const CHATBOT_SERVICE_URL = import.meta.env.VITE_CHATBOT_SERVICE_URL || 'http://localhost:8083';
+// Используем Vite proxy для обхода CORS и работы с Docker
+// В dev: /api/chatbot → localhost:8083 (через vite proxy)
+// В prod: /api/chatbot → nginx proxy → chatbot-service:8083
+const CHATBOT_API_PATH = '/api/chatbot';
 
 export function BotTestChat({ botId, botName }: BotTestChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -58,7 +61,7 @@ export function BotTestChat({ botId, botName }: BotTestChatProps) {
 
       setLoadingStatus('Ожидание буфера сообщений...');
 
-      const response = await fetch(`${CHATBOT_SERVICE_URL}/test-message`, {
+      const response = await fetch(`${CHATBOT_API_PATH}/test-message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
