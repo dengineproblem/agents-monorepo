@@ -528,6 +528,14 @@ async function upsertDialogAnalysis(params: {
 }, app: FastifyInstance) {
   const { userAccountId, accountId, instanceName, contactPhone, contactName, messageText, ctwaClid, timestamp } = params;
 
+  // DEBUG: Логируем входящие данные для диагностики ctwa_clid
+  app.log.info({
+    contactPhone,
+    instanceName,
+    ctwaClid: ctwaClid || null,
+    hasCtwaClid: !!ctwaClid
+  }, 'upsertDialogAnalysis: incoming params');
+
   // Проверить существование записи
   const { data: existing } = await supabase
     .from('dialog_analysis')
@@ -539,9 +547,19 @@ async function upsertDialogAnalysis(params: {
   if (existing) {
     // Обновить существующую запись
     // НЕ перезаписываем contact_name если оно уже есть (клиент мог сам назвать имя)
+    const finalCtwaClid = ctwaClid || existing.ctwa_clid;
+
+    // DEBUG: Логируем что записываем при UPDATE
+    app.log.info({
+      existingId: existing.id,
+      existingCtwaClid: existing.ctwa_clid,
+      newCtwaClid: ctwaClid,
+      finalCtwaClid
+    }, 'upsertDialogAnalysis: updating with ctwa_clid');
+
     const updateData: Record<string, any> = {
       last_message: messageText,
-      ctwa_clid: ctwaClid || existing.ctwa_clid,
+      ctwa_clid: finalCtwaClid,
       analyzed_at: timestamp.toISOString()
     };
 
@@ -550,13 +568,24 @@ async function upsertDialogAnalysis(params: {
       updateData.contact_name = contactName;
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('dialog_analysis')
       .update(updateData)
       .eq('id', existing.id);
+
+    // DEBUG: Проверяем ошибку UPDATE
+    if (updateError) {
+      app.log.error({ error: updateError, existingId: existing.id }, 'Failed to update dialog_analysis');
+    }
   } else {
+    // DEBUG: Логируем что записываем при INSERT
+    app.log.info({
+      contactPhone,
+      ctwaClid: ctwaClid || null
+    }, 'upsertDialogAnalysis: creating new record with ctwa_clid');
+
     // Создать новую запись
-    await supabase
+    const { error: insertError } = await supabase
       .from('dialog_analysis')
       .insert({
         user_account_id: userAccountId,
@@ -570,6 +599,11 @@ async function upsertDialogAnalysis(params: {
         interest_level: 'unknown',
         analyzed_at: timestamp.toISOString()
       });
+
+    // DEBUG: Проверяем ошибку INSERT
+    if (insertError) {
+      app.log.error({ error: insertError, contactPhone }, 'Failed to create dialog_analysis');
+    }
   }
 }
 
