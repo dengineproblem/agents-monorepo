@@ -107,6 +107,24 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
     return;
   }
 
+  // Ignore reactions - they don't need bot response
+  if (message.message?.reactionMessage) {
+    app.log.debug({
+      remoteJid: message.key.remoteJid,
+      reaction: message.message.reactionMessage.text
+    }, 'Ignoring reaction message');
+    return;
+  }
+
+  // Ignore protocol messages (read receipts, message deletions, etc.)
+  if (message.message?.protocolMessage) {
+    app.log.debug({
+      remoteJid: message.key.remoteJid,
+      type: message.message.protocolMessage.type
+    }, 'Ignoring protocol message');
+    return;
+  }
+
   const remoteJid = message.key.remoteJid;
   const remoteJidAlt = message.key.remoteJidAlt;  // Альтернативный JID (для лидов с рекламы)
 
