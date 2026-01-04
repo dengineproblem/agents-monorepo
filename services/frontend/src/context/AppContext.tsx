@@ -727,6 +727,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           localStorage.removeItem('currentAdAccountId');
         }
       }
+      // Legacy режим: currentAdAccountId может оставаться в localStorage,
+      // но API слой (creativesApi) проверяет флаг multi_account_enabled
+      // и ИГНОРИРУЕТ accountId в legacy режиме (см. MULTI_ACCOUNT_GUIDE.md)
 
       console.log('[AppContext] Загружены рекламные аккаунты:', {
         multiAccountEnabled: response.multi_account_enabled,

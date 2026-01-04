@@ -55,16 +55,30 @@ const getUserId = (): string | null => {
 
 const genId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? (crypto as any).randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
 
+/**
+ * Проверяет, включён ли режим мультиаккаунтности.
+ * СТРОГОЕ ПРАВИЛО: Логика ветвления определяется ТОЛЬКО значением multi_account_enabled,
+ * а НЕ наличием accountId в параметрах.
+ */
+const isMultiAccountEnabled = (): boolean => {
+  return localStorage.getItem('multiAccountEnabled') === 'true';
+};
+
 export const creativesApi = {
   /**
-   * Получает список креативов пользователя
-   * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
-   *                    Если передан - возвращает креативы только этого аккаунта
-   *                    Если null/undefined - возвращает все креативы пользователя (legacy режим)
+   * Получает список креативов пользователя.
+   *
+   * ЛОГИКА РАБОТЫ (по правилам из MULTI_ACCOUNT_GUIDE.md):
+   * - Если multi_account_enabled = true: фильтруем по accountId
+   * - Если multi_account_enabled = false: accountId ИГНОРИРУЕТСЯ, возвращаем все креативы
+   *
+   * @param accountId - UUID из ad_accounts.id (используется ТОЛЬКО в multi-account режиме)
    */
   async list(accountId?: string | null): Promise<UserCreative[]> {
     const userId = getUserId();
     if (!userId) return [];
+
+    const multiAccountMode = isMultiAccountEnabled();
 
     let query = supabase
       .from('user_creatives')
@@ -72,9 +86,15 @@ export const creativesApi = {
       .eq('user_id', userId)
       .neq('status', 'failed'); // Исключаем failed креативы из списка
 
-    // Фильтрация по account_id для мультиаккаунтности
-    if (accountId) {
+    // СТРОГОЕ ПРАВИЛО: Фильтрация по account_id ТОЛЬКО если multi_account_enabled = true
+    // В legacy режиме accountId ИГНОРИРУЕТСЯ, даже если он передан
+    if (multiAccountMode && accountId) {
       query = query.eq('account_id', accountId);
+      console.log('[creativesApi.list] Multi-account режим: фильтрация по account_id =', accountId);
+    } else if (multiAccountMode && !accountId) {
+      console.warn('[creativesApi.list] Multi-account режим, но accountId не передан — возвращаем все креативы');
+    } else {
+      console.log('[creativesApi.list] Legacy режим: accountId игнорируется, возвращаем все креативы пользователя');
     }
 
     const { data, error } = await query.order('created_at', { ascending: false });
