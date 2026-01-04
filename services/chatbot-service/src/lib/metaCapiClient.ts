@@ -651,7 +651,8 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
     }
 
     // Extract pixel_id from default_ad_settings (could be array or object)
-    const settings = direction.default_ad_settings;
+    // Type assertion needed because Supabase doesn't infer JOIN types correctly
+    const settings = direction.default_ad_settings as { pixel_id?: string } | { pixel_id?: string }[] | null;
     const pixelId = Array.isArray(settings)
       ? settings[0]?.pixel_id
       : settings?.pixel_id;
@@ -662,8 +663,9 @@ export async function getDirectionPixelInfo(directionId: string): Promise<{
     }
 
     // Get access token: prefer ad_accounts, fallback to user_accounts
-    const adAccount = direction.ad_accounts;
-    const userAccount = direction.user_accounts;
+    // Type assertions for JOIN relations
+    const adAccount = direction.ad_accounts as { access_token?: string } | { access_token?: string }[] | null;
+    const userAccount = direction.user_accounts as { access_token?: string } | { access_token?: string }[] | null;
 
     const accessToken = (Array.isArray(adAccount) ? adAccount[0]?.access_token : adAccount?.access_token)
       || (Array.isArray(userAccount) ? userAccount[0]?.access_token : userAccount?.access_token)
