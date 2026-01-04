@@ -207,6 +207,22 @@ export function Consultations() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    if (!confirm('Удалить консультацию? Это действие нельзя отменить.')) return;
+    try {
+      await consultationService.deleteConsultation(id);
+      toast({ title: 'Консультация удалена' });
+      setIsDetailModalOpen(false);
+      await loadData();
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось удалить консультацию',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const calculateEndTime = (startTime: string): string => {
     return calculateEndTimeWithDuration(startTime, 30);
   };
@@ -722,6 +738,14 @@ export function Consultations() {
                   disabled={selectedConsultation.status === 'cancelled'}
                 >
                   Отменить
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-600 border-red-300 hover:bg-red-50"
+                  onClick={() => handleDelete(selectedConsultation.id)}
+                >
+                  Удалить
                 </Button>
               </div>
             </div>
