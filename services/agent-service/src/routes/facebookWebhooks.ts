@@ -194,14 +194,14 @@ export default async function facebookWebhooks(app: FastifyInstance) {
           // 1. Try ad_accounts (multi-account support)
           const { data: adAccount } = await supabase
             .from('ad_accounts')
-            .select('id, user_account_id, fb_access_token, fb_page_access_token')
-            .eq('fb_page_id', targetPageId)
+            .select('id, user_account_id, access_token, fb_page_access_token')
+            .eq('page_id', targetPageId)
             .eq('is_active', true)
             .maybeSingle();
 
-          if (adAccount?.fb_access_token) {
+          if (adAccount?.access_token) {
             userAccountId = adAccount.user_account_id;
-            userAccessToken = adAccount.fb_access_token;
+            userAccessToken = adAccount.access_token;
             pageAccessToken = adAccount.fb_page_access_token || null;
             adAccountId = adAccount.id;
             log.info({ pageId: targetPageId, adAccountId, hasPageToken: !!pageAccessToken }, 'Found ad_account for leadgen');
