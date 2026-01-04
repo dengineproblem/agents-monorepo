@@ -514,6 +514,67 @@ WHERE user_account_id = 'user-uuid';
 - crm-frontend: 5174 (Vite dev server)
 - chatbot-service: 8083 (то же)
 
+### **Точные названия контейнеров (для копирования в команды):**
+
+```bash
+# Основные сервисы (agents-monorepo)
+agents-monorepo-nginx-1
+agents-monorepo-frontend-1
+agents-monorepo-frontend-appreview-1
+agents-monorepo-agent-service-1
+agents-monorepo-agent-brain-1
+agents-monorepo-creative-analyzer-1
+agents-monorepo-creative-generation-service-1
+agents-monorepo-chatbot-service-1
+agents-monorepo-chatbot-worker-1
+agents-monorepo-crm-backend-1
+agents-monorepo-crm-frontend-1
+agents-monorepo-redis-chatbot-1
+agents-monorepo-loki-1
+agents-monorepo-grafana-1
+agents-monorepo-promtail-1
+
+# Evolution API (WhatsApp)
+evolution-api
+evolution-postgres
+evolution-redis
+
+# N8N (отдельный docker-compose в /root/)
+root-n8n-1
+root-postgres-1
+root-redis-1
+```
+
+### **Готовые команды для логов:**
+
+```bash
+# Agent Service (вебхуки Evolution, Facebook API)
+docker logs agents-monorepo-agent-service-1 --tail 500
+docker logs agents-monorepo-agent-service-1 --tail 500 2>&1 | grep -i "error"
+docker logs agents-monorepo-agent-service-1 --tail 500 2>&1 | grep -i "Incoming message structure"
+
+# Chatbot Service (AI бот, CAPI)
+docker logs agents-monorepo-chatbot-service-1 --tail 500
+docker logs agents-monorepo-chatbot-service-1 --tail 500 2>&1 | grep -i "capi"
+docker logs agents-monorepo-chatbot-service-1 --tail 500 2>&1 | grep -i "error"
+
+# Agent Brain (scoring, cron jobs)
+docker logs agents-monorepo-agent-brain-1 --tail 500
+
+# CRM Backend
+docker logs agents-monorepo-crm-backend-1 --tail 500
+
+# Evolution API (WhatsApp)
+docker logs evolution-api --tail 500
+
+# Nginx (проксирование)
+docker logs agents-monorepo-nginx-1 --tail 500
+
+# Следить за логами в реальном времени
+docker logs -f agents-monorepo-chatbot-service-1
+docker logs -f agents-monorepo-agent-service-1
+```
+
 ### **Docker Compose файлы:**
 
 - **Основной:** `/root/agents-monorepo/docker-compose.yml` (все сервисы агентов, фронтенды, nginx)
