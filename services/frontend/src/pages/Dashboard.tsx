@@ -507,6 +507,7 @@ const Dashboard: React.FC = () => {
                 toggleAiAutopilot={toggleAiAutopilot}
                 aiAutopilotLoading={aiAutopilotLoading}
                 userAccountId={userAccountId}
+                currentAdAccountId={currentAdAccountId}
               />
             )}
         

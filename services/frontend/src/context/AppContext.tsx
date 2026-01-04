@@ -237,6 +237,78 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     return () => window.removeEventListener('reloadAdAccounts', handleReloadAdAccounts);
   }, []);
 
+  // При смене currentAdAccountId загружаем статус автопилота для этого аккаунта
+  useEffect(() => {
+    const loadAutopilotStatus = async () => {
+      console.log('[AppContext] loadAutopilotStatus called:', {
+        multiAccountEnabled,
+        currentAdAccountId,
+        mode: multiAccountEnabled ? 'multi_account' : 'legacy'
+      });
+
+      try {
+        if (multiAccountEnabled && currentAdAccountId) {
+          // Мультиаккаунтный режим — берём из ad_accounts
+          const { data, error } = await (supabase as any)
+            .from('ad_accounts')
+            .select('autopilot')
+            .eq('id', currentAdAccountId)
+            .single();
+
+          if (error) {
+            console.error('[AppContext] Ошибка загрузки autopilot из ad_accounts:', {
+              accountId: currentAdAccountId,
+              error: error.message
+            });
+            setAiAutopilot(false);
+            return;
+          }
+
+          const autopilotStatus = data?.autopilot ?? false;
+          setAiAutopilot(autopilotStatus);
+          console.log('[AppContext] Загружен статус autopilot (multi-account):', {
+            accountId: currentAdAccountId,
+            autopilot: autopilotStatus,
+            source: 'ad_accounts'
+          });
+        } else if (!multiAccountEnabled) {
+          // Legacy режим — берём из user_accounts
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            const userData = JSON.parse(storedUser);
+            const { data, error } = await supabase
+              .from('user_accounts')
+              .select('autopilot')
+              .eq('id', userData.id)
+              .single();
+
+            if (error) {
+              console.error('[AppContext] Ошибка загрузки autopilot из user_accounts:', {
+                userId: userData.id,
+                error: error.message
+              });
+              setAiAutopilot(false);
+              return;
+            }
+
+            const autopilotStatus = data?.autopilot ?? false;
+            setAiAutopilot(autopilotStatus);
+            console.log('[AppContext] Загружен статус autopilot (legacy):', {
+              userId: userData.id,
+              autopilot: autopilotStatus,
+              source: 'user_accounts'
+            });
+          }
+        }
+      } catch (err) {
+        console.error('[AppContext] Критическая ошибка в loadAutopilotStatus:', err);
+        setAiAutopilot(false);
+      }
+    };
+
+    loadAutopilotStatus();
+  }, [currentAdAccountId, multiAccountEnabled]);
+
   // Функция для переключения состояния AI автопилота
   const toggleAiAutopilot = async (enabled: boolean) => {
     setAiAutopilotLoading(true);
@@ -246,27 +318,43 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         toast.error('Пользователь не авторизован');
         return;
       }
-      
+
       const userData = JSON.parse(storedUser);
       if (!userData.id) {
         toast.error('ID пользователя не найден');
         return;
       }
-      
-      const { error } = await supabase
-        .from('user_accounts')
-        .update({ autopilot: enabled })
-        .eq('id', userData.id);
-        
-      if (error) {
-        console.error('Ошибка при обновлении состояния AI автопилота:', error);
-        toast.error('Не удалось обновить состояние AI автопилота');
-        return;
+
+      // В мультиаккаунтном режиме обновляем ad_accounts.autopilot
+      if (multiAccountEnabled && currentAdAccountId) {
+        const { error } = await (supabase as any)
+          .from('ad_accounts')
+          .update({ autopilot: enabled })
+          .eq('id', currentAdAccountId);
+
+        if (error) {
+          console.error('Ошибка при обновлении autopilot в ad_accounts:', error);
+          toast.error('Не удалось обновить состояние AI автопилота');
+          return;
+        }
+        console.log('Обновлено состояние AI автопилота в ad_accounts:', { accountId: currentAdAccountId, enabled });
+      } else {
+        // Legacy режим - обновляем user_accounts.autopilot
+        const { error } = await supabase
+          .from('user_accounts')
+          .update({ autopilot: enabled })
+          .eq('id', userData.id);
+
+        if (error) {
+          console.error('Ошибка при обновлении состояния AI автопилота:', error);
+          toast.error('Не удалось обновить состояние AI автопилота');
+          return;
+        }
+        console.log('Обновлено состояние AI автопилота в user_accounts:', enabled);
       }
-      
+
       setAiAutopilot(enabled);
       toast.success(`AI автопилот ${enabled ? 'включен' : 'выключен'}`);
-      console.log('Обновлено состояние AI автопилота:', enabled);
     } catch (err) {
       console.error('Ошибка при переключении AI автопилота:', err);
       toast.error('Произошла ошибка при обновлении настроек');

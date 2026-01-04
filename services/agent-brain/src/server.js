@@ -572,20 +572,71 @@ async function getLastReports(telegramId) {
 // DIRECTIONS (Направления бизнеса)
 // ========================================
 
-async function getUserDirections(userAccountId) {
+/**
+ * Получить направления пользователя
+ * @param {string} userAccountId - UUID пользователя
+ * @param {string|null} accountId - UUID из ad_accounts.id для мультиаккаунтного режима (null для legacy)
+ *
+ * ВАЖНО: В мультиаккаунтном режиме фильтруем ТОЛЬКО по account_id (без legacy fallback)
+ * Это предотвращает смешивание направлений разных аккаунтов
+ */
+async function getUserDirections(userAccountId, accountId = null) {
+  const startTime = Date.now();
+  const mode = accountId ? 'multi_account' : 'legacy';
+
+  fastify.log.info({
+    where: 'getUserDirections',
+    phase: 'start',
+    userAccountId,
+    accountId: accountId || null,
+    mode,
+    filter: accountId ? `account_id = '${accountId}'` : 'account_id IS NULL'
+  });
+
   try {
-    const data = await supabaseQuery('account_directions',
-      async () => await supabase
-        .from('account_directions')
-        .select('*')
-        .eq('user_account_id', userAccountId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false }),
-      { userAccountId }
-    );
+    let query = supabase
+      .from('account_directions')
+      .select('*')
+      .eq('user_account_id', userAccountId)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    // В мультиаккаунтном режиме фильтруем ТОЛЬКО по account_id
+    if (accountId) {
+      query = query.eq('account_id', accountId);
+    }
+    // Для legacy режима (accountId = null) — загружаем направления без account_id
+    else {
+      query = query.is('account_id', null);
+    }
+
+    const data = await supabaseQuery('account_directions', async () => query, { userAccountId, accountId });
+    const duration = Date.now() - startTime;
+
+    fastify.log.info({
+      where: 'getUserDirections',
+      phase: 'complete',
+      userAccountId,
+      accountId: accountId || null,
+      mode,
+      count: data?.length || 0,
+      directionNames: (data || []).slice(0, 5).map(d => d.name),
+      durationMs: duration
+    });
+
     return data || [];
   } catch (error) {
-    fastify.log.warn({ msg: 'load_directions_failed', error: String(error) });
+    const duration = Date.now() - startTime;
+    fastify.log.error({
+      where: 'getUserDirections',
+      phase: 'error',
+      userAccountId,
+      accountId: accountId || null,
+      mode,
+      error: String(error),
+      stack: error?.stack,
+      durationMs: duration
+    });
     return [];
   }
 }
@@ -2461,16 +2512,36 @@ fastify.post('/api/brain/run', async (request, reply) => {
     
     // ========================================
     // DIRECTIONS - Получаем направления бизнеса
+    // ВАЖНО: Передаём accountUUID для фильтрации по конкретному аккаунту!
     // ========================================
-    const directions = await getUserDirections(userAccountId);
-    fastify.log.info({ 
-      where: 'brain_run', 
-      phase: 'directions_loaded', 
+    const directions = await getUserDirections(userAccountId, accountUUID);
+    fastify.log.info({
+      where: 'brain_run',
+      phase: 'directions_loaded',
       userId: userAccountId,
       username: ua.username,
-      count: directions.length 
+      accountId: accountUUID || 'legacy',
+      count: directions.length
     });
-    
+
+    // Если нет направлений — пропускаем аккаунт (по решению пользователя)
+    if (accountUUID && (!directions || directions.length === 0)) {
+      fastify.log.warn({
+        where: 'brain_run',
+        phase: 'no_directions',
+        userId: userAccountId,
+        username: ua.username,
+        accountId: accountUUID,
+        message: 'No directions found for account, skipping autopilot'
+      });
+      return reply.send({
+        success: false,
+        skipped: true,
+        reason: 'no_directions',
+        message: 'Аккаунт пропущен: не создано ни одного направления'
+      });
+    }
+
     // ========================================
     // 1. SCORING AGENT - запускается ПЕРВЫМ
     // ========================================
@@ -3555,23 +3626,50 @@ fastify.post('/api/brain/decide', async (request, reply) => {
 
 /**
  * Получить всех активных пользователей из Supabase
- * Для мультиаккаунтного режима также загружаем multi_account_enabled и ad_account_id
+ *
+ * ВАЖНО: Для мультиаккаунтного режима НЕ проверяем user_accounts.autopilot!
+ * Вместо этого проверка autopilot происходит в processDailyBatch по ad_accounts.autopilot
+ *
+ * - Legacy пользователи: multi_account_enabled = false/null, autopilot = true
+ * - Мультиаккаунтные: multi_account_enabled = true (autopilot проверяется в processDailyBatch)
  */
 async function getActiveUsers() {
   try {
-    const data = await supabaseQuery('user_accounts',
+    // 1. Legacy пользователи (multi_account_enabled = false/null, autopilot = true)
+    const legacyUsers = await supabaseQuery('user_accounts_legacy',
       async () => await supabase
         .from('user_accounts')
         .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
         .eq('is_active', true)
         .eq('optimization', 'agent2')
-        .eq('autopilot', true),
-      { where: 'getActiveUsers' }
+        .eq('autopilot', true)
+        .or('multi_account_enabled.eq.false,multi_account_enabled.is.null'),
+      { where: 'getActiveUsers_legacy' }
     );
 
-    fastify.log.info({ where: 'getActiveUsers', count: data?.length || 0, filter: 'is_active=true AND optimization=agent2 AND autopilot=true' });
+    // 2. Мультиаккаунтные пользователи (multi_account_enabled = true)
+    // Не проверяем user_accounts.autopilot — проверка будет в processDailyBatch по ad_accounts.autopilot
+    const multiAccountUsers = await supabaseQuery('user_accounts_multi',
+      async () => await supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
+        .eq('is_active', true)
+        .eq('optimization', 'agent2')
+        .eq('multi_account_enabled', true),
+      { where: 'getActiveUsers_multi' }
+    );
 
-    return data || [];
+    const allUsers = [...(legacyUsers || []), ...(multiAccountUsers || [])];
+
+    fastify.log.info({
+      where: 'getActiveUsers',
+      legacyCount: legacyUsers?.length || 0,
+      multiAccountCount: multiAccountUsers?.length || 0,
+      totalCount: allUsers.length,
+      filter: 'legacy: autopilot=true AND multi_account_enabled=false/null; multi: multi_account_enabled=true (autopilot checked per ad_account)'
+    });
+
+    return allUsers;
   } catch (err) {
     fastify.log.error({ where: 'getActiveUsers', err: String(err) });
     return [];
@@ -3786,16 +3884,18 @@ async function processDailyBatch() {
     // ========================================
     // Мультиаккаунтность: разворачиваем пользователей по ad_accounts
     // Для multi_account_enabled=true создаём отдельную задачу для каждого ad_account
+    // ВАЖНО: Проверяем ad_accounts.autopilot для каждого аккаунта!
     // ========================================
     const expandedUsers = [];
     for (const user of users) {
       if (user.multi_account_enabled) {
-        // Загружаем все активные ad_accounts для этого пользователя
+        // Загружаем только активные ad_accounts с включённым автопилотом
         const { data: adAccounts, error: adAccountsError } = await supabase
           .from('ad_accounts')
-          .select('id, ad_account_id, name')
+          .select('id, ad_account_id, name, autopilot, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, default_cpl_target_cents, plan_daily_budget_cents')
           .eq('user_account_id', user.id)
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .eq('autopilot', true);  // ← КРИТИЧНО: только аккаунты с включённым автопилотом!
 
         if (adAccountsError) {
           fastify.log.error({
@@ -3809,34 +3909,70 @@ async function processDailyBatch() {
         }
 
         if (!adAccounts || adAccounts.length === 0) {
-          fastify.log.warn({
+          fastify.log.info({
             where: 'processDailyBatch',
-            phase: 'no_ad_accounts',
+            phase: 'no_autopilot_accounts',
             userId: user.id,
             username: user.username,
-            message: 'Multi-account user has no active ad_accounts'
+            message: 'Multi-account user has no ad_accounts with autopilot=true'
           });
           continue;
         }
 
         // Создаём отдельную задачу для каждого ad_account
         for (const adAccount of adAccounts) {
+          const hasTelegramIds = !!(adAccount.telegram_id || adAccount.telegram_id_2 || adAccount.telegram_id_3 || adAccount.telegram_id_4);
+
+          fastify.log.info({
+            where: 'processDailyBatch',
+            phase: 'expand_ad_account',
+            userId: user.id,
+            username: user.username,
+            accountId: adAccount.id,
+            accountName: adAccount.name || adAccount.ad_account_id,
+            hasTelegramIds,
+            telegramIdCount: [adAccount.telegram_id, adAccount.telegram_id_2, adAccount.telegram_id_3, adAccount.telegram_id_4].filter(Boolean).length,
+            defaultCplCents: adAccount.default_cpl_target_cents || null,
+            planBudgetCents: adAccount.plan_daily_budget_cents || null,
+            autopilot: adAccount.autopilot
+          });
+
           expandedUsers.push({
             ...user,
             accountId: adAccount.id,  // UUID из ad_accounts.id
-            accountName: adAccount.name || adAccount.ad_account_id
+            accountName: adAccount.name || adAccount.ad_account_id,
+            // Переопределяем telegram_id из ad_accounts (БЕЗ fallback на user_accounts!)
+            telegram_id: adAccount.telegram_id || null,
+            telegram_id_2: adAccount.telegram_id_2 || null,
+            telegram_id_3: adAccount.telegram_id_3 || null,
+            telegram_id_4: adAccount.telegram_id_4 || null,
+            // Добавляем CPL и budget из ad_accounts
+            default_cpl_target_cents: adAccount.default_cpl_target_cents,
+            plan_daily_budget_cents: adAccount.plan_daily_budget_cents
           });
         }
 
         fastify.log.info({
           where: 'processDailyBatch',
-          phase: 'expanded_multi_account',
+          phase: 'expanded_multi_account_complete',
           userId: user.id,
           username: user.username,
-          adAccountsCount: adAccounts.length
+          adAccountsCount: adAccounts.length,
+          accountNames: adAccounts.map(a => a.name || a.ad_account_id),
+          accountIds: adAccounts.map(a => a.id)
         });
       } else {
         // Legacy режим: один пользователь = одна задача
+        fastify.log.info({
+          where: 'processDailyBatch',
+          phase: 'expand_legacy_user',
+          userId: user.id,
+          username: user.username,
+          mode: 'legacy',
+          hasTelegramIds: !!(user.telegram_id || user.telegram_id_2 || user.telegram_id_3 || user.telegram_id_4),
+          telegramIdCount: [user.telegram_id, user.telegram_id_2, user.telegram_id_3, user.telegram_id_4].filter(Boolean).length
+        });
+
         expandedUsers.push({
           ...user,
           accountId: null,  // NULL для legacy режима

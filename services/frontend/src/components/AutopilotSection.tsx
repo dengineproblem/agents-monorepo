@@ -42,6 +42,7 @@ interface AutopilotSectionProps {
   toggleAiAutopilot: (enabled: boolean) => Promise<void>;
   aiAutopilotLoading: boolean;
   userAccountId: string;
+  currentAdAccountId?: string | null;  // Для мультиаккаунтного режима
 }
 
 // Карта типов действий на понятные названия
@@ -81,7 +82,8 @@ export function AutopilotSection({
   aiAutopilot,
   toggleAiAutopilot,
   aiAutopilotLoading,
-  userAccountId
+  userAccountId,
+  currentAdAccountId
 }: AutopilotSectionProps) {
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,17 +96,52 @@ export function AutopilotSection({
     if (!userAccountId) return;
 
     const fetchData = async () => {
+      const mode = currentAdAccountId ? 'multi_account' : 'legacy';
+      console.log('[AutopilotSection] fetchData called:', {
+        userAccountId,
+        currentAdAccountId,
+        mode
+      });
+
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/autopilot/executions?userAccountId=${userAccountId}&limit=10`);
+        // Формируем URL с учётом мультиаккаунтного режима
+        const url = new URL(`${API_BASE_URL}/autopilot/executions`);
+        url.searchParams.set('userAccountId', userAccountId);
+        url.searchParams.set('limit', '10');
+
+        // В мультиаккаунтном режиме фильтруем по конкретному аккаунту
+        if (currentAdAccountId) {
+          url.searchParams.set('accountId', currentAdAccountId);
+        }
+
+        console.log('[AutopilotSection] Fetching executions:', {
+          url: url.toString(),
+          mode,
+          filter: currentAdAccountId ? `accountId=${currentAdAccountId}` : 'all accounts (legacy)'
+        });
+
+        const res = await fetch(url.toString());
         if (res.ok) {
           const data = await res.json();
           if (data.success) {
             setExecutions(data.executions || []);
+            console.log('[AutopilotSection] Executions loaded:', {
+              count: data.executions?.length || 0,
+              mode,
+              accountId: currentAdAccountId || 'legacy'
+            });
+          } else {
+            console.warn('[AutopilotSection] API returned success=false:', data);
           }
+        } else {
+          console.error('[AutopilotSection] Fetch failed:', {
+            status: res.status,
+            statusText: res.statusText
+          });
         }
       } catch (error) {
-        console.error('Error fetching autopilot data:', error);
+        console.error('[AutopilotSection] Error fetching autopilot data:', error);
       } finally {
         setLoading(false);
       }
@@ -113,7 +150,7 @@ export function AutopilotSection({
     fetchData();
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [userAccountId]);
+  }, [userAccountId, currentAdAccountId]);
 
   const openReport = (exec: BrainExecution) => {
     setSelectedExecution(exec);
