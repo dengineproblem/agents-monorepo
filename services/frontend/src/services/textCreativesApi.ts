@@ -31,6 +31,7 @@ export interface GenerateTextCreativeRequest {
   user_id: string;
   text_type: TextCreativeType;
   user_prompt: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
 }
 
 export interface GenerateTextCreativeResponse {
@@ -45,6 +46,7 @@ export interface EditTextCreativeRequest {
   text_type: TextCreativeType;
   original_text: string;
   edit_instructions: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
 }
 
 export interface EditTextCreativeResponse {

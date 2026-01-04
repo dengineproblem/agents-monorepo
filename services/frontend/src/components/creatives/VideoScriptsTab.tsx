@@ -97,7 +97,8 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
       const response = await textCreativesApi.generate({
         user_id: userId,
         text_type: textType,
-        user_prompt: userPrompt.trim()
+        user_prompt: userPrompt.trim(),
+        account_id: accountId || undefined  // Мультиаккаунтность
       });
 
       if (response.success && response.text) {
@@ -137,7 +138,8 @@ export const VideoScriptsTab: React.FC<TextTabProps> = ({ userId, initialPrompt,
         user_id: userId,
         text_type: textType,
         original_text: generatedText,
-        edit_instructions: editInstructions.trim()
+        edit_instructions: editInstructions.trim(),
+        account_id: accountId || undefined  // Мультиаккаунтность
       });
 
       if (response.success && response.text) {

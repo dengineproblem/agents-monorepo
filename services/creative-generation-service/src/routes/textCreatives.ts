@@ -9,6 +9,7 @@ interface GenerateTextCreativeRequest {
   user_id: string;
   text_type: TextCreativeType;
   user_prompt: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
 }
 
 interface GenerateTextCreativeResponse {
@@ -23,6 +24,7 @@ interface EditTextCreativeRequest {
   text_type: TextCreativeType;
   original_text: string;
   edit_instructions: string;
+  account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности
 }
 
 interface EditTextCreativeResponse {
@@ -37,10 +39,10 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: GenerateTextCreativeRequest; Reply: GenerateTextCreativeResponse }>(
     '/generate-text-creative',
     async (request, reply) => {
-      const { user_id, text_type, user_prompt } = request.body;
+      const { user_id, text_type, user_prompt, account_id } = request.body;
 
       try {
-        app.log.info(`[Generate Text Creative] Request from user: ${user_id}, type: ${text_type}`);
+        app.log.info(`[Generate Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}`);
 
         // Валидация типа текста
         const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
@@ -54,11 +56,11 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
         // user_prompt может быть пустым - генерация на основе контекста
         const safeUserPrompt = user_prompt?.trim() || '';
 
-        // 1. Получаем prompt1 из user_accounts
+        // 1. Получаем prompt1 из user_accounts (и multi_account_enabled для определения режима)
         app.log.info(`[Generate Text Creative] Fetching prompt1 for user: ${user_id}`);
         const { data: userAccount, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, prompt1')
+          .select('id, prompt1, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -70,7 +72,26 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        const prompt1 = userAccount.prompt1 || '';
+        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
+        let prompt1 = userAccount.prompt1 || '';
+        const isMultiAccountMode = userAccount.multi_account_enabled === true;
+
+        if (isMultiAccountMode && account_id) {
+          const { data: adAccount, error: adError } = await supabase
+            .from('ad_accounts')
+            .select('prompt1')
+            .eq('id', account_id)
+            .eq('user_account_id', user_id)
+            .single();
+
+          if (!adError && adAccount?.prompt1) {
+            prompt1 = adAccount.prompt1;
+            app.log.info(`[Generate Text Creative] Using prompt1 from ad_account: ${account_id}`);
+          } else {
+            app.log.warn(`[Generate Text Creative] Ad account prompt1 not found, using user_accounts fallback`);
+          }
+        }
+
         app.log.info(`[Generate Text Creative] prompt1 length: ${prompt1.length}`);
 
         // 2. Получаем 10 лучших транскрибаций (по score или по дате)
@@ -205,10 +226,10 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: EditTextCreativeRequest; Reply: EditTextCreativeResponse }>(
     '/edit-text-creative',
     async (request, reply) => {
-      const { user_id, text_type, original_text, edit_instructions } = request.body;
+      const { user_id, text_type, original_text, edit_instructions, account_id } = request.body;
 
       try {
-        app.log.info(`[Edit Text Creative] Request from user: ${user_id}, type: ${text_type}`);
+        app.log.info(`[Edit Text Creative] Request from user: ${user_id}, type: ${text_type}, account: ${account_id || 'legacy'}`);
 
         // Валидация
         const validTypes: TextCreativeType[] = ['storytelling', 'direct_offer', 'expert_video', 'telegram_post', 'threads_post', 'reference'];
@@ -233,11 +254,11 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        // 1. Получаем prompt1 из user_accounts
+        // 1. Получаем prompt1 из user_accounts (и multi_account_enabled для определения режима)
         app.log.info(`[Edit Text Creative] Fetching prompt1 for user: ${user_id}`);
         const { data: userAccount, error: userError } = await supabase
           .from('user_accounts')
-          .select('id, prompt1')
+          .select('id, prompt1, multi_account_enabled')
           .eq('id', user_id)
           .single();
 
@@ -249,7 +270,23 @@ export const textCreativesRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        const prompt1 = userAccount.prompt1 || '';
+        // Определяем prompt1: в мультиаккаунтном режиме берём из ad_accounts
+        let prompt1 = userAccount.prompt1 || '';
+        const isMultiAccountMode = userAccount.multi_account_enabled === true;
+
+        if (isMultiAccountMode && account_id) {
+          const { data: adAccount, error: adError } = await supabase
+            .from('ad_accounts')
+            .select('prompt1')
+            .eq('id', account_id)
+            .eq('user_account_id', user_id)
+            .single();
+
+          if (!adError && adAccount?.prompt1) {
+            prompt1 = adAccount.prompt1;
+            app.log.info(`[Edit Text Creative] Using prompt1 from ad_account: ${account_id}`);
+          }
+        }
 
         // 2. Получаем 10 лучших транскрибаций для контекста
         app.log.info(`[Edit Text Creative] Fetching top transcriptions...`);

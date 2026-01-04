@@ -41,10 +41,11 @@ interface CreativeTexts {
 
 const CreativeGeneration = () => {
   const location = useLocation();
-  const { currentAdAccountId } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
 
   // В мультиаккаунтном режиме генерации безлимитные
-  const isMultiAccountMode = !!currentAdAccountId;
+  // ВАЖНО: проверяем флаг multiAccountEnabled, а НЕ наличие currentAdAccountId!
+  const isMultiAccountMode = multiAccountEnabled === true;
 
   // Читаем URL параметры
   const searchParams = new URLSearchParams(location.search);
@@ -311,9 +312,10 @@ const CreativeGeneration = () => {
   }, [currentAdAccountId]);
 
   // Загружаем prompt4 из ad_accounts при смене аккаунта (мультиаккаунтный режим)
+  // ВАЖНО: проверяем multiAccountEnabled — для legacy пользователей НЕ загружаем из ad_accounts!
   useEffect(() => {
     const loadAdAccountPrompt = async () => {
-      if (!currentAdAccountId || !userId) return;
+      if (!multiAccountEnabled || !currentAdAccountId || !userId) return;
 
       try {
         console.log('[CreativeGeneration] Загрузка prompt4 для ad_account:', currentAdAccountId);
@@ -341,7 +343,7 @@ const CreativeGeneration = () => {
     };
 
     loadAdAccountPrompt();
-  }, [currentAdAccountId, userId]);
+  }, [multiAccountEnabled, currentAdAccountId, userId]);
 
   // API базовый URL для creative-generation-service
   // В dev используем локальный сервер, в production - прокси через nginx (через /api/creative)
@@ -1594,6 +1596,7 @@ const CreativeGeneration = () => {
                   <CarouselTab
                     userId={userId}
                     currentAdAccountId={currentAdAccountId}
+                    multiAccountEnabled={multiAccountEnabled}
                     creativeGenerationsAvailable={creativeGenerationsAvailable}
                     setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
                     directions={directions}

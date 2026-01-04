@@ -19,6 +19,7 @@ import { useCarouselDraftAutoSave } from '@/hooks/useAutoSaveDraft';
 interface CarouselTabProps {
   userId: string | null;
   currentAdAccountId?: string | null; // UUID из ad_accounts (для мультиаккаунтности)
+  multiAccountEnabled?: boolean; // Флаг мультиаккаунтности из user_accounts
   creativeGenerationsAvailable: number;
   setCreativeGenerationsAvailable: (value: number) => void;
   directions: any[];
@@ -27,12 +28,14 @@ interface CarouselTabProps {
 export const CarouselTab: React.FC<CarouselTabProps> = ({
   userId,
   currentAdAccountId,
+  multiAccountEnabled,
   creativeGenerationsAvailable,
   setCreativeGenerationsAvailable,
   directions
 }) => {
   // В мультиаккаунтном режиме генерации безлимитные
-  const isMultiAccountMode = !!currentAdAccountId;
+  // ВАЖНО: проверяем флаг multiAccountEnabled, а НЕ наличие currentAdAccountId!
+  const isMultiAccountMode = multiAccountEnabled === true;
   // State для шага 1: Ввод идеи
   const [carouselIdea, setCarouselIdea] = useState('');
   const [cardsCount, setCardsCount] = useState(3);

@@ -9,7 +9,7 @@ import { useAppContext } from '@/context/AppContext';
 const CarouselTest = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [creativeGenerationsAvailable, setCreativeGenerationsAvailable] = useState(0);
-  const { currentAdAccountId } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
   // Загрузка направлений с фильтрацией по currentAdAccountId для мультиаккаунтности
   const { directions } = useDirections(userId, currentAdAccountId);
 
@@ -46,6 +46,7 @@ const CarouselTest = () => {
           <CarouselTab
             userId={userId}
             currentAdAccountId={currentAdAccountId}
+            multiAccountEnabled={multiAccountEnabled}
             creativeGenerationsAvailable={creativeGenerationsAvailable}
             setCreativeGenerationsAvailable={setCreativeGenerationsAvailable}
             directions={directions}
