@@ -287,11 +287,12 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     }
 
     // Build event payload
-    const eventPayload = {
+    // NOTE: event_source_url is NOT allowed for action_source: 'business_messaging'
+    // Meta API returns error 2804064 if it's included
+    const eventPayload: Record<string, unknown> = {
       event_name: eventName,
       event_time: eventTime,
       event_id: eventId,
-      event_source_url: eventSourceUrl || 'https://wa.me/',
       action_source: 'business_messaging', // For Click-to-WhatsApp
       messaging_channel: 'whatsapp',
       user_data: userData,
