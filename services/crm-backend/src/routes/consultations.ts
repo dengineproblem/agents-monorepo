@@ -71,7 +71,7 @@ const GetAvailableSlotsSchema = z.object({
   consultant_ids: z.array(z.string().uuid()).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   days_ahead: z.coerce.number().int().min(1).max(30).optional(),
-  limit: z.coerce.number().int().min(1).max(20).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
   duration_minutes: z.coerce.number().int().min(15).max(240),
   timezone: z.string().optional() // Таймзона для фильтрации прошедших слотов
 });
