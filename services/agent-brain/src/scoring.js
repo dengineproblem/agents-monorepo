@@ -1846,22 +1846,40 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       // МЕТРИКИ
       // ========================================
       const todaySpend = parseFloat(todayAdset.spend || 0);
-      const todayLeads = parseInt(todayAdset.leads || 0);
       const todayImpressions = parseInt(todayAdset.impressions || 0);
       const todayClicks = parseInt(todayAdset.clicks || 0);
-      const todayCPL = todayLeads > 0 ? todaySpend / todayLeads : null;
       const todayCTR = todayImpressions > 0 ? (todayClicks / todayImpressions * 100) : null;
       const todayCPM = todayImpressions > 0 ? (todaySpend / todayImpressions * 1000) : null;
 
+      // Для instagram_traffic используем link_clicks как "конверсии", для остальных - leads
+      const directionObjective = direction?.objective || 'whatsapp';
+      const isTrafficObjective = directionObjective === 'instagram_traffic';
+      const metricName = isTrafficObjective ? 'CPC' : 'CPL';
+
+      // Конверсии: для Traffic = link_clicks, для остальных = leads
+      const todayLinkClicks = parseInt(todayAdset.link_clicks || 0);
+      const todayLeads = parseInt(todayAdset.leads || 0);
+      const todayConversions = isTrafficObjective ? todayLinkClicks : todayLeads;
+      const todayCostPerConversion = todayConversions > 0 ? todaySpend / todayConversions : null;
+      // Сохраняем todayCPL для совместимости со старым кодом (логи, метрики)
+      const todayCPL = todayCostPerConversion;
+
       const yesterdaySpend = parseFloat(yesterdayAdset?.spend || 0);
+      const yesterdayLinkClicks = parseInt(yesterdayAdset?.link_clicks || 0);
       const yesterdayLeads = parseInt(yesterdayAdset?.leads || 0);
-      const yesterdayCPL = yesterdayLeads > 0 ? yesterdaySpend / yesterdayLeads : null;
+      const yesterdayConversions = isTrafficObjective ? yesterdayLinkClicks : yesterdayLeads;
+      const yesterdayCostPerConversion = yesterdayConversions > 0 ? yesterdaySpend / yesterdayConversions : null;
+      const yesterdayCPL = yesterdayCostPerConversion;
 
       const targetCPL = direction?.target_cpl_cents ? direction.target_cpl_cents / 100 : null;
 
       // Метрики из последнего отчёта Brain (7 дней)
       const hist7d = brainAdset?.metrics_last_7d || {};
-      const histCPL = hist7d.leads > 0 ? hist7d.spend / hist7d.leads : null;
+      // Для instagram_traffic используем link_clicks, для остальных leads
+      const hist7dConversions = isTrafficObjective
+        ? (hist7d.link_clicks || 0)
+        : (hist7d.leads || 0);
+      const histCPL = hist7dConversions > 0 ? hist7d.spend / hist7dConversions : null;
       const histCTR = hist7d.ctr || null;
       const histCPM = hist7d.cpm || null;
       const histFrequency = hist7d.frequency || 0;
@@ -1872,24 +1890,24 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       let healthScore = 0;
       const hsBreakdown = [];
 
-      // 1. CPL GAP к TARGET (вес 45)
+      // 1. CPL/CPC GAP к TARGET (вес 45) — для instagram_traffic используется CPC
       if (todayCPL && targetCPL) {
         const cplRatio = todayCPL / targetCPL;
         if (cplRatio <= 0.7) {
           healthScore += 45;
-          hsBreakdown.push({ factor: 'cpl_gap', value: 45, reason: `CPL ${((1 - cplRatio) * 100).toFixed(0)}% ниже target` });
+          hsBreakdown.push({ factor: 'cost_gap', value: 45, reason: `${metricName} ${((1 - cplRatio) * 100).toFixed(0)}% ниже target` });
         } else if (cplRatio <= 0.9) {
           healthScore += 30;
-          hsBreakdown.push({ factor: 'cpl_gap', value: 30, reason: `CPL ${((1 - cplRatio) * 100).toFixed(0)}% ниже target` });
+          hsBreakdown.push({ factor: 'cost_gap', value: 30, reason: `${metricName} ${((1 - cplRatio) * 100).toFixed(0)}% ниже target` });
         } else if (cplRatio <= 1.1) {
           healthScore += 10;
-          hsBreakdown.push({ factor: 'cpl_gap', value: 10, reason: 'CPL в пределах ±10% от target' });
+          hsBreakdown.push({ factor: 'cost_gap', value: 10, reason: `${metricName} в пределах ±10% от target` });
         } else if (cplRatio <= 1.3) {
           healthScore -= 30;
-          hsBreakdown.push({ factor: 'cpl_gap', value: -30, reason: `CPL ${((cplRatio - 1) * 100).toFixed(0)}% выше target` });
+          hsBreakdown.push({ factor: 'cost_gap', value: -30, reason: `${metricName} ${((cplRatio - 1) * 100).toFixed(0)}% выше target` });
         } else {
           healthScore -= 45;
-          hsBreakdown.push({ factor: 'cpl_gap', value: -45, reason: `CPL ${((cplRatio - 1) * 100).toFixed(0)}% выше target` });
+          hsBreakdown.push({ factor: 'cost_gap', value: -45, reason: `${metricName} ${((cplRatio - 1) * 100).toFixed(0)}% выше target` });
         }
       }
 
@@ -1898,10 +1916,10 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         const trendRatio = todayCPL / yesterdayCPL;
         if (trendRatio <= 0.8) {
           healthScore += 15;
-          hsBreakdown.push({ factor: 'trend', value: 15, reason: `CPL улучшился на ${((1 - trendRatio) * 100).toFixed(0)}% vs вчера` });
+          hsBreakdown.push({ factor: 'trend', value: 15, reason: `${metricName} улучшился на ${((1 - trendRatio) * 100).toFixed(0)}% vs вчера` });
         } else if (trendRatio >= 1.2) {
           healthScore -= 15;
-          hsBreakdown.push({ factor: 'trend', value: -15, reason: `CPL ухудшился на ${((trendRatio - 1) * 100).toFixed(0)}% vs вчера` });
+          hsBreakdown.push({ factor: 'trend', value: -15, reason: `${metricName} ухудшился на ${((trendRatio - 1) * 100).toFixed(0)}% vs вчера` });
         }
       }
 
@@ -1940,13 +1958,13 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         const improvementRatio = todayCPL / yesterdayCPL;
 
         if (improvementRatio <= TODAY_COMPENSATION.FULL) {
-          // CPL в 2+ раза лучше вчера → ПОЛНАЯ компенсация штрафов
+          // CPL/CPC в 2+ раза лучше вчера → ПОЛНАЯ компенсация штрафов
           const negativePart = hsBreakdown.filter(h => h.value < 0).reduce((sum, h) => sum + h.value, 0);
           todayCompensation = Math.abs(negativePart);
           hsBreakdown.push({
             factor: 'today_compensation',
             value: todayCompensation,
-            reason: `СЕГОДНЯ CPL в ${(1 / improvementRatio).toFixed(1)}x лучше вчера! Полная компенсация.`
+            reason: `СЕГОДНЯ ${metricName} в ${(1 / improvementRatio).toFixed(1)}x лучше вчера! Полная компенсация.`
           });
         } else if (improvementRatio <= TODAY_COMPENSATION.PARTIAL) {
           // На 30%+ лучше → 60% компенсация
@@ -1955,12 +1973,12 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           hsBreakdown.push({
             factor: 'today_compensation',
             value: Math.round(todayCompensation),
-            reason: `Сегодня CPL на ${((1 - improvementRatio) * 100).toFixed(0)}% лучше вчера (60% компенсация)`
+            reason: `Сегодня ${metricName} на ${((1 - improvementRatio) * 100).toFixed(0)}% лучше вчера (60% компенсация)`
           });
         } else if (improvementRatio <= TODAY_COMPENSATION.SLIGHT) {
           // Небольшое улучшение → +5 бонус
           todayCompensation = 5;
-          hsBreakdown.push({ factor: 'today_compensation', value: 5, reason: 'Небольшое улучшение CPL сегодня' });
+          hsBreakdown.push({ factor: 'today_compensation', value: 5, reason: `Небольшое улучшение ${metricName} сегодня` });
         }
         healthScore += todayCompensation;
       }
@@ -1986,13 +2004,30 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         adset_id: todayAdset.adset_id,
         adset_name: todayAdset.adset_name,
         direction_name: direction?.name,
+        direction_objective: directionObjective,
         health_score: healthScore,
         hs_class: hsClass,
         hs_breakdown: hsBreakdown,
         metrics: {
-          today: { spend: todaySpend, leads: todayLeads, cpl: todayCPL, ctr: todayCTR, impressions: todayImpressions },
-          yesterday: { spend: yesterdaySpend, leads: yesterdayLeads, cpl: yesterdayCPL },
-          target_cpl: targetCPL,
+          today: {
+            spend: todaySpend,
+            conversions: todayConversions,
+            cost_per_conversion: todayCPL,
+            ctr: todayCTR,
+            impressions: todayImpressions,
+            // Для обратной совместимости
+            leads: todayLeads,
+            link_clicks: todayLinkClicks
+          },
+          yesterday: {
+            spend: yesterdaySpend,
+            conversions: yesterdayConversions,
+            cost_per_conversion: yesterdayCPL,
+            leads: yesterdayLeads,
+            link_clicks: yesterdayLinkClicks
+          },
+          target_cost_per_conversion: targetCPL,
+          metric_name: metricName, // 'CPC' для instagram_traffic, 'CPL' для остальных
           hist_7d: hist7d
         }
       });
@@ -2019,17 +2054,17 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           direction_name: direction?.name,
           health_score: healthScore,
           hs_class: hsClass,
-          reason: `Отличные результаты! HS=${healthScore} (${hsClass}). CPL сегодня $${todayCPL?.toFixed(2) || '?'} при target $${targetCPL?.toFixed(2) || '?'}. Рекомендую масштабировать.`,
+          reason: `Отличные результаты! HS=${healthScore} (${hsClass}). ${metricName} сегодня $${todayCPL?.toFixed(2) || '?'} при target $${targetCPL?.toFixed(2) || '?'}. Рекомендую масштабировать.`,
           confidence: 0.85,
           suggested_action_params: {
             increase_percent: increasePercent,
             max_budget_cents: BUDGET_LIMITS.MAX_CENTS
           },
-          metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
         });
       }
       else if (hsClass === 'bad') {
-        // CPL критически высокий → пауза или сильное снижение
+        // CPL/CPC критически высокий → пауза или сильное снижение
         const cplMultiple = todayCPL && targetCPL ? todayCPL / targetCPL : null;
 
         if (cplMultiple && cplMultiple > 3) {
@@ -2043,9 +2078,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             direction_name: direction?.name,
             health_score: healthScore,
             hs_class: hsClass,
-            reason: `КРИТИЧНО! HS=${healthScore}. CPL $${todayCPL?.toFixed(2)} превышает target в ${cplMultiple.toFixed(1)}x раз. Рекомендую паузу.`,
+            reason: `КРИТИЧНО! HS=${healthScore}. ${metricName} $${todayCPL?.toFixed(2)} превышает target в ${cplMultiple.toFixed(1)}x раз. Рекомендую паузу.`,
             confidence: 0.9,
-            metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
           });
         } else {
           proposals.push({
@@ -2058,13 +2093,13 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             direction_name: direction?.name,
             health_score: healthScore,
             hs_class: hsClass,
-            reason: `Плохие результаты. HS=${healthScore}. CPL $${todayCPL?.toFixed(2)} выше target. Рекомендую снизить бюджет на 50%.`,
+            reason: `Плохие результаты. HS=${healthScore}. ${metricName} $${todayCPL?.toFixed(2)} выше target. Рекомендую снизить бюджет на 50%.`,
             confidence: 0.8,
             suggested_action_params: {
               decrease_percent: BUDGET_LIMITS.MAX_DECREASE_PCT,
               min_budget_cents: BUDGET_LIMITS.MIN_CENTS
             },
-            metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
           });
         }
       }
@@ -2086,7 +2121,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             decrease_percent: 25,
             min_budget_cents: BUDGET_LIMITS.MIN_CENTS
           },
-          metrics: { today_spend: todaySpend, today_leads: todayLeads, today_cpl: todayCPL, target_cpl: targetCPL }
+          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
         });
       }
       // good и neutral — не предлагаем изменений (наблюдаем)
@@ -2182,7 +2217,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       },
       brain_report_age_hours: brainReportAge,
       today_total_spend: todayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
-      today_total_leads: todayData.reduce((sum, a) => sum + parseInt(a.leads || 0), 0)
+      today_total_leads: todayData.reduce((sum, a) => sum + parseInt(a.leads || 0), 0),
+      today_total_link_clicks: todayData.reduce((sum, a) => sum + parseInt(a.link_clicks || 0), 0)
     };
 
     // Сохраняем запуск для аудита

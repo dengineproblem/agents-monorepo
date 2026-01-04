@@ -353,6 +353,13 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     loadPixels();
   }, []); // Загружаем один раз при открытии диалога
 
+  // Обновление дефолта целевой стоимости при смене objective
+  useEffect(() => {
+    // Для instagram_traffic дефолт $0.10, для остальных $2.00
+    const defaultValue = objective === 'instagram_traffic' ? '0.10' : '2.00';
+    setTargetCpl(defaultValue);
+  }, [objective]);
+
   // Загрузка лидформ при выборе цели "Lead Forms"
   useEffect(() => {
     const loadLeadForms = async () => {
@@ -519,8 +526,10 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     }
 
     const cplValue = parseFloat(targetCpl);
-    if (isNaN(cplValue) || cplValue < 0.5) {
-      setError('Минимальная стоимость заявки: $0.50');
+    const minCost = objective === 'instagram_traffic' ? 0.10 : 0.50;
+    if (isNaN(cplValue) || cplValue < minCost) {
+      const label = objective === 'instagram_traffic' ? 'перехода' : 'заявки';
+      setError(`Минимальная стоимость ${label}: $${minCost.toFixed(2)}`);
       return;
     }
 
@@ -849,31 +858,35 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               <p className="text-xs text-muted-foreground">Минимум: $5/день</p>
             </div>
 
-            {/* Целевая стоимость заявки */}
+            {/* Целевая стоимость (CPL для лидов, CPC для трафика) */}
             <div className="space-y-2">
               <div className="flex items-center gap-1.5">
                 <Label htmlFor="target-cpl">
-                  Целевая стоимость заявки (CPL) <span className="text-red-500">*</span>
+                  {objective === 'instagram_traffic'
+                    ? 'Целевая стоимость перехода (CPC)'
+                    : 'Целевая стоимость заявки (CPL)'} <span className="text-red-500">*</span>
                 </Label>
-                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_TARGET_CPL} />
+                <HelpTooltip tooltipKey={objective === 'instagram_traffic' ? TooltipKeys.DIRECTION_TARGET_CPC : TooltipKeys.DIRECTION_TARGET_CPL} />
               </div>
               <div className="flex items-center gap-2">
                 <Input
                   id="target-cpl"
                   type="number"
-                  min="0.5"
+                  min={objective === 'instagram_traffic' ? '0.1' : '0.5'}
                   step="0.01"
-                  placeholder="2.00"
+                  placeholder={objective === 'instagram_traffic' ? '0.10' : '2.00'}
                   value={targetCpl}
                   onChange={(e) => setTargetCpl(e.target.value)}
                   disabled={isSubmitting}
                   className="flex-1"
                 />
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  $ / заявка
+                  {objective === 'instagram_traffic' ? '$ / переход' : '$ / заявка'}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground">Минимум: $0.50/заявка</p>
+              <p className="text-xs text-muted-foreground">
+                {objective === 'instagram_traffic' ? 'Минимум: $0.10/переход' : 'Минимум: $0.50/заявка'}
+              </p>
             </div>
           </div>
 

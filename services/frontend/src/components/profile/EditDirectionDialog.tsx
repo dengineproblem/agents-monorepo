@@ -224,8 +224,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
     }
 
     const cplValue = parseFloat(targetCpl);
-    if (isNaN(cplValue) || cplValue < 0.5) {
-      setError('Минимальная стоимость заявки: $0.50');
+    const minCost = direction?.objective === 'instagram_traffic' ? 0.10 : 0.50;
+    if (isNaN(cplValue) || cplValue < minCost) {
+      const label = direction?.objective === 'instagram_traffic' ? 'перехода' : 'заявки';
+      setError(`Минимальная стоимость ${label}: $${minCost.toFixed(2)}`);
       return;
     }
 
@@ -420,16 +422,18 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                   </div>
                 </div>
 
-                {/* Целевая стоимость заявки */}
+                {/* Целевая стоимость (CPL для лидов, CPC для трафика) */}
                 <div className="space-y-2">
                   <Label htmlFor="edit-target-cpl">
-                    Целевая стоимость заявки (CPL) <span className="text-red-500">*</span>
+                    {direction?.objective === 'instagram_traffic'
+                      ? 'Целевая стоимость перехода (CPC)'
+                      : 'Целевая стоимость заявки (CPL)'} <span className="text-red-500">*</span>
                   </Label>
                   <div className="flex items-center gap-2">
                     <Input
                       id="edit-target-cpl"
                       type="number"
-                      min="0.5"
+                      min={direction?.objective === 'instagram_traffic' ? '0.1' : '0.5'}
                       step="0.01"
                       value={targetCpl}
                       onChange={(e) => setTargetCpl(e.target.value)}
@@ -437,7 +441,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                       className="flex-1"
                     />
                     <span className="text-sm text-muted-foreground whitespace-nowrap">
-                      $ / заявка
+                      {direction?.objective === 'instagram_traffic' ? '$ / переход' : '$ / заявка'}
                     </span>
                   </div>
                 </div>

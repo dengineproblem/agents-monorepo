@@ -27,6 +27,7 @@ export const TooltipKeys = {
   DIRECTION_WHAT: 'direction.what',
   DIRECTION_BUDGET: 'direction.budget',
   DIRECTION_TARGET_CPL: 'direction.targetCpl',
+  DIRECTION_TARGET_CPC: 'direction.targetCpc',
   DIRECTION_OBJECTIVE: 'direction.objective',
   DIRECTION_CITIES: 'direction.cities',
   DIRECTION_AGE: 'direction.age',
@@ -320,6 +321,10 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
   [TooltipKeys.DIRECTION_TARGET_CPL]: {
     title: 'Целевая стоимость лида',
     content: 'Желаемая стоимость привлечения одного клиента. AI Autopilot будет оптимизировать к этому показателю.',
+  },
+  [TooltipKeys.DIRECTION_TARGET_CPC]: {
+    title: 'Целевая стоимость перехода',
+    content: 'Желаемая стоимость одного перехода в Instagram профиль. AI Autopilot будет оптимизировать к этому показателю.',
   },
   [TooltipKeys.DIRECTION_OBJECTIVE]: {
     title: 'Тип направления',

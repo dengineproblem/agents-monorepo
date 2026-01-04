@@ -27,7 +27,7 @@ const CreateDirectionSchema = z.object({
   name: z.string().min(2).max(100),
   objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms']),
   daily_budget_cents: z.number().int().min(500), // минимум $5
-  target_cpl_cents: z.number().int().min(50), // минимум $0.50
+  target_cpl_cents: z.number().int().min(10), // минимум $0.10 для instagram_traffic, проверяется в refine
   whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
   // Опциональные дефолтные настройки рекламы
   default_settings: z.object({
@@ -54,12 +54,19 @@ const CreateDirectionSchema = z.object({
   capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
+}).refine((data) => {
+  // Для instagram_traffic минимум 10 центов ($0.10), для остальных 50 центов ($0.50)
+  const minCents = data.objective === 'instagram_traffic' ? 10 : 50;
+  return data.target_cpl_cents >= minCents;
+}, {
+  message: 'target_cpl_cents is below minimum for this objective',
+  path: ['target_cpl_cents'],
 });
 
 const UpdateDirectionSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   daily_budget_cents: z.number().int().min(500).optional(),
-  target_cpl_cents: z.number().int().min(50).optional(),
+  target_cpl_cents: z.number().int().min(10).optional(), // минимум проверяется в handler по objective
   is_active: z.boolean().optional(),
   whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую
   // CAPI settings (direction-level)
@@ -652,6 +659,17 @@ export async function directionsRoutes(app: FastifyInstance) {
           success: false,
           error: 'Direction not found',
         });
+      }
+
+      // Проверка минимума target_cpl_cents в зависимости от objective
+      if (input.target_cpl_cents !== undefined) {
+        const minCents = existingDirection.objective === 'instagram_traffic' ? 10 : 50;
+        if (input.target_cpl_cents < minCents) {
+          return reply.code(400).send({
+            success: false,
+            error: `target_cpl_cents minimum is ${minCents} cents for ${existingDirection.objective}`,
+          });
+        }
       }
 
       // Подробное логирование данных направления для диагностики
