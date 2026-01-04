@@ -335,9 +335,9 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
     utcNow: new Date().toISOString()
   }, '[getAvailableSlots] Timezone filtering setup');
 
-  // Если запрошена конкретная дата — показываем ВСЕ слоты на эту дату (до 20)
-  // Это позволяет клиенту увидеть слоты после обеда, а не только утренние
-  const effectiveLimit = date ? 20 : safeLimit;
+  // Если запрошена конкретная дата — показываем ВСЕ слоты на эту дату (до 100)
+  // Для ближайших слотов — используем переданный лимит
+  const effectiveLimit = date ? 100 : safeLimit;
 
   log.info({
     requestedDate: date || 'none',
@@ -347,6 +347,12 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
     consultantCount: consultantIds.length
   }, '[getAvailableSlots] Slot generation started');
 
+  // Счётчики для детального логирования
+  let totalSlotsGenerated = 0;
+  let skippedBusy = 0;
+  let skippedPast = 0;
+  let skippedNoSchedule = 0;
+
   while (currentDate <= endDate && availableSlots.length < effectiveLimit) {
     const dateStr = currentDate.toISOString().split('T')[0];
     const dayOfWeek = currentDate.getDay(); // 0 = Sunday
@@ -355,10 +361,16 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
       if (availableSlots.length >= effectiveLimit) break;
 
       const consultantSchedule = scheduleMap.get(consultantId);
-      if (!consultantSchedule) continue;
+      if (!consultantSchedule) {
+        skippedNoSchedule++;
+        continue;
+      }
 
       const daySchedule = consultantSchedule.get(dayOfWeek);
-      if (!daySchedule) continue;
+      if (!daySchedule) {
+        skippedNoSchedule++;
+        continue;
+      }
 
       // Генерируем слоты на этот день
       const timeSlots = generateTimeSlotsFromSchedule(
@@ -370,10 +382,20 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
       for (const slot of timeSlots) {
         if (availableSlots.length >= effectiveLimit) break;
 
+        totalSlotsGenerated++;
         const slotKey = `${consultantId}|${dateStr}|${slot.start}`;
 
         // Пропускаем занятые слоты
-        if (busySlots.has(slotKey)) continue;
+        if (busySlots.has(slotKey)) {
+          skippedBusy++;
+          log.debug({
+            slotKey,
+            date: dateStr,
+            time: slot.start,
+            consultant: consultantMap.get(consultantId)
+          }, '[getAvailableSlots] Slot skipped - already booked');
+          continue;
+        }
 
         // Пропускаем прошедшие слоты (для сегодняшнего дня в таймзоне клиента)
         if (dateStr === todayInTimezone) {
@@ -384,7 +406,16 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
           const currentMinutesTotal = currentHourInTz * 60 + currentMinInTz + bufferMinutes;
           const slotMinutesTotal = slotHour * 60 + slotMin;
 
-          if (slotMinutesTotal <= currentMinutesTotal) continue;
+          if (slotMinutesTotal <= currentMinutesTotal) {
+            skippedPast++;
+            log.debug({
+              date: dateStr,
+              slotTime: slot.start,
+              currentTime: `${currentHourInTz}:${currentMinInTz}`,
+              bufferMinutes
+            }, '[getAvailableSlots] Slot skipped - time already passed');
+            continue;
+          }
         }
 
         const consultantName = consultantMap.get(consultantId) || 'Консультант';
@@ -403,6 +434,14 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
 
     currentDate.setDate(currentDate.getDate() + 1);
   }
+
+  log.info({
+    totalSlotsGenerated,
+    skippedBusy,
+    skippedPast,
+    skippedNoSchedule,
+    availableCount: availableSlots.length
+  }, '[getAvailableSlots] Slot filtering summary');
 
   // Сортируем по дате и времени
   availableSlots.sort((a, b) => {

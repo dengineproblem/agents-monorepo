@@ -160,16 +160,11 @@ export function getConsultationToolDefinitions(
     {
       type: 'function',
       function: {
-        name: 'get_available_consultation_slots',
-        description: `Получить список свободных слотов для записи на консультацию. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй эту функцию когда клиент хочет записаться или узнать доступное время. Показывает до ${settings.slots_to_show} ближайших слотов.`,
+        name: 'get_nearest_slots',
+        description: `Получить ближайшие 10 свободных слотов для записи на консультацию. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй когда клиент хочет записаться и не указывает конкретную дату.`,
         parameters: {
           type: 'object',
-          properties: {
-            date: {
-              type: 'string',
-              description: 'Конкретная дата в формате YYYY-MM-DD. Если клиент спрашивает про конкретную дату - укажи её. Если не уточняет - оставь пустым для показа ближайших слотов.'
-            }
-          },
+          properties: {},
           required: []
         }
       }
@@ -177,8 +172,25 @@ export function getConsultationToolDefinitions(
     {
       type: 'function',
       function: {
+        name: 'get_slots_for_date',
+        description: `Получить ВСЕ свободные слоты на конкретную дату. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй когда клиент называет конкретный день (завтра, 6 января, в понедельник и т.д.).`,
+        parameters: {
+          type: 'object',
+          properties: {
+            date: {
+              type: 'string',
+              description: 'Дата в формате YYYY-MM-DD'
+            }
+          },
+          required: ['date']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'book_consultation',
-        description: `Записать клиента на консультацию. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй consultant_id из списка в системном промпте. Бери date и start_time ТОЛЬКО из результата get_available_consultation_slots! НЕ выдумывай даты. Длительность: ${settings.default_duration_minutes} минут.`,
+        description: `Записать клиента на консультацию. ВАЖНО: Сегодня ${todayFormatted} (${todayISO}). Используй consultant_id из списка в системном промпте. Бери date и start_time ТОЛЬКО из результата get_nearest_slots или get_slots_for_date! НЕ выдумывай даты. Длительность: ${settings.default_duration_minutes} минут.`,
         parameters: {
           type: 'object',
           properties: {
@@ -188,11 +200,11 @@ export function getConsultationToolDefinitions(
             },
             date: {
               type: 'string',
-              description: 'Дата слота в формате YYYY-MM-DD из результата get_available_consultation_slots'
+              description: 'Дата слота в формате YYYY-MM-DD из результата get_nearest_slots или get_slots_for_date'
             },
             start_time: {
               type: 'string',
-              description: 'Время слота в формате HH:MM из результата get_available_consultation_slots'
+              description: 'Время слота в формате HH:MM из результата get_nearest_slots или get_slots_for_date'
             },
             client_name: {
               type: 'string',
@@ -379,7 +391,7 @@ ${consultantsText}
 У тебя есть возможность записывать клиентов на консультацию.
 ${consultantsSection}
 
-ВАЖНО: Названия функций — это ВНУТРЕННИЕ инструменты. НИКОГДА не пиши клиенту названия функций типа "get_available_consultation_slots" или "book_consultation"! Клиент не должен знать о существовании этих функций. Просто выполняй их молча и показывай результат человеческим языком.
+ВАЖНО: Названия функций — это ВНУТРЕННИЕ инструменты. НИКОГДА не пиши клиенту названия функций! Клиент не должен знать о существовании этих функций. Просто выполняй их молча и показывай результат человеческим языком.
 
 Правила работы:
 1. Если клиент хочет записаться — сначала покажи доступные слоты
@@ -399,10 +411,9 @@ ${consultantsSection}
 }
 
 /**
- * Обработчик: Получить доступные слоты
+ * Обработчик: Получить ближайшие 10 слотов
  */
-export async function handleGetAvailableSlots(
-  args: { date?: string },
+export async function handleGetNearestSlots(
   lead: LeadInfo,
   settings: ConsultationIntegrationSettings,
   ctxLog?: ContextLogger
@@ -410,33 +421,22 @@ export async function handleGetAvailableSlots(
   const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
 
   log.info({
-    date: args.date,
-    consultantIds: settings.consultant_ids?.length || 'all',
-    slotsToShow: settings.slots_to_show,
-    daysAhead: settings.days_ahead_limit
-  }, '[handleGetAvailableSlots] Fetching available slots', ['consultation']);
+    consultantIds: settings.consultant_ids?.length || 'all'
+  }, '[handleGetNearestSlots] Fetching nearest slots', ['consultation']);
 
   try {
-    // Дефолтные значения если не заданы в настройках
-    const slotsToShow = settings.slots_to_show || 5;
-    const daysAhead = settings.days_ahead_limit || 14;
     const durationMinutes = settings.default_duration_minutes || 60;
 
     const params = new URLSearchParams({
       duration_minutes: String(durationMinutes),
-      limit: String(slotsToShow),
-      days_ahead: String(daysAhead)
+      limit: '10',
+      days_ahead: '7'
     });
-
-    if (args.date) {
-      params.append('date', args.date);
-    }
 
     if (settings.consultant_ids?.length) {
       params.append('consultant_ids', settings.consultant_ids.join(','));
     }
 
-    // Передаём таймзону для правильной фильтрации прошедших слотов
     if (settings.timezone) {
       params.append('timezone', settings.timezone);
     }
@@ -447,7 +447,7 @@ export async function handleGetAvailableSlots(
       url,
       { method: 'GET', headers: { 'Content-Type': 'application/json' } },
       log,
-      'handleGetAvailableSlots'
+      'handleGetNearestSlots'
     );
 
     if (!response.ok) {
@@ -456,7 +456,7 @@ export async function handleGetAvailableSlots(
         status: response.status,
         statusText: response.statusText,
         errorBody: errorBody.substring(0, 200)
-      }, '[handleGetAvailableSlots] API returned error status', {}, ['api', 'consultation']);
+      }, '[handleGetNearestSlots] API returned error status', {}, ['api', 'consultation']);
       return 'К сожалению, не удалось получить доступные слоты. Попробуйте позже.';
     }
 
@@ -464,31 +464,24 @@ export async function handleGetAvailableSlots(
     try {
       data = await response.json();
     } catch (parseError) {
-      log.error(parseError, '[handleGetAvailableSlots] Failed to parse JSON response', {}, ['api', 'consultation']);
+      log.error(parseError, '[handleGetNearestSlots] Failed to parse JSON response', {}, ['api', 'consultation']);
       return 'Произошла ошибка при обработке данных. Попробуйте позже.';
     }
 
-    // Валидация ответа
     if (!data || typeof data !== 'object') {
-      log.warn({ dataType: typeof data }, '[handleGetAvailableSlots] Invalid response format', ['api', 'consultation']);
+      log.warn({ dataType: typeof data }, '[handleGetNearestSlots] Invalid response format', ['api', 'consultation']);
       return 'Получен некорректный ответ от сервера. Попробуйте позже.';
     }
 
     if (!data.slots?.length) {
-      log.info({
-        hasSlots: !!data.slots,
-        slotsCount: data.slots?.length || 0
-      }, '[handleGetAvailableSlots] No slots available', ['consultation']);
-      return 'К сожалению, сейчас нет доступных слотов для записи. Попробуйте выбрать другую дату.';
+      log.info({ slotsCount: 0 }, '[handleGetNearestSlots] No slots available', ['consultation']);
+      return 'К сожалению, сейчас нет доступных слотов для записи.';
     }
 
     log.info({
-      slotsCount: data.slots.length,
-      firstSlot: data.slots[0]?.formatted
-    }, '[handleGetAvailableSlots] Slots found successfully', ['consultation']);
+      slotsCount: data.slots.length
+    }, '[handleGetNearestSlots] Slots found successfully', ['consultation']);
 
-    // Формируем текстовый ответ со слотами
-    // consultant_id уже в системном промпте, здесь только дата и время
     const slotsText = data.slots.map((slot: any, idx: number) => {
       return `[Слот ${idx + 1}]
 Консультант: ${slot.consultant_name}
@@ -497,14 +490,152 @@ date: ${slot.date}
 start_time: ${slot.start_time}`;
     }).join('\n\n');
 
-    return `Доступные слоты для записи:\n\n${slotsText}\n\nДля записи используй consultant_id из списка консультантов в начале промпта + date и start_time из выбранного слота.`;
+    return `Ближайшие свободные слоты:\n\n${slotsText}\n\nДля записи используй consultant_id из списка консультантов + date и start_time из выбранного слота.`;
   } catch (error: any) {
     const errorType = classifyError(error);
-    log.error(error, '[handleGetAvailableSlots] Error fetching slots', {
+    log.error(error, '[handleGetNearestSlots] Error fetching slots', {
       errorType: errorType.type,
       isRetryable: errorType.isRetryable
     }, ['api', 'consultation']);
-    return 'Произошла ошибка при получении доступных слотов. Попробуйте позже.';
+    return 'Произошла ошибка при получении слотов. Попробуйте позже.';
+  }
+}
+
+/**
+ * Валидация формата даты YYYY-MM-DD
+ */
+function isValidDateFormat(dateStr: string): boolean {
+  const regex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!regex.test(dateStr)) return false;
+
+  const date = new Date(dateStr);
+  return !isNaN(date.getTime());
+}
+
+/**
+ * Проверка что дата не в прошлом
+ */
+function isDateNotInPast(dateStr: string, timezone: string = 'Europe/Moscow'): boolean {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+  return dateStr >= today;
+}
+
+/**
+ * Обработчик: Получить ВСЕ слоты на конкретную дату
+ */
+export async function handleGetSlotsForDate(
+  args: { date: string },
+  lead: LeadInfo,
+  settings: ConsultationIntegrationSettings,
+  ctxLog?: ContextLogger
+): Promise<string> {
+  const log = ctxLog || createContextLogger(baseLog, { leadId: lead.id }, ['consultation']);
+
+  // Валидация: дата обязательна
+  if (!args.date) {
+    log.warn({}, '[handleGetSlotsForDate] Missing date parameter', ['consultation', 'validation']);
+    return 'Не указана дата. Укажи дату в формате YYYY-MM-DD.';
+  }
+
+  // Валидация: формат даты
+  if (!isValidDateFormat(args.date)) {
+    log.warn({
+      providedDate: args.date
+    }, '[handleGetSlotsForDate] Invalid date format', ['consultation', 'validation']);
+    return `Неверный формат даты "${args.date}". Используй формат YYYY-MM-DD (например, 2025-01-06).`;
+  }
+
+  // Валидация: дата не в прошлом
+  const timezone = settings.timezone || 'Europe/Moscow';
+  if (!isDateNotInPast(args.date, timezone)) {
+    log.warn({
+      providedDate: args.date,
+      timezone
+    }, '[handleGetSlotsForDate] Date is in the past', ['consultation', 'validation']);
+    return `Дата ${args.date} уже прошла. Выбери сегодняшний день или будущую дату.`;
+  }
+
+  log.info({
+    date: args.date,
+    consultantIds: settings.consultant_ids?.length || 'all',
+    timezone
+  }, '[handleGetSlotsForDate] Fetching slots for date', ['consultation']);
+
+  try {
+    const durationMinutes = settings.default_duration_minutes || 60;
+
+    const params = new URLSearchParams({
+      duration_minutes: String(durationMinutes),
+      date: args.date,
+      limit: '100' // Большой лимит — вернутся ВСЕ слоты на этот день
+    });
+
+    if (settings.consultant_ids?.length) {
+      params.append('consultant_ids', settings.consultant_ids.join(','));
+    }
+
+    if (settings.timezone) {
+      params.append('timezone', settings.timezone);
+    }
+
+    const url = `${CRM_BACKEND_URL}/consultations/available-slots?${params}`;
+
+    const response = await fetchWithRetry(
+      url,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+      log,
+      'handleGetSlotsForDate'
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => 'unknown');
+      log.error({
+        status: response.status,
+        statusText: response.statusText,
+        errorBody: errorBody.substring(0, 200)
+      }, '[handleGetSlotsForDate] API returned error status', {}, ['api', 'consultation']);
+      return 'К сожалению, не удалось получить слоты на эту дату. Попробуйте позже.';
+    }
+
+    let data: any;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      log.error(parseError, '[handleGetSlotsForDate] Failed to parse JSON response', {}, ['api', 'consultation']);
+      return 'Произошла ошибка при обработке данных. Попробуйте позже.';
+    }
+
+    if (!data || typeof data !== 'object') {
+      log.warn({ dataType: typeof data }, '[handleGetSlotsForDate] Invalid response format', ['api', 'consultation']);
+      return 'Получен некорректный ответ от сервера. Попробуйте позже.';
+    }
+
+    if (!data.slots?.length) {
+      log.info({ date: args.date, slotsCount: 0 }, '[handleGetSlotsForDate] No slots available', ['consultation']);
+      return `На ${args.date} нет свободных слотов. Попробуй другую дату.`;
+    }
+
+    log.info({
+      date: args.date,
+      slotsCount: data.slots.length
+    }, '[handleGetSlotsForDate] Slots found successfully', ['consultation']);
+
+    const slotsText = data.slots.map((slot: any, idx: number) => {
+      return `[Слот ${idx + 1}]
+Консультант: ${slot.consultant_name}
+Время: ${slot.formatted}
+date: ${slot.date}
+start_time: ${slot.start_time}`;
+    }).join('\n\n');
+
+    return `Все свободные слоты на ${args.date}:\n\n${slotsText}\n\nДля записи используй consultant_id из списка консультантов + date и start_time из выбранного слота.`;
+  } catch (error: any) {
+    const errorType = classifyError(error);
+    log.error(error, '[handleGetSlotsForDate] Error fetching slots', {
+      errorType: errorType.type,
+      isRetryable: errorType.isRetryable
+    }, ['api', 'consultation']);
+    return 'Произошла ошибка при получении слотов. Попробуйте позже.';
   }
 }
 
@@ -1100,7 +1231,8 @@ export async function handleGetConsultationHistory(
  */
 export function isConsultationTool(functionName: string): boolean {
   const consultationTools = [
-    'get_available_consultation_slots',
+    'get_nearest_slots',
+    'get_slots_for_date',
     'book_consultation',
     'cancel_consultation',
     'reschedule_consultation',
@@ -1123,8 +1255,11 @@ export async function handleConsultationTool(
   ctxLog?: ContextLogger
 ): Promise<string> {
   switch (functionName) {
-    case 'get_available_consultation_slots':
-      return handleGetAvailableSlots(args, lead, settings, ctxLog);
+    case 'get_nearest_slots':
+      return handleGetNearestSlots(lead, settings, ctxLog);
+
+    case 'get_slots_for_date':
+      return handleGetSlotsForDate(args, lead, settings, ctxLog);
 
     case 'book_consultation':
       return handleBookConsultation(args, lead, settings, ctxLog);
