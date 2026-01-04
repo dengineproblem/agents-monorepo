@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, AlertTriangle, ChevronLeft, ChevronRight, Download } from 'lucide-react';
+import { Users, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { salesApi } from '@/services/salesApi';
 import { AssignCreativeModal } from './AssignCreativeModal';
 import { exportToCSV, formatDateForExport, formatAmountForExport, formatDateTime } from '@/lib/exportUtils';
@@ -66,8 +66,6 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
     loadLeads();
   };
 
-  const leadsNeedingMatch = leads.filter(l => l.needs_manual_match && !l.creative_id);
-
   // Пагинация для основной таблицы
   const totalPages = Math.ceil(leads.length / ITEMS_PER_PAGE);
   const paginatedLeads = useMemo(() => {
@@ -91,7 +89,6 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
       { header: 'Креатив', accessor: (l) => l.creative_name || '' },
       { header: 'Направление', accessor: (l) => l.direction_name || '' },
       { header: 'Сумма продажи', accessor: (l) => formatAmountForExport(l.sale_amount) },
-      { header: 'Требует привязки', accessor: (l) => l.needs_manual_match ? 'Да' : 'Нет' },
       { header: 'Дата', accessor: (l) => formatDateForExport(l.created_at) },
     ], 'leads');
   };
@@ -126,53 +123,6 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
 
   return (
     <div className="space-y-4">
-      {/* Секция: Требуют привязки креатива */}
-      {leadsNeedingMatch.length > 0 && (
-        <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-900/10 dark:border-amber-800/50 shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                Требуют привязки к креативу ({leadsNeedingMatch.length})
-              </h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="border-b border-amber-200/50">
-                  <tr>
-                    <th className="py-2 px-3 text-left text-xs font-medium text-amber-700/70 whitespace-nowrap">Телефон</th>
-                    <th className="py-2 px-3 text-left text-xs font-medium text-amber-700/70 whitespace-nowrap">Направление</th>
-                    <th className="py-2 px-3 text-left text-xs font-medium text-amber-700/70 whitespace-nowrap">Дата</th>
-                    <th className="py-2 px-3 text-center text-xs font-medium text-amber-700/70 whitespace-nowrap">Действие</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leadsNeedingMatch.map((lead) => (
-                    <tr key={lead.id} className="border-b border-amber-200/30 last:border-0">
-                      <td className="py-2 px-3 whitespace-nowrap font-medium">{formatPhone(lead.chat_id)}</td>
-                      <td className="py-2 px-3 whitespace-nowrap text-xs">{lead.direction_name || '—'}</td>
-                      <td className="py-2 px-3 whitespace-nowrap text-xs">
-                        {formatDateTime(lead.created_at)}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs border-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30"
-                          onClick={() => handleAssignCreative(lead)}
-                        >
-                          Выбрать креатив
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Секция: Все лиды */}
       <Card className="shadow-sm">
         <CardContent className="p-0">
@@ -211,7 +161,7 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
                     <td className="py-2 px-3 whitespace-nowrap">
                       {lead.creative_name ? (
                         <span className="text-xs">{lead.creative_name}</span>
-                      ) : lead.needs_manual_match ? (
+                      ) : (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -220,8 +170,6 @@ export const LeadsTab: React.FC<LeadsTabProps> = ({ userAccountId, directionId, 
                         >
                           + Выбрать
                         </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </td>
                     <td className="py-2 px-3 whitespace-nowrap text-xs hidden sm:table-cell">

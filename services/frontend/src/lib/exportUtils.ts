@@ -73,6 +73,8 @@ export function formatDateForExport(dateString: string): string {
  */
 export function formatDateTime(dateString: string): string {
   const date = new Date(dateString);
+  // Прибавляем 5 часов (UTC+5 Казахстан) - данные в БД хранятся в UTC
+  date.setHours(date.getHours() + 5);
   return date.toLocaleString('ru-RU', {
     day: '2-digit',
     month: '2-digit',
