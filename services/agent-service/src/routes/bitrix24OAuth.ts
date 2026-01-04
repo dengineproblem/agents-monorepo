@@ -17,6 +17,8 @@ import {
   setBitrix24EntityType
 } from '../lib/bitrix24Tokens.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { supabase } from '../lib/supabase.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const BITRIX24_CLIENT_ID = process.env.BITRIX24_CLIENT_ID;
 const BITRIX24_CLIENT_SECRET = process.env.BITRIX24_CLIENT_SECRET;
@@ -207,9 +209,11 @@ export default async function bitrix24OAuthRoutes(app: FastifyInstance) {
       );
 
       // Save tokens to appropriate table based on multi-account mode
-      if (accountId) {
+      // Используем shouldFilterByAccountId для проверки режима (см. MULTI_ACCOUNT_GUIDE.md)
+      const useMultiAccount = await shouldFilterByAccountId(supabase, userAccountId, accountId);
+      if (useMultiAccount) {
         // Multi-account mode: save to ad_accounts
-        await saveBitrix24TokensToAdAccount(accountId, domain, tokens);
+        await saveBitrix24TokensToAdAccount(accountId!, domain, tokens);
         app.log.info({ userAccountId, accountId, domain }, 'Bitrix24 tokens saved to ad_accounts (multi-account mode)');
       } else {
         // Legacy mode: save to user_accounts

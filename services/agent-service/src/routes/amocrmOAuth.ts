@@ -21,6 +21,8 @@ import {
 } from '../lib/amocrmTempCredentials.js';
 import { registerAmoCRMWebhook } from '../lib/amocrmWebhook.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { supabase } from '../lib/supabase.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const AMOCRM_CLIENT_ID = process.env.AMOCRM_CLIENT_ID;
 const AMOCRM_REDIRECT_URI = process.env.AMOCRM_REDIRECT_URI;
@@ -276,9 +278,11 @@ export default async function amocrmOAuthRoutes(app: FastifyInstance) {
       const tokens = await exchangeCodeForToken(code, subdomain, clientId, clientSecret);
 
       // Save tokens to appropriate table based on multi-account mode
-      if (accountId) {
+      // Используем shouldFilterByAccountId для проверки режима (см. MULTI_ACCOUNT_GUIDE.md)
+      const useMultiAccount = await shouldFilterByAccountId(supabase, userAccountId, accountId);
+      if (useMultiAccount) {
         // Multi-account mode: save to ad_accounts
-        await saveAmoCRMTokensToAdAccount(accountId, subdomain, tokens, clientId, clientSecret);
+        await saveAmoCRMTokensToAdAccount(accountId!, subdomain, tokens, clientId, clientSecret);
         app.log.info({ userAccountId, accountId, subdomain }, 'AmoCRM tokens saved to ad_accounts (multi-account mode)');
       } else {
         // Legacy mode: save to user_accounts

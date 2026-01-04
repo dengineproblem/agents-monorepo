@@ -238,8 +238,8 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
         .eq('is_default', true)
         .eq('is_active', true);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
       }
 

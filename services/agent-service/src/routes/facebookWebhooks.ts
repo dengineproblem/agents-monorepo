@@ -8,6 +8,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { eventLogger } from '../lib/eventLogger.js';
 import { getPageAccessToken, subscribePageToLeadgen } from '../lib/facebookHelpers.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const log = createLogger({ module: 'facebookWebhooks' });
 
@@ -998,7 +999,8 @@ export default async function facebookWebhooks(app: FastifyInstance) {
       }
 
       // Для мультиаккаунтного режима: обновляем конкретный ad_account по account_id
-      if (account_id) {
+      // Проверяем режим через shouldFilterByAccountId (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, user_id, account_id)) {
         const { error: adAccountError } = await supabase
           .from('ad_accounts')
           .update({

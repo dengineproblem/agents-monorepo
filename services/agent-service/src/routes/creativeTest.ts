@@ -8,6 +8,7 @@ import { getWhatsAppPhoneNumber } from '../lib/settingsHelpers.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
 import { onCreativeTestLaunched } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const ANALYZER_URL = process.env.ANALYZER_URL || 'http://localhost:7081';
 
@@ -99,7 +100,8 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', user_id);
 
-      if (account_id) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, user_id, account_id)) {
         existingTestsQuery = existingTestsQuery.eq('account_id', account_id);
       }
 
@@ -125,8 +127,8 @@ export async function creativeTestRoutes(app: FastifyInstance) {
           .eq('user_id', user_id)
           .in('status', ['completed', 'cancelled', 'failed', 'running']);
 
-        // Фильтр по account_id для мультиаккаунтности
-        if (account_id) {
+        // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+        if (await shouldFilterByAccountId(supabase, user_id, account_id)) {
           deleteQuery = deleteQuery.eq('account_id', account_id);
         }
 
@@ -197,8 +199,8 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', user_id);
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (account_id) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, user_id, account_id)) {
         query = query.eq('account_id', account_id);
       }
 
@@ -458,8 +460,8 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', String(user_id));
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (account_id) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, String(user_id), account_id)) {
         selectQuery = selectQuery.eq('account_id', account_id);
       }
 
@@ -553,8 +555,8 @@ export async function creativeTestRoutes(app: FastifyInstance) {
         .eq('user_creative_id', user_creative_id)
         .eq('user_id', String(user_id));
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (account_id) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, String(user_id), account_id)) {
         finalDeleteQuery = finalDeleteQuery.eq('account_id', account_id);
       }
 

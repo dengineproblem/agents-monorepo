@@ -460,8 +460,8 @@ export default async function competitorsRoutes(app: FastifyInstance) {
         .eq('is_active', true)
         .order('created_at', { ascending: false });
 
-      // Фильтр по account_id для мультиаккаунтности
-      if (query.accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, query.userAccountId, query.accountId)) {
         dbQuery = dbQuery.eq('account_id', query.accountId);
       }
 
@@ -581,14 +581,15 @@ export default async function competitorsRoutes(app: FastifyInstance) {
 
       // 3. Проверяем, не связан ли уже этот конкурент с пользователем
       // В мультиаккаунтном режиме проверяем user_account_id + competitor_id + account_id
-      // В legacy режиме (без account_id) проверяем только user_account_id + competitor_id
+      // В legacy режиме проверяем user_account_id + competitor_id + account_id IS NULL
       let existingLinkQuery = supabase
         .from('user_competitors')
         .select('id, is_active')
         .eq('user_account_id', input.userAccountId)
         .eq('competitor_id', competitorId);
 
-      if (input.accountId) {
+      // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (await shouldFilterByAccountId(supabase, input.userAccountId, input.accountId)) {
         existingLinkQuery = existingLinkQuery.eq('account_id', input.accountId);
       } else {
         existingLinkQuery = existingLinkQuery.is('account_id', null);
