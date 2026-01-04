@@ -287,20 +287,31 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     }
 
     // Build event payload
-    // NOTE: event_source_url is NOT allowed for action_source: 'business_messaging'
-    // Meta API returns error 2804064 if it's included
+    // NOTE: action_source: 'business_messaging' is ONLY valid when ctwa_clid is present
+    // For leads without ctwa_clid (not from CTWA ads), use action_source: 'other'
+    // Meta API returns error 2804064 for event_source_url with business_messaging
+    // Meta API returns error 2804066 for invalid event names with business_messaging without ctwa_clid
     const eventPayload: Record<string, unknown> = {
       event_name: eventName,
       event_time: eventTime,
       event_id: eventId,
-      action_source: 'business_messaging', // For Click-to-WhatsApp
-      messaging_channel: 'whatsapp',
       user_data: userData,
       custom_data: {
         event_level: eventLevel,
         ...customData,
       },
     };
+
+    // Set action_source based on whether we have ctwa_clid
+    if (ctwaClid) {
+      // Lead from Click-to-WhatsApp ad - use business_messaging
+      eventPayload.action_source = 'business_messaging';
+      eventPayload.messaging_channel = 'whatsapp';
+    } else {
+      // Lead not from CTWA ad (direct WhatsApp contact or other source)
+      // Use 'other' as action_source since it's still WhatsApp but not from ad click
+      eventPayload.action_source = 'other';
+    }
 
     // Send to CAPI with retry and timeout
     const url = `${CAPI_BASE_URL}/${pixelId}/events`;
