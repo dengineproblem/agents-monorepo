@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { evolutionQuery } from '../lib/evolutionDb.js';
 import { sendWhatsAppMessage } from '../lib/evolutionApi.js';
+import { supabase } from '../lib/supabase.js';
 import {
   generateCorrelationId,
   shortCorrelationId,
@@ -32,6 +33,11 @@ const SendMessageBodySchema = z.object({
 const SearchChatsQuerySchema = z.object({
   instanceName: z.string().min(1, 'instanceName is required'),
   query: z.string().min(2, 'query must be at least 2 characters').max(100, 'query too long'),
+});
+
+const ToggleBotBodySchema = z.object({
+  instanceName: z.string().min(1, 'instanceName is required'),
+  paused: z.boolean(),
 });
 
 // ==================== INTERFACES ====================
@@ -626,5 +632,159 @@ export async function chatsRoutes(app: FastifyInstance) {
         message: error.message
       });
     }
+  });
+
+  /**
+   * PATCH /chats/:remoteJid/toggle-bot
+   * Toggle bot_paused for a specific chat
+   */
+  app.patch('/chats/:remoteJid/toggle-bot', async (request, reply) => {
+    const startTime = Date.now();
+    const cid = generateCorrelationId();
+    const { remoteJid } = request.params as { remoteJid: string };
+    const tags: LogTag[] = ['api', 'db', 'chats'];
+
+    const phone = extractPhoneFromJid(remoteJid);
+    const maskedPhone = maskPhone(phone);
+
+    app.log.info({
+      cid: shortCorrelationId(cid),
+      phone: maskedPhone,
+      tags
+    }, '[PATCH /chats/:remoteJid/toggle-bot] Request received');
+
+    try {
+      // Validate body
+      const validationResult = ToggleBotBodySchema.safeParse(request.body);
+      if (!validationResult.success) {
+        app.log.warn({
+          cid: shortCorrelationId(cid),
+          errorType: 'validation_error',
+          errors: validationResult.error.errors
+        }, '[PATCH /chats/:remoteJid/toggle-bot] Validation failed');
+        return reply.status(400).send({
+          error: 'Validation error',
+          details: validationResult.error.errors
+        });
+      }
+
+      const { instanceName, paused } = validationResult.data;
+
+      // Find dialog_analysis by phone and instance
+      const phoneVariants = [
+        phone,
+        `+${phone}`,
+        phone.replace(/^\+/, '')
+      ];
+
+      const { data: lead, error: findError } = await supabase
+        .from('dialog_analysis')
+        .select('id, bot_paused')
+        .eq('instance_name', instanceName)
+        .in('contact_phone', phoneVariants)
+        .maybeSingle();
+
+      if (findError) {
+        app.log.error({
+          cid: shortCorrelationId(cid),
+          error: findError.message,
+          phone: maskedPhone,
+          instanceName
+        }, '[PATCH /chats/:remoteJid/toggle-bot] Error finding lead');
+        return reply.status(500).send({ error: 'Database error' });
+      }
+
+      if (!lead) {
+        app.log.warn({
+          cid: shortCorrelationId(cid),
+          phone: maskedPhone,
+          instanceName
+        }, '[PATCH /chats/:remoteJid/toggle-bot] Lead not found');
+        return reply.status(404).send({ error: 'Lead not found for this chat' });
+      }
+
+      // Update bot_paused
+      const { error: updateError } = await supabase
+        .from('dialog_analysis')
+        .update({ bot_paused: paused })
+        .eq('id', lead.id);
+
+      if (updateError) {
+        app.log.error({
+          cid: shortCorrelationId(cid),
+          error: updateError.message,
+          leadId: lead.id
+        }, '[PATCH /chats/:remoteJid/toggle-bot] Error updating bot_paused');
+        return reply.status(500).send({ error: 'Failed to update bot status' });
+      }
+
+      app.log.info({
+        cid: shortCorrelationId(cid),
+        leadId: lead.id,
+        phone: maskedPhone,
+        botPaused: paused,
+        elapsedMs: getElapsedMs(startTime),
+        tags
+      }, '[PATCH /chats/:remoteJid/toggle-bot] Bot status updated');
+
+      return reply.send({
+        success: true,
+        botPaused: paused
+      });
+
+    } catch (error: any) {
+      const errorInfo = classifyError(error);
+      const errorLog = createErrorLog(error, {
+        correlationId: cid,
+        method: 'PATCH',
+        path: '/chats/:remoteJid/toggle-bot'
+      });
+
+      app.log.error({
+        ...errorLog,
+        errorType: errorInfo.type,
+        isRetryable: errorInfo.isRetryable,
+        elapsedMs: getElapsedMs(startTime),
+        tags: ['api', 'db', 'chats']
+      }, '[PATCH /chats/:remoteJid/toggle-bot] Failed');
+
+      return reply.status(500).send({
+        error: 'Failed to toggle bot',
+        message: error.message
+      });
+    }
+  });
+
+  /**
+   * GET /chats/:remoteJid/bot-status
+   * Get bot status for a specific chat
+   */
+  app.get('/chats/:remoteJid/bot-status', async (request, reply) => {
+    const { remoteJid } = request.params as { remoteJid: string };
+    const { instanceName } = request.query as { instanceName: string };
+
+    if (!instanceName) {
+      return reply.status(400).send({ error: 'instanceName is required' });
+    }
+
+    const phone = extractPhoneFromJid(remoteJid);
+    const phoneVariants = [phone, `+${phone}`, phone.replace(/^\+/, '')];
+
+    const { data: lead, error } = await supabase
+      .from('dialog_analysis')
+      .select('id, bot_paused')
+      .eq('instance_name', instanceName)
+      .in('contact_phone', phoneVariants)
+      .maybeSingle();
+
+    if (error) {
+      return reply.status(500).send({ error: 'Database error' });
+    }
+
+    return reply.send({
+      success: true,
+      leadId: lead?.id || null,
+      botPaused: lead?.bot_paused || false
+    });
   });
 }

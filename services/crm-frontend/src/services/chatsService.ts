@@ -62,4 +62,27 @@ export const chatsService = {
     if (!response.ok) throw new Error('Search failed');
     return response.json();
   },
+
+  /**
+   * Get bot status for a chat
+   */
+  async getBotStatus(instanceName: string, remoteJid: string): Promise<{ leadId: string | null; botPaused: boolean }> {
+    const params = new URLSearchParams({ instanceName });
+    const response = await fetch(`${API_BASE_URL}/chats/${encodeURIComponent(remoteJid)}/bot-status?${params}`);
+    if (!response.ok) throw new Error('Failed to get bot status');
+    return response.json();
+  },
+
+  /**
+   * Toggle bot for a chat (pause/resume)
+   */
+  async toggleBot(instanceName: string, remoteJid: string, paused: boolean): Promise<{ botPaused: boolean }> {
+    const response = await fetch(`${API_BASE_URL}/chats/${encodeURIComponent(remoteJid)}/toggle-bot`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceName, paused }),
+    });
+    if (!response.ok) throw new Error('Failed to toggle bot');
+    return response.json();
+  },
 };

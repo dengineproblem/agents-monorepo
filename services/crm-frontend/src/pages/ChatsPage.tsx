@@ -9,7 +9,9 @@ import {
   User,
   Phone,
   AlertCircle,
-  WifiOff
+  WifiOff,
+  Bot,
+  BotOff
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -107,6 +109,18 @@ export function ChatsPage() {
     retry: 1,
   });
 
+  // Fetch bot status for selected chat
+  const {
+    data: botStatusData,
+    isLoading: botStatusLoading
+  } = useQuery({
+    queryKey: ['bot-status', selectedInstance, selectedChat?.remoteJid],
+    queryFn: () => chatsService.getBotStatus(selectedInstance, selectedChat!.remoteJid),
+    enabled: !!selectedInstance && !!selectedChat,
+    staleTime: 30000, // 30 seconds
+    retry: 1,
+  });
+
   // Send message mutation
   const sendMutation = useMutation({
     mutationFn: () =>
@@ -129,6 +143,31 @@ export function ChatsPage() {
       toast({
         title: 'Ошибка отправки',
         description: error.message || 'Не удалось отправить сообщение',
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Toggle bot mutation
+  const toggleBotMutation = useMutation({
+    mutationFn: (paused: boolean) =>
+      chatsService.toggleBot(selectedInstance, selectedChat!.remoteJid, paused),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({
+        queryKey: ['bot-status', selectedInstance, selectedChat?.remoteJid],
+      });
+      toast({
+        title: data.botPaused ? 'Бот остановлен' : 'Бот запущен',
+        description: data.botPaused
+          ? 'AI-бот больше не будет отвечать в этом чате'
+          : 'AI-бот снова будет отвечать в этом чате',
+      });
+    },
+    onError: (error: Error) => {
+      console.error('[ChatsPage] Toggle bot error:', error);
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось изменить статус бота',
         variant: 'destructive',
       });
     },
@@ -386,6 +425,26 @@ export function ChatsPage() {
                     {getPhoneNumber(selectedChat.remoteJid)}
                   </p>
                 </div>
+                {/* Bot toggle button */}
+                {botStatusData?.leadId && (
+                  <Button
+                    variant={botStatusData.botPaused ? "outline" : "default"}
+                    size="sm"
+                    onClick={() => toggleBotMutation.mutate(!botStatusData.botPaused)}
+                    disabled={toggleBotMutation.isPending || botStatusLoading}
+                    className="gap-2"
+                    title={botStatusData.botPaused ? 'Запустить бота' : 'Остановить бота'}
+                  >
+                    {toggleBotMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : botStatusData.botPaused ? (
+                      <BotOff className="w-4 h-4" />
+                    ) : (
+                      <Bot className="w-4 h-4" />
+                    )}
+                    {botStatusData.botPaused ? 'Бот выкл' : 'Бот вкл'}
+                  </Button>
+                )}
                 {messagesFetching && !messagesLoading && (
                   <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                 )}
