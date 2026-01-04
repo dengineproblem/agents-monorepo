@@ -560,7 +560,7 @@ export async function createLeadFormVideoCreative(
     video_id: params.videoId,
     message: params.message,
     call_to_action: {
-      type: "SIGN_UP",
+      type: "LEARN_MORE",
       value: {
         lead_gen_form_id: params.leadFormId
       }
@@ -799,7 +799,7 @@ export async function createLeadFormImageCreative(
         image_hash: params.imageHash,
         message: params.message,
         call_to_action: {
-          type: "SIGN_UP",
+          type: "LEARN_MORE",
           value: {
             lead_gen_form_id: params.leadFormId
           }
@@ -1181,7 +1181,7 @@ export async function createLeadFormCarouselCreative(
     name: card.text.substring(0, 50),
     description: card.text,
     call_to_action: {
-      type: "SIGN_UP",
+      type: "LEARN_MORE",
       value: {
         lead_gen_form_id: params.leadFormId
       }
@@ -1196,7 +1196,7 @@ export async function createLeadFormCarouselCreative(
       multi_share_optimized: true,
       child_attachments: childAttachments,
       call_to_action: {
-        type: "SIGN_UP",
+        type: "LEARN_MORE",
         value: {
           lead_gen_form_id: params.leadFormId
         }
