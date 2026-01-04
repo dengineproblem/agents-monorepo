@@ -773,14 +773,16 @@ async function processAIBotResponse(
     ctxLog.debug({}, '[processAIBotResponse] Saving messages to history', ['db']);
 
     try {
-      // Получить текущую историю
+      // Получить текущую историю и счётчики
       const { data: currentLead } = await supabase
         .from('dialog_analysis')
-        .select('messages')
+        .select('messages, incoming_count, outgoing_count')
         .eq('id', lead.id)
         .single();
 
       const currentMessages = Array.isArray(currentLead?.messages) ? currentLead.messages : [];
+      const currentIncoming = currentLead?.incoming_count || 0;
+      const currentOutgoing = currentLead?.outgoing_count || 0;
       const now = new Date().toISOString();
 
       // Добавить входящее сообщение пользователя
@@ -800,10 +802,14 @@ async function processAIBotResponse(
       // Ограничить историю по количеству (последние 100 сообщений)
       const trimmedMessages = currentMessages.slice(-LIMITS.MAX_HISTORY_MESSAGES);
 
-      // Сохранить обновлённую историю
+      // Сохранить обновлённую историю и инкрементировать счётчики
       const { error: historyError } = await supabase
         .from('dialog_analysis')
-        .update({ messages: trimmedMessages })
+        .update({
+          messages: trimmedMessages,
+          incoming_count: currentIncoming + 1,  // +1 за входящее сообщение
+          outgoing_count: currentOutgoing + 1   // +1 за ответ бота
+        })
         .eq('id', lead.id);
 
       if (historyError) {
