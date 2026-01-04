@@ -357,6 +357,76 @@ Legacy поля сохраняются для старых отчётов:
 
 Данные берутся из `dialog_analysis` через API `/api/capi-events/:leadId`.
 
+## CAPI Dashboard
+
+Секция CAPI Events на главной странице Dashboard отображает агрегированную статистику CAPI событий.
+
+### Расположение
+
+```
+Dashboard.tsx
+    ├── SummaryStats
+    ├── CapiEventsSection  ← CAPI метрики
+    └── AutopilotSection
+```
+
+### Компоненты
+
+**Backend:** `services/agent-service/src/routes/analytics.ts`
+- Endpoint: `GET /analytics/capi-stats`
+- Параметры: `user_account_id`, `since`, `until`
+- Проверяет наличие направлений с `capi_enabled = true`
+- Считает события по уровням из `capi_events_log`
+
+**Frontend API:** `services/frontend/src/services/capiApi.ts`
+- Timeout: 15 секунд
+- Retry: до 3 попыток с экспоненциальной задержкой
+- Валидация ответа
+
+**Frontend Component:** `services/frontend/src/components/CapiEventsSection.tsx`
+- 9 карточек в сетке 3x3
+- Скрывается для TikTok платформы
+- Скрывается если CAPI не включён ни для одного направления
+
+### Отображаемые метрики
+
+| Ряд | Метрики |
+|-----|---------|
+| 1 | CAPI Lead, CAPI Registration, CAPI Schedule (количество) |
+| 2 | Лиды → CAPI Lead %, Lead → Registration %, Registration → Schedule % |
+| 3 | Cost per Lead, Cost per Registration, Cost per Schedule |
+
+### Расчёт стоимости
+
+```typescript
+const totalSpend = campaignStats.reduce((sum, s) => sum + s.spend, 0);
+const costPerLead = totalSpend / capiStats.lead;
+const costPerRegistration = totalSpend / capiStats.registration;
+const costPerSchedule = totalSpend / capiStats.schedule;
+```
+
+### Логирование
+
+Backend логирует в формате:
+```
+[capi-stats] Fetching CAPI stats { user_account_id, since, until }
+[capi-stats] Successfully fetched CAPI stats { eventsCount, result, durationMs }
+```
+
+Frontend логирует в консоль:
+```
+[capiApi] Fetching CAPI stats: { userId, since, until }
+[capiApi] Successfully fetched CAPI stats: { capiEnabled, lead, registration, schedule }
+[CapiEventsSection] CAPI stats loaded: { capiEnabled, lead, registration, schedule, durationMs }
+```
+
+### Условия отображения
+
+Секция **НЕ** отображается если:
+1. Платформа TikTok
+2. `capiEnabled === false` (нет направлений с включённым CAPI)
+3. Произошла ошибка загрузки и нет кэшированных данных
+
 ## Troubleshooting
 
 ### События не отправляются

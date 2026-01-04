@@ -13,8 +13,7 @@ import OpenAI from 'openai';
 import { createLogger } from './logger.js';
 import { supabase } from './supabase.js';
 import {
-  sendCapiEvent,
-  updateDialogCapiFlags,
+  sendCapiEventAtomic,
   getDirectionPixelInfo,
   CAPI_EVENTS,
   type CapiEventLevel,
@@ -22,8 +21,12 @@ import {
 
 const log = createLogger({ module: 'qualificationAgent' });
 
+// OpenAI timeout configuration
+const OPENAI_TIMEOUT_MS = 30000;
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: OPENAI_TIMEOUT_MS,
 });
 
 // Result from LLM qualification analysis
@@ -120,13 +123,33 @@ async function getQualificationPrompt(
 }
 
 /**
+ * Validate JSONB CAPI field config
+ * Ensures the data has the expected structure
+ */
+function validateCapiFields(fields: unknown): CapiFieldConfig[] {
+  if (!fields || !Array.isArray(fields)) {
+    return [];
+  }
+
+  return fields.filter((f): f is CapiFieldConfig => {
+    if (!f || typeof f !== 'object') return false;
+    // field_id and field_name are required
+    return (
+      (typeof f.field_id === 'string' || typeof f.field_id === 'number') &&
+      typeof f.field_name === 'string'
+    );
+  });
+}
+
+/**
  * Get direction CAPI settings
+ * With JSONB validation for field configs
  */
 async function getDirectionCapiSettings(
   directionId: string
 ): Promise<DirectionCapiSettings | null> {
   try {
-    const { data: direction } = await supabase
+    const { data: direction, error } = await supabase
       .from('account_directions')
       .select(`
         capi_enabled,
@@ -139,18 +162,34 @@ async function getDirectionCapiSettings(
       .eq('id', directionId)
       .single();
 
+    if (error) {
+      log.warn({
+        error: error.message,
+        directionId,
+      }, 'Error fetching direction CAPI settings');
+      return null;
+    }
+
     if (!direction) return null;
+
+    // Validate JSONB fields to prevent runtime errors
+    const interestFields = validateCapiFields(direction.capi_interest_fields);
+    const qualifiedFields = validateCapiFields(direction.capi_qualified_fields);
+    const scheduledFields = validateCapiFields(direction.capi_scheduled_fields);
 
     return {
       capi_enabled: direction.capi_enabled || false,
       capi_source: direction.capi_source || null,
       capi_crm_type: direction.capi_crm_type || null,
-      capi_interest_fields: direction.capi_interest_fields || [],
-      capi_qualified_fields: direction.capi_qualified_fields || [],
-      capi_scheduled_fields: direction.capi_scheduled_fields || [],
+      capi_interest_fields: interestFields,
+      capi_qualified_fields: qualifiedFields,
+      capi_scheduled_fields: scheduledFields,
     };
   } catch (error) {
-    log.error({ error, directionId }, 'Error getting direction CAPI settings');
+    log.error({
+      error: error instanceof Error ? error.message : String(error),
+      directionId,
+    }, 'Error getting direction CAPI settings');
     return null;
   }
 }
@@ -190,12 +229,22 @@ async function getCrmQualificationStatus(
 
   try {
     // Find lead by phone
-    const { data: lead } = await supabase
+    const { data: lead, error } = await supabase
       .from('leads')
       .select('is_qualified, is_scheduled, amocrm_lead_id, bitrix24_lead_id, bitrix24_deal_id')
       .eq('chat_id', contactPhone)
       .eq('user_account_id', userAccountId)
       .maybeSingle();
+
+    // Check for DB error
+    if (error) {
+      log.error({
+        error: error.message,
+        contactPhone,
+        userAccountId,
+      }, 'Error fetching lead for CRM qualification status');
+      return defaultResult;
+    }
 
     if (!lead) return defaultResult;
 
@@ -213,13 +262,17 @@ async function getCrmQualificationStatus(
     return {
       hasIntegration: true,
       // For interest - we check if interest fields are configured (will be evaluated by CRM sync)
-      isInterested: (capiSettings.capi_interest_fields?.length || 0) > 0,
+      isInterested: capiSettings.capi_interest_fields.length > 0,
       isQualified: lead.is_qualified || false,
       isScheduled: lead.is_scheduled || false,
       source,
     };
   } catch (error) {
-    log.error({ error, contactPhone, userAccountId }, 'Error getting CRM qualification status');
+    log.error({
+      error: error instanceof Error ? error.message : String(error),
+      contactPhone,
+      userAccountId,
+    }, 'Error getting CRM qualification status');
     return defaultResult;
   }
 }
@@ -527,6 +580,7 @@ export async function processDialogForCapi(
 
 /**
  * Send CAPI event for a specific level
+ * Uses atomic send to prevent race conditions
  */
 async function sendCapiEventForLevel(
   dialog: DialogData,
@@ -545,9 +599,10 @@ async function sendCapiEventForLevel(
     level,
     eventName,
     pixelId,
-  }, 'Sending CAPI event');
+  }, 'Sending CAPI event (atomic)');
 
-  const response = await sendCapiEvent({
+  // Use atomic send to prevent duplicate events
+  const response = await sendCapiEventAtomic({
     pixelId,
     accessToken,
     eventName,
@@ -559,32 +614,32 @@ async function sendCapiEventForLevel(
     directionId: dialog.direction_id,
   });
 
-  if (response.success && response.eventId) {
-    // Update dialog flags
-    await updateDialogCapiFlags(dialog.id, level, response.eventId);
-
+  if (response.success) {
     log.info({
       dialogId: dialog.id,
       level,
       eventId: response.eventId,
-    }, 'CAPI event sent and flags updated');
+    }, 'CAPI event sent successfully');
   } else {
-    log.warn({
+    // Could be already sent (dedup) or actual error
+    log.info({
       dialogId: dialog.id,
       level,
       error: response.error,
-    }, 'Failed to send CAPI event');
+    }, 'CAPI event not sent');
   }
 }
 
 /**
  * Get dialog data for CAPI processing
+ * Includes direction_id from dialog_analysis (migration 129) or leads table as fallback
  */
 export async function getDialogForCapi(
   instanceName: string,
   contactPhone: string
 ): Promise<DialogData | null> {
   try {
+    // Include direction_id from dialog_analysis (added in migration 129)
     const { data: dialog, error } = await supabase
       .from('dialog_analysis')
       .select(`
@@ -598,6 +653,7 @@ export async function getDialogForCapi(
         messages,
         funnel_stage,
         ctwa_clid,
+        direction_id,
         capi_interest_sent,
         capi_qualified_sent,
         capi_scheduled_sent
@@ -606,27 +662,71 @@ export async function getDialogForCapi(
       .eq('contact_phone', contactPhone)
       .single();
 
-    if (error || !dialog) {
-      log.warn({ instanceName, contactPhone, error }, 'Dialog not found');
+    if (error) {
+      log.warn({
+        instanceName,
+        contactPhone,
+        error: error.message,
+      }, 'Error fetching dialog for CAPI');
       return null;
     }
 
-    // Get direction_id and ctwa_clid from leads table
-    const { data: lead } = await supabase
-      .from('leads')
-      .select('direction_id, ctwa_clid')
-      .eq('chat_id', contactPhone)
-      .eq('user_account_id', dialog.user_account_id)
-      .maybeSingle();
+    if (!dialog) {
+      log.debug({ instanceName, contactPhone }, 'Dialog not found for CAPI');
+      return null;
+    }
+
+    // If direction_id is not in dialog_analysis, try to get it from leads table
+    let directionId = dialog.direction_id;
+    let ctwaClid = dialog.ctwa_clid;
+
+    if (!directionId || !ctwaClid) {
+      const { data: lead, error: leadError } = await supabase
+        .from('leads')
+        .select('direction_id, ctwa_clid')
+        .eq('chat_id', contactPhone)
+        .eq('user_account_id', dialog.user_account_id)
+        .maybeSingle();
+
+      if (leadError) {
+        log.warn({
+          contactPhone,
+          error: leadError.message,
+        }, 'Error fetching lead for direction_id fallback');
+      }
+
+      // Use lead data as fallback
+      if (!directionId && lead?.direction_id) {
+        directionId = lead.direction_id;
+        log.debug({ contactPhone, directionId }, 'Using direction_id from leads table');
+      }
+
+      if (!ctwaClid && lead?.ctwa_clid) {
+        ctwaClid = lead.ctwa_clid;
+      }
+    }
+
+    // Warn if direction_id is still missing
+    if (!directionId) {
+      log.warn({
+        dialogId: dialog.id,
+        instanceName,
+        contactPhone,
+      }, 'No direction_id found for dialog - CAPI will be skipped');
+    }
 
     return {
       ...dialog,
-      direction_id: lead?.direction_id || undefined,
-      ctwa_clid: dialog.ctwa_clid || lead?.ctwa_clid || undefined,
+      direction_id: directionId || undefined,
+      ctwa_clid: ctwaClid || undefined,
       messages: dialog.messages || [],
     } as DialogData;
   } catch (error) {
-    log.error({ error, instanceName, contactPhone }, 'Error getting dialog for CAPI');
+    log.error({
+      error: error instanceof Error ? error.message : String(error),
+      instanceName,
+      contactPhone,
+    }, 'Error getting dialog for CAPI');
     return null;
   }
 }

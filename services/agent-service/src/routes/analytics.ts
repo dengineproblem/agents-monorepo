@@ -419,4 +419,161 @@ export default async function analyticsRoutes(app: FastifyInstance) {
       return reply.code(500).send({ error: 'Internal server error' });
     }
   });
+
+  /**
+   * GET /analytics/capi-stats
+   *
+   * Get CAPI events statistics for dashboard
+   * Returns event counts by level and conversion rates
+   */
+  app.get('/analytics/capi-stats', async (request: FastifyRequest, reply: FastifyReply) => {
+    const startTime = Date.now();
+    const { user_account_id, since, until } = request.query as {
+      user_account_id: string;
+      since: string;
+      until: string;
+    };
+
+    // Validate required parameters
+    if (!user_account_id || !since || !until) {
+      logger.warn({
+        user_account_id,
+        since,
+        until,
+      }, '[capi-stats] Missing required parameters');
+      return reply.code(400).send({
+        error: 'Missing required parameters: user_account_id, since, until'
+      });
+    }
+
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(since) || !dateRegex.test(until)) {
+      logger.warn({
+        user_account_id,
+        since,
+        until,
+      }, '[capi-stats] Invalid date format');
+      return reply.code(400).send({
+        error: 'Invalid date format. Expected YYYY-MM-DD'
+      });
+    }
+
+    logger.info({
+      user_account_id,
+      since,
+      until,
+    }, '[capi-stats] Fetching CAPI stats');
+
+    try {
+      // Check if user has any direction with CAPI enabled
+      const { data: directions, error: dirError } = await supabase
+        .from('account_directions')
+        .select('id')
+        .eq('user_account_id', user_account_id)
+        .eq('capi_enabled', true)
+        .limit(1);
+
+      if (dirError) {
+        logger.warn({
+          user_account_id,
+          error: dirError.message,
+        }, '[capi-stats] Error checking CAPI directions');
+      }
+
+      const capiEnabled = !dirError && directions && directions.length > 0;
+
+      // If CAPI is not enabled for any direction, return early with capiEnabled: false
+      if (!capiEnabled) {
+        logger.debug({
+          user_account_id,
+          durationMs: Date.now() - startTime,
+        }, '[capi-stats] CAPI not enabled for user');
+        return reply.send({
+          capiEnabled: false,
+          lead: 0,
+          registration: 0,
+          schedule: 0,
+          total: 0,
+          conversionL1toL2: 0,
+          conversionL2toL3: 0
+        });
+      }
+
+      // Fetch all successful CAPI events for the period
+      const { data, error } = await supabase
+        .from('capi_events_log')
+        .select('event_level')
+        .eq('user_account_id', user_account_id)
+        .eq('capi_status', 'success')
+        .gte('created_at', since + 'T00:00:00.000Z')
+        .lte('created_at', until + 'T23:59:59.999Z');
+
+      if (error) {
+        logger.error({
+          user_account_id,
+          error: error.message,
+          since,
+          until,
+        }, '[capi-stats] Failed to fetch CAPI events');
+        return reply.code(500).send({ error: error.message });
+      }
+
+      // Count events by level
+      const counts = { level1: 0, level2: 0, level3: 0 };
+      data?.forEach(e => {
+        if (e.event_level === 1) counts.level1++;
+        else if (e.event_level === 2) counts.level2++;
+        else if (e.event_level === 3) counts.level3++;
+      });
+
+      // Calculate conversion rates
+      const conversionL1toL2 = counts.level1 > 0
+        ? Math.round((counts.level2 / counts.level1) * 100 * 10) / 10
+        : 0;
+      const conversionL2toL3 = counts.level2 > 0
+        ? Math.round((counts.level3 / counts.level2) * 100 * 10) / 10
+        : 0;
+
+      const result = {
+        capiEnabled: true,
+        lead: counts.level1,           // Interest (level 1)
+        registration: counts.level2,   // Qualified (level 2)
+        schedule: counts.level3,       // Scheduled (level 3)
+        total: counts.level1 + counts.level2 + counts.level3,
+        conversionL1toL2,              // % Lead → Registration
+        conversionL2toL3               // % Registration → Schedule
+      };
+
+      logger.info({
+        user_account_id,
+        since,
+        until,
+        eventsCount: data?.length || 0,
+        result,
+        durationMs: Date.now() - startTime,
+      }, '[capi-stats] Successfully fetched CAPI stats');
+
+      return reply.send(result);
+    } catch (err: any) {
+      logger.error({
+        user_account_id,
+        error: String(err),
+        stack: err.stack,
+        durationMs: Date.now() - startTime,
+      }, '[capi-stats] Exception');
+
+      logErrorToAdmin({
+        user_account_id,
+        error_type: 'api',
+        raw_error: err.message || String(err),
+        stack_trace: err.stack,
+        action: 'get_capi_stats',
+        endpoint: '/analytics/capi-stats',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.code(500).send({ error: 'Internal server error' });
+    }
+  });
 }

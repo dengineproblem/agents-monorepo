@@ -9,6 +9,7 @@ import TargetologJournal from '../components/TargetologJournal';
 import PageHero from '../components/common/PageHero';
 import { FacebookManualConnectModal } from '../components/profile/FacebookManualConnectModal';
 import { AutopilotSection } from '../components/AutopilotSection';
+import CapiEventsSection from '../components/CapiEventsSection';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
@@ -482,7 +483,8 @@ const Dashboard: React.FC = () => {
           </Card>
         )}
         <SummaryStats showTitle={userTarif === 'target'} />
-        
+        <CapiEventsSection showTitle={userTarif === 'target'} />
+
         {userTarif === 'target' ? (
           <>
             {/* Дашборд для тарифа Target */}

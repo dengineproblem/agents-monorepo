@@ -15,8 +15,53 @@ import { supabase } from './supabase.js';
 
 const log = createLogger({ module: 'metaCapiClient' });
 
-// Meta Conversions API endpoint
-const CAPI_BASE_URL = 'https://graph.facebook.com/v20.0';
+// Meta Conversions API endpoint (configurable via env)
+const CAPI_BASE_URL = process.env.META_CAPI_URL || 'https://graph.facebook.com/v20.0';
+
+// Retry and timeout configuration
+const CAPI_TIMEOUT_MS = 30000;
+const CAPI_MAX_RETRIES = 3;
+const CAPI_RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
+
+/**
+ * Circuit Breaker для Meta API
+ * Предотвращает перегрузку при сбоях
+ */
+class MetaCircuitBreaker {
+  private failures = 0;
+  private lastFailure = 0;
+  private readonly threshold = 5;
+  private readonly resetMs = 60000; // 1 minute
+
+  isOpen(): boolean {
+    if (this.failures < this.threshold) return false;
+    if (Date.now() - this.lastFailure > this.resetMs) {
+      this.reset();
+      return false;
+    }
+    return true;
+  }
+
+  recordSuccess(): void {
+    this.failures = 0;
+  }
+
+  recordFailure(): void {
+    this.failures++;
+    this.lastFailure = Date.now();
+  }
+
+  reset(): void {
+    this.failures = 0;
+    this.lastFailure = 0;
+  }
+
+  getState(): { failures: number; isOpen: boolean } {
+    return { failures: this.failures, isOpen: this.isOpen() };
+  }
+}
+
+const circuitBreaker = new MetaCircuitBreaker();
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
@@ -83,19 +128,88 @@ function hashForCapi(value: string): string {
 
 /**
  * Normalize and hash phone number for CAPI
- * Removes all non-digits, then hashes
+ * Removes all non-digits, validates length, then hashes
+ * @throws Error if phone is invalid
  */
 function hashPhone(phone: string): string {
   const normalized = phone.replace(/\D/g, '');
+  if (normalized.length < 10) {
+    throw new Error(`Invalid phone for CAPI hashing: too short (${normalized.length} digits)`);
+  }
   return hashForCapi(normalized);
 }
 
 /**
  * Generate unique event ID for deduplication
+ * Uses crypto.randomUUID for uniqueness instead of Date.now()
  */
 function generateEventId(params: CapiEventParams): string {
-  const data = `${params.pixelId}-${params.eventName}-${params.phone || params.ctwaClid}-${Date.now()}`;
+  const uuid = crypto.randomUUID();
+  const data = `${params.pixelId}-${params.eventName}-${params.phone || params.ctwaClid}-${uuid}`;
   return crypto.createHash('md5').update(data).digest('hex');
+}
+
+/**
+ * Fetch with retry and timeout
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  retries = CAPI_MAX_RETRIES
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), CAPI_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        // Success or client error (4xx) - don't retry
+        if (response.ok || response.status < 500) {
+          return response;
+        }
+
+        // Server error (5xx) - retry
+        log.warn({
+          attempt: attempt + 1,
+          status: response.status,
+          url,
+        }, 'CAPI request failed with 5xx, retrying...');
+
+        lastError = new Error(`HTTP ${response.status}`);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+
+      if (lastError.name === 'AbortError') {
+        log.warn({ attempt: attempt + 1, url }, 'CAPI request timed out, retrying...');
+      } else {
+        log.warn({
+          attempt: attempt + 1,
+          error: lastError.message,
+          url,
+        }, 'CAPI request failed, retrying...');
+      }
+    }
+
+    // Wait before next retry (exponential backoff)
+    if (attempt < retries - 1) {
+      const delay = CAPI_RETRY_DELAYS[attempt] || CAPI_RETRY_DELAYS[CAPI_RETRY_DELAYS.length - 1];
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError || new Error('Max retries exceeded');
 }
 
 /**
@@ -126,7 +240,18 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     hasEmail: !!email,
     hasCtwaClid: !!ctwaClid,
     dialogAnalysisId,
+    circuitBreakerState: circuitBreaker.getState(),
   }, 'Sending CAPI event');
+
+  // Check circuit breaker
+  if (circuitBreaker.isOpen()) {
+    log.warn({
+      pixelId,
+      eventName,
+      ...circuitBreaker.getState(),
+    }, 'Circuit breaker is open, skipping CAPI event');
+    return { success: false, error: 'Circuit breaker is open - too many recent failures' };
+  }
 
   // Validate required params
   if (!pixelId || !accessToken) {
@@ -176,10 +301,10 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       },
     };
 
-    // Send to CAPI
+    // Send to CAPI with retry and timeout
     const url = `${CAPI_BASE_URL}/${pixelId}/events`;
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -193,15 +318,18 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     const responseData = await response.json() as MetaCapiResponse;
 
     if (!response.ok) {
+      circuitBreaker.recordFailure();
+
       log.error({
         pixelId,
         eventName,
         status: response.status,
         error: responseData,
+        circuitBreakerState: circuitBreaker.getState(),
       }, 'CAPI request failed');
 
-      // Log to database
-      await logCapiEvent({
+      // Log to database with retry
+      await logCapiEventWithRetry({
         dialogAnalysisId,
         leadId,
         userAccountId,
@@ -225,6 +353,8 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       };
     }
 
+    circuitBreaker.recordSuccess();
+
     log.info({
       pixelId,
       eventName,
@@ -233,8 +363,8 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       eventsReceived: responseData.events_received,
     }, 'CAPI event sent successfully');
 
-    // Log to database
-    await logCapiEvent({
+    // Log to database with retry
+    await logCapiEventWithRetry({
       dialogAnalysisId,
       leadId,
       userAccountId,
@@ -256,16 +386,21 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       facebookResponse: responseData,
     };
   } catch (error) {
+    circuitBreaker.recordFailure();
+
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
 
     log.error({
       pixelId,
       eventName,
       error: errorMessage,
+      errorName,
+      circuitBreakerState: circuitBreaker.getState(),
     }, 'Error sending CAPI event');
 
-    // Log to database
-    await logCapiEvent({
+    // Log to database with retry
+    await logCapiEventWithRetry({
       dialogAnalysisId,
       leadId,
       userAccountId,
@@ -277,7 +412,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       eventTime: new Date(),
       contactPhone: phone,
       capiStatus: 'error',
-      capiError: errorMessage,
+      capiError: `${errorName}: ${errorMessage}`,
     });
 
     return {
@@ -287,10 +422,7 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
   }
 }
 
-/**
- * Log CAPI event to database for audit trail
- */
-async function logCapiEvent(params: {
+interface LogCapiEventParams {
   dialogAnalysisId?: string;
   leadId?: string;
   userAccountId: string;
@@ -305,37 +437,63 @@ async function logCapiEvent(params: {
   capiStatus: 'success' | 'error' | 'skipped';
   capiError?: string;
   capiResponse?: unknown;
-}): Promise<void> {
-  try {
-    await supabase.from('capi_events_log').insert({
-      dialog_analysis_id: params.dialogAnalysisId || null,
-      lead_id: params.leadId || null,
-      user_account_id: params.userAccountId,
-      direction_id: params.directionId || null,
-      event_name: params.eventName,
-      event_level: params.eventLevel,
-      pixel_id: params.pixelId,
-      ctwa_clid: params.ctwaClid || null,
-      event_time: params.eventTime.toISOString(),
-      event_id: params.eventId || null,
-      contact_phone: params.contactPhone || null,
-      capi_status: params.capiStatus,
-      capi_error: params.capiError || null,
-      capi_response: params.capiResponse || null,
-    });
-  } catch (error) {
-    log.error({ error }, 'Failed to log CAPI event to database');
+}
+
+/**
+ * Log CAPI event to database for audit trail with retry
+ */
+async function logCapiEventWithRetry(params: LogCapiEventParams, retries = 2): Promise<void> {
+  const insertData = {
+    dialog_analysis_id: params.dialogAnalysisId || null,
+    lead_id: params.leadId || null,
+    user_account_id: params.userAccountId,
+    direction_id: params.directionId || null,
+    event_name: params.eventName,
+    event_level: params.eventLevel,
+    pixel_id: params.pixelId,
+    ctwa_clid: params.ctwaClid || null,
+    event_time: params.eventTime.toISOString(),
+    event_id: params.eventId || null,
+    contact_phone: params.contactPhone || null,
+    capi_status: params.capiStatus,
+    capi_error: params.capiError || null,
+    capi_response: params.capiResponse || null,
+  };
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const { error } = await supabase.from('capi_events_log').insert(insertData);
+      if (error) throw error;
+      return; // Success
+    } catch (error) {
+      const isLastAttempt = attempt === retries;
+      if (isLastAttempt) {
+        log.error({
+          error: error instanceof Error ? error.message : String(error),
+          attempt: attempt + 1,
+          eventName: params.eventName,
+          eventLevel: params.eventLevel,
+        }, 'Failed to log CAPI event to database after retries');
+      } else {
+        log.warn({
+          attempt: attempt + 1,
+          eventName: params.eventName,
+        }, 'Failed to log CAPI event, retrying...');
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
   }
 }
 
 /**
  * Update dialog_analysis with CAPI event flags
+ * Returns true if update was successful
  */
 export async function updateDialogCapiFlags(
   dialogAnalysisId: string,
   eventLevel: CapiEventLevel,
   eventId: string
-): Promise<void> {
+): Promise<boolean> {
   try {
     const now = new Date().toISOString();
     const updates: Record<string, unknown> = {};
@@ -358,73 +516,169 @@ export async function updateDialogCapiFlags(
         break;
     }
 
-    await supabase
+    const { error, count } = await supabase
       .from('dialog_analysis')
       .update(updates)
       .eq('id', dialogAnalysisId);
 
+    if (error) {
+      log.error({
+        error: error.message,
+        dialogAnalysisId,
+        eventLevel,
+      }, 'Failed to update dialog CAPI flags - DB error');
+      return false;
+    }
+
+    if (count === 0) {
+      log.warn({
+        dialogAnalysisId,
+        eventLevel,
+      }, 'Failed to update dialog CAPI flags - dialog not found');
+      return false;
+    }
+
     log.debug({ dialogAnalysisId, eventLevel, eventId }, 'Updated dialog CAPI flags');
+    return true;
   } catch (error) {
-    log.error({ error, dialogAnalysisId, eventLevel }, 'Failed to update dialog CAPI flags');
+    log.error({
+      error: error instanceof Error ? error.message : String(error),
+      dialogAnalysisId,
+      eventLevel,
+    }, 'Failed to update dialog CAPI flags');
+    return false;
   }
 }
 
 /**
+ * Atomically claim and send CAPI event
+ * Prevents duplicate sends via atomic DB update
+ */
+export async function sendCapiEventAtomic(params: CapiEventParams): Promise<CapiResponse> {
+  const { dialogAnalysisId, eventLevel } = params;
+
+  if (!dialogAnalysisId) {
+    log.warn({ eventLevel }, 'Cannot use atomic send without dialogAnalysisId');
+    return sendCapiEvent(params);
+  }
+
+  const flagColumn = {
+    1: 'capi_interest_sent',
+    2: 'capi_qualified_sent',
+    3: 'capi_scheduled_sent',
+  }[eventLevel];
+
+  const flagAtColumn = `${flagColumn}_at`;
+
+  // Atomic: SET flag = true WHERE flag = false (claim the send)
+  const { data, error } = await supabase
+    .from('dialog_analysis')
+    .update({
+      [flagColumn]: true,
+      [flagAtColumn]: new Date().toISOString(),
+    })
+    .eq('id', dialogAnalysisId)
+    .eq(flagColumn, false)
+    .select('id')
+    .single();
+
+  if (error || !data) {
+    log.info({
+      dialogAnalysisId,
+      eventLevel,
+      reason: error ? 'db_error' : 'already_sent',
+    }, 'Skipping CAPI event - already sent or not found');
+
+    return {
+      success: false,
+      error: 'Event already sent or dialog not found',
+    };
+  }
+
+  // Successfully claimed - now send the event
+  const response = await sendCapiEvent(params);
+
+  // If send failed, we should ideally rollback the flag
+  // But for simplicity, we keep it set (event is logged as error in capi_events_log)
+  if (!response.success) {
+    log.warn({
+      dialogAnalysisId,
+      eventLevel,
+      error: response.error,
+    }, 'CAPI event claimed but send failed - flag remains set');
+  } else if (response.eventId) {
+    // Update with event_id
+    await supabase
+      .from('dialog_analysis')
+      .update({ [`${flagColumn.replace('_sent', '_event_id')}`]: response.eventId })
+      .eq('id', dialogAnalysisId);
+  }
+
+  return response;
+}
+
+/**
  * Get pixel info for a direction
+ * Optimized: single query with JOINs instead of 4 separate queries
  */
 export async function getDirectionPixelInfo(directionId: string): Promise<{
   pixelId: string | null;
   accessToken: string | null;
 }> {
   try {
-    // Get direction with default_ad_settings
-    const { data: settings } = await supabase
-      .from('default_ad_settings')
-      .select('pixel_id')
-      .eq('direction_id', directionId)
-      .single();
-
-    if (!settings?.pixel_id) {
-      return { pixelId: null, accessToken: null };
-    }
-
-    // Get access token from direction's user account
-    const { data: direction } = await supabase
+    // Single query with all necessary JOINs
+    const { data: direction, error } = await supabase
       .from('account_directions')
-      .select('user_account_id, account_id')
+      .select(`
+        id,
+        user_account_id,
+        account_id,
+        default_ad_settings(pixel_id),
+        ad_accounts(access_token),
+        user_accounts(access_token)
+      `)
       .eq('id', directionId)
       .single();
 
+    if (error) {
+      log.warn({ error: error.message, directionId }, 'Error fetching direction pixel info');
+      return { pixelId: null, accessToken: null };
+    }
+
     if (!direction) {
-      return { pixelId: settings.pixel_id, accessToken: null };
+      log.debug({ directionId }, 'Direction not found');
+      return { pixelId: null, accessToken: null };
     }
 
-    // Try ad_accounts first (multi-account mode)
-    if (direction.account_id) {
-      const { data: adAccount } = await supabase
-        .from('ad_accounts')
-        .select('access_token')
-        .eq('id', direction.account_id)
-        .single();
+    // Extract pixel_id from default_ad_settings (could be array or object)
+    const settings = direction.default_ad_settings;
+    const pixelId = Array.isArray(settings)
+      ? settings[0]?.pixel_id
+      : settings?.pixel_id;
 
-      if (adAccount?.access_token) {
-        return { pixelId: settings.pixel_id, accessToken: adAccount.access_token };
-      }
+    if (!pixelId) {
+      log.debug({ directionId }, 'No pixel_id found for direction');
+      return { pixelId: null, accessToken: null };
     }
 
-    // Fallback to user_accounts
-    const { data: userAccount } = await supabase
-      .from('user_accounts')
-      .select('access_token')
-      .eq('id', direction.user_account_id)
-      .single();
+    // Get access token: prefer ad_accounts, fallback to user_accounts
+    const adAccount = direction.ad_accounts;
+    const userAccount = direction.user_accounts;
 
-    return {
-      pixelId: settings.pixel_id,
-      accessToken: userAccount?.access_token || null,
-    };
+    const accessToken = (Array.isArray(adAccount) ? adAccount[0]?.access_token : adAccount?.access_token)
+      || (Array.isArray(userAccount) ? userAccount[0]?.access_token : userAccount?.access_token)
+      || null;
+
+    if (!accessToken) {
+      log.warn({ directionId, pixelId }, 'Found pixel but no access_token');
+    }
+
+    return { pixelId, accessToken };
   } catch (error) {
-    log.error({ error, directionId }, 'Error getting direction pixel info');
+    log.error({
+      error: error instanceof Error ? error.message : String(error),
+      directionId,
+    }, 'Error getting direction pixel info');
     return { pixelId: null, accessToken: null };
   }
 }

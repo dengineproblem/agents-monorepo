@@ -143,6 +143,22 @@ app.post('/process-message', async (request, reply) => {
         await markCampaignReply(lead.id);
       }
 
+      // Запустить CAPI анализ в фоне (не блокирует ответ)
+      // Using Promise.resolve().then() for proper error handling
+      Promise.resolve().then(async () => {
+        const dialogData = await getDialogForCapi(instanceName, contactPhone);
+        if (dialogData) {
+          await processDialogForCapi(dialogData);
+        }
+      }).catch((capiError: Error) => {
+        app.log.error({
+          error: capiError.message,
+          stack: capiError.stack,
+          contactPhone,
+          instanceName
+        }, 'Error in CAPI qualification processing (AI bot)');
+      });
+
       return reply.send({ success: result.processed, reason: result.reason });
     }
 
@@ -177,19 +193,19 @@ app.post('/process-message', async (request, reply) => {
 
     // Запустить LLM-агент квалификации в фоне (не блокирует ответ бота)
     // Анализирует диалог и отправляет CAPI события если нужно
-    setImmediate(async () => {
-      try {
-        const dialogData = await getDialogForCapi(instanceName, contactPhone);
-        if (dialogData) {
-          await processDialogForCapi(dialogData);
-        }
-      } catch (capiError: any) {
-        app.log.error({
-          error: capiError.message,
-          contactPhone,
-          instanceName
-        }, 'Error in CAPI qualification processing');
+    // Using Promise.resolve().then() for proper error handling
+    Promise.resolve().then(async () => {
+      const dialogData = await getDialogForCapi(instanceName, contactPhone);
+      if (dialogData) {
+        await processDialogForCapi(dialogData);
       }
+    }).catch((capiError: Error) => {
+      app.log.error({
+        error: capiError.message,
+        stack: capiError.stack,
+        contactPhone,
+        instanceName
+      }, 'Error in CAPI qualification processing (legacy)');
     });
 
     return reply.send({ success: true });

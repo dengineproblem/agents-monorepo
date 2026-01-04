@@ -159,6 +159,17 @@ export const TooltipKeys = {
   PROFILE_AD_ACCOUNTS: 'profile.adAccounts',
   PROFILE_BUSINESS_PORTFOLIO: 'profile.businessPortfolio',
 
+  // CAPI Events
+  CAPI_LEAD: 'capi.lead',
+  CAPI_REGISTRATION: 'capi.registration',
+  CAPI_SCHEDULE: 'capi.schedule',
+  CAPI_CONVERSION_LEADS: 'capi.conversionLeads',
+  CAPI_CONVERSION_L1L2: 'capi.conversionL1L2',
+  CAPI_CONVERSION_L2L3: 'capi.conversionL2L3',
+  CAPI_COST_LEAD: 'capi.costLead',
+  CAPI_COST_REGISTRATION: 'capi.costRegistration',
+  CAPI_COST_SCHEDULE: 'capi.costSchedule',
+
   // Autopilot
   AUTOPILOT_STATUS: 'autopilot.status',
   AUTOPILOT_HEALTH: 'autopilot.health',
@@ -816,6 +827,46 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
     title: 'Business Portfolio',
     content: 'Для подключения выдайте партнёрский доступ к вашему Business Portfolio в Meta Business Suite.',
     learnMoreLink: '/knowledge-base/getting-started/facebook-connection',
+  },
+
+  // ==========================================
+  // CAPI Events
+  // ==========================================
+  [TooltipKeys.CAPI_LEAD]: {
+    title: 'CAPI Lead (Interest)',
+    content: 'Количество событий Interest (уровень 1), отправленных в Meta Conversions API. Означает, что клиент проявил интерес (2+ сообщения в WhatsApp).',
+  },
+  [TooltipKeys.CAPI_REGISTRATION]: {
+    title: 'CAPI Registration (Qualified)',
+    content: 'Количество событий CompleteRegistration (уровень 2), отправленных в Meta CAPI. Означает, что клиент прошёл квалификацию.',
+  },
+  [TooltipKeys.CAPI_SCHEDULE]: {
+    title: 'CAPI Schedule (Scheduled)',
+    content: 'Количество событий Schedule (уровень 3), отправленных в Meta CAPI. Означает, что клиент записался на консультацию.',
+  },
+  [TooltipKeys.CAPI_CONVERSION_L1L2]: {
+    title: 'Конверсия Lead → Registration',
+    content: 'Процент лидов (Interest), которые прошли квалификацию (CompleteRegistration). Формула: Registration ÷ Lead × 100%.',
+  },
+  [TooltipKeys.CAPI_CONVERSION_L2L3]: {
+    title: 'Конверсия Registration → Schedule',
+    content: 'Процент квалифицированных лидов, которые записались на консультацию. Формула: Schedule ÷ Registration × 100%.',
+  },
+  [TooltipKeys.CAPI_CONVERSION_LEADS]: {
+    title: 'Конверсия Лиды → CAPI Lead',
+    content: 'Процент лидов из Facebook, которые отправили сообщение в WhatsApp и стали CAPI Lead. Формула: CAPI Lead ÷ Facebook Leads × 100%.',
+  },
+  [TooltipKeys.CAPI_COST_LEAD]: {
+    title: 'Стоимость CAPI Lead',
+    content: 'Средняя стоимость одного CAPI Lead. Рассчитывается как общий расход ÷ количество CAPI Lead.',
+  },
+  [TooltipKeys.CAPI_COST_REGISTRATION]: {
+    title: 'Стоимость CAPI Registration',
+    content: 'Средняя стоимость одного квалифицированного лида. Рассчитывается как общий расход ÷ количество CAPI Registration.',
+  },
+  [TooltipKeys.CAPI_COST_SCHEDULE]: {
+    title: 'Стоимость CAPI Schedule',
+    content: 'Средняя стоимость одной записи на консультацию. Рассчитывается как общий расход ÷ количество CAPI Schedule.',
   },
 
   // ==========================================
