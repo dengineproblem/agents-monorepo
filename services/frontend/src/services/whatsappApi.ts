@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export interface WhatsAppNumber {
   id: string;
@@ -28,7 +29,8 @@ export const whatsappApi = {
    */
   async getNumbers(userAccountId: string, accountId?: string): Promise<WhatsAppNumber[]> {
     let url = `${API_BASE_URL}/whatsapp-numbers?userAccountId=${userAccountId}`;
-    if (accountId) {
+    // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (shouldFilterByAccountId(accountId)) {
       url += `&accountId=${accountId}`;
     }
     const response = await fetch(url);

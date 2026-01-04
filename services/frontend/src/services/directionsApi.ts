@@ -1,5 +1,6 @@
 import type { Direction, CreateDirectionPayload, UpdateDirectionPayload } from '@/types/direction';
 import { API_BASE_URL } from '@/config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -20,8 +21,9 @@ export const directionsApi = {
 
       // Строим URL с параметрами
       const params = new URLSearchParams({ userAccountId });
-      if (accountId) {
-        params.append('accountId', accountId);
+      // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
+        params.append('accountId', accountId!);
       }
 
       const response = await fetch(`${API_BASE_URL}/directions?${params.toString()}`);

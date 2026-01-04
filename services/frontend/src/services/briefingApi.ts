@@ -3,6 +3,7 @@
  */
 
 import { API_BASE_URL } from '@/config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export interface BriefingFormData {
   business_name: string;
@@ -132,8 +133,9 @@ export const briefingApi = {
 
     try {
       const params = new URLSearchParams();
-      if (accountId) {
-        params.append('accountId', accountId);
+      // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
+        params.append('accountId', accountId!);
       }
       const queryString = params.toString();
       const url = `${API_BASE_URL}/briefing/${userId}${queryString ? `?${queryString}` : ''}`;

@@ -12,6 +12,7 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { unifiedStore } from './stores/unifiedStore.js';
 import { TokenBudget } from './shared/tokenBudget.js';
 import { formatBrainActionsForNotes } from './shared/brainRules.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 /**
  * Gather all context needed for the chat assistant with token budgeting
@@ -151,8 +152,8 @@ async function getBusinessProfile(userAccountId, adAccountId) {
     .select('*')
     .eq('user_account_id', userAccountId);
 
-  // Фильтр по account_id для мультиаккаунтности
-  if (adAccountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     query = query.eq('account_id', adAccountId);
   }
 
@@ -181,8 +182,8 @@ async function getTodayMetrics(userAccountId, adAccountId) {
       .order('created_at', { ascending: false })
       .limit(1);
 
-    // Для мультиаккаунтности фильтруем по account_id
-    if (adAccountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('account_id', adAccountId);
     }
 
@@ -254,8 +255,8 @@ async function getActiveContexts(userAccountId, adAccountId) {
     .eq('user_account_id', userAccountId)
     .eq('is_active', true);
 
-  // Фильтр по account_id для мультиаккаунтности
-  if (adAccountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     query = query.eq('account_id', adAccountId);
   }
 
@@ -347,7 +348,8 @@ async function getAdsSnapshot(userAccountId, adAccountId) {
     .order('created_at', { ascending: false })
     .limit(1);
 
-  if (adAccountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     query = query.eq('account_id', adAccountId);
   }
 
@@ -420,7 +422,8 @@ async function getDirectionsSnapshot(userAccountId, adAccountId) {
     .eq('user_account_id', userAccountId)
     .gte('day', sevenDaysAgo);
 
-  if (adAccountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     query = query.eq('account_id', adAccountId);
   }
 
@@ -473,7 +476,8 @@ async function getCreativesSnapshot(userAccountId, adAccountId) {
     .order('created_at', { ascending: false })
     .limit(50);
 
-  if (adAccountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     scoresQuery = scoresQuery.eq('account_id', adAccountId);
   }
 
@@ -582,8 +586,8 @@ async function getDirections(userAccountId, adAccountId) {
     .order('is_active', { ascending: false })
     .order('name', { ascending: true });
 
-  // Filter by ad account for multi-account support
-  if (adAccountId) {
+  // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     query = query.eq('account_id', adAccountId);
   }
 
@@ -790,7 +794,8 @@ export async function getConversations({ userAccountId, adAccountId, limit = 20,
     .order('updated_at', { ascending: false })
     .limit(limit);
 
-  if (adAccountId) {
+  // Фильтр по ad_account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
     query = query.eq('ad_account_id', adAccountId);
   }
 
@@ -872,8 +877,8 @@ export async function getRecentBrainActions(userAccountId, adAccountId) {
       .order('created_at', { ascending: false })
       .limit(5);
 
-    // Filter by account_id if provided
-    if (adAccountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('account_id', adAccountId);
     }
 

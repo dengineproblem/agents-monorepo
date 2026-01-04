@@ -12,6 +12,7 @@ import type {
   CompetitorsPagination,
 } from '@/types/competitor';
 import { API_BASE_URL } from '@/config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export const competitorsApi = {
   /**
@@ -23,8 +24,9 @@ export const competitorsApi = {
       console.log('[competitorsApi.list] Запрос конкурентов для user_account_id:', userAccountId, 'account_id:', accountId);
 
       const params = new URLSearchParams({ userAccountId });
-      if (accountId) {
-        params.append('accountId', accountId);
+      // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
+        params.append('accountId', accountId!);
       }
 
       const response = await fetch(
@@ -252,8 +254,9 @@ export const competitorsApi = {
         newOnly: newOnly.toString(),
       });
 
-      if (accountId) {
-        params.append('accountId', accountId);
+      // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
+        params.append('accountId', accountId!);
       }
 
       const response = await fetch(
@@ -307,8 +310,9 @@ export const competitorsApi = {
         top10Only: 'true',
       });
 
-      if (accountId) {
-        params.append('accountId', accountId);
+      // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+      if (shouldFilterByAccountId(accountId)) {
+        params.append('accountId', accountId!);
       }
 
       const response = await fetch(

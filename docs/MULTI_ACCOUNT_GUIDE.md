@@ -2839,3 +2839,150 @@ if (currentAdAccountId) {
 - Telegram берётся из `ad_accounts` без fallback
 - Frontend загружает статус при смене аккаунта
 - Legacy режим не затронут
+
+### Версия 2.9 — shouldFilterByAccountId для совместимости legacy аккаунтов
+
+**Критическая проблема:**
+
+Legacy аккаунты (multi_account_enabled=false) не видели данные, потому что API фильтровали по `accountId` без проверки флага `multi_account_enabled`. Frontend мог передавать stale `accountId` из localStorage даже для legacy пользователей.
+
+**Корневая причина:**
+
+```javascript
+// НЕПРАВИЛЬНО — проверяли только наличие accountId
+if (accountId) {
+  query = query.eq('account_id', accountId);
+}
+```
+
+Если frontend случайно передаёт `accountId` для legacy пользователя → данные не найдутся → пустой ответ.
+
+**Решение — shouldFilterByAccountId хелпер:**
+
+Создан единый хелпер, который проверяет СНАЧАЛА флаг `multi_account_enabled`, и ТОЛЬКО ПОТОМ применяет фильтр:
+
+```javascript
+// ПРАВИЛЬНО — всегда проверяем флаг первым
+if (await shouldFilterByAccountId(userAccountId, accountId)) {
+  query = query.eq('account_id', accountId);
+}
+```
+
+**Новые файлы:**
+
+| Сервис | Файл | Описание |
+|--------|------|----------|
+| agent-brain | `src/lib/multiAccountHelper.js` | Хелперы с 5-минутным кэшем |
+| agent-service | `src/lib/multiAccountHelper.ts` | TypeScript версия |
+
+**Реализация multiAccountHelper:**
+
+```javascript
+// services/agent-brain/src/lib/multiAccountHelper.js
+import { supabase } from './supabaseClient.js';
+
+const cache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 минут
+
+export async function isMultiAccountEnabled(userAccountId) {
+  const now = Date.now();
+  const cached = cache.get(userAccountId);
+  if (cached && cached.expires > now) return cached.value;
+
+  const { data } = await supabase
+    .from('user_accounts')
+    .select('multi_account_enabled')
+    .eq('id', userAccountId)
+    .single();
+
+  const enabled = !!data?.multi_account_enabled;
+  cache.set(userAccountId, { value: enabled, expires: now + CACHE_TTL_MS });
+  return enabled;
+}
+
+export async function shouldFilterByAccountId(userAccountId, accountId) {
+  if (!accountId) return false;
+  return await isMultiAccountEnabled(userAccountId);
+}
+```
+
+**Исправленные файлы в agent-brain:**
+
+| Файл | Количество исправлений |
+|------|------------------------|
+| `src/chatAssistant/contextGatherer.js` | 9 мест |
+| `src/chatAssistant/toolHandlers.js` | 4 места |
+| `src/chatAssistant/stores/unifiedStore.js` | 1 место |
+
+**Исправленные функции в contextGatherer.js:**
+
+- `getBusinessProfile()` — профиль бизнеса
+- `getTodayMetrics()` — метрики за сегодня
+- `getActiveContexts()` — активные контексты
+- `getAdsSnapshot()` — снапшот объявлений
+- `getDirectionsSnapshot()` — снапшот направлений
+- `getCreativesSnapshot()` — снапшот креативов
+- `getDirections()` — список направлений
+- `getConversations()` — чаты (исправило ошибку "Не удалось загрузить чаты")
+- `getRecentBrainActions()` — недавние действия агента
+
+**Исправленные функции в toolHandlers.js:**
+
+- `handleLeads()` — получение лидов
+- `handleFunnelStats()` — статистика воронки
+- `handleDialogsInfo()` — информация о диалогах
+- `handleCreativeInfo()` — информация о креативах
+
+**Паттерн исправления:**
+
+```javascript
+// До
+if (adAccountId) {
+  query = query.eq('account_id', adAccountId);
+}
+
+// После
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
+
+if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
+  query = query.eq('account_id', adAccountId);
+}
+```
+
+**Исправления в Frontend (API слой):**
+
+| Файл | Изменение |
+|------|-----------|
+| `competitorsApi.ts` | Использует shouldFilterByAccountId |
+| `briefingApi.ts` | Использует shouldFilterByAccountId |
+| `amocrmApi.ts` | Использует shouldFilterByAccountId |
+| `whatsappApi.ts` | Использует shouldFilterByAccountId |
+| `directionsApi.ts` | Использует shouldFilterByAccountId |
+| `assistantApi.ts` | Использует shouldFilterByAccountId |
+
+**Логика принятия решения:**
+
+| multi_account_enabled | accountId передан | shouldFilterByAccountId | Результат |
+|-----------------------|-------------------|-------------------------|-----------|
+| false | любой | false | Нет фильтра, видит все данные |
+| true | null/undefined | false | Нет фильтра |
+| true | UUID | true | Фильтр по account_id |
+
+**Почему batch processing безопасен:**
+
+```javascript
+// processDailyBatch() передаёт:
+// - Legacy: accountId = null → shouldFilterByAccountId = false ✓
+// - Multi-account: accountId = UUID → shouldFilterByAccountId = true ✓
+```
+
+**CORS исправление:**
+
+Добавлен `'http://localhost:8087'` в `ALLOWED_ORIGINS` в `server.js` для локальной разработки.
+
+**Готовность к продакшену:** ✅
+
+- Legacy аккаунты работают корректно
+- Multi-account аккаунты изолированы
+- Батч-обработка безопасна для обоих режимов
+- 5-минутный кэш снижает нагрузку на БД

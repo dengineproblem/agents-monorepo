@@ -5,6 +5,7 @@
  */
 
 import { API_BASE_URL } from '../config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 export interface FunnelStage {
   stage_name: string;
@@ -80,8 +81,9 @@ export async function getCreativeFunnelStats(params: {
     creativeId: params.creativeId,
   });
 
-  if (params.accountId) {
-    queryParams.append('accountId', params.accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(params.accountId)) {
+    queryParams.append('accountId', params.accountId!);
   }
 
   if (params.directionId) {
@@ -121,8 +123,9 @@ export async function triggerLeadsSync(
 ): Promise<SyncResult> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -158,8 +161,9 @@ export async function triggerCreativeLeadsSync(
     creativeId,
   });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -190,8 +194,9 @@ export async function getPipelines(
 ): Promise<Pipeline[]> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const url = `${API_BASE_URL}/amocrm/pipelines?${queryParams.toString()}`;
@@ -315,8 +320,9 @@ export async function recalculateKeyStageStats(
     queryParams.append('directionId', directionId);
   }
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -388,8 +394,9 @@ export async function getLeadCustomFields(
 ): Promise<{ fields: CustomField[] }> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -417,8 +424,9 @@ export async function getQualificationField(
 ): Promise<QualificationFieldSetting> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -456,8 +464,9 @@ export async function setQualificationField(
 ): Promise<{ success: boolean }> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -492,8 +501,9 @@ export async function getQualificationFields(
 ): Promise<QualificationFieldsSettings> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -524,8 +534,9 @@ export async function setQualificationFields(
 ): Promise<{ success: boolean }> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -575,8 +586,9 @@ export async function getQualifiedLeadsByCreative(
     queryParams.append('dateTo', dateTo);
   }
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -627,8 +639,9 @@ export async function getQualifiedLeadsTotal(
     queryParams.append('dateTo', dateTo);
   }
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -665,8 +678,9 @@ export async function getScheduledFields(
 ): Promise<ScheduledFieldsSettings> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(
@@ -697,8 +711,9 @@ export async function setScheduledFields(
 ): Promise<{ success: boolean }> {
   const queryParams = new URLSearchParams({ userAccountId });
 
-  if (accountId) {
-    queryParams.append('accountId', accountId);
+  // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(accountId)) {
+    queryParams.append('accountId', accountId!);
   }
 
   const response = await fetch(

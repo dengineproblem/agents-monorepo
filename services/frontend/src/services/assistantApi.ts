@@ -4,6 +4,7 @@
  */
 
 import { BRAIN_API_BASE_URL } from '@/config/api';
+import { shouldFilterByAccountId } from '@/utils/multiAccountHelper';
 
 // Types
 export type ChatMode = 'auto' | 'plan' | 'ask';
@@ -409,8 +410,9 @@ export async function getConversations(
     limit: String(limit),
   });
 
-  if (adAccountId) {
-    params.set('adAccountId', adAccountId);
+  // Передаём adAccountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+  if (shouldFilterByAccountId(adAccountId)) {
+    params.set('adAccountId', adAccountId!);
   }
 
   const response = await fetch(

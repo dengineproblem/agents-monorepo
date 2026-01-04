@@ -6,6 +6,7 @@
 import { supabase, supabaseQuery } from '../lib/supabaseClient.js';
 import { logger } from '../lib/logger.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://localhost:8082';
@@ -362,7 +363,8 @@ const toolHandlers = {
       .order('created_at', { ascending: false })
       .limit(limit || 20);
 
-    if (adAccountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('account_id', adAccountId);
     }
 
@@ -453,7 +455,8 @@ const toolHandlers = {
       .gte('created_at', dateRange.since)
       .lte('created_at', dateRange.until);
 
-    if (adAccountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('account_id', adAccountId);
     }
 
@@ -513,7 +516,8 @@ const toolHandlers = {
       .order('last_message_at', { ascending: false })
       .limit(limit || 20);
 
-    if (adAccountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('account_id', adAccountId);
     }
 
@@ -617,7 +621,8 @@ const toolHandlers = {
       .eq('user_account_id', userAccountId)
       .limit(limit || 20);
 
-    if (adAccountId) {
+    // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('account_id', adAccountId);
     }
 

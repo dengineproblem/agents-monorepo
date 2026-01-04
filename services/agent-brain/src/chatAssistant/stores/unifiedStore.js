@@ -5,6 +5,7 @@
 
 import { supabase } from '../../lib/supabaseClient.js';
 import { logger } from '../../lib/logger.js';
+import { shouldFilterByAccountId } from '../../lib/multiAccountHelper.js';
 
 const MAX_CONTEXT_MESSAGES = 20;
 const LOCK_TIMEOUT_MINUTES = 5;
@@ -94,7 +95,8 @@ export class UnifiedConversationStore {
       .order('updated_at', { ascending: false })
       .limit(limit);
 
-    if (adAccountId) {
+    // Фильтр по ad_account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
+    if (await shouldFilterByAccountId(userAccountId, adAccountId)) {
       query = query.eq('ad_account_id', adAccountId);
     }
 
