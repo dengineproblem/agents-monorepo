@@ -101,12 +101,9 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
 
   const message = messages[0];
 
-  // IMPORTANT: Ignore outgoing messages (fromMe === true)
+  // Handle outgoing messages (fromMe === true) - check for operator intervention
   if (message.key?.fromMe === true) {
-    app.log.debug({
-      remoteJid: message.key.remoteJid,
-      messageId: message.key.id
-    }, 'Ignoring outgoing message');
+    await handleOperatorIntervention(event, message, app);
     return;
   }
 
@@ -963,4 +960,199 @@ async function notifyManualMatchRequired(
   if (sent) {
     app.log.info({ userAccountId, clientPhone }, 'Sent manual match notification to Telegram');
   }
+}
+
+/**
+ * Обработка исходящего сообщения - проверка на вмешательство оператора
+ * Если оператор отправил сообщение (не бот), и включена пауза при вмешательстве,
+ * ставим бота на паузу
+ */
+async function handleOperatorIntervention(
+  event: any,
+  message: any,
+  app: FastifyInstance
+) {
+  const { instance } = event;
+  const remoteJid = message.key?.remoteJid;
+
+  if (!remoteJid) {
+    app.log.debug({ instance }, 'No remoteJid in outgoing message');
+    return;
+  }
+
+  // Пропускаем групповые чаты
+  if (remoteJid.endsWith('@g.us')) {
+    return;
+  }
+
+  // Извлекаем номер телефона
+  const clientPhone = remoteJid
+    .replace('@s.whatsapp.net', '')
+    .replace('@c.us', '')
+    .replace('@lid', '');
+
+  // Находим dialog_analysis для этого чата
+  const { data: lead, error: leadError } = await supabase
+    .from('dialog_analysis')
+    .select('id, instance_name, last_bot_message_at, bot_paused')
+    .eq('contact_phone', clientPhone)
+    .eq('instance_name', instance)
+    .maybeSingle();
+
+  if (leadError || !lead) {
+    app.log.debug({ instance, clientPhone }, 'No dialog_analysis for outgoing message');
+    return;
+  }
+
+  // Если бот уже на паузе - ничего не делаем
+  if (lead.bot_paused) {
+    app.log.debug({ instance, clientPhone, leadId: lead.id }, 'Bot already paused');
+    return;
+  }
+
+  // Проверяем, это сообщение от бота или от оператора
+  // Бот обновляет last_bot_message_at при отправке
+  // Если last_bot_message_at было обновлено в последние 10 секунд - это бот
+  const now = Date.now();
+  const lastBotMessageAt = lead.last_bot_message_at
+    ? new Date(lead.last_bot_message_at).getTime()
+    : 0;
+  const timeSinceLastBotMessage = now - lastBotMessageAt;
+
+  // Если прошло меньше 10 секунд с последнего сообщения бота - это скорее всего бот
+  if (timeSinceLastBotMessage < 10000) {
+    app.log.debug({
+      instance,
+      clientPhone,
+      timeSinceLastBotMessage,
+      leadId: lead.id
+    }, 'Outgoing message is likely from bot');
+    return;
+  }
+
+  // Это сообщение от оператора! Получаем конфиг бота
+  const botConfig = await getBotConfigForOperatorPause(instance);
+
+  if (!botConfig) {
+    app.log.debug({ instance }, 'No bot config for operator pause check');
+    return;
+  }
+
+  if (!botConfig.operator_pause_enabled) {
+    app.log.debug({
+      instance,
+      clientPhone,
+      botId: botConfig.id
+    }, 'Operator pause not enabled for this bot');
+    return;
+  }
+
+  // Оператор вмешался и пауза включена - ставим бота на паузу
+  app.log.info({
+    instance,
+    clientPhone,
+    leadId: lead.id,
+    botId: botConfig.id,
+    operatorPauseHours: botConfig.operator_auto_resume_hours,
+    operatorPauseMinutes: botConfig.operator_auto_resume_minutes
+  }, 'Operator intervention detected, pausing bot');
+
+  // Вычисляем время автоматического возобновления
+  const pauseHours = botConfig.operator_auto_resume_hours || 0;
+  const pauseMinutes = botConfig.operator_auto_resume_minutes || 0;
+  const totalPauseMs = (pauseHours * 60 + pauseMinutes) * 60 * 1000;
+
+  const updateData: Record<string, any> = { bot_paused: true };
+
+  if (totalPauseMs > 0) {
+    const pausedUntil = new Date(now + totalPauseMs);
+    updateData.bot_paused_until = pausedUntil.toISOString();
+    app.log.info({
+      leadId: lead.id,
+      pausedUntil: pausedUntil.toISOString()
+    }, 'Bot paused with auto-resume time');
+  }
+
+  const { error: updateError } = await supabase
+    .from('dialog_analysis')
+    .update(updateData)
+    .eq('id', lead.id);
+
+  if (updateError) {
+    app.log.error({
+      error: updateError.message,
+      leadId: lead.id
+    }, 'Failed to pause bot after operator intervention');
+  } else {
+    app.log.info({
+      leadId: lead.id,
+      clientPhone,
+      instance
+    }, 'Bot paused due to operator intervention');
+  }
+}
+
+/**
+ * Получить конфиг бота для проверки operator_pause
+ */
+async function getBotConfigForOperatorPause(instanceName: string): Promise<{
+  id: string;
+  operator_pause_enabled: boolean;
+  operator_auto_resume_hours: number;
+  operator_auto_resume_minutes: number;
+} | null> {
+  // Получаем инстанс
+  const { data: instanceData, error: instanceError } = await supabase
+    .from('whatsapp_instances')
+    .select('user_account_id')
+    .eq('instance_name', instanceName)
+    .single();
+
+  if (instanceError || !instanceData) {
+    return null;
+  }
+
+  // Ищем бота привязанного к инстансу через bot_instances или активного бота пользователя
+  const { data: botInstance } = await supabase
+    .from('bot_instances')
+    .select(`
+      ai_bots (
+        id,
+        config
+      )
+    `)
+    .eq('instance_name', instanceName)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (botInstance?.ai_bots) {
+    const bot = botInstance.ai_bots as any;
+    const config = bot.config || {};
+    return {
+      id: bot.id,
+      operator_pause_enabled: config.operator_pause_enabled ?? false,
+      operator_auto_resume_hours: config.operator_auto_resume_hours ?? 0,
+      operator_auto_resume_minutes: config.operator_auto_resume_minutes ?? 30
+    };
+  }
+
+  // Fallback: ищем любого активного бота пользователя
+  const { data: fallbackBot } = await supabase
+    .from('ai_bots')
+    .select('id, config')
+    .eq('user_account_id', instanceData.user_account_id)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (fallbackBot) {
+    const config = fallbackBot.config || {};
+    return {
+      id: fallbackBot.id,
+      operator_pause_enabled: config.operator_pause_enabled ?? false,
+      operator_auto_resume_hours: config.operator_auto_resume_hours ?? 0,
+      operator_auto_resume_minutes: config.operator_auto_resume_minutes ?? 30
+    };
+  }
+
+  return null;
 }
