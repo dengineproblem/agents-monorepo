@@ -37,6 +37,25 @@ export const chatsService = {
   },
 
   /**
+   * Get message history with AI debug info for bot messages
+   */
+  async getMessagesWithDebug(
+    instanceName: string,
+    remoteJid: string,
+    options?: { limit?: number; offset?: number }
+  ): Promise<ChatMessagesResponse> {
+    const params = new URLSearchParams({
+      instanceName,
+      ...(options?.limit && { limit: String(options.limit) }),
+      ...(options?.offset && { offset: String(options.offset) }),
+    });
+
+    const response = await fetch(`${API_BASE_URL}/chats/${encodeURIComponent(remoteJid)}/messages-with-debug?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch messages with debug');
+    return response.json();
+  },
+
+  /**
    * Send a message to a chat
    */
   async sendMessage(

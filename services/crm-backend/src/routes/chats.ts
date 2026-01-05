@@ -411,6 +411,171 @@ export async function chatsRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /chats/:remoteJid/messages-with-debug
+   * Get message history with AI debug info for bot messages
+   */
+  app.get('/chats/:remoteJid/messages-with-debug', async (request, reply) => {
+    const startTime = Date.now();
+    const cid = generateCorrelationId();
+    const { remoteJid } = request.params as { remoteJid: string };
+    const tags: LogTag[] = ['api', 'db', 'chats'];
+
+    const phone = extractPhoneFromJid(remoteJid);
+    const maskedPhone = maskPhone(phone);
+
+    app.log.info({
+      cid: shortCorrelationId(cid),
+      phone: maskedPhone,
+      tags
+    }, '[GET /chats/:remoteJid/messages-with-debug] Request received');
+
+    try {
+      // Validate query params
+      const validationResult = GetMessagesQuerySchema.safeParse(request.query);
+      if (!validationResult.success) {
+        app.log.warn({
+          cid: shortCorrelationId(cid),
+          errorType: 'validation_error',
+          errors: validationResult.error.errors
+        }, '[GET /chats/:remoteJid/messages-with-debug] Validation failed');
+        return reply.status(400).send({
+          error: 'Validation error',
+          details: validationResult.error.errors
+        });
+      }
+
+      const { instanceName, limit, offset } = validationResult.data;
+
+      // 1. Get messages from Evolution DB
+      const evolutionQuery_ = `
+        SELECT
+          m."key"->>'id' as message_id,
+          m."key"->>'fromMe' as from_me,
+          m."message" as message_data,
+          m."messageTimestamp" as timestamp,
+          m."pushName" as push_name
+        FROM "Message" m
+        WHERE m."instanceId" = (
+          SELECT id FROM "Instance" WHERE name = $1
+        )
+        AND (
+          m."key"->>'remoteJid' = $2
+          OR m."key"->>'remoteJidAlt' = $2
+        )
+        ORDER BY m."messageTimestamp" DESC
+        LIMIT $3 OFFSET $4
+      `;
+
+      const evolutionResult = await evolutionQuery(evolutionQuery_, [instanceName, remoteJid, limit, offset]);
+
+      // 2. Get debug info from dialog_analysis
+      const phoneVariants = [
+        phone,
+        `+${phone}`,
+        phone.replace(/^\+/, '')
+      ];
+
+      const { data: lead } = await supabase
+        .from('dialog_analysis')
+        .select('messages')
+        .eq('instance_name', instanceName)
+        .in('contact_phone', phoneVariants)
+        .maybeSingle();
+
+      // 3. Collect debug info with exact timestamps for precise matching
+      const debugEntries: Array<{ timestamp: number; debug: any }> = [];
+      if (lead?.messages && Array.isArray(lead.messages)) {
+        for (const msg of lead.messages) {
+          if (msg.sender === 'bot' && msg.debug) {
+            const ts = new Date(msg.timestamp).getTime() / 1000;
+            debugEntries.push({ timestamp: ts, debug: msg.debug });
+          }
+        }
+        // Sort by timestamp for efficient searching
+        debugEntries.sort((a, b) => a.timestamp - b.timestamp);
+      }
+
+      // 4. Merge Evolution messages with debug
+      const MATCH_TOLERANCE_SECONDS = 120; // 2 minutes tolerance
+      const usedDebugTimestamps = new Set<number>();
+      const messages = evolutionResult.rows.reverse().map(row => {
+        const timestamp = parseInt(row.timestamp) || 0;
+        const fromMe = row.from_me === 'true';
+
+        const message: any = {
+          id: row.message_id || `msg_${timestamp}`,
+          text: extractMessageText(row.message_data),
+          timestamp,
+          fromMe,
+          pushName: row.push_name,
+          messageType: getMessageType(row.message_data)
+        };
+
+        // Match debug by finding closest entry within tolerance
+        if (fromMe) {
+          // Find closest debug that hasn't been used yet (prevent double-matching)
+          for (const entry of debugEntries) {
+            const diff = Math.abs(entry.timestamp - timestamp);
+            if (diff <= MATCH_TOLERANCE_SECONDS && !usedDebugTimestamps.has(entry.timestamp)) {
+              message.debug = entry.debug;
+              usedDebugTimestamps.add(entry.timestamp);
+              break;
+            }
+          }
+        }
+
+        return message;
+      });
+
+      // Get contact name
+      let contactName: string | null = null;
+      const incomingMsg = evolutionResult.rows.find(r => r.from_me === 'false' && r.push_name);
+      if (incomingMsg) {
+        contactName = incomingMsg.push_name;
+      }
+
+      app.log.info({
+        cid: shortCorrelationId(cid),
+        instanceName,
+        phone: maskedPhone,
+        messagesCount: messages.length,
+        debugMessagesCount: debugEntries.length,
+        elapsedMs: getElapsedMs(startTime),
+        tags
+      }, '[GET /chats/:remoteJid/messages-with-debug] Successfully fetched messages with debug');
+
+      return reply.send({
+        success: true,
+        remoteJid,
+        contactName,
+        messages,
+        hasMore: evolutionResult.rows.length === limit
+      });
+
+    } catch (error: any) {
+      const errorInfo = classifyError(error);
+      const errorLog = createErrorLog(error, {
+        correlationId: cid,
+        method: 'GET',
+        path: '/chats/:remoteJid/messages-with-debug'
+      });
+
+      app.log.error({
+        ...errorLog,
+        errorType: errorInfo.type,
+        isRetryable: errorInfo.isRetryable,
+        elapsedMs: getElapsedMs(startTime),
+        tags: ['api', 'db', 'chats']
+      }, '[GET /chats/:remoteJid/messages-with-debug] Failed');
+
+      return reply.status(500).send({
+        error: 'Failed to fetch messages with debug',
+        message: error.message
+      });
+    }
+  });
+
+  /**
    * POST /chats/:remoteJid/send
    * Send a message to a chat
    */

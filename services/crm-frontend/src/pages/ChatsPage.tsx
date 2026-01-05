@@ -11,7 +11,8 @@ import {
   AlertCircle,
   WifiOff,
   Bot,
-  BotOff
+  BotOff,
+  Bug
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { chatsService } from '@/services/chatsService';
 import { aiBotApi } from '@/services/aiBotApi';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DebugPanel } from '@/components/chats/DebugPanel';
 import type { Chat, ChatMessage } from '@/types/chat';
 
 const USER_ID = '0f559eb0-53fa-4b6a-a51b-5d3e15e5864b';
@@ -55,6 +57,7 @@ export function ChatsPage() {
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [messageText, setMessageText] = useState('');
+  const [debugMode, setDebugMode] = useState(false);
 
   // Debounce search query
   const debouncedSearchQuery = useDebounce(searchQuery, SEARCH_DEBOUNCE_MS);
@@ -101,8 +104,10 @@ export function ChatsPage() {
     isFetching: messagesFetching,
     error: messagesError
   } = useQuery({
-    queryKey: ['chat-messages', selectedInstance, selectedChat?.remoteJid],
-    queryFn: () => chatsService.getMessages(selectedInstance, selectedChat!.remoteJid, { limit: 100 }),
+    queryKey: ['chat-messages', selectedInstance, selectedChat?.remoteJid, debugMode],
+    queryFn: () => debugMode
+      ? chatsService.getMessagesWithDebug(selectedInstance, selectedChat!.remoteJid, { limit: 100 })
+      : chatsService.getMessages(selectedInstance, selectedChat!.remoteJid, { limit: 100 }),
     enabled: !!selectedInstance && !!selectedChat,
     refetchInterval: POLLING_INTERVAL,
     staleTime: POLLING_INTERVAL - 1000,
@@ -425,6 +430,18 @@ export function ChatsPage() {
                     {getPhoneNumber(selectedChat.remoteJid)}
                   </p>
                 </div>
+                {/* Debug toggle button */}
+                <Button
+                  variant={debugMode ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setDebugMode(!debugMode)}
+                  className="gap-2"
+                  title={debugMode ? 'Выключить debug' : 'Включить debug'}
+                >
+                  <Bug className="w-4 h-4" />
+                  Debug
+                </Button>
+
                 {/* Bot toggle button */}
                 {botStatusData?.leadId && (
                   <Button
@@ -477,7 +494,7 @@ export function ChatsPage() {
                           {group.messages.map(msg => (
                             <div
                               key={msg.id}
-                              className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
+                              className={`flex flex-col ${msg.fromMe ? 'items-end' : 'items-start'}`}
                             >
                               <div
                                 className={`max-w-[70%] px-3 py-2 rounded-lg ${
@@ -497,6 +514,12 @@ export function ChatsPage() {
                                   {formatTime(msg.timestamp)}
                                 </p>
                               </div>
+                              {/* Debug Panel for bot messages */}
+                              {debugMode && msg.fromMe && msg.debug && (
+                                <div className="max-w-[70%] w-full">
+                                  <DebugPanel debug={msg.debug} />
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

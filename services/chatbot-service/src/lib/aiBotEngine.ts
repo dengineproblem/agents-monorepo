@@ -42,6 +42,7 @@ import {
   RateLimitConfig,
   logOpenAiCall,
   logOpenAiCallWithCost,
+  calculateApiCost,
   validateMessage,
   isDuplicateMessage,
   logStageTransition,
@@ -80,6 +81,34 @@ import {
 const baseLog = createLogger({ module: 'aiBotEngine' });
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+
+// Debug информация для AI-ответов
+export interface AIDebugInfo {
+  // Timing
+  totalProcessingMs: number;
+  aiLatencyMs: number;
+  sendLatencyMs: number;
+
+  // Tokens & Cost
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costCents: number;
+
+  // Tool Calls
+  toolCalls: Array<{
+    name: string;
+    arguments: Record<string, any>;
+    result: string;
+    durationMs: number;
+  }>;
+
+  // Context
+  iterations: number;
+  systemPrompt?: string;
+  historyMessagesCount?: number;
+}
 
 // Rate limit конфигурация: 20 сообщений в минуту на телефон
 const MESSAGE_RATE_LIMIT: RateLimitConfig = {
@@ -761,12 +790,18 @@ async function processAIBotResponse(
       }
     }
 
+    const sendLatencyMs = Date.now() - sendStartTime;
     logOutgoingMessage(ctxLog, {
       messageLength: finalText.length,
       chunksCount: chunks.length,
-      latencyMs: Date.now() - sendStartTime,
+      latencyMs: sendLatencyMs,
       success: true
     });
+
+    // Обновить debug info с данными об отправке
+    if (response.debug) {
+      response.debug.sendLatencyMs = sendLatencyMs;
+    }
 
     // === Сохранить сообщения в историю ===
     ctxLog.checkpoint('save_history');
@@ -792,12 +827,16 @@ async function processAIBotResponse(
         timestamp: now
       });
 
-      // Добавить ответ бота
-      currentMessages.push({
+      // Добавить ответ бота (с debug info если есть)
+      const botMessage: { sender: string; content: string; timestamp: string; debug?: AIDebugInfo } = {
         sender: 'bot',
         content: finalText,
         timestamp: now
-      });
+      };
+      if (response.debug) {
+        botMessage.debug = response.debug;
+      }
+      currentMessages.push(botMessage);
 
       // Ограничить историю по количеству (последние 100 сообщений)
       const trimmedMessages = currentMessages.slice(-LIMITS.MAX_HISTORY_MESSAGES);
@@ -1053,11 +1092,14 @@ async function generateAIResponse(
   moveToStage?: string;
   needsHuman?: boolean;
   functionCall?: { name: string; arguments: any };
+  debug?: AIDebugInfo;
 }> {
   const log = ctxLog || createContextLogger(baseLog, {
     leadId: lead.id,
     botId: config.id
   }, ['openai']);
+
+  const generateStartTime = Date.now();
 
   log.checkpoint('start_generate');
   log.info({
@@ -1214,10 +1256,29 @@ async function generateAIResponse(
   const model = config.model || 'gpt-4o-mini';
   log.debug({ model }, '[generateAIResponse] Using model', ['openai']);
 
+  // Инициализация debug info (до try блока для доступа в catch)
+  const debugInfo: AIDebugInfo = {
+    model,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    costCents: 0,
+    aiLatencyMs: 0,
+    toolCalls: [],
+    iterations: 0,
+    systemPrompt: systemPrompt + clientInfo,
+    historyMessagesCount: 0, // Будет обновлено после загрузки истории
+    totalProcessingMs: 0,
+    sendLatencyMs: 0
+  };
+
   try {
     // Загрузить историю сообщений
     log.checkpoint('load_history');
     const history = await loadMessageHistory(lead.id, config, log);
+
+    // Обновляем debug info после загрузки истории
+    debugInfo.historyMessagesCount = history.length;
 
     // Собрать массив сообщений: system + history + текущее
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
@@ -1277,6 +1338,12 @@ async function generateAIResponse(
       success: true
     });
 
+    // Накапливаем debug данные
+    debugInfo.promptTokens += completion.usage?.prompt_tokens || 0;
+    debugInfo.completionTokens += completion.usage?.completion_tokens || 0;
+    debugInfo.totalTokens += completion.usage?.total_tokens || 0;
+    debugInfo.aiLatencyMs += apiElapsed;
+
     log.info({
       finishReason: choice.finish_reason,
       hasContent: !!choice.message.content,
@@ -1323,6 +1390,7 @@ async function generateAIResponse(
         }, '[generateAIResponse] Executing tool call');
 
         let toolResult = '';
+        const toolStartTime = Date.now();
 
         // Обработать consultation tools
         if (isConsultationTool(functionName) && config.consultation_settings) {
@@ -1377,6 +1445,16 @@ async function generateAIResponse(
           log.warn({ functionName }, '[generateAIResponse] Unknown function called');
         }
 
+        const toolDuration = Date.now() - toolStartTime;
+
+        // Сохраняем в debug info
+        debugInfo.toolCalls.push({
+          name: functionName,
+          arguments: args,
+          result: toolResult,
+          durationMs: toolDuration
+        });
+
         log.info({
           functionName,
           resultLen: toolResult.length
@@ -1421,6 +1499,13 @@ async function generateAIResponse(
         success: true
       });
 
+      // Накапливаем debug данные (follow-up вызовы)
+      debugInfo.promptTokens += completion.usage?.prompt_tokens || 0;
+      debugInfo.completionTokens += completion.usage?.completion_tokens || 0;
+      debugInfo.totalTokens += completion.usage?.total_tokens || 0;
+      debugInfo.aiLatencyMs += apiElapsed;
+      debugInfo.iterations = iterations;
+
       log.info({
         iteration: iterations,
         finishReason: choice.finish_reason,
@@ -1436,6 +1521,7 @@ async function generateAIResponse(
         finishReason: choice.finish_reason
       }, '[generateAIResponse] Empty response after tool calls, retrying without tools');
 
+      const retryStartTime = Date.now();
       const retryParams: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
         model,
         messages,
@@ -1446,8 +1532,16 @@ async function generateAIResponse(
         // Без tools - просто текстовый ответ
       };
       const retryCompletion = await openai.chat.completions.create(retryParams);
+      const retryElapsed = Date.now() - retryStartTime;
 
       choice = retryCompletion.choices[0];
+
+      // Накапливаем debug данные (retry вызов)
+      debugInfo.promptTokens += retryCompletion.usage?.prompt_tokens || 0;
+      debugInfo.completionTokens += retryCompletion.usage?.completion_tokens || 0;
+      debugInfo.totalTokens += retryCompletion.usage?.total_tokens || 0;
+      debugInfo.aiLatencyMs += retryElapsed;
+
       log.info({
         retryResponseLen: choice.message.content?.length || 0
       }, '[generateAIResponse] Retry response received');
@@ -1461,6 +1555,11 @@ async function generateAIResponse(
       }, '[generateAIResponse] Completed with tool calls executed');
     }
 
+    // Финализация debug info
+    debugInfo.totalProcessingMs = Date.now() - generateStartTime;
+    const costResult = calculateApiCost(model, debugInfo.promptTokens, debugInfo.completionTokens);
+    debugInfo.costCents = costResult.totalCostCents;
+
     log.info({
       responseLen: choice.message.content?.length || 0,
       responsePreview: truncateText(choice.message.content || '', 100),
@@ -1468,7 +1567,8 @@ async function generateAIResponse(
     }, '[generateAIResponse] Completed with text response', ['openai']);
 
     return {
-      text: choice.message.content || ''
+      text: choice.message.content || '',
+      debug: debugInfo
     };
 
   } catch (error: any) {
@@ -1486,7 +1586,12 @@ async function generateAIResponse(
       ...log.getTimings()
     }, ['openai', 'api']);
 
-    return { text: '' };
+    // Возвращаем partial debug даже при ошибке (полезно для отладки)
+    debugInfo.totalProcessingMs = Date.now() - generateStartTime;
+    const costResult = calculateApiCost(model, debugInfo.promptTokens, debugInfo.completionTokens);
+    debugInfo.costCents = costResult.totalCostCents;
+
+    return { text: '', debug: debugInfo };
   }
 }
 

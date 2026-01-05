@@ -1,3 +1,31 @@
+// Debug информация для AI-ответов
+export interface AIDebugInfo {
+  // Timing
+  totalProcessingMs: number;
+  aiLatencyMs: number;
+  sendLatencyMs: number;
+
+  // Tokens & Cost
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costCents: number;
+
+  // Tool Calls
+  toolCalls: Array<{
+    name: string;
+    arguments: Record<string, unknown>;
+    result: string;
+    durationMs: number;
+  }>;
+
+  // Context
+  iterations: number;
+  systemPrompt?: string;
+  historyMessagesCount?: number;
+}
+
 export interface Chat {
   remoteJid: string;
   contactName: string | null;
@@ -14,6 +42,7 @@ export interface ChatMessage {
   fromMe: boolean;
   pushName: string | null;
   messageType: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'contact' | 'location' | 'unknown';
+  debug?: AIDebugInfo;
 }
 
 export interface ChatMessagesResponse {
