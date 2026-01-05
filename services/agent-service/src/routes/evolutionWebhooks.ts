@@ -585,6 +585,8 @@ async function upsertDialogAnalysis(params: {
     }, 'upsertDialogAnalysis: creating new record with ctwa_clid');
 
     // Создать новую запись
+    // NOTE: НЕ указываем interest_level - constraint разрешает только hot/warm/cold
+    // chatbot-service установит interest_level при анализе
     const { error: insertError } = await supabase
       .from('dialog_analysis')
       .insert({
@@ -596,7 +598,6 @@ async function upsertDialogAnalysis(params: {
         last_message: messageText,
         ctwa_clid: ctwaClid || null,  // ✅ НОВОЕ: сохраняем ctwa_clid для CAPI
         funnel_stage: 'new_lead',
-        interest_level: 'unknown',
         analyzed_at: timestamp.toISOString()
       });
 
