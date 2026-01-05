@@ -172,19 +172,33 @@ const CAPI_EVENTS = {
 1. `ad_accounts.access_token` (multi-account mode)
 2. `user_accounts.access_token` (fallback)
 
-### 3. ctwa_clid
+### 3. ctwa_clid (Click-to-WhatsApp Click ID)
 
-Извлекается из:
-- Evolution API webhook → `contextInfo.referral.ctwaClid`
-- Сохраняется в `leads.ctwa_clid`
+**Извлечение из Evolution API (WHATSAPP-BAILEYS mode):**
+```
+data.message.contextInfo.externalAdReply.ctwaClid
+```
+
+**Путь в webhook payload:**
+```typescript
+const ctwaClid = message?.contextInfo?.externalAdReply?.ctwaClid;
+const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
+```
+
+**Хранение:**
+- `dialog_analysis.ctwa_clid` — основное хранилище для CAPI событий
+- `leads.ctwa_clid` — дублирование для совместимости
+
+**Важно:** Evolution API в режиме WHATSAPP-BAILEYS использует `externalAdReply`, а не `referral`.
 
 ## Поток данных
 
 ### Источник: WhatsApp (LLM анализ)
 
 1. **Входящее сообщение** → `evolutionWebhooks.ts`
-   - Извлекает ctwa_clid из referral
-   - Сохраняет в leads
+   - Извлекает ctwa_clid из `contextInfo.externalAdReply`
+   - Вызывает `upsertDialogAnalysis()` с ctwa_clid
+   - Сохраняет в `dialog_analysis.ctwa_clid`
    - Отправляет в chatbot-service
 
 2. **chatbot-service** → `/process-message`
@@ -442,6 +456,59 @@ Frontend логирует в консоль:
 - `Invalid parameter` - проверить формат данных
 - `(#100)` - пиксель не существует или нет доступа
 - `Invalid OAuth access token` - обновить токен
+
+### ctwa_clid = null (не сохраняется)
+
+**Симптомы:**
+- События CAPI отправляются с `action_source: 'other'` вместо `'business_messaging'`
+- В `dialog_analysis.ctwa_clid` всегда null
+- В логах видно что ctwa_clid приходит в webhook
+
+**Возможные причины:**
+
+1. **Неправильный тип поля `last_message`**
+   - Поле `last_message` в таблице `dialog_analysis` имеет тип `TIMESTAMPTZ`
+   - Если код записывает текст сообщения вместо timestamp, INSERT падает
+   - Ошибка: `invalid input syntax for type timestamp with time zone: "Здравствуйте..."`
+   - Решение: использовать `timestamp.toISOString()` для `last_message`
+
+2. **Constraint на `interest_level`**
+   - Constraint `dialog_analysis_interest_level_check` разрешает только `'hot'`, `'warm'`, `'cold'`
+   - Если код использует `interest_level: 'unknown'`, INSERT падает
+   - Решение: не указывать `interest_level` при INSERT
+
+3. **Race condition с chatbot-service**
+   - chatbot-service может создать запись в `dialog_analysis` первым (без ctwa_clid)
+   - evolutionWebhooks.ts потом пытается INSERT, получает conflict, делает UPDATE
+   - Решение: `upsertDialogAnalysis()` использует `ctwa_clid || existing.ctwa_clid`
+
+**Диагностика:**
+
+```bash
+# Проверить логи ctwa_clid
+docker logs -f agent-service 2>&1 | grep -E "(ctwaClid|ctwa_clid|upsertDialogAnalysis)"
+
+# Проверить ошибки INSERT/UPDATE
+docker logs -f agent-service 2>&1 | grep -E "(Failed to create|Failed to update)"
+```
+
+**Проверка в базе:**
+
+```sql
+-- Записи с ctwa_clid
+SELECT contact_phone, ctwa_clid, created_at
+FROM dialog_analysis
+WHERE ctwa_clid IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 10;
+
+-- Записи с рекламы без ctwa_clid (проблема)
+SELECT contact_phone, created_at, funnel_stage
+FROM dialog_analysis
+WHERE ctwa_clid IS NULL
+  AND created_at > NOW() - INTERVAL '1 day'
+ORDER BY created_at DESC;
+```
 
 ### Проверка флагов
 
