@@ -112,6 +112,19 @@ const UpdateWorkingSchedulesSchema = z.object({
   schedules: z.array(WorkingScheduleSchema)
 });
 
+// ===== Blocked Slots Schemas =====
+
+const CreateBlockedSlotSchema = z.object({
+  consultant_id: z.string().uuid(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start_time: z.string().regex(/^\d{2}:\d{2}$/),
+  end_time: z.string().regex(/^\d{2}:\d{2}$/),
+  reason: z.string().max(255).optional().default('Перерыв')
+}).refine(
+  (data) => data.end_time > data.start_time,
+  { message: 'Время окончания должно быть после времени начала', path: ['end_time'] }
+);
+
 export async function consultationsRoutes(app: FastifyInstance) {
 
   // ==================== CONSULTANTS ====================
@@ -1360,6 +1373,152 @@ export async function consultationsRoutes(app: FastifyInstance) {
       });
     } catch (error: any) {
       app.log.error({ error }, 'Error getting consultations by lead');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  // ==================== BLOCKED SLOTS ====================
+
+  /**
+   * GET /blocked-slots
+   * Get blocked slots by date or date range
+   */
+  app.get('/blocked-slots', async (request, reply) => {
+    try {
+      const { date, consultant_id, start_date, end_date } = request.query as {
+        date?: string;
+        consultant_id?: string;
+        start_date?: string;
+        end_date?: string;
+      };
+
+      let query = supabase
+        .from('blocked_slots')
+        .select(`
+          *,
+          consultant:consultants(id, name)
+        `)
+        .order('date', { ascending: true })
+        .order('start_time', { ascending: true });
+
+      if (date) {
+        query = query.eq('date', date);
+      }
+      if (consultant_id) {
+        query = query.eq('consultant_id', consultant_id);
+      }
+      if (start_date && end_date) {
+        query = query.gte('date', start_date).lte('date', end_date);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        app.log.error({ error }, 'Failed to fetch blocked slots');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.send(data || []);
+    } catch (error: any) {
+      app.log.error({ error }, 'Error fetching blocked slots');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * POST /blocked-slots
+   * Create a blocked slot (break/pause)
+   */
+  app.post('/blocked-slots', async (request, reply) => {
+    try {
+      const body = CreateBlockedSlotSchema.parse(request.body);
+
+      // Check if there's already a consultation at this time
+      const { data: existingConsultation } = await supabase
+        .from('consultations')
+        .select('id')
+        .eq('consultant_id', body.consultant_id)
+        .eq('date', body.date)
+        .in('status', ['scheduled', 'confirmed'])
+        .lt('start_time', body.end_time)
+        .gt('end_time', body.start_time)
+        .limit(1);
+
+      if (existingConsultation && existingConsultation.length > 0) {
+        return reply.status(409).send({
+          error: 'Conflict',
+          message: 'В это время уже есть запись на консультацию'
+        });
+      }
+
+      // Check if there's already a blocked slot overlapping this time
+      const { data: existingBlock } = await supabase
+        .from('blocked_slots')
+        .select('id')
+        .eq('consultant_id', body.consultant_id)
+        .eq('date', body.date)
+        .lt('start_time', body.end_time)
+        .gt('end_time', body.start_time)
+        .limit(1);
+
+      if (existingBlock && existingBlock.length > 0) {
+        return reply.status(409).send({
+          error: 'Conflict',
+          message: 'Это время пересекается с другой блокировкой'
+        });
+      }
+
+      const { data, error } = await supabase
+        .from('blocked_slots')
+        .insert([body])
+        .select(`
+          *,
+          consultant:consultants(id, name)
+        `)
+        .single();
+
+      if (error) {
+        if (error.code === '23505') { // unique violation
+          return reply.status(409).send({
+            error: 'Conflict',
+            message: 'Этот слот уже заблокирован'
+          });
+        }
+        app.log.error({ error }, 'Failed to create blocked slot');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.status(201).send(data);
+    } catch (error: any) {
+      if (error instanceof z.ZodError) {
+        return reply.status(400).send({ error: 'Validation error', details: error.errors });
+      }
+      app.log.error({ error }, 'Error creating blocked slot');
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
+  /**
+   * DELETE /blocked-slots/:id
+   * Delete a blocked slot
+   */
+  app.delete('/blocked-slots/:id', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+
+      const { error } = await supabase
+        .from('blocked_slots')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        app.log.error({ error }, 'Failed to delete blocked slot');
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return reply.status(204).send();
+    } catch (error: any) {
+      app.log.error({ error }, 'Error deleting blocked slot');
       return reply.status(500).send({ error: error.message });
     }
   });

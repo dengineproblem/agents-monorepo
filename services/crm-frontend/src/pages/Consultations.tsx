@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, X, Coffee } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Calendar, Clock, User, Phone, Plus, ChevronLeft, ChevronRight, RefreshCw, Coffee } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
-import { consultationService } from '@/services/consultationService';
+import { consultationService, BlockedSlot } from '@/services/consultationService';
 import {
   Consultant,
   ConsultationWithDetails,
@@ -65,7 +66,16 @@ export function Consultations() {
   }
 
   // Заблокированные слоты (обеды, перерывы)
-  const [blockedSlots] = useState<{ consultant_id: string; time: string; reason: string }[]>([]);
+  const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
+
+  // Модальное окно блокировки слота
+  const [isBlockSlotModalOpen, setIsBlockSlotModalOpen] = useState(false);
+  const [slotToBlock, setSlotToBlock] = useState<{
+    consultant_id: string;
+    consultant_name: string;
+    time: string;
+  } | null>(null);
+  const [blockReason, setBlockReason] = useState('Перерыв');
 
   useEffect(() => {
     loadData();
@@ -76,12 +86,13 @@ export function Consultations() {
     try {
       const dateStr = selectedDate.toISOString().split('T')[0];
 
-      const [consultantsData, consultationsData, statsData, schedulesData, servicesData] = await Promise.all([
+      const [consultantsData, consultationsData, statsData, schedulesData, servicesData, blockedSlotsData] = await Promise.all([
         consultationService.getConsultants(),
         consultationService.getConsultations(dateStr),
         consultationService.getStats(),
         consultationService.getAllSchedules().catch(() => []),
-        consultationService.getServices(userAccountId).catch(() => [])
+        consultationService.getServices(userAccountId).catch(() => []),
+        consultationService.getBlockedSlots({ date: dateStr }).catch(() => [])
       ]);
 
       setConsultants(consultantsData);
@@ -89,6 +100,7 @@ export function Consultations() {
       setStats(statsData);
       setAllSchedules(schedulesData);
       setServices(servicesData);
+      setBlockedSlots(blockedSlotsData);
     } catch (error) {
       console.error('Ошибка загрузки данных:', error);
       toast({
@@ -247,15 +259,76 @@ export function Consultations() {
   };
 
   const isSlotBlocked = (consultantId: string, timeSlot: string) => {
+    const dateStr = selectedDate.toISOString().split('T')[0];
     return blockedSlots.some(slot =>
-      slot.consultant_id === consultantId && slot.time === timeSlot
+      slot.consultant_id === consultantId &&
+      slot.date === dateStr &&
+      slot.start_time.substring(0, 5) === timeSlot
+    );
+  };
+
+  const getBlockedSlot = (consultantId: string, timeSlot: string): BlockedSlot | undefined => {
+    const dateStr = selectedDate.toISOString().split('T')[0];
+    return blockedSlots.find(slot =>
+      slot.consultant_id === consultantId &&
+      slot.date === dateStr &&
+      slot.start_time.substring(0, 5) === timeSlot
     );
   };
 
   const getBlockedReason = (consultantId: string, timeSlot: string) => {
-    return blockedSlots.find(slot =>
-      slot.consultant_id === consultantId && slot.time === timeSlot
-    )?.reason || '';
+    return getBlockedSlot(consultantId, timeSlot)?.reason || 'Перерыв';
+  };
+
+  // Обработчики блокировки слотов
+  const handleBlockSlot = (consultantId: string, consultantName: string, timeSlot: string) => {
+    setSlotToBlock({ consultant_id: consultantId, consultant_name: consultantName, time: timeSlot });
+    setBlockReason('Перерыв');
+    setIsBlockSlotModalOpen(true);
+  };
+
+  const handleCreateBlockedSlot = async () => {
+    if (!slotToBlock) return;
+
+    try {
+      const dateStr = selectedDate.toISOString().split('T')[0];
+      const endTime = calculateEndTime(slotToBlock.time);
+
+      await consultationService.createBlockedSlot({
+        consultant_id: slotToBlock.consultant_id,
+        date: dateStr,
+        start_time: slotToBlock.time,
+        end_time: endTime,
+        reason: blockReason
+      });
+
+      toast({ title: 'Слот заблокирован' });
+      setIsBlockSlotModalOpen(false);
+      setSlotToBlock(null);
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: 'Ошибка',
+        description: error.message || 'Не удалось заблокировать слот',
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleUnblockSlot = async (blockedSlotItem: BlockedSlot) => {
+    if (!confirm('Разблокировать этот слот?')) return;
+
+    try {
+      await consultationService.deleteBlockedSlot(blockedSlotItem.id);
+      toast({ title: 'Слот разблокирован' });
+      await loadData();
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось разблокировать слот',
+        variant: 'destructive'
+      });
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -412,10 +485,12 @@ export function Consultations() {
             <User className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium mb-2">Нет консультантов</h3>
             <p className="text-muted-foreground mb-4">Добавьте консультанта чтобы начать планировать расписание</p>
-            <Button onClick={() => setIsConsultantsModalOpen(true)}>
-              <Plus className="w-4 h-4 mr-1" />
-              Добавить консультанта
-            </Button>
+            <Link to="/consultations/consultants">
+              <Button>
+                <Plus className="w-4 h-4 mr-1" />
+                Добавить консультанта
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       ) : (
@@ -456,7 +531,8 @@ export function Consultations() {
                     {consultants.map(consultant => {
                       const consultation = getConsultationForSlot(consultant.id, timeSlot);
                       const isBlocked = isSlotBlocked(consultant.id, timeSlot);
-                      const blockReason = getBlockedReason(consultant.id, timeSlot);
+                      const blockedSlotItem = getBlockedSlot(consultant.id, timeSlot);
+                      const blockedReasonText = getBlockedReason(consultant.id, timeSlot);
                       const isOutsideHours = isSlotOutsideWorkingHours(consultant.id, timeSlot);
 
                       return (
@@ -480,28 +556,45 @@ export function Consultations() {
                                 {consultation.client_phone}
                               </div>
                             </button>
-                          ) : isBlocked ? (
-                            <div className="w-full h-full rounded bg-muted border border-dashed flex items-center justify-center text-muted-foreground">
+                          ) : isBlocked && blockedSlotItem ? (
+                            <button
+                              onClick={() => handleUnblockSlot(blockedSlotItem)}
+                              className="w-full h-full rounded bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 hover:bg-amber-200 transition-colors"
+                              title="Нажмите чтобы разблокировать"
+                            >
                               <div className="text-center">
                                 <Coffee className="w-3 h-3 mx-auto" />
-                                <div className="text-xs">{blockReason}</div>
+                                <div className="text-xs truncate max-w-full px-1">{blockedReasonText}</div>
                               </div>
-                            </div>
-                          ) : isOutsideHours ? null : (
-                            <button
-                              onClick={() => {
-                                setNewConsultation(prev => ({
-                                  ...prev,
-                                  consultant_id: consultant.id,
-                                  date: selectedDate.toISOString().split('T')[0],
-                                  start_time: timeSlot
-                                }));
-                                setIsNewConsultationOpen(true);
-                              }}
-                              className="w-full h-full rounded border border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/5 transition-colors flex items-center justify-center text-muted-foreground hover:text-primary group"
-                            >
-                              <Plus className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
                             </button>
+                          ) : isOutsideHours ? null : (
+                            <div className="relative group w-full h-full">
+                              <button
+                                onClick={() => {
+                                  setNewConsultation(prev => ({
+                                    ...prev,
+                                    consultant_id: consultant.id,
+                                    date: selectedDate.toISOString().split('T')[0],
+                                    start_time: timeSlot
+                                  }));
+                                  setIsNewConsultationOpen(true);
+                                }}
+                                className="w-full h-full rounded border border-dashed border-muted-foreground/30 hover:border-primary hover:bg-primary/5 transition-colors flex items-center justify-center text-muted-foreground hover:text-primary"
+                              >
+                                <Plus className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              </button>
+                              {/* Кнопка блокировки при hover */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleBlockSlot(consultant.id, consultant.name, timeSlot);
+                                }}
+                                className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity text-amber-600 hover:text-amber-800 bg-white/80 rounded-bl"
+                                title="Сделать перерыв"
+                              >
+                                <Coffee className="w-3 h-3" />
+                              </button>
+                            </div>
                           )}
                         </div>
                       );
@@ -746,6 +839,52 @@ export function Consultations() {
                   onClick={() => handleDelete(selectedConsultation.id)}
                 >
                   Удалить
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Модальное окно блокировки слота */}
+      <Dialog open={isBlockSlotModalOpen} onOpenChange={setIsBlockSlotModalOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Coffee className="w-5 h-5 text-amber-600" />
+              Заблокировать слот
+            </DialogTitle>
+          </DialogHeader>
+          {slotToBlock && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                <p><strong>Консультант:</strong> {slotToBlock.consultant_name}</p>
+                <p><strong>Дата:</strong> {formatDate(selectedDate)}</p>
+                <p><strong>Время:</strong> {slotToBlock.time}</p>
+              </div>
+
+              <div>
+                <Label>Причина</Label>
+                <Select value={blockReason} onValueChange={setBlockReason}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Перерыв">Перерыв</SelectItem>
+                    <SelectItem value="Обед">Обед</SelectItem>
+                    <SelectItem value="Личные дела">Личные дела</SelectItem>
+                    <SelectItem value="Встреча">Встреча</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button onClick={handleCreateBlockedSlot} className="flex-1 bg-amber-600 hover:bg-amber-700">
+                  <Coffee className="w-4 h-4 mr-1" />
+                  Заблокировать
+                </Button>
+                <Button variant="outline" onClick={() => setIsBlockSlotModalOpen(false)}>
+                  Отмена
                 </Button>
               </div>
             </div>

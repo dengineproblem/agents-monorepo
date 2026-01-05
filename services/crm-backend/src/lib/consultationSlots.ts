@@ -317,6 +317,35 @@ export async function getAvailableSlots(params: GetAvailableSlotsParams): Promis
     existingConsultationsCount: existingConsultations?.length || 0
   }, '[getAvailableSlots] Busy slots created');
 
+  // 4.5 Получаем заблокированные слоты (перерывы) в этом диапазоне
+  const { data: blockedSlots, error: blockedError } = await supabase
+    .from('blocked_slots')
+    .select('consultant_id, date, start_time, end_time')
+    .in('consultant_id', consultantIds)
+    .gte('date', startDateStr)
+    .lte('date', endDateStr);
+
+  if (blockedError) {
+    log.error({
+      error: blockedError,
+      consultantIds: consultantIds.length,
+      dateRange: `${startDateStr} - ${endDateStr}`
+    }, '[getAvailableSlots] Error fetching blocked slots');
+  }
+
+  // Добавляем заблокированные слоты в set занятых
+  for (const blocked of blockedSlots || []) {
+    const normalizedDate = normalizeDate(blocked.date);
+    const normalizedStartTime = normalizeTime(blocked.start_time);
+    const key = `${blocked.consultant_id}|${normalizedDate}|${normalizedStartTime}`;
+    busySlots.add(key);
+  }
+
+  log.debug({
+    blockedSlotsCount: blockedSlots?.length || 0,
+    totalBusySlotsCount: busySlots.size
+  }, '[getAvailableSlots] Blocked slots added to busy set');
+
   // 5. Генерируем доступные слоты
   const availableSlots: AvailableSlot[] = [];
   const currentDate = new Date(startDate);
@@ -562,18 +591,54 @@ export async function isSlotAvailable(
     return false;
   }
 
-  const isAvailable = !existing || existing.length === 0;
+  if (existing && existing.length > 0) {
+    log.debug({
+      consultantId,
+      date,
+      startTime: normalizedStartTime,
+      existingCount: existing.length
+    }, '[isSlotAvailable] Slot has existing consultations');
+    return false;
+  }
+
+  // Проверяем, нет ли блокировки (перерыва) на это время
+  const { data: blocked, error: blockedError } = await supabase
+    .from('blocked_slots')
+    .select('id')
+    .eq('consultant_id', consultantId)
+    .eq('date', date)
+    .lt('start_time', endTime)
+    .gt('end_time', normalizedStartTime)
+    .limit(1);
+
+  if (blockedError) {
+    log.error({
+      error: blockedError,
+      consultantId,
+      date,
+      startTime: normalizedStartTime
+    }, '[isSlotAvailable] Error checking blocked slots');
+    return false;
+  }
+
+  if (blocked && blocked.length > 0) {
+    log.debug({
+      consultantId,
+      date,
+      startTime: normalizedStartTime
+    }, '[isSlotAvailable] Slot is blocked (break)');
+    return false;
+  }
 
   log.debug({
     consultantId,
     date,
     startTime: normalizedStartTime,
     endTime,
-    existingCount: existing?.length || 0,
-    isAvailable
-  }, '[isSlotAvailable] Availability check completed');
+    isAvailable: true
+  }, '[isSlotAvailable] Slot is available');
 
-  return isAvailable;
+  return true;
 }
 
 /**

@@ -361,5 +361,71 @@ export const consultationService = {
     const response = await fetch(`${API_BASE_URL}/consultations/stats/extended?${searchParams}`);
     if (!response.ok) throw new Error('Failed to fetch extended stats');
     return response.json();
+  },
+
+  // ==================== BLOCKED SLOTS (BREAKS) ====================
+
+  // Получение заблокированных слотов
+  async getBlockedSlots(params?: {
+    date?: string;
+    consultant_id?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<BlockedSlot[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.date) searchParams.append('date', params.date);
+    if (params?.consultant_id) searchParams.append('consultant_id', params.consultant_id);
+    if (params?.start_date) searchParams.append('start_date', params.start_date);
+    if (params?.end_date) searchParams.append('end_date', params.end_date);
+
+    const response = await fetch(`${API_BASE_URL}/blocked-slots?${searchParams}`);
+    if (!response.ok) throw new Error('Failed to fetch blocked slots');
+    return response.json();
+  },
+
+  // Создание блокировки слота (перерыв)
+  async createBlockedSlot(data: CreateBlockedSlotData): Promise<BlockedSlot> {
+    const response = await fetch(`${API_BASE_URL}/blocked-slots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Failed to create blocked slot' }));
+      throw new Error(error.message || 'Failed to create blocked slot');
+    }
+    return response.json();
+  },
+
+  // Удаление блокировки слота
+  async deleteBlockedSlot(id: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/blocked-slots/${id}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Failed to delete blocked slot');
   }
 };
+
+// ==================== BLOCKED SLOTS TYPES ====================
+
+export interface BlockedSlot {
+  id: string;
+  consultant_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason: string;
+  created_at: string;
+  consultant?: {
+    id: string;
+    name: string;
+  };
+}
+
+export interface CreateBlockedSlotData {
+  consultant_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason?: string;
+}
