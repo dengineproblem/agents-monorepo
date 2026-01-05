@@ -558,7 +558,7 @@ async function upsertDialogAnalysis(params: {
     }, 'upsertDialogAnalysis: updating with ctwa_clid');
 
     const updateData: Record<string, any> = {
-      last_message: messageText,
+      last_message: timestamp.toISOString(),  // timestamp, не текст сообщения
       ctwa_clid: finalCtwaClid,
       analyzed_at: timestamp.toISOString()
     };
@@ -595,7 +595,8 @@ async function upsertDialogAnalysis(params: {
         instance_name: instanceName,
         contact_phone: contactPhone,
         contact_name: contactName || null,  // ✅ НОВОЕ: сохраняем имя из WhatsApp
-        last_message: messageText,
+        first_message: timestamp.toISOString(),  // время первого сообщения
+        last_message: timestamp.toISOString(),   // время последнего сообщения (timestamp, не текст!)
         ctwa_clid: ctwaClid || null,  // ✅ НОВОЕ: сохраняем ctwa_clid для CAPI
         funnel_stage: 'new_lead',
         analyzed_at: timestamp.toISOString()
