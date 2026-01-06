@@ -84,6 +84,27 @@ async function fetchAdInsights(adAccountId, accessToken, adId, datePresetOrRange
 }
 
 /**
+ * Извлечь лиды сайта из actions (fb_pixel_lead с fallback на custom)
+ */
+function extractSiteLeads(actions) {
+  if (!actions || !Array.isArray(actions)) return 0;
+
+  let hasPixelLead = false;
+  let siteLeads = 0;
+
+  for (const action of actions) {
+    if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+      siteLeads = parseFloat(action.value || '0') || 0;
+      hasPixelLead = true;
+    } else if (!hasPixelLead && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
+      siteLeads = parseFloat(action.value || '0') || 0;
+    }
+  }
+
+  return siteLeads;
+}
+
+/**
  * Извлечь количество лидов из actions
  * Поддерживает разные типы конверсий (lead, messaging, site leads)
  */
@@ -93,21 +114,17 @@ function extractLeads(actions) {
   // Count leads from ALL sources (same logic as facebookApi.ts)
   // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
   let messagingLeads = 0;
-  let siteLeads = 0;
   let leadFormLeads = 0;
 
   for (const action of actions) {
     if (action.action_type === 'onsite_conversion.total_messaging_connection') {
       messagingLeads = parseInt(action.value || '0', 10);
-    } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
-      siteLeads = parseInt(action.value || '0', 10);
-    } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
-      siteLeads = parseInt(action.value || '0', 10);
     } else if (action.action_type === 'onsite_conversion.lead_grouped') {
       leadFormLeads = parseInt(action.value || '0', 10);
     }
   }
 
+  const siteLeads = extractSiteLeads(actions);
   return messagingLeads + siteLeads + leadFormLeads;
 }
 
@@ -513,14 +530,14 @@ function calculateMultiPeriodTrends(dailyData, actionsData = [], campaignObjecti
     } else if (objective === 'site_leads') {
       // Site Leads метрики
       const linkClicksTotal = extractActionValue(actions, 'link_click');
-      const pixelLeadsTotal = extractActionValue(actions, 'offsite_conversion.fb_pixel_lead');
+      const siteLeadsTotal = extractSiteLeads(actions);
 
-      const conversionRate = linkClicksTotal > 0 ? (pixelLeadsTotal / linkClicksTotal) * 100 : 0;
+      const conversionRate = linkClicksTotal > 0 ? (siteLeadsTotal / linkClicksTotal) * 100 : 0;
 
       objectiveMetrics = {
         site_leads_metrics: {
           link_clicks: linkClicksTotal,
-          pixel_leads: pixelLeadsTotal,
+          pixel_leads: siteLeadsTotal,
           conversion_rate: conversionRate.toFixed(1),
           all_action_types: allActionTypes
         }
@@ -540,7 +557,7 @@ function calculateMultiPeriodTrends(dailyData, actionsData = [], campaignObjecti
       };
     } else if (objective === 'lead_forms') {
       // Lead Forms метрики (Facebook Instant Forms)
-      const formLeadsTotal = extractActionValue(actions, 'lead');
+      const formLeadsTotal = extractActionValue(actions, 'onsite_conversion.lead_grouped');
       const totalSpend = last7d?.spend || 0;
       const costPerLead = formLeadsTotal > 0 ? totalSpend / formLeadsTotal : 0;
 
@@ -2286,4 +2303,3 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     throw error;
   }
 }
-

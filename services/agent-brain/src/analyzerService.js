@@ -153,6 +153,7 @@ async function fetchProductionMetrics(adAccountId, accessToken, fbCreativeId) {
       let messagingLeads = 0;
       let siteLeads = 0;
       let formLeads = 0;
+      let hasPixelLead = false;
 
       for (const action of d.actions) {
         const t = action.action_type;
@@ -162,17 +163,18 @@ async function fetchProductionMetrics(adAccountId, accessToken, fbCreativeId) {
         if (t === 'onsite_conversion.total_messaging_connection') {
           messagingLeads = v;
         }
-        // Лид-формы
-        else if (t === 'lead' || t === 'fb_form_lead' || (typeof t === 'string' && (t.includes('fb_form_lead') || t.includes('leadgen')))) {
-          formLeads += v;
-        }
-        // Лиды с сайта - ТОЛЬКО offsite_conversion.fb_pixel_lead (избегаем дублирования с onsite_web_lead)
+        // Лиды с сайта - fb_pixel_lead имеет приоритет
         else if (t === 'offsite_conversion.fb_pixel_lead') {
           siteLeads = v;
+          hasPixelLead = true;
         }
-        // Кастомные конверсии пикселя
-        else if (typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
-          siteLeads += v;
+        // Кастомные конверсии пикселя - только если нет fb_pixel_lead
+        else if (!hasPixelLead && typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
+          siteLeads = v;
+        }
+        // Lead forms - только lead_grouped
+        else if (t === 'onsite_conversion.lead_grouped') {
+          formLeads = v;
         }
       }
 

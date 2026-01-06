@@ -735,6 +735,7 @@ function computeLeadsFromActions(stat) {
   let qualityLeads = 0;
   let siteLeads = 0;
   let formLeads = 0;
+  let hasPixelLead = false;
   const actions = Array.isArray(stat?.actions) ? stat.actions : [];
   for (const action of actions) {
     const t = action?.action_type;
@@ -743,23 +744,26 @@ function computeLeadsFromActions(stat) {
       messagingLeads = v;
     } else if (t === 'onsite_conversion.messaging_user_depth_2_message_send') {
       qualityLeads = v;
-    } else if (t === 'lead' || t === 'fb_form_lead' || (typeof t === 'string' && (t.includes('fb_form_lead') || t.includes('leadgen')))) {
-      formLeads = sumInt(formLeads, v);
     }
-    // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
-    // чтобы избежать дублирования с onsite_web_lead
+    // Лиды с сайта - fb_pixel_lead имеет приоритет
+    // чтобы избежать дублирования с агрегатами/onsite_web_lead
     else if (t === 'offsite_conversion.fb_pixel_lead') {
       siteLeads = v;
+      hasPixelLead = true;
     }
-    // Кастомные конверсии пикселя
-    else if (typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
-      siteLeads = sumInt(siteLeads, v);
+    // Кастомные конверсии пикселя - только если нет fb_pixel_lead
+    else if (!hasPixelLead && typeof t === 'string' && t.startsWith('offsite_conversion.custom')) {
+      siteLeads = v;
+    }
+    // Facebook Lead Forms - только onsite_conversion.lead_grouped
+    else if (t === 'onsite_conversion.lead_grouped') {
+      formLeads = v;
     }
   }
   // Считаем все типы лидов:
   // - messagingLeads: WhatsApp/Instagram conversations
-  // - siteLeads: offsite_conversion.fb_pixel_lead (пиксельные лиды)
-  // - formLeads: action_type 'lead' (Facebook Lead Forms / Instant Forms)
+  // - siteLeads: offsite_conversion.fb_pixel_lead (пиксельные лиды; custom* только если нет fb_pixel_lead)
+  // - formLeads: action_type 'onsite_conversion.lead_grouped' (Facebook Lead Forms / Instant Forms)
   // Они НЕ дублируются если objective правильно настроен:
   // - site_leads кампании: только siteLeads
   // - lead_forms кампании: только formLeads
@@ -1288,8 +1292,8 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- Лиды считаются суммой релевантных action_type:',
   '  • Мессенджеры (старт диалога): onsite_conversion.total_messaging_connection',
   '  • Качественные WA-лиды (≥2 сообщений): onsite_conversion.messaging_user_depth_2_message_send',
-  '  • Лид-формы: lead, fb_form_lead, leadgen',
-  '  • Сайт/пиксель: offsite_conversion.fb_pixel_lead, offsite_conversion.custom* (БЕЗ onsite_web_lead для избежания дублирования)',
+  '  • Лид-формы: onsite_conversion.lead_grouped (НЕ используем lead)',
+  '  • Сайт/пиксель: offsite_conversion.fb_pixel_lead, offsite_conversion.custom* (ТОЛЬКО если нет fb_pixel_lead)',
   '- Формулы: CPL = spend / max(total_leads,1); QCPL = spend / max(quality_leads,1). Для WhatsApp сначала QCPL; если quality_leads<3 на окне — опираемся на CPL.',
   '',
   'ТАЙМФРЕЙМЫ И ВЕСА',
