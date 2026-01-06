@@ -160,6 +160,11 @@ Facebook отправляет webhook когда пользователь зап
 - При OAuth подключении (`/facebook/save-selection`) → получаем через `/me/accounts`
 - При обновлении `fb_access_token` для ad_accounts → автоматически получаем Page Token
 - Сохраняется в поле `fb_page_access_token` (user_accounts и ad_accounts)
+- При создании направления с objective `lead_forms` backend:
+  - требует `page_id` (user_accounts/ad_accounts),
+  - пытается получить Page Access Token (сначала `/me/accounts`, затем fallback `/{page_id}?fields=access_token` — для system user токенов),
+  - сохраняет `fb_page_access_token`,
+  - подписывает страницу на `leadgen` (с повторной попыткой при неудаче).
 
 **Логика в webhook:**
 ```typescript
@@ -262,6 +267,8 @@ FB_API_VERSION=v20.0
 4. Для каждой Facebook Page пользователя:
    - Pages → Your Page → Settings → Webhooks
    - Подписать страницу на leadgen events приложения
+   - При создании `lead_forms` направления подписка выполняется автоматически,
+     но только если получен корректный Page Access Token.
 
 ### 4. Permissions в Facebook App
 
@@ -337,6 +344,10 @@ grep "Lead form lead created successfully" /var/log/agent-service.log
 
 # Ошибки
 grep "Failed to retrieve lead data" /var/log/agent-service.log
+
+# Автоподписка lead_forms при создании направления
+grep "Lead forms objective: ensuring page token and leadgen subscription" /var/log/agent-service.log
+grep "Page subscribed to leadgen successfully" /var/log/agent-service.log
 ```
 
 ### SQL запросы
@@ -378,6 +389,7 @@ LIMIT 20;
 2. Проверить что страница подписана на события приложения
 3. Проверить логи nginx на 5xx ошибки
 4. Проверить что endpoint доступен извне
+5. Проверить логи `directionsRoutes` (автополучение Page Access Token и подписка leadgen)
 
 ### Лиды создаются без creative_id
 
@@ -390,6 +402,7 @@ LIMIT 20;
 1. Проверить что access_token пользователя валидный
 2. Проверить что приложение имеет permission `leads_retrieval`
 3. Проверить что Lead Form не архивирована
+4. Проверить что `fb_page_access_token` актуален (при необходимости пересоздать lead_forms направление для автообновления)
 
 ### Дубликаты лидов
 
@@ -404,6 +417,12 @@ LIMIT 20;
 - [ROI_CALCULATOR.md](./ROI_CALCULATOR.md) - ROI аналитика (если есть)
 
 ## Changelog
+
+### v1.2.0 (2026-01)
+- Автополучение Page Access Token при создании направления с objective `lead_forms`
+- Автоподписка страницы на `leadgen` (с повторной попыткой после обновления токена)
+- Fallback получения Page Access Token через `/{page_id}?fields=access_token` (для system user токенов)
+- Расширенное логирование в `directionsRoutes` и `facebookHelpers`
 
 ### v1.1.0 (2024-12)
 - Добавлена поддержка Page Access Token для Lead Forms API

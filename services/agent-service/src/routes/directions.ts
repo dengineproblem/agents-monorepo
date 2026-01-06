@@ -5,6 +5,7 @@ import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
 import { onDirectionCreated } from '../lib/onboardingHelper.js';
 import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
+import { getPageAccessToken, subscribePageToLeadgen } from '../lib/facebookHelpers.js';
 
 const log = createLogger({ module: 'directionsRoutes' });
 
@@ -365,7 +366,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Проверяем флаг multi_account_enabled у пользователя
       const { data: userAccountCheck, error: userCheckError } = await supabase
         .from('user_accounts')
-        .select('multi_account_enabled, ad_account_id, access_token, username')
+        .select('multi_account_enabled, ad_account_id, access_token, username, page_id, fb_page_access_token')
         .eq('id', userAccountId)
         .single();
 
@@ -381,6 +382,9 @@ export async function directionsRoutes(app: FastifyInstance) {
       let fbAdAccountId: string | null = null;
       let fbAccessToken: string | null = null;
       let userAccountName: string | undefined;
+      let pageId: string | null = null;
+      let pageAccessToken: string | null = null;
+      let accountRecordId: string | null = null;
 
       if (userAccountCheck.multi_account_enabled) {
         // Мультиаккаунтный режим: данные в ad_accounts
@@ -395,7 +399,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
         const { data: adAccount, error: adAccountError } = await supabase
           .from('ad_accounts')
-          .select('ad_account_id, access_token, name')
+          .select('ad_account_id, access_token, name, page_id, fb_page_access_token')
           .eq('id', accountIdToUse)
           .eq('user_account_id', userAccountId)
           .single();
@@ -415,11 +419,16 @@ export async function directionsRoutes(app: FastifyInstance) {
         fbAdAccountId = adAccount.ad_account_id;
         fbAccessToken = adAccount.access_token;
         userAccountName = adAccount.name || undefined;
+        pageId = adAccount.page_id || null;
+        pageAccessToken = adAccount.fb_page_access_token || null;
+        accountRecordId = accountIdToUse;
       } else {
         // Legacy режим: данные в user_accounts
         fbAdAccountId = userAccountCheck.ad_account_id;
         fbAccessToken = userAccountCheck.access_token;
         userAccountName = userAccountCheck.username || undefined;
+        pageId = userAccountCheck.page_id || null;
+        pageAccessToken = userAccountCheck.fb_page_access_token || null;
       }
 
       log.info({
@@ -492,6 +501,93 @@ export async function directionsRoutes(app: FastifyInstance) {
           success: false,
           error: 'Facebook не подключен. Заполните данные рекламного кабинета.',
         });
+      }
+
+      if (input.objective === 'lead_forms') {
+        if (!pageId) {
+          return reply.code(400).send({
+            success: false,
+            error: 'page_id is required for lead_forms objective',
+          });
+        }
+
+        log.info({
+          userAccountId,
+          accountId: input.accountId || null,
+          pageId,
+          hasPageAccessToken: !!pageAccessToken,
+          multiAccount: userAccountCheck.multi_account_enabled
+        }, 'Lead forms objective: ensuring page token and leadgen subscription');
+
+        let effectivePageAccessToken = pageAccessToken;
+        let fetchedPageAccessToken = false;
+
+        if (!effectivePageAccessToken) {
+          log.info({ pageId, userAccountId }, 'Fetching Page Access Token for lead_forms');
+          effectivePageAccessToken = await getPageAccessToken(pageId, fbAccessToken);
+          fetchedPageAccessToken = true;
+          if (effectivePageAccessToken) {
+            const updateTarget = userAccountCheck.multi_account_enabled ? 'ad_accounts' : 'user_accounts';
+            const updateId = userAccountCheck.multi_account_enabled ? accountRecordId : userAccountId;
+
+            if (updateTarget && updateId) {
+              const { error: updateError } = await supabase
+                .from(updateTarget)
+                .update({ fb_page_access_token: effectivePageAccessToken, updated_at: new Date().toISOString() })
+                .eq('id', updateId);
+
+              if (updateError) {
+                log.warn({ err: updateError, updateTarget, updateId }, 'Failed to store fb_page_access_token');
+              } else {
+                log.info({ updateTarget, updateId, pageId }, 'Stored fb_page_access_token for lead_forms');
+              }
+            }
+          } else {
+            log.warn({ pageId, userAccountId }, 'Failed to obtain Page Access Token for lead_forms');
+          }
+        }
+
+        if (effectivePageAccessToken) {
+          log.info({ pageId, userAccountId }, 'Subscribing page to leadgen');
+          let subscribed = await subscribePageToLeadgen(pageId, effectivePageAccessToken);
+
+          if (!subscribed && !fetchedPageAccessToken) {
+            log.warn({ pageId, userAccountId }, 'Leadgen subscription failed, retrying with fresh Page Access Token');
+            const refreshedToken = await getPageAccessToken(pageId, fbAccessToken);
+
+            if (refreshedToken && refreshedToken !== effectivePageAccessToken) {
+              const updateTarget = userAccountCheck.multi_account_enabled ? 'ad_accounts' : 'user_accounts';
+              const updateId = userAccountCheck.multi_account_enabled ? accountRecordId : userAccountId;
+
+              if (updateTarget && updateId) {
+                const { error: updateError } = await supabase
+                  .from(updateTarget)
+                  .update({ fb_page_access_token: refreshedToken, updated_at: new Date().toISOString() })
+                  .eq('id', updateId);
+
+                if (updateError) {
+                  log.warn({ err: updateError, updateTarget, updateId }, 'Failed to refresh fb_page_access_token');
+                } else {
+                  log.info({ updateTarget, updateId, pageId }, 'Refreshed fb_page_access_token for lead_forms');
+                }
+              }
+
+              subscribed = await subscribePageToLeadgen(pageId, refreshedToken);
+            } else if (!refreshedToken) {
+              log.warn({ pageId, userAccountId }, 'Failed to refresh Page Access Token after subscription failure');
+            } else {
+              log.warn({ pageId, userAccountId }, 'Refreshed Page Access Token matches existing token, skipping retry');
+            }
+          }
+
+          if (!subscribed) {
+            log.warn({ pageId, userAccountId }, 'Failed to subscribe page to leadgen');
+          } else {
+            log.info({ pageId, userAccountId }, 'Page subscribed to leadgen successfully');
+          }
+        } else {
+          log.warn({ pageId, userAccountId }, 'Skipping leadgen subscription: no Page Access Token');
+        }
       }
 
       // Создаём Facebook Campaign
@@ -936,4 +1032,3 @@ export async function directionsRoutes(app: FastifyInstance) {
     }
   });
 }
-

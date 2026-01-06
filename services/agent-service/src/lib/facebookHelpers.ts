@@ -24,19 +24,31 @@ export async function getPageAccessToken(pageId: string, userAccessToken: string
     const accountsResponse = await fetch(accountsUrl);
     const accountsData = await accountsResponse.json();
 
-    if (accountsData.error) {
+    if (!accountsData.error) {
+      // Find the page and get its access token
+      const page = accountsData.data?.find((p: any) => p.id === pageId);
+      if (page?.access_token) {
+        log.info({ pageId }, 'Resolved Page Access Token via /me/accounts');
+        return page.access_token;
+      }
+      log.warn({ pageId, accountsCount: accountsData.data?.length || 0 }, 'Page not found in /me/accounts');
+    } else {
       log.error({ error: accountsData.error, pageId }, 'Failed to get /me/accounts');
+    }
+
+    // Fallback for system user tokens: request token directly from page
+    log.info({ pageId }, 'Attempting Page Access Token via page endpoint');
+    const pageUrl = `https://graph.facebook.com/${FB_API_VERSION}/${pageId}?fields=access_token&access_token=${encodeURIComponent(userAccessToken)}`;
+    const pageResponse = await fetch(pageUrl);
+    const pageData = await pageResponse.json();
+
+    if (pageData.error || !pageData.access_token) {
+      log.error({ error: pageData.error, pageId }, 'Failed to get Page Access Token from page endpoint');
       return null;
     }
 
-    // Find the page and get its access token
-    const page = accountsData.data?.find((p: any) => p.id === pageId);
-    if (!page?.access_token) {
-      log.warn({ pageId }, 'Page not found in /me/accounts');
-      return null;
-    }
-
-    return page.access_token;
+    log.info({ pageId }, 'Resolved Page Access Token via page endpoint');
+    return pageData.access_token;
   } catch (error) {
     log.error({ error, pageId }, 'Error getting Page Access Token');
     return null;
