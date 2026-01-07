@@ -8,6 +8,7 @@ export const CITIES = [
   { id: '1301648', name: 'Астана' },
   { id: '1290182', name: 'Атырау' },
   { id: '118296', name: 'Баку' },
+  { id: '1938', name: 'Бишкек' },
   { id: 'TASHKENT', name: 'Ташкент' },
   { id: '1301740', name: 'Туркестан' },
   { id: '1293836', name: 'Караганда' },
@@ -55,4 +56,3 @@ export const COUNTRY_IDS = ['AZ', 'BY', 'KZ', 'KG', 'UZ', 'US', 'IT', 'CA', 'SA'
 
 // Дефолтный UTM-тег
 export const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}';
-

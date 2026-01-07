@@ -31,6 +31,7 @@ const CITIES = [
   { id: '1301648', name: 'Астана' },
   { id: '1289662', name: 'Алматы' },
   { id: '1290182', name: 'Атырау' },
+  { id: '1938', name: 'Бишкек' },
 ];
 
 const CITIES_AND_COUNTRIES = [
