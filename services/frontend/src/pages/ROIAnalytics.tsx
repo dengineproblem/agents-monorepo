@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -17,6 +17,9 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
   Edit,
   Trash2,
   Save,
@@ -52,6 +55,18 @@ import { creativesApi } from '@/services/creativesApi';
 
 // Конфигурация для badge типа медиа
 type MediaType = 'video' | 'image' | 'carousel' | null | undefined;
+
+type CampaignSortKey =
+  | 'revenue'
+  | 'spend'
+  | 'roi'
+  | 'leads'
+  | 'cpl'
+  | 'qualification_rate'
+  | 'capi_interest'
+  | 'capi_qualified'
+  | 'capi_scheduled'
+  | 'conversion_rate';
 
 const MEDIA_TYPE_CONFIG: Record<string, { icon: React.ComponentType<{ className?: string }>; label: string; className: string }> = {
   video: {
@@ -113,6 +128,7 @@ const ROIAnalytics: React.FC = () => {
   const [isPeriodMenuOpen, setIsPeriodMenuOpen] = useState(false);
   const [mediaTypeFilter, setMediaTypeFilter] = useState<'all' | 'video' | 'image' | 'carousel'>('all');
   const [activeMainTab, setActiveMainTab] = useState<'creatives' | 'leads' | 'sales'>('creatives');
+  const [sortConfig, setSortConfig] = useState<{ key: CampaignSortKey; direction: 'asc' | 'desc' } | null>(null);
 
   // Funnel modal state
   const [funnelModalOpen, setFunnelModalOpen] = useState(false);
@@ -187,10 +203,97 @@ const ROIAnalytics: React.FC = () => {
     }
   };
 
-  const handleExportCreatives = () => {
-    if (!roiData?.campaigns) return;
+  const handleSort = (key: CampaignSortKey) => {
+    setSortConfig((prev) => {
+      if (!prev || prev.key !== key) {
+        return { key, direction: 'asc' };
+      }
+      if (prev.direction === 'asc') {
+        return { key, direction: 'desc' };
+      }
+      return null;
+    });
+  };
 
-    exportToCSV(roiData.campaigns, [
+  const sortedCampaigns = useMemo(() => {
+    if (!roiData?.campaigns) return [];
+    if (!sortConfig) return roiData.campaigns;
+
+    const getCampaignSortValue = (campaign: CampaignROI, key: CampaignSortKey): number | null => {
+      switch (key) {
+        case 'revenue':
+          return campaign.revenue;
+        case 'spend':
+          return campaign.spend;
+        case 'roi':
+          return campaign.roi;
+        case 'leads':
+          return campaign.leads;
+        case 'cpl':
+          return campaign.leads > 0 ? campaign.spend / 530 / campaign.leads : null;
+        case 'qualification_rate':
+          return campaign.qualification?.rate ?? null;
+        case 'capi_interest':
+          return campaign.capi_events?.interest ?? null;
+        case 'capi_qualified':
+          return campaign.capi_events?.qualified ?? null;
+        case 'capi_scheduled':
+          return campaign.capi_events?.scheduled ?? null;
+        case 'conversion_rate':
+          return campaign.leads > 0 ? (campaign.conversions / campaign.leads) * 100 : 0;
+        default:
+          return null;
+      }
+    };
+
+    const { key, direction } = sortConfig;
+    const sorted = [...roiData.campaigns];
+    sorted.sort((a, b) => {
+      const aValue = getCampaignSortValue(a, key);
+      const bValue = getCampaignSortValue(b, key);
+
+      if (aValue === null && bValue === null) return 0;
+      if (aValue === null) return 1;
+      if (bValue === null) return -1;
+
+      return direction === 'asc' ? aValue - bValue : bValue - aValue;
+    });
+    return sorted;
+  }, [roiData?.campaigns, sortConfig]);
+
+  const getAriaSort = (key: CampaignSortKey) => {
+    if (sortConfig?.key !== key) return 'none';
+    return sortConfig.direction === 'asc' ? 'ascending' : 'descending';
+  };
+
+  const SortIcon = ({ columnKey }: { columnKey: CampaignSortKey }) => {
+    if (sortConfig?.key !== columnKey) {
+      return <ArrowUpDown className="h-3 w-3 opacity-50" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ArrowUp className="h-3 w-3" />
+      : <ArrowDown className="h-3 w-3" />;
+  };
+
+  const SortButton = ({ label, columnKey, align = 'left' }: { label: string; columnKey: CampaignSortKey; align?: 'left' | 'center' }) => (
+    <button
+      type="button"
+      onClick={() => handleSort(columnKey)}
+      className={cn(
+        'flex items-center gap-1 w-full cursor-pointer select-none hover:text-foreground',
+        align === 'center' ? 'justify-center' : 'justify-start'
+      )}
+      aria-label={`Сортировать по ${label}`}
+    >
+      <span>{label}</span>
+      <SortIcon columnKey={columnKey} />
+    </button>
+  );
+
+  const handleExportCreatives = () => {
+    if (sortedCampaigns.length === 0) return;
+
+    exportToCSV(sortedCampaigns, [
       { header: 'Название', accessor: (c) => c.name },
       { header: 'Тип', accessor: (c) => getMediaTypeLabel(c.media_type) },
       { header: 'Выручка', accessor: (c) => formatAmountForExport(c.revenue) },
@@ -868,7 +971,7 @@ const ROIAnalytics: React.FC = () => {
                 <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", isSyncing && "animate-spin")} />
                 {isSyncing ? 'Синхронизация...' : 'Обновить'}
               </Button>
-              {roiData?.campaigns && roiData.campaigns.length > 0 && (
+              {sortedCampaigns.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -882,7 +985,7 @@ const ROIAnalytics: React.FC = () => {
             </div>
           </div>
 
-          {roiData?.campaigns && roiData.campaigns.length > 0 ? (
+          {sortedCampaigns.length > 0 ? (
             <>
               {/* Десктопная таблица */}
               <div className="hidden md:block">
@@ -894,16 +997,48 @@ const ROIAnalytics: React.FC = () => {
                           <tr>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Название креатива</th>
                             <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Тип</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Выручка</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Затраты</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">ROI</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Лиды</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">CPL</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">% квал</th>
-                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground" title="CAPI Level 1: Клиент проявил интерес (2+ сообщения)">Интерес</th>
-                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground" title="CAPI Level 2: Клиент прошёл квалификацию">Квал CAPI</th>
-                            <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground" title="CAPI Level 3: Клиент записался на консультацию">Запись</th>
-                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground">Конверсия %</th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('revenue')}>
+                              <SortButton label="Выручка" columnKey="revenue" />
+                            </th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('spend')}>
+                              <SortButton label="Затраты" columnKey="spend" />
+                            </th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('roi')}>
+                              <SortButton label="ROI" columnKey="roi" />
+                            </th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('leads')}>
+                              <SortButton label="Лиды" columnKey="leads" />
+                            </th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('cpl')}>
+                              <SortButton label="CPL" columnKey="cpl" />
+                            </th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('qualification_rate')}>
+                              <SortButton label="% квал" columnKey="qualification_rate" />
+                            </th>
+                            <th
+                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                              title="CAPI Level 1: Клиент проявил интерес (3+ входящих сообщений)"
+                              aria-sort={getAriaSort('capi_interest')}
+                            >
+                              <SortButton label="Интерес" columnKey="capi_interest" align="center" />
+                            </th>
+                            <th
+                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                              title="CAPI Level 2: Клиент прошёл квалификацию"
+                              aria-sort={getAriaSort('capi_qualified')}
+                            >
+                              <SortButton label="Квал CAPI" columnKey="capi_qualified" align="center" />
+                            </th>
+                            <th
+                              className="py-2 px-3 text-center text-xs font-medium text-muted-foreground"
+                              title="CAPI Level 3: Клиент записался на консультацию"
+                              aria-sort={getAriaSort('capi_scheduled')}
+                            >
+                              <SortButton label="Запись" columnKey="capi_scheduled" align="center" />
+                            </th>
+                            <th className="py-2 px-3 text-left text-xs font-medium text-muted-foreground" aria-sort={getAriaSort('conversion_rate')}>
+                              <SortButton label="Конверсия %" columnKey="conversion_rate" />
+                            </th>
                             {/* TEMPORARILY HIDDEN: Key Stages Column Header
                             {qualificationStats && qualificationStats.key_stages.length > 0 && (
                               <th className="py-2 px-3 text-center text-xs font-medium text-muted-foreground">Ключевые этапы</th>
@@ -915,7 +1050,7 @@ const ROIAnalytics: React.FC = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {roiData.campaigns.map((campaign, index) => (
+                          {sortedCampaigns.map((campaign, index) => (
                             <React.Fragment key={campaign.id}>
                               <tr className={cn(
                                 "border-b hover:bg-muted/30 transition-all duration-200",
@@ -1342,7 +1477,7 @@ const ROIAnalytics: React.FC = () => {
 
               {/* Мобильные карточки */}
               <div className="md:hidden space-y-2">
-                {roiData.campaigns.map((campaign) => (
+                {sortedCampaigns.map((campaign) => (
                   <Card
                     key={campaign.id}
                     className={cn(
