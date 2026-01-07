@@ -1281,7 +1281,8 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '',
   'ОСНОВНЫЕ ПРИНЦИПЫ И ПРИОРИТЕТЫ',
   '- 1) Строго соблюдать плановый СУТОЧНЫЙ БЮДЖЕТ аккаунта и, если заданы, квоты БЮДЖЕТОВ по НАПРАВЛЕНИЯМ. Бюджеты в факте могут гулять у Facebook — мы держим целевые daily_budget, не «подкручивая» реактивно по факту.',
-  '- 2) Главный KPI — CPL (стоимость заявки). Для WhatsApp приоритет — QCPL (стоимость КАЧЕСТВЕННОГО лида ≥2 сообщений).',
+  '- 2) Главный KPI — CPL (стоимость заявки). Для WhatsApp приоритет — QCPL (стоимость КАЧЕСТВЕННОГО лида ≥2 сообщений) ТОЛЬКО если account.whatsapp_connected=true.',
+  '-    Если WhatsApp не подключен — ориентируйся только на CPL, не ожидай качества из WhatsApp.',
   '- 3) Решения принимаем по поэтапной логике: (A) таймфреймы → (B) класс HS → (C) матрица действий → (D) ребаланс до планов → (E) отчёт с причинами.',
   '- 4) Если НЕТ «хороших» ad set (HS≥+25), применяем принцип «best of bad»: выбираем лучший по HS и используем его как временный опорный для добора плана с малыми шагами/рекомендацией дубля.',
   '- 5) Новые связки (<48 ч с запуска) не дёргаем агрессивно: штрафы мягче, допускаются только мягкие корректировки и явные остановки при критике.',
@@ -1294,7 +1295,7 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '  • Качественные WA-лиды (≥2 сообщений): onsite_conversion.messaging_user_depth_2_message_send',
   '  • Лид-формы: onsite_conversion.lead_grouped (НЕ используем lead)',
   '  • Сайт/пиксель: offsite_conversion.fb_pixel_lead, offsite_conversion.custom* (ТОЛЬКО если нет fb_pixel_lead)',
-  '- Формулы: CPL = spend / max(total_leads,1); QCPL = spend / max(quality_leads,1). Для WhatsApp сначала QCPL; если quality_leads<3 на окне — опираемся на CPL.',
+  '- Формулы: CPL = spend / max(total_leads,1); QCPL = spend / max(quality_leads,1). Для WhatsApp сначала QCPL; если quality_leads<3 на окне — опираемся на CPL. Если WhatsApp не подключен — QCPL не применяем.',
   '',
   'ТАЙМФРЕЙМЫ И ВЕСА',
   '- Окна анализа: yesterday (50%), last_3d (25%), last_7d (15%), last_30d (10%).',
@@ -1349,12 +1350,23 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '     - CPC = spend / link_clicks (НЕ CPL!)',
   '   • Validation: данные всегда валидны',
   '',
+  '4️⃣ Lead Forms кампании (objective = "lead_forms"):',
+  '   • Поле с метриками: lead_forms_metrics',
+  '   • Метрики:',
+  '     - form_leads: лиды из Instant Forms (onsite_conversion.lead_grouped)',
+  '     - cost_per_lead: стоимость лида',
+  '   • Формулы:',
+  '     - CPL = spend / form_leads',
+  '   • Validation: данные всегда валидны',
+  '',
   'ПРАВИЛА РАБОТЫ С МЕТРИКАМИ:',
   '- При анализе adset ВСЕГДА проверяй поле objective',
-  '- Используй соответствующее поле метрик (whatsapp_metrics / site_leads_metrics / instagram_metrics)',
+  '- Используй соответствующее поле метрик (whatsapp_metrics / site_leads_metrics / lead_forms_metrics / instagram_metrics)',
   '- Сравнивай CPL (или CPC для Instagram) с target_cpl_cents из Direction',
-  '- Для WhatsApp: учитывай что data_valid=false означает что лиды еще не прогрузились, подожди',
-  '- Для Site Leads и Instagram: данные всегда валидны, можно анализировать сразу',
+  '- Для WhatsApp: если account.whatsapp_connected=false — НЕ учитывай quality_leads и QCPL, оценивай только CPL',
+  '- Для WhatsApp: data_valid=false означает что лиды еще не прогрузились, подожди (только если WhatsApp подключен)',
+  '- Для Site Leads, Lead Forms и Instagram: данные всегда валидны, можно анализировать сразу',
+  '- Если objective != "whatsapp" — НЕ упоминай ожидание качества из WhatsApp и не ссылайся на QCPL',
   '',
           '📜 ИСТОРИЯ ТВОИХ ДЕЙСТВИЙ ЗА ПОСЛЕДНИЕ 3 ДНЯ',
   '- Во входных данных ты получаешь поле `action_history` - массив последних 10 запусков (твоих и campaign-builder) за 3 дня.',
@@ -1615,11 +1627,14 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '- Лиды ЗАВИСЯТ ОТ ТИПА КАМПАНИИ:',
   '  • WhatsApp (objective=whatsapp): лиды = conversations_started из whatsapp_metrics',
   '  • Site Leads (objective=site_leads): лиды = pixel_leads из site_leads_metrics',
+  '  • Lead Forms (objective=lead_forms): лиды = form_leads из lead_forms_metrics',
   '  • Instagram Traffic (objective=instagram_traffic): метрика = link_clicks (НЕ лиды!)',
   '- CPL формулы:',
   '  • WhatsApp: CPL = spend / conversations_started, Quality CPL = spend / quality_leads',
   '  • Site Leads: CPL = spend / pixel_leads',
+  '  • Lead Forms: CPL = spend / form_leads',
   '  • Instagram: CPC = spend / link_clicks (НЕ CPL!)',
+  '- Если objective != "whatsapp" — не упоминай ожидание качества из WhatsApp и не ссылайся на QCPL.',
   '- При делении на 0 — выводи "н/д".',
   '- Таймзона отчёта = таймзона аккаунта; дата отчёта — вчерашняя дата этой таймзоны.',
   '- Раздел "Сводка по отдельным кампаниям" формируй ТОЛЬКО по АКТИВНЫМ кампаниям с результатом за yesterday (spend>0 или leads>0). Неактивные/безрезультатные — не включать.',
@@ -2025,10 +2040,14 @@ async function sendToMonitoringBot(userAccount, reportText, dispatchFailed = fal
   }
 
   const errorPrefix = dispatchFailed ? '❌ ОШИБКА ВЫПОЛНЕНИЯ\n' : '';
+  const displayName = userAccount.accountName || userAccount.username || 'N/A';
+  const accountIdLine = userAccount.ad_account_id
+    ? `🏷️ Ad Account ID: ${userAccount.ad_account_id}\n`
+    : '';
   const prefix = `${errorPrefix}📊 ОТЧЁТ КЛИЕНТА
-👤 User: ${userAccount.username || 'N/A'}
+👤 User: ${displayName}
 🆔 ID: ${userAccount.id}
-━━━━━━━━━━━━━━━━
+${accountIdLine}━━━━━━━━━━━━━━━━
 
 `;
 
@@ -2387,8 +2406,14 @@ async function llmPlan(systemPrompt, userPayload) {
 // accountId - UUID из ad_accounts.id для мультиаккаунтного режима (опционально, если не передан - определится через getAccountUUID)
 fastify.post('/api/brain/run', async (request, reply) => {
   const started = Date.now();
+  let userAccountId = null;
+  let accountId = null;
+  let inputs = null;
   try {
-    const { idempotencyKey, userAccountId, accountId, inputs } = request.body || {};
+    const { idempotencyKey, userAccountId: reqUserAccountId, accountId: reqAccountId, inputs: reqInputs } = request.body || {};
+    userAccountId = reqUserAccountId || null;
+    accountId = reqAccountId || null;
+    inputs = reqInputs || null;
     if (!userAccountId) return reply.code(400).send({ error: 'userAccountId required' });
 
     const idem = idempotencyKey || genIdem();
@@ -2466,7 +2491,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
     if (ua.multi_account_enabled && accountUUID) {
       const { data: adAccount, error: adAccountError } = await supabase
         .from('ad_accounts')
-        .select('access_token, ad_account_id, page_id, whatsapp_phone_number')
+        .select('access_token, ad_account_id, page_id, whatsapp_phone_number, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, name, username, default_cpl_target_cents, plan_daily_budget_cents, prompt3, ig_seed_audience_id')
         .eq('id', accountUUID)
         .eq('user_account_id', userAccountId)
         .single();
@@ -2491,7 +2516,17 @@ fastify.post('/api/brain/run', async (request, reply) => {
         access_token: adAccount.access_token,
         ad_account_id: adAccount.ad_account_id,
         page_id: adAccount.page_id,
-        whatsapp_phone_number: adAccount.whatsapp_phone_number
+        whatsapp_phone_number: adAccount.whatsapp_phone_number,
+        telegram_id: adAccount.telegram_id || null,
+        telegram_id_2: adAccount.telegram_id_2 || null,
+        telegram_id_3: adAccount.telegram_id_3 || null,
+        telegram_id_4: adAccount.telegram_id_4 || null,
+        prompt3: adAccount.prompt3 || ua.prompt3,
+        ig_seed_audience_id: adAccount.ig_seed_audience_id || ua.ig_seed_audience_id,
+        default_cpl_target_cents: adAccount.default_cpl_target_cents ?? ua.default_cpl_target_cents,
+        plan_daily_budget_cents: adAccount.plan_daily_budget_cents ?? ua.plan_daily_budget_cents,
+        accountName: adAccount.name || adAccount.ad_account_id || null,
+        accountUsername: adAccount.username || null
       };
 
       fastify.log.info({
@@ -3126,7 +3161,9 @@ fastify.post('/api/brain/run', async (request, reply) => {
         dispatch: !!inputs?.dispatch,
         report_only_mode: reportOnlyMode,
         has_lal_audience: !!ua?.ig_seed_audience_id,
-        default_adset_mode: ua?.default_adset_mode || 'api_create'
+        default_adset_mode: ua?.default_adset_mode || 'api_create',
+        whatsapp_connected: !!ua?.whatsapp_phone_number,
+        account_name: ua?.accountName || null
       },
       limits: { min_cents: bounds.minCents, max_cents: bounds.maxCents, step_up: 0.30, step_down: 0.50 },
       targets,
@@ -3158,6 +3195,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
             // Данные направления
             direction_id: direction?.id || null,
             direction_name: direction?.name || null,
+            objective: direction?.objective || null,
             direction_daily_budget_cents: direction?.daily_budget_cents || null,
             direction_target_cpl_cents: direction?.target_cpl_cents || null,
             windows: {
@@ -3186,37 +3224,39 @@ fastify.post('/api/brain/run', async (request, reply) => {
             }
           })
           .map(as=>{
-          const current = toInt(as.daily_budget)||0;
-          const maxUp = Math.max(0, Math.min(bounds.maxCents, Math.round(current*1.3)) - current);
-          const maxDown = Math.max(0, current - Math.max(bounds.minCents, Math.round(current*0.5)));
+            const direction = directions.find(d => d.fb_campaign_id === as.campaign_id);
+            const current = toInt(as.daily_budget)||0;
+            const maxUp = Math.max(0, Math.min(bounds.maxCents, Math.round(current*1.3)) - current);
+            const maxDown = Math.max(0, current - Math.max(bounds.minCents, Math.round(current*0.5)));
           
-          // Получаем ads для этого adset (вчера)
-          const adsForAdset = (adsByAdsetY.get(as.id)||[]).map(ad => ({
-            ad_id: ad.ad_id,
-            ad_name: ad.ad_name,
-            spend: ad.spend || 0,
-            impressions: ad.impressions || 0,
-            actions: ad.actions || []
-          }));
+            // Получаем ads для этого adset (вчера)
+            const adsForAdset = (adsByAdsetY.get(as.id)||[]).map(ad => ({
+              ad_id: ad.ad_id,
+              ad_name: ad.ad_name,
+              spend: ad.spend || 0,
+              impressions: ad.impressions || 0,
+              actions: ad.actions || []
+            }));
           
-          return {
-          adset_id: as.id,
-          name: as.name,
-          campaign_id: as.campaign_id,
-          daily_budget_cents: current,
-          status: as.status,
-          step_constraints: { step_up_max_pct: 0.30, step_down_max_pct: 0.50 },
-          step_bounds_cents: { max_increase: maxUp, max_decrease: maxDown },
-          windows: {
-            yesterday: byY.get(as.id)||{},
-            last_3d: by3.get(as.id)||{},
-            last_7d: by7.get(as.id)||{},
-            last_30d: by30.get(as.id)||{},
-            today: byToday.get(as.id)||{}
-          },
-          ads: adsForAdset
-          };
-        })
+            return {
+              adset_id: as.id,
+              name: as.name,
+              campaign_id: as.campaign_id,
+              objective: direction?.objective || null,
+              daily_budget_cents: current,
+              status: as.status,
+              step_constraints: { step_up_max_pct: 0.30, step_down_max_pct: 0.50 },
+              step_bounds_cents: { max_increase: maxUp, max_decrease: maxDown },
+              windows: {
+                yesterday: byY.get(as.id)||{},
+                last_3d: by3.get(as.id)||{},
+                last_7d: by7.get(as.id)||{},
+                last_30d: by30.get(as.id)||{},
+                today: byToday.get(as.id)||{}
+              },
+              ads: adsForAdset
+            };
+          })
       },
       report: {
         report_date: date,

@@ -357,11 +357,10 @@ async function fetchAdsetsDaily(adAccountId, accessToken, days = 14) {
 
 /**
  * Получить objective для adsets через campaign_id → direction
- * Возвращает Map<adset_id, objective>
+ * Возвращает Map<campaign_id, objective>
+ * В мультиаккаунтном режиме фильтрует по account_id
  */
-async function getAdsetsObjectives(supabase, userAccountId, adsetIds) {
-  if (!adsetIds || adsetIds.length === 0) return new Map();
-
+async function getAdsetsObjectives(supabase, userAccountId, accountUUID = null) {
   const objectivesMap = new Map();
 
   try {
@@ -370,11 +369,19 @@ async function getAdsetsObjectives(supabase, userAccountId, adsetIds) {
     // Поэтому вместо adsetIds используем campaign_ids
 
     // Получаем directions с их fb_campaign_id и objective
-    const { data: directions, error } = await supabase
+    let query = supabase
       .from('account_directions')
       .select('fb_campaign_id, objective')
       .eq('user_account_id', userAccountId)
       .not('fb_campaign_id', 'is', null);
+
+    if (accountUUID) {
+      query = query.eq('account_id', accountUUID);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data: directions, error } = await query;
 
     if (error) {
       logger.error({ error: error.message }, '[getAdsetsObjectives] Failed to fetch directions');
@@ -389,7 +396,8 @@ async function getAdsetsObjectives(supabase, userAccountId, adsetIds) {
 
     logger.debug({
       directions_count: directions?.length || 0,
-      campaigns_mapped: campaignObjectives.size
+      campaigns_mapped: campaignObjectives.size,
+      accountUUID: accountUUID || null
     }, '[getAdsetsObjectives] Loaded campaign objectives');
 
     return campaignObjectives;
@@ -864,12 +872,12 @@ async function getCreativeMetricsFromDB(supabase, userAccountId, fbCreativeId, d
 /**
  * Получить активные креативы пользователя из user_creatives
  */
-async function getActiveCreatives(supabase, userAccountId) {
+async function getActiveCreatives(supabase, userAccountId, accountId = null) {
   // ========================================
   // ФИЛЬТРУЕМ КРЕАТИВЫ ПО АКТИВНЫМ НАПРАВЛЕНИЯМ
   // ========================================
   // Получаем креативы с информацией о направлении (только из активных направлений)
-  const { data, error } = await supabase
+  let query = supabase
     .from('user_creatives')
     .select(`
       id, 
@@ -888,17 +896,33 @@ async function getActiveCreatives(supabase, userAccountId) {
     .eq('is_active', true)
     .eq('status', 'ready')
     .eq('account_directions.is_active', true); // ТОЛЬКО из активных направлений!
+
+  if (accountId) {
+    query = query.eq('account_id', accountId).eq('account_directions.account_id', accountId);
+  } else {
+    query = query.is('account_id', null).is('account_directions.account_id', null);
+  }
+
+  const { data, error } = await query;
   
   if (error) throw new Error(`Failed to get active creatives: ${error.message}`);
   
   // Также включаем креативы БЕЗ направления (legacy)
-  const { data: legacyCreatives, error: legacyError } = await supabase
+  let legacyQuery = supabase
     .from('user_creatives')
     .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, is_active, status, created_at, direction_id')
     .eq('user_id', userAccountId)
     .eq('is_active', true)
     .eq('status', 'ready')
     .is('direction_id', null); // Креативы без направления (legacy)
+
+  if (accountId) {
+    legacyQuery = legacyQuery.eq('account_id', accountId);
+  } else {
+    legacyQuery = legacyQuery.is('account_id', null);
+  }
+
+  const { data: legacyCreatives, error: legacyError } = await legacyQuery;
   
   if (legacyError) throw new Error(`Failed to get legacy creatives: ${legacyError.message}`);
   
@@ -1298,7 +1322,7 @@ export async function runScoringAgent(userAccount, options = {}) {
       fetchAdsetsDaily(ad_account_id, access_token, 14),
       fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),
       fetchAdsetDiagnostics(ad_account_id, access_token),
-      getAdsetsObjectives(supabase, userAccountId)
+      getAdsetsObjectives(supabase, userAccountId, accountUUID)
     ]);
 
     // Группируем по adset_id и вычисляем метрики для разных периодов
@@ -1377,7 +1401,7 @@ export async function runScoringAgent(userAccount, options = {}) {
     
     logger.info({ where: 'scoring_agent', phase: 'fetching_creatives' });
     
-    const userCreatives = await getActiveCreatives(supabase, userAccountId);
+    const userCreatives = await getActiveCreatives(supabase, userAccountId, accountUUID);
     
     // Получаем список creative_id которые используются в активных ads
     const activeCreativeIds = await getActiveCreativeIds(ad_account_id, access_token);

@@ -5,25 +5,41 @@ import { supabase } from '@/integrations/supabase/client';
 import { CampaignReport } from '@/types/report';
 import { toast } from 'sonner';
 import { useTelegramWebApp } from './useTelegramWebApp';
+import { useAppContext } from '@/context/AppContext';
 
 export const useReports = () => {
   const [reports, setReports] = useState<CampaignReport[]>([]);
   const [loading, setLoading] = useState(false);
   const { user } = useTelegramWebApp();
+  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
   
   const fetchReports = async () => {
     if (!user?.id) {
       console.warn('Нет идентификатора пользователя Telegram для получения отчетов');
       return;
     }
+
+    if (multiAccountEnabled && !currentAdAccountId) {
+      console.warn('Мультиаккаунт: отчет не запрошен, аккаунт не выбран');
+      setReports([]);
+      return;
+    }
     
     setLoading(true);
     try {
       console.log('Загрузка отчетов для пользователя с Telegram ID:', user.id);
-      const { data, error } = await supabase
+      let query = supabase
         .from('campaign_reports')
         .select('*')
-        .eq('telegram_id', user.id.toString())
+        .eq('telegram_id', user.id.toString());
+
+      if (multiAccountEnabled && currentAdAccountId) {
+        query = query.eq('account_id', currentAdAccountId);
+      } else {
+        query = query.is('account_id', null);
+      }
+
+      const { data, error } = await query
         .order('created_at', { ascending: false });
       
       if (error) {
@@ -46,7 +62,7 @@ export const useReports = () => {
     if (user?.id) {
       fetchReports();
     }
-  }, [user?.id]);
+  }, [user?.id, currentAdAccountId, multiAccountEnabled]);
   
   return {
     reports,

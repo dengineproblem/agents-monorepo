@@ -83,7 +83,12 @@ export async function autopilotRoutes(app: FastifyInstance) {
    */
   app.get('/autopilot/reports', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { telegramId, limit = '10' } = request.query as { telegramId?: string; limit?: string };
+      const { telegramId, userAccountId, accountId, limit = '10' } = request.query as {
+        telegramId?: string;
+        userAccountId?: string;
+        accountId?: string; // UUID FK к ad_accounts.id
+        limit?: string;
+      };
 
       if (!telegramId) {
         return reply.code(400).send({
@@ -94,12 +99,34 @@ export async function autopilotRoutes(app: FastifyInstance) {
 
       const limitNum = Math.min(parseInt(limit, 10) || 10, 50);
 
-      log.info({ telegramId, limit: limitNum }, 'Fetching campaign reports');
+      log.info({ telegramId, userAccountId, accountId, limit: limitNum }, 'Fetching campaign reports');
 
-      const { data: reports, error } = await supabase
+      let query = supabase
         .from('campaign_reports')
-        .select('id, telegram_id, report_data, created_at')
-        .eq('telegram_id', telegramId)
+        .select('id, telegram_id, account_id, report_data, created_at')
+        .eq('telegram_id', telegramId);
+
+      let resolvedUserAccountId = userAccountId;
+
+      if (!resolvedUserAccountId && accountId) {
+        const { data: adAccount, error: adAccountError } = await supabase
+          .from('ad_accounts')
+          .select('user_account_id')
+          .eq('id', accountId)
+          .maybeSingle();
+
+        if (adAccountError) {
+          log.warn({ err: adAccountError, accountId }, 'Failed to resolve userAccountId for reports');
+        } else {
+          resolvedUserAccountId = adAccount?.user_account_id || null;
+        }
+      }
+
+      if (resolvedUserAccountId && await shouldFilterByAccountId(supabase, resolvedUserAccountId, accountId)) {
+        query = query.eq('account_id', accountId);
+      }
+
+      const { data: reports, error } = await query
         .order('created_at', { ascending: false })
         .limit(limitNum);
 
