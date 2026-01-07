@@ -799,6 +799,10 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     cpl: number;
     ctr: number; // Click-through rate (%)
     cpm: number; // Cost per mille (cost per 1000 impressions)
+    messagingLeads: number; // total_messaging_connection
+    qualityLeads: number; // messaging_user_depth_2_message_send (≥2 messages)
+    cpql: number; // Cost per qualified lead
+    qualityRate: number; // (qualityLeads / messagingLeads) × 100
   }
 
   async function fetchFacebookStatsForAccount(
@@ -862,12 +866,25 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       const impressions = parseInt(insight.impressions || '0', 10);
       const clicks = parseInt(insight.clicks || '0', 10);
 
-      // Подсчёт лидов из actions
+      // Подсчёт лидов из actions с раздельным учётом messaging и quality
       let leads = 0;
+      let messagingLeads = 0;
+      let qualityLeads = 0;
+
       if (insight.actions && Array.isArray(insight.actions)) {
         for (const action of insight.actions) {
-          if (
-            action.action_type === 'onsite_conversion.total_messaging_connection' ||
+          // Messaging leads (переписки)
+          if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+            const value = parseInt(action.value || '0', 10);
+            messagingLeads = value;
+            leads += value;
+          }
+          // Quality leads (≥2 сообщения)
+          else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
+            qualityLeads = parseInt(action.value || '0', 10);
+          }
+          // Site leads и lead forms
+          else if (
             action.action_type === 'offsite_conversion.fb_pixel_lead' ||
             action.action_type === 'onsite_conversion.lead_grouped'
           ) {
@@ -875,6 +892,10 @@ export async function adAccountsRoutes(app: FastifyInstance) {
           }
         }
       }
+
+      // Расчет производных метрик качества
+      const cpql = qualityLeads > 0 ? spend / qualityLeads : 0;
+      const qualityRate = messagingLeads > 0 ? (qualityLeads / messagingLeads) * 100 : 0;
 
       const stats: FacebookStats = {
         spend,
@@ -884,6 +905,10 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         cpl: leads > 0 ? spend / leads : 0,
         ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
         cpm: impressions > 0 ? (spend / impressions) * 1000 : 0,
+        messagingLeads,
+        qualityLeads,
+        cpql,
+        qualityRate,
       };
 
       log.debug({

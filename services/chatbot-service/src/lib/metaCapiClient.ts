@@ -3,10 +3,10 @@
  *
  * Отправляет события конверсий в Facebook для оптимизации рекламы.
  *
- * Три уровня событий:
- * 1. Lead (INTEREST) - клиент проявил интерес (2+ сообщения)
- * 2. CompleteRegistration (QUALIFIED) - клиент квалифицирован
- * 3. Schedule (SCHEDULED) - клиент записался на консультацию/встречу
+ * Три уровня событий (Pixel/CAPI без WABA):
+ * 1. ViewContent (INTEREST) - клиент проявил интерес (3+ входящих сообщений)
+ * 2. CompleteRegistration (QUALIFIED) - клиент прошёл квалификацию
+ * 3. Purchase (BOOKED) - клиент записался/купил (event_name = Purchase)
  */
 
 import crypto from 'crypto';
@@ -65,13 +65,15 @@ const circuitBreaker = new MetaCircuitBreaker();
 
 // Event names for each conversion level
 export const CAPI_EVENTS = {
-  INTEREST: 'Lead',                  // Level 1: 2+ messages
-  QUALIFIED: 'CompleteRegistration', // Level 2: Passed qualification
-  SCHEDULED: 'Schedule',             // Level 3: Booked appointment
+  INTEREST: 'ViewContent',          // Level 1: 3+ inbound messages
+  QUALIFIED: 'CompleteRegistration',// Level 2: Passed qualification
+  SCHEDULED: 'Purchase',            // Level 3: Booked/purchase event
 } as const;
 
 export type CapiEventName = typeof CAPI_EVENTS[keyof typeof CAPI_EVENTS];
 export type CapiEventLevel = 1 | 2 | 3;
+const PURCHASE_CURRENCY = 'KZT';
+const PURCHASE_DEFAULT_VALUE = 1;
 
 // Meta CAPI response structure
 interface MetaCapiResponse {
@@ -96,7 +98,7 @@ export interface CapiEventParams {
   // User data for matching (at least one required)
   phone?: string;        // Will be hashed
   email?: string;        // Will be hashed
-  ctwaClid?: string;     // Click-to-WhatsApp Click ID (not hashed)
+  ctwaClid?: string;     // Stored for logs only; not used in payload
 
   // Context
   dialogAnalysisId?: string;
@@ -140,13 +142,36 @@ function hashPhone(phone: string): string {
 }
 
 /**
- * Generate unique event ID for deduplication
- * Uses crypto.randomUUID for uniqueness instead of Date.now()
+ * Generate deterministic event ID for deduplication
+ * Format: wa_{leadId}_{interest|qualified|purchase}_v1
  */
 function generateEventId(params: CapiEventParams): string {
-  const uuid = crypto.randomUUID();
-  const data = `${params.pixelId}-${params.eventName}-${params.phone || params.ctwaClid}-${uuid}`;
-  return crypto.createHash('md5').update(data).digest('hex');
+  const levelSuffix = {
+    1: 'interest',
+    2: 'qualified',
+    3: 'purchase',
+  }[params.eventLevel];
+
+  const baseId = params.leadId || params.dialogAnalysisId || params.phone || params.email || params.ctwaClid;
+
+  if (params.leadId || params.dialogAnalysisId) {
+    return `wa_${baseId}_${levelSuffix}_v1`;
+  }
+
+  if (params.phone) {
+    return `wa_${hashPhone(params.phone)}_${levelSuffix}_v1`;
+  }
+
+  if (params.email) {
+    return `wa_${hashForCapi(params.email)}_${levelSuffix}_v1`;
+  }
+
+  if (params.ctwaClid) {
+    return `wa_${params.ctwaClid}_${levelSuffix}_v1`;
+  }
+
+  const fallback = crypto.randomUUID();
+  return `wa_${fallback}_${levelSuffix}_v1`;
 }
 
 /**
@@ -238,7 +263,6 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     eventLevel,
     hasPhone: !!phone,
     hasEmail: !!email,
-    hasCtwaClid: !!ctwaClid,
     dialogAnalysisId,
     circuitBreakerState: circuitBreaker.getState(),
   }, 'Sending CAPI event');
@@ -260,8 +284,8 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
   }
 
   // Need at least one user identifier
-  if (!phone && !email && !ctwaClid) {
-    log.warn({}, 'No user data (phone, email, or ctwaClid) provided, skipping CAPI event');
+  if (!phone && !email) {
+    log.warn({}, 'No user data (phone or email) provided, skipping CAPI event');
     return { success: false, error: 'No user data provided' };
   }
 
@@ -281,36 +305,36 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       userData.em = [hashForCapi(email)];
     }
 
-    // ctwa_clid is NOT hashed - it's passed as-is
-    if (ctwaClid) {
-      userData.ctwa_clid = ctwaClid;
+    if (leadId) {
+      userData.external_id = String(leadId);
+    }
+
+    const mergedCustomData: Record<string, unknown> = {
+      event_level: eventLevel,
+      ...customData,
+    };
+
+    if (eventName === CAPI_EVENTS.SCHEDULED) {
+      if (mergedCustomData.currency == null) {
+        mergedCustomData.currency = PURCHASE_CURRENCY;
+      }
+      if (mergedCustomData.value == null) {
+        mergedCustomData.value = PURCHASE_DEFAULT_VALUE;
+      }
     }
 
     // Build event payload
-    // NOTE: action_source: 'business_messaging' is ONLY valid when ctwa_clid is present
-    // For leads without ctwa_clid (not from CTWA ads), use action_source: 'other'
-    // Meta API returns error 2804064 for event_source_url with business_messaging
-    // Meta API returns error 2804066 for invalid event names with business_messaging without ctwa_clid
     const eventPayload: Record<string, unknown> = {
       event_name: eventName,
       event_time: eventTime,
       event_id: eventId,
+      action_source: process.env.META_CAPI_ACTION_SOURCE || 'system_generated',
       user_data: userData,
-      custom_data: {
-        event_level: eventLevel,
-        ...customData,
-      },
+      custom_data: mergedCustomData,
     };
 
-    // Set action_source based on whether we have ctwa_clid
-    if (ctwaClid) {
-      // Lead from Click-to-WhatsApp ad - use business_messaging
-      eventPayload.action_source = 'business_messaging';
-      eventPayload.messaging_channel = 'whatsapp';
-    } else {
-      // Lead not from CTWA ad (direct WhatsApp contact or other source)
-      // Use 'other' as action_source since it's still WhatsApp but not from ad click
-      eventPayload.action_source = 'other';
+    if (eventSourceUrl) {
+      eventPayload.event_source_url = eventSourceUrl;
     }
 
     // Send to CAPI with retry and timeout

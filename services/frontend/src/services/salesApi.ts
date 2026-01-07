@@ -35,9 +35,9 @@ export interface CampaignROI {
   };
   // CAPI события (Meta Conversions API)
   capi_events?: {
-    interest: number;    // Level 1 - Lead event (клиент отправил 2+ сообщения)
+    interest: number;    // Level 1 - Lead event (клиент отправил 3+ сообщений)
     qualified: number;   // Level 2 - CompleteRegistration (прошёл квалификацию)
-    scheduled: number;   // Level 3 - Schedule (записался на консультацию)
+    scheduled: number;   // Level 3 - Schedule (записался на ключевой этап)
   };
   // Новые поля для типа медиа и миниатюр
   media_type?: 'video' | 'image' | 'carousel' | null;

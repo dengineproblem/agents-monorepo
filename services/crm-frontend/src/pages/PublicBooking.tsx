@@ -521,7 +521,7 @@ export function PublicBooking() {
                 <div><strong>Специалист:</strong> {selectedConsultant?.name}</div>
                 <div><strong>Дата:</strong> {selectedSlot && formatDisplayDate(selectedSlot.date)}</div>
                 <div><strong>Время:</strong> {selectedSlot?.start_time}</div>
-                {selectedService?.price > 0 && (
+                {selectedService && selectedService.price > 0 && (
                   <div><strong>Стоимость:</strong> {formatPrice(selectedService.price, selectedService.currency)}</div>
                 )}
               </div>

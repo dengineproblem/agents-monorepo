@@ -384,10 +384,13 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
     console.log(`[API] Запрос статистики ad sets для кампании ${campaignId} с action_breakdowns`);
     const response = await fetchFromFacebookAPI(endpoint, params);
 
+    console.log(`[API] getAdsetStats response для кампании ${campaignId}:`, response.data?.length || 0, 'adsets');
+
     if (response.data && response.data.length > 0) {
-      return response.data.map((stat: any) => {
+      const result = response.data.map((stat: any) => {
         // Используем ту же логику подсчёта лидов, что и на главном дашборде (getCampaignStats)
         let messagingLeads = 0;
+        let qualityLeads = 0;
         let siteLeads = 0;
         let leadFormLeads = 0;
 
@@ -396,6 +399,10 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
             // Общие лиды (messaging_connection)
             if (action.action_type === 'onsite_conversion.total_messaging_connection') {
               messagingLeads = parseInt(action.value || "0", 10);
+            }
+            // Качественные лиды (2+ сообщения)
+            else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
+              qualityLeads = parseInt(action.value || "0", 10);
             }
             // Лиды с сайта - используем ТОЛЬКО offsite_conversion.fb_pixel_lead
             // чтобы избежать дублирования с onsite_web_lead
@@ -419,6 +426,8 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
 
         const spend = parseFloat(stat.spend || "0");
         const cpl = leads > 0 ? spend / leads : 0;
+        const cpql = qualityLeads > 0 ? spend / qualityLeads : 0;
+        const qualityRate = messagingLeads > 0 ? (qualityLeads / messagingLeads) * 100 : 0;
 
         return {
           adset_id: stat.adset_id,
@@ -428,8 +437,15 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
           cpl,
           impressions: parseInt(stat.impressions || "0", 10),
           clicks: parseInt(stat.clicks || "0", 10),
+          messagingLeads,
+          qualityLeads,
+          cpql,
+          qualityRate,
         };
       });
+
+      console.log(`[API] getAdsetStats returning ${result.length} mapped adsets`);
+      return result;
     }
 
     return [];
@@ -1034,6 +1050,10 @@ export const facebookApi = {
     clicks: number;
     ctr: number;
     cpl: number;
+    messagingLeads: number;
+    qualityLeads: number;
+    cpql: number;
+    qualityRate: number;
   }>> => {
     if (!await hasValidConfig()) {
       return [];
@@ -1056,6 +1076,7 @@ export const facebookApi = {
         return response.data.map((stat: any) => {
           // Используем ту же логику подсчёта лидов
           let messagingLeads = 0;
+          let qualityLeads = 0;
           let siteLeads = 0;
           let leadFormLeads = 0;
 
@@ -1063,6 +1084,8 @@ export const facebookApi = {
             for (const action of stat.actions) {
               if (action.action_type === 'onsite_conversion.total_messaging_connection') {
                 messagingLeads = parseInt(action.value || "0", 10);
+              } else if (action.action_type === 'onsite_conversion.messaging_user_depth_2_message_send') {
+                qualityLeads = parseInt(action.value || "0", 10);
               } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
                 siteLeads = parseInt(action.value || "0", 10);
               } else if (!siteLeads && typeof action.action_type === 'string' && action.action_type.startsWith('offsite_conversion.custom')) {
@@ -1077,6 +1100,8 @@ export const facebookApi = {
           const spend = parseFloat(stat.spend || '0');
           const impressions = parseInt(stat.impressions || '0', 10);
           const clicks = parseInt(stat.clicks || '0', 10);
+          const cpql = qualityLeads > 0 ? spend / qualityLeads : 0;
+          const qualityRate = messagingLeads > 0 ? (qualityLeads / messagingLeads) * 100 : 0;
 
           return {
             ad_id: stat.ad_id,
@@ -1087,6 +1112,10 @@ export const facebookApi = {
             clicks,
             ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
             cpl: leads > 0 ? spend / leads : 0,
+            messagingLeads,
+            qualityLeads,
+            cpql,
+            qualityRate,
           };
         });
       }

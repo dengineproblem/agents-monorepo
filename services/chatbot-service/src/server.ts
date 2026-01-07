@@ -273,6 +273,13 @@ app.post('/capi/resend', async (request, reply) => {
           : level === 2 ? CAPI_EVENTS.QUALIFIED
           : CAPI_EVENTS.SCHEDULED;
 
+        const { data: leadRecord } = await supabase
+          .from('leads')
+          .select('id')
+          .eq('chat_id', dialog.contact_phone)
+          .eq('user_account_id', dialog.user_account_id)
+          .maybeSingle();
+
         const response = await sendCapiEvent({
           pixelId,
           accessToken,
@@ -281,6 +288,7 @@ app.post('/capi/resend', async (request, reply) => {
           phone: dialog.contact_phone,
           ctwaClid: dialog.ctwa_clid,
           dialogAnalysisId: dialog.id,
+          leadId: leadRecord?.id,
           userAccountId: dialog.user_account_id,
           directionId: dialog.direction_id,
         });
@@ -353,4 +361,3 @@ app.listen({ host: '0.0.0.0', port: PORT }).then(() => {
   app.log.error(e);
   process.exit(1);
 });
-

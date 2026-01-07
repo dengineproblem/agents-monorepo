@@ -2,6 +2,14 @@ import { DialogAnalysis, DialogFilters, FunnelStage } from '@/types/dialogAnalys
 
 const API_BASE_URL = import.meta.env.VITE_CRM_BACKEND_URL || '/api/crm';
 
+export interface WhatsAppInstance {
+  id: string;
+  instance_name: string;
+  user_account_id: string;
+  status?: string;
+  created_at?: string;
+}
+
 export const dialogAnalysisService = {
   // Analyze dialogs
   async analyzeDialogs(data: {
@@ -59,7 +67,7 @@ export const dialogAnalysisService = {
   },
   
   // Get WhatsApp instances
-  async getInstances(userAccountId: string) {
+  async getInstances(userAccountId: string): Promise<WhatsAppInstance[]> {
     const response = await fetch(`${API_BASE_URL}/instances?userAccountId=${userAccountId}`);
     if (!response.ok) throw new Error('Failed to fetch instances');
     return response.json();

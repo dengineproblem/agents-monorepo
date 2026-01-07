@@ -2,7 +2,7 @@
  * CAPI Tools - функции для управления Meta Conversions API из AI-бота
  *
  * Эти функции позволяют боту:
- * - Вручную отправлять CAPI события (Lead, Qualified, Scheduled)
+ * - Вручную отправлять CAPI события (Lead, Qualified, Schedule)
  * - Проверять статус отправленных CAPI событий
  *
  * Features:
@@ -26,10 +26,12 @@ const baseLog = createLogger({ module: 'capiTools' });
 
 // Названия уровней CAPI событий для логов
 const LEVEL_NAMES: Record<number, string> = {
-  1: 'Interest (Lead)',
-  2: 'Qualified (CompleteRegistration)',
-  3: 'Scheduled (Schedule)'
+  1: 'Interest',
+  2: 'Qualified',
+  3: 'Scheduled'
 };
+
+const CAPI_CHANNEL = 'whatsapp_baileys';
 
 // Имена CAPI tools
 const CAPI_TOOL_NAMES = ['send_capi_event', 'get_capi_status'] as const;
@@ -43,14 +45,14 @@ export function getCapiToolDefinitions(): OpenAI.Chat.Completions.ChatCompletion
       type: 'function',
       function: {
         name: 'send_capi_event',
-        description: 'Отправить событие конверсии в Meta CAPI. Используй когда клиент явно проявил интерес (level 1), прошёл квалификацию и ответил на вопросы (level 2), или записался на консультацию/встречу (level 3). Каждый уровень можно отправить только один раз.',
+        description: 'Отправить событие конверсии в Meta CAPI. Используй когда клиент явно проявил интерес (level 1, 3+ входящих сообщений), прошёл квалификацию (level 2), или записался на ключевой этап (level 3). Каждый уровень можно отправить только один раз.',
         parameters: {
           type: 'object',
           properties: {
             level: {
               type: 'integer',
               enum: [1, 2, 3],
-              description: '1 = Interest/Lead (клиент заинтересован), 2 = Qualified/CompleteRegistration (прошёл квалификацию), 3 = Scheduled/Schedule (записался)'
+              description: '1 = Interest/Lead (3+ входящих сообщений), 2 = Qualified/CompleteRegistration (прошёл квалификацию), 3 = Schedule (записался)'
             },
             reason: {
               type: 'string',
@@ -106,7 +108,22 @@ async function getLeadDataForCapi(leadId: string) {
     return null;
   }
 
-  return data;
+  let leadRecordId: string | undefined;
+  const { data: leadRecord, error: leadError } = await supabase
+    .from('leads')
+    .select('id')
+    .eq('chat_id', data.contact_phone)
+    .eq('user_account_id', data.user_account_id)
+    .maybeSingle();
+
+  if (!leadError && leadRecord?.id) {
+    leadRecordId = String(leadRecord.id);
+  }
+
+  return {
+    ...data,
+    lead_id: leadRecordId,
+  };
 }
 
 /**
@@ -136,7 +153,7 @@ async function handleSendCapiEvent(
       validLevels: [1, 2, 3],
       elapsedMs: Date.now() - startTime
     }, '[handleSendCapiEvent] Invalid event level', ['api', 'validation']);
-    return 'Неверный уровень события. Допустимые значения: 1 (Interest), 2 (Qualified), 3 (Scheduled).';
+    return 'Неверный уровень события. Допустимые значения: 1 (Interest), 2 (Qualified), 3 (Schedule).';
   }
 
   // Получаем данные лида
@@ -195,8 +212,8 @@ async function handleSendCapiEvent(
       level,
       levelName: LEVEL_NAMES[level],
       elapsedMs: Date.now() - startTime
-    }, '[handleSendCapiEvent] Scheduled event already sent - skipping', ['api']);
-    return 'Событие Scheduled (уровень 3) уже было отправлено для этого клиента.';
+    }, '[handleSendCapiEvent] Schedule event already sent - skipping', ['api']);
+    return 'Событие Schedule (уровень 3) уже было отправлено для этого клиента.';
   }
 
   // Получаем pixel info через direction
@@ -250,9 +267,14 @@ async function handleSendCapiEvent(
     eventLevel: level,
     phone: lead.contact_phone,
     dialogAnalysisId: lead.id,
+    leadId: lead.lead_id ? String(lead.lead_id) : undefined,
     userAccountId: lead.user_account_id || '',
     directionId: lead.direction_id,
-    customData: args.reason ? { reason: args.reason } : undefined
+    customData: {
+      channel: CAPI_CHANNEL,
+      ...(level === 1 ? { stage: 'interest' } : level === 2 ? { stage: 'qualified' } : { stage: 'scheduled' }),
+      ...(args.reason ? { reason: args.reason } : {}),
+    }
   });
   const capiLatencyMs = Date.now() - capiStartTime;
 
@@ -361,11 +383,11 @@ async function handleGetCapiStatus(
       status.push('⬜ Qualified (уровень 2): не отправлено');
     }
 
-    // Level 3 - Scheduled
+    // Level 3 - Schedule
     if (data.capi_scheduled_sent) {
-      status.push(`✅ Scheduled (уровень 3): отправлено ${formatDate(data.capi_scheduled_sent_at)}`);
+      status.push(`✅ Schedule (уровень 3): отправлено ${formatDate(data.capi_scheduled_sent_at)}`);
     } else {
-      status.push('⬜ Scheduled (уровень 3): не отправлено');
+      status.push('⬜ Schedule (уровень 3): не отправлено');
     }
 
     log.info({

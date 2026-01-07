@@ -13,9 +13,11 @@
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `Lead` (INTEREST) | Клиент отправил 2+ сообщения | Поле CRM установлено в нужное значение |
+| 1 | `ViewContent` (INTEREST) | Клиент отправил 3+ сообщения | Поле CRM установлено в нужное значение |
 | 2 | `CompleteRegistration` (QUALIFIED) | Клиент ответил на все квалификационные вопросы | Поле CRM установлено в нужное значение |
-| 3 | `Schedule` (SCHEDULED) | Клиент записался на консультацию/встречу | Поле CRM установлено в нужное значение |
+| 3 | `Purchase` (BOOKED) | Клиент записался на ключевой этап | Поле CRM установлено в нужное значение |
+
+> Уровень 3 использует `event_name = Purchase`, даже если фактически это “запись”.
 
 ## Архитектура
 
@@ -80,31 +82,32 @@ AMO CRM / Bitrix24
 
 **Особенности:**
 - Хеширование телефона/email (SHA256)
-- Поддержка ctwa_clid для Click-to-WhatsApp атрибуции
-- action_source: `business_messaging`
-- messaging_channel: `whatsapp`
+- external_id для дедупликации и матчинга
+- action_source: `system_generated` (события от системы/бота/CRM)
 
 **Типы событий:**
 
 ```typescript
 const CAPI_EVENTS = {
-  INTEREST: 'Lead',                  // Level 1
+  INTEREST: 'ViewContent',           // Level 1
   QUALIFIED: 'CompleteRegistration', // Level 2
-  SCHEDULED: 'Schedule',             // Level 3
+  SCHEDULED: 'Purchase',             // Level 3
 };
 ```
+
+Для `Purchase`, если сумма неизвестна, отправляется `value=1` и `currency=KZT` по умолчанию.
 
 ## База данных
 
 ### Миграция 125_meta_capi_tracking.sql
 
 **leads:**
-- `ctwa_clid` - Click-to-WhatsApp Click ID для атрибуции
+- `ctwa_clid` - Click-to-WhatsApp Click ID (legacy, не обязателен для текущего Pixel/CAPI потока)
 
 **dialog_analysis:**
 - `capi_interest_sent` / `_sent_at` / `_event_id` - флаги Level 1
 - `capi_qualified_sent` / `_sent_at` / `_event_id` - флаги Level 2
-- `capi_scheduled_sent` / `_sent_at` / `_event_id` - флаги Level 3
+-- `capi_scheduled_sent` / `_sent_at` / `_event_id` - флаги Level 3 (Scheduled → Purchase event_name)
 
 **capi_events_log:**
 - Аудит-лог всех отправленных событий
@@ -117,9 +120,9 @@ const CAPI_EVENTS = {
 - `capi_enabled` (BOOLEAN) - включен ли CAPI для направления
 - `capi_source` (TEXT) - источник событий: `whatsapp` или `crm`
 - `capi_crm_type` (TEXT) - тип CRM: `amocrm` или `bitrix24`
-- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/Lead)
+- `capi_interest_fields` (JSONB) - поля CRM для Level 1 (Interest/ViewContent)
 - `capi_qualified_fields` (JSONB) - поля CRM для Level 2 (Qualified/CompleteRegistration)
-- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled/Schedule)
+-- `capi_scheduled_fields` (JSONB) - поля CRM для Level 3 (Scheduled → Purchase event_name)
 
 **Формат JSONB для CRM полей:**
 ```json
@@ -157,10 +160,10 @@ const CAPI_EVENTS = {
 
 **Шаг 4 (только для CRM источника):**
 - Выбор типа CRM (AMO CRM или Bitrix24)
-- Настройка полей для каждого уровня конверсии:
-  - Level 1 (Интерес / Lead)
+  - Настройка полей для каждого уровня конверсии:
+  - Level 1 (Интерес / ViewContent)
   - Level 2 (Квалифицирован / CompleteRegistration)
-  - Level 3 (Записался / Schedule)
+  - Level 3 (Записался / Purchase)
 
 **Логика проверки CRM полей:**
 - Если настроено несколько полей — используется логика OR
@@ -172,7 +175,9 @@ const CAPI_EVENTS = {
 1. `ad_accounts.access_token` (multi-account mode)
 2. `user_accounts.access_token` (fallback)
 
-### 3. ctwa_clid (Click-to-WhatsApp Click ID)
+### 3. ctwa_clid (Click-to-WhatsApp Click ID, legacy)
+
+ctwa_clid сохраняется для справки/атрибуции, но **не используется** в текущем Pixel/CAPI потоке и **не требуется** для отправки событий (action_source = `system_generated`).
 
 **Извлечение из Evolution API (WHATSAPP-BAILEYS mode):**
 ```
@@ -196,9 +201,9 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 ### Источник: WhatsApp (LLM анализ)
 
 1. **Входящее сообщение** → `evolutionWebhooks.ts`
-   - Извлекает ctwa_clid из `contextInfo.externalAdReply`
-   - Вызывает `upsertDialogAnalysis()` с ctwa_clid
-   - Сохраняет в `dialog_analysis.ctwa_clid`
+   - Извлекает ctwa_clid из `contextInfo.externalAdReply` (опционально)
+   - Вызывает `upsertDialogAnalysis()` с ctwa_clid (если есть)
+   - Сохраняет в `dialog_analysis.ctwa_clid` (опционально)
    - Отправляет в chatbot-service
 
 2. **chatbot-service** → `/process-message`
@@ -239,7 +244,7 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 ## Дедупликация
 
 - Флаги `capi_*_sent` предотвращают повторную отправку
-- `event_id` генерируется уникально для каждого события
+- `event_id` генерируется детерминированно: `wa_{leadId}_{interest|qualified|purchase}_v1`
 - Facebook использует event_id для дедупликации на своей стороне
 
 ## Логирование
@@ -259,15 +264,14 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 POST /v20.0/{pixel_id}/events
 {
   "data": [{
-    "event_name": "Lead",
+    "event_name": "ViewContent",
     "event_time": 1703520000,
     "event_id": "abc123...",
     "event_source_url": "https://wa.me/",
-    "action_source": "business_messaging",
-    "messaging_channel": "whatsapp",
+    "action_source": "system_generated",
     "user_data": {
       "ph": ["a1b2c3..."],
-      "ctwa_clid": "click-id-from-ad"
+      "external_id": "91991aa6"
     },
     "custom_data": {
       "event_level": 1
@@ -335,7 +339,7 @@ interface DirectionReportData {
 🎯 Воронка CAPI:
   👋 Интерес: 45
   ✅ Квалиф.: 12
-  📅 Записался: 5
+  💳 Записался/оплатил: 5
   📊 Конверсия: 27%
 
 📌 Стоматология
@@ -365,9 +369,9 @@ Legacy поля сохраняются для старых отчётов:
 
 | Колонка | Описание |
 |---------|----------|
-| Интерес | CAPI Level 1 — клиент проявил интерес (2+ сообщения) |
+| Интерес | CAPI Level 1 — клиент проявил интерес (3+ сообщения) |
 | Квал CAPI | CAPI Level 2 — клиент прошёл квалификацию |
-| Запись | CAPI Level 3 — клиент записался на консультацию |
+| Запись | CAPI Level 3 — клиент записался на ключевой этап |
 
 Данные берутся из `dialog_analysis` через API `/api/capi-events/:leadId`.
 
@@ -406,17 +410,17 @@ Dashboard.tsx
 
 | Ряд | Метрики |
 |-----|---------|
-| 1 | CAPI Lead, CAPI Registration, CAPI Schedule (количество) |
-| 2 | Лиды → CAPI Lead %, Lead → Registration %, Registration → Schedule % |
-| 3 | Cost per Lead, Cost per Registration, Cost per Schedule |
+| 1 | CAPI ViewContent, CAPI Registration, CAPI Purchase (количество) |
+| 2 | Лиды → CAPI ViewContent %, ViewContent → Registration %, Registration → Purchase % |
+| 3 | Cost per ViewContent, Cost per Registration, Cost per Purchase |
 
 ### Расчёт стоимости
 
 ```typescript
 const totalSpend = campaignStats.reduce((sum, s) => sum + s.spend, 0);
-const costPerLead = totalSpend / capiStats.lead;
+const costPerLead = totalSpend / capiStats.lead; // lead == ViewContent
 const costPerRegistration = totalSpend / capiStats.registration;
-const costPerSchedule = totalSpend / capiStats.schedule;
+const costPerSchedule = totalSpend / capiStats.schedule; // schedule == Purchase
 ```
 
 ### Логирование
@@ -457,12 +461,13 @@ Frontend логирует в консоль:
 - `(#100)` - пиксель не существует или нет доступа
 - `Invalid OAuth access token` - обновить токен
 
-### ctwa_clid = null (не сохраняется)
+### ctwa_clid = null (legacy, не блокирует CAPI)
 
 **Симптомы:**
-- События CAPI отправляются с `action_source: 'other'` вместо `'business_messaging'`
-- В `dialog_analysis.ctwa_clid` всегда null
-- В логах видно что ctwa_clid приходит в webhook
+- `dialog_analysis.ctwa_clid` всегда null
+- В логах видно что ctwa_clid приходит в webhook (не всегда)
+
+**Важно:** ctwa_clid больше не требуется для отправки событий (action_source = `system_generated`), поэтому отсутствие значения не влияет на CAPI.
 
 **Возможные причины:**
 
@@ -529,9 +534,9 @@ WHERE capi_interest_sent = true;
 
 | Неделя | Событие для оптимизации |
 |--------|------------------------|
-| 1 | Lead (если 50+ событий) |
-| 2 | Lead → CompleteRegistration (если 50+) |
-| 3 | CompleteRegistration → Schedule |
+| 1 | ViewContent (если 50+ событий) |
+| 2 | ViewContent → CompleteRegistration (если 50+) |
+| 3 | CompleteRegistration → Purchase |
 
 Переключение на следующий уровень когда:
 - Накоплено 50+ событий текущего уровня

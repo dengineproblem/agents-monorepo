@@ -32,7 +32,7 @@ export interface CapiStats {
   capiEnabled: boolean;   // Whether CAPI is enabled for any direction
   lead: number;           // Interest (level 1)
   registration: number;   // Qualified (level 2)
-  schedule: number;       // Scheduled (level 3)
+  schedule: number;       // Schedule (level 3)
   total: number;          // Total events
   conversionL1toL2: number; // % Lead → Registration
   conversionL2toL3: number; // % Registration → Schedule

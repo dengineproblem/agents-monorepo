@@ -1487,7 +1487,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                                 />
                               </div>
 
-                              {/* Level 3: Scheduled (Schedule) */}
+                              {/* Level 3: Schedule */}
                               <div className="space-y-2 p-3 border rounded-lg bg-purple-50 dark:bg-purple-900/20">
                                 <div className="flex items-center gap-2">
                                   <span className="text-purple-600 font-medium text-sm">Level 3: Запись (Schedule)</span>
@@ -1548,4 +1548,3 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     </Dialog>
   );
 };
-

@@ -1,4 +1,4 @@
-import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3, Moon, Sun, LogOut } from 'lucide-react';
+import { MessageSquare, Send, ChevronLeft, ChevronRight, ChevronDown, Calendar, Cpu, Users, Settings, BarChart3, Moon, Sun } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { useTheme } from '@/hooks/useTheme';

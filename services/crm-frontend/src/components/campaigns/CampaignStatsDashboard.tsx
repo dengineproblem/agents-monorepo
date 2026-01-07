@@ -37,25 +37,25 @@ export function CampaignStatsDashboard() {
     refetchInterval: 60000,
   });
 
-  const { data: byStrategy, isLoading: strategyLoading } = useQuery({
+  const { data: byStrategy } = useQuery({
     queryKey: ['campaign-analytics-strategy', USER_ACCOUNT_ID],
     queryFn: () => getAnalyticsByStrategy(USER_ACCOUNT_ID),
     refetchInterval: 60000,
   });
 
-  const { data: byTemperature, isLoading: temperatureLoading } = useQuery({
+  const { data: byTemperature } = useQuery({
     queryKey: ['campaign-analytics-temperature', USER_ACCOUNT_ID],
     queryFn: () => getAnalyticsByTemperature(USER_ACCOUNT_ID),
     refetchInterval: 60000,
   });
 
-  const { data: dynamics, isLoading: dynamicsLoading } = useQuery({
+  const { data: dynamics } = useQuery({
     queryKey: ['campaign-temperature-dynamics', USER_ACCOUNT_ID],
     queryFn: () => getTemperatureDynamics(USER_ACCOUNT_ID, 30),
     refetchInterval: 60000,
   });
 
-  const { data: byStage, isLoading: stageLoading } = useQuery({
+  const { data: byStage } = useQuery({
     queryKey: ['campaign-analytics-stage', USER_ACCOUNT_ID],
     queryFn: () => getAnalyticsByStage(USER_ACCOUNT_ID),
     refetchInterval: 60000,
@@ -288,9 +288,7 @@ export function CampaignStatsDashboard() {
               {byTemperature.map((t, idx) => {
                 const Icon = t.interest_level === 'hot' ? Flame : t.interest_level === 'warm' ? Wind : Snowflake;
                 const color = t.interest_level === 'hot' ? 'red' : t.interest_level === 'warm' ? 'orange' : 'blue';
-                const replyRate = parseFloat(t.replyRate);
-                const conversionRate = parseFloat(t.conversionRate);
-                
+
                 return (
                   <Card key={idx}>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

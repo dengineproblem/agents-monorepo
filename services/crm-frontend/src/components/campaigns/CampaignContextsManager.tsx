@@ -333,7 +333,7 @@ export function CampaignContextsManager() {
                 <Label>Дата окончания</Label>
                 <Input
                   type="date"
-                  value={formData.end_date}
+                  value={formData.end_date || ''}
                   onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
                 />
                 <p className="text-xs text-gray-500 mt-1">Оставьте пустым, если без срока</p>

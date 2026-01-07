@@ -190,8 +190,8 @@ export function DailyCampaignQueue() {
               )}
               Очистить очередь
             </Button>
-            <Button 
-              onClick={() => generateMutation.mutate()} 
+            <Button
+              onClick={() => generateMutation.mutate(undefined)}
               disabled={generateMutation.isPending}
               variant="outline"
               size="sm"

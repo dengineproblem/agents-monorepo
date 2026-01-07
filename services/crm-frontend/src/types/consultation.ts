@@ -67,6 +67,9 @@ export interface WorkingSchedule {
   start_time: string; // формат HH:MM
   end_time: string; // формат HH:MM
   is_active: boolean;
+  is_working?: boolean; // рабочий ли день
+  break_start?: string | null; // начало перерыва
+  break_end?: string | null; // конец перерыва
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +79,9 @@ export interface WorkingScheduleInput {
   start_time: string;
   end_time: string;
   is_active?: boolean;
+  is_working?: boolean;
+  break_start?: string | null;
+  break_end?: string | null;
 }
 
 export interface ConsultationSlot {

@@ -43,6 +43,10 @@ interface AccountStats {
     cpl: number;
     ctr: number; // Click-through rate (%)
     cpm: number; // Cost per mille
+    messagingLeads: number;
+    qualityLeads: number;
+    cpql: number; // Cost per qualified lead
+    qualityRate: number; // Quality rate percentage
   } | null;
 }
 
@@ -55,6 +59,10 @@ interface CampaignStats {
   clicks: number;
   ctr: number;
   cpl: number;
+  messagingLeads: number;
+  qualityLeads: number;
+  cpql: number;
+  qualityRate: number;
 }
 
 interface AdsetStats {
@@ -66,6 +74,10 @@ interface AdsetStats {
   clicks: number;
   ctr: number;
   cpl: number;
+  messagingLeads: number;
+  qualityLeads: number;
+  cpql: number;
+  qualityRate: number;
 }
 
 interface AdStats {
@@ -77,6 +89,20 @@ interface AdStats {
   clicks: number;
   ctr: number;
   cpl: number;
+  messagingLeads: number;
+  qualityLeads: number;
+  cpql: number;
+  qualityRate: number;
+}
+
+interface Direction {
+  id: string;
+  name: string;
+  fb_campaign_id: string | null;
+  target_cpl_cents: number;
+  daily_budget_cents: number;
+  objective: string;
+  is_active: boolean;
 }
 
 // =============================================================================
@@ -137,6 +163,45 @@ function getUserIdFromStorage(): string | null {
   return user.id;
 }
 
+/**
+ * Рассчитать отклонение CPL от target_cpl в процентах
+ */
+function calculateCplDeviation(
+  actualCpl: number,
+  targetCplCents: number
+): { deviation: number; formattedText: string } | null {
+  if (!targetCplCents || actualCpl === 0) return null;
+
+  const targetCpl = targetCplCents / 100; // центы → доллары
+  const deviation = ((actualCpl - targetCpl) / targetCpl) * 100;
+
+  const sign = deviation > 0 ? '+' : '';
+  const formattedText = `${sign}${deviation.toFixed(0)}%`;
+
+  return { deviation, formattedText };
+}
+
+/**
+ * Получить target_cpl для уровня
+ * На уровне кампании: ищем direction по fb_campaign_id
+ * На уровне аккаунта: если только 1 direction - используем его, иначе null
+ */
+function getTargetCplForLevel(
+  campaignId: string | null,
+  directions: Direction[]
+): number | null {
+  if (!directions || directions.length === 0) return null;
+
+  if (campaignId) {
+    // Уровень кампании
+    const direction = directions.find((d) => d.fb_campaign_id === campaignId);
+    return direction?.target_cpl_cents || null;
+  } else {
+    // Уровень аккаунта: если 1 direction - вернуть, иначе null
+    return directions.length === 1 ? directions[0].target_cpl_cents : null;
+  }
+}
+
 // =============================================================================
 // MAIN COMPONENT
 // =============================================================================
@@ -169,6 +234,10 @@ const MultiAccountDashboard: React.FC = () => {
   const [expandedAdsets, setExpandedAdsets] = useState<Set<string>>(new Set());
   const [adsData, setAdsData] = useState<Record<string, AdStats[]>>({});
   const [adsLoading, setAdsLoading] = useState<Set<string>>(new Set());
+
+  // Directions data
+  const [directionsData, setDirectionsData] = useState<Record<string, Direction[]>>({});
+  const [directionsLoading, setDirectionsLoading] = useState<Set<string>>(new Set());
 
   // Ref для отмены запроса при размонтировании
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -289,6 +358,48 @@ const MultiAccountDashboard: React.FC = () => {
     }
   }, [adAccounts, dateRange]);
 
+  /**
+   * Загрузка directions для конкретного аккаунта
+   */
+  const loadDirectionsForAccount = useCallback(async (accountId: string) => {
+    logger.debug('Loading directions for account', { accountId });
+
+    const userId = getUserIdFromStorage();
+    if (!userId) {
+      logger.error('Cannot load directions: no user ID');
+      return;
+    }
+
+    setDirectionsLoading((prev) => new Set(prev).add(accountId));
+
+    try {
+      const url = `${API_BASE_URL}/directions?userAccountId=${userId}&accountId=${accountId}`;
+      const response = await fetch(url, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load directions: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const directions: Direction[] = data.directions || [];
+
+      logger.debug('Directions loaded', { accountId, count: directions.length });
+
+      setDirectionsData((prev) => ({ ...prev, [accountId]: directions }));
+    } catch (err) {
+      logger.error('Failed to load directions', err, { accountId });
+      setDirectionsData((prev) => ({ ...prev, [accountId]: [] }));
+    } finally {
+      setDirectionsLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  }, []);
+
   // Загрузка данных при монтировании и изменении зависимостей
   useEffect(() => {
     loadAllAccountStats();
@@ -301,6 +412,16 @@ const MultiAccountDashboard: React.FC = () => {
       }
     };
   }, [loadAllAccountStats]);
+
+  // Загрузка directions для всех аккаунтов после загрузки статистики
+  useEffect(() => {
+    if (accountStats.length > 0) {
+      logger.debug('Loading directions for all accounts', { count: accountStats.length });
+      accountStats.forEach((account) => {
+        loadDirectionsForAccount(account.id);
+      });
+    }
+  }, [accountStats, loadDirectionsForAccount]);
 
   // Автозагрузка кампаний для всех аккаунтов для отображения статистики
   const loadedAccountsRef = useRef<Set<string>>(new Set());
@@ -345,6 +466,10 @@ const MultiAccountDashboard: React.FC = () => {
                 clicks: c.clicks,
                 ctr: c.ctr,
                 cpl: c.cpl,
+                messagingLeads: c.messagingLeads || 0,
+                qualityLeads: c.qualityLeads || 0,
+                cpql: c.cpql || 0,
+                qualityRate: c.qualityRate || 0,
               }));
 
             setCampaignsData((prev) => ({ ...prev, [account.id]: campaignStats }));
@@ -452,6 +577,10 @@ const MultiAccountDashboard: React.FC = () => {
                 clicks: c.clicks,
                 ctr: c.ctr,
                 cpl: c.cpl,
+                messagingLeads: c.messagingLeads || 0,
+                qualityLeads: c.qualityLeads || 0,
+                cpql: c.cpql || 0,
+                qualityRate: c.qualityRate || 0,
               }));
 
             setCampaignsData((prev) => ({ ...prev, [accountId]: campaignStats }));
@@ -495,29 +624,27 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
-            // Получаем список адсетов с их статусами
-            const adsetsList = await facebookApi.getAdsetsByCampaign(campaignId);
-            const activeAdsetIds = new Set(
-              adsetsList.filter((a: any) => a.status === 'ACTIVE').map((a: any) => a.id)
-            );
-
-            // Получаем статистику адсетов
+            // Получаем статистику адсетов БЕЗ фильтрации по статусу
             const adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
+            console.log(`[Dashboard] Статистика адсетов из API для кампании ${campaignId}:`, adsets.length);
 
-            // Фильтруем только активные адсеты
-            const adsetStats: AdsetStats[] = adsets
-              .filter((a: any) => activeAdsetIds.has(a.adset_id))
-              .map((a: any) => ({
-                adset_id: a.adset_id,
-                adset_name: a.adset_name,
-                spend: a.spend || 0,
-                leads: a.leads || 0,
-                impressions: a.impressions || 0,
-                clicks: a.clicks || 0,
-                ctr: a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0,
-                cpl: a.cpl || 0,
-              }));
+            // Маппим адсеты в AdsetStats
+            const adsetStats: AdsetStats[] = adsets.map((a: any) => ({
+              adset_id: a.adset_id,
+              adset_name: a.adset_name,
+              spend: a.spend || 0,
+              leads: a.leads || 0,
+              impressions: a.impressions || 0,
+              clicks: a.clicks || 0,
+              ctr: a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0,
+              cpl: a.cpl || 0,
+              messagingLeads: a.messagingLeads || 0,
+              qualityLeads: a.qualityLeads || 0,
+              cpql: a.cpql || 0,
+              qualityRate: a.qualityRate || 0,
+            }));
 
+            console.log('[Dashboard] Адсетов замаплено:', adsetStats.length);
             setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
           } finally {
             if (previousAccountId) {
@@ -579,6 +706,10 @@ const MultiAccountDashboard: React.FC = () => {
                 clicks: a.clicks || 0,
                 ctr: a.ctr || 0,
                 cpl: a.cpl || 0,
+                messagingLeads: a.messagingLeads || 0,
+                qualityLeads: a.qualityLeads || 0,
+                cpql: a.cpql || 0,
+                qualityRate: a.qualityRate || 0,
               }));
 
             setAdsData((prev) => ({ ...prev, [adsetId]: adStats }));
@@ -677,13 +808,15 @@ const MultiAccountDashboard: React.FC = () => {
             ) : (
               <div className="divide-y">
                 {/* Table Header */}
-                <div className="hidden md:grid grid-cols-11 gap-2 px-6 py-3 bg-muted/50 text-sm font-medium text-muted-foreground">
-                  <div className="col-span-3">Аккаунт</div>
+                <div className="hidden md:grid grid-cols-13 px-6 py-3 bg-muted/50 text-sm font-medium text-muted-foreground">
+                  <div className="col-span-5">Аккаунт</div>
                   <div className="col-span-2 text-right">Расходы</div>
                   <div className="col-span-1 text-right">Лиды</div>
-                  <div className="col-span-2 text-right">CPL</div>
+                  <div className="col-span-1 text-right">CPL</div>
+                  <div className="col-span-1 text-right">CPQL</div>
+                  <div className="col-span-1 text-right">Качество</div>
                   <div className="col-span-1 text-right">CTR</div>
-                  <div className="col-span-2 text-right">CPM</div>
+                  <div className="col-span-1 text-right">CPM</div>
                 </div>
 
                 {/* Account Rows */}
@@ -705,6 +838,7 @@ const MultiAccountDashboard: React.FC = () => {
                     adsLoading={adsLoading}
                     adsData={adsData}
                     dateRange={dateRange}
+                    directions={directionsData[account.id] || []}
                   />
                 ))}
               </div>
@@ -723,6 +857,37 @@ const MultiAccountDashboard: React.FC = () => {
 // SUB-COMPONENTS
 // =============================================================================
 
+/**
+ * Компонент для отображения CPL с отклонением от target_cpl
+ */
+interface CplWithDeviationProps {
+  cpl: number;
+  targetCplCents: number | null;
+}
+
+const CplWithDeviation: React.FC<CplWithDeviationProps> = ({ cpl, targetCplCents }) => {
+  const deviation = targetCplCents ? calculateCplDeviation(cpl, targetCplCents) : null;
+
+  const getDeviationColor = (dev: number) => {
+    if (dev <= -10) return 'text-green-600 dark:text-green-400'; // -10% и ниже = хорошо
+    if (dev <= 10) return 'text-yellow-600 dark:text-yellow-400'; // -10% до +10% = норма
+    return 'text-red-600 dark:text-red-400'; // +10% и выше = плохо
+  };
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span className="font-medium text-sm">{formatCurrency(cpl)}</span>
+      {deviation && (
+        <span
+          className={cn('text-[10px] font-medium', getDeviationColor(deviation.deviation))}
+        >
+          ({deviation.formattedText})
+        </span>
+      )}
+    </div>
+  );
+};
+
 interface AccountRowProps {
   account: AccountStats;
   onClick: () => void;
@@ -739,6 +904,7 @@ interface AccountRowProps {
   adsLoading: Set<string>;
   adsData: Record<string, AdStats[]>;
   dateRange: { since: string; until: string };
+  directions: Direction[];
 }
 
 const AccountRow: React.FC<AccountRowProps> = ({
@@ -756,6 +922,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
   onAdsetExpand,
   adsLoading,
   adsData,
+  directions,
 }) => {
   const [imageError, setImageError] = useState(false);
 
@@ -768,13 +935,20 @@ const AccountRow: React.FC<AccountRowProps> = ({
   const calculatedStats = campaigns.length > 0 ? {
     spend: campaigns.reduce((sum, c) => sum + c.spend, 0),
     leads: campaigns.reduce((sum, c) => sum + c.leads, 0),
+    messagingLeads: campaigns.reduce((sum, c) => sum + (c.messagingLeads || 0), 0),
+    qualityLeads: campaigns.reduce((sum, c) => sum + (c.qualityLeads || 0), 0),
     impressions: campaigns.reduce((sum, c) => sum + c.impressions, 0),
     clicks: campaigns.reduce((sum, c) => sum + c.clicks, 0),
     get cpl() { return this.leads > 0 ? this.spend / this.leads : 0; },
+    get cpql() { return this.qualityLeads > 0 ? this.spend / this.qualityLeads : 0; },
+    get qualityRate() {
+      return this.messagingLeads > 0 ? (this.qualityLeads / this.messagingLeads) * 100 : 0;
+    },
     get ctr() { return this.impressions > 0 ? (this.clicks / this.impressions) * 100 : 0; },
     get cpm() { return this.impressions > 0 ? (this.spend / this.impressions) * 1000 : 0; },
   } : null;
 
+  // ИСПРАВЛЕНИЕ: Всегда показываем account.stats, даже если нет campaigns
   // Используем рассчитанные данные если есть кампании, иначе данные с бэкенда
   const stats = calculatedStats || account.stats;
 
@@ -788,7 +962,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
       {/* Account Row */}
       <div
         className={cn(
-          'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-4 cursor-pointer transition-colors',
+          'grid grid-cols-1 md:grid-cols-13 px-6 py-4 cursor-pointer transition-colors',
           'hover:bg-muted/50',
           !account.is_active && 'opacity-50',
           isExpanded && 'bg-muted/30'
@@ -804,7 +978,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
         }}
       >
         {/* Account Info */}
-        <div className="col-span-3 flex items-center gap-2">
+        <div className="col-span-5 flex items-center gap-2">
           <button
             onClick={handleExpandClick}
             className="p-1 hover:bg-muted rounded transition-colors"
@@ -834,7 +1008,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
             {/* Мобильная версия — компактная строка метрик */}
             {stats && (
               <p className="md:hidden text-xs text-muted-foreground truncate">
-                {formatCurrency(stats.spend)} • {formatNumber(stats.leads)} лидов • {formatCurrency(stats.cpl)} CPL
+                {formatCurrency(stats.spend)} • {formatNumber(stats.leads)} лидов • {formatCurrency(stats.cpl)} CPL • {stats.cpql > 0 ? formatCurrency(stats.cpql) + ' CPQL' : ''} • {stats.qualityRate > 0 ? stats.qualityRate.toFixed(0) + '% качество' : ''}
               </p>
             )}
           </div>
@@ -842,31 +1016,51 @@ const AccountRow: React.FC<AccountRowProps> = ({
 
         {/* Десктопная версия — отдельные колонки */}
         <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="font-medium text-sm">
+          <span className="font-medium text-sm whitespace-nowrap">
             {stats ? formatCurrency(stats.spend) : '—'}
           </span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
-          <span className="font-medium text-sm">
+          <span className="font-medium text-sm whitespace-nowrap">
             {stats ? formatNumber(stats.leads) : '—'}
           </span>
         </div>
 
-        <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="font-medium text-sm">
-            {stats ? formatCurrency(stats.cpl) : '—'}
+        {/* CPL с отклонением */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          {stats ? (
+            <CplWithDeviation
+              cpl={stats.cpl}
+              targetCplCents={getTargetCplForLevel(null, directions)}
+            />
+          ) : (
+            <span className="font-medium text-sm">—</span>
+          )}
+        </div>
+
+        {/* CPQL */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="font-medium text-sm whitespace-nowrap">
+            {stats && stats.cpql > 0 ? formatCurrency(stats.cpql) : '—'}
+          </span>
+        </div>
+
+        {/* Качество лидов */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="font-medium text-sm whitespace-nowrap">
+            {stats && stats.qualityRate > 0 ? `${stats.qualityRate.toFixed(0)}%` : '—'}
           </span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
-          <span className="font-medium text-sm">
+          <span className="font-medium text-sm whitespace-nowrap">
             {stats ? formatCtr(stats.ctr) : '—'}
           </span>
         </div>
 
-        <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="font-medium text-sm">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="font-medium text-sm whitespace-nowrap">
             {stats ? formatCpm(stats.cpm) : '—'}
           </span>
         </div>
@@ -897,6 +1091,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
                 onAdsetExpand={onAdsetExpand}
                 adsLoading={adsLoading}
                 adsData={adsData}
+                directions={directions}
               />
             ))
           )}
@@ -920,6 +1115,7 @@ interface CampaignRowProps {
   onAdsetExpand: (adsetId: string) => void;
   adsLoading: Set<string>;
   adsData: Record<string, AdStats[]>;
+  directions: Direction[];
 }
 
 const CampaignRow: React.FC<CampaignRowProps> = ({
@@ -932,6 +1128,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   onAdsetExpand,
   adsLoading,
   adsData,
+  directions,
 }) => {
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
@@ -943,7 +1140,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
     <div className="divide-y divide-muted/30">
       <div
         className={cn(
-          'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-3 cursor-pointer transition-colors',
+          'grid grid-cols-1 md:grid-cols-13 px-6 py-3 cursor-pointer transition-colors',
           'hover:bg-muted/40',
           isExpanded && 'bg-muted/30'
         )}
@@ -952,7 +1149,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
         tabIndex={0}
       >
         {/* Campaign Info */}
-        <div className="col-span-3 flex items-center gap-2 pl-4 md:pl-6">
+        <div className="col-span-5 flex items-center gap-2 pl-4 md:pl-6">
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : isExpanded ? (
@@ -965,7 +1162,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
             <p className="font-medium text-sm truncate">{campaign.campaign_name}</p>
             {/* Мобильная версия — компактная строка метрик */}
             <p className="md:hidden text-xs text-muted-foreground truncate">
-              {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL
+              {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL • {campaign.cpql > 0 ? formatCurrency(campaign.cpql) + ' CPQL' : ''} • {campaign.qualityRate > 0 ? campaign.qualityRate.toFixed(0) + '% качество' : ''}
             </p>
           </div>
         </div>
@@ -979,15 +1176,33 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
           <span className="text-sm">{formatNumber(campaign.leads)}</span>
         </div>
 
-        <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="text-sm">{formatCurrency(campaign.cpl)}</span>
+        {/* CPL с отклонением */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <CplWithDeviation
+            cpl={campaign.cpl}
+            targetCplCents={getTargetCplForLevel(campaign.campaign_id, directions)}
+          />
+        </div>
+
+        {/* CPQL */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="text-sm">
+            {campaign.cpql > 0 ? formatCurrency(campaign.cpql) : '—'}
+          </span>
+        </div>
+
+        {/* Качество лидов */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="text-sm">
+            {campaign.qualityRate > 0 ? `${campaign.qualityRate.toFixed(0)}%` : '—'}
+          </span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">{formatCtr(campaign.ctr)}</span>
         </div>
 
-        <div className="hidden md:flex col-span-2 items-center justify-end">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">{formatCpm(campaign.impressions, campaign.spend)}</span>
         </div>
       </div>
@@ -1013,6 +1228,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
                 onExpand={() => onAdsetExpand(adset.adset_id)}
                 isLoading={adsLoading.has(adset.adset_id)}
                 ads={adsData[adset.adset_id] || []}
+                targetCplCents={getTargetCplForLevel(campaign.campaign_id, directions)}
               />
             ))
           )}
@@ -1032,6 +1248,7 @@ interface AdsetRowProps {
   onExpand: () => void;
   isLoading: boolean;
   ads: AdStats[];
+  targetCplCents: number | null;
 }
 
 const AdsetRow: React.FC<AdsetRowProps> = ({
@@ -1040,6 +1257,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
   onExpand,
   isLoading,
   ads,
+  targetCplCents,
 }) => {
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
@@ -1051,7 +1269,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
     <div className="divide-y divide-muted/20">
       <div
         className={cn(
-          'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-2 cursor-pointer transition-colors',
+          'grid grid-cols-1 md:grid-cols-13 px-6 py-2 cursor-pointer transition-colors',
           'hover:bg-muted/30',
           isExpanded && 'bg-muted/20'
         )}
@@ -1060,7 +1278,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
         tabIndex={0}
       >
         {/* Adset Info */}
-        <div className="col-span-3 flex items-center gap-2 pl-6 md:pl-14">
+        <div className="col-span-5 flex items-center gap-2 pl-6 md:pl-14">
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           ) : isExpanded ? (
@@ -1075,7 +1293,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             <p className="text-sm truncate">{adset.adset_name}</p>
             {/* Мобильная версия — компактная строка метрик */}
             <p className="md:hidden text-xs text-muted-foreground truncate">
-              {formatCurrency(adset.spend)} • {formatNumber(adset.leads)} лидов • {formatCurrency(adset.cpl)} CPL
+              {formatCurrency(adset.spend)} • {formatNumber(adset.leads)} лидов • {formatCurrency(adset.cpl)} CPL • {adset.cpql > 0 ? formatCurrency(adset.cpql) + ' CPQL' : ''} • {adset.qualityRate > 0 ? adset.qualityRate.toFixed(0) + '% качество' : ''}
             </p>
           </div>
         </div>
@@ -1089,15 +1307,30 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
           <span className="text-sm text-muted-foreground">{formatNumber(adset.leads)}</span>
         </div>
 
-        <div className="hidden md:flex col-span-2 items-center justify-end">
-          <span className="text-sm text-muted-foreground">{formatCurrency(adset.cpl)}</span>
+        {/* CPL с отклонением */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <CplWithDeviation cpl={adset.cpl} targetCplCents={targetCplCents} />
+        </div>
+
+        {/* CPQL */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="text-sm text-muted-foreground">
+            {adset.cpql > 0 ? formatCurrency(adset.cpql) : '—'}
+          </span>
+        </div>
+
+        {/* Качество лидов */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="text-sm text-muted-foreground">
+            {adset.qualityRate > 0 ? `${adset.qualityRate.toFixed(0)}%` : '—'}
+          </span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCtr(adset.ctr)}</span>
         </div>
 
-        <div className="hidden md:flex col-span-2 items-center justify-end">
+        <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCpm(adset.impressions, adset.spend)}</span>
         </div>
       </div>
@@ -1116,7 +1349,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             </div>
           ) : (
             ads.map((ad) => (
-              <AdRow key={ad.ad_id} ad={ad} />
+              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} />
             ))
           )}
         </div>
@@ -1131,24 +1364,28 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
 
 interface AdRowProps {
   ad: AdStats;
+  targetCplCents: number | null;
 }
 
-const AdRow: React.FC<AdRowProps> = ({ ad }) => {
+const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents }) => {
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
     return formatCurrency(calculatedCpm);
   };
 
+  const cpql = ad.cpql || (ad.qualityLeads > 0 ? ad.spend / ad.qualityLeads : 0);
+  const qualityRate = ad.qualityRate || (ad.messagingLeads > 0 ? (ad.qualityLeads / ad.messagingLeads) * 100 : 0);
+
   return (
     <div
       className={cn(
-        'grid grid-cols-1 md:grid-cols-11 gap-2 px-6 py-2 transition-colors',
+        'grid grid-cols-1 md:grid-cols-13 px-6 py-2 transition-colors',
         'hover:bg-muted/20'
       )}
     >
       {/* Ad Info */}
-      <div className="col-span-3 flex items-center gap-2 pl-8 md:pl-20">
+      <div className="col-span-5 flex items-center gap-2 pl-8 md:pl-20">
         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800 flex-shrink-0">
           ad
         </Badge>
@@ -1157,6 +1394,8 @@ const AdRow: React.FC<AdRowProps> = ({ ad }) => {
           {/* Мобильная версия — компактная строка метрик */}
           <p className="md:hidden text-[10px] text-muted-foreground/70 truncate">
             {formatCurrency(ad.spend)} • {formatNumber(ad.leads)} лидов • {formatCurrency(ad.cpl)} CPL
+            {cpql > 0 && ` • ${formatCurrency(cpql)} CPQL`}
+            {qualityRate > 0 && ` • ${qualityRate.toFixed(0)}% кач.`}
           </p>
         </div>
       </div>
@@ -1170,15 +1409,35 @@ const AdRow: React.FC<AdRowProps> = ({ ad }) => {
         <span className="text-xs text-muted-foreground/70">{formatNumber(ad.leads)}</span>
       </div>
 
-      <div className="hidden md:flex col-span-2 items-center justify-end">
-        <span className="text-xs text-muted-foreground/70">{formatCurrency(ad.cpl)}</span>
+      {/* CPL с отклонением */}
+      <div className="hidden md:flex col-span-1 items-center justify-end">
+        <div className="text-xs text-muted-foreground/70">
+          <CplWithDeviation
+            cpl={ad.cpl}
+            targetCplCents={targetCplCents}
+          />
+        </div>
+      </div>
+
+      {/* CPQL */}
+      <div className="hidden md:flex col-span-1 items-center justify-end">
+        <span className="text-xs text-muted-foreground/70">
+          {cpql > 0 ? formatCurrency(cpql) : '—'}
+        </span>
+      </div>
+
+      {/* Качество лидов */}
+      <div className="hidden md:flex col-span-1 items-center justify-end">
+        <span className="text-xs text-muted-foreground/70">
+          {qualityRate > 0 ? `${qualityRate.toFixed(0)}%` : '—'}
+        </span>
       </div>
 
       <div className="hidden md:flex col-span-1 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCtr(ad.ctr)}</span>
       </div>
 
-      <div className="hidden md:flex col-span-2 items-center justify-end">
+      <div className="hidden md:flex col-span-1 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCpm(ad.impressions, ad.spend)}</span>
       </div>
     </div>

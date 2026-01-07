@@ -6,12 +6,9 @@ import {
   Save,
   Loader2,
   Bot,
-  MessageSquare,
   Settings2,
   Clock,
-  Mic,
   Image,
-  FileText,
   Bell,
   Shield,
   Zap,
@@ -42,7 +39,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { aiBotApi, type LinkedInstance, type WhatsAppInstance } from '@/services/aiBotApi';
-import type { AIBotConfiguration, UpdateBotRequest, ConsultationIntegrationSettings } from '@/types/aiBot';
+import type { AIBotConfiguration, UpdateBotRequest } from '@/types/aiBot';
 import { AI_MODELS, TIMEZONES, DAYS_OF_WEEK, DEFAULT_CONSULTATION_SETTINGS } from '@/types/aiBot';
 import { consultationService, type Consultant } from '@/services/consultationService';
 import { BotTestChat } from '@/components/bots/BotTestChat';
@@ -310,7 +307,7 @@ export function BotEditor() {
               <CardContent>
                 <Select
                   value={formData.model}
-                  onValueChange={(value) => updateField('model', value)}
+                  onValueChange={(value) => updateField('model', value as AIBotConfiguration['model'])}
                 >
                   <SelectTrigger className="w-full max-w-xs">
                     <SelectValue placeholder="Выберите модель" />

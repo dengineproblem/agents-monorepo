@@ -52,7 +52,15 @@ export interface DialogAnalysis {
   bot_paused?: boolean;
   bot_paused_until?: string;
   last_bot_message_at?: string;
-  
+  autopilot_enabled?: boolean;
+
+  // Ручные заметки и дополнительная информация
+  manual_notes?: string | null;
+  uses_ads_now?: boolean | null;
+  ad_budget?: string | null;
+  audio_transcripts?: string[] | null;
+  has_sales_dept?: boolean | null;
+
   // История
   messages: DialogMessage[] | null;
   

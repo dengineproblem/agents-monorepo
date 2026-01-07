@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import { consultationService } from '@/services/consultationService';
-import { Consultant, CreateConsultantData, WorkingSchedule, WorkingScheduleInput, ConsultationService, ConsultantService } from '@/types/consultation';
+import { Consultant, CreateConsultantData, WorkingSchedule, WorkingScheduleInput, ConsultationService } from '@/types/consultation';
 
 const DAYS_OF_WEEK = [
   { value: 0, label: 'Воскресенье', short: 'Вс' },

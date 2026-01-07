@@ -2,15 +2,12 @@ import { useState, useEffect } from 'react';
 import {
   BarChart3,
   TrendingUp,
-  TrendingDown,
   DollarSign,
   Users,
   Calendar,
   Clock,
-  X,
   RefreshCw,
   CheckCircle,
-  XCircle,
   AlertCircle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -66,15 +63,6 @@ export function ExtendedStats({ userAccountId, isOpen, onClose }: ExtendedStatsP
       day: 'numeric',
       month: 'short'
     });
-  };
-
-  const getPeriodLabel = () => {
-    switch (period) {
-      case 'week': return 'За неделю';
-      case 'month': return 'За месяц';
-      case 'quarter': return 'За квартал';
-      case 'year': return 'За год';
-    }
   };
 
   // Get max value for bar chart scaling

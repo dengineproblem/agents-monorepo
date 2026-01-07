@@ -834,7 +834,7 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
   // ==========================================
   [TooltipKeys.CAPI_LEAD]: {
     title: 'CAPI Lead (Interest)',
-    content: 'Количество событий Interest (уровень 1), отправленных в Meta Conversions API. Означает, что клиент проявил интерес (2+ сообщения в WhatsApp).',
+    content: 'Количество событий Interest (уровень 1), отправленных в Meta Conversions API. Означает, что клиент проявил интерес (3+ входящих сообщений в WhatsApp).',
   },
   [TooltipKeys.CAPI_REGISTRATION]: {
     title: 'CAPI Registration (Qualified)',
@@ -842,7 +842,7 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
   },
   [TooltipKeys.CAPI_SCHEDULE]: {
     title: 'CAPI Schedule (Scheduled)',
-    content: 'Количество событий Schedule (уровень 3), отправленных в Meta CAPI. Означает, что клиент записался на консультацию.',
+    content: 'Количество событий Schedule (уровень 3), отправленных в Meta CAPI. Означает, что клиент записался на ключевой этап.',
   },
   [TooltipKeys.CAPI_CONVERSION_L1L2]: {
     title: 'Конверсия Lead → Registration',
@@ -850,7 +850,7 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
   },
   [TooltipKeys.CAPI_CONVERSION_L2L3]: {
     title: 'Конверсия Registration → Schedule',
-    content: 'Процент квалифицированных лидов, которые записались на консультацию. Формула: Schedule ÷ Registration × 100%.',
+    content: 'Процент квалифицированных лидов, которые записались на ключевой этап. Формула: Schedule ÷ Registration × 100%.',
   },
   [TooltipKeys.CAPI_CONVERSION_LEADS]: {
     title: 'Конверсия Лиды → CAPI Lead',
@@ -866,7 +866,7 @@ export const tooltips: Record<TooltipKey, TooltipData> = {
   },
   [TooltipKeys.CAPI_COST_SCHEDULE]: {
     title: 'Стоимость CAPI Schedule',
-    content: 'Средняя стоимость одной записи на консультацию. Рассчитывается как общий расход ÷ количество CAPI Schedule.',
+    content: 'Средняя стоимость одной записи на ключевой этап. Рассчитывается как общий расход ÷ количество CAPI Schedule.',
   },
 
   // ==========================================

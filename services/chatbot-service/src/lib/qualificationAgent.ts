@@ -4,9 +4,9 @@
  * Анализирует WhatsApp-переписки и определяет уровень конверсии лида.
  * Отправляет события в Meta CAPI при достижении уровней:
  *
- * 1. INTEREST (Lead) - клиент отправил 2+ сообщения
+ * 1. INTEREST (Lead) - клиент отправил 3+ входящих сообщений
  * 2. QUALIFIED (CompleteRegistration) - клиент ответил на все квалификационные вопросы
- * 3. SCHEDULED (Schedule) - клиент записался на консультацию/встречу
+ * 3. SCHEDULED (Schedule) - клиент записался на ключевой этап
  */
 
 import OpenAI from 'openai';
@@ -21,6 +21,15 @@ import {
 
 const log = createLogger({ module: 'qualificationAgent' });
 
+const INTEREST_MSG_THRESHOLD = Number.isFinite(Number(process.env.CAPI_INTEREST_MSG_THRESHOLD))
+  ? Number(process.env.CAPI_INTEREST_MSG_THRESHOLD)
+  : 3;
+const QUALIFIED_CONFIDENCE_THRESHOLD = Number.isFinite(Number(process.env.CAPI_QUALIFIED_CONFIDENCE_THRESHOLD))
+  ? Number(process.env.CAPI_QUALIFIED_CONFIDENCE_THRESHOLD)
+  : 0.7;
+const QUALIFICATION_MODEL = process.env.CAPI_QUAL_MODEL || 'wa-qualifier-v1';
+const CAPI_CHANNEL = 'whatsapp_baileys';
+
 // OpenAI timeout configuration
 const OPENAI_TIMEOUT_MS = 30000;
 
@@ -31,9 +40,10 @@ const openai = new OpenAI({
 
 // Result from LLM qualification analysis
 export interface QualificationResult {
-  is_interested: boolean;     // Level 1: 2+ messages
+  is_interested: boolean;     // Level 1: 3+ inbound messages
   is_qualified: boolean;      // Level 2: Passed qualification
   is_scheduled: boolean;      // Level 3: Booked appointment
+  confidence?: number;        // Confidence 0..1 for qualification decision
   qualification_details: {
     answered_questions: number;
     matching_criteria: number;
@@ -78,6 +88,7 @@ interface DialogData {
   }>;
   funnel_stage?: string;
   ctwa_clid?: string;
+  lead_id?: string;
   direction_id?: string;
   // CAPI flags
   capi_interest_sent?: boolean;
@@ -336,9 +347,10 @@ ${formatMessagesForAnalysis(dialog.messages)}
 
 Верни JSON с результатом анализа:
 {
-  "is_interested": boolean,      // true если клиент отправил 2+ сообщения
+  "is_interested": boolean,      // true если клиент отправил ${INTEREST_MSG_THRESHOLD}+ сообщения
   "is_qualified": boolean,       // true если ответил на все квалификационные вопросы правильно
   "is_scheduled": boolean,       // true если записался на консультацию/встречу
+  "confidence": number,          // уверенность 0..1 для is_qualified
   "qualification_details": {
     "answered_questions": number,  // сколько вопросов ответил
     "matching_criteria": number,   // сколько критериев совпало
@@ -394,7 +406,7 @@ function getDefaultQualificationPrompt(): string {
   return `Ты — AI-агент для квалификации лидов в WhatsApp.
 
 Твоя задача — анализировать переписку и определять:
-1. ИНТЕРЕС (is_interested): клиент отправил 2 или более сообщений
+1. ИНТЕРЕС (is_interested): клиент отправил ${INTEREST_MSG_THRESHOLD} или более сообщений
 2. КВАЛИФИКАЦИЯ (is_qualified): клиент ответил на ключевые вопросы и подходит как потенциальный клиент
 3. ЗАПИСЬ (is_scheduled): клиент согласился на встречу, консультацию или услугу
 
@@ -484,6 +496,7 @@ export async function processDialogForCapi(
       is_interested: crmStatus.isInterested,
       is_qualified: crmStatus.isQualified,
       is_scheduled: crmStatus.isScheduled,
+      confidence: crmStatus.isQualified ? 1 : 0,
       qualification_details: {
         answered_questions: 0,
         matching_criteria: 0,
@@ -503,10 +516,15 @@ export async function processDialogForCapi(
       log.warn({ dialogId: dialog.id }, 'LLM qualification analysis failed');
     }
 
+    const interestByCount = dialog.incoming_count >= INTEREST_MSG_THRESHOLD;
+    const confidence = typeof llmResult?.confidence === 'number' ? llmResult.confidence : 0;
+    const qualifiedByLlm = !!llmResult?.is_qualified && confidence >= QUALIFIED_CONFIDENCE_THRESHOLD;
+
     result = {
-      is_interested: llmResult?.is_interested || (dialog.incoming_count >= 2),
-      is_qualified: llmResult?.is_qualified || false,
-      is_scheduled: llmResult?.is_scheduled || false,
+      is_interested: interestByCount,
+      is_qualified: qualifiedByLlm,
+      is_scheduled: !!llmResult?.is_scheduled,
+      confidence,
       qualification_details: llmResult?.qualification_details || {
         answered_questions: 0,
         matching_criteria: 0,
@@ -550,13 +568,13 @@ export async function processDialogForCapi(
   }
 
   // Send CAPI events based on levels (highest first)
-  // Level 3: Scheduled
+  // Level 3: Schedule
   if (result.is_scheduled && !dialog.capi_scheduled_sent) {
     log.info({
       dialogId: dialog.id,
       source: scheduledSource,
     }, 'Sending CAPI Schedule event');
-    await sendCapiEventForLevel(dialog, 3, pixelId, accessToken);
+    await sendCapiEventForLevel(dialog, 3, pixelId, accessToken, result);
   }
 
   // Level 2: Qualified
@@ -565,7 +583,7 @@ export async function processDialogForCapi(
       dialogId: dialog.id,
       source: qualifiedSource,
     }, 'Sending CAPI Qualified event');
-    await sendCapiEventForLevel(dialog, 2, pixelId, accessToken);
+    await sendCapiEventForLevel(dialog, 2, pixelId, accessToken, result);
   }
 
   // Level 1: Interested
@@ -574,7 +592,7 @@ export async function processDialogForCapi(
       dialogId: dialog.id,
       source: interestSource,
     }, 'Sending CAPI Interest event');
-    await sendCapiEventForLevel(dialog, 1, pixelId, accessToken);
+    await sendCapiEventForLevel(dialog, 1, pixelId, accessToken, result);
   }
 }
 
@@ -586,13 +604,34 @@ async function sendCapiEventForLevel(
   dialog: DialogData,
   level: CapiEventLevel,
   pixelId: string,
-  accessToken: string
+  accessToken: string,
+  result?: QualificationResult
 ): Promise<void> {
   const eventName = {
     1: CAPI_EVENTS.INTEREST,
     2: CAPI_EVENTS.QUALIFIED,
     3: CAPI_EVENTS.SCHEDULED,
   }[level];
+
+  const baseCustomData = {
+    channel: CAPI_CHANNEL,
+  };
+
+  const customData = level === 1 ? {
+    ...baseCustomData,
+    stage: 'interest',
+    rule: `${INTEREST_MSG_THRESHOLD}_inbound_msgs`,
+    msg_count: dialog.incoming_count,
+  } : level === 2 ? {
+    ...baseCustomData,
+    stage: 'qualified',
+    qual_model: QUALIFICATION_MODEL,
+    confidence: result?.confidence ?? null,
+  } : {
+    ...baseCustomData,
+    stage: 'scheduled',
+    outcome: 'booked',
+  };
 
   log.info({
     dialogId: dialog.id,
@@ -610,8 +649,10 @@ async function sendCapiEventForLevel(
     phone: dialog.contact_phone,
     ctwaClid: dialog.ctwa_clid,
     dialogAnalysisId: dialog.id,
+    leadId: dialog.lead_id ? String(dialog.lead_id) : undefined,
     userAccountId: dialog.user_account_id,
     directionId: dialog.direction_id,
+    customData,
   });
 
   if (response.success) {
@@ -679,29 +720,29 @@ export async function getDialogForCapi(
     // If direction_id is not in dialog_analysis, try to get it from leads table
     let directionId = dialog.direction_id;
     let ctwaClid = dialog.ctwa_clid;
+    let leadId: string | undefined;
 
-    if (!directionId || !ctwaClid) {
-      const { data: lead, error: leadError } = await supabase
-        .from('leads')
-        .select('direction_id, ctwa_clid')
-        .eq('chat_id', contactPhone)
-        .eq('user_account_id', dialog.user_account_id)
-        .maybeSingle();
+    const { data: lead, error: leadError } = await supabase
+      .from('leads')
+      .select('id, direction_id, ctwa_clid')
+      .eq('chat_id', contactPhone)
+      .eq('user_account_id', dialog.user_account_id)
+      .maybeSingle();
 
-      if (leadError) {
-        log.warn({
-          contactPhone,
-          error: leadError.message,
-        }, 'Error fetching lead for direction_id fallback');
-      }
+    if (leadError) {
+      log.warn({
+        contactPhone,
+        error: leadError.message,
+      }, 'Error fetching lead for CAPI enrichment');
+    }
 
-      // Use lead data as fallback
-      if (!directionId && lead?.direction_id) {
+    if (lead) {
+      leadId = String(lead.id);
+      if (!directionId && lead.direction_id) {
         directionId = lead.direction_id;
         log.debug({ contactPhone, directionId }, 'Using direction_id from leads table');
       }
-
-      if (!ctwaClid && lead?.ctwa_clid) {
+      if (!ctwaClid && lead.ctwa_clid) {
         ctwaClid = lead.ctwa_clid;
       }
     }
@@ -717,6 +758,7 @@ export async function getDialogForCapi(
 
     return {
       ...dialog,
+      lead_id: leadId,
       direction_id: directionId || undefined,
       ctwa_clid: ctwaClid || undefined,
       messages: dialog.messages || [],
