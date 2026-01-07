@@ -26,6 +26,10 @@ import { creativeHandlers } from '../../chatAssistant/agents/creative/handlers.j
 import { AdsToolDefs } from '../../chatAssistant/agents/ads/toolDefs.js';
 import { adsHandlers } from '../../chatAssistant/agents/ads/handlers.js';
 
+// TikTok Ads Agent (20+ tools)
+import { TikTokToolDefs } from '../../chatAssistant/agents/tiktok/toolDefs.js';
+import { tikTokHandlers } from '../../chatAssistant/agents/tiktok/handlers.js';
+
 /**
  * Convert Zod schema to JSON Schema for MCP
  * @param {import('zod').ZodSchema} zodSchema
@@ -169,14 +173,54 @@ export const adsTools = [
 ];
 
 /**
+ * TikTok Ads Agent Tools (25 tools)
+ * All tools from TikTokToolDefs with handlers
+ */
+export const tikTokAdsTools = [
+  // READ tools - Campaigns & AdGroups
+  createMCPTool('getTikTokCampaigns', TikTokToolDefs.getTikTokCampaigns, tikTokHandlers.getTikTokCampaigns, 'tiktok'),
+  createMCPTool('getTikTokCampaignDetails', TikTokToolDefs.getTikTokCampaignDetails, tikTokHandlers.getTikTokCampaignDetails, 'tiktok'),
+  createMCPTool('getTikTokAdGroups', TikTokToolDefs.getTikTokAdGroups, tikTokHandlers.getTikTokAdGroups, 'tiktok'),
+  createMCPTool('getTikTokAds', TikTokToolDefs.getTikTokAds, tikTokHandlers.getTikTokAds, 'tiktok'),
+  createMCPTool('getTikTokSpendReport', TikTokToolDefs.getTikTokSpendReport, tikTokHandlers.getTikTokSpendReport, 'tiktok'),
+  // READ tools - Account & Insights
+  createMCPTool('getTikTokAccountStatus', TikTokToolDefs.getTikTokAccountStatus, tikTokHandlers.getTikTokAccountStatus, 'tiktok'),
+  createMCPTool('getTikTokAdvertiserInfo', TikTokToolDefs.getTikTokAdvertiserInfo, tikTokHandlers.getTikTokAdvertiserInfo, 'tiktok'),
+  createMCPTool('getTikTokDirections', TikTokToolDefs.getTikTokDirections, tikTokHandlers.getTikTokDirections, 'tiktok'),
+  createMCPTool('getTikTokDirectionCreatives', TikTokToolDefs.getTikTokDirectionCreatives, tikTokHandlers.getTikTokDirectionCreatives, 'tiktok'),
+  createMCPTool('getTikTokDirectionInsights', TikTokToolDefs.getTikTokDirectionInsights, tikTokHandlers.getTikTokDirectionInsights, 'tiktok'),
+  // WRITE tools - Campaigns
+  createMCPTool('pauseTikTokCampaign', TikTokToolDefs.pauseTikTokCampaign, tikTokHandlers.pauseTikTokCampaign, 'tiktok'),
+  createMCPTool('resumeTikTokCampaign', TikTokToolDefs.resumeTikTokCampaign, tikTokHandlers.resumeTikTokCampaign, 'tiktok'),
+  // WRITE tools - AdGroups
+  createMCPTool('pauseTikTokAdGroup', TikTokToolDefs.pauseTikTokAdGroup, tikTokHandlers.pauseTikTokAdGroup, 'tiktok'),
+  createMCPTool('resumeTikTokAdGroup', TikTokToolDefs.resumeTikTokAdGroup, tikTokHandlers.resumeTikTokAdGroup, 'tiktok'),
+  createMCPTool('updateTikTokAdGroupBudget', TikTokToolDefs.updateTikTokAdGroupBudget, tikTokHandlers.updateTikTokAdGroupBudget, 'tiktok'),
+  // WRITE tools - Ads
+  createMCPTool('pauseTikTokAd', TikTokToolDefs.pauseTikTokAd, tikTokHandlers.pauseTikTokAd, 'tiktok'),
+  createMCPTool('resumeTikTokAd', TikTokToolDefs.resumeTikTokAd, tikTokHandlers.resumeTikTokAd, 'tiktok'),
+  // WRITE tools - Directions
+  createMCPTool('pauseTikTokDirection', TikTokToolDefs.pauseTikTokDirection, tikTokHandlers.pauseTikTokDirection, 'tiktok'),
+  createMCPTool('resumeTikTokDirection', TikTokToolDefs.resumeTikTokDirection, tikTokHandlers.resumeTikTokDirection, 'tiktok'),
+  createMCPTool('updateTikTokDirectionBudget', TikTokToolDefs.updateTikTokDirectionBudget, tikTokHandlers.updateTikTokDirectionBudget, 'tiktok'),
+  // Media tools
+  createMCPTool('uploadTikTokVideo', TikTokToolDefs.uploadTikTokVideo, tikTokHandlers.uploadTikTokVideo, 'tiktok'),
+  createMCPTool('getTikTokVideos', TikTokToolDefs.getTikTokVideos, tikTokHandlers.getTikTokVideos, 'tiktok'),
+  // ROI & Analytics
+  createMCPTool('getTikTokROIReport', TikTokToolDefs.getTikTokROIReport, tikTokHandlers.getTikTokROIReport, 'tiktok'),
+  createMCPTool('compareTikTokWithFacebook', TikTokToolDefs.compareTikTokWithFacebook, tikTokHandlers.compareTikTokWithFacebook, 'tiktok')
+];
+
+/**
  * All MCP tools - Complete
- * WhatsApp (4) + CRM (12) + Creative (23) + Ads (24) = 63 tools
+ * WhatsApp (4) + CRM (12) + Creative (23) + Ads (24) + TikTok (24) = 87 tools
  */
 export const allMCPTools = [
   ...whatsappTools,
   ...crmTools,
   ...creativeTools,
-  ...adsTools
+  ...adsTools,
+  ...tikTokAdsTools
 ];
 
 /**

@@ -20,6 +20,7 @@ const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID || '-507902032
 // Типы ошибок
 export type ErrorType =
   | 'facebook'
+  | 'tiktok'
   | 'amocrm'
   | 'bitrix24'
   | 'evolution'

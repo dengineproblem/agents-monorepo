@@ -12,7 +12,7 @@ export interface SaveAdMappingParams {
   adset_id?: string;
   campaign_id?: string;
   fb_creative_id?: string;
-  source: 'creative_test' | 'direction_launch' | 'campaign_builder' | 'duplicate';
+  source: 'creative_test' | 'direction_launch' | 'campaign_builder' | 'duplicate' | 'tiktok_direction' | 'tiktok_campaign_builder';
 }
 
 /**
