@@ -63,6 +63,7 @@ interface CampaignStats {
   qualityLeads: number;
   cpql: number;
   qualityRate: number;
+  daily_budget: number; // Сумма бюджетов адсетов кампании
 }
 
 interface AdsetStats {
@@ -78,6 +79,7 @@ interface AdsetStats {
   qualityLeads: number;
   cpql: number;
   qualityRate: number;
+  daily_budget: number; // Установленный бюджет адсета
 }
 
 interface AdStats {
@@ -455,6 +457,25 @@ const MultiAccountDashboard: React.FC = () => {
 
             const campaigns = await facebookApi.getCampaignStats(dateRange, false);
 
+            // Загружаем бюджеты активных адсетов для всех кампаний параллельно
+            const budgetByCampaign = new Map<string, number>();
+            await Promise.all(
+              Array.from(activeCampaignIds).map(async (campaignId) => {
+                try {
+                  const adsets = await facebookApi.getAdsetsByCampaign(campaignId);
+                  // Фильтруем только активные адсеты
+                  const activeAdsets = adsets.filter((a: any) => a.status === 'ACTIVE');
+                  const totalBudget = activeAdsets.reduce((sum, a: any) => {
+                    return sum + parseFloat(a.daily_budget || '0') / 100;
+                  }, 0);
+                  budgetByCampaign.set(campaignId, totalBudget);
+                } catch (e) {
+                  console.error(`Failed to load budget for campaign ${campaignId}`, e);
+                  budgetByCampaign.set(campaignId, 0);
+                }
+              })
+            );
+
             const campaignStats: CampaignStats[] = campaigns
               .filter((c) => activeCampaignIds.has(c.campaign_id))
               .map((c) => ({
@@ -470,6 +491,7 @@ const MultiAccountDashboard: React.FC = () => {
                 qualityLeads: c.qualityLeads || 0,
                 cpql: c.cpql || 0,
                 qualityRate: c.qualityRate || 0,
+                daily_budget: budgetByCampaign.get(c.campaign_id) || 0,
               }));
 
             setCampaignsData((prev) => ({ ...prev, [account.id]: campaignStats }));
@@ -624,12 +646,25 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
-            // Получаем статистику адсетов БЕЗ фильтрации по статусу
-            const adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
-            console.log(`[Dashboard] Статистика адсетов из API для кампании ${campaignId}:`, adsets.length);
+            // Получаем список адсетов с бюджетами и статусами
+            const adsetsList = await facebookApi.getAdsetsByCampaign(campaignId);
 
-            // Маппим адсеты в AdsetStats
-            const adsetStats: AdsetStats[] = adsets.map((a: any) => ({
+            // Фильтруем только активные адсеты
+            const activeAdsets = adsetsList.filter((a: any) => a.status === 'ACTIVE');
+
+            // Создаём мапу бюджетов по adset_id только для активных
+            const budgetMap = new Map(
+              activeAdsets.map((a: any) => [a.id, parseFloat(a.daily_budget || '0') / 100])
+            );
+            const activeAdsetIds = new Set(activeAdsets.map((a: any) => a.id));
+
+            // Получаем статистику адсетов
+            const adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
+
+            // Маппим адсеты в AdsetStats с добавлением бюджетов (только активные)
+            const adsetStats: AdsetStats[] = adsets
+              .filter((a: any) => activeAdsetIds.has(a.adset_id))
+              .map((a: any) => ({
               adset_id: a.adset_id,
               adset_name: a.adset_name,
               spend: a.spend || 0,
@@ -642,9 +677,9 @@ const MultiAccountDashboard: React.FC = () => {
               qualityLeads: a.qualityLeads || 0,
               cpql: a.cpql || 0,
               qualityRate: a.qualityRate || 0,
+              daily_budget: budgetMap.get(a.adset_id) || 0,
             }));
 
-            console.log('[Dashboard] Адсетов замаплено:', adsetStats.length);
             setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
           } finally {
             if (previousAccountId) {
@@ -808,9 +843,10 @@ const MultiAccountDashboard: React.FC = () => {
             ) : (
               <div className="divide-y">
                 {/* Table Header */}
-                <div className="hidden md:grid grid-cols-13 px-6 py-3 bg-muted/50 text-sm font-medium text-muted-foreground">
+                <div className="hidden md:grid grid-cols-14 px-6 py-3 bg-muted/50 text-sm font-medium text-muted-foreground">
                   <div className="col-span-5">Аккаунт</div>
                   <div className="col-span-2 text-right">Расходы</div>
+                  <div className="col-span-1 text-right">Бюджет</div>
                   <div className="col-span-1 text-right">Лиды</div>
                   <div className="col-span-1 text-right">CPL</div>
                   <div className="col-span-1 text-right">CPQL</div>
@@ -962,7 +998,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
       {/* Account Row */}
       <div
         className={cn(
-          'grid grid-cols-1 md:grid-cols-13 px-6 py-4 cursor-pointer transition-colors',
+          'grid grid-cols-1 md:grid-cols-14 px-6 py-4 cursor-pointer transition-colors',
           'hover:bg-muted/50',
           !account.is_active && 'opacity-50',
           isExpanded && 'bg-muted/30'
@@ -1018,6 +1054,13 @@ const AccountRow: React.FC<AccountRowProps> = ({
         <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="font-medium text-sm whitespace-nowrap">
             {stats ? formatCurrency(stats.spend) : '—'}
+          </span>
+        </div>
+
+        {/* Бюджет */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="font-medium text-sm whitespace-nowrap">
+            {campaigns.length > 0 ? formatCurrency(campaigns.reduce((sum, c) => sum + c.daily_budget, 0)) : '—'}
           </span>
         </div>
 
@@ -1140,7 +1183,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
     <div className="divide-y divide-muted/30">
       <div
         className={cn(
-          'grid grid-cols-1 md:grid-cols-13 px-6 py-3 cursor-pointer transition-colors',
+          'grid grid-cols-1 md:grid-cols-14 px-6 py-3 cursor-pointer transition-colors',
           'hover:bg-muted/40',
           isExpanded && 'bg-muted/30'
         )}
@@ -1170,6 +1213,11 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
         {/* Десктопная версия — отдельные колонки */}
         <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm">{formatCurrency(campaign.spend)}</span>
+        </div>
+
+        {/* Бюджет */}
+        <div className="hidden md:flex col-span-1 items-center justify-end">
+          <span className="text-sm">{formatCurrency(campaign.daily_budget)}</span>
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
@@ -1265,17 +1313,59 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
     return formatCurrency(calculatedCpm);
   };
 
+  const [isHovered, setIsHovered] = React.useState(false);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [editedBudget, setEditedBudget] = React.useState(adset.daily_budget.toFixed(2));
+  const [currentBudget, setCurrentBudget] = React.useState(adset.daily_budget);
+
+  const handleBudgetSave = async () => {
+    const newBudget = parseFloat(editedBudget);
+    if (!isNaN(newBudget) && newBudget >= 0) {
+      try {
+        await facebookApi.updateAdsetBudget(adset.adset_id, Math.round(newBudget * 100));
+        setCurrentBudget(newBudget);
+        setIsEditing(false);
+      } catch (e) {
+        console.error('Failed to update budget', e);
+        setEditedBudget(currentBudget.toFixed(2));
+      }
+    }
+  };
+
+  const handleCancelEdit = React.useCallback(() => {
+    setIsEditing(false);
+    setEditedBudget(currentBudget.toFixed(2));
+  }, [currentBudget]);
+
+  // Закрытие при клике вне input
+  React.useEffect(() => {
+    if (!isEditing) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Если клик не по input бюджета - закрываем без сохранения
+      if (!target.closest('[data-budget-input]')) {
+        handleCancelEdit();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isEditing, handleCancelEdit]);
+
   return (
     <div className="divide-y divide-muted/20">
       <div
         className={cn(
-          'grid grid-cols-1 md:grid-cols-13 px-6 py-2 cursor-pointer transition-colors',
+          'grid grid-cols-1 md:grid-cols-14 px-6 py-2 cursor-pointer transition-colors',
           'hover:bg-muted/30',
           isExpanded && 'bg-muted/20'
         )}
         onClick={onExpand}
         role="button"
         tabIndex={0}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
         {/* Adset Info */}
         <div className="col-span-5 flex items-center gap-2 pl-6 md:pl-14">
@@ -1301,6 +1391,48 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
         {/* Десктопная версия — отдельные колонки */}
         <div className="hidden md:flex col-span-2 items-center justify-end">
           <span className="text-sm text-muted-foreground">{formatCurrency(adset.spend)}</span>
+        </div>
+
+        {/* Бюджет с редактированием */}
+        <div
+          className="hidden md:flex col-span-1 items-center justify-end"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!isEditing) {
+              setIsEditing(true);
+            }
+          }}
+        >
+          {isEditing ? (
+            <input
+              data-budget-input
+              type="text"
+              value={editedBudget}
+              onChange={(e) => {
+                const value = e.target.value;
+                // Разрешаем только цифры, точку и запятую
+                if (value === '' || /^[0-9]*[.,]?[0-9]*$/.test(value)) {
+                  setEditedBudget(value.replace(',', '.'));
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleBudgetSave();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  handleCancelEdit();
+                }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-20 px-2 py-1 text-sm text-right border rounded focus:outline-none focus:ring-2 focus:ring-primary"
+              autoFocus
+            />
+          ) : (
+            <span className={cn('text-sm text-muted-foreground', isHovered && 'underline cursor-text')}>
+              {formatCurrency(currentBudget)}
+            </span>
+          )}
         </div>
 
         <div className="hidden md:flex col-span-1 items-center justify-end">
@@ -1349,7 +1481,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             </div>
           ) : (
             ads.map((ad) => (
-              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} />
+              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} adsetBudget={adset.daily_budget} />
             ))
           )}
         </div>
@@ -1365,9 +1497,10 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
 interface AdRowProps {
   ad: AdStats;
   targetCplCents: number | null;
+  adsetBudget: number; // Бюджет родительского адсета
 }
 
-const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents }) => {
+const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget }) => {
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
@@ -1380,7 +1513,7 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents }) => {
   return (
     <div
       className={cn(
-        'grid grid-cols-1 md:grid-cols-13 px-6 py-2 transition-colors',
+        'grid grid-cols-1 md:grid-cols-14 px-6 py-2 transition-colors',
         'hover:bg-muted/20'
       )}
     >
@@ -1403,6 +1536,11 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents }) => {
       {/* Десктопная версия — отдельные колонки */}
       <div className="hidden md:flex col-span-2 items-center justify-end">
         <span className="text-xs text-muted-foreground/70">{formatCurrency(ad.spend)}</span>
+      </div>
+
+      {/* Бюджет адсета */}
+      <div className="hidden md:flex col-span-1 items-center justify-end">
+        <span className="text-xs text-muted-foreground/70">{formatCurrency(adsetBudget)}</span>
       </div>
 
       <div className="hidden md:flex col-span-1 items-center justify-end">

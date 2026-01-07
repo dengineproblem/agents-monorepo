@@ -381,10 +381,7 @@ const getAdsetStats = async (campaignId: string, dateRange: DateRange) => {
       limit: '500',
     };
 
-    console.log(`[API] Запрос статистики ad sets для кампании ${campaignId} с action_breakdowns`);
     const response = await fetchFromFacebookAPI(endpoint, params);
-
-    console.log(`[API] getAdsetStats response для кампании ${campaignId}:`, response.data?.length || 0, 'adsets');
 
     if (response.data && response.data.length > 0) {
       const result = response.data.map((stat: any) => {
