@@ -11,6 +11,39 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+function buildClientSection(briefingData: BriefingData): string {
+  const lines: string[] = [];
+  const addLine = (label: string, value?: string | string[] | null) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      if (value.length === 0) return;
+      lines.push(`- ${label}: ${value.join(', ')}`);
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    lines.push(`- ${label}: ${trimmed}`);
+  };
+
+  addLine('Бизнес', briefingData.business_name);
+  addLine('Ниша', briefingData.business_niche);
+  addLine('Instagram', briefingData.instagram_url);
+  addLine('Сайт', briefingData.website_url);
+  addLine('Целевая аудитория', briefingData.target_audience);
+  addLine('География', briefingData.geography);
+  addLine('Основные услуги/продукты', briefingData.main_services);
+  addLine('Конкурентные преимущества', briefingData.competitive_advantages);
+  addLine('Ценовой сегмент', briefingData.price_segment);
+  addLine('Боли клиентов', briefingData.main_pains);
+  addLine('Главные обещания', briefingData.main_promises);
+  addLine('Социальные доказательства', briefingData.social_proof);
+  addLine('Гарантии', briefingData.guarantees);
+  addLine('Тон общения', briefingData.tone_of_voice);
+  addLine('Конкуренты (Instagram)', briefingData.competitor_instagrams);
+
+  return lines.join('\n');
+}
+
 // Базовый шаблон prompt1 для генерации
 const PROMPT1_TEMPLATE = `## Промпт для AI-помощника по созданию креативов агентства Performante
 
@@ -266,6 +299,7 @@ export async function generatePrompt1(briefingData: BriefingData): Promise<strin
   }, 'Генерация prompt1 для клиента');
 
   try {
+    const clientSection = buildClientSection(briefingData);
 
     // Формируем system prompt для OpenAI
     const systemPrompt = `Ты - эксперт по созданию промптов для AI-креативного директора маркетингового агентства Performante.
@@ -284,22 +318,17 @@ ${PROMPT1_TEMPLATE}
 6. Сохрани профессиональный тон и структуру
 7. Промпт должен быть на русском языке
 8. Не сокращай базовые разделы шаблона
-9. Адаптируй 5-й формат креативов (Карусель для Instagram) под специфику бизнеса клиента, учитывая подходящие storytelling-подходы для данной ниши`;
+9. Адаптируй 5-й формат креативов (Карусель для Instagram) под специфику бизнеса клиента, учитывая подходящие storytelling-подходы для данной ниши
+10. Используй боли, обещания, социальные доказательства, гарантии и тон общения, если они переданы в брифе
+11. Не выдумывай факты, которых нет в брифе`;
 
-    const userPrompt = `Создай персонализированный промпт для клиента со следующими данными:
+    const userPrompt = `Создай персонализированный промпт для клиента со следующими данными.
 
-**Бизнес:** ${briefingData.business_name}
-**Ниша:** ${briefingData.business_niche}
-${briefingData.instagram_url ? `**Instagram:** ${briefingData.instagram_url}` : ''}
-${briefingData.website_url ? `**Сайт:** ${briefingData.website_url}` : ''}
-${briefingData.target_audience ? `**Целевая аудитория:** ${briefingData.target_audience}` : ''}
-${briefingData.geography ? `**География:** ${briefingData.geography}` : ''}
-${briefingData.main_services ? `**Основные услуги/продукты:** ${briefingData.main_services}` : ''}
-${briefingData.competitive_advantages ? `**Конкурентные преимущества:** ${briefingData.competitive_advantages}` : ''}
-${briefingData.price_segment ? `**Ценовой сегмент:** ${briefingData.price_segment}` : ''}
+Данные клиента:
+${clientSection}
 
-Создай промпт, который поможет AI-помощнику генерировать эффективные рекламные креативы именно для этого бизнеса. 
-Учти специфику ниши, целевую аудиторию и конкурентные преимущества.`;
+Создай промпт, который поможет AI-помощнику генерировать эффективные рекламные креативы именно для этого бизнеса.
+Обязательно добавь раздел "### О КЛИЕНТЕ" и используй данные из блока выше.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -315,6 +344,27 @@ ${briefingData.price_segment ? `**Ценовой сегмент:** ${briefingDat
 
     if (!generatedPrompt) {
       throw new Error('OpenAI не вернул результат генерации');
+    }
+
+    const normalizedPrompt = generatedPrompt.toLowerCase();
+    const businessName = briefingData.business_name?.toLowerCase() || '';
+    const businessNiche = briefingData.business_niche?.toLowerCase() || '';
+    const hasClientSection = normalizedPrompt.includes('### о клиенте');
+    const hasBusinessName = businessName ? normalizedPrompt.includes(businessName) : true;
+    const hasBusinessNiche = businessNiche ? normalizedPrompt.includes(businessNiche) : true;
+
+    if (!hasClientSection || (!hasBusinessName && !hasBusinessNiche)) {
+      log.warn({
+        business_name: briefingData.business_name,
+        business_niche: briefingData.business_niche,
+        hasClientSection,
+        hasBusinessName,
+        hasBusinessNiche,
+      }, 'Prompt1 выглядит шаблонным, используем fallback с данными клиента');
+      return `### О КЛИЕНТЕ
+${clientSection}
+
+${PROMPT1_TEMPLATE}`;
     }
 
     log.info({
