@@ -32,6 +32,11 @@ const CITIES = [
   { id: '1289662', name: 'Алматы' },
   { id: '1290182', name: 'Атырау' },
   { id: '1938', name: 'Бишкек' },
+  { id: '1219326', name: 'Jalal-Abad' },
+  { id: '1219379', name: 'Kara-Balta' },
+  { id: '1219420', name: 'Karakol' },
+  { id: '1219908', name: 'Osh' },
+  { id: '1220195', name: 'Tokmok' },
 ];
 
 const CITIES_AND_COUNTRIES = [
