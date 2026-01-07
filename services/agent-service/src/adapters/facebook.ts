@@ -788,8 +788,10 @@ export async function createLeadFormImageCreative(
     instagramId: string;
     message: string;
     leadFormId: string;
+    link?: string;
   }
 ): Promise<{ id: string }> {
+  const leadFormLink = params.link || `https://www.facebook.com/${params.pageId}`;
   const payload: any = {
     name: "Lead Form Image Creative",
     object_story_spec: {
@@ -798,6 +800,7 @@ export async function createLeadFormImageCreative(
       link_data: {
         image_hash: params.imageHash,
         message: params.message,
+        link: leadFormLink,
         call_to_action: {
           type: "LEARN_MORE",
           value: {

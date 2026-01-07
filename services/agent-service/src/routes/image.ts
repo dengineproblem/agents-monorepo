@@ -306,7 +306,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
             pageId: pageId,
             instagramId: instagramId,
             message: description,
-            leadFormId: leadFormId
+            leadFormId: leadFormId,
+            link: siteUrl || undefined
           });
           fbCreativeId = leadFormCreative.id;
         }
@@ -643,7 +644,8 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           pageId: pageId,
           instagramId: instagramId,
           message: description,
-          leadFormId: leadFormId
+          leadFormId: leadFormId,
+          link: siteUrl || undefined
         });
         fbCreativeId = result.id;
       } else {
@@ -752,4 +754,3 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 };
-
