@@ -502,8 +502,11 @@ const MultiAccountDashboard: React.FC = () => {
 
             setCampaignsData((prev) => ({ ...prev, [account.id]: campaignStats }));
           } finally {
+            // Restore previous account (always restore, even if it was null)
             if (previousAccountId) {
               localStorage.setItem('currentAdAccountId', previousAccountId);
+            } else {
+              localStorage.removeItem('currentAdAccountId');
             }
           }
         } catch (err) {
@@ -611,9 +614,11 @@ const MultiAccountDashboard: React.FC = () => {
 
             setCampaignsData((prev) => ({ ...prev, [accountId]: campaignStats }));
           } finally {
-            // Restore previous account
+            // Restore previous account (always restore, even if it was null)
             if (previousAccountId) {
               localStorage.setItem('currentAdAccountId', previousAccountId);
+            } else {
+              localStorage.removeItem('currentAdAccountId');
             }
           }
         } catch (err) {
@@ -684,8 +689,11 @@ const MultiAccountDashboard: React.FC = () => {
 
             setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
           } finally {
+            // Restore previous account (always restore, even if it was null)
             if (previousAccountId) {
               localStorage.setItem('currentAdAccountId', previousAccountId);
+            } else {
+              localStorage.removeItem('currentAdAccountId');
             }
           }
         } catch (err) {
@@ -752,8 +760,11 @@ const MultiAccountDashboard: React.FC = () => {
 
             setAdsData((prev) => ({ ...prev, [adsetId]: adStats }));
           } finally {
+            // Restore previous account (always restore, even if it was null)
             if (previousAccountId) {
               localStorage.setItem('currentAdAccountId', previousAccountId);
+            } else {
+              localStorage.removeItem('currentAdAccountId');
             }
           }
         } catch (err) {
@@ -1179,6 +1190,11 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   const [campaignActive, setCampaignActive] = useState(campaign.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
+  // Sync toggle state with campaign status
+  useEffect(() => {
+    setCampaignActive(campaign.status === 'ACTIVE');
+  }, [campaign.status]);
+
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
@@ -1347,6 +1363,11 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
   const [currentBudget, setCurrentBudget] = React.useState(adset.daily_budget);
   const [adsetActive, setAdsetActive] = React.useState(adset.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
+
+  // Sync toggle state with adset status
+  React.useEffect(() => {
+    setAdsetActive(adset.status === 'ACTIVE');
+  }, [adset.status]);
 
   const handleBudgetSave = async () => {
     const newBudget = parseFloat(editedBudget);
@@ -1555,6 +1576,11 @@ interface AdRowProps {
 const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget }) => {
   const [adActive, setAdActive] = React.useState(ad.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
+
+  // Sync toggle state with ad status
+  React.useEffect(() => {
+    setAdActive(ad.status === 'ACTIVE');
+  }, [ad.status]);
 
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
