@@ -29,6 +29,7 @@ export interface CampaignStat {
   qualityLeads?: number; // Количество качественных лидов (≥2 сообщения)
   qualityRate?: number; // Процент качества лидов
   cpl: number;
+  cpql?: number; // Cost per qualified lead (стоимость качественного лида)
   date: string;
   _is_real_data?: boolean; // Флаг для определения реальных данных
 }
@@ -902,7 +903,8 @@ export const facebookApi = {
           const cpl = leads > 0 ? spend / leads : 0;
           // Качество считается только от переписок, не от лидформ
           const qualityRate = messagingLeads > 0 ? (qualityLeads / messagingLeads) * 100 : 0;
-          
+          const cpql = qualityLeads > 0 ? spend / qualityLeads : 0;
+
           return {
             campaign_id: stat.campaign_id,
             campaign_name: stat.campaign_name,
@@ -916,6 +918,7 @@ export const facebookApi = {
             qualityLeads,
             qualityRate,
             cpl,
+            cpql,
             date: stat.date_start,
             _is_real_data: true // Помечаем как реальные данные
           };
@@ -951,7 +954,11 @@ export const facebookApi = {
             clicks: 0,
             ctr: 0,
             leads: 0,
+            messagingLeads: 0,
+            qualityLeads: 0,
+            qualityRate: 0,
             cpl: 0,
+            cpql: 0,
             date: dateStr,
             _is_real_data: true // Это реальные данные с нулевыми значениями
           });
