@@ -453,10 +453,20 @@ const MultiAccountDashboard: React.FC = () => {
           if (!accountData) continue;
 
           const previousAccountId = localStorage.getItem('currentAdAccountId');
+          logger.debug('[loadAllCampaigns] Switching context', {
+            from: previousAccountId?.slice(0, 8) || 'null',
+            to: account.id.slice(0, 8),
+            accountName: account.name
+          });
           localStorage.setItem('currentAdAccountId', account.id);
 
           try {
             const campaignsList = await facebookApi.getCampaigns();
+            logger.debug('[loadAllCampaigns] Campaigns loaded', {
+              accountId: account.id.slice(0, 8),
+              accountName: account.name,
+              campaignsCount: campaignsList.length
+            });
             const activeCampaignIds = new Set(
               campaignsList.filter((c) => c.status === 'ACTIVE').map((c) => c.id)
             );
@@ -500,9 +510,19 @@ const MultiAccountDashboard: React.FC = () => {
                 daily_budget: budgetByCampaign.get(c.campaign_id) || 0,
               }));
 
+            logger.info('[loadAllCampaigns] Saving campaigns to state', {
+              accountId: account.id.slice(0, 8),
+              accountName: account.name,
+              campaignsCount: campaignStats.length,
+              firstCampaignName: campaignStats[0]?.campaign_name || 'N/A'
+            });
             setCampaignsData((prev) => ({ ...prev, [account.id]: campaignStats }));
           } finally {
             // Restore previous account (always restore, even if it was null)
+            logger.debug('[loadAllCampaigns] Restoring context', {
+              restoring: previousAccountId?.slice(0, 8) || 'null',
+              accountName: account.name
+            });
             if (previousAccountId) {
               localStorage.setItem('currentAdAccountId', previousAccountId);
             } else {
@@ -558,6 +578,12 @@ const MultiAccountDashboard: React.FC = () => {
   const handleAccountExpand = useCallback(async (accountId: string, account: AccountStats) => {
     const isExpanded = expandedAccounts.has(accountId);
 
+    logger.info('handleAccountExpand called', {
+      accountId: accountId.slice(0, 8),
+      accountName: account.name,
+      isExpanded
+    });
+
     if (isExpanded) {
       // Collapse
       setExpandedAccounts((prev) => {
@@ -584,11 +610,21 @@ const MultiAccountDashboard: React.FC = () => {
 
           // Set this account as current for API calls
           const previousAccountId = localStorage.getItem('currentAdAccountId');
+          logger.info('Switching account context', {
+            from: previousAccountId?.slice(0, 8) || 'null',
+            to: accountId.slice(0, 8),
+            accountName: account.name
+          });
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
             // Получаем список кампаний с их статусами
             const campaignsList = await facebookApi.getCampaigns();
+            logger.info('Campaigns loaded', {
+              accountId: accountId.slice(0, 8),
+              accountName: account.name,
+              campaignsCount: campaignsList.length
+            });
             const campaignsMap = new Map(campaignsList.map(c => [c.id, c.status]));
 
             // Получаем статистику кампаний
@@ -612,6 +648,12 @@ const MultiAccountDashboard: React.FC = () => {
                 daily_budget: c.daily_budget || 0,
               }));
 
+            logger.info('[handleAccountExpand] Saving campaigns to state', {
+              accountId: accountId.slice(0, 8),
+              accountName: account.name,
+              campaignsCount: campaignStats.length,
+              firstCampaignName: campaignStats[0]?.campaign_name || 'N/A'
+            });
             setCampaignsData((prev) => ({ ...prev, [accountId]: campaignStats }));
           } finally {
             // Restore previous account (always restore, even if it was null)
@@ -975,6 +1017,17 @@ const AccountRow: React.FC<AccountRowProps> = ({
   directions,
 }) => {
   const [imageError, setImageError] = useState(false);
+
+  // Debug: log when campaigns change for this account
+  React.useEffect(() => {
+    logger.info('[AccountRow] Rendering with campaigns', {
+      accountId: account.id.slice(0, 8),
+      accountName: account.name,
+      campaignsCount: campaigns.length,
+      firstCampaignName: campaigns[0]?.campaign_name || 'N/A',
+      isExpanded
+    });
+  }, [campaigns, account.id, account.name, isExpanded]);
 
   // Форматирование CTR
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
