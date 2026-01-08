@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Header from '../components/Header';
 import SummaryStats from '../components/SummaryStats';
 import CampaignList from '../components/CampaignList';
+import HierarchicalCampaignTable from '../components/HierarchicalCampaignTable';
 import DateRangePicker from '../components/DateRangePicker';
 import DirectionsTable from '../components/DirectionsTable';
 import MonthlyPlanFact from '../components/MonthlyPlanFact';
@@ -520,8 +521,8 @@ const Dashboard: React.FC = () => {
         
             <div className="mb-6">
               <h2 className="text-xl font-semibold mb-4">{t('campaign.adCampaigns')}</h2>
-          <CampaignList />
-        </div>
+              <HierarchicalCampaignTable />
+            </div>
           </>
         )}
       </div>

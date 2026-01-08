@@ -492,6 +492,34 @@ const updateAdsetStatus = async (adsetId: string, isActive: boolean) => {
   return await response.json();
 };
 
+/**
+ * Обновить статус объявления (ACTIVE/PAUSED)
+ */
+const updateAdStatus = async (adId: string, isActive: boolean) => {
+  const FB_API_CONFIG = await getCurrentUserConfig();
+  if (!FB_API_CONFIG.access_token) {
+    throw new Error('Нет access_token');
+  }
+
+  const url = `${FB_API_CONFIG.base_url}/${FB_API_CONFIG.api_version}/${adId}`;
+  const formData = new URLSearchParams();
+  formData.append('access_token', FB_API_CONFIG.access_token);
+  formData.append('status', isActive ? 'ACTIVE' : 'PAUSED');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData?.error?.message || response.statusText);
+  }
+
+  return await response.json();
+};
+
 // Получить статус рекламного кабинета и данные по бюджету
 const getAccountStatus = async () => {
   const FB_API_CONFIG = await getCurrentUserConfig();
@@ -1007,20 +1035,21 @@ export const facebookApi = {
   getAdsetStats,
   updateAdsetBudget,
   updateAdsetStatus,
+  updateAdStatus,
   getAccountStatus,
   getCurrentDailySpend,
 
   /**
    * Получить объявления для адсета
    */
-  getAdsByAdset: async (adsetId: string): Promise<Array<{ id: string; name: string; status: string }>> => {
+  getAdsByAdset: async (adsetId: string): Promise<Array<{ id: string; name: string; status: string; thumbnail_url?: string | null }>> => {
     if (!await hasValidConfig()) {
       return [];
     }
     try {
       const endpoint = `${adsetId}/ads`;
       const params = {
-        fields: 'id,name,status',
+        fields: 'id,name,status,creative{thumbnail_url,image_url}',
         limit: '200',
       };
       const data = await fetchFromFacebookAPI(endpoint, params);
@@ -1028,6 +1057,7 @@ export const facebookApi = {
         id: ad.id,
         name: ad.name,
         status: ad.status,
+        thumbnail_url: ad.creative?.thumbnail_url || ad.creative?.image_url || null,
       }));
     } catch (e) {
       console.error('getAdsByAdset error', e);

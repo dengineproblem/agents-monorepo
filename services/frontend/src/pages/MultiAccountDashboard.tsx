@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import {
   BarChart3,
   Building2,
@@ -17,6 +18,7 @@ import {
   RefreshCw,
   Loader2,
   Megaphone,
+  ImageIcon,
 } from 'lucide-react';
 import { formatCurrency, formatNumber } from '../utils/formatters';
 import { cn } from '@/lib/utils';
@@ -53,6 +55,7 @@ interface AccountStats {
 interface CampaignStats {
   campaign_id: string;
   campaign_name: string;
+  status?: string; // ACTIVE, PAUSED, etc.
   spend: number;
   leads: number;
   impressions: number;
@@ -69,6 +72,7 @@ interface CampaignStats {
 interface AdsetStats {
   adset_id: string;
   adset_name: string;
+  status?: string; // ACTIVE, PAUSED, etc.
   spend: number;
   leads: number;
   impressions: number;
@@ -85,6 +89,8 @@ interface AdsetStats {
 interface AdStats {
   ad_id: string;
   ad_name: string;
+  status?: string; // ACTIVE, PAUSED, etc.
+  thumbnail_url?: string | null; // Миниатюра креатива
   spend: number;
   leads: number;
   impressions: number;
@@ -580,19 +586,16 @@ const MultiAccountDashboard: React.FC = () => {
           try {
             // Получаем список кампаний с их статусами
             const campaignsList = await facebookApi.getCampaigns();
-            const activeCampaignIds = new Set(
-              campaignsList.filter((c) => c.status === 'ACTIVE').map((c) => c.id)
-            );
+            const campaignsMap = new Map(campaignsList.map(c => [c.id, c.status]));
 
             // Получаем статистику кампаний
             const campaigns = await facebookApi.getCampaignStats(dateRange, false);
 
-            // Фильтруем только активные кампании
-            const campaignStats: CampaignStats[] = campaigns
-              .filter((c) => activeCampaignIds.has(c.campaign_id))
-              .map((c) => ({
+            // Добавляем статусы к кампаниям
+            const campaignStats: CampaignStats[] = campaigns.map((c) => ({
                 campaign_id: c.campaign_id,
                 campaign_name: c.campaign_name,
+                status: campaignsMap.get(c.campaign_id),
                 spend: c.spend,
                 leads: c.leads,
                 impressions: c.impressions,
@@ -603,6 +606,7 @@ const MultiAccountDashboard: React.FC = () => {
                 qualityLeads: c.qualityLeads || 0,
                 cpql: c.cpql || 0,
                 qualityRate: c.qualityRate || 0,
+                daily_budget: c.daily_budget || 0,
               }));
 
             setCampaignsData((prev) => ({ ...prev, [accountId]: campaignStats }));
@@ -649,24 +653,22 @@ const MultiAccountDashboard: React.FC = () => {
             // Получаем список адсетов с бюджетами и статусами
             const adsetsList = await facebookApi.getAdsetsByCampaign(campaignId);
 
-            // Фильтруем только активные адсеты
-            const activeAdsets = adsetsList.filter((a: any) => a.status === 'ACTIVE');
-
-            // Создаём мапу бюджетов по adset_id только для активных
+            // Создаём мапы для бюджетов и статусов
             const budgetMap = new Map(
-              activeAdsets.map((a: any) => [a.id, parseFloat(a.daily_budget || '0') / 100])
+              adsetsList.map((a: any) => [a.id, parseFloat(a.daily_budget || '0') / 100])
             );
-            const activeAdsetIds = new Set(activeAdsets.map((a: any) => a.id));
+            const statusMap = new Map(
+              adsetsList.map((a: any) => [a.id, a.status])
+            );
 
             // Получаем статистику адсетов
             const adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
 
-            // Маппим адсеты в AdsetStats с добавлением бюджетов (только активные)
-            const adsetStats: AdsetStats[] = adsets
-              .filter((a: any) => activeAdsetIds.has(a.adset_id))
-              .map((a: any) => ({
+            // Маппим адсеты в AdsetStats с добавлением бюджетов и статусов
+            const adsetStats: AdsetStats[] = adsets.map((a: any) => ({
               adset_id: a.adset_id,
               adset_name: a.adset_name,
+              status: statusMap.get(a.adset_id),
               spend: a.spend || 0,
               leads: a.leads || 0,
               impressions: a.impressions || 0,
@@ -720,21 +722,22 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
-            // Получаем список объявлений с их статусами
+            // Получаем список объявлений с их статусами и миниатюрами
             const adsList = await facebookApi.getAdsByAdset(adsetId);
-            const activeAdIds = new Set(
-              adsList.filter((a) => a.status === 'ACTIVE').map((a) => a.id)
-            );
+
+            // Создаём мапы для статусов и миниатюр
+            const adsStatusMap = new Map(adsList.map((a) => [a.id, a.status]));
+            const adsThumbnailMap = new Map(adsList.map((a) => [a.id, a.thumbnail_url]));
 
             // Получаем статистику объявлений
             const ads = await facebookApi.getAdStatsByAdset(adsetId, dateRange);
 
-            // Фильтруем только активные объявления
-            const adStats: AdStats[] = ads
-              .filter((a) => activeAdIds.has(a.ad_id))
-              .map((a) => ({
+            // Маппим объявления в AdStats с добавлением статусов и миниатюр
+            const adStats: AdStats[] = ads.map((a) => ({
                 ad_id: a.ad_id,
                 ad_name: a.ad_name,
+                status: adsStatusMap.get(a.ad_id),
+                thumbnail_url: adsThumbnailMap.get(a.ad_id),
                 spend: a.spend || 0,
                 leads: a.leads || 0,
                 impressions: a.impressions || 0,
@@ -1173,10 +1176,28 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   adsData,
   directions,
 }) => {
+  const [campaignActive, setCampaignActive] = useState(campaign.status === 'ACTIVE');
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
     return formatCurrency(calculatedCpm);
+  };
+
+  const handleCampaignToggle = async (e: React.MouseEvent, checked: boolean) => {
+    e.stopPropagation();
+    setIsUpdatingStatus(true);
+    try {
+      await facebookApi.updateCampaignStatus(campaign.campaign_id, checked);
+      setCampaignActive(checked);
+      toast.success(checked ? 'Кампания запущена' : 'Кампания остановлена');
+    } catch (error) {
+      toast.error('Ошибка изменения статуса кампании');
+      console.error('Campaign toggle error:', error);
+    } finally {
+      setIsUpdatingStatus(false);
+    }
   };
 
   return (
@@ -1201,6 +1222,13 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           )}
           <Megaphone className="h-4 w-4 text-blue-500 flex-shrink-0" />
+          <Switch
+            checked={campaignActive}
+            disabled={isUpdatingStatus}
+            onClick={(e) => e.stopPropagation()}
+            onCheckedChange={(checked) => handleCampaignToggle({} as React.MouseEvent, checked)}
+            className="ml-2"
+          />
           <div className="min-w-0 flex-1">
             <p className="font-medium text-sm truncate">{campaign.campaign_name}</p>
             {/* Мобильная версия — компактная строка метрик */}
@@ -1317,6 +1345,8 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
   const [isEditing, setIsEditing] = React.useState(false);
   const [editedBudget, setEditedBudget] = React.useState(adset.daily_budget.toFixed(2));
   const [currentBudget, setCurrentBudget] = React.useState(adset.daily_budget);
+  const [adsetActive, setAdsetActive] = React.useState(adset.status === 'ACTIVE');
+  const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
 
   const handleBudgetSave = async () => {
     const newBudget = parseFloat(editedBudget);
@@ -1336,6 +1366,21 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
     setIsEditing(false);
     setEditedBudget(currentBudget.toFixed(2));
   }, [currentBudget]);
+
+  const handleAdsetToggle = async (e: React.MouseEvent, checked: boolean) => {
+    e.stopPropagation();
+    setIsUpdatingStatus(true);
+    try {
+      await facebookApi.updateAdsetStatus(adset.adset_id, checked);
+      setAdsetActive(checked);
+      toast.success(checked ? 'Адсет запущен' : 'Адсет остановлен');
+    } catch (error) {
+      toast.error('Ошибка изменения статуса адсета');
+      console.error('Adset toggle error:', error);
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
 
   // Закрытие при клике вне input
   React.useEffect(() => {
@@ -1379,6 +1424,13 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 flex-shrink-0">
             adset
           </Badge>
+          <Switch
+            checked={adsetActive}
+            disabled={isUpdatingStatus}
+            onClick={(e) => e.stopPropagation()}
+            onCheckedChange={(checked) => handleAdsetToggle({} as React.MouseEvent, checked)}
+            className="ml-2"
+          />
           <div className="min-w-0 flex-1">
             <p className="text-sm truncate">{adset.adset_name}</p>
             {/* Мобильная версия — компактная строка метрик */}
@@ -1501,10 +1553,28 @@ interface AdRowProps {
 }
 
 const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget }) => {
+  const [adActive, setAdActive] = React.useState(ad.status === 'ACTIVE');
+  const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
+
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
     return formatCurrency(calculatedCpm);
+  };
+
+  const handleAdToggle = async (e: React.MouseEvent, checked: boolean) => {
+    e.stopPropagation();
+    setIsUpdatingStatus(true);
+    try {
+      await facebookApi.updateAdStatus(ad.ad_id, checked);
+      setAdActive(checked);
+      toast.success(checked ? 'Объявление запущено' : 'Объявление остановлено');
+    } catch (error) {
+      toast.error('Ошибка изменения статуса объявления');
+      console.error('Ad toggle error:', error);
+    } finally {
+      setIsUpdatingStatus(false);
+    }
   };
 
   const cpql = ad.cpql || (ad.qualityLeads > 0 ? ad.spend / ad.qualityLeads : 0);
@@ -1522,6 +1592,25 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget }) => {
         <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:border-orange-800 flex-shrink-0">
           ad
         </Badge>
+        {ad.thumbnail_url ? (
+          <img
+            src={ad.thumbnail_url}
+            alt={ad.ad_name}
+            className="w-10 h-10 rounded object-cover flex-shrink-0"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        ) : (
+          <ImageIcon className="w-10 h-10 text-muted-foreground/50 flex-shrink-0" />
+        )}
+        <Switch
+          checked={adActive}
+          disabled={isUpdatingStatus}
+          onClick={(e) => e.stopPropagation()}
+          onCheckedChange={(checked) => handleAdToggle({} as React.MouseEvent, checked)}
+          className="ml-2"
+        />
         <div className="min-w-0 flex-1">
           <p className="text-xs truncate text-muted-foreground">{ad.ad_name}</p>
           {/* Мобильная версия — компактная строка метрик */}
@@ -1603,3 +1692,9 @@ const EmptyState: React.FC<EmptyStateProps> = ({ onAddAccount }) => {
 };
 
 export default MultiAccountDashboard;
+
+// Экспорт Row компонентов для переиспользования
+export { CampaignRow, AdsetRow, AdRow };
+
+// Экспорт типов
+export type { CampaignStats, AdsetStats, AdStats, Direction };
