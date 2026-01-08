@@ -542,7 +542,9 @@ const MultiAccountDashboard: React.FC = () => {
       }
     };
 
-    loadAllCampaigns();
+    // ОТКЛЮЧЕНО: автозагрузка вызывает race condition и смешивание данных между аккаунтами
+    // Кампании будут загружаться только при раскрытии аккаунта через handleAccountExpand
+    // loadAllCampaigns();
   }, [accountStats, dateRange]);
 
   // Сброс загруженных аккаунтов при смене dateRange
