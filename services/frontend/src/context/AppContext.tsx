@@ -160,7 +160,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         
         const { data, error } = await supabase
           .from('user_accounts')
-          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_access_token, tiktok_account_id, tiktok_business_id, prompt1')
+          .select('autopilot, current_campaign_goal, tarif, optimization, tiktok_access_token, tiktok_account_id, tiktok_business_id, prompt1, access_token, ad_account_id, page_id, instagram_id')
           .eq('id', userData.id)
           .single();
           
@@ -207,17 +207,17 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
               merged.prompt1 = (data as any).prompt1;
             }
             // Синхронизация Facebook полей (КРИТИЧНО для legacy пользователей!)
-            if ((data as any).fb_access_token) {
-              merged.access_token = (data as any).fb_access_token;
+            if ((data as any).access_token) {
+              merged.access_token = (data as any).access_token;
             }
-            if ((data as any).fb_ad_account_id) {
-              merged.ad_account_id = (data as any).fb_ad_account_id;
+            if ((data as any).ad_account_id) {
+              merged.ad_account_id = (data as any).ad_account_id;
             }
-            if ((data as any).fb_page_id) {
-              merged.page_id = (data as any).fb_page_id;
+            if ((data as any).page_id) {
+              merged.page_id = (data as any).page_id;
             }
-            if ((data as any).fb_instagram_id) {
-              merged.instagram_id = (data as any).fb_instagram_id;
+            if ((data as any).instagram_id) {
+              merged.instagram_id = (data as any).instagram_id;
             }
             // сохраняем обратно только если что-то изменилось
             const needSave = JSON.stringify(storedJson) !== JSON.stringify(merged);
