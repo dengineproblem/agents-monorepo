@@ -652,9 +652,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       const userData = JSON.parse(storedUser);
       if (!userData.id) return;
 
-      // Очищаем старый кэш перед загрузкой свежих данных
-      localStorage.removeItem('adAccounts');
-      console.log('[AppContext] Очищен кэш adAccounts, загружаем свежие данные...');
+      console.log('[AppContext] Загружаем свежие данные adAccounts...');
 
       const response = await adAccountsApi.list(userData.id);
 

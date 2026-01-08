@@ -77,6 +77,8 @@ const getCurrentUserConfig = async () => {
 
         if (!currentAcc) {
           console.error('[facebookApi] !!! НЕ НАЙДЕН по id:', currentAdAccountId);
+          console.error('[facebookApi] !!! Доступные аккаунты:', adAccounts.map((a: any) => a.id?.slice(0, 8)));
+          console.warn('[facebookApi] !!! Fallback на legacy режим - может быть неправильный ad_account_id!');
         } else {
           console.log('[facebookApi] НАЙДЕН:', currentAcc.name, currentAcc.ad_account_id, currentAcc.fb_page_id);
         }
