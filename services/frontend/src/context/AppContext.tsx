@@ -206,11 +206,24 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
             if ((data as any).prompt1 !== undefined) {
               merged.prompt1 = (data as any).prompt1;
             }
+            // Синхронизация Facebook полей (КРИТИЧНО для legacy пользователей!)
+            if ((data as any).fb_access_token) {
+              merged.access_token = (data as any).fb_access_token;
+            }
+            if ((data as any).fb_ad_account_id) {
+              merged.ad_account_id = (data as any).fb_ad_account_id;
+            }
+            if ((data as any).fb_page_id) {
+              merged.page_id = (data as any).fb_page_id;
+            }
+            if ((data as any).fb_instagram_id) {
+              merged.instagram_id = (data as any).fb_instagram_id;
+            }
             // сохраняем обратно только если что-то изменилось
             const needSave = JSON.stringify(storedJson) !== JSON.stringify(merged);
             if (needSave) {
               localStorage.setItem('user', JSON.stringify(merged));
-              console.log('[AppContext] Синхронизированы поля из Supabase в localStorage (TikTok, prompt1)');
+              console.log('[AppContext] Синхронизированы поля из Supabase в localStorage (Facebook, TikTok, prompt1)');
             }
             setTiktokConnected(!!merged.tiktok_business_id && !!merged.tiktok_access_token);
           } catch (e) {
