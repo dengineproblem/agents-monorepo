@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency, formatNumber } from '../utils/formatters';
 import { facebookApi } from '@/services/facebookApi';
 import { toast } from 'sonner';
+import { API_BASE_URL } from '@/config/api';
 import {
   CampaignRow,
   AdsetRow,
@@ -18,7 +19,33 @@ import {
 // Logger placeholder
 const logger = {
   error: (msg: string, err: any, meta?: any) => console.error(msg, err, meta),
+  debug: (msg: string, meta?: any) => console.log(msg, meta),
 };
+
+// Helper functions
+function safeJsonParse<T>(json: string, fallback: T): T {
+  try {
+    return JSON.parse(json) as T;
+  } catch (error) {
+    logger.error('Failed to parse JSON', error);
+    return fallback;
+  }
+}
+
+function getUserIdFromStorage(): string | null {
+  const userData = localStorage.getItem('user');
+  if (!userData) {
+    logger.debug('No user data in localStorage');
+    return null;
+  }
+
+  const user = safeJsonParse<{ id?: string }>(userData, {});
+  if (!user.id) {
+    return null;
+  }
+
+  return user.id;
+}
 
 interface HierarchicalCampaignTableProps {
   accountId?: string;
@@ -96,14 +123,30 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
     const loadDirections = async () => {
       if (!effectiveAccountId) return;
 
+      const userId = getUserIdFromStorage();
+      if (!userId) {
+        logger.error('Cannot load directions: no user ID');
+        return;
+      }
+
       try {
-        const response = await fetch('/api/directions');
-        if (response.ok) {
-          const data = await response.json();
-          setDirections(data);
+        const url = `${API_BASE_URL}/directions?userAccountId=${userId}&accountId=${effectiveAccountId}`;
+        const response = await fetch(url, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to load directions: ${response.status}`);
         }
+
+        const data = await response.json();
+        const directions: Direction[] = data.directions || [];
+
+        logger.debug('Directions loaded', { accountId: effectiveAccountId, count: directions.length });
+        setDirections(directions);
       } catch (err) {
-        logger.error('Failed to load directions', err);
+        logger.error('Failed to load directions', err, { accountId: effectiveAccountId });
+        setDirections([]);
       }
     };
 
