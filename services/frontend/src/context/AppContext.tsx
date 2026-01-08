@@ -695,9 +695,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setMultiAccountEnabled(response.multi_account_enabled);
       setAdAccounts(mappedAccounts);
 
-      // Сохраняем в localStorage для использования в facebookApi
+      // Сохраняем в localStorage ТОЛЬКО для мультиаккаунтного режима
       localStorage.setItem('multiAccountEnabled', String(response.multi_account_enabled));
-      localStorage.setItem('adAccounts', JSON.stringify(mappedAccounts));
+
+      if (response.multi_account_enabled) {
+        // Мультиаккаунтный режим - сохраняем данные для facebookApi
+        localStorage.setItem('adAccounts', JSON.stringify(mappedAccounts));
+      } else {
+        // Legacy режим - НЕ сохраняем adAccounts, чтобы facebookApi использовал userData
+        localStorage.removeItem('adAccounts');
+      }
 
       // Оповещаем App.tsx что данные о мультиаккаунтности загружены
       window.dispatchEvent(new CustomEvent('multiAccountLoaded'));
