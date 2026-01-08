@@ -250,6 +250,9 @@ const MultiAccountDashboard: React.FC = () => {
   // Ref для отмены запроса при размонтировании
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Session ID для отмены предыдущих загрузок при refresh
+  const sessionIdRef = useRef(Date.now());
+
   // ==========================================================================
   // DATA LOADING
   // ==========================================================================
@@ -452,7 +455,16 @@ const MultiAccountDashboard: React.FC = () => {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    logger.info('Manual refresh triggered');
+    // Генерируем новый session ID чтобы отменить все предыдущие незавершенные загрузки
+    sessionIdRef.current = Date.now();
+
+    logger.info('Manual refresh triggered', {
+      newSessionId: sessionIdRef.current
+    });
+
+    // Очищаем все загруженные кампании чтобы они перезагрузились заново
+    setCampaignsData({});
+    setExpandedAccounts(new Set());
     loadAllAccountStats(true);
   }, [loadAllAccountStats]);
 
@@ -483,6 +495,9 @@ const MultiAccountDashboard: React.FC = () => {
       if (!campaignsData[accountId] && !campaignsLoading.has(accountId)) {
         setCampaignsLoading((prev) => new Set(prev).add(accountId));
 
+        // Захватываем текущий session ID чтобы проверить его перед записью данных
+        const currentSessionId = sessionIdRef.current;
+
         try {
           // Temporarily switch to this account's context
           const storedAdAccounts = localStorage.getItem('adAccounts');
@@ -503,8 +518,22 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
+            // ВАЖНО: Делаем все запросы синхронно (один за другим) чтобы currentAdAccountId не поменялся
+            // между запросами. Можно оптимизировать через Promise.all, но тогда нужно передавать accountId явно.
+
             // Получаем список кампаний с их статусами
             const campaignsList = await facebookApi.getCampaigns();
+
+            // ПРОВЕРКА: убедимся что currentAdAccountId не изменился пока шел запрос
+            const currentInLS = localStorage.getItem('currentAdAccountId');
+            if (currentInLS !== accountId) {
+              logger.warn('currentAdAccountId changed during request, aborting', {
+                expected: accountId.slice(0, 8),
+                actual: currentInLS?.slice(0, 8) || 'null'
+              });
+              return; // Прерываем загрузку
+            }
+
             logger.info('Campaigns loaded', {
               accountId: accountId.slice(0, 8),
               accountName: account.name,
@@ -514,6 +543,20 @@ const MultiAccountDashboard: React.FC = () => {
 
             // Получаем статистику кампаний
             const campaigns = await facebookApi.getCampaignStats(dateRange, false);
+
+            // ПРОВЕРКА: убедимся что currentAdAccountId не изменился пока шел запрос
+            if (localStorage.getItem('currentAdAccountId') !== accountId) {
+              logger.warn('currentAdAccountId changed during getCampaignStats, aborting', {
+                expected: accountId.slice(0, 8),
+                actual: localStorage.getItem('currentAdAccountId')?.slice(0, 8) || 'null'
+              });
+              return; // Прерываем загрузку
+            }
+
+            logger.info('Campaign stats loaded', {
+              accountId: accountId.slice(0, 8),
+              statsCount: campaigns.length
+            });
 
             // Добавляем статусы к кампаниям
             const campaignStats: CampaignStats[] = campaigns.map((c) => ({
@@ -533,20 +576,28 @@ const MultiAccountDashboard: React.FC = () => {
                 daily_budget: c.daily_budget || 0,
               }));
 
+            // ПРОВЕРКА: убедимся что session ID не изменился (не было refresh)
+            if (sessionIdRef.current !== currentSessionId) {
+              logger.warn('Session ID changed, aborting campaigns save', {
+                accountId: accountId.slice(0, 8),
+                currentSession: sessionIdRef.current,
+                requestSession: currentSessionId
+              });
+              return; // Прерываем - данные устарели
+            }
+
             logger.info('[handleAccountExpand] Saving campaigns to state', {
               accountId: accountId.slice(0, 8),
               accountName: account.name,
               campaignsCount: campaignStats.length,
-              firstCampaignName: campaignStats[0]?.campaign_name || 'N/A'
+              firstCampaignName: campaignStats[0]?.campaign_name || 'N/A',
+              sessionId: currentSessionId
             });
             setCampaignsData((prev) => ({ ...prev, [accountId]: campaignStats }));
           } finally {
-            // Restore previous account (always restore, even if it was null)
-            if (previousAccountId) {
-              localStorage.setItem('currentAdAccountId', previousAccountId);
-            } else {
-              localStorage.removeItem('currentAdAccountId');
-            }
+            // НЕ делаем restore! currentAdAccountId должен остаться на выбранном аккаунте
+            // Он изменится только когда пользователь раскроет другой аккаунт
+            logger.debug('Keeping currentAdAccountId on selected account');
           }
         } catch (err) {
           logger.error('Failed to load campaigns', err, { accountId });
@@ -576,6 +627,9 @@ const MultiAccountDashboard: React.FC = () => {
 
       if (!adsetsData[campaignId] && !adsetsLoading.has(campaignId)) {
         setAdsetsLoading((prev) => new Set(prev).add(campaignId));
+
+        // Захватываем текущий session ID
+        const currentSessionId = sessionIdRef.current;
 
         try {
           const previousAccountId = localStorage.getItem('currentAdAccountId');
@@ -614,14 +668,21 @@ const MultiAccountDashboard: React.FC = () => {
               daily_budget: budgetMap.get(a.adset_id) || 0,
             }));
 
+            // ПРОВЕРКА: убедимся что session ID не изменился
+            if (sessionIdRef.current !== currentSessionId) {
+              logger.warn('Session ID changed, aborting adsets save', {
+                campaignId: campaignId.slice(0, 8),
+                currentSession: sessionIdRef.current,
+                requestSession: currentSessionId
+              });
+              return;
+            }
+
             setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
           } finally {
-            // Restore previous account (always restore, even if it was null)
-            if (previousAccountId) {
-              localStorage.setItem('currentAdAccountId', previousAccountId);
-            } else {
-              localStorage.removeItem('currentAdAccountId');
-            }
+            // НЕ делаем restore! currentAdAccountId должен остаться на выбранном аккаунте
+            // Он изменится только когда пользователь раскроет другой аккаунт
+            logger.debug('Keeping currentAdAccountId on selected account');
           }
         } catch (err) {
           logger.error('Failed to load adsets', err, { campaignId });
@@ -651,6 +712,9 @@ const MultiAccountDashboard: React.FC = () => {
 
       if (!adsData[adsetId] && !adsLoading.has(adsetId)) {
         setAdsLoading((prev) => new Set(prev).add(adsetId));
+
+        // Захватываем текущий session ID
+        const currentSessionId = sessionIdRef.current;
 
         try {
           const previousAccountId = localStorage.getItem('currentAdAccountId');
@@ -685,14 +749,21 @@ const MultiAccountDashboard: React.FC = () => {
                 qualityRate: a.qualityRate || 0,
               }));
 
+            // ПРОВЕРКА: убедимся что session ID не изменился
+            if (sessionIdRef.current !== currentSessionId) {
+              logger.warn('Session ID changed, aborting ads save', {
+                adsetId: adsetId.slice(0, 8),
+                currentSession: sessionIdRef.current,
+                requestSession: currentSessionId
+              });
+              return;
+            }
+
             setAdsData((prev) => ({ ...prev, [adsetId]: adStats }));
           } finally {
-            // Restore previous account (always restore, even if it was null)
-            if (previousAccountId) {
-              localStorage.setItem('currentAdAccountId', previousAccountId);
-            } else {
-              localStorage.removeItem('currentAdAccountId');
-            }
+            // НЕ делаем restore! currentAdAccountId должен остаться на выбранном аккаунте
+            // Он изменится только когда пользователь раскроет другой аккаунт
+            logger.debug('Keeping currentAdAccountId on selected account');
           }
         } catch (err) {
           logger.error('Failed to load ads', err, { adsetId });
