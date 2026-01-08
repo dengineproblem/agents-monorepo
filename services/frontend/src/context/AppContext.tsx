@@ -704,6 +704,37 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       } else {
         // Legacy режим - НЕ сохраняем adAccounts, чтобы facebookApi использовал userData
         localStorage.removeItem('adAccounts');
+
+        // ВАЖНО: для legacy режима обновляем userData с актуальными данными из БД
+        if (mappedAccounts.length > 0) {
+          const storedUser = localStorage.getItem('user');
+          if (storedUser) {
+            try {
+              const userData = JSON.parse(storedUser);
+              const legacyAccount = mappedAccounts[0]; // берем первый аккаунт
+
+              // Обновляем поля для facebookApi (если они есть в БД)
+              if (legacyAccount.access_token) {
+                userData.access_token = legacyAccount.access_token;
+              }
+              if (legacyAccount.ad_account_id) {
+                userData.ad_account_id = legacyAccount.ad_account_id;
+              }
+              if (legacyAccount.page_id) {
+                userData.page_id = legacyAccount.page_id;
+              }
+
+              localStorage.setItem('user', JSON.stringify(userData));
+              console.log('[AppContext] Обновлены данные userData для legacy режима:', {
+                ad_account_id: legacyAccount.ad_account_id?.slice(0, 20),
+                has_access_token: !!legacyAccount.access_token,
+                page_id: legacyAccount.page_id
+              });
+            } catch (e) {
+              console.error('[AppContext] Ошибка при обновлении userData для legacy:', e);
+            }
+          }
+        }
       }
 
       // Оповещаем App.tsx что данные о мультиаккаунтности загружены
