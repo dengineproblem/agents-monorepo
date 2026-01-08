@@ -601,6 +601,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
         }),
         ...(objective === 'lead_forms' && {
           lead_form_id: leadFormId,
+          ...(siteUrl.trim() && { site_url: siteUrl.trim() }),
         }),
       };
 
@@ -1250,6 +1251,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
                     Выберите лидформу, которая будет использоваться для сбора заявок
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="lead-form-site-url">
+                  URL сайта (для изображений и каруселей)
+                </Label>
+                <Input
+                  id="lead-form-site-url"
+                  type="url"
+                  placeholder="https://yoursite.com"
+                  value={siteUrl}
+                  onChange={(e) => setSiteUrl(e.target.value)}
+                  disabled={isSubmitting}
+                />
+                <p className="text-xs text-amber-600">
+                  ⚠️ Обязательно для объявлений с изображениями и каруселями. Для видео — не требуется.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Если не указан, вы сможете создавать только видео объявления на эту лид-форму.
+                </p>
               </div>
             </div>
           )}

@@ -788,26 +788,30 @@ export async function createLeadFormImageCreative(
     instagramId: string;
     message: string;
     leadFormId: string;
-    link?: string;
+    link: string;  // Required by Facebook API for link_data structure
   }
 ): Promise<{ id: string }> {
-  const leadFormLink = params.link || `https://www.facebook.com/${params.pageId}`;
+  // Note: link is required for image creatives with lead forms (link_data structure)
+  // For video creatives, link is not required (video_data structure)
+
+  const linkData: any = {
+    image_hash: params.imageHash,
+    message: params.message,
+    link: params.link,
+    call_to_action: {
+      type: "LEARN_MORE",
+      value: {
+        lead_gen_form_id: params.leadFormId
+      }
+    }
+  };
+
   const payload: any = {
     name: "Lead Form Image Creative",
     object_story_spec: {
       page_id: params.pageId,
       instagram_user_id: params.instagramId,
-      link_data: {
-        image_hash: params.imageHash,
-        message: params.message,
-        link: leadFormLink,
-        call_to_action: {
-          type: "LEARN_MORE",
-          value: {
-            lead_gen_form_id: params.leadFormId
-          }
-        }
-      }
+      link_data: linkData
     }
   };
 

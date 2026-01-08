@@ -298,16 +298,21 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
           fbCreativeId = websiteCreative.id;
         } else if (objective === 'lead_forms') {
           if (!leadFormId) {
-            app.log.error('lead_forms objective requires lead_form_id in direction settings');
-            throw new Error('lead_form_id is required for lead_forms objective');
+            app.log.error({ direction_id: body.direction_id }, 'lead_forms objective requires lead_form_id in direction settings');
+            throw new Error('lead_form_id is required for lead_forms objective. Please configure it in direction default_ad_settings.');
           }
+          if (!siteUrl) {
+            app.log.error({ direction_id: body.direction_id }, 'lead_forms objective requires site_url for image creatives');
+            throw new Error('site_url is required for lead_forms image creatives. Please configure it in direction default_ad_settings. For video creatives, site_url is not required.');
+          }
+
           const leadFormCreative = await createLeadFormImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             imageHash: fbImage.hash,
             pageId: pageId,
             instagramId: instagramId,
             message: description,
             leadFormId: leadFormId,
-            link: siteUrl || undefined
+            link: siteUrl
           });
           fbCreativeId = leadFormCreative.id;
         }
@@ -500,7 +505,7 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
 
       const description = defaultSettings?.description || 'Узнайте подробности!';
       const clientQuestion = defaultSettings?.client_question || 'Здравствуйте! Хочу узнать подробнее.';
-      const siteUrl = defaultSettings?.site_url || null;
+      let siteUrl = defaultSettings?.site_url || null;
       const utm = defaultSettings?.utm_tag || null;
       const leadFormId = defaultSettings?.lead_form_id || null;
 
@@ -636,16 +641,25 @@ export const imageRoutes: FastifyPluginAsync = async (app) => {
         if (!leadFormId) {
           return reply.status(400).send({
             success: false,
-            error: 'lead_form_id is required for lead_forms objective. Please configure it in direction settings.'
+            error: 'lead_form_id is required for lead_forms objective. Please configure it in direction default_ad_settings.',
+            direction_id: direction_id
           });
         }
+        if (!siteUrl) {
+          return reply.status(400).send({
+            success: false,
+            error: 'site_url is required for lead_forms image creatives. Please configure it in direction default_ad_settings. For video creatives, site_url is not required.',
+            direction_id: direction_id
+          });
+        }
+
         const result = await createLeadFormImageCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           imageHash: fbImage.hash,
           pageId: pageId,
           instagramId: instagramId,
           message: description,
           leadFormId: leadFormId,
-          link: siteUrl || undefined
+          link: siteUrl
         });
         fbCreativeId = result.id;
       } else {
