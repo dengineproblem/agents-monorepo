@@ -26,6 +26,8 @@ import { API_BASE_URL } from '@/config/api';
 import DateRangePicker from '../components/DateRangePicker';
 import { toast } from 'sonner';
 import { facebookApi } from '@/services/facebookApi';
+import { useOptimization, type OptimizationScope } from '@/hooks/useOptimization';
+import { OptimizeButton, OptimizationModal } from '@/components/optimization';
 
 // =============================================================================
 // TYPES
@@ -278,6 +280,9 @@ const MultiAccountDashboard: React.FC = () => {
   // Directions data
   const [directionsData, setDirectionsData] = useState<Record<string, Direction[]>>({});
   const [directionsLoading, setDirectionsLoading] = useState<Set<string>>(new Set());
+
+  // Optimization hook
+  const optimization = useOptimization();
 
   // Ref для отмены запроса при размонтировании
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -921,6 +926,7 @@ const MultiAccountDashboard: React.FC = () => {
                     adsData={adsData}
                     dateRange={dateRange}
                     directions={directionsData[account.id] || []}
+                    onOptimize={optimization.startOptimization}
                   />
                 ))}
               </div>
@@ -931,6 +937,21 @@ const MultiAccountDashboard: React.FC = () => {
       </div>
 
       <DateRangePicker open={datePickerOpen} onOpenChange={setDatePickerOpen} />
+
+      {/* Brain Mini Optimization Modal */}
+      <OptimizationModal
+        open={optimization.state.isOpen}
+        onClose={optimization.close}
+        scope={optimization.state.scope}
+        streamingState={optimization.state.streamingState}
+        plan={optimization.state.plan}
+        content={optimization.state.content}
+        isLoading={optimization.state.isLoading}
+        error={optimization.state.error}
+        onApprove={optimization.approveAll}
+        onReject={optimization.reject}
+        isExecuting={optimization.state.isExecuting}
+      />
     </div>
   );
 };
@@ -987,6 +1008,7 @@ interface AccountRowProps {
   adsData: Record<string, AdStats[]>;
   dateRange: { since: string; until: string };
   directions: Direction[];
+  onOptimize: (scope: OptimizationScope) => void;
 }
 
 const AccountRow: React.FC<AccountRowProps> = ({
@@ -1005,8 +1027,10 @@ const AccountRow: React.FC<AccountRowProps> = ({
   adsLoading,
   adsData,
   directions,
+  onOptimize,
 }) => {
   const [imageError, setImageError] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   // Debug: log when campaigns change for this account
   React.useEffect(() => {
@@ -1069,6 +1093,8 @@ const AccountRow: React.FC<AccountRowProps> = ({
             onClick();
           }
         }}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
         {/* Account Info */}
         <div className="col-span-5 flex items-center gap-2">
@@ -1115,6 +1141,16 @@ const AccountRow: React.FC<AccountRowProps> = ({
                   </Badge>
                 );
               })()}
+              <OptimizeButton
+                isVisible={isHovered}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOptimize({
+                    accountId: account.id,
+                    accountName: account.name,
+                  });
+                }}
+              />
             </div>
             {/* Мобильная версия — компактная строка метрик */}
             {stats && (
@@ -1210,6 +1246,9 @@ const AccountRow: React.FC<AccountRowProps> = ({
                 adsLoading={adsLoading}
                 adsData={adsData}
                 directions={directions}
+                accountId={account.id}
+                accountName={account.name}
+                onOptimize={onOptimize}
               />
             ))
           )}
@@ -1234,6 +1273,9 @@ interface CampaignRowProps {
   adsLoading: Set<string>;
   adsData: Record<string, AdStats[]>;
   directions: Direction[];
+  accountId?: string;
+  accountName?: string;
+  onOptimize?: (scope: OptimizationScope) => void;
 }
 
 const CampaignRow: React.FC<CampaignRowProps> = ({
@@ -1247,9 +1289,13 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   adsLoading,
   adsData,
   directions,
+  accountId,
+  accountName,
+  onOptimize,
 }) => {
   const [campaignActive, setCampaignActive] = useState(campaign.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   // Sync toggle state with campaign status
   useEffect(() => {
@@ -1277,6 +1323,9 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
     }
   };
 
+  // Находим direction для этой кампании
+  const direction = directions.find(d => d.fb_campaign_id === campaign.campaign_id);
+
   return (
     <div className="divide-y divide-muted/30">
       <div
@@ -1288,6 +1337,8 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
         onClick={onExpand}
         role="button"
         tabIndex={0}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
         {/* Campaign Info */}
         <div className="col-span-5 flex items-center gap-2 pl-4 md:pl-6">
@@ -1307,7 +1358,21 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
             className="ml-2"
           />
           <div className="min-w-0 flex-1">
-            <p className="font-medium text-sm truncate">{campaign.campaign_name}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium text-sm truncate">{campaign.campaign_name}</p>
+              <OptimizeButton
+                isVisible={isHovered}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOptimize({
+                    accountId,
+                    accountName,
+                    directionId: direction?.id,
+                    directionName: direction?.name || campaign.campaign_name,
+                  });
+                }}
+              />
+            </div>
             {/* Мобильная версия — компактная строка метрик */}
             <p className="md:hidden text-xs text-muted-foreground truncate">
               {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL • {campaign.cpql > 0 ? formatCurrency(campaign.cpql) + ' CPQL' : ''} • {campaign.qualityRate > 0 ? campaign.qualityRate.toFixed(0) + '% качество' : ''}

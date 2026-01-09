@@ -2,14 +2,11 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { formatCurrency, formatNumber } from '../utils/formatters';
 import { facebookApi } from '@/services/facebookApi';
 import { toast } from 'sonner';
 import { API_BASE_URL } from '@/config/api';
 import {
   CampaignRow,
-  AdsetRow,
-  AdRow,
   type CampaignStats,
   type AdsetStats,
   type AdStats,
@@ -52,7 +49,7 @@ interface HierarchicalCampaignTableProps {
 }
 
 const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ accountId }) => {
-  const { dateRange, currentAdAccountId, multiAccountEnabled, adAccounts } = useAppContext();
+  const { dateRange, currentAdAccountId, multiAccountEnabled } = useAppContext();
 
   const effectiveAccountId = accountId || currentAdAccountId;
 
@@ -109,7 +106,7 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
             qualityLeads: stats?.qualityLeads || 0,
             cpql: stats?.cpql || 0,
             qualityRate: stats?.qualityRate || 0,
-            daily_budget: stats?.daily_budget || 0,
+            daily_budget: 0, // Бюджет на уровне кампании не отображается, только на адсетах
           };
         });
 
@@ -140,7 +137,7 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
 
       const userId = getUserIdFromStorage();
       if (!userId) {
-        logger.error('Cannot load directions: no user ID');
+        logger.error('Cannot load directions: no user ID', null);
         return;
       }
 
@@ -185,37 +182,35 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         setAdsetsLoading((prev) => new Set(prev).add(campaignId));
 
         try {
-          // Получаем список адсетов с бюджетами и статусами
+          // Получаем ВСЕ адсеты кампании
           const adsetsList = await facebookApi.getAdsetsByCampaign(campaignId);
 
-          // Создаём мапы для бюджетов и статусов
-          const budgetMap = new Map(
-            adsetsList.map((a: any) => [a.id, parseFloat(a.daily_budget || '0') / 100])
-          );
-          const statusMap = new Map(
-            adsetsList.map((a: any) => [a.id, a.status])
-          );
-
           // Получаем статистику адсетов
-          const adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
+          const adsetsStatsRaw = await facebookApi.getAdsetStats(campaignId, dateRange);
 
-          // Маппим адсеты в AdsetStats с добавлением бюджетов и статусов
-          const adsetStats: AdsetStats[] = adsets.map((a: any) => ({
-            adset_id: a.adset_id,
-            adset_name: a.adset_name,
-            status: statusMap.get(a.adset_id),
-            spend: a.spend || 0,
-            leads: a.leads || 0,
-            impressions: a.impressions || 0,
-            clicks: a.clicks || 0,
-            ctr: a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0,
-            cpl: a.cpl || 0,
-            messagingLeads: a.messagingLeads || 0,
-            qualityLeads: a.qualityLeads || 0,
-            cpql: a.cpql || 0,
-            qualityRate: a.qualityRate || 0,
-            daily_budget: budgetMap.get(a.adset_id) || 0,
-          }));
+          // Создаем Map статистики для быстрого поиска
+          const statsMap = new Map<string, any>(adsetsStatsRaw.map((s: any) => [s.adset_id, s]));
+
+          // Создаем данные для ВСЕХ адсетов, добавляя статистику если есть
+          const adsetStats: AdsetStats[] = adsetsList.map((a: any) => {
+            const stats: any = statsMap.get(a.id);
+            return {
+              adset_id: a.id,
+              adset_name: a.name,
+              status: a.status,
+              spend: stats?.spend || 0,
+              leads: stats?.leads || 0,
+              impressions: stats?.impressions || 0,
+              clicks: stats?.clicks || 0,
+              ctr: stats?.impressions > 0 ? (stats.clicks / stats.impressions) * 100 : 0,
+              cpl: stats?.cpl || 0,
+              messagingLeads: stats?.messagingLeads || 0,
+              qualityLeads: stats?.qualityLeads || 0,
+              cpql: stats?.cpql || 0,
+              qualityRate: stats?.qualityRate || 0,
+              daily_budget: parseFloat(a.daily_budget || '0') / 100,
+            };
+          });
 
           // Сортировка: ACTIVE наверху
           adsetStats.sort((a, b) => {
@@ -258,33 +253,35 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         setAdsLoading((prev) => new Set(prev).add(adsetId));
 
         try {
-          // Получаем список объявлений с их статусами и миниатюрами
+          // Получаем ВСЕ объявления адсета
           const adsList = await facebookApi.getAdsByAdset(adsetId);
 
-          // Создаём мапы для статусов и миниатюр
-          const adsStatusMap = new Map(adsList.map((a) => [a.id, a.status]));
-          const adsThumbnailMap = new Map(adsList.map((a) => [a.id, a.thumbnail_url]));
-
           // Получаем статистику объявлений
-          const ads = await facebookApi.getAdStatsByAdset(adsetId, dateRange);
+          const adsStatsRaw = await facebookApi.getAdStatsByAdset(adsetId, dateRange);
 
-          // Маппим объявления в AdStats с добавлением статусов и миниатюр
-          const adStats: AdStats[] = ads.map((a) => ({
-            ad_id: a.ad_id,
-            ad_name: a.ad_name,
-            status: adsStatusMap.get(a.ad_id),
-            thumbnail_url: adsThumbnailMap.get(a.ad_id),
-            spend: a.spend || 0,
-            leads: a.leads || 0,
-            impressions: a.impressions || 0,
-            clicks: a.clicks || 0,
-            ctr: a.ctr || 0,
-            cpl: a.cpl || 0,
-            messagingLeads: a.messagingLeads || 0,
-            qualityLeads: a.qualityLeads || 0,
-            cpql: a.cpql || 0,
-            qualityRate: a.qualityRate || 0,
-          }));
+          // Создаем Map статистики для быстрого поиска
+          const statsMap = new Map<string, any>(adsStatsRaw.map((s: any) => [s.ad_id, s]));
+
+          // Создаем данные для ВСЕХ объявлений, добавляя статистику если есть
+          const adStats: AdStats[] = adsList.map((a) => {
+            const stats: any = statsMap.get(a.id);
+            return {
+              ad_id: a.id,
+              ad_name: a.name,
+              status: a.status,
+              thumbnail_url: a.thumbnail_url,
+              spend: stats?.spend || 0,
+              leads: stats?.leads || 0,
+              impressions: stats?.impressions || 0,
+              clicks: stats?.clicks || 0,
+              ctr: stats?.ctr || 0,
+              cpl: stats?.cpl || 0,
+              messagingLeads: stats?.messagingLeads || 0,
+              qualityLeads: stats?.qualityLeads || 0,
+              cpql: stats?.cpql || 0,
+              qualityRate: stats?.qualityRate || 0,
+            };
+          });
 
           // Сортировка: ACTIVE наверху
           adStats.sort((a, b) => {
