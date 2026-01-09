@@ -24,6 +24,596 @@ import {
 
 const FB_API_VERSION = 'v23.0';
 
+// =============================================================================
+// LLM FUNCTIONS ДЛЯ BRAIN MINI
+// =============================================================================
+
+const BRAIN_MINI_MODEL = process.env.BRAIN_MODEL || 'gpt-4.1';
+const LLM_TIMEOUT_MS = 240000; // 4 минуты таймаут для LLM (GPT-5 может долго думать)
+
+/**
+ * Вызов OpenAI Responses API для Brain Mini
+ * С таймаутом и подробным логированием
+ */
+async function responsesCreateMini(payload) {
+  const startTime = Date.now();
+  const { model, input, reasoning, temperature, top_p, metadata } = payload || {};
+
+  // Проверка наличия API ключа
+  if (!process.env.OPENAI_API_KEY) {
+    const err = new Error('OPENAI_API_KEY not configured');
+    err.status = 500;
+    logger.error({
+      where: 'responsesCreateMini',
+      phase: 'config_error',
+      error: 'OPENAI_API_KEY environment variable is not set'
+    });
+    throw err;
+  }
+
+  const safeBody = {
+    ...(model ? { model } : {}),
+    ...(input ? { input } : {}),
+    ...(reasoning ? { reasoning } : {}),
+    ...(typeof temperature === 'number' ? { temperature } : {}),
+    ...(typeof top_p === 'number' ? { top_p } : {}),
+    ...(metadata ? { metadata } : {})
+  };
+
+  // Логируем начало запроса
+  logger.info({
+    where: 'responsesCreateMini',
+    phase: 'request_start',
+    model: safeBody.model,
+    input_length: JSON.stringify(safeBody.input || []).length,
+    timeout_ms: LLM_TIMEOUT_MS
+  });
+
+  // Создаём AbortController для таймаута
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      body: JSON.stringify(safeBody),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+    const text = await res.text();
+    const duration = Date.now() - startTime;
+
+    // Подробное логирование ответа
+    logger.info({
+      where: 'responsesCreateMini',
+      phase: 'response_received',
+      status: res.status,
+      duration_ms: duration,
+      response_length: text.length,
+      bodyPreview: text.slice(0, 500)
+    });
+
+    if (!res.ok) {
+      const err = new Error(`LLM API error: ${res.status} ${text.slice(0, 200)}`);
+      err.status = res.status;
+      err._responseText = text;
+      logger.error({
+        where: 'responsesCreateMini',
+        phase: 'api_error',
+        status: res.status,
+        duration_ms: duration,
+        error_preview: text.slice(0, 500)
+      });
+      throw err;
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch (parseErr) {
+      logger.warn({
+        where: 'responsesCreateMini',
+        phase: 'json_parse_warning',
+        error: String(parseErr),
+        raw_preview: text.slice(0, 200)
+      });
+      return { raw: text };
+    }
+  } catch (error) {
+    clearTimeout(timeoutId);
+    const duration = Date.now() - startTime;
+
+    if (error.name === 'AbortError') {
+      const timeoutErr = new Error(`LLM request timeout after ${LLM_TIMEOUT_MS}ms`);
+      timeoutErr.status = 408;
+      logger.error({
+        where: 'responsesCreateMini',
+        phase: 'timeout',
+        duration_ms: duration,
+        timeout_ms: LLM_TIMEOUT_MS,
+        error: 'Request aborted due to timeout'
+      });
+      throw timeoutErr;
+    }
+
+    logger.error({
+      where: 'responsesCreateMini',
+      phase: 'fetch_error',
+      duration_ms: duration,
+      error: String(error),
+      error_name: error.name
+    });
+    throw error;
+  }
+}
+
+/**
+ * Wrapper с retry-логикой для Brain Mini
+ * Ретраит на 429 (rate limit), 500, 502, 503 и таймауты
+ */
+async function responsesCreateMiniWithRetry(payload, maxRetries = 3) {
+  let lastError;
+  const overallStartTime = Date.now();
+
+  logger.info({
+    where: 'responsesCreateMiniWithRetry',
+    phase: 'start',
+    max_retries: maxRetries,
+    model: payload?.model
+  });
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const attemptStartTime = Date.now();
+
+    try {
+      const result = await responsesCreateMini(payload);
+
+      logger.info({
+        where: 'responsesCreateMiniWithRetry',
+        phase: 'success',
+        attempt,
+        attempt_duration_ms: Date.now() - attemptStartTime,
+        total_duration_ms: Date.now() - overallStartTime,
+        was_retry: attempt > 1
+      });
+
+      return result;
+    } catch (error) {
+      lastError = error;
+      const status = error.status || parseInt(error.message?.match(/^\d+/)?.[0]);
+      const attemptDuration = Date.now() - attemptStartTime;
+
+      // Определяем, нужно ли ретраить
+      const isRateLimited = status === 429;
+      const isServerError = status >= 500 && status < 600;
+      const isTimeout = status === 408;
+      const isNetworkError = !status && (error.name === 'FetchError' || error.code === 'ECONNRESET');
+      const shouldRetry = isRateLimited || isServerError || isTimeout || isNetworkError;
+
+      logger.warn({
+        where: 'responsesCreateMiniWithRetry',
+        phase: 'attempt_failed',
+        attempt,
+        max_retries: maxRetries,
+        status,
+        error_type: isRateLimited ? 'rate_limit' : isServerError ? 'server_error' : isTimeout ? 'timeout' : isNetworkError ? 'network' : 'other',
+        should_retry: shouldRetry,
+        attempt_duration_ms: attemptDuration,
+        error: String(error).slice(0, 200)
+      });
+
+      // Если не нужно ретраить или последняя попытка
+      if (!shouldRetry || attempt === maxRetries) {
+        logger.error({
+          where: 'responsesCreateMiniWithRetry',
+          phase: 'final_failure',
+          attempt,
+          max_retries: maxRetries,
+          total_duration_ms: Date.now() - overallStartTime,
+          status,
+          error: String(error),
+          should_retry,
+          reason: !shouldRetry ? 'non_retryable_error' : 'max_retries_exceeded'
+        });
+        throw error;
+      }
+
+      // Exponential backoff с jitter
+      const baseDelay = 1000 * Math.pow(2, attempt - 1);
+      const jitter = Math.random() * 500;
+      const delay = Math.min(baseDelay + jitter, 15000);
+
+      logger.info({
+        where: 'responsesCreateMiniWithRetry',
+        phase: 'retry_scheduled',
+        attempt,
+        next_attempt: attempt + 1,
+        delay_ms: Math.round(delay),
+        total_elapsed_ms: Date.now() - overallStartTime
+      });
+
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Вызов LLM для Brain Mini с валидацией и подробным логированием
+ * @param {string} systemPrompt - Системный промпт
+ * @param {object} userPayload - Данные для анализа
+ * @returns {object} - { parsed, rawText, parseError, meta, validation }
+ */
+async function llmPlanMini(systemPrompt, userPayload) {
+  const startTime = Date.now();
+
+  // Безопасная сериализация payload
+  let payloadJson;
+  try {
+    payloadJson = JSON.stringify(userPayload);
+  } catch (serializeErr) {
+    logger.error({
+      where: 'llmPlanMini',
+      phase: 'payload_serialize_error',
+      error: String(serializeErr),
+      payload_keys: Object.keys(userPayload || {})
+    });
+    return {
+      parsed: null,
+      rawText: '',
+      parseError: `payload_serialize_error: ${serializeErr.message}`,
+      meta: {},
+      validation: { valid: false, errors: ['Failed to serialize payload'] }
+    };
+  }
+
+  logger.info({
+    where: 'llmPlanMini',
+    phase: 'start',
+    model: BRAIN_MINI_MODEL,
+    prompt_length: systemPrompt.length,
+    payload_length: payloadJson.length,
+    payload_adsets_count: userPayload?.adsets?.length || 0,
+    payload_directions_count: userPayload?.directions?.length || 0
+  });
+
+  const resp = await responsesCreateMiniWithRetry({
+    model: BRAIN_MINI_MODEL,
+    input: [
+      { role: 'system', content: [{ type: 'input_text', text: systemPrompt }] },
+      { role: 'user', content: [{ type: 'input_text', text: payloadJson }] }
+    ]
+  });
+
+  const duration = Date.now() - startTime;
+
+  // Extract text from output array
+  let txt = '';
+  if (Array.isArray(resp.output)) {
+    const message = resp.output.find(o => o.type === 'message');
+    if (message && Array.isArray(message.content)) {
+      const textContent = message.content.find(c => c.type === 'output_text');
+      txt = textContent?.text || '';
+    }
+  }
+
+  logger.info({
+    where: 'llmPlanMini',
+    phase: 'response_extracted',
+    duration_ms: duration,
+    output_length: txt.length,
+    output_preview: txt.slice(0, 300),
+    has_output: !!txt
+  });
+
+  let parsed = null;
+  let parseError = null;
+
+  if (txt) {
+    // Попытка 1: прямой парсинг
+    try {
+      parsed = JSON.parse(txt);
+      logger.debug({
+        where: 'llmPlanMini',
+        phase: 'json_parse_success',
+        method: 'direct'
+      });
+    } catch (e) {
+      // Попытка 2: извлечение JSON из текста
+      try {
+        const m = txt.match(/\{[\s\S]*\}/);
+        if (m) {
+          parsed = JSON.parse(m[0]);
+          logger.debug({
+            where: 'llmPlanMini',
+            phase: 'json_parse_success',
+            method: 'regex_extract'
+          });
+        } else {
+          parseError = 'no_json_found_in_response';
+        }
+      } catch (e2) {
+        parseError = `json_parse_failed: ${e2.message}`;
+      }
+    }
+  } else {
+    parseError = 'empty_llm_response';
+  }
+
+  // Валидация структуры ответа
+  const validation = { valid: false, errors: [], warnings: [] };
+
+  if (parsed) {
+    // Проверяем наличие обязательных полей
+    if (!parsed.proposals) {
+      validation.errors.push('Missing required field: proposals');
+    } else if (!Array.isArray(parsed.proposals)) {
+      validation.errors.push('proposals must be an array');
+    } else {
+      // Валидация каждого proposal
+      parsed.proposals.forEach((p, idx) => {
+        if (!p.action) validation.errors.push(`proposals[${idx}]: missing action`);
+        if (!p.entity_id) validation.errors.push(`proposals[${idx}]: missing entity_id`);
+        if (!p.entity_type) validation.warnings.push(`proposals[${idx}]: missing entity_type`);
+        if (typeof p.health_score !== 'number') validation.warnings.push(`proposals[${idx}]: health_score is not a number`);
+      });
+    }
+
+    if (!parsed.planNote) validation.warnings.push('Missing planNote');
+    if (!parsed.summary) validation.warnings.push('Missing summary');
+
+    validation.valid = validation.errors.length === 0;
+  }
+
+  logger.info({
+    where: 'llmPlanMini',
+    phase: 'complete',
+    duration_ms: duration,
+    parse_success: !!parsed,
+    parse_error: parseError,
+    proposals_count: parsed?.proposals?.length || 0,
+    validation_valid: validation.valid,
+    validation_errors: validation.errors,
+    validation_warnings: validation.warnings,
+    llm_usage: resp?.usage
+  });
+
+  return {
+    parsed,
+    rawText: txt,
+    parseError,
+    meta: {
+      id: resp.id || null,
+      created: resp.created || null,
+      finish_reason: resp.output?.[0]?.finish_reason || null,
+      usage: resp?.usage || null
+    },
+    validation
+  };
+}
+
+// =============================================================================
+// SYSTEM PROMPT ДЛЯ BRAIN MINI (адаптирован для внешних кампаний и proposals)
+// =============================================================================
+
+/**
+ * Генерирует системный промпт для Brain Mini
+ * Ключевые отличия от основного Brain:
+ * - Поддержка внешних кампаний (без direction_id)
+ * - Возврат proposals вместо actions
+ * - Фокус на данных TODAY
+ * - Не выполняет действия автоматически
+ */
+function SYSTEM_PROMPT_MINI() {
+  return `Ты — таргетолог-агент Brain Mini, анализирующий рекламу в Facebook Ads Manager.
+
+## ТВОЯ ЗАДАЧА
+Ты работаешь в режиме РЕАЛЬНОГО ВРЕМЕНИ (данные за СЕГОДНЯ).
+Ты НЕ выполняешь действия автоматически — только ПРЕДЛАГАЕШЬ их пользователю.
+Пользователь сам решает, применить предложения или нет.
+
+## КЛЮЧЕВЫЕ ОТЛИЧИЯ ОТ ОСНОВНОГО BRAIN
+1. **Данные TODAY**: Ты анализируешь данные за СЕГОДНЯ (today), а не за вчера
+2. **Proposals вместо Actions**: Ты возвращаешь ПРЕДЛОЖЕНИЯ (proposals), а не выполняемые действия
+3. **Внешние кампании**: Ты анализируешь ВСЕ кампании, включая внешние (без direction_id)
+4. **Подтверждение пользователя**: Все предложения требуют одобрения пользователя
+
+## ВНЕШНИЕ КАМПАНИИ (ВАЖНО!)
+- Внешние кампании = кампании БЕЗ привязки к направлению (direction_id = null)
+- Для них используй настройки аккаунта (default_cpl_target_cents)
+- Если нет ни direction target, ни account target → анализируй только по трендам
+- В предложениях помечай их как campaign_type: "external"
+- МОЖЕШЬ и ДОЛЖЕН предлагать действия для внешних кампаний!
+
+## HEALTH SCORE (HS) — оценка эффективности
+HS ∈ [-100; +100] — интегральная оценка ad set:
+
+**Компоненты HS:**
+1. **Gap к таргету** (вес 45) — CPL для lead-кампаний, CPC для Instagram Traffic:
+   - ≥30% дешевле плана → +45
+   - 10-30% дешевле → +30
+   - ±10% от плана → +10/-10
+   - 10-30% дороже → -30
+   - ≥30% дороже → -45
+
+2. **Тренды** (вес до 15):
+   - 3d vs 7d, today vs yesterday
+   - Улучшение → + до 15
+   - Ухудшение → - до 15
+
+3. **Диагностика** (до -30):
+   - CTR < 1% → -8 (слабый креатив)
+   - CPM > медианы на ≥30% → -12 (дорогой аукцион)
+   - Frequency 30d > 2 → -10 (выгорание)
+
+4. **Today-компенсация** (КРИТИЧНО!):
+   - Если сегодня стоимость в 2 раза лучше вчера → ПОЛНАЯ компенсация штрафов
+   - Хорошие результаты СЕГОДНЯ перевешивают плохие ВЧЕРА!
+
+**Классы HS:**
+| Класс | Диапазон | Значение |
+|-------|----------|----------|
+| very_good | ≥ +25 | Отличный, масштабировать |
+| good | +5..+24 | Хороший, держать |
+| neutral | -5..+4 | Нейтральный, наблюдать |
+| slightly_bad | -25..-6 | Немного плохой, снижать |
+| bad | ≤ -25 | Плохой, пауза/резкое снижение |
+
+## МАТРИЦА ДЕЙСТВИЙ ПО КЛАССУ HS
+
+| HS Класс | Действие | Детали |
+|----------|----------|--------|
+| **very_good** | Масштабировать | +10..+30% бюджета |
+| **good** | Держать | При недоборе плана: +0..+10% |
+| **neutral** | Держать | Не предлагать изменений |
+| **slightly_bad** | Снижать | -20..-50% бюджета |
+| **bad** | Пауза/снижение | -50% если CPL x2-3; полная пауза если CPL > x3 |
+
+## ОГРАНИЧЕНИЯ БЮДЖЕТОВ
+- Повышение за шаг: максимум **+30%**
+- Снижение за шаг: максимум **-50%**
+- Диапазон бюджета: **$3..$100** (300..10000 центов)
+- Новый ad set: **$10-$20** (не больше!)
+
+## ВЕСА ПЕРИОДОВ ДЛЯ АНАЛИЗА
+| Период | Вес | Описание |
+|--------|-----|----------|
+| today | 50% | Приоритет — текущий день (если есть данные) |
+| yesterday | 30% | Вчерашние результаты |
+| last_7d | 15% | Среднесрочный тренд |
+| last_30d | 5% | Долгосрочный тренд |
+
+Если данных за сегодня недостаточно (< 300 impressions), увеличь вес yesterday до 50%.
+
+## МЕТРИКИ ПО ТИПАМ КАМПАНИЙ
+| Objective | Метрика | Формула |
+|-----------|---------|---------|
+| whatsapp | CPL | spend / conversations_started |
+| lead_forms | CPL | spend / form_leads |
+| site_leads | CPL | spend / pixel_leads |
+| instagram_traffic | CPC | spend / link_clicks |
+
+## ФОРМАТ ВЫХОДА (СТРОГО!)
+Выведи ОДИН JSON-объект и НИЧЕГО больше:
+{
+  "planNote": "краткое техническое описание анализа",
+  "proposals": [
+    {
+      "action": "updateBudget" | "pauseAdSet" | "pauseAd" | "createAdSet" | "review",
+      "priority": "critical" | "high" | "medium" | "low",
+      "entity_type": "adset" | "ad" | "campaign" | "direction",
+      "entity_id": "string",
+      "entity_name": "string",
+      "campaign_id": "string",
+      "campaign_type": "internal" | "external",
+      "direction_id": "string | null",
+      "direction_name": "string | null",
+      "health_score": number,
+      "hs_class": "very_good" | "good" | "neutral" | "slightly_bad" | "bad",
+      "reason": "Понятное объяснение на русском языке",
+      "confidence": number (0-1),
+      "suggested_action_params": {
+        "increase_percent": number | null,
+        "decrease_percent": number | null,
+        "current_budget_cents": number,
+        "new_budget_cents": number,
+        "min_budget_cents": 300,
+        "max_budget_cents": 10000
+      },
+      "metrics": {
+        "today_spend": number,
+        "today_conversions": number,
+        "today_cpl": number | null,
+        "target_cpl": number | null,
+        "objective": "string",
+        "metrics_source": "today" | "yesterday" | "last_7d"
+      }
+    }
+  ],
+  "summary": "Краткое резюме анализа для пользователя на русском языке"
+}
+
+## ПРАВИЛА ГЕНЕРАЦИИ PROPOSALS
+1. Генерируй proposals для adsets с классом very_good, slightly_bad, bad
+2. Для neutral — НЕ генерируй proposals (наблюдаем)
+3. Для good — генерируй ЕСЛИ есть недобор планового бюджета (+5..+10%)
+4. Каждый proposal должен иметь понятное объяснение в поле reason
+5. Для внешних кампаний обязательно указывай campaign_type: "external"
+6. confidence зависит от объёма данных: мало данных → ниже confidence
+
+## ⚠️ КРИТИЧЕСКИ ВАЖНО: ПРАВИЛО СОХРАНЕНИЯ БЮДЖЕТА
+При снижении/паузе любого adset ВСЕГДА предлагай перераспределение освободившегося бюджета!
+
+**ПРАВИЛО:**
+- Если предлагаешь снизить daily_budget adset_A с $50 до $25 (освобождается $25):
+  1. ОБЯЗАТЕЛЬНО предложи увеличить бюджет другого adset (с лучшим HS) на ~$25
+  2. ИЛИ предложи создать новый adset если есть unused_creatives
+
+- Если предлагаешь паузу adset_B с бюджетом $50:
+  1. ОБЯЗАТЕЛЬНО предложи перераспределить $50 на другие adsets
+
+## BEST-OF-BAD ЛОГИКА (как в основном Brain)
+Если НЕТ adsets с HS ≥ +25 (very_good):
+1. Найди adset с МАКСИМАЛЬНЫМ HS (наименее плохой) — это "best of bad"
+2. Используй его для добора бюджета: предложи +10..+20% (не более +30%)
+3. В reason укажи: "Лучший из доступных — используем для добора планового бюджета"
+4. Это позволяет НЕ останавливать рекламу полностью!
+
+## КОНТРОЛЬ ПЛАНОВОГО БЮДЖЕТА (95-105% коридор)
+Если указан plan_daily_budget_cents в account_settings:
+1. Посчитай current_total_budget_cents (сумма всех adsets)
+2. Сравни с планом:
+   - Если < 95% плана → НЕДОБОР: добирай через увеличение лучших или best-of-bad
+   - Если > 105% плана → ПЕРЕБОР: режь у худших по HS
+   - Если в коридоре 95-105% → ОК
+3. ⚠️ НЕ ПРЕДЛАГАЙ только снижения если это приведёт к недобору плана!
+4. Итоговая сумма proposals должна сохранять бюджет в коридоре
+
+## ПОРЯДОК ДОБОРА БЮДЖЕТА (при недоборе)
+1. Сначала — adsets с HS ≥ +25 (very_good): +10..+30%
+2. Затем — adsets с HS +5..+24 (good): +5..+10%
+3. Если таких нет — best-of-bad: +10..+20%
+4. Ограничение: один adset не должен занимать >40% от планового бюджета
+
+## ПРИМЕР PROPOSAL
+{
+  "action": "updateBudget",
+  "priority": "high",
+  "entity_type": "adset",
+  "entity_id": "120123456789",
+  "entity_name": "Креатив 1 — LAL3",
+  "campaign_id": "120987654321",
+  "campaign_type": "external",
+  "direction_id": null,
+  "direction_name": null,
+  "health_score": 35,
+  "hs_class": "very_good",
+  "reason": "«Креатив 1 — LAL3» [внешняя кампания]: отличные результаты! CPL $1.50 на 25% ниже цели. Увеличить бюджет с $20 до $26 (+30%).",
+  "confidence": 0.85,
+  "suggested_action_params": {
+    "increase_percent": 30,
+    "current_budget_cents": 2000,
+    "new_budget_cents": 2600,
+    "max_budget_cents": 10000
+  },
+  "metrics": {
+    "today_spend": 15.50,
+    "today_conversions": 10,
+    "today_cpl": 1.55,
+    "target_cpl": 2.00,
+    "objective": "whatsapp",
+    "metrics_source": "today"
+  }
+}
+
+Теперь проанализируй входные данные и сгенерируй JSON с proposals.`;
+}
+
 /**
  * Normalize ad account ID (ensure it starts with 'act_')
  */
@@ -1854,11 +2444,12 @@ export async function runScoringAgent(userAccount, options = {}) {
  * @param {string} options.directionId - UUID направления (опционально, для фильтрации)
  * @param {Object} options.supabase - Supabase client
  * @param {Object} options.logger - logger instance
+ * @param {boolean} options.useLLM - использовать ли LLM для генерации proposals (default: true)
  * @returns {Object} - { proposals: [...], context: {...}, summary: {...} }
  */
 export async function runInteractiveBrain(userAccount, options = {}) {
   const startTime = Date.now();
-  const { ad_account_id, access_token, id: userAccountId } = userAccount;
+  const { ad_account_id, access_token, id: userAccountId, account_uuid } = userAccount;
 
   const supabase = options.supabase || createClient(
     process.env.SUPABASE_URL,
@@ -1867,8 +2458,21 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
   const log = options.logger || logger;
   const directionId = options.directionId || null;
+  const useLLM = options.useLLM !== false; // default: true
 
-  log.info({ where: 'interactive_brain', phase: 'start', userId: userAccountId, directionId });
+  // accountUUID может быть передан через options или через userAccount
+  // Консистентно с основным Brain (server.js)
+  const accountUUID = options.accountUUID || account_uuid || null;
+
+  log.info({
+    where: 'interactive_brain',
+    phase: 'start',
+    userId: userAccountId,
+    directionId,
+    useLLM,
+    accountUUID,
+    ad_account_id
+  });
 
   try {
     // ========================================
@@ -2012,6 +2616,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     // ========================================
     // ЧАСТЬ 3: ПОЛУЧАЕМ НАПРАВЛЕНИЯ И НАСТРОЙКИ
+    // Фильтруем по account_id для мультиаккаунтного режима
+    // Консистентно с основным Brain (server.js getUserDirections)
     // ========================================
 
     let directionsQuery = supabase
@@ -2024,32 +2630,58 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       directionsQuery = directionsQuery.eq('id', directionId);
     }
 
+    // Мультиаккаунтность: фильтруем directions по account_id
+    if (accountUUID) {
+      directionsQuery = directionsQuery.eq('account_id', accountUUID);
+      log.info({
+        where: 'interactive_brain',
+        phase: 'directions_filter',
+        accountUUID,
+        message: 'Фильтрация directions по account_id'
+      });
+    } else {
+      // Legacy режим: только directions без account_id
+      directionsQuery = directionsQuery.is('account_id', null);
+    }
+
     const { data: directions } = await directionsQuery;
 
     // ========================================
     // ЗАГРУЗКА НАСТРОЕК АККАУНТА (для внешних кампаний)
+    // Приоритет: accountUUID > ad_account_id > user_account_id
     // ========================================
     let adAccountSettings = null;
 
-    // Пробуем найти ad_account по fb_ad_account_id
-    const { data: adAccountData } = await supabase
-      .from('ad_accounts')
-      .select('id, default_cpl_target_cents, plan_daily_budget_cents')
-      .eq('ad_account_id', ad_account_id)
-      .single();
-
-    if (adAccountData) {
-      adAccountSettings = adAccountData;
-    } else {
-      // Fallback: ищем по user_account_id
-      const { data: adAccountByUser } = await supabase
+    if (accountUUID) {
+      // Мультиаккаунтный режим: загружаем по UUID напрямую
+      const { data: adAccountByUUID } = await supabase
         .from('ad_accounts')
         .select('id, default_cpl_target_cents, plan_daily_budget_cents')
-        .eq('user_account_id', userAccountId)
-        .limit(1)
+        .eq('id', accountUUID)
         .single();
 
-      adAccountSettings = adAccountByUser || null;
+      adAccountSettings = adAccountByUUID || null;
+    } else {
+      // Legacy режим: пробуем найти ad_account по fb_ad_account_id
+      const { data: adAccountData } = await supabase
+        .from('ad_accounts')
+        .select('id, default_cpl_target_cents, plan_daily_budget_cents')
+        .eq('ad_account_id', ad_account_id)
+        .single();
+
+      if (adAccountData) {
+        adAccountSettings = adAccountData;
+      } else {
+        // Fallback: ищем по user_account_id
+        const { data: adAccountByUser } = await supabase
+          .from('ad_accounts')
+          .select('id, default_cpl_target_cents, plan_daily_budget_cents')
+          .eq('user_account_id', userAccountId)
+          .limit(1)
+          .single();
+
+        adAccountSettings = adAccountByUser || null;
+      }
     }
 
     log.info({
@@ -2057,7 +2689,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       phase: 'ad_account_settings_loaded',
       has_settings: !!adAccountSettings,
       default_cpl: adAccountSettings?.default_cpl_target_cents,
-      plan_budget: adAccountSettings?.plan_daily_budget_cents
+      plan_budget: adAccountSettings?.plan_daily_budget_cents,
+      accountUUID,
+      settings_source: accountUUID ? 'accountUUID' : 'fallback'
     });
 
     // Загружаем последние действия Brain для защиты от дёрготни
@@ -2158,7 +2792,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           todayCTR = todayImpressions > 0 ? (todayClicks / todayImpressions * 100) : null;
           todayCPM = todayImpressions > 0 ? (todaySpend / todayImpressions * 1000) : null;
           todayLinkClicks = getActionValue(todayAdset.actions, 'link_click');
-          todayLeads = getActionValue(todayAdset.actions, 'lead');
+          // ВАЖНО: используем extractLeads() для корректного подсчёта WhatsApp/messaging лидов
+          // (onsite_conversion.total_messaging_connection + lead_grouped + pixel_lead)
+          todayLeads = extractLeads(todayAdset.actions);
           metricsSource = 'today';
         } else if (fbMetrics?.metrics_last_7d) {
           // Нет данных за сегодня — используем средние за 7 дней
@@ -2191,7 +2827,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         // Yesterday метрики
         const yesterdaySpend = parseFloat(yesterdayAdset?.spend || 0);
         const yesterdayLinkClicks = getActionValue(yesterdayAdset?.actions, 'link_click');
-        const yesterdayLeads = getActionValue(yesterdayAdset?.actions, 'lead');
+        // ВАЖНО: используем extractLeads() для корректного подсчёта WhatsApp/messaging лидов
+        const yesterdayLeads = extractLeads(yesterdayAdset?.actions);
         const yesterdayConversions = isTrafficObjective ? yesterdayLinkClicks : yesterdayLeads;
         const yesterdayCostPerConversion = yesterdayConversions > 0 ? yesterdaySpend / yesterdayConversions : null;
         const yesterdayCPL = yesterdayCostPerConversion;
@@ -2630,6 +3267,201 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     }
 
     // ========================================
+    // ЧАСТЬ 4.4: ВЫЗОВ LLM ДЛЯ ГЕНЕРАЦИИ PROPOSALS (NEW!)
+    // ========================================
+
+    let llmProposals = null;
+    let llmSummary = null;
+    let llmPlanNote = null;
+    let llmUsed = false;
+    let llmError = null;
+    let llmValidation = null;
+    let llmMeta = null;
+    const llmStartTime = Date.now();
+
+    if (useLLM && adsetAnalysis.length > 0) {
+      const externalCount = adsetAnalysis.filter(a => a.campaign_type === 'external').length;
+      const internalCount = adsetAnalysis.filter(a => a.campaign_type === 'internal').length;
+
+      log.info({
+        where: 'interactive_brain',
+        phase: 'llm_call_start',
+        adsets_count: adsetAnalysis.length,
+        external_count: externalCount,
+        internal_count: internalCount,
+        has_directions: (directions?.length || 0) > 0,
+        has_account_settings: !!adAccountSettings,
+        has_brain_report: !!brainReport,
+        unused_creatives_count: brainReport?.unused_creatives?.length || 0,
+        ready_creatives_count: brainReport?.ready_creatives?.length || 0,
+        message: 'Подготовка payload для LLM'
+      });
+
+      try {
+        // Готовим payload для LLM с полным контекстом
+        const llmPayload = {
+          adsets: adsetAnalysis.map(a => ({
+            adset_id: a.adset_id,
+            adset_name: a.adset_name,
+            campaign_id: a.campaign_id,
+            campaign_type: a.campaign_type,
+            direction_id: a.direction_id,
+            direction_name: a.direction_name,
+            direction_objective: a.direction_objective,
+            health_score: a.health_score,
+            hs_class: a.hs_class,
+            hs_breakdown: a.hs_breakdown,
+            target_cpl_source: a.target_cpl_source,
+            metrics_source: a.metrics_source,
+            metrics: a.metrics,
+            // Добавляем бюджет адсета
+            current_budget_cents: adsetBudgets.get(a.adset_id)?.daily_budget_cents || null
+          })),
+          directions: directions?.map(d => ({
+            id: d.id,
+            name: d.name,
+            objective: d.objective,
+            daily_budget_cents: d.daily_budget_cents,
+            target_cpl_cents: d.target_cpl_cents
+          })) || [],
+          account_settings: {
+            default_cpl_target_cents: adAccountSettings?.default_cpl_target_cents || null,
+            plan_daily_budget_cents: adAccountSettings?.plan_daily_budget_cents || null
+          },
+          unused_creatives: brainReport?.unused_creatives?.slice(0, 10) || [],
+          ready_creatives: brainReport?.ready_creatives?.slice(0, 10) || [],
+          recent_actions_count: recentActions?.length || 0,
+          summary: {
+            total_adsets: adsetAnalysis.length,
+            external_count: externalCount,
+            internal_count: internalCount,
+            by_hs_class: {
+              very_good: adsetAnalysis.filter(a => a.hs_class === 'very_good').length,
+              good: adsetAnalysis.filter(a => a.hs_class === 'good').length,
+              neutral: adsetAnalysis.filter(a => a.hs_class === 'neutral').length,
+              slightly_bad: adsetAnalysis.filter(a => a.hs_class === 'slightly_bad').length,
+              bad: adsetAnalysis.filter(a => a.hs_class === 'bad').length
+            },
+            today_total_spend: todayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
+            // Для best-of-bad логики и баланса бюджета
+            current_total_budget_cents: Array.from(adsetBudgets.values()).reduce((sum, b) => sum + (b?.daily_budget_cents || 0), 0),
+            plan_daily_budget_cents: adAccountSettings?.plan_daily_budget_cents || null,
+            best_adset: adsetAnalysis.length > 0 ? adsetAnalysis.reduce((best, curr) => (curr.health_score > (best?.health_score ?? -Infinity)) ? curr : best, null) : null,
+            has_good_adsets: adsetAnalysis.some(a => a.hs_class === 'very_good' || a.hs_class === 'good')
+          }
+        };
+
+        log.info({
+          where: 'interactive_brain',
+          phase: 'llm_payload_prepared',
+          payload_size: JSON.stringify(llmPayload).length,
+          adsets_in_payload: llmPayload.adsets.length,
+          message: 'Отправка запроса в LLM'
+        });
+
+        const systemPrompt = SYSTEM_PROMPT_MINI();
+        const llmResult = await llmPlanMini(systemPrompt, llmPayload);
+        const llmDuration = Date.now() - llmStartTime;
+
+        llmMeta = llmResult.meta;
+        llmValidation = llmResult.validation;
+
+        // Проверяем успешность и валидность ответа
+        if (llmResult.parsed && Array.isArray(llmResult.parsed.proposals)) {
+          // Проверяем валидацию
+          if (llmResult.validation && !llmResult.validation.valid) {
+            log.warn({
+              where: 'interactive_brain',
+              phase: 'llm_validation_failed',
+              duration_ms: llmDuration,
+              validation_errors: llmResult.validation.errors,
+              validation_warnings: llmResult.validation.warnings,
+              proposals_count: llmResult.parsed.proposals.length,
+              message: 'LLM ответ не прошёл валидацию, используем детерминированные proposals'
+            });
+            llmError = `validation_failed: ${llmResult.validation.errors.join(', ')}`;
+          } else {
+            // LLM успешно сгенерировал валидные proposals
+            llmProposals = llmResult.parsed.proposals;
+            llmSummary = llmResult.parsed.summary || null;
+            llmPlanNote = llmResult.parsed.planNote || null;
+            llmUsed = true;
+
+            // Сохраняем детерминированные proposals на случай если нужно сравнить
+            const deterministicProposalsCount = proposals.length;
+
+            // Заменяем детерминированные proposals на LLM-сгенерированные
+            proposals.length = 0; // Очищаем массив
+            proposals.push(...llmProposals);
+
+            log.info({
+              where: 'interactive_brain',
+              phase: 'llm_call_success',
+              duration_ms: llmDuration,
+              llm_proposals_count: llmProposals.length,
+              deterministic_proposals_count: deterministicProposalsCount,
+              proposals_by_action: {
+                updateBudget: llmProposals.filter(p => p.action === 'updateBudget').length,
+                pauseAdSet: llmProposals.filter(p => p.action === 'pauseAdSet').length,
+                createAdSet: llmProposals.filter(p => p.action === 'createAdSet').length,
+                review: llmProposals.filter(p => p.action === 'review').length
+              },
+              proposals_by_type: {
+                internal: llmProposals.filter(p => p.campaign_type === 'internal').length,
+                external: llmProposals.filter(p => p.campaign_type === 'external').length
+              },
+              llm_summary_preview: llmSummary?.substring(0, 150),
+              llm_plan_note_preview: llmPlanNote?.substring(0, 150),
+              validation_warnings: llmResult.validation?.warnings,
+              llm_usage: llmResult.meta?.usage,
+              message: 'LLM успешно сгенерировал proposals'
+            });
+          }
+        } else {
+          // LLM вернул невалидный ответ
+          llmError = llmResult.parseError || 'invalid_response_format';
+          log.warn({
+            where: 'interactive_brain',
+            phase: 'llm_call_invalid_response',
+            duration_ms: llmDuration,
+            error: llmError,
+            raw_length: llmResult.rawText?.length || 0,
+            raw_preview: llmResult.rawText?.substring(0, 300),
+            deterministic_proposals_count: proposals.length,
+            message: 'LLM вернул невалидный ответ, используем детерминированные proposals'
+          });
+        }
+      } catch (llmErr) {
+        // LLM вызов упал
+        const llmDuration = Date.now() - llmStartTime;
+        llmError = String(llmErr);
+        log.error({
+          where: 'interactive_brain',
+          phase: 'llm_call_error',
+          duration_ms: llmDuration,
+          error: llmError,
+          error_name: llmErr.name,
+          error_status: llmErr.status,
+          deterministic_proposals_count: proposals.length,
+          message: 'Ошибка при вызове LLM, используем детерминированные proposals как fallback'
+        });
+      }
+    } else if (!useLLM) {
+      log.info({
+        where: 'interactive_brain',
+        phase: 'llm_disabled',
+        deterministic_proposals_count: proposals.length,
+        message: 'LLM отключен (useLLM=false), используем детерминированные proposals'
+      });
+    } else if (adsetAnalysis.length === 0) {
+      log.info({
+        where: 'interactive_brain',
+        phase: 'llm_skipped_no_adsets',
+        message: 'Нет адсетов для анализа, LLM не вызывается'
+      });
+    }
+
+    // ========================================
     // ЧАСТЬ 4.5: ЛОГИКА ПЕРЕРАСПРЕДЕЛЕНИЯ БЮДЖЕТА
     // ========================================
 
@@ -2869,9 +3701,13 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       },
       brain_report_age_hours: brainReportAge,
       today_total_spend: todayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
-      // Исправлено: используем getActionValue вместо прямого доступа к свойствам
-      today_total_leads: todayData.reduce((sum, a) => sum + getActionValue(a.actions, 'lead'), 0),
-      today_total_link_clicks: todayData.reduce((sum, a) => sum + getActionValue(a.actions, 'link_click'), 0)
+      // ВАЖНО: используем extractLeads() для корректного подсчёта WhatsApp/messaging лидов
+      // (onsite_conversion.total_messaging_connection + lead_grouped + pixel_lead)
+      today_total_leads: todayData.reduce((sum, a) => sum + extractLeads(a.actions), 0),
+      today_total_link_clicks: todayData.reduce((sum, a) => sum + getActionValue(a.actions, 'link_click'), 0),
+      // LLM integration (NEW!)
+      llm_used: llmUsed,
+      llm_error: llmError
     };
 
     // Сохраняем запуск для аудита
@@ -2899,7 +3735,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       proposals_internal: summary.proposals_by_campaign_type.internal,
       proposals_external: summary.proposals_by_campaign_type.external,
       data_sources: summary.by_data_source,
-      message: `Анализ завершён: ${adsetAnalysis.length} адсетов (${internalAdsets.length} internal, ${externalAdsets.length} external), ${proposals.length} proposals`
+      llm_used: llmUsed,
+      llm_error: llmError,
+      message: `Анализ завершён: ${adsetAnalysis.length} адсетов (${internalAdsets.length} internal, ${externalAdsets.length} external), ${proposals.length} proposals${llmUsed ? ' (LLM)' : ' (deterministic)'}`
     });
 
     // Детальный лог summary для отладки
@@ -2915,6 +3753,13 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       proposals,
       adset_analysis: adsetAnalysis,
       summary,
+      // LLM-related fields (NEW!)
+      llm: {
+        used: llmUsed,
+        summary: llmSummary,
+        planNote: llmPlanNote,
+        error: llmError
+      },
       context: {
         today_adsets: todayData.length,
         yesterday_adsets: yesterdayData.length,
@@ -2927,7 +3772,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         directions_count: directions?.length || 0,
         generated_at: new Date().toISOString(),
         duration_ms: duration,
-        focus: 'TODAY — все решения основаны на сегодняшних данных с учётом истории'
+        focus: llmUsed
+          ? 'LLM-powered — решения сгенерированы ИИ на основе сегодняшних данных'
+          : 'TODAY — детерминированные решения на основе сегодняшних данных'
       }
     };
 

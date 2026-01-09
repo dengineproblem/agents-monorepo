@@ -80,7 +80,7 @@ export function OptimizationModal({
           )}
         </DialogHeader>
 
-        <ScrollArea className="flex-1 min-h-[300px] pr-4">
+        <ScrollArea className="flex-1 min-h-[200px] max-h-[50vh] pr-4 overflow-y-auto">
           {/* Streaming Progress */}
           {isLoading && streamingState && (
             <div className="py-2">

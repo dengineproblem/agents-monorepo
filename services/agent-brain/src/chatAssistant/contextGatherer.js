@@ -251,7 +251,7 @@ async function getTodayMetrics(userAccountId, adAccountId) {
 async function getActiveContexts(userAccountId, adAccountId) {
   let query = supabase
     .from('campaign_contexts')
-    .select('id, title, content, context_type')
+    .select('id, title, content, type')
     .eq('user_account_id', userAccountId)
     .eq('is_active', true);
 

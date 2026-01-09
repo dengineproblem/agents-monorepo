@@ -88,6 +88,16 @@ export function useOptimization() {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
+    // Флаг для различения таймаута и ручной отмены
+    let isTimeout = false;
+
+    // Таймаут 7 минут (420000 мс) - GPT-5 может думать 3-4 мин + overhead
+    const timeoutId = setTimeout(() => {
+      console.log('[Optimization] Timeout reached (7 min), aborting...');
+      isTimeout = true;
+      abortController.abort();
+    }, 420000);
+
     // Формируем сообщение - явно указываем вызвать triggerBrainOptimizationRun с dry_run: true
     const message = scope.directionId
       ? `Вызови инструмент triggerBrainOptimizationRun с параметрами: direction_id="${scope.directionId}", dry_run=true. Покажи предложения по оптимизации для направления "${scope.directionName || 'направление'}".`
@@ -179,6 +189,9 @@ export function useOptimization() {
 
       console.log('[Optimization] Stream finished, finalPlan:', finalPlan, 'content:', finalContent, 'error:', errorMessage);
 
+      // Очищаем таймаут
+      clearTimeout(timeoutId);
+
       // Завершаем с результатами
       setState(prev => ({
         ...prev,
@@ -189,9 +202,23 @@ export function useOptimization() {
       }));
 
     } catch (error) {
-      console.log('[Optimization] Catch block, error:', error);
+      // Очищаем таймаут
+      clearTimeout(timeoutId);
+      console.log('[Optimization] Catch block, error:', error, 'isTimeout:', isTimeout);
+
       if ((error as Error).name === 'AbortError') {
-        console.log('[Optimization] AbortError, returning');
+        if (isTimeout) {
+          // Таймаут - показываем ошибку пользователю
+          console.log('[Optimization] Timeout AbortError');
+          setState(prev => ({
+            ...prev,
+            isLoading: false,
+            error: 'Превышено время ожидания (7 минут). Попробуйте ещё раз или выберите конкретное направление.',
+          }));
+          return;
+        }
+        // Ручная отмена - просто выходим
+        console.log('[Optimization] Manual AbortError, returning');
         return;
       }
 

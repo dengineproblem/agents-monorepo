@@ -2076,10 +2076,13 @@ export const adsHandlers = {
     try {
       const { runInteractiveBrain } = await import('../../../scoring.js');
 
-      // Get user account data for Brain
+      // ========================================
+      // МУЛЬТИАККАУНТНОСТЬ: Консистентно с основным Brain (server.js)
+      // Проверяем multi_account_enabled и загружаем credentials из ad_accounts
+      // ========================================
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, ad_account_id, access_token')
+        .select('id, ad_account_id, access_token, multi_account_enabled')
         .eq('id', userAccountId)
         .single();
 
@@ -2087,24 +2090,74 @@ export const adsHandlers = {
         return { success: false, error: 'Не удалось получить данные пользователя' };
       }
 
-      // Use provided accessToken or from user_account
-      const finalAccessToken = accessToken || userAccount.access_token;
+      // Определяем credentials в зависимости от режима
+      let finalAdAccountId = userAccount.ad_account_id;
+      let finalAccessToken = accessToken || userAccount.access_token;
+      let accountUUID = null;
+
+      // Мультиаккаунтный режим: загружаем из ad_accounts
+      if (userAccount.multi_account_enabled && adAccountDbId) {
+        const { data: adAccount, error: adAccountError } = await supabase
+          .from('ad_accounts')
+          .select('id, access_token, ad_account_id')
+          .eq('id', adAccountDbId)
+          .eq('user_account_id', userAccountId)
+          .single();
+
+        if (adAccountError || !adAccount) {
+          logger.error({
+            where: 'triggerBrainOptimizationRun',
+            error: 'Ad account not found',
+            adAccountDbId,
+            userAccountId,
+            details: adAccountError?.message
+          });
+          return { success: false, error: `Рекламный аккаунт не найден: ${adAccountDbId}` };
+        }
+
+        // Переопределяем credentials из ad_accounts
+        finalAdAccountId = adAccount.ad_account_id;
+        finalAccessToken = accessToken || adAccount.access_token;
+        accountUUID = adAccount.id;
+
+        logger.info({
+          where: 'triggerBrainOptimizationRun',
+          phase: 'multi_account_mode',
+          userAccountId,
+          adAccountDbId,
+          finalAdAccountId,
+          accountUUID
+        });
+      } else {
+        logger.info({
+          where: 'triggerBrainOptimizationRun',
+          phase: 'legacy_mode',
+          userAccountId,
+          finalAdAccountId: userAccount.ad_account_id
+        });
+      }
 
       if (!finalAccessToken) {
         return { success: false, error: 'Access token не доступен' };
       }
 
-      // Run interactive brain
+      if (!finalAdAccountId) {
+        return { success: false, error: 'Ad account ID не найден' };
+      }
+
+      // Run interactive brain с правильными credentials
       const result = await runInteractiveBrain(
         {
-          ad_account_id: userAccount.ad_account_id,
+          ad_account_id: finalAdAccountId,
           access_token: finalAccessToken,
-          id: userAccountId
+          id: userAccountId,
+          account_uuid: accountUUID  // Передаём UUID для фильтрации по аккаунту
         },
         {
           directionId: direction_id,
           supabase,
-          logger
+          logger,
+          accountUUID  // Также передаём в options для directions
         }
       );
 
