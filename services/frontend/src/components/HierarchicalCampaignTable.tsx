@@ -108,6 +108,14 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
           daily_budget: c.daily_budget || 0,
         }));
 
+        // Сортировка: ACTIVE наверху, потом остальные
+        campaignData.sort((a, b) => {
+          if (a.status === b.status) return 0;
+          if (a.status === 'ACTIVE') return -1;
+          if (b.status === 'ACTIVE') return 1;
+          return 0;
+        });
+
         setCampaigns(campaignData);
       } catch (err) {
         logger.error('Failed to load campaigns', err, { accountId: effectiveAccountId });
@@ -204,6 +212,14 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
             daily_budget: budgetMap.get(a.adset_id) || 0,
           }));
 
+          // Сортировка: ACTIVE наверху
+          adsetStats.sort((a, b) => {
+            if (a.status === b.status) return 0;
+            if (a.status === 'ACTIVE') return -1;
+            if (b.status === 'ACTIVE') return 1;
+            return 0;
+          });
+
           setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
         } catch (err) {
           logger.error('Failed to load adsets', err, { campaignId });
@@ -264,6 +280,14 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
             cpql: a.cpql || 0,
             qualityRate: a.qualityRate || 0,
           }));
+
+          // Сортировка: ACTIVE наверху
+          adStats.sort((a, b) => {
+            if (a.status === b.status) return 0;
+            if (a.status === 'ACTIVE') return -1;
+            if (b.status === 'ACTIVE') return 1;
+            return 0;
+          });
 
           setAdsData((prev) => ({ ...prev, [adsetId]: adStats }));
         } catch (err) {
