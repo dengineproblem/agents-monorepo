@@ -80,10 +80,12 @@ const MonthlyPlanFact: React.FC = () => {
         const userTarif = userData?.tarif || null;
         const includeLeadForms = userTarif === 'target';
         
-        // Загружаем активные кампании, статистику и планы параллельно
-        const [campaigns, stats, plansData] = await Promise.all([
-          facebookApi.getCampaigns(),
-          facebookApi.getCampaignStats(monthRange, includeLeadForms),
+        // Загружаем сначала кампании, потом статистику (передаём campaigns чтобы не дублировать запрос)
+        const campaigns = await facebookApi.getCampaigns();
+
+        // Загружаем статистику и планы параллельно
+        const [stats, plansData] = await Promise.all([
+          facebookApi.getCampaignStats(monthRange, includeLeadForms, campaigns),
           getUserDirectionsWithPlans(user.id).catch(error => {
             console.warn('Ошибка загрузки планов:', error);
             return []; // Возвращаем пустой массив при ошибке

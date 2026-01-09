@@ -806,29 +806,31 @@ export const facebookApi = {
   },
   
   // Получить статистику кампаний за период
-  getCampaignStats: async (dateRange: DateRange, includeLeadForms: boolean = false): Promise<CampaignStat[]> => {
+  // campaigns - опциональный параметр, если передан - используем его, иначе загружаем (для избежания дублирования запросов)
+  getCampaignStats: async (dateRange: DateRange, includeLeadForms: boolean = false, campaigns?: Campaign[]): Promise<CampaignStat[]> => {
     console.log('Запрос статистики кампаний за период:', dateRange);
-    
+
     if (!await hasValidConfig()) {
       console.warn('Нет данных для получения статистики. Возвращаю пустой массив.');
       return [];
     }
-    
+
     try {
       const FB_API_CONFIG = await getCurrentUserConfig();
       const accountId = FB_API_CONFIG.ad_account_id;
-      
+
       console.log(`Запрашиваем статистику для рекламного кабинета: ${accountId}`);
-      
-      // Сначала получаем список кампаний, чтобы затем создать для них нулевую статистику при необходимости
-      const campaigns = await facebookApi.getCampaigns();
+
+      // Используем переданные кампании или загружаем (если не переданы)
+      // Это позволяет избежать дублирования запросов при вызове из AppContext
+      const campaignsToUse = campaigns || await facebookApi.getCampaigns();
       const campaignObjectiveById = new Map<string, string>();
-      for (const c of campaigns) {
+      for (const c of campaignsToUse) {
         // @ts-ignore - защищаемся от разных форматов
         campaignObjectiveById.set(c.id, (c.objective as string) || 'UNKNOWN');
       }
       
-      if (!campaigns || campaigns.length === 0) {
+      if (!campaignsToUse || campaignsToUse.length === 0) {
         console.warn('Нет кампаний для запроса статистики, возвращаю пустой массив');
         return [];
       }
@@ -942,8 +944,8 @@ export const facebookApi = {
       
       // Создаем статистику с нулями для каждой кампании на каждую дату
       const zeroStats: CampaignStat[] = [];
-      
-      campaigns.forEach(campaign => {
+
+      campaignsToUse.forEach(campaign => {
         dates.forEach(date => {
           const dateStr = format(date, 'yyyy-MM-dd');
           zeroStats.push({

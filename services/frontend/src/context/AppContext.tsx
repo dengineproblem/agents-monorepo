@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { Campaign, CampaignStat, DateRange, facebookApi } from '../services/facebookApi';
 import { tiktokApi } from '@/services/tiktokApi';
 import { format, subDays } from 'date-fns';
@@ -62,6 +62,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [userTarif, setUserTarif] = useState<string | null>(null);
   const [platform, setPlatform] = useState<'instagram' | 'tiktok'>('instagram');
   const [tiktokConnected, setTiktokConnected] = useState<boolean>(false);
+
+  // Ref для защиты от race condition в refreshData
+  const refreshRequestIdRef = useRef<number>(0);
+
+  // Ref для отслеживания первичной инициализации (чтобы не делать множественные refreshData)
+  const isInitializedRef = useRef<boolean>(false);
+  const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Multi-account state - инициализируем из localStorage для мгновенного редиректа
   const [multiAccountEnabled, setMultiAccountEnabled] = useState<boolean>(() => {
@@ -406,11 +413,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   };
 
   const refreshData = async () => {
+    // Увеличиваем ID запроса для отслеживания актуальности
+    const currentRequestId = ++refreshRequestIdRef.current;
+
     setLoading(true);
     setError(null);
 
     try {
-      console.log('Обновление данных приложения...');
+      console.log('Обновление данных приложения...', { requestId: currentRequestId });
 
       // Проверяем авторизацию пользователя (только username)
       if (!checkUserAuth()) {
@@ -453,6 +463,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         // Загружаем список кампаний (Instagram/Facebook)
         console.log('Запрашиваем список кампаний (Instagram/Facebook)...');
         const campaignsData = await facebookApi.getCampaigns();
+
+        // Проверяем актуальность запроса перед обновлением state
+        if (currentRequestId !== refreshRequestIdRef.current) {
+          console.log('Запрос устарел, пропускаем обновление кампаний', { currentRequestId, latestId: refreshRequestIdRef.current });
+          return;
+        }
+
         setCampaigns(campaignsData);
         console.log(`Получено ${campaignsData.length} кампаний`);
 
@@ -460,12 +477,27 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         console.log('Запрашиваем статистику кампаний (Instagram/Facebook)...');
         // Для тарифа Target включаем лидформы в подсчет лидов
         const includeLeadForms = userTarif === 'target';
-        const statsData = await facebookApi.getCampaignStats(dateRange, includeLeadForms);
+        // Передаём campaignsData чтобы избежать повторного запроса getCampaigns() внутри getCampaignStats()
+        const statsData = await facebookApi.getCampaignStats(dateRange, includeLeadForms, campaignsData);
+
+        // Проверяем актуальность запроса перед обновлением state
+        if (currentRequestId !== refreshRequestIdRef.current) {
+          console.log('Запрос устарел, пропускаем обновление статистики', { currentRequestId, latestId: refreshRequestIdRef.current });
+          return;
+        }
+
         setCampaignStats(statsData);
       } else {
         // TikTok: загружаем кампании и статистику и маппим к общему формату
         console.log('Запрашиваем список кампаний (TikTok)...');
         const ttCampaigns = await tiktokApi.getCampaigns();
+
+        // Проверяем актуальность запроса
+        if (currentRequestId !== refreshRequestIdRef.current) {
+          console.log('Запрос устарел, пропускаем обновление TikTok кампаний', { currentRequestId, latestId: refreshRequestIdRef.current });
+          return;
+        }
+
         const mappedCampaigns: Campaign[] = (ttCampaigns || []).map((c: any) => ({
           id: c.id,
           name: c.name,
@@ -479,6 +511,13 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
         console.log('Запрашиваем статистику кампаний (TikTok)...');
         const ttStats = await tiktokApi.getCampaignStats(dateRange);
+
+        // Проверяем актуальность запроса
+        if (currentRequestId !== refreshRequestIdRef.current) {
+          console.log('Запрос устарел, пропускаем обновление TikTok статистики', { currentRequestId, latestId: refreshRequestIdRef.current });
+          return;
+        }
+
         const mappedStats: CampaignStat[] = (ttStats || []).map((s: any) => ({
           campaign_id: s.campaign_id,
           campaign_name: s.campaign_name,
@@ -519,6 +558,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       }
       
     } catch (err: any) {
+      // Проверяем актуальность запроса перед обработкой ошибки
+      if (currentRequestId !== refreshRequestIdRef.current) {
+        console.log('Ошибка устаревшего запроса, игнорируем', { currentRequestId, latestId: refreshRequestIdRef.current });
+        return;
+      }
+
       // Проверяем ошибку на наличие сообщения о недействительности токена
       if (err.message && err.message.includes('Error validating application')) {
         toast.error('Ошибка авторизации в Facebook. Пожалуйста, войдите снова.');
@@ -529,16 +574,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       }
       console.error('Ошибка при загрузке данных:', err);
     } finally {
-      setLoading(false);
+      // Сбрасываем loading только для актуального запроса
+      if (currentRequestId === refreshRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 
-  // Первоначальная загрузка данных при монтировании компонента
-  useEffect(() => {
-    refreshData();
-  }, []); // Только при первом рендере
-
   // Следим за изменением пользователя в localStorage и обновляем данные
+  // NOTE: первоначальная загрузка происходит через useEffect с [dateRange, platform, currentAdAccountId]
   useEffect(() => {
     const handleStorageChange = () => {
       const storedUser = localStorage.getItem('user');
@@ -594,9 +638,31 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   };
 
   // Обновляем данные при изменении диапазона дат, платформы или текущего аккаунта
+  // Используем debounce чтобы избежать множественных запросов при инициализации
   useEffect(() => {
-    console.log('Изменение параметров (даты/платформа/currentAdAccountId), обновляем данные:', { dateRange, platform, currentAdAccountId });
-    refreshData();
+    // Отменяем предыдущий pending refresh
+    if (pendingRefreshRef.current) {
+      clearTimeout(pendingRefreshRef.current);
+    }
+
+    // Debounce: ждём 150ms перед вызовом refreshData
+    // Это позволяет объединить множественные изменения state при инициализации в один запрос
+    pendingRefreshRef.current = setTimeout(() => {
+      console.log('Изменение параметров (даты/платформа/currentAdAccountId), обновляем данные:', {
+        dateRange,
+        platform,
+        currentAdAccountId,
+        isInitialized: isInitializedRef.current
+      });
+      refreshData();
+      isInitializedRef.current = true;
+    }, isInitializedRef.current ? 0 : 150); // После инициализации - без задержки
+
+    return () => {
+      if (pendingRefreshRef.current) {
+        clearTimeout(pendingRefreshRef.current);
+      }
+    };
   }, [dateRange, platform, currentAdAccountId]);
 
   // Функция для проверки наличия business_id

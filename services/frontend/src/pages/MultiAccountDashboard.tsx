@@ -580,8 +580,8 @@ const MultiAccountDashboard: React.FC = () => {
             });
             const campaignsMap = new Map(campaignsList.map(c => [c.id, c.status]));
 
-            // Получаем статистику кампаний
-            const campaigns = await facebookApi.getCampaignStats(dateRange, false);
+            // Получаем статистику кампаний (передаём campaignsList чтобы не дублировать запрос)
+            const campaigns = await facebookApi.getCampaignStats(dateRange, false, campaignsList);
 
             // ПРОВЕРКА: убедимся что currentAdAccountId не изменился пока шел запрос
             if (localStorage.getItem('currentAdAccountId') !== accountId) {

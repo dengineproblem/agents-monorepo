@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -49,13 +49,55 @@ interface HierarchicalCampaignTableProps {
 }
 
 const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ accountId }) => {
-  const { dateRange, currentAdAccountId, multiAccountEnabled } = useAppContext();
+  const {
+    dateRange,
+    currentAdAccountId,
+    multiAccountEnabled,
+    campaigns: contextCampaigns,
+    campaignStats: contextCampaignStats,
+    loading: contextLoading,
+  } = useAppContext();
 
   const effectiveAccountId = accountId || currentAdAccountId;
 
-  // State для кампаний
-  const [campaigns, setCampaigns] = useState<CampaignStats[]>([]);
-  const [campaignsLoading, setCampaignsLoading] = useState(false);
+  // Используем данные из AppContext вместо собственных запросов (избегаем дублирования)
+  const campaigns = useMemo<CampaignStats[]>(() => {
+    // Создаём Map статистики для быстрого поиска
+    const statsMap = new Map(contextCampaignStats.map(s => [s.campaign_id, s]));
+
+    // Создаём данные для ВСЕХ кампаний, добавляя статистику если есть
+    const campaignData: CampaignStats[] = contextCampaigns.map((c) => {
+      const stats = statsMap.get(c.id);
+      return {
+        campaign_id: c.id,
+        campaign_name: c.name,
+        status: c.status,
+        spend: stats?.spend || 0,
+        leads: stats?.leads || 0,
+        impressions: stats?.impressions || 0,
+        clicks: stats?.clicks || 0,
+        ctr: stats?.ctr || 0,
+        cpl: stats?.cpl || 0,
+        messagingLeads: (stats as any)?.messagingLeads || 0,
+        qualityLeads: (stats as any)?.qualityLeads || 0,
+        cpql: (stats as any)?.cpql || 0,
+        qualityRate: (stats as any)?.qualityRate || 0,
+        daily_budget: 0,
+      };
+    });
+
+    // Сортировка: ACTIVE наверху, потом остальные
+    campaignData.sort((a, b) => {
+      if (a.status === b.status) return 0;
+      if (a.status === 'ACTIVE') return -1;
+      if (b.status === 'ACTIVE') return 1;
+      return 0;
+    });
+
+    return campaignData;
+  }, [contextCampaigns, contextCampaignStats]);
+
+  const campaignsLoading = contextLoading;
 
   // State для раскрытия иерархии
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
@@ -71,64 +113,8 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
   // State для directions (для расчета target CPL)
   const [directions, setDirections] = useState<Direction[]>([]);
 
-  // Загрузка кампаний
-  useEffect(() => {
-    const loadCampaigns = async () => {
-      // Для мультиаккаунтного режима требуется effectiveAccountId
-      // Для легаси юзеров (multiAccountEnabled = false) загружаем данные напрямую
-      if (multiAccountEnabled && !effectiveAccountId) return;
-
-      setCampaignsLoading(true);
-      try {
-        // Получаем ВСЕ кампании из рекламного кабинета
-        const campaignsList = await facebookApi.getCampaigns();
-
-        // Получаем статистику кампаний
-        const campaignsStats = await facebookApi.getCampaignStats(dateRange, false);
-
-        // Создаем Map статистики для быстрого поиска
-        const statsMap = new Map(campaignsStats.map(s => [s.campaign_id, s]));
-
-        // Создаем данные для ВСЕХ кампаний, добавляя статистику если есть
-        const campaignData: CampaignStats[] = campaignsList.map((c) => {
-          const stats = statsMap.get(c.id);
-          return {
-            campaign_id: c.id,
-            campaign_name: c.name,
-            status: c.status,
-            spend: stats?.spend || 0,
-            leads: stats?.leads || 0,
-            impressions: stats?.impressions || 0,
-            clicks: stats?.clicks || 0,
-            ctr: stats?.ctr || 0,
-            cpl: stats?.cpl || 0,
-            messagingLeads: stats?.messagingLeads || 0,
-            qualityLeads: stats?.qualityLeads || 0,
-            cpql: stats?.cpql || 0,
-            qualityRate: stats?.qualityRate || 0,
-            daily_budget: 0, // Бюджет на уровне кампании не отображается, только на адсетах
-          };
-        });
-
-        // Сортировка: ACTIVE наверху, потом остальные
-        campaignData.sort((a, b) => {
-          if (a.status === b.status) return 0;
-          if (a.status === 'ACTIVE') return -1;
-          if (b.status === 'ACTIVE') return 1;
-          return 0;
-        });
-
-        setCampaigns(campaignData);
-      } catch (err) {
-        logger.error('Failed to load campaigns', err, { accountId: effectiveAccountId });
-        toast.error('Ошибка загрузки кампаний');
-      } finally {
-        setCampaignsLoading(false);
-      }
-    };
-
-    loadCampaigns();
-  }, [effectiveAccountId, dateRange, multiAccountEnabled]);
+  // NOTE: Загрузка кампаний происходит в AppContext.refreshData()
+  // HierarchicalCampaignTable использует данные из контекста через useMemo выше
 
   // Загрузка directions
   useEffect(() => {
