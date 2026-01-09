@@ -83,30 +83,35 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
 
       setCampaignsLoading(true);
       try {
-        // Получаем список кампаний с их статусами
+        // Получаем ВСЕ кампании из рекламного кабинета
         const campaignsList = await facebookApi.getCampaigns();
-        const campaignsMap = new Map(campaignsList.map(c => [c.id, c.status]));
 
         // Получаем статистику кампаний
         const campaignsStats = await facebookApi.getCampaignStats(dateRange, false);
 
-        // Добавляем статусы к кампаниям
-        const campaignData: CampaignStats[] = campaignsStats.map((c) => ({
-          campaign_id: c.campaign_id,
-          campaign_name: c.campaign_name,
-          status: campaignsMap.get(c.campaign_id),
-          spend: c.spend,
-          leads: c.leads,
-          impressions: c.impressions,
-          clicks: c.clicks,
-          ctr: c.ctr,
-          cpl: c.cpl,
-          messagingLeads: c.messagingLeads || 0,
-          qualityLeads: c.qualityLeads || 0,
-          cpql: c.cpql || 0,
-          qualityRate: c.qualityRate || 0,
-          daily_budget: c.daily_budget || 0,
-        }));
+        // Создаем Map статистики для быстрого поиска
+        const statsMap = new Map(campaignsStats.map(s => [s.campaign_id, s]));
+
+        // Создаем данные для ВСЕХ кампаний, добавляя статистику если есть
+        const campaignData: CampaignStats[] = campaignsList.map((c) => {
+          const stats = statsMap.get(c.id);
+          return {
+            campaign_id: c.id,
+            campaign_name: c.name,
+            status: c.status,
+            spend: stats?.spend || 0,
+            leads: stats?.leads || 0,
+            impressions: stats?.impressions || 0,
+            clicks: stats?.clicks || 0,
+            ctr: stats?.ctr || 0,
+            cpl: stats?.cpl || 0,
+            messagingLeads: stats?.messagingLeads || 0,
+            qualityLeads: stats?.qualityLeads || 0,
+            cpql: stats?.cpql || 0,
+            qualityRate: stats?.qualityRate || 0,
+            daily_budget: stats?.daily_budget || 0,
+          };
+        });
 
         // Сортировка: ACTIVE наверху, потом остальные
         campaignData.sort((a, b) => {
