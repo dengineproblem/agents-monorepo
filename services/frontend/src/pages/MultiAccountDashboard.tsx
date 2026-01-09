@@ -978,13 +978,13 @@ const CplWithDeviation: React.FC<CplWithDeviationProps> = ({ cpl, targetCplCents
   };
 
   return (
-    <div className="flex flex-col items-end gap-0.5">
+    <div className="relative inline-flex items-center">
       <span className="font-medium text-sm">{formatCurrency(cpl)}</span>
       {deviation && (
         <span
-          className={cn('text-[10px] font-medium', getDeviationColor(deviation.deviation))}
+          className={cn('absolute -top-2.5 left-full ml-0.5 text-[10px] font-medium whitespace-nowrap', getDeviationColor(deviation.deviation))}
         >
-          ({deviation.formattedText})
+          {deviation.formattedText}
         </span>
       )}
     </div>
@@ -1581,9 +1581,52 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
           <div className="min-w-0 flex-1">
             <p className="text-sm truncate">{adset.adset_name}</p>
             {/* Мобильная версия — компактная строка метрик */}
-            <p className="md:hidden text-xs text-muted-foreground truncate">
-              {formatCurrency(adset.spend)} • {formatNumber(adset.leads)} лидов • {formatCurrency(adset.cpl)} CPL • {adset.cpql > 0 ? formatCurrency(adset.cpql) + ' CPQL' : ''} • {adset.qualityRate > 0 ? adset.qualityRate.toFixed(0) + '% качество' : ''}
-            </p>
+            <div className="md:hidden text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
+              <span>{formatCurrency(adset.spend)}</span>
+              <span>•</span>
+              {/* Бюджет с редактированием для мобильной версии */}
+              {isEditing ? (
+                <input
+                  data-budget-input
+                  type="text"
+                  value={editedBudget}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '' || /^[0-9]*[.,]?[0-9]*$/.test(value)) {
+                      setEditedBudget(value.replace(',', '.'));
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleBudgetSave();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      handleCancelEdit();
+                    }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-16 px-1 py-0.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-primary"
+                  autoFocus
+                />
+              ) : (
+                <span
+                  className="underline cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditing(true);
+                  }}
+                >
+                  {formatCurrency(currentBudget)} бюджет
+                </span>
+              )}
+              <span>•</span>
+              <span>{formatNumber(adset.leads)} лидов</span>
+              <span>•</span>
+              <span>{formatCurrency(adset.cpl)} CPL</span>
+              {adset.cpql > 0 && <><span>•</span><span>{formatCurrency(adset.cpql)} CPQL</span></>}
+              {adset.qualityRate > 0 && <><span>•</span><span>{adset.qualityRate.toFixed(0)}% качество</span></>}
+            </div>
           </div>
         </div>
 
