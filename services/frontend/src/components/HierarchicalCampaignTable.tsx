@@ -168,11 +168,12 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         setAdsetsLoading((prev) => new Set(prev).add(campaignId));
 
         try {
-          // Получаем ВСЕ адсеты кампании
-          const adsetsList = await facebookApi.getAdsetsByCampaign(campaignId);
-
-          // Получаем статистику адсетов
-          const adsetsStatsRaw = await facebookApi.getAdsetStats(campaignId, dateRange);
+          // ОПТИМИЗАЦИЯ: Параллельные запросы через Promise.all
+          // getAdsetsByCampaign() и getAdsetStats() не зависят друг от друга
+          const [adsetsList, adsetsStatsRaw] = await Promise.all([
+            facebookApi.getAdsetsByCampaign(campaignId),
+            facebookApi.getAdsetStats(campaignId, dateRange)
+          ]);
 
           // Создаем Map статистики для быстрого поиска
           const statsMap = new Map<string, any>(adsetsStatsRaw.map((s: any) => [s.adset_id, s]));
@@ -239,11 +240,12 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
         setAdsLoading((prev) => new Set(prev).add(adsetId));
 
         try {
-          // Получаем ВСЕ объявления адсета
-          const adsList = await facebookApi.getAdsByAdset(adsetId);
-
-          // Получаем статистику объявлений
-          const adsStatsRaw = await facebookApi.getAdStatsByAdset(adsetId, dateRange);
+          // ОПТИМИЗАЦИЯ: Параллельные запросы через Promise.all
+          // getAdsByAdset() и getAdStatsByAdset() не зависят друг от друга
+          const [adsList, adsStatsRaw] = await Promise.all([
+            facebookApi.getAdsByAdset(adsetId),
+            facebookApi.getAdStatsByAdset(adsetId, dateRange)
+          ]);
 
           // Создаем Map статистики для быстрого поиска
           const statsMap = new Map<string, any>(adsStatsRaw.map((s: any) => [s.ad_id, s]));

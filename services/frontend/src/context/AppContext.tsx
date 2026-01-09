@@ -70,6 +70,48 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const isInitializedRef = useRef<boolean>(false);
   const pendingRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ОПТИМИЗАЦИЯ: Кэш campaigns/stats для избежания повторных запросов при переходе между страницами
+  // Ключ: `${accountId}_${dateRange.since}_${dateRange.until}_${platform}`
+  // TTL: 10 минут, MAX_ENTRIES: 20 (ограничение размера кэша)
+  const CACHE_TTL = 600000;
+  const CACHE_MAX_ENTRIES = 20;
+  interface CampaignCacheEntry {
+    campaigns: Campaign[];
+    campaignStats: CampaignStat[];
+    timestamp: number;
+  }
+  const campaignsCacheRef = useRef<Map<string, CampaignCacheEntry>>(new Map());
+
+  // Функция для очистки устаревших записей кэша
+  const cleanupCache = useCallback(() => {
+    const cache = campaignsCacheRef.current;
+    const now = Date.now();
+    let removed = 0;
+
+    // Удаляем устаревшие записи
+    for (const [key, entry] of cache.entries()) {
+      if (now - entry.timestamp > CACHE_TTL) {
+        cache.delete(key);
+        removed++;
+      }
+    }
+
+    // Если кэш всё ещё слишком большой, удаляем самые старые
+    if (cache.size > CACHE_MAX_ENTRIES) {
+      const entries = Array.from(cache.entries())
+        .sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, cache.size - CACHE_MAX_ENTRIES);
+      toRemove.forEach(([key]) => {
+        cache.delete(key);
+        removed++;
+      });
+    }
+
+    if (removed > 0) {
+      console.log('[AppContext Cache] Очищено записей:', removed, 'Осталось:', cache.size);
+    }
+  }, []);
+
   // Multi-account state - инициализируем из localStorage для мгновенного редиректа
   const [multiAccountEnabled, setMultiAccountEnabled] = useState<boolean>(() => {
     return localStorage.getItem('multiAccountEnabled') === 'true';
@@ -458,10 +500,45 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         setLoading(false);
         return;
       }
-      
+
+      // ОПТИМИЗАЦИЯ: Проверяем кэш перед загрузкой
+      const storedCurrentAdAccountId = localStorage.getItem('currentAdAccountId') || 'legacy';
+      const cacheKey = `${storedCurrentAdAccountId}_${dateRange.since}_${dateRange.until}_${platform}`;
+      const cached = campaignsCacheRef.current.get(cacheKey);
+
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        console.log('[AppContext Cache] HIT - используем кэшированные данные', {
+          cacheKey,
+          age: Math.round((Date.now() - cached.timestamp) / 1000) + 's',
+          campaignsCount: cached.campaigns.length,
+          statsCount: cached.campaignStats.length
+        });
+        setCampaigns(cached.campaigns);
+        setCampaignStats(cached.campaignStats);
+        setLoading(false);
+
+        // Загружаем статус аккаунта (не кэшируем, так как может меняться)
+        try {
+          const accStatus = await facebookApi.getAccountStatus();
+          setAccountStatus(accStatus);
+          setAccountStatusError(null);
+        } catch (e: any) {
+          setAccountStatus(null);
+          setAccountStatusError(e?.message || String(e));
+        }
+        return;
+      }
+
+      // Cache MISS - загружаем данные с API
+      console.log('[AppContext Cache] MISS - загружаем данные с API', {
+        cacheKey,
+        reason: cached ? 'expired' : 'not_found',
+        cacheSize: campaignsCacheRef.current.size
+      });
+
       if (platform === 'instagram') {
         // Загружаем список кампаний (Instagram/Facebook)
-        console.log('Запрашиваем список кампаний (Instagram/Facebook)...');
+        console.log('[AppContext] Запрашиваем список кампаний (Instagram/Facebook)...');
         const campaignsData = await facebookApi.getCampaigns();
 
         // Проверяем актуальность запроса перед обновлением state
@@ -487,6 +564,20 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         }
 
         setCampaignStats(statsData);
+
+        // ОПТИМИЗАЦИЯ: Очищаем устаревшие записи и сохраняем в кэш
+        cleanupCache();
+        campaignsCacheRef.current.set(cacheKey, {
+          campaigns: campaignsData,
+          campaignStats: statsData,
+          timestamp: Date.now()
+        });
+        console.log('[AppContext Cache] Сохранено в кэш', {
+          cacheKey,
+          campaignsCount: campaignsData.length,
+          statsCount: statsData.length,
+          cacheSize: campaignsCacheRef.current.size
+        });
       } else {
         // TikTok: загружаем кампании и статистику и маппим к общему формату
         console.log('Запрашиваем список кампаний (TikTok)...');
@@ -531,8 +622,22 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
           _is_real_data: s._is_real_data,
         }));
         setCampaignStats(mappedStats);
+
+        // ОПТИМИЗАЦИЯ: Очищаем устаревшие записи и сохраняем в кэш
+        cleanupCache();
+        campaignsCacheRef.current.set(cacheKey, {
+          campaigns: mappedCampaigns,
+          campaignStats: mappedStats,
+          timestamp: Date.now()
+        });
+        console.log('[AppContext Cache] TikTok сохранено в кэш', {
+          cacheKey,
+          campaignsCount: mappedCampaigns.length,
+          statsCount: mappedStats.length,
+          cacheSize: campaignsCacheRef.current.size
+        });
       }
-      
+
       // Загружаем статус рекламного кабинета
       try {
         const accStatus = await facebookApi.getAccountStatus();

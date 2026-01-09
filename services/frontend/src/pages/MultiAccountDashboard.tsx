@@ -290,6 +290,38 @@ const MultiAccountDashboard: React.FC = () => {
   // Session ID для отмены предыдущих загрузок при refresh
   const sessionIdRef = useRef(Date.now());
 
+  // ОПТИМИЗАЦИЯ: Кэш списков кампаний (не зависит от dateRange)
+  // При смене dateRange очищается только статистика, списки остаются
+  // MAX_LIST_CACHE_SIZE ограничивает размер каждого кэша
+  const MAX_LIST_CACHE_SIZE = 200;
+
+  interface CampaignListEntry {
+    id: string;
+    name: string;
+    status: string;
+  }
+  const campaignsListCacheRef = useRef<Map<string, CampaignListEntry[]>>(new Map());
+  const adsetsListCacheRef = useRef<Map<string, { id: string; name: string; status: string; daily_budget: number }[]>>(new Map());
+  const adsListCacheRef = useRef<Map<string, { id: string; name: string; status: string; thumbnail_url?: string }[]>>(new Map());
+
+  // Функция очистки кэшей если превышен лимит (FIFO - удаляем самые старые)
+  const cleanupListCaches = useCallback(() => {
+    const caches = [
+      { name: 'campaigns', cache: campaignsListCacheRef.current },
+      { name: 'adsets', cache: adsetsListCacheRef.current },
+      { name: 'ads', cache: adsListCacheRef.current },
+    ];
+
+    caches.forEach(({ name, cache }) => {
+      if (cache.size > MAX_LIST_CACHE_SIZE) {
+        const toRemove = cache.size - MAX_LIST_CACHE_SIZE;
+        const keys = Array.from(cache.keys()).slice(0, toRemove);
+        keys.forEach(key => cache.delete(key));
+        logger.debug(`Кэш ${name} очищен`, { removed: toRemove, remaining: cache.size });
+      }
+    });
+  }, []);
+
   // ==========================================================================
   // DATA LOADING
   // ==========================================================================
@@ -473,9 +505,15 @@ const MultiAccountDashboard: React.FC = () => {
     }
   }, [accountStats, loadDirectionsForAccount]);
 
-  // Сброс загруженных кампаний при смене dateRange
+  // ОПТИМИЗАЦИЯ: При смене dateRange очищаем только статистику (данные в state),
+  // но сохраняем кэши списков (campaignsListCacheRef, adsetsListCacheRef, adsListCacheRef)
+  // Это позволяет при повторном раскрытии загружать только статистику, а не списки
   useEffect(() => {
+    console.log('[MultiAccountDashboard] dateRange изменился, очищаем статистику (списки в кэше сохраняются)');
     setCampaignsData({});
+    setAdsetsData({});
+    setAdsData({});
+    // НЕ очищаем campaignsListCacheRef, adsetsListCacheRef, adsListCacheRef - они не зависят от дат
   }, [dateRange]);
 
   // ==========================================================================
@@ -501,9 +539,28 @@ const MultiAccountDashboard: React.FC = () => {
       newSessionId: sessionIdRef.current
     });
 
-    // Очищаем все загруженные кампании чтобы они перезагрузились заново
+    // Очищаем ВСЕ данные включая кэши списков (ручное обновление = полная перезагрузка)
     setCampaignsData({});
+    setAdsetsData({});
+    setAdsData({});
     setExpandedAccounts(new Set());
+    setExpandedCampaigns(new Set());
+    setExpandedAdsets(new Set());
+
+    // Очищаем кэши списков (полная очистка при ручном refresh)
+    const campaignsCacheSize = campaignsListCacheRef.current.size;
+    const adsetsCacheSize = adsetsListCacheRef.current.size;
+    const adsCacheSize = adsListCacheRef.current.size;
+
+    campaignsListCacheRef.current.clear();
+    adsetsListCacheRef.current.clear();
+    adsListCacheRef.current.clear();
+
+    logger.info('All caches cleared on manual refresh', {
+      clearedCampaigns: campaignsCacheSize,
+      clearedAdsets: adsetsCacheSize,
+      clearedAds: adsCacheSize
+    });
     loadAllAccountStats(true);
   }, [loadAllAccountStats]);
 
@@ -557,27 +614,49 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
-            // ВАЖНО: Делаем все запросы синхронно (один за другим) чтобы currentAdAccountId не поменялся
-            // между запросами. Можно оптимизировать через Promise.all, но тогда нужно передавать accountId явно.
+            // ОПТИМИЗАЦИЯ: Проверяем кэш списков кампаний
+            // Если список есть в кэше - используем его и загружаем только статистику
+            const cachedList = campaignsListCacheRef.current.get(accountId);
+            let campaignsList: any[];
 
-            // Получаем список кампаний с их статусами
-            const campaignsList = await facebookApi.getCampaigns();
-
-            // ПРОВЕРКА: убедимся что currentAdAccountId не изменился пока шел запрос
-            const currentInLS = localStorage.getItem('currentAdAccountId');
-            if (currentInLS !== accountId) {
-              logger.warn('currentAdAccountId changed during request, aborting', {
-                expected: accountId.slice(0, 8),
-                actual: currentInLS?.slice(0, 8) || 'null'
+            if (cachedList && cachedList.length > 0) {
+              // Используем кэшированный список (CACHE HIT)
+              campaignsList = cachedList.map(c => ({ id: c.id, name: c.name, status: c.status }));
+              logger.info('Campaigns list cache HIT', {
+                accountId: accountId.slice(0, 8),
+                cachedCount: cachedList.length,
+                cacheSize: campaignsListCacheRef.current.size
               });
-              return; // Прерываем загрузку
+            } else {
+              // Загружаем список кампаний с их статусами
+              campaignsList = await facebookApi.getCampaigns();
+
+              // ПРОВЕРКА: убедимся что currentAdAccountId не изменился пока шел запрос
+              const currentInLS = localStorage.getItem('currentAdAccountId');
+              if (currentInLS !== accountId) {
+                logger.warn('currentAdAccountId changed during request, aborting', {
+                  expected: accountId.slice(0, 8),
+                  actual: currentInLS?.slice(0, 8) || 'null'
+                });
+                return; // Прерываем загрузку
+              }
+
+              // Сохраняем список в кэш (с очисткой если превышен лимит)
+              cleanupListCaches();
+              campaignsListCacheRef.current.set(accountId, campaignsList.map(c => ({
+                id: c.id,
+                name: c.name,
+                status: c.status
+              })));
+
+              logger.info('Campaigns list cached', {
+                accountId: accountId.slice(0, 8),
+                accountName: account.name,
+                campaignsCount: campaignsList.length,
+                cacheSize: campaignsListCacheRef.current.size
+              });
             }
 
-            logger.info('Campaigns loaded', {
-              accountId: accountId.slice(0, 8),
-              accountName: account.name,
-              campaignsCount: campaignsList.length
-            });
             const campaignsMap = new Map(campaignsList.map(c => [c.id, c.status]));
 
             // Получаем статистику кампаний (передаём campaignsList чтобы не дублировать запрос)
@@ -650,7 +729,7 @@ const MultiAccountDashboard: React.FC = () => {
         }
       }
     }
-  }, [expandedAccounts, campaignsData, campaignsLoading, dateRange]);
+  }, [expandedAccounts, campaignsData, campaignsLoading, dateRange, cleanupListCaches]);
 
   const handleCampaignExpand = useCallback(async (campaignId: string, accountId: string) => {
     const isExpanded = expandedCampaigns.has(campaignId);
@@ -675,19 +754,49 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
-            // Получаем список адсетов с бюджетами и статусами
-            const adsetsList = await facebookApi.getAdsetsByCampaign(campaignId);
+            // ОПТИМИЗАЦИЯ: Проверяем кэш списков адсетов
+            const cachedAdsetsList = adsetsListCacheRef.current.get(campaignId);
+            let adsetsList: any[];
+            let adsets: any[];
+
+            if (cachedAdsetsList && cachedAdsetsList.length > 0) {
+              // Используем кэшированный список (CACHE HIT), загружаем только статистику
+              adsetsList = cachedAdsetsList;
+              adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
+              logger.info('Adsets list cache HIT', {
+                campaignId: campaignId.slice(0, 8),
+                cachedCount: cachedAdsetsList.length,
+                cacheSize: adsetsListCacheRef.current.size
+              });
+            } else {
+              // ОПТИМИЗАЦИЯ: Параллельные запросы через Promise.all
+              [adsetsList, adsets] = await Promise.all([
+                facebookApi.getAdsetsByCampaign(campaignId),
+                facebookApi.getAdsetStats(campaignId, dateRange)
+              ]);
+
+              // Сохраняем список в кэш (с очисткой если превышен лимит)
+              cleanupListCaches();
+              adsetsListCacheRef.current.set(campaignId, adsetsList.map((a: any) => ({
+                id: a.id,
+                name: a.name,
+                status: a.status,
+                daily_budget: parseFloat(a.daily_budget || '0') / 100
+              })));
+              logger.info('Adsets list cached', {
+                campaignId: campaignId.slice(0, 8),
+                count: adsetsList.length,
+                cacheSize: adsetsListCacheRef.current.size
+              });
+            }
 
             // Создаём мапы для бюджетов и статусов
             const budgetMap = new Map(
-              adsetsList.map((a: any) => [a.id, parseFloat(a.daily_budget || '0') / 100])
+              adsetsList.map((a: any) => [a.id, a.daily_budget !== undefined ? a.daily_budget : parseFloat(a.daily_budget || '0') / 100])
             );
             const statusMap = new Map(
               adsetsList.map((a: any) => [a.id, a.status])
             );
-
-            // Получаем статистику адсетов
-            const adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
 
             // Маппим адсеты в AdsetStats с добавлением бюджетов и статусов
             const adsetStats: AdsetStats[] = adsets.map((a: any) => ({
@@ -735,7 +844,7 @@ const MultiAccountDashboard: React.FC = () => {
         }
       }
     }
-  }, [expandedCampaigns, adsetsData, adsetsLoading, dateRange]);
+  }, [expandedCampaigns, adsetsData, adsetsLoading, dateRange, cleanupListCaches]);
 
   const handleAdsetExpand = useCallback(async (adsetId: string, accountId: string) => {
     const isExpanded = expandedAdsets.has(adsetId);
@@ -760,15 +869,45 @@ const MultiAccountDashboard: React.FC = () => {
           localStorage.setItem('currentAdAccountId', accountId);
 
           try {
-            // Получаем список объявлений с их статусами и миниатюрами
-            const adsList = await facebookApi.getAdsByAdset(adsetId);
+            // ОПТИМИЗАЦИЯ: Проверяем кэш списков объявлений
+            const cachedAdsList = adsListCacheRef.current.get(adsetId);
+            let adsList: any[];
+            let ads: any[];
+
+            if (cachedAdsList && cachedAdsList.length > 0) {
+              // Используем кэшированный список (CACHE HIT), загружаем только статистику
+              adsList = cachedAdsList;
+              ads = await facebookApi.getAdStatsByAdset(adsetId, dateRange);
+              logger.info('Ads list cache HIT', {
+                adsetId: adsetId.slice(0, 8),
+                cachedCount: cachedAdsList.length,
+                cacheSize: adsListCacheRef.current.size
+              });
+            } else {
+              // ОПТИМИЗАЦИЯ: Параллельные запросы через Promise.all
+              [adsList, ads] = await Promise.all([
+                facebookApi.getAdsByAdset(adsetId),
+                facebookApi.getAdStatsByAdset(adsetId, dateRange)
+              ]);
+
+              // Сохраняем список в кэш (с очисткой если превышен лимит)
+              cleanupListCaches();
+              adsListCacheRef.current.set(adsetId, adsList.map((a) => ({
+                id: a.id,
+                name: a.name,
+                status: a.status,
+                thumbnail_url: a.thumbnail_url
+              })));
+              logger.info('Ads list cached', {
+                adsetId: adsetId.slice(0, 8),
+                count: adsList.length,
+                cacheSize: adsListCacheRef.current.size
+              });
+            }
 
             // Создаём мапы для статусов и миниатюр
             const adsStatusMap = new Map(adsList.map((a) => [a.id, a.status]));
             const adsThumbnailMap = new Map(adsList.map((a) => [a.id, a.thumbnail_url]));
-
-            // Получаем статистику объявлений
-            const ads = await facebookApi.getAdStatsByAdset(adsetId, dateRange);
 
             // Маппим объявления в AdStats с добавлением статусов и миниатюр
             const adStats: AdStats[] = ads.map((a) => ({
@@ -816,7 +955,7 @@ const MultiAccountDashboard: React.FC = () => {
         }
       }
     }
-  }, [expandedAdsets, adsData, adsLoading, dateRange]);
+  }, [expandedAdsets, adsData, adsLoading, dateRange, cleanupListCaches]);
 
   // ==========================================================================
   // LOADING STATE
