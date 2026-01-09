@@ -77,7 +77,9 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
   // Загрузка кампаний
   useEffect(() => {
     const loadCampaigns = async () => {
-      if (!effectiveAccountId) return;
+      // Для мультиаккаунтного режима требуется effectiveAccountId
+      // Для легаси юзеров (multiAccountEnabled = false) загружаем данные напрямую
+      if (multiAccountEnabled && !effectiveAccountId) return;
 
       setCampaignsLoading(true);
       try {
@@ -116,7 +118,7 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
     };
 
     loadCampaigns();
-  }, [effectiveAccountId, dateRange]);
+  }, [effectiveAccountId, dateRange, multiAccountEnabled]);
 
   // Загрузка directions
   useEffect(() => {
