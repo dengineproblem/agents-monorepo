@@ -38,10 +38,15 @@ export async function processWithMetaTools({
   onToolEvent = null
 }) {
   const startTime = Date.now();
-  const { layerLogger } = toolContext;
+  const { layerLogger, mode } = toolContext;
 
   // Layer 3: Meta Orchestrator start
-  layerLogger?.start(3, { model: MODEL, maxIterations: MAX_ITERATIONS });
+  layerLogger?.start(3, { model: MODEL, maxIterations: MAX_ITERATIONS, mode });
+
+  // Determine dangerous policy based on mode
+  // In 'plan' mode, allow dangerous tools so they can return optimization proposals for user approval
+  // The tools use dry_run=true, so no actual changes are made until user approves
+  const dangerousPolicy = mode === 'plan' ? 'allow' : 'block';
 
   // Create MCP session for this request
   const sessionId = createSession({
@@ -50,7 +55,7 @@ export async function processWithMetaTools({
     adAccountDbId: toolContext.adAccountDbId,  // UUID for database queries
     accessToken: toolContext.accessToken,
     conversationId: toolContext.conversationId,
-    dangerousPolicy: 'block',
+    dangerousPolicy,
     integrations: context?.integrations
   });
 
@@ -58,16 +63,16 @@ export async function processWithMetaTools({
   const enrichedToolContext = {
     ...toolContext,
     sessionId,
-    dangerousPolicy: 'block',
+    dangerousPolicy,
     layerLogger, // Pass logger to downstream
     onToolEvent // Pass tool event callback for streaming
   };
 
-  layerLogger?.info(3, 'MCP session created', { sessionId: sessionId.substring(0, 8) });
-  logger.debug({ sessionId: sessionId.substring(0, 8) }, 'MCP session created for meta orchestrator');
+  layerLogger?.info(3, 'MCP session created', { sessionId: sessionId.substring(0, 8), dangerousPolicy });
+  logger.debug({ sessionId: sessionId.substring(0, 8), mode, dangerousPolicy }, 'MCP session created for meta orchestrator');
 
-  // Build system prompt with context
-  const systemPrompt = buildMetaSystemPrompt(context);
+  // Build system prompt with context and mode
+  const systemPrompt = buildMetaSystemPrompt(context, { mode, dangerousPolicy });
 
   // Prepare messages
   const messages = [

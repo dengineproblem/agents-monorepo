@@ -10,9 +10,13 @@ import { formatAdAccountStatus } from '../shared/memoryFormat.js';
 /**
  * Build system prompt for meta-tools orchestrator
  * @param {Object} context - Business context
+ * @param {Object} options - Additional options
+ * @param {string} options.mode - Current mode ('auto' | 'plan' | 'ask')
+ * @param {string} options.dangerousPolicy - Policy for dangerous tools ('allow' | 'block')
  * @returns {string} System prompt
  */
-export function buildMetaSystemPrompt(context = {}) {
+export function buildMetaSystemPrompt(context = {}, options = {}) {
+  const { mode, dangerousPolicy } = options;
   const today = new Date();
   const currentDate = today.toLocaleDateString('ru-RU', {
     weekday: 'long',
@@ -106,7 +110,7 @@ ${businessInstructionsSection}
 
 ### Важные правила:
 
-- ⚠️ **DANGEROUS tools** — ОБЯЗАТЕЛЬНО спроси подтверждение перед выполнением!
+${formatDangerousToolsPolicy(mode, dangerousPolicy)}
 - Агенты возвращают готовые ответы — тебе нужно только формализовать
 - При нескольких доменах — объедини ответы логично
 - При ошибке — сообщи пользователю и предложи альтернативу
@@ -397,6 +401,18 @@ function formatDirections(directions) {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Format dangerous tools policy based on mode
+ * In 'plan' mode, user has already confirmed intent by clicking the optimization button
+ */
+function formatDangerousToolsPolicy(mode, dangerousPolicy) {
+  if (mode === 'plan' || dangerousPolicy === 'allow') {
+    return `- ✅ **DANGEROUS tools РАЗРЕШЕНЫ** — пользователь уже подтвердил намерение. Выполняй опасные инструменты (например triggerBrainOptimizationRun) напрямую без дополнительных вопросов.`;
+  }
+
+  return `- ⚠️ **DANGEROUS tools** — ОБЯЗАТЕЛЬНО спроси подтверждение перед выполнением!`;
 }
 
 export default buildMetaSystemPrompt;

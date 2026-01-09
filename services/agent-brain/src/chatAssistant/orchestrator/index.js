@@ -161,7 +161,7 @@ export class Orchestrator {
         message,
         context: enrichedContext,
         conversationHistory,
-        toolContext
+        toolContext: { ...toolContext, mode }
       });
 
       const duration = Date.now() - startTime;
@@ -403,7 +403,7 @@ export class Orchestrator {
         message,
         context: enrichedContext,
         conversationHistory,
-        toolContext,
+        toolContext: { ...toolContext, mode },
         onToolEvent: toolContext.onToolEvent  // Use callback from toolContext for real-time streaming
       });
 

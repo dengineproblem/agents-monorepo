@@ -504,6 +504,180 @@ export async function executePlan(params: ExecutePlanParams): Promise<{
   return response.json();
 }
 
+// ============================================================
+// BRAIN MINI TYPES
+// ============================================================
+
+export interface BrainMiniParams {
+  userAccountId: string;
+  adAccountId?: string;
+  directionId?: string;
+  dryRun?: boolean;
+}
+
+export interface BrainMiniProposal {
+  action: 'updateBudget' | 'pauseAdSet' | 'createAdSet' | 'review';
+  priority: 'critical' | 'high' | 'medium' | 'low';
+  entity_type: string;
+  entity_id: string;
+  entity_name: string;
+  campaign_id?: string;
+  campaign_type?: 'internal' | 'external';
+  direction_id?: string | null;
+  direction_name?: string | null;
+  target_cpl_source?: 'direction' | 'account_default' | 'none';
+  health_score: number;
+  hs_class: 'very_good' | 'good' | 'neutral' | 'slightly_bad' | 'bad';
+  reason: string;
+  confidence: number;
+  suggested_action_params?: Record<string, unknown>;
+  metrics?: Record<string, unknown>;
+}
+
+export interface BrainMiniAdsetAnalysis {
+  adset_id: string;
+  adset_name: string;
+  campaign_id: string;
+  campaign_type: 'internal' | 'external';
+  direction_id?: string | null;
+  direction_name?: string | null;
+  target_cpl_source: 'direction' | 'account_default' | 'none';
+  health_score: number;
+  hs_class: string;
+  hs_breakdown: Array<{ factor: string; value: number | null; reason: string }>;
+  metrics: {
+    today: {
+      spend: number;
+      conversions: number;
+      cost_per_conversion: number | null;
+      ctr: number | null;
+      impressions: number;
+    };
+    yesterday: {
+      spend: number;
+      conversions: number;
+      cost_per_conversion: number | null;
+    };
+    target_cost_per_conversion: number | null;
+    metric_name: 'CPL' | 'CPC';
+  };
+}
+
+export interface BrainMiniSummary {
+  total_adsets_analyzed: number;
+  by_hs_class: Record<string, number>;
+  today_total_spend: string;
+  today_total_leads?: number;
+  proposals_by_action?: Record<string, number>;
+}
+
+export type BrainMiniEventType = 'progress' | 'done' | 'error';
+
+export interface BrainMiniEventProgress {
+  type: 'progress';
+  phase: 'resolving' | 'auth' | 'fetching' | 'data_loaded' | 'analysis_done';
+  message: string;
+}
+
+export interface BrainMiniEventDone {
+  type: 'done';
+  success: boolean;
+  mode: string;
+  message: string;
+  proposals: BrainMiniProposal[];
+  plan: Plan | null;
+  summary: BrainMiniSummary | null;
+  adset_analysis: BrainMiniAdsetAnalysis[];
+  context?: Record<string, unknown>;
+}
+
+export interface BrainMiniEventError {
+  type: 'error';
+  message: string;
+}
+
+export type BrainMiniEvent =
+  | BrainMiniEventProgress
+  | BrainMiniEventDone
+  | BrainMiniEventError;
+
+/**
+ * Run Brain Mini directly (bypasses Meta Orchestrator)
+ * Returns an async generator that yields BrainMiniEvent objects
+ */
+export async function* runBrainMiniStream(
+  params: BrainMiniParams,
+  signal?: AbortSignal
+): AsyncGenerator<BrainMiniEvent, void, unknown> {
+  const response = await fetch(`${BRAIN_API_BASE_URL}/api/brain/mini/run/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+    signal,
+  });
+
+  if (!response.ok) {
+    let errorMessage = 'Failed to start Brain Mini';
+    try {
+      const error = await response.json();
+      errorMessage = error.error || errorMessage;
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(errorMessage);
+  }
+
+  if (!response.body) {
+    throw new Error('No response body');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE messages
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            yield data as BrainMiniEvent;
+          } catch {
+            // Skip malformed JSON
+            console.warn('Failed to parse Brain Mini SSE data:', line);
+          }
+        }
+      }
+    }
+
+    // Process any remaining data
+    if (buffer.startsWith('data: ')) {
+      try {
+        const data = JSON.parse(buffer.slice(6));
+        yield data as BrainMiniEvent;
+      } catch {
+        // Skip malformed JSON
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export default {
   sendMessage,
   sendMessageStream,
@@ -513,4 +687,5 @@ export default {
   getConversationMessages,
   deleteConversation,
   executePlan,
+  runBrainMiniStream,
 };

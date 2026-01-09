@@ -287,6 +287,9 @@ export interface BriefingData {
   guarantees?: string;
   tone_of_voice?: string;
   competitor_instagrams?: string[]; // До 5 Instagram аккаунтов конкурентов
+  // Настройки рекламы для Brain Mini
+  plan_daily_budget?: number; // Плановый дневной бюджет в рублях
+  default_cpl_target?: number; // Целевой CPL в рублях
 }
 
 /**

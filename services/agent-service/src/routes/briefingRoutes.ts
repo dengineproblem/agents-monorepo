@@ -176,6 +176,9 @@ const generatePromptRequestSchema = {
       items: { type: 'string' },
       maxItems: 5,
     },
+    // Настройки рекламы для Brain Mini
+    plan_daily_budget: { type: 'number', minimum: 0 }, // Плановый дневной бюджет в рублях
+    default_cpl_target: { type: 'number', minimum: 0 }, // Целевой CPL в рублях
   },
 };
 
@@ -274,6 +277,13 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
             instagram_username: user.instagram_username || briefingData.instagram_url || null,
             access_token: user.access_token || null,
             business_id: user.business_id || null,
+            // Настройки бюджета для Brain Mini (конвертируем рубли в центы)
+            plan_daily_budget_cents: briefingData.plan_daily_budget
+              ? Math.round(briefingData.plan_daily_budget * 100)
+              : null,
+            default_cpl_target_cents: briefingData.default_cpl_target
+              ? Math.round(briefingData.default_cpl_target * 100)
+              : null,
           };
 
           const { data: newAdAccount, error: adAccountError } = await supabase
@@ -315,6 +325,28 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
               error: 'Ошибка при сохранении промптов',
             });
           }
+
+          // Обновляем бюджетные настройки в ad_accounts (если есть)
+          if (briefingData.plan_daily_budget || briefingData.default_cpl_target) {
+            const updateData: Record<string, unknown> = {};
+            if (briefingData.plan_daily_budget) {
+              updateData.plan_daily_budget_cents = Math.round(briefingData.plan_daily_budget * 100);
+            }
+            if (briefingData.default_cpl_target) {
+              updateData.default_cpl_target_cents = Math.round(briefingData.default_cpl_target * 100);
+            }
+
+            const { error: adAccountUpdateError } = await supabase
+              .from('ad_accounts')
+              .update(updateData)
+              .eq('user_account_id', user_id);
+
+            if (adAccountUpdateError) {
+              reqLog.warn({ error: adAccountUpdateError, user_id }, 'Ошибка обновления бюджета в ad_accounts (legacy)');
+            } else {
+              reqLog.info({ user_id, ...updateData }, 'Бюджетные настройки обновлены в ad_accounts (legacy)');
+            }
+          }
         }
 
         // 4. Сохраняем ответы брифа в user_briefing_responses (с account_id для мультиаккаунта)
@@ -336,6 +368,9 @@ export const briefingRoutes: FastifyPluginAsync = async (fastify) => {
           guarantees: briefingData.guarantees,
           tone_of_voice: briefingData.tone_of_voice,
           competitor_instagrams: briefingData.competitor_instagrams || [],
+          // Бюджетные настройки (сохраняем в рублях как есть)
+          plan_daily_budget: briefingData.plan_daily_budget || null,
+          default_cpl_target: briefingData.default_cpl_target || null,
         };
 
         // Для мультиаккаунтного режима вставляем новую запись, для legacy - upsert по user_id

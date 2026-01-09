@@ -24,6 +24,7 @@ import {
 } from './telegramHandler.js';
 import { LayerLogger, createNoOpLogger } from './shared/layerLogger.js';
 import { ORCHESTRATOR_CONFIG } from './config.js';
+import { adsHandlers } from './agents/ads/handlers.js';
 
 // SECURITY: Allowed origins for CORS
 const ALLOWED_ORIGINS = [
@@ -705,6 +706,124 @@ export function registerChatRoutes(fastify) {
 
       return reply.code(500).send({ error: error.message });
     }
+  });
+
+  // ============================================================
+  // BRAIN MINI - Direct endpoint (bypasses Meta Orchestrator)
+  // ============================================================
+  fastify.post('/api/brain/mini/run/stream', async (request, reply) => {
+    const { userAccountId, adAccountId, directionId, dryRun } = request.body;
+
+    if (!userAccountId) {
+      return reply.code(400).send({ error: 'userAccountId is required' });
+    }
+
+    // Set SSE headers
+    const requestOrigin = request.headers.origin;
+    const allowedOrigin = ALLOWED_ORIGINS.includes(requestOrigin)
+      ? requestOrigin
+      : 'https://app.performanteaiagency.com';
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': allowedOrigin,
+      'Access-Control-Allow-Credentials': 'true',
+      'X-Accel-Buffering': 'no'
+    });
+
+    const sendEvent = (event) => {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    try {
+      // Step 1: Resolve ad account
+      sendEvent({ type: 'progress', phase: 'resolving', message: 'Определяю рекламный аккаунт...' });
+
+      const { dbId, fbId } = await resolveAdAccountId(userAccountId, adAccountId);
+
+      if (!fbId) {
+        sendEvent({ type: 'error', message: 'Не найден рекламный аккаунт' });
+        return reply.raw.end();
+      }
+
+      // Step 2: Get access token
+      sendEvent({ type: 'progress', phase: 'auth', message: 'Получаю доступ к Facebook API...' });
+
+      const accessToken = await getAccessToken(userAccountId, dbId);
+
+      if (!accessToken) {
+        sendEvent({ type: 'error', message: 'Не удалось получить access token. Переподключите Facebook аккаунт.' });
+        return reply.raw.end();
+      }
+
+      // Step 3: Run Brain Mini directly (bypass orchestrator)
+      sendEvent({ type: 'progress', phase: 'fetching', message: 'Загружаю данные из Facebook...' });
+
+      const toolContext = {
+        userAccountId,
+        adAccountId: fbId,
+        adAccountDbId: dbId,
+        accessToken
+      };
+
+      // Call triggerBrainOptimizationRun directly
+      const result = await adsHandlers.triggerBrainOptimizationRun(
+        {
+          direction_id: directionId || null,
+          dry_run: dryRun || false,
+          reason: 'Direct Brain Mini call from Dashboard'
+        },
+        toolContext
+      );
+
+      // Step 4: Send analysis progress
+      if (result.success && result.adset_analysis) {
+        sendEvent({
+          type: 'progress',
+          phase: 'analysis_done',
+          message: `Проанализировано ${result.adset_analysis.length} адсетов, найдено ${result.proposals?.length || 0} предложений`
+        });
+      }
+
+      // Step 5: Send final result
+      sendEvent({
+        type: 'done',
+        success: result.success,
+        mode: result.mode || 'interactive',
+        message: result.message,
+        proposals: result.proposals || [],
+        plan: result.plan || null,
+        summary: result.summary || null,
+        adset_analysis: result.adset_analysis || [],
+        context: result.context || null
+      });
+
+      logger.info({
+        userAccountId,
+        adAccountId: fbId,
+        proposalsCount: result.proposals?.length || 0,
+        endpoint: '/api/brain/mini/run/stream'
+      }, 'Brain Mini direct execution completed');
+
+    } catch (error) {
+      logger.error({ error: error.message, userAccountId }, 'Brain Mini direct execution failed');
+
+      sendEvent({ type: 'error', message: error.message || 'Ошибка при выполнении Brain Mini' });
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'api',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'brain_mini_direct',
+        endpoint: '/api/brain/mini/run/stream',
+        severity: 'warning'
+      }).catch(() => {});
+    }
+
+    reply.raw.end();
   });
 
   fastify.log.info('Chat Assistant routes registered');

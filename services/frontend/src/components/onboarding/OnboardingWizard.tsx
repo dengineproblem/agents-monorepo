@@ -12,10 +12,11 @@ import { Step2OnlinePresence } from './Step2OnlinePresence';
 import { Step3TargetAudience } from './Step3TargetAudience';
 import { Step4ProductInfo } from './Step4ProductInfo';
 import { Step5Competitors } from './Step5Competitors';
+import { Step6BudgetSettings } from './Step6BudgetSettings';
 import { Step5Completion } from './Step5Completion';
 import type { BriefingFormData } from '@/services/briefingApi';
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
 
 export type OnboardingData = BriefingFormData;
 
@@ -103,6 +104,17 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, 
           />
         );
       case 6:
+        return (
+          <Step6BudgetSettings
+            data={formData}
+            onNext={(data) => {
+              updateFormData(data);
+              goToNextStep();
+            }}
+            onBack={goToPreviousStep}
+          />
+        );
+      case 7:
         return (
           <Step5Completion
             data={formData as OnboardingData}

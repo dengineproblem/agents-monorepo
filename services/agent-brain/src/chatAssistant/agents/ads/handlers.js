@@ -2068,59 +2068,10 @@ export const adsHandlers = {
   async triggerBrainOptimizationRun({ direction_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
     const dbAccountId = adAccountDbId || null;
 
-    // Dry-run mode: show what would be optimized
-    if (dry_run) {
-      // Get current state for preview
-      let directionsQuery = supabase
-        .from('account_directions')
-        .select('id, name, is_active, daily_budget_cents, target_cpl_cents')
-        .eq('user_account_id', userAccountId)
-        .eq('is_active', true);
-
-      if (dbAccountId) {
-        directionsQuery = directionsQuery.eq('account_id', dbAccountId);
-      }
-      if (direction_id) {
-        directionsQuery = directionsQuery.eq('id', direction_id);
-      }
-
-      const { data: directions } = await directionsQuery;
-
-      // Get last scoring output for insights
-      let scoringQuery = supabase
-        .from('scoring_executions')
-        .select('scoring_output, created_at')
-        .eq('user_account_id', userAccountId)
-        .eq('status', 'success')
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (dbAccountId) {
-        scoringQuery = scoringQuery.eq('account_id', dbAccountId);
-      }
-
-      const { data: lastScoring } = await scoringQuery.maybeSingle();
-
-      return {
-        success: true,
-        dry_run: true,
-        preview: {
-          directions_to_optimize: (directions || []).map(d => ({
-            id: d.id,
-            name: d.name,
-            current_budget: d.daily_budget_cents / 100,
-            target_cpl: d.target_cpl_cents / 100
-          })),
-          total_directions: directions?.length || 0,
-          last_scoring_at: lastScoring?.created_at,
-          adsets_in_scope: lastScoring?.scoring_output?.adsets?.length || 0
-        },
-        warning: 'Brain Agent может изменить бюджеты и статусы адсетов. Используй dry_run: false для выполнения.'
-      };
-    }
-
     // ========================================
-    // INTERACTIVE MODE: Generate proposals without executing
+    // INTERACTIVE MODE: Generate proposals (dry_run=true или false)
+    // runInteractiveBrain ВСЕГДА только генерирует proposals БЕЗ исполнения
+    // dry_run влияет только на отображение в UI
     // ========================================
     try {
       const { runInteractiveBrain } = await import('../../../scoring.js');
@@ -2197,12 +2148,20 @@ export const adsHandlers = {
       } : null;
 
       // Return proposals for user confirmation
+      // Добавляем статистику по типам кампаний в message
+      const internalCount = result.summary?.by_campaign_type?.internal || 0;
+      const externalCount = result.summary?.by_campaign_type?.external || 0;
+      const campaignTypeInfo = externalCount > 0
+        ? ` (${internalCount} internal, ${externalCount} external)`
+        : '';
+
       return {
         success: true,
         mode: 'interactive',
+        dry_run: !!dry_run,  // Передаём флаг dry_run в ответ
         message: result.proposals?.length > 0
-          ? `Brain Agent предлагает ${result.proposals.length} действий для оптимизации`
-          : 'Brain Agent не нашёл действий для оптимизации на данный момент',
+          ? `Brain Agent предлагает ${result.proposals.length} действий для оптимизации. Проанализировано ${result.summary?.total_adsets_analyzed || 0} адсетов${campaignTypeInfo}.`
+          : `Brain Agent не нашёл действий для оптимизации. Проанализировано ${result.summary?.total_adsets_analyzed || 0} адсетов${campaignTypeInfo}.`,
         proposals: result.proposals || [],
         plan,  // Plan в формате frontend
         summary: result.summary,

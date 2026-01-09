@@ -164,6 +164,82 @@ function extractVideoMetrics(insights) {
 }
 
 /**
+ * Извлекает значение action из массива FB actions по типу
+ * @param {Array} actions - массив actions из FB API
+ * @param {string} actionType - тип действия (lead, link_click, etc)
+ * @returns {number} количество действий
+ */
+function getActionValue(actions, actionType) {
+  if (!actions || !Array.isArray(actions)) return 0;
+  const action = actions.find(a => a.action_type === actionType);
+  return parseInt(action?.value || 0);
+}
+
+/**
+ * Форматирует сумму в доллары (центы → доллары с разделителями)
+ * @param {number} cents - сумма в центах
+ * @returns {string} форматированная сумма, например "$5,000"
+ */
+function formatDollars(cents) {
+  if (cents === null || cents === undefined) return '—';
+  const dollars = Math.round(cents / 100);
+  return '$' + dollars.toLocaleString('en-US');
+}
+
+/**
+ * Строит человекочитаемое объяснение на основе hsBreakdown
+ * @param {Array} hsBreakdown - массив факторов [{ factor, value, reason }]
+ * @param {object} metrics - метрики { todayCPL, targetCPL, metricName }
+ * @returns {string} понятное объяснение почему HS такой
+ */
+function buildHumanReadableReason(hsBreakdown, metrics = {}) {
+  if (!hsBreakdown || hsBreakdown.length === 0) return '';
+
+  const { todayCPL, targetCPL, metricName = 'CPL' } = metrics;
+  const reasons = [];
+
+  // Группируем факторы по типу
+  const cplGap = hsBreakdown.find(f => f.factor === 'cpl_gap' || f.factor === 'cpc_gap');
+  const trend = hsBreakdown.find(f => f.factor === 'trend_cpl' || f.factor === 'trend_cpc');
+  const diagnostics = hsBreakdown.filter(f => ['ctr_low', 'cpm_high', 'frequency_high'].includes(f.factor));
+
+  // CPL/CPC к target
+  if (cplGap && targetCPL) {
+    const gap = todayCPL - targetCPL;
+    const gapPercent = Math.round((gap / targetCPL) * 100);
+    if (gap > 0) {
+      reasons.push(`${metricName} $${Math.round(todayCPL)} выше цели $${Math.round(targetCPL)} на ${gapPercent}%`);
+    } else if (gap < 0) {
+      reasons.push(`${metricName} $${Math.round(todayCPL)} ниже цели $${Math.round(targetCPL)} — отлично!`);
+    }
+  } else if (todayCPL && !targetCPL) {
+    reasons.push(`${metricName} $${Math.round(todayCPL)} (цель не задана)`);
+  }
+
+  // Тренд
+  if (trend) {
+    if (trend.value > 0) {
+      reasons.push('тренд ухудшается');
+    } else if (trend.value < 0) {
+      reasons.push('тренд улучшается');
+    }
+  }
+
+  // Диагностика
+  for (const diag of diagnostics) {
+    if (diag.factor === 'ctr_low' && diag.value < 0) {
+      reasons.push('низкий CTR');
+    } else if (diag.factor === 'cpm_high' && diag.value < 0) {
+      reasons.push('высокий CPM');
+    } else if (diag.factor === 'frequency_high' && diag.value < 0) {
+      reasons.push('высокая частота показов (выгорание)');
+    }
+  }
+
+  return reasons.join(', ');
+}
+
+/**
  * Fetch активных ad sets с insights за указанный период
  */
 async function fetchAdsets(adAccountId, accessToken, options = 'last_7d') {
@@ -1801,17 +1877,107 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     log.info({ where: 'interactive_brain', phase: 'fetching_today_data' });
 
-    // Получаем данные за сегодня и вчера из FB API
-    const [todayData, yesterdayData] = await Promise.all([
-      fetchAdsetsActions(ad_account_id, access_token, 'today'),
-      fetchAdsetsActions(ad_account_id, access_token, 'yesterday')
-    ]);
+    // Получаем данные из FB API:
+    // - today/yesterday для текущих метрик
+    // - dailyData + actionsData для исторических метрик (как в основном runScoringAgent)
+    log.info({
+      where: 'interactive_brain',
+      phase: 'fetching_fb_data',
+      ad_account_id,
+      message: 'Запрашиваем today, yesterday, daily (14d), actions (7d)'
+    });
+
+    let todayData, yesterdayData, dailyData, actionsData, adsetsConfigData;
+    try {
+      [todayData, yesterdayData, dailyData, actionsData, adsetsConfigData] = await Promise.all([
+        fetchAdsets(ad_account_id, access_token, 'today'),
+        fetchAdsets(ad_account_id, access_token, 'yesterday'),
+        fetchAdsetsDaily(ad_account_id, access_token, 14),  // 14 дней для трендов
+        fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),  // actions за 7 дней
+        fetchAdsetsConfig(ad_account_id, access_token, log)  // конфиг с бюджетами
+      ]);
+    } catch (fbError) {
+      log.error({
+        where: 'interactive_brain',
+        phase: 'fb_api_error',
+        error: String(fbError),
+        message: 'Ошибка при запросе данных из Facebook API'
+      });
+      throw new Error(`FB API fetch failed: ${fbError.message}`);
+    }
+
+    // Валидация ответов FB API
+    if (!Array.isArray(todayData)) {
+      log.warn({ where: 'interactive_brain', phase: 'validation', message: 'todayData не массив, заменяем на []' });
+      todayData = [];
+    }
+    if (!Array.isArray(yesterdayData)) {
+      log.warn({ where: 'interactive_brain', phase: 'validation', message: 'yesterdayData не массив, заменяем на []' });
+      yesterdayData = [];
+    }
+    if (!Array.isArray(dailyData)) {
+      log.warn({ where: 'interactive_brain', phase: 'validation', message: 'dailyData не массив, заменяем на []' });
+      dailyData = [];
+    }
+    if (!Array.isArray(actionsData)) {
+      log.warn({ where: 'interactive_brain', phase: 'validation', message: 'actionsData не массив, заменяем на []' });
+      actionsData = [];
+    }
 
     log.info({
       where: 'interactive_brain',
-      phase: 'today_data_fetched',
+      phase: 'fb_data_received',
       today_rows: todayData.length,
-      yesterday_rows: yesterdayData.length
+      yesterday_rows: yesterdayData.length,
+      daily_rows: dailyData.length,
+      actions_rows: actionsData.length,
+      today_adset_ids: todayData.slice(0, 5).map(a => a.adset_id),
+      message: `Получено ${todayData.length} адсетов today, ${yesterdayData.length} yesterday`
+    });
+
+    // Проверка на пустые данные
+    if (todayData.length === 0) {
+      log.warn({
+        where: 'interactive_brain',
+        phase: 'no_data',
+        message: 'Нет активных адсетов за сегодня. Возможно, все кампании на паузе или нет расхода.'
+      });
+    }
+
+    // Рассчитываем метрики как в основном агенте (для external кампаний)
+    // campaignObjectives = пустая Map, т.к. для external нет directions
+    const adsetMetricsFromFB = calculateMultiPeriodTrends(dailyData, actionsData, new Map());
+
+    // Создаём Map для быстрого доступа к рассчитанным метрикам по adset_id
+    const fbMetricsByAdset = new Map();
+    for (const adset of adsetMetricsFromFB) {
+      fbMetricsByAdset.set(adset.adset_id, adset);
+    }
+
+    // Создаём Map для бюджетов адсетов (id → {daily_budget, status})
+    const adsetBudgets = new Map();
+    if (adsetsConfigData?.data && Array.isArray(adsetsConfigData.data)) {
+      for (const adset of adsetsConfigData.data) {
+        adsetBudgets.set(adset.id, {
+          daily_budget_cents: adset.daily_budget ? parseInt(adset.daily_budget) : null,
+          lifetime_budget_cents: adset.lifetime_budget ? parseInt(adset.lifetime_budget) : null,
+          status: adset.status,
+          effective_status: adset.effective_status
+        });
+      }
+    }
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'metrics_calculated',
+      fb_metrics_adsets: adsetMetricsFromFB.length,
+      adset_budgets_loaded: adsetBudgets.size,
+      sample_metrics: adsetMetricsFromFB.slice(0, 2).map(a => ({
+        adset_id: a.adset_id,
+        has_7d: !!a.metrics_last_7d,
+        spend_7d: a.metrics_last_7d?.spend
+      })),
+      message: 'calculateMultiPeriodTrends завершён'
     });
 
     // ========================================
@@ -1860,6 +2026,40 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     const { data: directions } = await directionsQuery;
 
+    // ========================================
+    // ЗАГРУЗКА НАСТРОЕК АККАУНТА (для внешних кампаний)
+    // ========================================
+    let adAccountSettings = null;
+
+    // Пробуем найти ad_account по fb_ad_account_id
+    const { data: adAccountData } = await supabase
+      .from('ad_accounts')
+      .select('id, default_cpl_target_cents, plan_daily_budget_cents')
+      .eq('ad_account_id', ad_account_id)
+      .single();
+
+    if (adAccountData) {
+      adAccountSettings = adAccountData;
+    } else {
+      // Fallback: ищем по user_account_id
+      const { data: adAccountByUser } = await supabase
+        .from('ad_accounts')
+        .select('id, default_cpl_target_cents, plan_daily_budget_cents')
+        .eq('user_account_id', userAccountId)
+        .limit(1)
+        .single();
+
+      adAccountSettings = adAccountByUser || null;
+    }
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'ad_account_settings_loaded',
+      has_settings: !!adAccountSettings,
+      default_cpl: adAccountSettings?.default_cpl_target_cents,
+      plan_budget: adAccountSettings?.plan_daily_budget_cents
+    });
+
     // Загружаем последние действия Brain для защиты от дёрготни
     const { data: recentActions } = await supabase
       .from('brain_executions')
@@ -1873,57 +2073,207 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     // ЧАСТЬ 4: АНАЛИЗ С HEALTH SCORE
     // ========================================
 
-    log.info({ where: 'interactive_brain', phase: 'calculating_health_scores' });
+    // ========================================
+    // ВЫБОР ИСТОЧНИКА АДСЕТОВ ДЛЯ АНАЛИЗА
+    // Если есть данные за сегодня — используем todayData
+    // Если нет данных за сегодня — используем adsetMetricsFromFB (все адсеты за 14 дней)
+    // Это позволяет анализировать кампании, которые были на паузе сегодня
+    // ========================================
+    const adsetsToAnalyze = todayData.length > 0 ? todayData : adsetMetricsFromFB;
+    const usingHistoricalData = todayData.length === 0;
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'calculating_health_scores',
+      adsets_to_process: adsetsToAnalyze.length,
+      using_historical_data: usingHistoricalData,
+      today_adsets_count: todayData.length,
+      fb_metrics_adsets_count: adsetMetricsFromFB.length,
+      directions_count: directions?.length || 0,
+      message: usingHistoricalData
+        ? `Нет данных за сегодня, анализируем ${adsetMetricsFromFB.length} адсетов за 14 дней`
+        : `Начинаем анализ ${todayData.length} адсетов`
+    });
 
     const proposals = [];
     const adsetAnalysis = [];
+    const skippedAdsets = [];  // Для логирования пропущенных адсетов
 
-    for (const todayAdset of todayData) {
-      const yesterdayAdset = yesterdayData.find(a => a.adset_id === todayAdset.adset_id);
-      const brainAdset = brainReport?.adsets?.find(a => a.adset_id === todayAdset.adset_id);
-      const direction = directions?.find(d => d.fb_campaign_id === todayAdset.campaign_id);
+    for (let adsetIndex = 0; adsetIndex < adsetsToAnalyze.length; adsetIndex++) {
+      const adsetData = adsetsToAnalyze[adsetIndex];
+      // Унифицируем структуру: adsetMetricsFromFB и todayData имеют разные поля
+      const adsetId = adsetData.adset_id;
+      const adsetName = adsetData.adset_name;
+      const campaignId = adsetData.campaign_id;
 
-      // ========================================
-      // МЕТРИКИ
-      // ========================================
-      const todaySpend = parseFloat(todayAdset.spend || 0);
-      const todayImpressions = parseInt(todayAdset.impressions || 0);
-      const todayClicks = parseInt(todayAdset.clicks || 0);
-      const todayCTR = todayImpressions > 0 ? (todayClicks / todayImpressions * 100) : null;
-      const todayCPM = todayImpressions > 0 ? (todaySpend / todayImpressions * 1000) : null;
+      try {
+        // ========================================
+        // ПОИСК СВЯЗАННЫХ ДАННЫХ
+        // ========================================
+        const todayAdset = todayData.find(a => a.adset_id === adsetId);
+        const yesterdayAdset = yesterdayData.find(a => a.adset_id === adsetId);
+        const brainAdset = brainReport?.adsets?.find(a => a.adset_id === adsetId);
+        const direction = directions?.find(d => d.fb_campaign_id === campaignId);
+        const fbMetrics = fbMetricsByAdset.get(adsetId);
 
-      // Для instagram_traffic используем link_clicks как "конверсии", для остальных - leads
-      const directionObjective = direction?.objective || 'whatsapp';
-      const isTrafficObjective = directionObjective === 'instagram_traffic';
-      const metricName = isTrafficObjective ? 'CPC' : 'CPL';
+        // ========================================
+        // ОПРЕДЕЛЕНИЕ ТИПА КАМПАНИИ (internal vs external)
+        // ========================================
+        const isExternalCampaign = !direction;
 
-      // Конверсии: для Traffic = link_clicks, для остальных = leads
-      const todayLinkClicks = parseInt(todayAdset.link_clicks || 0);
-      const todayLeads = parseInt(todayAdset.leads || 0);
-      const todayConversions = isTrafficObjective ? todayLinkClicks : todayLeads;
-      const todayCostPerConversion = todayConversions > 0 ? todaySpend / todayConversions : null;
-      // Сохраняем todayCPL для совместимости со старым кодом (логи, метрики)
-      const todayCPL = todayCostPerConversion;
+        // Детальное логирование для каждого адсета (первые 3 + все external)
+        if (adsetIndex < 3 || isExternalCampaign) {
+          log.info({
+            where: 'interactive_brain',
+            phase: 'adset_processing_start',
+            adset_index: adsetIndex,
+            adset_id: adsetId,
+            adset_name: adsetName?.substring(0, 50),
+            campaign_id: campaignId,
+            campaign_type: isExternalCampaign ? 'EXTERNAL' : 'internal',
+            has_today_data: !!todayAdset,
+            has_yesterday_data: !!yesterdayAdset,
+            has_fb_metrics: !!fbMetrics,
+            has_brain_report_data: !!brainAdset,
+            has_direction: !!direction,
+            direction_id: direction?.id || null,
+            using_historical: usingHistoricalData
+          });
+        }
 
-      const yesterdaySpend = parseFloat(yesterdayAdset?.spend || 0);
-      const yesterdayLinkClicks = parseInt(yesterdayAdset?.link_clicks || 0);
-      const yesterdayLeads = parseInt(yesterdayAdset?.leads || 0);
-      const yesterdayConversions = isTrafficObjective ? yesterdayLinkClicks : yesterdayLeads;
-      const yesterdayCostPerConversion = yesterdayConversions > 0 ? yesterdaySpend / yesterdayConversions : null;
-      const yesterdayCPL = yesterdayCostPerConversion;
+        // ========================================
+        // МЕТРИКИ
+        // Если есть данные за сегодня — используем их
+        // Иначе используем metrics_last_7d как "текущие" метрики
+        // ========================================
+        let todaySpend, todayImpressions, todayClicks, todayCTR, todayCPM;
+        let todayLinkClicks, todayLeads, todayConversions, todayCostPerConversion, todayCPL;
+        let metricsSource = 'none';
 
-      const targetCPL = direction?.target_cpl_cents ? direction.target_cpl_cents / 100 : null;
+        if (todayAdset) {
+          // Есть данные за сегодня
+          todaySpend = parseFloat(todayAdset.spend || 0);
+          todayImpressions = parseInt(todayAdset.impressions || 0);
+          todayClicks = parseInt(todayAdset.clicks || 0);
+          todayCTR = todayImpressions > 0 ? (todayClicks / todayImpressions * 100) : null;
+          todayCPM = todayImpressions > 0 ? (todaySpend / todayImpressions * 1000) : null;
+          todayLinkClicks = getActionValue(todayAdset.actions, 'link_click');
+          todayLeads = getActionValue(todayAdset.actions, 'lead');
+          metricsSource = 'today';
+        } else if (fbMetrics?.metrics_last_7d) {
+          // Нет данных за сегодня — используем средние за 7 дней
+          const m7d = fbMetrics.metrics_last_7d;
+          todaySpend = m7d.spend || 0;
+          todayImpressions = m7d.impressions || 0;
+          todayClicks = m7d.clicks || 0;
+          todayCTR = m7d.ctr || null;
+          todayCPM = m7d.cpm || null;
+          todayLinkClicks = m7d.link_clicks || 0;
+          todayLeads = m7d.leads || 0;
+          metricsSource = 'last_7d';
+        } else {
+          // Нет никаких данных — пропускаем
+          skippedAdsets.push({ adset_id: adsetId, adset_name: adsetName, error: 'No metrics data' });
+          continue;
+        }
 
-      // Метрики из последнего отчёта Brain (7 дней)
-      const hist7d = brainAdset?.metrics_last_7d || {};
-      // Для instagram_traffic используем link_clicks, для остальных leads
-      const hist7dConversions = isTrafficObjective
-        ? (hist7d.link_clicks || 0)
-        : (hist7d.leads || 0);
-      const histCPL = hist7dConversions > 0 ? hist7d.spend / hist7dConversions : null;
-      const histCTR = hist7d.ctr || null;
-      const histCPM = hist7d.cpm || null;
-      const histFrequency = hist7d.frequency || 0;
+        // Для instagram_traffic используем link_clicks как "конверсии", для остальных - leads
+        // Для внешних кампаний по умолчанию используем leads (CPL)
+        const directionObjective = direction?.objective || 'whatsapp';
+        const isTrafficObjective = directionObjective === 'instagram_traffic';
+        const metricName = isTrafficObjective ? 'CPC' : 'CPL';
+
+        // Конверсии
+        todayConversions = isTrafficObjective ? todayLinkClicks : todayLeads;
+        todayCostPerConversion = todayConversions > 0 ? todaySpend / todayConversions : null;
+        todayCPL = todayCostPerConversion;
+
+        // Yesterday метрики
+        const yesterdaySpend = parseFloat(yesterdayAdset?.spend || 0);
+        const yesterdayLinkClicks = getActionValue(yesterdayAdset?.actions, 'link_click');
+        const yesterdayLeads = getActionValue(yesterdayAdset?.actions, 'lead');
+        const yesterdayConversions = isTrafficObjective ? yesterdayLinkClicks : yesterdayLeads;
+        const yesterdayCostPerConversion = yesterdayConversions > 0 ? yesterdaySpend / yesterdayConversions : null;
+        const yesterdayCPL = yesterdayCostPerConversion;
+
+        // ========================================
+        // TARGET CPL с каскадом fallback
+        // 1. target_cpl из direction (если есть)
+        // 2. default_cpl_target_cents из ad_accounts (если есть)
+        // 3. null — анализ только по трендам
+        // ========================================
+        let targetCPL = null;
+        let targetCPLSource = 'none';
+
+        if (direction?.target_cpl_cents) {
+          targetCPL = direction.target_cpl_cents / 100;
+          targetCPLSource = 'direction';
+        } else if (adAccountSettings?.default_cpl_target_cents) {
+          targetCPL = adAccountSettings.default_cpl_target_cents / 100;
+          targetCPLSource = 'account_default';
+        }
+        // Если targetCPL = null — всё равно анализируем (только тренды)
+
+        // ========================================
+        // МЕТРИКИ ЗА 7 ДНЕЙ (hist7d)
+        // ========================================
+        let hist7d = {};
+        let histCPL = null;
+        let histCTR = null;
+        let histCPM = null;
+        let histFrequency = 0;
+        let hist7dSource = 'none';
+
+        if (!isExternalCampaign && brainAdset?.metrics_last_7d) {
+          // Internal кампании: используем brainReport (сохранённый с утреннего прогона)
+          hist7d = brainAdset.metrics_last_7d;
+          hist7dSource = 'brain_report';
+        } else {
+          // External кампании ИЛИ internal без данных в brainReport:
+          // используем данные из FB API (рассчитанные через calculateMultiPeriodTrends)
+          const fbMetrics = fbMetricsByAdset.get(adsetId);
+          if (fbMetrics?.metrics_last_7d) {
+            hist7d = fbMetrics.metrics_last_7d;
+            hist7dSource = 'fb_api_calculated';
+          }
+        }
+
+        // Извлекаем метрики из hist7d (одинаковая структура для internal и external)
+        if (hist7d && Object.keys(hist7d).length > 0) {
+          const hist7dConversions = isTrafficObjective
+            ? (hist7d.link_clicks || 0)
+            : (hist7d.leads || 0);
+          histCPL = hist7dConversions > 0 ? hist7d.spend / hist7dConversions : null;
+          histCTR = hist7d.ctr || null;
+          histCPM = hist7d.cpm || null;
+          histFrequency = hist7d.frequency || 0;
+        }
+
+        // Логируем источники данных для external и первых internal
+        if (adsetIndex < 3 || isExternalCampaign) {
+          log.info({
+            where: 'interactive_brain',
+            phase: 'adset_data_sources',
+            adset_id: adsetId,
+            campaign_type: isExternalCampaign ? 'EXTERNAL' : 'internal',
+            target_cpl_source: targetCPLSource,
+            target_cpl_value: targetCPL,
+            hist7d_source: hist7dSource,
+            hist7d_has_data: Object.keys(hist7d).length > 0,
+            hist_metrics: {
+              histCPL: histCPL?.toFixed(2),
+              histCTR: histCTR?.toFixed(2),
+              histCPM: histCPM?.toFixed(2),
+              histFrequency: histFrequency?.toFixed(2)
+            },
+            today_metrics: {
+              spend: todaySpend.toFixed(2),
+              conversions: todayConversions,
+              cpl: todayCPL?.toFixed(2),
+              impressions: todayImpressions
+            }
+          });
+        }
 
       // ========================================
       // HEALTH SCORE CALCULATION (синхронизировано с brainRules.js)
@@ -2042,10 +2392,16 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
       // Сохраняем анализ
       adsetAnalysis.push({
-        adset_id: todayAdset.adset_id,
-        adset_name: todayAdset.adset_name,
-        direction_name: direction?.name,
+        adset_id: adsetId,
+        adset_name: adsetName,
+        campaign_id: campaignId,
+        campaign_type: isExternalCampaign ? 'external' : 'internal',
+        direction_id: direction?.id || null,
+        direction_name: direction?.name || null,
         direction_objective: directionObjective,
+        target_cpl_source: targetCPLSource,
+        hist7d_source: hist7dSource,
+        metrics_source: metricsSource,  // NEW: откуда взяты текущие метрики (today/last_7d)
         health_score: healthScore,
         hs_class: hsClass,
         hs_breakdown: hsBreakdown,
@@ -2069,7 +2425,13 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           },
           target_cost_per_conversion: targetCPL,
           metric_name: metricName, // 'CPC' для instagram_traffic, 'CPL' для остальных
-          hist_7d: hist7d
+          hist_7d: hist7d,
+          hist_7d_calculated: {
+            histCPL,
+            histCTR,
+            histCPM,
+            histFrequency
+          }
         }
       });
 
@@ -2079,93 +2441,308 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
       // Защита от дёрготни: проверяем недавние действия
       const recentActionOnAdset = recentActions?.some(ra =>
-        ra.proposals_json?.some(p => p.entity_id === todayAdset.adset_id)
+        ra.proposals_json?.some(p => p.entity_id === adsetId)
       );
 
+      // Получаем текущий бюджет адсета
+      const adsetBudgetInfo = adsetBudgets.get(adsetId);
+      const currentBudgetCents = adsetBudgetInfo?.daily_budget_cents || null;
+      const currentBudgetDollars = currentBudgetCents ? Math.round(currentBudgetCents / 100) : null;
+
+      // Строим человекочитаемое объяснение
+      const humanReason = buildHumanReadableReason(hsBreakdown, { todayCPL, targetCPL, metricName });
+
+      // Добавляем пометку если данные исторические
+      const dataNote = metricsSource === 'last_7d' ? ' (данные за 7 дней)' : '';
+      const campaignNote = isExternalCampaign ? ' [внешняя кампания]' : '';
+
       if (hsClass === 'very_good' && !recentActionOnAdset) {
-        // Масштабировать +10..+30% (используем MAX из brainRules)
+        // Масштабировать +20%
         const increasePercent = Math.min(BUDGET_LIMITS.MAX_INCREASE_PCT, 20);
+        const newBudgetCents = currentBudgetCents ? Math.round(currentBudgetCents * (1 + increasePercent / 100)) : null;
+        const newBudgetDollars = newBudgetCents ? Math.round(newBudgetCents / 100) : null;
+
+        const budgetChangeText = currentBudgetDollars && newBudgetDollars
+          ? `Увеличить бюджет с $${currentBudgetDollars} до $${newBudgetDollars} (+${increasePercent}%).`
+          : `Увеличить бюджет на ${increasePercent}%.`;
+
         proposals.push({
           action: 'updateBudget',
           priority: 'high',
           entity_type: 'adset',
-          entity_id: todayAdset.adset_id,
-          entity_name: todayAdset.adset_name,
-          direction_id: direction?.id,
-          direction_name: direction?.name,
+          entity_id: adsetId,
+          entity_name: adsetName,
+          campaign_id: campaignId,
+          campaign_type: isExternalCampaign ? 'external' : 'internal',
+          direction_id: direction?.id || null,
+          direction_name: direction?.name || null,
+          target_cpl_source: targetCPLSource,
           health_score: healthScore,
           hs_class: hsClass,
-          reason: `Отличные результаты! HS=${healthScore} (${hsClass}). ${metricName} сегодня $${todayCPL?.toFixed(2) || '?'} при target $${targetCPL?.toFixed(2) || '?'}. Рекомендую масштабировать.`,
+          reason: `«${adsetName}»${campaignNote}: ${humanReason || 'отличные результаты'}${dataNote}. ${budgetChangeText}`,
           confidence: 0.85,
           suggested_action_params: {
             increase_percent: increasePercent,
+            current_budget_cents: currentBudgetCents,
+            new_budget_cents: newBudgetCents,
             max_budget_cents: BUDGET_LIMITS.MAX_CENTS
           },
-          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
+          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
         });
       }
       else if (hsClass === 'bad') {
-        // CPL/CPC критически высокий → пауза или сильное снижение
+        // CPL/CPC критически высокий → пауза или сильное снижение (-50%)
         const cplMultiple = todayCPL && targetCPL ? todayCPL / targetCPL : null;
+        const decreasePercent = BUDGET_LIMITS.MAX_DECREASE_PCT;
+        const newBudgetCents = currentBudgetCents ? Math.round(currentBudgetCents * (1 - decreasePercent / 100)) : null;
+        const newBudgetDollars = newBudgetCents ? Math.round(newBudgetCents / 100) : null;
 
         if (cplMultiple && cplMultiple > 3) {
           proposals.push({
             action: 'pauseAdSet',
             priority: 'critical',
             entity_type: 'adset',
-            entity_id: todayAdset.adset_id,
-            entity_name: todayAdset.adset_name,
-            direction_id: direction?.id,
-            direction_name: direction?.name,
+            entity_id: adsetId,
+            entity_name: adsetName,
+            campaign_id: campaignId,
+            campaign_type: isExternalCampaign ? 'external' : 'internal',
+            direction_id: direction?.id || null,
+            direction_name: direction?.name || null,
+            target_cpl_source: targetCPLSource,
             health_score: healthScore,
             hs_class: hsClass,
-            reason: `КРИТИЧНО! HS=${healthScore}. ${metricName} $${todayCPL?.toFixed(2)} превышает target в ${cplMultiple.toFixed(1)}x раз. Рекомендую паузу.`,
+            reason: `«${adsetName}»${campaignNote}: КРИТИЧНО! ${humanReason}${dataNote}. ${metricName} превышает цель в ${cplMultiple.toFixed(1)}x раз. Рекомендую поставить на паузу.`,
             confidence: 0.9,
-            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
+            suggested_action_params: {
+              current_budget_cents: currentBudgetCents
+            },
+            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
           });
         } else {
+          const budgetChangeText = currentBudgetDollars && newBudgetDollars
+            ? `Снизить бюджет с $${currentBudgetDollars} до $${newBudgetDollars} (-${decreasePercent}%).`
+            : `Снизить бюджет на ${decreasePercent}%.`;
+
           proposals.push({
             action: 'updateBudget',
             priority: 'high',
             entity_type: 'adset',
-            entity_id: todayAdset.adset_id,
-            entity_name: todayAdset.adset_name,
-            direction_id: direction?.id,
-            direction_name: direction?.name,
+            entity_id: adsetId,
+            entity_name: adsetName,
+            campaign_id: campaignId,
+            campaign_type: isExternalCampaign ? 'external' : 'internal',
+            direction_id: direction?.id || null,
+            direction_name: direction?.name || null,
+            target_cpl_source: targetCPLSource,
             health_score: healthScore,
             hs_class: hsClass,
-            reason: `Плохие результаты. HS=${healthScore}. ${metricName} $${todayCPL?.toFixed(2)} выше target. Рекомендую снизить бюджет на 50%.`,
+            reason: `«${adsetName}»${campaignNote}: ${humanReason}${dataNote}. ${budgetChangeText}`,
             confidence: 0.8,
             suggested_action_params: {
-              decrease_percent: BUDGET_LIMITS.MAX_DECREASE_PCT,
+              decrease_percent: decreasePercent,
+              current_budget_cents: currentBudgetCents,
+              new_budget_cents: newBudgetCents,
               min_budget_cents: BUDGET_LIMITS.MIN_CENTS
             },
-            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
+            metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
           });
         }
       }
       else if (hsClass === 'slightly_bad' && !recentActionOnAdset) {
-        // Снижать -20..-50%
+        // Снижать -25%
+        const decreasePercent = 25;
+        const newBudgetCents = currentBudgetCents ? Math.round(currentBudgetCents * (1 - decreasePercent / 100)) : null;
+        const newBudgetDollars = newBudgetCents ? Math.round(newBudgetCents / 100) : null;
+
+        const budgetChangeText = currentBudgetDollars && newBudgetDollars
+          ? `Снизить бюджет с $${currentBudgetDollars} до $${newBudgetDollars} (-${decreasePercent}%).`
+          : `Снизить бюджет на ${decreasePercent}%.`;
+
         proposals.push({
           action: 'updateBudget',
           priority: 'medium',
           entity_type: 'adset',
-          entity_id: todayAdset.adset_id,
-          entity_name: todayAdset.adset_name,
-          direction_id: direction?.id,
-          direction_name: direction?.name,
+          entity_id: adsetId,
+          entity_name: adsetName,
+          campaign_id: campaignId,
+          campaign_type: isExternalCampaign ? 'external' : 'internal',
+          direction_id: direction?.id || null,
+          direction_name: direction?.name || null,
+          target_cpl_source: targetCPLSource,
           health_score: healthScore,
           hs_class: hsClass,
-          reason: `Результаты ниже нормы. HS=${healthScore}. Рекомендую снизить бюджет на 20-30%.`,
+          reason: `«${adsetName}»${campaignNote}: ${humanReason || 'результаты ниже нормы'}${dataNote}. ${budgetChangeText}`,
           confidence: 0.7,
           suggested_action_params: {
-            decrease_percent: 25,
+            decrease_percent: decreasePercent,
+            current_budget_cents: currentBudgetCents,
+            new_budget_cents: newBudgetCents,
             min_budget_cents: BUDGET_LIMITS.MIN_CENTS
           },
-          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective }
+          metrics: { today_spend: todaySpend, today_conversions: todayConversions, today_cpl: todayCPL, target_cpl: targetCPL, objective: directionObjective, metrics_source: metricsSource }
         });
       }
       // good и neutral — не предлагаем изменений (наблюдаем)
+
+        // Логируем итоговый результат анализа адсета (для external и первых internal)
+        if (adsetIndex < 3 || isExternalCampaign) {
+          log.info({
+            where: 'interactive_brain',
+            phase: 'adset_analysis_complete',
+            adset_id: adsetId,
+            campaign_type: isExternalCampaign ? 'EXTERNAL' : 'internal',
+            health_score: healthScore,
+            hs_class: hsClass,
+            hs_breakdown_count: hsBreakdown.length,
+            proposal_generated: proposals.some(p => p.entity_id === adsetId),
+            metrics_source: metricsSource
+          });
+        }
+
+      } catch (adsetError) {
+        // Ловим ошибки при обработке отдельного адсета, не прерывая весь анализ
+        log.error({
+          where: 'interactive_brain',
+          phase: 'adset_processing_error',
+          adset_id: adsetId,
+          adset_name: adsetName?.substring(0, 50),
+          error: String(adsetError),
+          stack: adsetError.stack?.substring(0, 500)
+        });
+        skippedAdsets.push({
+          adset_id: adsetId,
+          adset_name: adsetName,
+          error: String(adsetError)
+        });
+        // Продолжаем обработку следующих адсетов
+      }
+    }
+
+    // Логируем если были пропущены адсеты из-за ошибок
+    if (skippedAdsets.length > 0) {
+      log.warn({
+        where: 'interactive_brain',
+        phase: 'adsets_skipped',
+        skipped_count: skippedAdsets.length,
+        skipped_adsets: skippedAdsets.slice(0, 5),
+        message: `${skippedAdsets.length} адсетов пропущено из-за ошибок обработки`
+      });
+    }
+
+    // ========================================
+    // ЧАСТЬ 4.5: ЛОГИКА ПЕРЕРАСПРЕДЕЛЕНИЯ БЮДЖЕТА
+    // ========================================
+
+    // Считаем сумму экономии от снижения бюджетов
+    const decreaseProposals = proposals.filter(p =>
+      p.action === 'updateBudget' &&
+      p.suggested_action_params?.decrease_percent &&
+      p.suggested_action_params?.current_budget_cents
+    );
+
+    const totalSavingsCents = decreaseProposals.reduce((sum, p) => {
+      const current = p.suggested_action_params.current_budget_cents;
+      const newBudget = p.suggested_action_params.new_budget_cents || 0;
+      return sum + (current - newBudget);
+    }, 0);
+
+    // Находим адсеты с хорошими результатами, куда можно перераспределить
+    const goodAdsets = adsetAnalysis.filter(a =>
+      (a.hs_class === 'very_good' || a.hs_class === 'good') &&
+      !proposals.some(p => p.entity_id === a.adset_id && p.action === 'updateBudget')
+    );
+
+    if (totalSavingsCents > 0 && goodAdsets.length > 0) {
+      const totalSavingsDollars = Math.round(totalSavingsCents / 100);
+
+      // Добавляем информацию о перераспределении к decrease proposals
+      const redistributeTargets = goodAdsets.slice(0, 3).map(a => ({
+        adset_id: a.adset_id,
+        adset_name: a.adset_name,
+        health_score: a.health_score
+      }));
+
+      for (const proposal of decreaseProposals) {
+        proposal.redistribute_suggestion = {
+          total_savings_cents: totalSavingsCents,
+          total_savings_dollars: totalSavingsDollars,
+          redistribute_to: redistributeTargets,
+          message: `Сэкономленные $${totalSavingsDollars} можно перераспределить на: ${redistributeTargets.map(t => `«${t.adset_name}» (HS=${t.health_score})`).join(', ')}`
+        };
+      }
+
+      log.info({
+        where: 'interactive_brain',
+        phase: 'redistribution_calculated',
+        total_savings_cents: totalSavingsCents,
+        total_savings_dollars: totalSavingsDollars,
+        decrease_proposals_count: decreaseProposals.length,
+        good_adsets_count: goodAdsets.length,
+        redistribute_targets: redistributeTargets.map(t => t.adset_name)
+      });
+    } else if (totalSavingsCents > 0 && goodAdsets.length === 0) {
+      // Некуда перераспределять — все адсеты плохие
+      // Предлагаем запустить новые адсеты с лучшими креативами
+      const totalSavingsDollars = Math.round(totalSavingsCents / 100);
+
+      // Проверяем есть ли внешние кампании среди плохих
+      const hasExternalCampaigns = decreaseProposals.some(p => p.campaign_type === 'external');
+
+      // Добавляем рекомендацию к каждому decrease proposal
+      for (const proposal of decreaseProposals) {
+        if (proposal.campaign_type === 'external') {
+          proposal.redistribute_suggestion = {
+            total_savings_cents: totalSavingsCents,
+            total_savings_dollars: totalSavingsDollars,
+            redistribute_to: [],
+            no_good_adsets: true,
+            message: `Все адсеты показывают слабые результаты. Рекомендуем: запустить новые адсеты с улучшенными креативами (свежие визуалы, новые тексты). Сэкономленные $${totalSavingsDollars} можно направить на тестирование.`
+          };
+        } else {
+          proposal.redistribute_suggestion = {
+            total_savings_cents: totalSavingsCents,
+            total_savings_dollars: totalSavingsDollars,
+            redistribute_to: [],
+            no_good_adsets: true,
+            message: `Нет адсетов с хорошими результатами для перераспределения бюджета.`
+          };
+        }
+      }
+
+      // Добавляем отдельный proposal-рекомендацию для запуска новых креативов
+      if (hasExternalCampaigns) {
+        proposals.push({
+          action: 'launchNewCreatives',
+          priority: 'medium',
+          entity_type: 'account',
+          entity_id: ad_account_id,
+          entity_name: 'Рекламный аккаунт',
+          campaign_type: 'external',
+          health_score: null,
+          hs_class: null,
+          reason: `💡 Все текущие адсеты неэффективны. Рекомендуем запустить новые адсеты с улучшенными креативами: свежие визуалы, новые тексты, возможно другие аудитории. Освободившийся бюджет $${totalSavingsDollars} можно направить на тестирование новых связок.`,
+          confidence: 0.7,
+          suggested_action_params: {
+            recommended_budget_cents: totalSavingsCents,
+            suggestions: [
+              'Обновить визуалы (новые фото/видео)',
+              'Переписать тексты объявлений',
+              'Протестировать новые аудитории',
+              'Изменить формат (карусель, reels, stories)'
+            ]
+          }
+        });
+      }
+
+      log.info({
+        where: 'interactive_brain',
+        phase: 'no_redistribution_targets',
+        total_savings_cents: totalSavingsCents,
+        total_savings_dollars: totalSavingsDollars,
+        decrease_proposals_count: decreaseProposals.length,
+        has_external_campaigns: hasExternalCampaigns,
+        message: 'Все адсеты плохие, некуда перераспределять. Предложено запустить новые креативы.'
+      });
     }
 
     // ========================================
@@ -2241,8 +2818,26 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     const duration = Date.now() - startTime;
 
     // Summary статистика
+    const externalAdsets = adsetAnalysis.filter(a => a.campaign_type === 'external');
+    const internalAdsets = adsetAnalysis.filter(a => a.campaign_type === 'internal');
+
     const summary = {
       total_adsets_analyzed: adsetAnalysis.length,
+      skipped_adsets_count: skippedAdsets.length,
+      // NEW: статистика по типам кампаний
+      by_campaign_type: {
+        internal: internalAdsets.length,
+        external: externalAdsets.length
+      },
+      // NEW: статистика по источникам данных
+      by_data_source: {
+        target_cpl_from_direction: adsetAnalysis.filter(a => a.target_cpl_source === 'direction').length,
+        target_cpl_from_account: adsetAnalysis.filter(a => a.target_cpl_source === 'account_default').length,
+        target_cpl_none: adsetAnalysis.filter(a => a.target_cpl_source === 'none').length,
+        hist7d_from_brain_report: adsetAnalysis.filter(a => a.hist7d_source === 'brain_report').length,
+        hist7d_from_fb_api: adsetAnalysis.filter(a => a.hist7d_source === 'fb_api_calculated').length,
+        hist7d_none: adsetAnalysis.filter(a => a.hist7d_source === 'none').length
+      },
       by_hs_class: {
         very_good: adsetAnalysis.filter(a => a.hs_class === 'very_good').length,
         good: adsetAnalysis.filter(a => a.hs_class === 'good').length,
@@ -2250,16 +2845,33 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         slightly_bad: adsetAnalysis.filter(a => a.hs_class === 'slightly_bad').length,
         bad: adsetAnalysis.filter(a => a.hs_class === 'bad').length
       },
+      // NEW: HS по типам кампаний для сравнения
+      external_hs_breakdown: externalAdsets.length > 0 ? {
+        avg_health_score: Math.round(externalAdsets.reduce((sum, a) => sum + a.health_score, 0) / externalAdsets.length),
+        by_class: {
+          very_good: externalAdsets.filter(a => a.hs_class === 'very_good').length,
+          good: externalAdsets.filter(a => a.hs_class === 'good').length,
+          neutral: externalAdsets.filter(a => a.hs_class === 'neutral').length,
+          slightly_bad: externalAdsets.filter(a => a.hs_class === 'slightly_bad').length,
+          bad: externalAdsets.filter(a => a.hs_class === 'bad').length
+        }
+      } : null,
       proposals_by_action: {
         pauseAdSet: proposals.filter(p => p.action === 'pauseAdSet').length,
         updateBudget: proposals.filter(p => p.action === 'updateBudget').length,
         createAdSet: proposals.filter(p => p.action === 'createAdSet').length,
         review: proposals.filter(p => p.action === 'review').length
       },
+      // NEW: proposals по типам кампаний
+      proposals_by_campaign_type: {
+        internal: proposals.filter(p => p.campaign_type === 'internal').length,
+        external: proposals.filter(p => p.campaign_type === 'external').length
+      },
       brain_report_age_hours: brainReportAge,
       today_total_spend: todayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
-      today_total_leads: todayData.reduce((sum, a) => sum + parseInt(a.leads || 0), 0),
-      today_total_link_clicks: todayData.reduce((sum, a) => sum + parseInt(a.link_clicks || 0), 0)
+      // Исправлено: используем getActionValue вместо прямого доступа к свойствам
+      today_total_leads: todayData.reduce((sum, a) => sum + getActionValue(a.actions, 'lead'), 0),
+      today_total_link_clicks: todayData.reduce((sum, a) => sum + getActionValue(a.actions, 'link_click'), 0)
     };
 
     // Сохраняем запуск для аудита
@@ -2279,8 +2891,22 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       where: 'interactive_brain',
       phase: 'complete',
       proposals_count: proposals.length,
-      summary,
-      duration
+      duration_ms: duration,
+      adsets_analyzed: adsetAnalysis.length,
+      adsets_skipped: skippedAdsets.length,
+      internal_adsets: internalAdsets.length,
+      external_adsets: externalAdsets.length,
+      proposals_internal: summary.proposals_by_campaign_type.internal,
+      proposals_external: summary.proposals_by_campaign_type.external,
+      data_sources: summary.by_data_source,
+      message: `Анализ завершён: ${adsetAnalysis.length} адсетов (${internalAdsets.length} internal, ${externalAdsets.length} external), ${proposals.length} proposals`
+    });
+
+    // Детальный лог summary для отладки
+    log.debug({
+      where: 'interactive_brain',
+      phase: 'complete_summary',
+      summary
     });
 
     return {
@@ -2292,10 +2918,15 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       context: {
         today_adsets: todayData.length,
         yesterday_adsets: yesterdayData.length,
+        daily_data_rows: dailyData.length,
+        fb_calculated_metrics: adsetMetricsFromFB.length,
         brain_report_available: !!brainReport,
         brain_report_age_hours: brainReportAge,
+        ad_account_settings_available: !!adAccountSettings,
+        default_cpl_target: adAccountSettings?.default_cpl_target_cents ? (adAccountSettings.default_cpl_target_cents / 100) : null,
         directions_count: directions?.length || 0,
         generated_at: new Date().toISOString(),
+        duration_ms: duration,
         focus: 'TODAY — все решения основаны на сегодняшних данных с учётом истории'
       }
     };

@@ -187,22 +187,55 @@ interface PlanStepItemProps {
   index: number;
 }
 
+/**
+ * Перевод action на русский язык
+ */
+function getActionLabel(action: string): string {
+  const actionLabels: Record<string, string> = {
+    updateBudget: '💰 Изменить бюджет',
+    pauseAdSet: '⏸️ Поставить на паузу',
+    pauseAd: '⏸️ Остановить объявление',
+    enableAdSet: '▶️ Включить адсет',
+    enableAd: '▶️ Включить объявление',
+    createAdSet: '➕ Создать новый адсет',
+    review: '👀 Требует внимания',
+    launchNewCreatives: '🚀 Запустить новые креативы',
+  };
+  return actionLabels[action] || action;
+}
+
+/**
+ * Перевод приоритета на русский
+ */
+function getPriorityLabel(priority: string | undefined): string | null {
+  if (!priority) return null;
+  const labels: Record<string, string> = {
+    critical: '🔴 Критично',
+    high: '🟠 Высокий',
+    medium: '🟡 Средний',
+    low: '🟢 Низкий',
+  };
+  return labels[priority] || null;
+}
+
 function PlanStepItem({ step, index }: PlanStepItemProps) {
-  // Определяем цвет по приоритету если есть
+  // Определяем цвет по приоритету если есть (light + dark mode)
   const priorityColors: Record<string, string> = {
-    high: 'border-l-red-500',
-    medium: 'border-l-yellow-500',
-    low: 'border-l-green-500',
+    critical: 'border-l-red-600 bg-red-50/50 dark:bg-red-950/30',
+    high: 'border-l-red-500 bg-red-50/30 dark:bg-red-950/20',
+    medium: 'border-l-yellow-500 bg-yellow-50/30 dark:bg-yellow-950/20',
+    low: 'border-l-green-500 bg-green-50/30 dark:bg-green-950/20',
   };
 
   const priority = (step as { priority?: string }).priority;
   const borderColor = priority ? priorityColors[priority] || '' : '';
+  const priorityLabel = getPriorityLabel(priority);
 
   return (
     <div
       className={cn(
-        'p-3 bg-muted/30 rounded-lg border-l-4',
-        borderColor || 'border-l-primary/50'
+        'p-3 rounded-lg border-l-4',
+        borderColor || 'border-l-primary/50 bg-muted/30'
       )}
     >
       <div className="flex items-start gap-3">
@@ -210,10 +243,17 @@ function PlanStepItem({ step, index }: PlanStepItemProps) {
           {index + 1}
         </span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground">
-            {step.action}
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-foreground">
+              {getActionLabel(step.action)}
+            </p>
+            {priorityLabel && (
+              <span className="text-xs text-muted-foreground">
+                {priorityLabel}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
             {step.description}
           </p>
         </div>
