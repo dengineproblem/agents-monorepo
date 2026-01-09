@@ -289,20 +289,32 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         access_token: account.access_token,
       }));
 
-      // Фильтруем аккаунты, для которых можно запросить статистику
-      const accountsToFetch = since && until
-        ? accountsBase.filter(acc => acc.access_token && acc.fb_ad_account_id)
-        : [];
+      // Фильтруем аккаунты с credentials
+      const accountsWithCredentials = accountsBase.filter(acc => acc.access_token && acc.fb_ad_account_id);
+
+      // Для статистики нужны даты
+      const accountsToFetchStats = since && until ? accountsWithCredentials : [];
 
       log.info({
         userAccountId,
         totalAccounts: accountCount,
-        accountsWithCredentials: accountsToFetch.length,
+        accountsWithCredentials: accountsWithCredentials.length,
+        accountsToFetchStats: accountsToFetchStats.length,
         hasDates: !!(since && until)
-      }, '[all-stats] Preparing to fetch Facebook stats');
+      }, '[all-stats] Preparing to fetch Facebook data');
 
-      // Запрашиваем статистику параллельно для всех аккаунтов с credentials
-      const statsPromises = accountsToFetch.map(async account => {
+      // Запрашиваем статус для ВСЕХ аккаунтов с credentials (независимо от дат)
+      const statusPromises = accountsWithCredentials.map(async account => {
+        const accountStatus = await fetchFacebookAccountStatus(
+          account.fb_ad_account_id!,
+          account.access_token!,
+          account.id
+        );
+        return { accountId: account.id, accountStatus };
+      });
+
+      // Запрашиваем статистику только если есть даты
+      const statsPromises = accountsToFetchStats.map(async account => {
         const stats = await fetchFacebookStatsForAccount(
           account.fb_ad_account_id!,
           account.access_token!,
@@ -313,23 +325,37 @@ export async function adAccountsRoutes(app: FastifyInstance) {
         return { accountId: account.id, stats };
       });
 
-      const statsResults = await Promise.all(statsPromises);
+      // Выполняем все запросы параллельно
+      const [statusResults, statsResults] = await Promise.all([
+        Promise.all(statusPromises),
+        Promise.all(statsPromises),
+      ]);
 
-      // Создаём map для быстрого доступа к статистике
+      // Создаём maps для быстрого доступа к статистике и статусу
       const statsMap = new Map<string, FacebookStats | null>();
+      const statusMap = new Map<string, FacebookAccountStatus | null>();
+
+      for (const result of statusResults) {
+        statusMap.set(result.accountId, result.accountStatus);
+      }
       for (const result of statsResults) {
         statsMap.set(result.accountId, result.stats);
       }
 
       // Собираем финальный результат
-      const accountsWithStats = accountsBase.map(account => ({
-        id: account.id,
-        name: account.name,
-        fb_page_id: account.fb_page_id,
-        connection_status: account.connection_status,
-        is_active: account.is_active,
-        stats: statsMap.get(account.id) || null,
-      }));
+      const accountsWithStats = accountsBase.map(account => {
+        const status = statusMap.get(account.id);
+        return {
+          id: account.id,
+          name: account.name,
+          fb_page_id: account.fb_page_id,
+          connection_status: account.connection_status,
+          is_active: account.is_active,
+          fb_account_status: status?.account_status ?? null,
+          fb_disable_reason: status?.disable_reason ?? null,
+          stats: statsMap.get(account.id) || null,
+        };
+      });
 
       // Считаем статистику для логирования
       const accountsWithStatsCount = accountsWithStats.filter(a => a.stats !== null).length;
@@ -786,6 +812,62 @@ export async function adAccountsRoutes(app: FastifyInstance) {
     since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional(),
     until: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional(),
   });
+
+  // ========================================
+  // HELPER: Fetch Facebook account status
+  // ========================================
+
+  // Facebook account_status codes:
+  // 1 = ACTIVE, 2 = DISABLED, 3 = UNSETTLED (задолженность)
+  // 7 = PENDING_RISK_REVIEW, 8 = PENDING_SETTLEMENT, 9 = IN_GRACE_PERIOD
+  // 100 = PENDING_CLOSURE, 101 = CLOSED
+  interface FacebookAccountStatus {
+    account_status: number;
+    disable_reason?: number;
+  }
+
+  async function fetchFacebookAccountStatus(
+    adAccountId: string,
+    accessToken: string,
+    accountDbId: string
+  ): Promise<FacebookAccountStatus | null> {
+    const fbAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    try {
+      const url = new URL(`https://graph.facebook.com/v18.0/${fbAccountId}`);
+      url.searchParams.set('access_token', accessToken);
+      url.searchParams.set('fields', 'account_status,disable_reason');
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд
+
+      const response = await fetch(url.toString(), { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        log.warn({ accountDbId, status: response.status, error: errorText.slice(0, 200) }, 'Failed to fetch account status');
+        return null;
+      }
+
+      const data = await response.json();
+
+      log.info({
+        accountDbId,
+        fbAccountId: fbAccountId.slice(0, 15) + '...',
+        account_status: data.account_status,
+        disable_reason: data.disable_reason,
+      }, '[fetchFacebookAccountStatus] Got account status from Facebook');
+
+      return {
+        account_status: data.account_status ?? 1,
+        disable_reason: data.disable_reason,
+      };
+    } catch (error: any) {
+      log.warn({ accountDbId, error: error.message }, 'Error fetching account status');
+      return null;
+    }
+  }
 
   // ========================================
   // HELPER: Fetch Facebook stats for single account

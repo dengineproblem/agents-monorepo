@@ -31,12 +31,20 @@ import { facebookApi } from '@/services/facebookApi';
 // TYPES
 // =============================================================================
 
+// Facebook account_status codes:
+// 1 = ACTIVE, 2 = DISABLED, 3 = UNSETTLED (задолженность)
+// 7 = PENDING_RISK_REVIEW, 8 = PENDING_SETTLEMENT, 9 = IN_GRACE_PERIOD
+// 100 = PENDING_CLOSURE, 101 = CLOSED
+type FbAccountStatus = 1 | 2 | 3 | 7 | 8 | 9 | 100 | 101 | null;
+
 interface AccountStats {
   id: string;
   name: string;
   fb_page_id: string | null;
   connection_status: 'pending' | 'connected' | 'error';
   is_active: boolean;
+  fb_account_status: FbAccountStatus;
+  fb_disable_reason: number | null;
   stats: {
     spend: number;
     leads: number;
@@ -187,6 +195,30 @@ function calculateCplDeviation(
   const formattedText = `${sign}${deviation.toFixed(0)}%`;
 
   return { deviation, formattedText };
+}
+
+/**
+ * Получить информацию о статусе Facebook аккаунта для отображения
+ */
+function getFbAccountStatusInfo(status: FbAccountStatus): {
+  label: string;
+  variant: 'destructive' | 'warning' | 'secondary';
+  show: boolean;
+} | null {
+  if (status === null || status === 1) return null; // ACTIVE или неизвестно
+
+  const statusMap: Record<number, { label: string; variant: 'destructive' | 'warning' | 'secondary' }> = {
+    2: { label: 'Отключён', variant: 'destructive' },
+    3: { label: 'Задолженность', variant: 'destructive' },
+    7: { label: 'Проверка', variant: 'warning' },
+    8: { label: 'Ожидание оплаты', variant: 'warning' },
+    9: { label: 'Льготный период', variant: 'warning' },
+    100: { label: 'Закрывается', variant: 'destructive' },
+    101: { label: 'Закрыт', variant: 'secondary' },
+  };
+
+  const info = statusMap[status];
+  return info ? { ...info, show: true } : null;
 }
 
 /**
@@ -354,6 +386,8 @@ const MultiAccountDashboard: React.FC = () => {
         fb_page_id: acc.fb_page_id || null,
         connection_status: (acc.connection_status as 'pending' | 'connected' | 'error') || 'pending',
         is_active: acc.is_active !== false,
+        fb_account_status: null,
+        fb_disable_reason: null,
         stats: null,
       }));
 
@@ -1063,7 +1097,25 @@ const AccountRow: React.FC<AccountRowProps> = ({
             </AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
-            <p className="font-medium truncate text-sm">{account.name}</p>
+            <div className="flex items-center gap-2">
+              <p className="font-medium truncate text-sm">{account.name}</p>
+              {(() => {
+                const statusInfo = getFbAccountStatusInfo(account.fb_account_status);
+                if (!statusInfo) return null;
+                return (
+                  <Badge
+                    variant={statusInfo.variant === 'warning' ? 'outline' : statusInfo.variant}
+                    className={cn(
+                      'text-[10px] px-1.5 py-0 h-4 flex-shrink-0',
+                      statusInfo.variant === 'warning' && 'bg-yellow-50 text-yellow-700 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-700',
+                      statusInfo.variant === 'destructive' && 'bg-red-50 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700'
+                    )}
+                  >
+                    {statusInfo.label}
+                  </Badge>
+                );
+              })()}
+            </div>
             {/* Мобильная версия — компактная строка метрик */}
             {stats && (
               <p className="md:hidden text-xs text-muted-foreground truncate">
