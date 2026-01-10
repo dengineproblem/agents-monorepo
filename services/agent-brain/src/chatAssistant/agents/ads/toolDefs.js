@@ -307,14 +307,10 @@ export const AdsToolDefs = {
   },
 
   triggerBrainOptimizationRun: {
-    description: `Запустить принудительный цикл Brain Agent оптимизации ПРЯМО СЕЙЧАС. ОПАСНАЯ ОПЕРАЦИЯ — агент может изменить бюджеты, остановить или запустить адсеты.
+    description: `Запустить AI-оптимизацию рекламы.
 
-Варианты использования:
-- БЕЗ параметров: оптимизация ВСЕГО аккаунта
-- direction_id: оптимизация конкретного направления (internal кампании)
-- campaign_id: оптимизация конкретной кампании (для external кампаний БЕЗ direction)
-
-ВАЖНО: campaign_id работает самостоятельно без direction_id для внешних кампаний!`,
+⚠️ ОТВЕТ ПОЛЬЗОВАТЕЛЮ: Скопируй ДОСЛОВНО текст из поля formatted.text — это готовый отчёт.
+Ничего не добавляй, не анализируй, не комментируй. Просто выведи formatted.text.`,
     schema: z.object({
       direction_id: uuidSchema.optional().describe('UUID направления для оптимизации (для internal кампаний)'),
       campaign_id: z.string().optional().describe('Facebook Campaign ID для оптимизации (для external кампаний без direction)'),

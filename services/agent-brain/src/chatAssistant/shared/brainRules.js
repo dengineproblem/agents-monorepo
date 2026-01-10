@@ -59,6 +59,17 @@ export const VOLUME_THRESHOLDS = {
   TODAY_MIN_IMPRESSIONS: 300  // Минимум показов сегодня для компенсации
 };
 
+/**
+ * Пороги для определения ads-пожирателей
+ * Объявления, которые тратят бюджет без результата
+ */
+export const AD_EATER_THRESHOLDS = {
+  MIN_SPEND_FOR_ANALYSIS: 3,    // $3 минимум (как BUDGET_LIMITS.MIN_CENTS / 100)
+  MIN_IMPRESSIONS: 300,          // Минимум показов (как TODAY_MIN_IMPRESSIONS)
+  CPL_CRITICAL_MULTIPLIER: 3,    // CPL > 3x от таргета = критично
+  SPEND_SHARE_CRITICAL: 0.5      // >50% бюджета адсета без результата
+};
+
 // =============================================================================
 // ПРОМПТ ДЛЯ ADSAGENT
 // =============================================================================

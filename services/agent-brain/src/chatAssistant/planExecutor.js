@@ -607,7 +607,8 @@ export class PlanExecutor {
         report_text: reportText,
         status: allSucceeded ? 'success' : 'partial',
         actions_taken: results.length,
-        actions_failed: results.filter(r => !r.success).length
+        actions_failed: results.filter(r => !r.success).length,
+        idempotency_key: crypto.randomUUID()
       };
 
       const { data, error } = await supabase.from('brain_executions').insert(insertData).select();

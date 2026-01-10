@@ -33,6 +33,16 @@ export async function processDomainResults(domain, toolCalls, rawResults, contex
   const startTime = Date.now();
   const { layerLogger } = context;
 
+  // Fast path: triggerBrainOptimizationRun с proposals = 0 → вернуть formatted.text напрямую (без LLM)
+  const brainResult = rawResults['triggerBrainOptimizationRun'];
+  if (brainResult?.result?.formatted?.text) {
+    const proposals = brainResult.result.proposals || [];
+    if (proposals.length === 0) {
+      logger.info({ domain, proposals: 0 }, 'Domain agent: skipping LLM, returning formatted.text directly');
+      return brainResult.result.formatted.text;
+    }
+  }
+
   // Layer 9: Domain Agents start
   layerLogger?.start(9, { domain, toolsCount: Object.keys(rawResults).length });
 
@@ -416,13 +426,20 @@ function formatToolResults(rawResults) {
     if (data.result?.success === false) {
       parts.push(`Ошибка: ${data.result.error || 'unknown'}`);
     } else {
-      // Pretty print result, limit size (increased for large datasets like 50+ ads)
-      const resultStr = JSON.stringify(data.result, null, 2);
-      console.log(`[formatToolResults] ${toolName}: ${resultStr.length} chars, ads: ${data.result?.ads?.length || 0}, totals: ${JSON.stringify(data.result?.totals || {})}`);
-      if (resultStr.length > 50000) {
-        parts.push(resultStr.substring(0, 50000) + '\n... (данные обрезаны)');
+      // Для triggerBrainOptimizationRun БЕЗ proposals — шаблонный ответ (без LLM интерпретации)
+      // Если есть proposals — старое поведение (полный JSON для LLM)
+      const proposals = data.result?.proposals || [];
+      if (toolName === 'triggerBrainOptimizationRun' && proposals.length === 0 && data.result?.formatted?.text) {
+        parts.push(data.result.formatted.text);
       } else {
-        parts.push(resultStr);
+        // Pretty print result, limit size (increased for large datasets like 50+ ads)
+        const resultStr = JSON.stringify(data.result, null, 2);
+        console.log(`[formatToolResults] ${toolName}: ${resultStr.length} chars, ads: ${data.result?.ads?.length || 0}, totals: ${JSON.stringify(data.result?.totals || {})}`);
+        if (resultStr.length > 50000) {
+          parts.push(resultStr.substring(0, 50000) + '\n... (данные обрезаны)');
+        } else {
+          parts.push(resultStr);
+        }
       }
     }
 

@@ -138,7 +138,11 @@ export function formatSummary(summary) {
 
   // Основные метрики за сегодня
   if (summary.today_total_spend !== undefined) {
-    lines.push(`Расход сегодня: $${summary.today_total_spend?.toFixed(2) || '0.00'}`);
+    // today_total_spend может быть числом или строкой (уже с .toFixed(2))
+    const spend = typeof summary.today_total_spend === 'number'
+      ? summary.today_total_spend.toFixed(2)
+      : summary.today_total_spend || '0.00';
+    lines.push(`Расход сегодня: $${spend}`);
   }
   if (summary.today_total_leads !== undefined) {
     lines.push(`Лидов сегодня: ${summary.today_total_leads || 0}`);
@@ -310,52 +314,49 @@ export function formatBrainMiniReport({ proposals, summary, context, adset_analy
  * Генерировать текстовый отчёт для отображения
  */
 export function generateTextReport({ proposals, summary, context, message }) {
+  // Если нет proposals — простой шаблонный ответ
+  if (!proposals || proposals.length === 0) {
+    const spend = summary?.today_total_spend;
+    const leads = summary?.today_total_leads;
+    const adsetsCount = summary?.total_adsets_analyzed || 0;
+
+    const spendText = typeof spend === 'number'
+      ? `$${spend.toFixed(2)}`
+      : (spend ? `$${spend}` : '—');
+
+    return `✅ Оптимизация не требуется
+
+Расход сегодня: ${spendText}
+Лидов: ${leads ?? '—'}
+Проанализировано групп: ${adsetsCount}
+
+Все показатели в норме или недостаточно данных для рекомендаций.`;
+  }
+
+  // Есть proposals — полный отчёт
   const lines = [];
 
-  // Заголовок
-  lines.push('=== Отчёт Brain Mini ===\n');
+  lines.push(`📋 Найдено ${proposals.length} рекомендаций`);
+  lines.push('');
 
-  // Сообщение
-  if (message) {
-    lines.push(message);
+  // Краткая статистика
+  if (summary) {
+    const spend = summary.today_total_spend;
+    const leads = summary.today_total_leads;
+    const spendText = typeof spend === 'number' ? `$${spend.toFixed(2)}` : (spend ? `$${spend}` : '—');
+    lines.push(`Расход сегодня: ${spendText} | Лидов: ${leads ?? '—'}`);
     lines.push('');
   }
 
-  // Контекст
-  if (context) {
-    const contextText = formatContext(context);
-    if (contextText) {
-      lines.push('--- Контекст ---');
-      lines.push(contextText);
-      lines.push('');
-    }
-  }
-
-  // Резюме
-  if (summary) {
-    const summaryText = formatSummary(summary);
-    if (summaryText) {
-      lines.push('--- Статистика ---');
-      lines.push(summaryText);
-      lines.push('');
-    }
-  }
-
   // Предложения
-  if (proposals?.length > 0) {
-    lines.push('--- Предложения ---');
-    proposals.forEach((p, i) => {
-      const formatted = formatProposal(p);
-      lines.push(`${i + 1}. ${formatted.entityName}`);
-      lines.push(`   ${formatted.action} — ${formatted.reason}`);
-      if (formatted.budgetDetails) {
-        lines.push(`   Бюджет: ${formatted.budgetDetails.current} → ${formatted.budgetDetails.new} (${formatted.budgetDetails.change})`);
-      }
-      lines.push(`   Приоритет: ${formatted.priority}, Оценка: ${formatted.rating}`);
-    });
-  } else {
-    lines.push('Оптимизация не требуется — все показатели в норме.');
-  }
+  proposals.forEach((p, i) => {
+    const formatted = formatProposal(p);
+    lines.push(`${i + 1}. ${formatted.entityName}`);
+    lines.push(`   ${formatted.action}`);
+    if (formatted.budgetDetails) {
+      lines.push(`   ${formatted.budgetDetails.current} → ${formatted.budgetDetails.new}`);
+    }
+  });
 
   return lines.join('\n');
 }

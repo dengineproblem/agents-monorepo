@@ -113,8 +113,8 @@ export function useOptimization() {
 
     const targetName = scope.directionName || scope.accountName;
     const message = (scope.directionId || scope.campaignId)
-      ? `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. Покажи предложения по оптимизации для "${targetName}".`
-      : `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. Покажи предложения по оптимизации для всего аккаунта "${scope.accountName}".`;
+      ? `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. ВАЖНО: После вызова выведи ТОЛЬКО содержимое поля formatted.text — это готовый отчёт для пользователя. НЕ добавляй своих комментариев, НЕ упоминай dry_run, proposals, plan, adset_id, Brain Mini и другие технические термины. Просто покажи текст из formatted.text как есть.`
+      : `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. ВАЖНО: После вызова выведи ТОЛЬКО содержимое поля formatted.text — это готовый отчёт для пользователя. НЕ добавляй своих комментариев, НЕ упоминай dry_run, proposals, plan, adset_id, Brain Mini и другие технические термины. Просто покажи текст из formatted.text как есть.`;
 
     // Инициализируем состояние
     const initialState = createInitialStreamingState();

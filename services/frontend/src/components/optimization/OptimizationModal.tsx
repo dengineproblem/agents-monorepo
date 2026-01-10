@@ -104,7 +104,7 @@ export function OptimizationModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Brain className="h-5 w-5 text-primary" />
-            Brain Mini Оптимизация
+            AI-оптимизация
           </DialogTitle>
           {subtitle && (
             <DialogDescription className="flex items-center gap-2">

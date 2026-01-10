@@ -11,6 +11,7 @@
  * - creative_metrics_history используется ТОЛЬКО для аудита/логирования
  */
 
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { logger } from './lib/logger.js';
 import { logScoringError } from './lib/errorLogger.js';
@@ -19,7 +20,8 @@ import {
   BUDGET_LIMITS,
   TIMEFRAME_WEIGHTS,
   TODAY_COMPENSATION,
-  VOLUME_THRESHOLDS
+  VOLUME_THRESHOLDS,
+  AD_EATER_THRESHOLDS
 } from './chatAssistant/shared/brainRules.js';
 
 const FB_API_VERSION = 'v23.0';
@@ -1105,6 +1107,248 @@ async function fetchAdsetsActions(adAccountId, accessToken, datePreset = 'last_7
   }
   
   return json.data || [];
+}
+
+/**
+ * Получить insights по всем активным ads
+ * Один batch-запрос вместо N отдельных для оптимизации API вызовов
+ * Включает retry при rate limit и graceful fallback при ошибках
+ *
+ * @param {string} adAccountId - ID рекламного аккаунта
+ * @param {string} accessToken - Токен доступа
+ * @param {number} maxRetries - Максимальное количество попыток (по умолчанию 2)
+ * @returns {Promise<Array>} Массив ads с метриками (пустой массив при ошибке)
+ */
+async function fetchAdsInsights(adAccountId, accessToken, maxRetries = 2) {
+  const normalizedId = normalizeAdAccountId(adAccountId);
+  const url = new URL(`https://graph.facebook.com/${FB_API_VERSION}/${normalizedId}/insights`);
+
+  url.searchParams.set('level', 'ad');
+  url.searchParams.set('date_preset', 'last_7d');
+  url.searchParams.set('filtering', JSON.stringify([
+    { field: 'ad.effective_status', operator: 'IN', value: ['ACTIVE'] }
+  ]));
+  url.searchParams.set('fields', [
+    'ad_id', 'ad_name', 'adset_id', 'adset_name',
+    'campaign_id', 'campaign_name', 'spend',
+    'impressions', 'clicks', 'ctr', 'actions'
+  ].join(','));
+  url.searchParams.set('limit', '500');
+  url.searchParams.set('access_token', accessToken);
+
+  const startTime = Date.now();
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      logger.debug({
+        where: 'fetchAdsInsights',
+        attempt,
+        ad_account_id: normalizedId
+      }, '[fetchAdsInsights] Fetching ads insights...');
+
+      const res = await fetch(url.toString());
+      const duration = Date.now() - startTime;
+
+      if (res.ok) {
+        const json = await res.json();
+        const adsCount = json.data?.length || 0;
+
+        logger.info({
+          where: 'fetchAdsInsights',
+          ad_account_id: normalizedId,
+          ads_count: adsCount,
+          duration_ms: duration,
+          attempt
+        }, `[fetchAdsInsights] Success: ${adsCount} ads fetched in ${duration}ms`);
+
+        return json.data || [];
+      }
+
+      // Rate limit — ждём и повторяем
+      if (res.status === 429 && attempt < maxRetries) {
+        const retryAfter = parseInt(res.headers.get('retry-after') || '5', 10);
+        logger.warn({
+          where: 'fetchAdsInsights',
+          status: 429,
+          retry_after_sec: retryAfter,
+          attempt
+        }, `[fetchAdsInsights] Rate limited, waiting ${retryAfter}s before retry...`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        continue;
+      }
+
+      // Другие ошибки
+      const errText = await res.text();
+      logger.error({
+        where: 'fetchAdsInsights',
+        status: res.status,
+        error: errText.substring(0, 500),
+        duration_ms: duration,
+        attempt
+      }, `[fetchAdsInsights] FB API error: ${res.status}`);
+
+      // Graceful fallback — возвращаем пустой массив вместо throw
+      return [];
+
+    } catch (fetchError) {
+      const duration = Date.now() - startTime;
+      logger.error({
+        where: 'fetchAdsInsights',
+        error: String(fetchError),
+        duration_ms: duration,
+        attempt
+      }, `[fetchAdsInsights] Fetch failed: ${fetchError.message}`);
+
+      // Последняя попытка — graceful fallback
+      if (attempt >= maxRetries) {
+        return [];
+      }
+
+      // Ждём перед повтором
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Анализирует ads для поиска "пожирателей" — объявлений,
+ * которые тратят бюджет без результата
+ *
+ * @param {Array} adsInsights - Массив ads с метриками из fetchAdsInsights
+ * @param {Object} options - Опции анализа
+ * @param {number} options.targetCPL - Целевой CPL (в долларах)
+ * @param {Map} options.adsetSpendMap - Map<adset_id, total_spend> для расчёта доли
+ * @param {Object} options.thresholds - Пороги из AD_EATER_THRESHOLDS
+ * @returns {Array} Массив "пожирателей" с причинами и приоритетом
+ */
+function analyzeAdsForEaters(adsInsights, options = {}) {
+  const { targetCPL, adsetSpendMap, thresholds = AD_EATER_THRESHOLDS } = options;
+  const eaters = [];
+
+  // Статистика для логирования
+  let skippedLowSpend = 0;
+  let skippedLowImpressions = 0;
+  let analyzedCount = 0;
+
+  logger.debug({
+    where: 'analyzeAdsForEaters',
+    total_ads: adsInsights.length,
+    target_cpl: targetCPL,
+    thresholds: {
+      min_spend: thresholds.MIN_SPEND_FOR_ANALYSIS,
+      min_impressions: thresholds.MIN_IMPRESSIONS,
+      cpl_multiplier: thresholds.CPL_CRITICAL_MULTIPLIER,
+      spend_share: thresholds.SPEND_SHARE_CRITICAL
+    }
+  }, '[analyzeAdsForEaters] Starting analysis...');
+
+  for (const ad of adsInsights) {
+    const spend = parseFloat(ad.spend || 0);
+    const leads = extractLeads(ad.actions);
+    const impressions = parseInt(ad.impressions || 0);
+
+    // Пропускаем ads с малым расходом — недостаточно данных для выводов
+    if (spend < thresholds.MIN_SPEND_FOR_ANALYSIS) {
+      skippedLowSpend++;
+      continue;
+    }
+
+    // Пропускаем ads с малыми показами
+    if (impressions < thresholds.MIN_IMPRESSIONS) {
+      skippedLowImpressions++;
+      continue;
+    }
+
+    analyzedCount++;
+    const reasons = [];
+    let priority = 'medium';
+    let isCritical = false;
+
+    // Критерий 1: Потратил $X, но 0 лидов (главный критерий пожирателя)
+    if (leads === 0) {
+      reasons.push(`Потрачено $${spend.toFixed(2)}, но 0 лидов`);
+      priority = 'high';
+
+      // Если занимает >50% бюджета адсета — критично
+      const adsetSpend = adsetSpendMap?.get(ad.adset_id) || 0;
+      if (adsetSpend > 0 && spend / adsetSpend >= thresholds.SPEND_SHARE_CRITICAL) {
+        const sharePercent = Math.round(spend / adsetSpend * 100);
+        reasons.push(`Занимает ${sharePercent}% бюджета адсета`);
+        priority = 'critical';
+        isCritical = true;
+      }
+    }
+
+    // Критерий 2: CPL > 3x от таргета (есть лиды, но слишком дорого)
+    if (leads > 0 && targetCPL && targetCPL > 0) {
+      const adCPL = spend / leads;
+      const multiplier = adCPL / targetCPL;
+      if (multiplier >= thresholds.CPL_CRITICAL_MULTIPLIER) {
+        reasons.push(`CPL $${adCPL.toFixed(2)} = ${multiplier.toFixed(1)}x от цели $${targetCPL.toFixed(2)}`);
+        priority = 'high';
+        isCritical = true;
+      }
+    }
+
+    // Если есть причины — это пожиратель
+    if (reasons.length > 0) {
+      const eater = {
+        ad_id: ad.ad_id,
+        ad_name: ad.ad_name,
+        adset_id: ad.adset_id,
+        adset_name: ad.adset_name,
+        campaign_id: ad.campaign_id,
+        campaign_name: ad.campaign_name,
+        spend,
+        leads,
+        impressions,
+        cpl: leads > 0 ? spend / leads : null,
+        ctr: parseFloat(ad.ctr || 0),
+        reasons,
+        priority,
+        is_critical: isCritical
+      };
+
+      // Логируем каждого найденного пожирателя
+      logger.info({
+        where: 'analyzeAdsForEaters',
+        ad_id: eater.ad_id,
+        ad_name: eater.ad_name?.substring(0, 50),
+        adset_id: eater.adset_id,
+        spend: eater.spend,
+        leads: eater.leads,
+        priority: eater.priority,
+        is_critical: eater.is_critical,
+        reasons: eater.reasons
+      }, `[analyzeAdsForEaters] 🔥 EATER FOUND: ${eater.ad_name?.substring(0, 30)} - $${spend.toFixed(2)}, ${leads} leads, priority=${priority}`);
+
+      eaters.push(eater);
+    }
+  }
+
+  // Сортируем: critical → high → medium, затем по spend (убывание)
+  const priorityOrder = { critical: 0, high: 1, medium: 2 };
+  const sortedEaters = eaters.sort((a, b) =>
+    priorityOrder[a.priority] - priorityOrder[b.priority] || b.spend - a.spend
+  );
+
+  // Итоговый лог
+  const totalWastedSpend = sortedEaters.reduce((sum, e) => sum + e.spend, 0);
+  logger.info({
+    where: 'analyzeAdsForEaters',
+    total_ads: adsInsights.length,
+    skipped_low_spend: skippedLowSpend,
+    skipped_low_impressions: skippedLowImpressions,
+    analyzed: analyzedCount,
+    eaters_found: sortedEaters.length,
+    critical_count: sortedEaters.filter(e => e.is_critical).length,
+    high_count: sortedEaters.filter(e => e.priority === 'high').length,
+    total_wasted_spend: totalWastedSpend.toFixed(2)
+  }, `[analyzeAdsForEaters] Analysis complete: ${sortedEaters.length} eaters found, $${totalWastedSpend.toFixed(2)} wasted`);
+
+  return sortedEaters;
 }
 
 /**
@@ -2493,14 +2737,15 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       message: 'Запрашиваем today, yesterday, daily (14d), actions (7d)'
     });
 
-    let todayData, yesterdayData, dailyData, actionsData, adsetsConfigData;
+    let todayData, yesterdayData, dailyData, actionsData, adsetsConfigData, adsInsightsData;
     try {
-      [todayData, yesterdayData, dailyData, actionsData, adsetsConfigData] = await Promise.all([
+      [todayData, yesterdayData, dailyData, actionsData, adsetsConfigData, adsInsightsData] = await Promise.all([
         fetchAdsets(ad_account_id, access_token, 'today'),
         fetchAdsets(ad_account_id, access_token, 'yesterday'),
         fetchAdsetsDaily(ad_account_id, access_token, 14),  // 14 дней для трендов
         fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),  // actions за 7 дней
-        fetchAdsetsConfig(ad_account_id, access_token, log)  // конфиг с бюджетами
+        fetchAdsetsConfig(ad_account_id, access_token, log),  // конфиг с бюджетами
+        fetchAdsInsights(ad_account_id, access_token)  // ads insights для анализа пожирателей
       ]);
     } catch (fbError) {
       log.error({
@@ -3312,6 +3557,80 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     }
 
     // ========================================
+    // ЧАСТЬ 4.3.5: АНАЛИЗ ADS-ПОЖИРАТЕЛЕЙ
+    // ========================================
+
+    let adEaters = [];
+    if (adsInsightsData && adsInsightsData.length > 0) {
+      // Собираем spend по адсетам для расчёта доли бюджета
+      const adsetSpendMap = new Map();
+      for (const adset of todayData) {
+        adsetSpendMap.set(adset.adset_id, parseFloat(adset.spend || 0));
+      }
+
+      // Целевой CPL из настроек аккаунта
+      const effectiveTargetCPL = adAccountSettings?.default_cpl_target_cents
+        ? adAccountSettings.default_cpl_target_cents / 100
+        : null;
+
+      // Анализируем ads на наличие пожирателей
+      adEaters = analyzeAdsForEaters(adsInsightsData, {
+        targetCPL: effectiveTargetCPL,
+        adsetSpendMap
+      });
+
+      log.info({
+        where: 'interactive_brain',
+        phase: 'ad_eaters_analysis',
+        ads_checked: adsInsightsData.length,
+        eaters_found: adEaters.length,
+        critical_count: adEaters.filter(e => e.is_critical).length,
+        target_cpl_used: effectiveTargetCPL,
+        message: `Найдено ${adEaters.length} объявлений-пожирателей`
+      });
+
+      // Генерируем proposals для pauseAd
+      for (const eater of adEaters) {
+        // Находим информацию о direction для этого adset
+        const adsetAnalysisEntry = adsetAnalysis.find(a => a.adset_id === eater.adset_id);
+        const isExternalCampaign = !adsetAnalysisEntry?.direction_id;
+
+        proposals.push({
+          action: 'pauseAd',
+          priority: eater.priority,
+          entity_type: 'ad',
+          entity_id: eater.ad_id,
+          entity_name: eater.ad_name,
+          adset_id: eater.adset_id,
+          adset_name: eater.adset_name,
+          campaign_id: eater.campaign_id,
+          campaign_type: isExternalCampaign ? 'external' : 'internal',
+          direction_id: adsetAnalysisEntry?.direction_id || null,
+          direction_name: adsetAnalysisEntry?.direction_name || null,
+          health_score: null,  // На уровне ad не рассчитываем HS
+          hs_class: null,
+          reason: `«${eater.ad_name}»: ${eater.reasons.join('. ')}. Рекомендую остановить объявление.`,
+          confidence: eater.is_critical ? 0.9 : 0.75,
+          suggested_action_params: {
+            current_spend: eater.spend,
+            current_leads: eater.leads,
+            current_cpl: eater.cpl,
+            current_ctr: eater.ctr
+          },
+          metrics: {
+            spend: eater.spend,
+            leads: eater.leads,
+            cpl: eater.cpl,
+            ctr: eater.ctr,
+            impressions: eater.impressions,
+            target_cpl: effectiveTargetCPL,
+            metrics_source: 'last_7d'
+          }
+        });
+      }
+    }
+
+    // ========================================
     // ЧАСТЬ 4.4: ВЫЗОВ LLM ДЛЯ ГЕНЕРАЦИИ PROPOSALS (NEW!)
     // ========================================
 
@@ -3448,6 +3767,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
               proposals_by_action: {
                 updateBudget: llmProposals.filter(p => p.action === 'updateBudget').length,
                 pauseAdSet: llmProposals.filter(p => p.action === 'pauseAdSet').length,
+                pauseAd: llmProposals.filter(p => p.action === 'pauseAd').length,
                 createAdSet: llmProposals.filter(p => p.action === 'createAdSet').length,
                 review: llmProposals.filter(p => p.action === 'review').length
               },
@@ -3698,6 +4018,10 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     const externalAdsets = adsetAnalysis.filter(a => a.campaign_type === 'external');
     const internalAdsets = adsetAnalysis.filter(a => a.campaign_type === 'internal');
 
+    // Фильтруем todayData только по проанализированным адсетам (для точных метрик)
+    const analyzedAdsetIds = new Set(adsetAnalysis.map(a => a.adset_id));
+    const analyzedTodayData = todayData.filter(a => analyzedAdsetIds.has(a.adset_id));
+
     const summary = {
       total_adsets_analyzed: adsetAnalysis.length,
       skipped_adsets_count: skippedAdsets.length,
@@ -3735,6 +4059,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       } : null,
       proposals_by_action: {
         pauseAdSet: proposals.filter(p => p.action === 'pauseAdSet').length,
+        pauseAd: proposals.filter(p => p.action === 'pauseAd').length,
         updateBudget: proposals.filter(p => p.action === 'updateBudget').length,
         createAdSet: proposals.filter(p => p.action === 'createAdSet').length,
         review: proposals.filter(p => p.action === 'review').length
@@ -3744,12 +4069,19 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         internal: proposals.filter(p => p.campaign_type === 'internal').length,
         external: proposals.filter(p => p.campaign_type === 'external').length
       },
+      // Статистика по ads-пожирателям
+      ad_eaters: {
+        total: adEaters.length,
+        critical: adEaters.filter(e => e.is_critical).length,
+        wasted_spend: adEaters.reduce((sum, e) => sum + e.spend, 0).toFixed(2)
+      },
       brain_report_age_hours: brainReportAge,
-      today_total_spend: todayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
+      // ВАЖНО: считаем только по проанализированным адсетам (analyzedTodayData), а не по всем
+      today_total_spend: analyzedTodayData.reduce((sum, a) => sum + parseFloat(a.spend || 0), 0).toFixed(2),
       // ВАЖНО: используем extractLeads() для корректного подсчёта WhatsApp/messaging лидов
       // (onsite_conversion.total_messaging_connection + lead_grouped + pixel_lead)
-      today_total_leads: todayData.reduce((sum, a) => sum + extractLeads(a.actions), 0),
-      today_total_link_clicks: todayData.reduce((sum, a) => sum + getActionValue(a.actions, 'link_click'), 0),
+      today_total_leads: analyzedTodayData.reduce((sum, a) => sum + extractLeads(a.actions), 0),
+      today_total_link_clicks: analyzedTodayData.reduce((sum, a) => sum + getActionValue(a.actions, 'link_click'), 0),
       // LLM integration (NEW!)
       llm_used: llmUsed,
       llm_error: llmError
@@ -3765,7 +4097,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       duration_ms: duration,
       status: 'proposals_generated',
       proposals_count: proposals.length,
-      proposals_json: proposals
+      proposals_json: proposals,
+      idempotency_key: crypto.randomUUID()
     });
 
     log.info({
@@ -3844,7 +4177,8 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       completed_at: new Date().toISOString(),
       duration_ms: duration,
       status: 'error',
-      error_message: String(error)
+      error_message: String(error),
+      idempotency_key: crypto.randomUUID()
     });
 
     throw error;
