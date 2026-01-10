@@ -12,6 +12,7 @@ import {
   type AdStats,
   type Direction,
 } from '../pages/MultiAccountDashboard';
+import type { OptimizationScope } from '@/hooks/useOptimization';
 
 // Logger placeholder
 const logger = {
@@ -46,9 +47,11 @@ function getUserIdFromStorage(): string | null {
 
 interface HierarchicalCampaignTableProps {
   accountId?: string;
+  accountName?: string;
+  onOptimize?: (scope: OptimizationScope) => void;
 }
 
-const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ accountId }) => {
+const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ accountId, accountName, onOptimize }) => {
   const {
     dateRange,
     currentAdAccountId,
@@ -352,6 +355,9 @@ const HierarchicalCampaignTable: React.FC<HierarchicalCampaignTableProps> = ({ a
               adsLoading={adsLoading}
               adsData={adsData}
               directions={directions}
+              accountId={effectiveAccountId}
+              accountName={accountName}
+              onOptimize={onOptimize}
             />
           ))}
         </div>

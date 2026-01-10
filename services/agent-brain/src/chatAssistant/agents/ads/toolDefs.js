@@ -307,9 +307,17 @@ export const AdsToolDefs = {
   },
 
   triggerBrainOptimizationRun: {
-    description: 'Запустить принудительный цикл Brain Agent оптимизации ПРЯМО СЕЙЧАС. ОПАСНАЯ ОПЕРАЦИЯ — агент может изменить бюджеты, остановить или запустить адсеты.',
+    description: `Запустить принудительный цикл Brain Agent оптимизации ПРЯМО СЕЙЧАС. ОПАСНАЯ ОПЕРАЦИЯ — агент может изменить бюджеты, остановить или запустить адсеты.
+
+Варианты использования:
+- БЕЗ параметров: оптимизация ВСЕГО аккаунта
+- direction_id: оптимизация конкретного направления (internal кампании)
+- campaign_id: оптимизация конкретной кампании (для external кампаний БЕЗ direction)
+
+ВАЖНО: campaign_id работает самостоятельно без direction_id для внешних кампаний!`,
     schema: z.object({
-      direction_id: uuidSchema.optional().describe('UUID направления для оптимизации (опционально — если не указано, оптимизирует весь аккаунт)'),
+      direction_id: uuidSchema.optional().describe('UUID направления для оптимизации (для internal кампаний)'),
+      campaign_id: z.string().optional().describe('Facebook Campaign ID для оптимизации (для external кампаний без direction)'),
       dry_run: dryRunOption.describe('Preview mode — показать что будет сделано без выполнения'),
       reason: z.string().optional().describe('Причина запуска (для логирования)')
     }),

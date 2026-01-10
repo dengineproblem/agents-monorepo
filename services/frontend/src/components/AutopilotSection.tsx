@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -35,6 +36,7 @@ interface BrainExecution {
   status: string;
   duration_ms: number;
   created_at: string;
+  execution_mode?: 'batch' | 'manual_trigger' | 'interactive';
 }
 
 interface AutopilotSectionProps {
@@ -229,6 +231,11 @@ export function AutopilotSection({
                       <span className="text-xs text-muted-foreground">
                         ({formatDistanceToNow(new Date(exec.created_at), { addSuffix: true, locale: ru })})
                       </span>
+                      {exec.execution_mode === 'manual_trigger' && (
+                        <Badge variant="outline" className="text-xs px-1.5 py-0 h-5">
+                          Brain Mini
+                        </Badge>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
                       {exec.report_text && (

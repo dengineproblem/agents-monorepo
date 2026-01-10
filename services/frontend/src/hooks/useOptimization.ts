@@ -75,7 +75,10 @@ export function useOptimization() {
    * Запустить процесс оптимизации
    */
   const startOptimization = useCallback(async (scope: OptimizationScope) => {
+    console.log('[Optimization] startOptimization called with scope:', scope);
+
     const userAccountId = getUserAccountId();
+    console.log('[Optimization] userAccountId:', userAccountId);
     if (!userAccountId) {
       toast.error('Пользователь не авторизован');
       return;
@@ -270,12 +273,17 @@ export function useOptimization() {
   }, []);
 
   /**
-   * Одобрить и выполнить план
+   * Одобрить и выполнить выбранные шаги
    */
-  const approveAll = useCallback(async () => {
+  const approveSelected = useCallback(async (stepIndices: number[]) => {
     const userAccountId = getUserAccountId();
     if (!userAccountId || !state.conversationId || !state.scope) {
       toast.error('Недостаточно данных для выполнения');
+      return;
+    }
+
+    if (stepIndices.length === 0) {
+      toast.error('Выберите хотя бы один шаг');
       return;
     }
 
@@ -286,11 +294,12 @@ export function useOptimization() {
         conversationId: state.conversationId,
         userAccountId,
         adAccountId: state.scope.accountId,
-        executeAll: true,
+        stepIndices, // Передаём массив индексов
       });
 
       if (result.success) {
-        toast.success('План успешно выполнен');
+        const count = stepIndices.length;
+        toast.success(`Выполнено ${count} ${count === 1 ? 'действие' : count < 5 ? 'действия' : 'действий'}`);
         closeModal();
       } else {
         toast.error(result.message || 'Ошибка при выполнении плана');
@@ -314,7 +323,7 @@ export function useOptimization() {
   return {
     state,
     startOptimization,
-    approveAll,
+    approveSelected,
     reject,
     close: closeModal,
   };

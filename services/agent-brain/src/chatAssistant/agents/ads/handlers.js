@@ -30,6 +30,12 @@ import {
 import { attachRefs, buildEntityMap } from '../../shared/entityLinker.js';
 import { getUsdToKzt } from '../../shared/currencyRate.js';
 import { logger } from '../../../lib/logger.js';
+import {
+  formatSummary,
+  formatContext,
+  formatProposal,
+  generateTextReport
+} from '../../shared/reportFormatter.js';
 
 export const adsHandlers = {
   // ============================================================
@@ -2205,6 +2211,10 @@ export const adsHandlers = {
             entity_id: p.entity_id,
             entity_name: p.entity_name,
             direction_id: p.direction_id,
+            // Map entity_id to specific ID fields for tool handlers
+            ...(p.entity_type === 'adset' && { adset_id: p.entity_id }),
+            ...(p.entity_type === 'ad' && { ad_id: p.entity_id }),
+            ...(p.entity_type === 'campaign' && { campaign_id: p.entity_id }),
             ...p.suggested_action_params
           },
           description: p.reason,
@@ -2220,26 +2230,45 @@ export const adsHandlers = {
       } : null;
 
       // Return proposals for user confirmation
-      // Добавляем статистику по типам кампаний в message
-      const internalCount = result.summary?.by_campaign_type?.internal || 0;
-      const externalCount = result.summary?.by_campaign_type?.external || 0;
-      const campaignTypeInfo = externalCount > 0
-        ? ` (${internalCount} internal, ${externalCount} external)`
-        : '';
+      // Форматируем данные для человекочитаемого отчёта
+      const proposalsCount = result.proposals?.length || 0;
+      const adsetsCount = result.summary?.total_adsets_analyzed || 0;
+
+      // Человекочитаемое сообщение (без технических деталей)
+      const humanMessage = proposalsCount > 0
+        ? `Brain Agent предлагает ${proposalsCount} ${proposalsCount === 1 ? 'действие' : proposalsCount < 5 ? 'действия' : 'действий'} для оптимизации. Проанализировано ${adsetsCount} ${adsetsCount === 1 ? 'группа' : adsetsCount < 5 ? 'группы' : 'групп'}.`
+        : `Brain Agent не нашёл действий для оптимизации. Проанализировано ${adsetsCount} ${adsetsCount === 1 ? 'группа' : adsetsCount < 5 ? 'группы' : 'групп'}.`;
+
+      // Форматированный отчёт для пользователя
+      const formattedReport = {
+        summary: formatSummary(result.summary),
+        context: formatContext(result.context),
+        proposals: result.proposals?.map(formatProposal) || [],
+        // Генерируем текстовый отчёт
+        text: generateTextReport({
+          proposals: result.proposals,
+          summary: result.summary,
+          context: result.context,
+          message: humanMessage
+        })
+      };
 
       return {
         success: true,
         mode: 'interactive',
-        dry_run: !!dry_run,  // Передаём флаг dry_run в ответ
-        message: result.proposals?.length > 0
-          ? `Brain Agent предлагает ${result.proposals.length} действий для оптимизации. Проанализировано ${result.summary?.total_adsets_analyzed || 0} адсетов${campaignTypeInfo}.`
-          : `Brain Agent не нашёл действий для оптимизации. Проанализировано ${result.summary?.total_adsets_analyzed || 0} адсетов${campaignTypeInfo}.`,
+        dry_run: !!dry_run,
+        message: humanMessage,
         proposals: result.proposals || [],
         plan,  // Plan в формате frontend
-        summary: result.summary,
-        adset_analysis: result.adset_analysis,
-        context: result.context,
-        instructions: result.proposals?.length > 0
+        // Форматированные данные для UI
+        formatted: formattedReport,
+        // Технические данные (для отладки, можно скрыть в UI)
+        _debug: {
+          summary: result.summary,
+          adset_analysis: result.adset_analysis,
+          context: result.context
+        },
+        instructions: proposalsCount > 0
           ? 'Подтвердите план для выполнения действий.'
           : null
       };

@@ -14,6 +14,8 @@ import CapiEventsSection from '../components/CapiEventsSection';
 
 import { VideoUpload } from '../components/VideoUpload';
 import { useAppContext } from '../context/AppContext';
+import { useOptimization } from '@/hooks/useOptimization';
+import { OptimizationModal } from '@/components/optimization';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -45,6 +47,9 @@ const Dashboard: React.FC = () => {
     adAccounts: contextAdAccounts,
     currentAdAccountId,
   } = useAppContext();
+
+  // Optimization hook for Brain Mini
+  const optimization = useOptimization();
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [webhookResult, setWebhookResult] = useState<string>('');
@@ -521,7 +526,11 @@ const Dashboard: React.FC = () => {
         
             <div className="mb-6">
               <h2 className="text-xl font-semibold mb-4">{t('campaign.adCampaigns')}</h2>
-              <HierarchicalCampaignTable />
+              <HierarchicalCampaignTable
+                accountId={currentAdAccountId || undefined}
+                accountName={contextAdAccounts?.find(a => a.id === currentAdAccountId)?.name}
+                onOptimize={optimization.startOptimization}
+              />
             </div>
           </>
         )}
@@ -537,6 +546,21 @@ const Dashboard: React.FC = () => {
           setShowFacebookConnectModal(false);
           window.location.reload();
         }}
+      />
+
+      {/* Brain Mini Optimization Modal */}
+      <OptimizationModal
+        open={optimization.state.isOpen}
+        onClose={optimization.close}
+        scope={optimization.state.scope}
+        streamingState={optimization.state.streamingState}
+        plan={optimization.state.plan}
+        content={optimization.state.content}
+        isLoading={optimization.state.isLoading}
+        error={optimization.state.error}
+        onApprove={optimization.approveSelected}
+        onReject={optimization.reject}
+        isExecuting={optimization.state.isExecuting}
       />
     </div>
   );

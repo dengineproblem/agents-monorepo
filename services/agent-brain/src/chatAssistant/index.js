@@ -344,6 +344,70 @@ export async function executeFullPlan({ conversationId, userAccountId, adAccount
 }
 
 /**
+ * Execute only selected plan steps
+ */
+export async function executeSelectedSteps({ conversationId, stepIndices, userAccountId, adAccountId }) {
+  logger.info({
+    where: 'executeSelectedSteps',
+    phase: 'start',
+    conversationId,
+    stepIndices,
+    userAccountId,
+    adAccountId
+  }, `Executing selected steps: [${stepIndices.join(', ')}]`);
+
+  const { unifiedStore } = await import('./stores/unifiedStore.js');
+  const { planExecutor } = await import('./planExecutor.js');
+
+  const pendingPlan = await unifiedStore.getPendingPlan(conversationId);
+
+  if (!pendingPlan) {
+    logger.error({
+      where: 'executeSelectedSteps',
+      conversationId
+    }, 'No pending plan found for conversation');
+    throw new Error('No pending plan found');
+  }
+
+  logger.info({
+    where: 'executeSelectedSteps',
+    phase: 'plan_found',
+    planId: pendingPlan.id,
+    planStatus: pendingPlan.status,
+    totalSteps: pendingPlan.plan_json?.steps?.length || 0
+  }, `Found pending plan with ${pendingPlan.plan_json?.steps?.length || 0} steps`);
+
+  await unifiedStore.approvePlan(pendingPlan.id);
+
+  const result = await planExecutor.executeSelectedSteps({
+    planId: pendingPlan.id,
+    stepIndices,
+    toolContext: { userAccountId, adAccountId }
+  });
+
+  logger.info({
+    where: 'executeSelectedSteps',
+    phase: 'execution_complete',
+    planId: pendingPlan.id,
+    success: result.success,
+    successCount: result.successCount,
+    totalSteps: result.totalSteps,
+    summary: result.summary
+  }, `Execution complete: ${result.summary}`);
+
+  const count = stepIndices.length;
+  const stepsWord = count === 1 ? 'шаг' : count < 5 ? 'шага' : 'шагов';
+  await unifiedStore.addMessage(conversationId, {
+    role: 'system',
+    content: result.success
+      ? `✅ Выполнено ${count} ${stepsWord}: ${result.summary}`
+      : `⚠️ Частично выполнено: ${result.summary}`
+  });
+
+  return result;
+}
+
+/**
  * Register routes on Fastify instance
  */
 export function registerChatRoutes(fastify) {
@@ -547,6 +611,20 @@ export function registerChatRoutes(fastify) {
         debugLogsJson: layerLogger.isEnabled() ? layerLogger.getAllLogs() : null
       });
 
+      // Create pending plan for web mode if plan exists with steps
+      if (finalPlan && finalPlan.steps && finalPlan.steps.length > 0 && mode === 'plan') {
+        const { unifiedStore } = await import('./stores/unifiedStore.js');
+        await unifiedStore.createPendingPlan(
+          conversation.id,
+          finalPlan,
+          {
+            source: 'web',
+            agent: finalAgent
+          }
+        );
+        logger.info({ conversationId: conversation.id, stepsCount: finalPlan.steps.length }, 'Created pending plan for web');
+      }
+
       layerLogger.end(11, { messageId: savedMessage?.id, logsCount: layerLogger.getAllLogs().length });
 
       reply.raw.end();
@@ -666,7 +744,19 @@ export function registerChatRoutes(fastify) {
   // Execute plan action
   fastify.post('/api/brain/conversations/:id/execute', async (request, reply) => {
     const { id } = request.params;
-    const { userAccountId, adAccountId, actionIndex, executeAll } = request.body;
+    const { userAccountId, adAccountId, actionIndex, stepIndices, executeAll } = request.body;
+
+    logger.info({
+      where: 'execute_plan_endpoint',
+      phase: 'request_received',
+      conversationId: id,
+      userAccountId,
+      adAccountId,
+      actionIndex,
+      stepIndices,
+      executeAll,
+      mode: stepIndices?.length > 0 ? 'selected_steps' : executeAll ? 'full_plan' : 'single_action'
+    }, `Execute plan request: ${stepIndices?.length > 0 ? `selected ${stepIndices.length} steps` : executeAll ? 'full plan' : `action ${actionIndex}`}`);
 
     if (!userAccountId) {
       return reply.code(400).send({ error: 'userAccountId is required' });
@@ -675,7 +765,17 @@ export function registerChatRoutes(fastify) {
     try {
       let result;
 
-      if (executeAll) {
+      if (stepIndices && Array.isArray(stepIndices) && stepIndices.length > 0) {
+        // Новый режим: выполнить только выбранные шаги
+        logger.info({ conversationId: id, stepIndices }, 'Executing selected steps');
+        result = await executeSelectedSteps({
+          conversationId: id,
+          stepIndices,
+          userAccountId,
+          adAccountId
+        });
+      } else if (executeAll) {
+        logger.info({ conversationId: id }, 'Executing full plan');
         result = await executeFullPlan({
           conversationId: id,
           userAccountId,
@@ -689,7 +789,7 @@ export function registerChatRoutes(fastify) {
           adAccountId
         });
       } else {
-        return reply.code(400).send({ error: 'actionIndex or executeAll required' });
+        return reply.code(400).send({ error: 'actionIndex, stepIndices or executeAll required' });
       }
 
       return reply.send(result);

@@ -33,7 +33,7 @@ export async function autopilotRoutes(app: FastifyInstance) {
 
       let query = supabase
         .from('brain_executions')
-        .select('id, user_account_id, account_id, plan_json, actions_json, report_text, status, duration_ms, created_at')
+        .select('id, user_account_id, account_id, plan_json, actions_json, report_text, status, duration_ms, created_at, execution_mode')
         .eq('user_account_id', userAccountId);
 
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)

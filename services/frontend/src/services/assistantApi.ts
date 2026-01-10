@@ -82,8 +82,9 @@ export interface ExecutePlanParams {
   conversationId: string;
   userAccountId: string;
   adAccountId?: string;
-  actionIndex?: number;
-  executeAll?: boolean;
+  actionIndex?: number;     // Один конкретный шаг (legacy)
+  stepIndices?: number[];   // Массив выбранных шагов
+  executeAll?: boolean;     // Все шаги (legacy)
 }
 
 // ============================================================
@@ -491,6 +492,7 @@ export async function executePlan(params: ExecutePlanParams): Promise<{
         userAccountId: params.userAccountId,
         adAccountId: params.adAccountId,
         actionIndex: params.actionIndex,
+        stepIndices: params.stepIndices,
         executeAll: params.executeAll,
       }),
     }

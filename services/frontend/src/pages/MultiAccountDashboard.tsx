@@ -1087,7 +1087,7 @@ const MultiAccountDashboard: React.FC = () => {
         content={optimization.state.content}
         isLoading={optimization.state.isLoading}
         error={optimization.state.error}
-        onApprove={optimization.approveAll}
+        onApprove={optimization.approveSelected}
         onReject={optimization.reject}
         isExecuting={optimization.state.isExecuting}
       />

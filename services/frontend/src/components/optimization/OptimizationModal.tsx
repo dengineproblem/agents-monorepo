@@ -1,3 +1,4 @@
+import { useState, useCallback, useEffect } from 'react';
 import { Brain, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import {
   Dialog,
@@ -10,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Checkbox } from '@/components/ui/checkbox';
 import { StreamingMessage, type StreamingState } from '@/components/assistant/StreamingMessage';
 import type { Plan } from '@/services/assistantApi';
 import type { OptimizationScope } from '@/hooks/useOptimization';
@@ -24,7 +26,7 @@ interface OptimizationModalProps {
   content: string | null; // Текстовый ответ от AI
   isLoading: boolean;
   error: string | null;
-  onApprove: () => void;
+  onApprove: (stepIndices: number[]) => void; // Массив выбранных индексов
   onReject: () => void;
   isExecuting: boolean;
 }
@@ -45,11 +47,51 @@ export function OptimizationModal({
   onReject,
   isExecuting,
 }: OptimizationModalProps) {
+  // Состояние для выбранных шагов
+  const [selectedSteps, setSelectedSteps] = useState<Set<number>>(new Set());
+
+  // Количество шагов и выбранных
+  const stepsCount = plan?.steps?.length ?? 0;
+  const selectedCount = selectedSteps.size;
+  const allSelected = stepsCount > 0 && selectedCount === stepsCount;
+
+  // Переключить выбор шага
+  const toggleStep = useCallback((index: number) => {
+    setSelectedSteps(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  }, []);
+
+  // Выбрать/снять все
+  const toggleAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedSteps(new Set());
+    } else {
+      setSelectedSteps(new Set(Array.from({ length: stepsCount }, (_, i) => i)));
+    }
+  }, [allSelected, stepsCount]);
+
+  // Сбросить выбор при смене плана
+  useEffect(() => {
+    if (plan?.steps) {
+      // По умолчанию выбираем все шаги
+      setSelectedSteps(new Set(Array.from({ length: plan.steps.length }, (_, i) => i)));
+    } else {
+      setSelectedSteps(new Set());
+    }
+  }, [plan]);
+
   // Не рендерим Dialog пока не открыт
   if (!open) return null;
 
   const hasSteps = plan?.steps && plan.steps.length > 0;
-  const showApproveButtons = !isLoading && !error && hasSteps;
+  const showApproveButtons = !isLoading && !error && hasSteps && selectedCount > 0;
 
   // Subtitle based on scope
   const subtitle = scope?.directionId
@@ -114,11 +156,28 @@ export function OptimizationModal({
               {/* Steps */}
               {hasSteps ? (
                 <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    Предлагаемые действия ({plan.steps.length}):
-                  </p>
+                  {/* Выбрать всё */}
+                  <div className="flex items-center gap-2 pb-2 border-b">
+                    <Checkbox
+                      id="select-all"
+                      checked={allSelected}
+                      onCheckedChange={toggleAll}
+                    />
+                    <label
+                      htmlFor="select-all"
+                      className="text-sm font-medium cursor-pointer select-none"
+                    >
+                      {allSelected ? 'Снять выбор' : 'Выбрать всё'} ({selectedCount}/{stepsCount})
+                    </label>
+                  </div>
                   {plan.steps.map((step, index) => (
-                    <PlanStepItem key={index} step={step} index={index} />
+                    <PlanStepItem
+                      key={index}
+                      step={step}
+                      index={index}
+                      checked={selectedSteps.has(index)}
+                      onToggle={() => toggleStep(index)}
+                    />
                   ))}
                 </div>
               ) : (
@@ -162,7 +221,10 @@ export function OptimizationModal({
           </Button>
 
           {showApproveButtons && (
-            <Button onClick={onApprove} disabled={isExecuting}>
+            <Button
+              onClick={() => onApprove(Array.from(selectedSteps).sort((a, b) => a - b))}
+              disabled={isExecuting}
+            >
               {isExecuting ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -171,7 +233,7 @@ export function OptimizationModal({
               ) : (
                 <>
                   <CheckCircle2 className="h-4 w-4 mr-2" />
-                  Одобрить всё
+                  Одобрить выбранное ({selectedCount})
                 </>
               )}
             </Button>
@@ -185,23 +247,72 @@ export function OptimizationModal({
 interface PlanStepItemProps {
   step: Plan['steps'][0];
   index: number;
+  checked: boolean;
+  onToggle: () => void;
 }
 
 /**
- * Перевод action на русский язык
+ * Форматирование действия с бюджетом с точными цифрами
  */
-function getActionLabel(action: string): string {
-  const actionLabels: Record<string, string> = {
-    updateBudget: '💰 Изменить бюджет',
-    pauseAdSet: '⏸️ Поставить на паузу',
-    pauseAd: '⏸️ Остановить объявление',
-    enableAdSet: '▶️ Включить адсет',
-    enableAd: '▶️ Включить объявление',
-    createAdSet: '➕ Создать новый адсет',
-    review: '👀 Требует внимания',
-    launchNewCreatives: '🚀 Запустить новые креативы',
+function formatBudgetAction(step: Plan['steps'][0]): string {
+  const params = step.params as {
+    current_budget_cents?: number;
+    new_budget_cents?: number;
+    increase_percent?: number;
+    decrease_percent?: number;
   };
-  return actionLabels[action] || action;
+
+  const current = params.current_budget_cents
+    ? `$${(params.current_budget_cents / 100).toFixed(2)}`
+    : null;
+  const newBudget = params.new_budget_cents
+    ? `$${(params.new_budget_cents / 100).toFixed(2)}`
+    : null;
+
+  // Определяем процент изменения
+  let percentStr = '';
+  if (params.increase_percent) {
+    percentStr = `+${params.increase_percent}%`;
+  } else if (params.decrease_percent) {
+    percentStr = `-${params.decrease_percent}%`;
+  }
+
+  // Если есть все данные - показываем полную информацию
+  if (current && newBudget && percentStr) {
+    return `💰 ${current} → ${newBudget} (${percentStr})`;
+  }
+  // Если есть только новый бюджет
+  if (newBudget) {
+    return `💰 Бюджет → ${newBudget}`;
+  }
+  // Fallback
+  return '💰 Изменить бюджет';
+}
+
+/**
+ * Получить метку действия с деталями
+ */
+function getActionLabel(step: Plan['steps'][0]): string {
+  switch (step.action) {
+    case 'updateBudget':
+      return formatBudgetAction(step);
+    case 'pauseAdSet':
+      return '⏸️ Поставить на паузу';
+    case 'pauseAd':
+      return '⏸️ Остановить объявление';
+    case 'enableAdSet':
+      return '▶️ Включить адсет';
+    case 'enableAd':
+      return '▶️ Включить объявление';
+    case 'createAdSet':
+      return '➕ Создать новый адсет';
+    case 'review':
+      return '👀 Требует внимания';
+    case 'launchNewCreatives':
+      return '🚀 Запустить новые креативы';
+    default:
+      return step.action;
+  }
 }
 
 /**
@@ -218,37 +329,49 @@ function getPriorityLabel(priority: string | undefined): string | null {
   return labels[priority] || null;
 }
 
-function PlanStepItem({ step, index }: PlanStepItemProps) {
-  // Определяем цвет по приоритету если есть (light + dark mode)
-  const priorityColors: Record<string, string> = {
-    critical: 'border-l-red-600 bg-red-50/50 dark:bg-red-950/30',
-    high: 'border-l-red-500 bg-red-50/30 dark:bg-red-950/20',
-    medium: 'border-l-yellow-500 bg-yellow-50/30 dark:bg-yellow-950/20',
-    low: 'border-l-green-500 bg-green-50/30 dark:bg-green-950/20',
+function PlanStepItem({ step, index, checked, onToggle }: PlanStepItemProps) {
+  // Минималистичные цвета границы по приоритету
+  const priorityBorders: Record<string, string> = {
+    critical: 'border-l-red-500',
+    high: 'border-l-orange-400',
+    medium: 'border-l-yellow-400',
+    low: 'border-l-green-400',
   };
 
   const priority = (step as { priority?: string }).priority;
-  const borderColor = priority ? priorityColors[priority] || '' : '';
+  const borderColor = priority ? priorityBorders[priority] || 'border-l-muted-foreground/30' : 'border-l-muted-foreground/30';
   const priorityLabel = getPriorityLabel(priority);
+
+  // Название сущности (адсета) из params
+  const entityName = (step.params as { entity_name?: string })?.entity_name;
 
   return (
     <div
       className={cn(
-        'p-3 rounded-lg border-l-4',
-        borderColor || 'border-l-primary/50 bg-muted/30'
+        'p-3 rounded-md border-l-2 transition-colors',
+        borderColor,
+        checked ? 'bg-muted/30' : 'bg-muted/10 opacity-60'
       )}
     >
       <div className="flex items-start gap-3">
-        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 text-primary text-xs font-medium flex items-center justify-center">
-          {index + 1}
-        </span>
+        <Checkbox
+          checked={checked}
+          onCheckedChange={onToggle}
+          className="mt-0.5"
+        />
         <div className="flex-1 min-w-0">
+          {/* Название адсета */}
+          {entityName && (
+            <p className="text-xs text-muted-foreground mb-1 truncate">
+              {entityName}
+            </p>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-medium text-foreground">
-              {getActionLabel(step.action)}
+              {getActionLabel(step)}
             </p>
             {priorityLabel && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground/70">
                 {priorityLabel}
               </span>
             )}
