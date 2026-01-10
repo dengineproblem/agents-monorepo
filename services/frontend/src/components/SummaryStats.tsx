@@ -9,6 +9,7 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { getQualifiedLeadsTotal } from '@/services/amocrmApi';
 import { HelpTooltip } from './ui/help-tooltip';
 import { TooltipKeys, type TooltipKey } from '@/content/tooltips';
+import { useDirections } from '@/hooks/useDirections';
 
 interface SummaryStatsProps {
   showTitle?: boolean;
@@ -16,11 +17,21 @@ interface SummaryStatsProps {
 
 const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   const { t } = useTranslation();
-  const { campaignStats, loading, error, platform, dateRange } = useAppContext();
+  const { campaignStats, loading, error, platform, dateRange, currentAdAccountId } = useAppContext();
 
   // State for AmoCRM qualified leads
   const [amocrmQualifiedLeads, setAmocrmQualifiedLeads] = useState<number | null>(null);
   const [amocrmConfigured, setAmocrmConfigured] = useState(false);
+
+  // Загружаем направления для проверки, есть ли WhatsApp кампании
+  const storedUser = localStorage.getItem('user');
+  const userAccountId = storedUser ? JSON.parse(storedUser).id : null;
+  const { directions } = useDirections(userAccountId, currentAdAccountId);
+
+  // Проверяем, есть ли хотя бы одно WhatsApp направление
+  const hasWhatsAppDirections = useMemo(() => {
+    return directions.some(d => d.objective === 'whatsapp');
+  }, [directions]);
 
   // Load AmoCRM qualified leads data when date range changes
   useEffect(() => {
@@ -100,11 +111,22 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
     const totalImpressions = campaignStats.reduce((sum, stat) => sum + stat.impressions, 0);
 
     const avgCpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
-    // Quality rate: for AmoCRM, calculate against total leads; for Facebook, calculate against messaging leads
+
+    // Качество лидов:
+    // - AmoCRM настроен → берём из CRM (качество = qualifiedLeads / totalLeads)
+    // - Есть WhatsApp направления → считаем из Facebook messaging events
+    // - Нет WhatsApp направлений (только лид-формы и т.п.) → показываем 0, ждём CRM
     const qualityRate = amocrmConfigured && amocrmQualifiedLeads !== null
       ? (totalLeads > 0 ? (totalQualityLeads / totalLeads) * 100 : 0)
-      : (totalMessagingLeads > 0 ? (totalQualityLeads / totalMessagingLeads) * 100 : 0);
-    const avgCpql = totalQualityLeads > 0 ? totalSpend / totalQualityLeads : 0;
+      : (hasWhatsAppDirections && totalMessagingLeads > 0
+          ? (totalQualityLeads / totalMessagingLeads) * 100
+          : 0);
+
+    const avgCpql = amocrmConfigured && amocrmQualifiedLeads !== null
+      ? (totalQualityLeads > 0 ? totalSpend / totalQualityLeads : 0)
+      : (hasWhatsAppDirections && totalQualityLeads > 0
+          ? totalSpend / totalQualityLeads
+          : 0);
     
     const isZeroData = hasRealData && totalSpend === 0 && totalLeads === 0 && totalImpressions === 0;
     if (isZeroData) {
@@ -124,7 +146,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
       isZeroData,
       useAmocrmData: amocrmConfigured && amocrmQualifiedLeads !== null
     };
-  }, [campaignStats, amocrmConfigured, amocrmQualifiedLeads]);
+  }, [campaignStats, amocrmConfigured, amocrmQualifiedLeads, hasWhatsAppDirections]);
 
   // Для Target тарифа - с Card оберткой, для остальных - просто grid
   if (showTitle) {
