@@ -258,9 +258,9 @@ services:
   # Evolution API - WhatsApp integration
   # ВАЖНО: Используется кастомный форк с патчем extractAdMetadata для извлечения sourceId из рекламных сообщений
   # Репозиторий: https://github.com/dengineproblem/evolution-api-fork
-  # Обновление: cd ~/evolution-api && git pull origin main && docker build -t atendai/evolution-api:2.3.6-patched .
+  # Обновление: cd ~/evolution-api && git pull origin main && docker build -t atendai/evolution-api:2.3.7-patched .
   evolution-api:
-    image: atendai/evolution-api:2.3.6-patched
+    image: atendai/evolution-api:2.3.7-patched
     container_name: evolution-api
     ports:
       - "8080:8080"
