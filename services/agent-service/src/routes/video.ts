@@ -205,15 +205,15 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
         throw new Error(`Failed to create creative record: ${creativeError?.message}`);
       }
 
-      app.log.info(`Creative record created: ${creative.id}, reading video file for upload...`);
+      app.log.info(`Creative record created: ${creative.id}, uploading to Facebook...`);
 
-      // Читаем файл с диска в буфер ТОЛЬКО для загрузки в Facebook
-      // (Facebook API требует buffer/stream, но это уже после сохранения на диск)
-      const videoBuffer = await fs.readFile(videoPath);
+      // ОПТИМИЗАЦИЯ: Передаём путь к файлу вместо буфера.
+      // uploadVideo() читает файл потоком напрямую, без загрузки в память.
+      // Это экономит до 500MB RAM на каждую загрузку.
+      const videoStats = await fs.stat(videoPath);
+      app.log.info(`Video file size: ${Math.round(videoStats.size / 1024 / 1024)}MB, uploading to Facebook (streaming mode)...`);
 
-      app.log.info(`Video file read (${Math.round(videoBuffer.length / 1024 / 1024)}MB), uploading to Facebook...`);
-
-      const fbVideo = await uploadVideo(normalizedAdAccountId, ACCESS_TOKEN, videoBuffer);
+      const fbVideo = await uploadVideo(normalizedAdAccountId, ACCESS_TOKEN, videoPath);
 
       app.log.info(`Video uploaded to Facebook: ${fbVideo.id}, waiting for processing...`);
 

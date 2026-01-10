@@ -50,6 +50,7 @@ import adminNotificationsRoutes from './routes/adminNotifications.js';
 import adminSettingsRoutes from './routes/adminSettings.js';
 import adInsightsRoutes from './routes/adInsights.js';
 import budgetForecastRoutes from './routes/budgetForecast.js';
+import tusUploadRoutes from './routes/tusUpload.js';
 import { requireTechAdmin } from './middleware/adminAuth.js';
 import { startCreativeTestCron } from './cron/creativeTestChecker.js';
 import { startCompetitorCrawlerCron } from './cron/competitorCrawler.js';
@@ -112,8 +113,19 @@ app.register(cors, {
     }
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-user-id"]
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+  allowedHeaders: [
+    "Content-Type", "Authorization", "x-user-id",
+    // TUS headers
+    "Upload-Length", "Upload-Offset", "Tus-Resumable",
+    "Upload-Metadata", "Upload-Defer-Length", "Upload-Concat"
+  ],
+  exposedHeaders: [
+    // TUS response headers
+    "Upload-Offset", "Location", "Upload-Length",
+    "Tus-Version", "Tus-Resumable", "Tus-Max-Size",
+    "Tus-Extension", "Upload-Metadata", "Upload-Defer-Length", "Upload-Concat"
+  ]
 });
 // Поддержка application/x-www-form-urlencoded (для Tilda webhook)
 app.register(formbody);
@@ -121,6 +133,7 @@ app.register(formbody);
 // См. nginx-production.conf: rewrite ^/api/(.*)$ /$1 break;
 app.register(actionsRoutes);
 app.register(videoRoutes);
+app.register(tusUploadRoutes);
 app.register(imageRoutes);
 app.register(creativeTestRoutes);
 app.register(campaignBuilderRoutes, { prefix: '/campaign-builder' });

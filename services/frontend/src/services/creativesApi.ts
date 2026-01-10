@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { API_BASE_URL } from '@/config/api';
 import { isMultiAccountEnabled, shouldFilterByAccountId } from '@/utils/multiAccountHelper';
+import * as tus from 'tus-js-client';
 
 // Тип для карточки карусели
 export type CarouselCard = {
@@ -74,7 +75,9 @@ export const creativesApi = {
       .from('user_creatives')
       .select('*')
       .eq('user_id', userId)
-      .neq('status', 'failed'); // Исключаем failed креативы из списка
+      // Показываем только успешно загруженные креативы
+      // Исключаем: failed, error, processing (без Facebook ID они не готовы)
+      .in('status', ['ready', 'partial_ready', 'uploaded']);
 
     // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
     if (shouldFilterByAccountId(accountId)) {
@@ -88,7 +91,17 @@ export const creativesApi = {
       return [];
     }
 
-    const creatives = (data as unknown as UserCreative[]) || [];
+    // Дополнительно фильтруем: видео-креативы должны иметь fb_video_id
+    // Если у креатива нет fb_video_id - значит он не был успешно загружен на Facebook
+    const rawCreatives = (data as unknown as UserCreative[]) || [];
+    const creatives = rawCreatives.filter(creative => {
+      // Для видео требуем наличие fb_video_id
+      if (creative.media_type === 'video' || (!creative.media_type && !creative.image_url && !creative.carousel_data)) {
+        return creative.fb_video_id != null;
+      }
+      // Для изображений и каруселей - достаточно status ready/partial_ready
+      return true;
+    });
 
     // Carousel_data в user_creatives берём из generated_creatives (источник правды)
     const carouselsWithGenId = creatives.filter(
@@ -373,81 +386,204 @@ export const creativesApi = {
     directionId?: string | null,
     adAccountId?: string | null // UUID из ad_accounts (для мультиаккаунтности)
   ): Promise<boolean> {
-    // Выбираем эндпоинт по типу файла
-    // ✅ Следуем правилам: API_BASE_URL уже содержит /api, не добавляем его в путь
     const isImage = (file?.type || '').startsWith('image/');
-    const imageEndpoint = `${API_BASE_URL}/process-image`;
-    const videoEndpoint = `${API_BASE_URL}/process-video`;
-    const webhookUrl = isImage ? imageEndpoint : videoEndpoint;
     const userId = getUserId();
     if (!userId) return false;
 
     console.log('[creativesApi.uploadToWebhook] directionId:', directionId);
 
-    const form = new FormData();
-    form.append('file', file);
-    // Совместимость: backend может ожидать как user_id, так и id (алиас)
-    form.append('user_id', userId);
-    form.append('id', userId);
-    form.append('title', title || file.name);
-    if (recordId) form.append('record_id', recordId);
-    if (!recordId) form.append('client_request_id', genId());
-    if (description) form.append('description', description);
+    // Для изображений используем обычный XHR (без TUS)
+    if (isImage) {
+      const imageEndpoint = `${API_BASE_URL}/process-image`;
+      const form = new FormData();
+      form.append('file', file);
+      form.append('user_id', userId);
+      form.append('id', userId);
+      form.append('title', title || file.name);
+      if (recordId) form.append('record_id', recordId);
+      if (!recordId) form.append('client_request_id', genId());
+      if (description) form.append('description', description);
+      if (directionId) form.append('direction_id', directionId);
+      if (adAccountId) form.append('account_id', adAccountId);
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', imageEndpoint, true);
+          xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable && onProgress) {
+              onProgress(Math.round((evt.loaded / evt.total) * 100));
+            }
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              onProgress?.(100);
+              resolve();
+            } else {
+              reject(new Error(`HTTP ${xhr.status}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(form);
+        });
+        return true;
+      } catch (e) {
+        console.error('uploadToWebhook image exception', e);
+        return false;
+      }
+    }
+
+    // Для видео используем TUS resumable upload
+    const tusEndpoint = `${API_BASE_URL}/tus`;
+    const storageKey = `tus_upload_${file.name}_${file.size}`;
+
+    // Собираем metadata для TUS
+    const metadata: Record<string, string> = {
+      filename: file.name,
+      filetype: file.type,
+      user_id: userId,
+      title: title || file.name,
+      language: 'ru'
+    };
+    if (recordId) metadata.record_id = recordId;
+    if (!recordId) metadata.client_request_id = genId();
+    if (description) metadata.description = description;
     if (directionId) {
-      console.log('[creativesApi.uploadToWebhook] Добавляем direction_id в FormData:', directionId);
-      form.append('direction_id', directionId);
-    } else {
-      console.log('[creativesApi.uploadToWebhook] direction_id НЕ добавлен (значение:', directionId, ')');
+      console.log('[creativesApi.uploadToWebhook] TUS metadata direction_id:', directionId);
+      metadata.direction_id = directionId;
     }
-
-    // account_id (UUID из ad_accounts) для мультиаккаунтности
     if (adAccountId) {
-      console.log('[creativesApi.uploadToWebhook] Добавляем account_id в FormData:', adAccountId);
-      form.append('account_id', adAccountId);
-    }
-    
-    // Язык для транскрибации добавляем только для видео
-    if (!isImage) {
-      form.append('language', 'ru');
+      console.log('[creativesApi.uploadToWebhook] TUS metadata account_id:', adAccountId);
+      metadata.account_id = adAccountId;
     }
 
-    // Поля целей отдельными полями, без явных флагов campaign_goal
+    // Добавляем поля целей
     const cfg = goals || {};
-    if (cfg.whatsapp?.enabled) {
-      if (cfg.whatsapp?.client_question) form.append('client_question', String(cfg.whatsapp.client_question));
+    if (cfg.whatsapp?.enabled && cfg.whatsapp?.client_question) {
+      metadata.client_question = String(cfg.whatsapp.client_question);
     }
     if (cfg.site_leads?.enabled) {
-      if (cfg.site_leads?.site_url) form.append('site_url', String(cfg.site_leads.site_url));
-      if (cfg.site_leads?.utm_tag) form.append('utm', String(cfg.site_leads.utm_tag));
+      if (cfg.site_leads?.site_url) metadata.site_url = String(cfg.site_leads.site_url);
+      if (cfg.site_leads?.utm_tag) metadata.utm = String(cfg.site_leads.utm_tag);
     }
 
-    try {
-      // Используем XHR для получения прогресса загрузки
-      await new Promise<void>((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', webhookUrl, true);
-        xhr.upload.onprogress = (evt) => {
-          if (evt.lengthComputable && onProgress) {
-            const pct = Math.round((evt.loaded / evt.total) * 100);
-            onProgress(pct);
+    return new Promise<boolean>((resolve) => {
+      const upload = new tus.Upload(file, {
+        endpoint: tusEndpoint,
+        retryDelays: [0, 1000, 3000, 5000, 10000, 20000, 30000],
+        chunkSize: 5 * 1024 * 1024, // 5MB chunks
+        metadata,
+        onError: (error) => {
+          console.error('[TUS] Upload error:', error);
+          // Сохраняем URL для возможного resume
+          if (upload.url) {
+            try {
+              localStorage.setItem(storageKey, upload.url);
+            } catch (e) {
+              console.warn('[TUS] Failed to save resume URL:', e);
+            }
           }
-        };
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            onProgress && onProgress(100);
-            resolve();
-          } else {
-            reject(new Error(`HTTP ${xhr.status}`));
+          resolve(false);
+        },
+        onProgress: (bytesUploaded, bytesTotal) => {
+          const pct = Math.round((bytesUploaded / bytesTotal) * 100);
+          onProgress?.(pct);
+        },
+        onSuccess: async () => {
+          console.log('[TUS] File upload completed, waiting for processing...');
+          // Удаляем сохранённый URL после успешной загрузки файла
+          try {
+            localStorage.removeItem(storageKey);
+          } catch (e) {
+            // ignore
           }
-        };
-        xhr.onerror = () => reject(new Error('Network error'));
-        xhr.send(form);
+
+          // Извлекаем upload_id из URL для точного отслеживания
+          // URL формата: http://localhost:8082/tus/abc123... -> abc123...
+          let uploadId: string | null = null;
+          if (upload.url) {
+            const urlParts = upload.url.split('/tus/');
+            if (urlParts.length > 1) {
+              uploadId = urlParts[1].split('?')[0]; // убираем query params если есть
+              console.log('[TUS] Extracted upload_id:', uploadId);
+            }
+          }
+
+          // Теперь ждём завершения обработки на сервере (Facebook upload)
+          // Делаем polling статуса каждые 2 секунды, максимум 3 минуты
+          const maxAttempts = 90; // 90 * 2 = 180 секунд
+          const pollInterval = 2000;
+
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            try {
+              const statusUrl = new URL(`${API_BASE_URL}/tus/processing-status`);
+              statusUrl.searchParams.set('user_id', userId);
+              // Используем upload_id если есть, иначе fallback на title
+              if (uploadId) {
+                statusUrl.searchParams.set('upload_id', uploadId);
+              } else {
+                statusUrl.searchParams.set('title', metadata.title);
+              }
+              if (adAccountId) {
+                statusUrl.searchParams.set('account_id', adAccountId);
+              }
+
+              const response = await fetch(statusUrl.toString());
+              if (!response.ok) {
+                console.warn('[TUS] Status check failed:', response.status);
+                await new Promise(r => setTimeout(r, pollInterval));
+                continue;
+              }
+
+              const status = await response.json();
+              console.log('[TUS] Processing status:', status);
+
+              if (status.status === 'success') {
+                console.log('[TUS] Processing completed successfully');
+                onProgress?.(100);
+                resolve(true);
+                return;
+              }
+
+              if (status.status === 'error') {
+                console.error('[TUS] Processing failed:', status.error);
+                resolve(false);
+                return;
+              }
+
+              // status === 'processing' - продолжаем ждать
+              await new Promise(r => setTimeout(r, pollInterval));
+            } catch (e) {
+              console.warn('[TUS] Status check error:', e);
+              await new Promise(r => setTimeout(r, pollInterval));
+            }
+          }
+
+          // Таймаут - считаем ошибкой
+          console.error('[TUS] Processing timeout after 3 minutes');
+          resolve(false);
+        }
       });
-      return true;
-    } catch (e) {
-      console.error('uploadToWebhook exception', e);
-      return false;
-    }
+
+      // Пытаемся восстановить незавершённую загрузку
+      const previousUrl = localStorage.getItem(storageKey);
+      if (previousUrl) {
+        console.log('[TUS] Resuming previous upload from:', previousUrl);
+        upload.url = previousUrl;
+      }
+
+      // Проверяем, можно ли продолжить предыдущую загрузку
+      upload.findPreviousUploads().then((previousUploads) => {
+        if (previousUploads.length > 0) {
+          console.log('[TUS] Found previous uploads, resuming...');
+          upload.resumeFromPreviousUpload(previousUploads[0]);
+        }
+        upload.start();
+      }).catch(() => {
+        // Если не удалось найти предыдущие загрузки, начинаем новую
+        upload.start();
+      });
+    });
   },
 };
 

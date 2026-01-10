@@ -1581,6 +1581,26 @@ const Creatives: React.FC = () => {
     setQueue(prev => prev.filter(i => i.status === "queued" || i.status === "uploading"));
   }, []);
 
+  // Повторная загрузка неудачного элемента
+  const retryItem = useCallback((itemId: string) => {
+    console.log(`retryItem: Повторная загрузка элемента ${itemId}`);
+    setQueue(prev => prev.map(item =>
+      item.id === itemId
+        ? { ...item, status: "queued" as const, progress: 0, error: undefined }
+        : item
+    ));
+  }, []);
+
+  // Повторная загрузка всех неудачных элементов
+  const retryAllFailed = useCallback(() => {
+    console.log('retryAllFailed: Повторная загрузка всех неудачных элементов');
+    setQueue(prev => prev.map(item =>
+      item.status === "error"
+        ? { ...item, status: "queued" as const, progress: 0, error: undefined }
+        : item
+    ));
+  }, []);
+
   const processNext = useCallback(async (): Promise<boolean> => {
     return new Promise((resolve) => {
       setQueue(prev => {
@@ -1624,6 +1644,8 @@ const Creatives: React.FC = () => {
               console.log(`processNext: ✅ Успешно загружено "${item.name}"`);
               setQueue(prev2 => prev2.map((it) => it.id === item.id ? { ...it, status: "success", progress: 100, recordId: null } : it));
         toast.success(`Загружено: ${item.name}`);
+        // Обновляем список креативов после успешной загрузки
+        reload();
       }
     } catch (e) {
             console.error(`processNext: ❌ Исключение при загрузке "${item.name}"`, e);
@@ -1640,7 +1662,7 @@ const Creatives: React.FC = () => {
         return prev.map((it, idx) => idx === nextIndex ? { ...it, status: "uploading", progress: 0 } : it);
       });
     });
-  }, [selectedDirectionId, currentAdAccountId]);
+  }, [selectedDirectionId, currentAdAccountId, reload]);
 
   const startProcessing = useCallback(async () => {
     if (processingRef.current) {
@@ -1793,6 +1815,23 @@ const Creatives: React.FC = () => {
                     Остановить
                   </Button>
                 )}
+                {queue.some(i => i.status === "error") && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      retryAllFailed();
+                      if (!processingRef.current) {
+                        startProcessing();
+                      }
+                    }}
+                    disabled={isProcessing}
+                    title="Повторить все неудачные загрузки"
+                  >
+                    <RefreshCw className="mr-1 h-4 w-4" />
+                    Повторить всё
+                  </Button>
+                )}
                 <Button variant="ghost" onClick={clearCompleted} disabled={isProcessing}>
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -1826,9 +1865,26 @@ const Creatives: React.FC = () => {
                         )}
                       </div>
                       {item.status === "success" ? (
-                        <CheckCircle2 className="text-green-600 h-5 w-5" />
+                        <CheckCircle2 className="text-green-600 h-5 w-5 flex-shrink-0" />
                       ) : item.status === "error" ? (
-                        <XCircle className="text-red-600 h-5 w-5" />
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => {
+                              retryItem(item.id);
+                              // Запускаем обработку, если она не идёт
+                              if (!processingRef.current) {
+                                startProcessing();
+                              }
+                            }}
+                            title="Повторить загрузку"
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </Button>
+                          <XCircle className="text-red-600 h-5 w-5" />
+                        </div>
                       ) : null}
                     </div>
                   ))

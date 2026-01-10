@@ -158,46 +158,48 @@ export async function getPagePictureUrl(pageId: string, accessToken: string): Pr
 /**
  * Загрузка видео в Facebook Ad Account с поддержкой больших файлов (>100 МБ)
  * Использует chunked upload через graph-video.facebook.com
+ *
+ * ОПТИМИЗАЦИЯ: Принимает путь к файлу вместо Buffer для экономии памяти.
+ * Файл читается потоком напрямую, без загрузки в память.
  */
-export async function uploadVideo(adAccountId: string, token: string, videoBuffer: Buffer): Promise<{ id: string }> {
-  const tmpPath = path.join('/var/tmp', `fb_video_${randomUUID()}.mp4`);
-  const fileSize = videoBuffer.length;
+export async function uploadVideo(adAccountId: string, token: string, filePath: string): Promise<{ id: string }> {
+  const stats = await fs.promises.stat(filePath);
+  const fileSize = stats.size;
   const fileSizeMB = Math.round(fileSize / 1024 / 1024);
-  
-  log.info({ adAccountId, fileSizeMB, tmpPath }, 'Writing video to temporary file');
-  fs.writeFileSync(tmpPath, videoBuffer);
-  
+
+  log.info({ adAccountId, fileSizeMB, filePath }, 'Starting video upload to Facebook (streaming mode)');
+
   try {
     // Для файлов >50 МБ используем chunked upload через graph-video
     if (fileSize > 50 * 1024 * 1024) {
       log.info({ adAccountId, fileSizeMB }, 'Using chunked upload for large video');
-      const videoId = await uploadVideoChunked(adAccountId, token, tmpPath, fileSize);
-      fs.unlinkSync(tmpPath);
+      const videoId = await uploadVideoChunked(adAccountId, token, filePath, fileSize);
       return { id: videoId };
     }
-    
-    // Для маленьких файлов используем простой upload
-    log.info({ adAccountId, fileSizeMB }, 'Using simple upload for video');
+
+    // Для маленьких файлов используем простой upload с streaming
+    log.info({ adAccountId, fileSizeMB }, 'Using simple upload for video (streaming)');
     const formData = new FormData();
-    formData.append('source', fs.createReadStream(tmpPath));
+    // ВАЖНО: Указываем filename с расширением .mp4, иначе Facebook не определит формат
+    // TUS сохраняет файлы без расширения, поэтому нужно явно указать
+    formData.append('source', fs.createReadStream(filePath), {
+      filename: 'video.mp4',
+      contentType: 'video/mp4'
+    });
 
     const url = `https://graph-video.facebook.com/${FB_API_VERSION}/${adAccountId}/advideos?access_token=${token}`;
-    
+
     const response = await axios.post(url, formData, {
       headers: formData.getHeaders(),
       maxBodyLength: Infinity,
-      maxContentLength: Infinity
+      maxContentLength: Infinity,
+      timeout: 600000 // 10 минут для upload
     });
-    
+
     log.info({ adAccountId, videoId: response.data.id }, 'Video uploaded successfully');
-    fs.unlinkSync(tmpPath);
-    
+
     return response.data;
   } catch (error: any) {
-    if (fs.existsSync(tmpPath)) {
-      fs.unlinkSync(tmpPath);
-    }
-    
     // Подробное логирование ошибки
     console.error('[uploadVideo] Full error object:', JSON.stringify({
       message: error?.message,
@@ -206,7 +208,7 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       response_data: error?.response?.data,
       response_headers: error?.response?.headers
     }, null, 2));
-    
+
     const g = error?.response?.data?.error || {};
     const err: any = new Error(g?.message || error.message);
     err.fb = {
@@ -219,7 +221,7 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       fbtrace_id: g?.fbtrace_id
     };
     err.resolution = resolveFacebookError(err.fb);
-    
+
     log.error({
       msg: err.resolution.msgCode,
       adAccountId,
@@ -229,19 +231,20 @@ export async function uploadVideo(adAccountId: string, token: string, videoBuffe
       statusText: error?.response?.statusText,
       message: error?.message
     }, 'Facebook API error during video upload');
-    
+
     throw err;
   }
 }
 
 /**
  * Helper для axios запросов с retry
+ * ОПТИМИЗАЦИЯ: Увеличены maxRetries и baseDelay для большей надёжности
  */
 async function axiosWithRetry<T>(
   requestFn: () => Promise<T>,
   options: { maxRetries?: number; baseDelay?: number; phase?: string } = {}
 ): Promise<T> {
-  const { maxRetries = 5, baseDelay = 3000, phase = 'request' } = options;
+  const { maxRetries = 7, baseDelay = 5000, phase = 'request' } = options;
   let lastError: any;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -300,7 +303,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
   const startRes = await axiosWithRetry(
     () => axios.post(url, startFormData, {
       headers: startFormData.getHeaders(),
-      timeout: 60000 // 60 секунд таймаут
+      timeout: 120000 // ОПТИМИЗАЦИЯ: 2 минуты (было 60 сек)
     }),
     { phase: 'start' }
   );
@@ -332,9 +335,13 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
         transferFormData.append('upload_phase', 'transfer');
         transferFormData.append('upload_session_id', upload_session_id);
         transferFormData.append('start_offset', String(start));
+        // ВАЖНО: Указываем filename с расширением .mp4
+        // TUS сохраняет файлы без расширения, path.basename вернёт ID без расширения
+        const basename = path.basename(filePath);
+        const filename = basename.includes('.') ? basename : `${basename}.mp4`;
         transferFormData.append('video_file_chunk', chunk, {
-          filename: path.basename(filePath),
-          contentType: 'application/octet-stream',
+          filename,
+          contentType: 'video/mp4',
           knownLength: chunkSize
         });
 
@@ -342,7 +349,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
           headers: transferFormData.getHeaders(),
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
-          timeout: 300000 // 5 минут для chunk
+          timeout: 600000 // ОПТИМИЗАЦИЯ: 10 минут для chunk (было 5 минут)
         });
       },
       { phase: `transfer-chunk-${chunkNumber}` }
@@ -367,7 +374,7 @@ async function uploadVideoChunked(adAccountId: string, token: string, filePath: 
   const finishRes = await axiosWithRetry(
     () => axios.post(url, finishFormData, {
       headers: finishFormData.getHeaders(),
-      timeout: 60000
+      timeout: 120000 // ОПТИМИЗАЦИЯ: 2 минуты (было 60 сек)
     }),
     { phase: 'finish' }
   );
