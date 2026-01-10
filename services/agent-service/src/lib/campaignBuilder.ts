@@ -841,23 +841,41 @@ export async function getActiveAdSets(
 
   log.info({ campaignId, retryCount }, 'Fetching active ad sets for campaign');
 
+  const MAX_RETRIES = 5;
+  const BASE_DELAY = 3000; // 3s base, exponential: 3s, 6s, 12s, 24s, 48s
+
   try {
     const url = `https://graph.facebook.com/${FB_API_VERSION}/${campaignId}/adsets?fields=id,name,status,effective_status,optimized_goal&limit=200&access_token=${accessToken}`;
-    console.log(`[getActiveAdSets] campaignId=${campaignId}, tokenLength=${accessToken?.length}, FB_API_VERSION=${FB_API_VERSION}, retry=${retryCount}`);
+    log.debug({ campaignId, retryCount, maxRetries: MAX_RETRIES }, '[getActiveAdSets] Fetching adsets');
 
     const response = await fetch(url);
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`[getActiveAdSets] Error ${response.status}:`, errorBody);
 
-      // Rate limiting - retry с задержкой
-      if (response.status === 400 && errorBody.includes('User request limit reached') && retryCount < 3) {
-        const delay = (retryCount + 1) * 5000; // 5s, 10s, 15s
-        log.warn({ campaignId, retryCount, delay }, 'Rate limited, retrying after delay...');
+      // Rate limiting - retry с exponential backoff
+      const isRateLimit = response.status === 400 &&
+        (errorBody.includes('User request limit reached') || errorBody.includes('"code":17') || errorBody.includes('"code":4'));
+
+      if (isRateLimit && retryCount < MAX_RETRIES) {
+        const delay = BASE_DELAY * Math.pow(2, retryCount); // 3s, 6s, 12s, 24s, 48s
+        log.warn({
+          campaignId,
+          retryCount: retryCount + 1,
+          maxRetries: MAX_RETRIES,
+          delayMs: delay
+        }, '[getActiveAdSets] Rate limited, retrying with exponential backoff...');
         await new Promise(resolve => setTimeout(resolve, delay));
         return getActiveAdSets(campaignId, accessToken, retryCount + 1, skipCache);
       }
+
+      log.error({
+        campaignId,
+        status: response.status,
+        retryCount,
+        isRateLimit,
+        errorBody: errorBody.substring(0, 300)
+      }, '[getActiveAdSets] Failed after retries');
 
       throw new Error(`Facebook API error: ${response.status} - ${errorBody}`);
     }

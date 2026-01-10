@@ -196,9 +196,20 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             credentials.fbAccessToken!
           );
 
+          log.info({
+            activeCampaignsCount: activeCampaigns.length,
+            activeCampaignIds: activeCampaigns.map((c: any) => c.campaign_id)
+          }, 'Fetched active campaigns from Facebook');
+
           const directionCampaigns = activeDirections
             .map((direction: any) => direction.fb_campaign_id)
             .filter((campaignId: string | null) => Boolean(campaignId));
+
+          log.info({
+            directionCampaignsCount: directionCampaigns.length,
+            directionCampaignIds: directionCampaigns,
+            directionsWithoutCampaign: activeDirections.filter((d: any) => !d.fb_campaign_id).map((d: any) => d.name)
+          }, 'Direction campaigns to check');
 
           const campaignIdsForDirections = new Set(directionCampaigns);
 
@@ -206,8 +217,14 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .filter((campaign: any) => campaignIdsForDirections.has(campaign.campaign_id))
             .map((campaign: any) => campaign.campaign_id);
 
+          log.info({
+            campaignIdsToPause,
+            matched: campaignIdsToPause.length,
+            notMatched: directionCampaigns.filter((id: string) => !activeCampaigns.some((c: any) => c.campaign_id === id))
+          }, 'Campaigns matching for pause');
+
           if (campaignIdsToPause.length > 0) {
-            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause (parallel)');
+            log.info({ count: campaignIdsToPause.length, campaignIds: campaignIdsToPause }, 'Found campaigns with ad sets to pause (parallel)');
             // Параллельная пауза всех кампаний
             const pauseResults = await Promise.allSettled(
               campaignIdsToPause.map((campaignId: string) =>
@@ -217,12 +234,23 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               )
             );
             const successCount = pauseResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
-            log.info({ total: campaignIdsToPause.length, success: successCount }, 'Finished pausing campaigns (parallel)');
+            const totalPaused = pauseResults
+              .filter(r => r.status === 'fulfilled' && (r.value as any).success)
+              .reduce((sum, r) => sum + ((r as any).value?.pausedCount || 0), 0);
+            log.info({
+              total: campaignIdsToPause.length,
+              success: successCount,
+              totalAdSetsPaused: totalPaused,
+              results: pauseResults.map(r => r.status === 'fulfilled' ? r.value : { error: (r as any).reason?.message })
+            }, 'Finished pausing campaigns (parallel)');
           } else {
-            log.info('No campaigns found for pausing');
+            log.warn({
+              activeCampaignsCount: activeCampaigns.length,
+              directionCampaignsCount: directionCampaigns.length
+            }, 'No campaigns found for pausing - directions may not have fb_campaign_id or campaigns are not ACTIVE');
           }
         } catch (error: any) {
-          log.error({ err: error, userAccountId: user_account_id, adAccountName: credentials.adAccountName }, 'Error pausing ad sets');
+          log.error({ err: error, stack: error.stack, userAccountId: user_account_id, adAccountName: credentials.adAccountName }, 'Error pausing ad sets');
         }
 
         const results: any[] = [];
