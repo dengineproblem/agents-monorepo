@@ -207,15 +207,17 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .map((campaign: any) => campaign.campaign_id);
 
           if (campaignIdsToPause.length > 0) {
-            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
-            for (const campaignId of campaignIdsToPause) {
-              try {
-                await pauseAdSetsForCampaign(campaignId, credentials.fbAccessToken!);
-                log.info({ campaignId }, 'Paused ad sets for campaign');
-              } catch (pauseError: any) {
-                log.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
-              }
-            }
+            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause (parallel)');
+            // Параллельная пауза всех кампаний
+            const pauseResults = await Promise.allSettled(
+              campaignIdsToPause.map((campaignId: string) =>
+                pauseAdSetsForCampaign(campaignId, credentials.fbAccessToken!)
+                  .then(count => ({ campaignId, success: true, pausedCount: count }))
+                  .catch(err => ({ campaignId, success: false, error: err.message }))
+              )
+            );
+            const successCount = pauseResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
+            log.info({ total: campaignIdsToPause.length, success: successCount }, 'Finished pausing campaigns (parallel)');
           } else {
             log.info('No campaigns found for pausing');
           }
@@ -1100,15 +1102,17 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .map((campaign: any) => campaign.campaign_id);
 
           if (campaignIdsToPause.length > 0) {
-            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause');
-            for (const campaignId of campaignIdsToPause) {
-              try {
-                await pauseAdSetsForCampaign(campaignId, userAccount.access_token);
-                log.info({ campaignId }, 'Paused ad sets for campaign');
-              } catch (pauseError: any) {
-                log.warn({ campaignId, err: pauseError }, 'Failed to pause ad sets for campaign');
-              }
-            }
+            log.info({ count: campaignIdsToPause.length }, 'Found campaigns with ad sets to pause (parallel)');
+            // Параллельная пауза всех кампаний
+            const pauseResults = await Promise.allSettled(
+              campaignIdsToPause.map((campaignId: string) =>
+                pauseAdSetsForCampaign(campaignId, userAccount.access_token)
+                  .then(count => ({ campaignId, success: true, pausedCount: count }))
+                  .catch(err => ({ campaignId, success: false, error: err.message }))
+              )
+            );
+            const successCount = pauseResults.filter(r => r.status === 'fulfilled' && (r.value as any).success).length;
+            log.info({ total: campaignIdsToPause.length, success: successCount }, 'Finished pausing campaigns (parallel)');
           } else {
             log.info('No campaigns found for pausing');
           }

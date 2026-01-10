@@ -131,6 +131,260 @@ export async function graph(method: 'GET'|'POST'|'DELETE', path: string, token: 
 }
 
 /**
+ * Batch запрос к Facebook Graph API
+ * Позволяет объединить до 50 запросов в один HTTP вызов
+ *
+ * @param token - Access token
+ * @param requests - Массив запросов для batch
+ * @returns Массив результатов (в том же порядке что и requests)
+ */
+export interface BatchRequest {
+  method: 'GET' | 'POST' | 'DELETE';
+  relative_url: string;
+  body?: string;
+}
+
+export interface BatchResponse {
+  code: number;
+  headers?: Array<{ name: string; value: string }>;
+  body: string;
+}
+
+export async function graphBatch(
+  token: string,
+  requests: BatchRequest[]
+): Promise<BatchResponse[]> {
+  const startTime = Date.now();
+
+  if (requests.length === 0) {
+    log.debug({ count: 0 }, '[graphBatch] Empty batch request, returning []');
+    return [];
+  }
+
+  // Логируем типы запросов в batch
+  const requestTypes = requests.reduce((acc, r) => {
+    const key = `${r.method} ${r.relative_url.split('?')[0]}`;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  if (requests.length > 50) {
+    log.info({
+      totalCount: requests.length,
+      chunks: Math.ceil(requests.length / 50),
+      requestTypes
+    }, '[graphBatch] Splitting large batch into chunks of 50');
+
+    const results: BatchResponse[] = [];
+    for (let i = 0; i < requests.length; i += 50) {
+      const chunkIndex = Math.floor(i / 50) + 1;
+      const totalChunks = Math.ceil(requests.length / 50);
+      const chunk = requests.slice(i, i + 50);
+
+      log.debug({
+        chunkIndex,
+        totalChunks,
+        chunkSize: chunk.length
+      }, '[graphBatch] Processing chunk');
+
+      const chunkResults = await graphBatch(token, chunk);
+      results.push(...chunkResults);
+
+      // Небольшая задержка между chunks для снижения rate limit
+      if (i + 50 < requests.length) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    log.info({
+      totalCount: requests.length,
+      resultCount: results.length,
+      durationMs: duration
+    }, '[graphBatch] All chunks completed');
+
+    return results;
+  }
+
+  log.info({
+    count: requests.length,
+    requestTypes
+  }, '[graphBatch] Executing Facebook Batch API request');
+
+  const url = `https://graph.facebook.com/${FB_API_VERSION}/`;
+  const usp = new URLSearchParams();
+  usp.set('access_token', token);
+  usp.set('batch', JSON.stringify(requests));
+  usp.set('include_headers', 'false');
+
+  // Retry logic с exponential backoff
+  const MAX_RETRIES = 5;
+  const BASE_DELAY = 3000;
+
+  let res: Response;
+  let lastError: any;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000); // 30 сек для batch
+
+    try {
+      log.debug({ attempt, maxRetries: MAX_RETRIES }, '[graphBatch] Sending request');
+
+      res = await fetch(url, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: usp.toString(),
+      });
+      clearTimeout(timeout);
+
+      // Проверяем HTTP статус
+      if (!res.ok) {
+        const errorText = await res.text();
+        log.warn({
+          status: res.status,
+          statusText: res.statusText,
+          errorText: errorText.substring(0, 500),
+          attempt
+        }, '[graphBatch] HTTP error response');
+
+        // Rate limiting на уровне HTTP
+        if (res.status === 400 || res.status === 429) {
+          if (attempt < MAX_RETRIES) {
+            const delay = BASE_DELAY * Math.pow(2, attempt - 1); // Exponential backoff
+            log.warn({ attempt, delay }, '[graphBatch] Rate limited, waiting before retry');
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+        }
+
+        throw new Error(`HTTP ${res.status}: ${errorText.substring(0, 200)}`);
+      }
+
+      break;
+    } catch (error: any) {
+      clearTimeout(timeout);
+      lastError = error;
+
+      const isNetworkError = error.name === 'AbortError' ||
+                             error.message?.includes('fetch failed') ||
+                             error.code === 'ECONNRESET' ||
+                             error.code === 'ETIMEDOUT';
+
+      if (isNetworkError && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY * Math.pow(2, attempt - 1);
+        log.warn({
+          attempt,
+          maxRetries: MAX_RETRIES,
+          delay,
+          error: error.message,
+          errorCode: error.code
+        }, '[graphBatch] Network error, retrying with exponential backoff');
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      log.error({
+        attempt,
+        error: error.message,
+        errorCode: error.code,
+        stack: error.stack
+      }, '[graphBatch] Request failed after all retries');
+      throw error;
+    }
+  }
+
+  if (!res!) {
+    log.error({ lastError: lastError?.message }, '[graphBatch] No response after retries');
+    throw lastError || new Error(`Batch request failed after ${MAX_RETRIES} attempts`);
+  }
+
+  const text = await res.text();
+  let json: BatchResponse[];
+
+  try {
+    json = JSON.parse(text);
+  } catch (parseError) {
+    log.error({
+      text: text.substring(0, 500),
+      parseError: (parseError as Error).message
+    }, '[graphBatch] Failed to parse batch response as JSON');
+    throw new Error(`Invalid batch response: ${text.substring(0, 200)}`);
+  }
+
+  if (!Array.isArray(json)) {
+    log.error({
+      responseType: typeof json,
+      response: JSON.stringify(json).substring(0, 500)
+    }, '[graphBatch] Batch response is not an array');
+    throw new Error('Batch response is not an array');
+  }
+
+  // Детальная статистика по результатам
+  const successCount = json.filter(r => r.code >= 200 && r.code < 300).length;
+  const errorCount = json.filter(r => r.code >= 400).length;
+  const rateLimitCount = json.filter(r => {
+    if (r.code !== 400) return false;
+    try {
+      const body = JSON.parse(r.body);
+      return body?.error?.code === 17 || body?.error?.code === 4;
+    } catch { return false; }
+  }).length;
+
+  const duration = Date.now() - startTime;
+
+  log.info({
+    count: json.length,
+    successCount,
+    errorCount,
+    rateLimitCount,
+    durationMs: duration,
+    avgTimePerRequest: Math.round(duration / json.length)
+  }, '[graphBatch] Batch request completed');
+
+  // Логируем ошибки для отладки
+  if (errorCount > 0) {
+    const errors = json
+      .filter(r => r.code >= 400)
+      .slice(0, 3) // Первые 3 ошибки
+      .map((r, i) => {
+        try {
+          const body = JSON.parse(r.body);
+          return {
+            index: i,
+            code: r.code,
+            errorCode: body?.error?.code,
+            errorSubcode: body?.error?.error_subcode,
+            message: body?.error?.message?.substring(0, 100)
+          };
+        } catch {
+          return { index: i, code: r.code, body: r.body.substring(0, 100) };
+        }
+      });
+    log.warn({ errorSamples: errors }, '[graphBatch] Some requests in batch failed');
+  }
+
+  return json;
+}
+
+/**
+ * Парсит body из batch response
+ */
+export function parseBatchBody<T = any>(response: BatchResponse): { success: boolean; data?: T; error?: any } {
+  try {
+    const body = JSON.parse(response.body);
+    if (response.code >= 200 && response.code < 300) {
+      return { success: true, data: body };
+    } else {
+      return { success: false, error: body.error || body };
+    }
+  } catch {
+    return { success: false, error: { message: response.body } };
+  }
+}
+
+/**
  * Получить URL аватара Facebook страницы
  * @param pageId - ID страницы Facebook
  * @param accessToken - Access token с доступом к странице

@@ -11,9 +11,62 @@ import { createLogger } from './logger.js';
 import { resolveFacebookError } from './facebookErrors.js';
 import { saveAdCreativeMapping } from './adCreativeMapping.js';
 import { shouldFilterByAccountId } from './multiAccountHelper.js';
+import { graphBatch, parseBatchBody, type BatchRequest } from '../adapters/facebook.js';
 
 const FB_API_VERSION = process.env.FB_API_VERSION || 'v20.0';
 const log = createLogger({ module: 'campaignBuilder' });
+
+// ========================================
+// TTL CACHE для Facebook API данных
+// ========================================
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+class TTLCache<T> {
+  private cache = new Map<string, CacheEntry<T>>();
+  private maxSize: number;
+  private defaultTTL: number;
+
+  constructor(maxSize = 100, defaultTTLMs = 60000) {
+    this.maxSize = maxSize;
+    this.defaultTTL = defaultTTLMs;
+  }
+
+  get(key: string): T | null {
+    const entry = this.cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key);
+      return null;
+    }
+    return entry.data;
+  }
+
+  set(key: string, data: T, ttlMs?: number): void {
+    // FIFO eviction если превышен лимит
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) this.cache.delete(firstKey);
+    }
+    this.cache.set(key, {
+      data,
+      expiresAt: Date.now() + (ttlMs ?? this.defaultTTL)
+    });
+  }
+
+  invalidate(key: string): void {
+    this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+}
+
+// Кэш для ad sets (TTL 1 минута, макс 100 кампаний)
+const adSetsCache = new TTLCache<Array<{ adset_id: string; name?: string; status?: string; effective_status?: string; optimized_goal?: string }>>(100, 60000);
 
 // ========================================
 // TYPES
@@ -774,8 +827,18 @@ export async function pauseActiveCampaigns(
 export async function getActiveAdSets(
   campaignId: string,
   accessToken: string,
-  retryCount = 0
+  retryCount = 0,
+  skipCache = false
 ): Promise<Array<{ adset_id: string; name?: string; status?: string; effective_status?: string; optimized_goal?: string }>> {
+  // Проверяем кэш (если не skipCache)
+  if (!skipCache) {
+    const cached = adSetsCache.get(campaignId);
+    if (cached) {
+      log.debug({ campaignId, count: cached.length }, 'Returning cached ad sets');
+      return cached;
+    }
+  }
+
   log.info({ campaignId, retryCount }, 'Fetching active ad sets for campaign');
 
   try {
@@ -793,7 +856,7 @@ export async function getActiveAdSets(
         const delay = (retryCount + 1) * 5000; // 5s, 10s, 15s
         log.warn({ campaignId, retryCount, delay }, 'Rate limited, retrying after delay...');
         await new Promise(resolve => setTimeout(resolve, delay));
-        return getActiveAdSets(campaignId, accessToken, retryCount + 1);
+        return getActiveAdSets(campaignId, accessToken, retryCount + 1, skipCache);
       }
 
       throw new Error(`Facebook API error: ${response.status} - ${errorBody}`);
@@ -809,13 +872,18 @@ export async function getActiveAdSets(
 
     log.info({ count: activeAdsets.length, campaignId }, 'Found active ad sets');
 
-    return activeAdsets.map((adset: any) => ({
+    const result = activeAdsets.map((adset: any) => ({
       adset_id: adset.id,
       name: adset.name,
       status: adset.status,
       effective_status: adset.effective_status,
       optimized_goal: adset.optimized_goal
     }));
+
+    // Сохраняем в кэш
+    adSetsCache.set(campaignId, result);
+
+    return result;
   } catch (error: any) {
     log.error({ err: error, campaignId }, 'Error fetching ad sets');
     throw new Error(`Failed to fetch ad sets: ${error.message}`);
@@ -826,53 +894,172 @@ export async function pauseAdSetsForCampaign(
   campaignId: string,
   accessToken: string
 ): Promise<number> {
-  const adsets = await getActiveAdSets(campaignId, accessToken);
-  log.info({ campaignId, count: adsets.length }, 'Pausing ad sets for campaign');
+  const startTime = Date.now();
 
-  let pausedCount = 0;
+  const adsets = await getActiveAdSets(campaignId, accessToken, 0, true); // skipCache для актуальных данных
 
-  for (const adset of adsets) {
-    let success = false;
-    for (let retry = 0; retry < 3 && !success; retry++) {
-      try {
-        const response = await fetch(
-          `https://graph.facebook.com/${FB_API_VERSION}/${adset.adset_id}?access_token=${accessToken}`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ status: 'PAUSED' }),
-          }
-        );
+  if (adsets.length === 0) {
+    log.info({ campaignId, durationMs: Date.now() - startTime }, '[pauseAdSetsForCampaign] No active ad sets to pause');
+    return 0;
+  }
 
-        if (!response.ok) {
-          const errorBody = await response.text();
+  log.info({
+    campaignId,
+    count: adsets.length,
+    adsetIds: adsets.map(a => a.adset_id)
+  }, '[pauseAdSetsForCampaign] Starting batch pause');
 
-          // Rate limiting - retry с задержкой
-          if (response.status === 400 && errorBody.includes('User request limit reached') && retry < 2) {
-            const delay = (retry + 1) * 5000;
-            log.warn({ adsetId: adset.adset_id, retry, delay }, 'Rate limited on pause, retrying...');
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
+  // Используем batch API для паузы всех ad sets за один запрос
+  const batchRequests: BatchRequest[] = adsets.map(adset => ({
+    method: 'POST' as const,
+    relative_url: adset.adset_id,
+    body: 'status=PAUSED'
+  }));
 
-          throw new Error(`Facebook API error: ${errorBody}`);
-        }
+  try {
+    const batchStartTime = Date.now();
+    const responses = await graphBatch(accessToken, batchRequests);
+    const batchDuration = Date.now() - batchStartTime;
 
-        log.info({ adsetId: adset.adset_id, campaignId }, 'Paused ad set');
+    let pausedCount = 0;
+    const errors: Array<{ adsetId: string; error: any; errorCode?: number }> = [];
+    let rateLimitErrors = 0;
+
+    responses.forEach((response, index) => {
+      const adset = adsets[index];
+      const parsed = parseBatchBody(response);
+
+      if (parsed.success) {
         pausedCount++;
-        success = true;
-      } catch (error: any) {
-        if (retry === 2) {
-          log.warn({ err: error, adsetId: adset.adset_id, campaignId }, 'Failed to pause ad set after retries');
+        log.debug({ adsetId: adset.adset_id, campaignId }, '[pauseAdSetsForCampaign] Paused ad set');
+      } else {
+        const errorCode = parsed.error?.code;
+        if (errorCode === 17 || errorCode === 4) {
+          rateLimitErrors++;
+        }
+        errors.push({ adsetId: adset.adset_id, error: parsed.error, errorCode });
+        log.warn({
+          adsetId: adset.adset_id,
+          campaignId,
+          errorCode,
+          errorMessage: parsed.error?.message?.substring(0, 100)
+        }, '[pauseAdSetsForCampaign] Failed to pause ad set in batch');
+      }
+    });
+
+    // Инвалидируем кэш после изменений
+    adSetsCache.invalidate(campaignId);
+
+    const totalDuration = Date.now() - startTime;
+    log.info({
+      campaignId,
+      pausedCount,
+      totalAdsets: adsets.length,
+      errorsCount: errors.length,
+      rateLimitErrors,
+      batchDurationMs: batchDuration,
+      totalDurationMs: totalDuration,
+      avgTimePerAdset: Math.round(batchDuration / adsets.length)
+    }, '[pauseAdSetsForCampaign] Completed (batch)');
+
+    return pausedCount;
+  } catch (error: any) {
+    const batchFailTime = Date.now() - startTime;
+    log.error({
+      err: error,
+      campaignId,
+      failedAfterMs: batchFailTime
+    }, '[pauseAdSetsForCampaign] Batch failed, falling back to sequential with retry');
+
+    // Fallback на последовательные запросы с exponential backoff
+    let pausedCount = 0;
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 3000;
+
+    for (let i = 0; i < adsets.length; i++) {
+      const adset = adsets[i];
+      let success = false;
+
+      for (let retry = 0; retry < MAX_RETRIES && !success; retry++) {
+        try {
+          const response = await fetch(
+            `https://graph.facebook.com/${FB_API_VERSION}/${adset.adset_id}?access_token=${accessToken}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: 'status=PAUSED',
+            }
+          );
+
+          if (response.ok) {
+            pausedCount++;
+            success = true;
+            log.debug({
+              adsetId: adset.adset_id,
+              campaignId,
+              progress: `${i + 1}/${adsets.length}`
+            }, '[pauseAdSetsForCampaign] Paused ad set (fallback)');
+          } else {
+            const errorText = await response.text();
+            const isRateLimit = response.status === 400 &&
+              (errorText.includes('User request limit reached') || errorText.includes('"code":17'));
+
+            if (isRateLimit && retry < MAX_RETRIES - 1) {
+              const delay = BASE_DELAY * Math.pow(2, retry);
+              log.warn({
+                adsetId: adset.adset_id,
+                retry: retry + 1,
+                maxRetries: MAX_RETRIES,
+                delayMs: delay
+              }, '[pauseAdSetsForCampaign] Rate limited, retrying with backoff');
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+
+            log.warn({
+              adsetId: adset.adset_id,
+              campaignId,
+              status: response.status,
+              error: errorText.substring(0, 200)
+            }, '[pauseAdSetsForCampaign] Failed to pause ad set (fallback)');
+            break;
+          }
+        } catch (err: any) {
+          if (retry < MAX_RETRIES - 1) {
+            const delay = BASE_DELAY * Math.pow(2, retry);
+            log.warn({
+              err,
+              adsetId: adset.adset_id,
+              retry: retry + 1,
+              delayMs: delay
+            }, '[pauseAdSetsForCampaign] Network error, retrying');
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            log.error({
+              err,
+              adsetId: adset.adset_id,
+              campaignId
+            }, '[pauseAdSetsForCampaign] Failed after all retries');
+          }
         }
       }
     }
-  }
 
-  log.info({ campaignId, pausedCount, totalAdsets: adsets.length }, 'Finished pausing ad sets');
-  return pausedCount;
+    // Инвалидируем кэш после изменений
+    adSetsCache.invalidate(campaignId);
+
+    const totalDuration = Date.now() - startTime;
+    log.info({
+      campaignId,
+      pausedCount,
+      totalAdsets: adsets.length,
+      failedCount: adsets.length - pausedCount,
+      totalDurationMs: totalDuration,
+      mode: 'fallback'
+    }, '[pauseAdSetsForCampaign] Completed (fallback)');
+
+    return pausedCount;
+  }
 }
 
 /**
@@ -2162,7 +2349,7 @@ export function getCreativeIdForObjective(creative: AvailableCreative, objective
 }
 
 /**
- * Создать Ads в Ad Set
+ * Создать Ads в Ad Set (использует batch API для оптимизации)
  */
 export async function createAdsInAdSet(params: {
   adsetId: string;
@@ -2175,13 +2362,20 @@ export async function createAdsInAdSet(params: {
   campaignId?: string;
   accountId?: string | null;  // UUID из ad_accounts.id для мультиаккаунтности
 }) {
+  const startTime = Date.now();
   const { adsetId, adAccountId, creatives, accessToken, objective, userId, directionId, campaignId, accountId } = params;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
-  log.info({ adsetId, creativeCount: creatives.length }, 'Creating ads in ad set');
+  log.info({
+    adsetId,
+    creativeCount: creatives.length,
+    objective,
+    adAccountId: normalizedAdAccountId
+  }, '[createAdsInAdSet] Starting batch ad creation');
 
-  const ads = [];
+  // Подготовим креативы с их FB ID
+  const validCreatives: Array<{ creative: AvailableCreative; fbCreativeId: string }> = [];
 
   for (const creative of creatives) {
     const creativeId = getCreativeIdForObjective(creative, objective);
@@ -2197,110 +2391,274 @@ export async function createAdsInAdSet(params: {
           site_leads: creative.fb_creative_id_site_leads,
           lead_forms: creative.fb_creative_id_lead_forms
         }
-      }, 'No Facebook creative ID for creative');
+      }, '[createAdsInAdSet] No Facebook creative ID for creative');
       continue;
     }
 
-    const adPayload = {
-      access_token: accessToken,
-      name: `Ad - ${creative.title}`,
-      adset_id: adsetId,
-      creative: { creative_id: creativeId },
-      status: 'ACTIVE',
-    };
-
-    log.info({
-      userCreativeId: creative.user_creative_id,
-      creativeTitle: creative.title,
-      fbCreativeId: creativeId,
-      adsetId,
-      adAccountId: normalizedAdAccountId,
-      objective,
-      adPayload: {
-        name: adPayload.name,
-        adset_id: adPayload.adset_id,
-        creative: adPayload.creative,
-        status: adPayload.status
-      }
-    }, 'Attempting to create ad in Facebook');
-
-    try {
-      const response = await fetch(
-        `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/ads`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(adPayload),
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.json();
-        log.error({
-          err: error,
-          userCreativeId: creative.user_creative_id,
-          creativeTitle: creative.title,
-          fbCreativeId: creativeId,
-          adsetId,
-          statusCode: response.status,
-          errorCode: error.error?.code,
-          errorSubcode: error.error?.error_subcode,
-          errorMessage: error.error?.message,
-          errorUserTitle: error.error?.error_user_title,
-          errorUserMsg: error.error?.error_user_msg
-        }, 'Failed to create ad');
-        continue;
-      }
-
-      const ad = await response.json();
-      log.info({
-        adId: ad.id,
-        userCreativeId: creative.user_creative_id,
-        creativeTitle: creative.title,
-        fbCreativeId: creativeId
-      }, 'Ad created successfully');
-      ads.push({
-        ad_id: ad.id,
-        name: `Ad - ${creative.title}`,
-        user_creative_id: creative.user_creative_id,
-        creative_title: creative.title
-      });
-
-      // Сохраняем маппинг для трекинга лидов (если есть userId)
-      if (userId && ad.id) {
-        await saveAdCreativeMapping({
-          ad_id: ad.id,
-          user_creative_id: creative.user_creative_id,
-          direction_id: directionId || null,
-          user_id: userId,
-          account_id: accountId || null,  // UUID для мультиаккаунтности
-          adset_id: adsetId,
-          campaign_id: campaignId,
-          fb_creative_id: creativeId,
-          source: 'campaign_builder'
-        });
-      }
-    } catch (error: any) {
-      log.error({
-        err: error,
-        userCreativeId: creative.user_creative_id,
-        creativeTitle: creative.title,
-        fbCreativeId: creativeId,
-        adsetId,
-        errorMessage: error.message,
-        errorStack: error.stack
-      }, 'Error creating ad (exception caught)');
-    }
+    validCreatives.push({ creative, fbCreativeId: creativeId });
   }
+
+  if (validCreatives.length === 0) {
+    log.warn({
+      adsetId,
+      totalCreatives: creatives.length,
+      objective,
+      durationMs: Date.now() - startTime
+    }, '[createAdsInAdSet] No valid creatives to create ads');
+    return [];
+  }
+
+  // Формируем batch запросы
+  const batchRequests: BatchRequest[] = validCreatives.map(({ creative, fbCreativeId }) => {
+    const adName = `Ad - ${creative.title}`;
+    const body = new URLSearchParams({
+      name: adName,
+      adset_id: adsetId,
+      creative: JSON.stringify({ creative_id: fbCreativeId }),
+      status: 'ACTIVE'
+    }).toString();
+
+    return {
+      method: 'POST' as const,
+      relative_url: `${normalizedAdAccountId}/ads`,
+      body
+    };
+  });
 
   log.info({
     adsetId,
-    totalCreatives: creatives.length,
-    successfulAds: ads.length,
-    failedAds: creatives.length - ads.length,
-    adsCreated: ads.map(ad => ({ id: ad.ad_id, name: ad.name }))
-  }, 'Finished creating ads in ad set');
+    batchSize: batchRequests.length,
+    adAccountId: normalizedAdAccountId,
+    creativeIds: validCreatives.map(vc => vc.fbCreativeId)
+  }, '[createAdsInAdSet] Sending batch request');
 
-  return ads;
+  const ads: Array<{
+    ad_id: string;
+    name: string;
+    user_creative_id: string;
+    creative_title: string;
+  }> = [];
+
+  try {
+    const batchStartTime = Date.now();
+    const responses = await graphBatch(accessToken, batchRequests);
+    const batchDuration = Date.now() - batchStartTime;
+
+    // Обрабатываем результаты
+    const mappingsToSave: Array<{
+      ad_id: string;
+      user_creative_id: string;
+      direction_id: string | null;
+      user_id: string;
+      account_id: string | null;
+      adset_id: string;
+      campaign_id?: string;
+      fb_creative_id: string;
+      source: 'campaign_builder';
+    }> = [];
+
+    let rateLimitErrors = 0;
+    const failedCreatives: Array<{ id: string; title: string; errorCode?: number }> = [];
+
+    for (let i = 0; i < responses.length; i++) {
+      const response = responses[i];
+      const { creative, fbCreativeId } = validCreatives[i];
+      const parsed = parseBatchBody<{ id: string }>(response);
+
+      if (parsed.success && parsed.data?.id) {
+        log.debug({
+          adId: parsed.data.id,
+          userCreativeId: creative.user_creative_id,
+          creativeTitle: creative.title,
+          fbCreativeId
+        }, '[createAdsInAdSet] Ad created successfully');
+
+        ads.push({
+          ad_id: parsed.data.id,
+          name: `Ad - ${creative.title}`,
+          user_creative_id: creative.user_creative_id,
+          creative_title: creative.title
+        });
+
+        // Подготовим маппинг для сохранения
+        if (userId) {
+          mappingsToSave.push({
+            ad_id: parsed.data.id,
+            user_creative_id: creative.user_creative_id,
+            direction_id: directionId || null,
+            user_id: userId,
+            account_id: accountId || null,
+            adset_id: adsetId,
+            campaign_id: campaignId,
+            fb_creative_id: fbCreativeId,
+            source: 'campaign_builder' as const
+          });
+        }
+      } else {
+        const errorCode = parsed.error?.code;
+        if (errorCode === 17 || errorCode === 4) {
+          rateLimitErrors++;
+        }
+        failedCreatives.push({
+          id: creative.user_creative_id,
+          title: creative.title,
+          errorCode
+        });
+        log.error({
+          userCreativeId: creative.user_creative_id,
+          creativeTitle: creative.title,
+          fbCreativeId,
+          adsetId,
+          errorCode,
+          errorMessage: parsed.error?.message?.substring(0, 150)
+        }, '[createAdsInAdSet] Failed to create ad (batch)');
+      }
+    }
+
+    // Сохраняем маппинги (можно параллельно)
+    if (mappingsToSave.length > 0) {
+      await Promise.all(mappingsToSave.map(mapping => saveAdCreativeMapping(mapping)));
+    }
+
+    const totalDuration = Date.now() - startTime;
+    log.info({
+      adsetId,
+      totalCreatives: creatives.length,
+      validCreatives: validCreatives.length,
+      successfulAds: ads.length,
+      failedAds: failedCreatives.length,
+      rateLimitErrors,
+      batchDurationMs: batchDuration,
+      totalDurationMs: totalDuration,
+      avgTimePerAd: Math.round(batchDuration / validCreatives.length),
+      adsCreated: ads.map(ad => ad.ad_id)
+    }, '[createAdsInAdSet] Completed (batch)');
+
+    return ads;
+  } catch (error: any) {
+    const batchFailTime = Date.now() - startTime;
+    log.error({
+      err: error,
+      adsetId,
+      failedAfterMs: batchFailTime
+    }, '[createAdsInAdSet] Batch failed, falling back to sequential with exponential backoff');
+
+    // Fallback на последовательное создание с exponential backoff
+    const MAX_RETRIES = 3;
+    const BASE_DELAY = 3000;
+    let rateLimitHits = 0;
+    let networkErrors = 0;
+
+    for (let i = 0; i < validCreatives.length; i++) {
+      const { creative, fbCreativeId } = validCreatives[i];
+      let success = false;
+
+      for (let retry = 0; retry < MAX_RETRIES && !success; retry++) {
+        try {
+          const response = await fetch(
+            `https://graph.facebook.com/${FB_API_VERSION}/${normalizedAdAccountId}/ads`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({
+                access_token: accessToken,
+                name: `Ad - ${creative.title}`,
+                adset_id: adsetId,
+                creative: JSON.stringify({ creative_id: fbCreativeId }),
+                status: 'ACTIVE'
+              }).toString(),
+            }
+          );
+
+          if (response.ok) {
+            const ad = await response.json();
+            ads.push({
+              ad_id: ad.id,
+              name: `Ad - ${creative.title}`,
+              user_creative_id: creative.user_creative_id,
+              creative_title: creative.title
+            });
+
+            log.debug({
+              adId: ad.id,
+              userCreativeId: creative.user_creative_id,
+              progress: `${i + 1}/${validCreatives.length}`,
+              retry
+            }, '[createAdsInAdSet] Ad created (fallback)');
+
+            if (userId && ad.id) {
+              await saveAdCreativeMapping({
+                ad_id: ad.id,
+                user_creative_id: creative.user_creative_id,
+                direction_id: directionId || null,
+                user_id: userId,
+                account_id: accountId || null,
+                adset_id: adsetId,
+                campaign_id: campaignId,
+                fb_creative_id: fbCreativeId,
+                source: 'campaign_builder'
+              });
+            }
+            success = true;
+          } else {
+            const errorBody = await response.text();
+            const isRateLimit = response.status === 400 &&
+              (errorBody.includes('User request limit reached') || errorBody.includes('"code":17') || errorBody.includes('"code":4'));
+
+            if (isRateLimit && retry < MAX_RETRIES - 1) {
+              rateLimitHits++;
+              const delay = BASE_DELAY * Math.pow(2, retry); // 3s, 6s, 12s
+              log.warn({
+                userCreativeId: creative.user_creative_id,
+                retry: retry + 1,
+                maxRetries: MAX_RETRIES,
+                delayMs: delay
+              }, '[createAdsInAdSet] Rate limited, retrying with backoff');
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+
+            log.error({
+              userCreativeId: creative.user_creative_id,
+              status: response.status,
+              error: errorBody.substring(0, 200)
+            }, '[createAdsInAdSet] Failed to create ad (fallback)');
+            break;
+          }
+        } catch (err: any) {
+          networkErrors++;
+          if (retry < MAX_RETRIES - 1) {
+            const delay = BASE_DELAY * Math.pow(2, retry);
+            log.warn({
+              err,
+              userCreativeId: creative.user_creative_id,
+              retry: retry + 1,
+              delayMs: delay
+            }, '[createAdsInAdSet] Network error, retrying');
+            await new Promise(resolve => setTimeout(resolve, delay));
+          } else {
+            log.error({
+              err,
+              userCreativeId: creative.user_creative_id
+            }, '[createAdsInAdSet] Error creating ad after retries');
+          }
+        }
+      }
+    }
+
+    const totalDuration = Date.now() - startTime;
+    log.info({
+      adsetId,
+      totalCreatives: creatives.length,
+      successfulAds: ads.length,
+      failedAds: validCreatives.length - ads.length,
+      rateLimitHits,
+      networkErrors,
+      totalDurationMs: totalDuration,
+      mode: 'fallback'
+    }, '[createAdsInAdSet] Completed (fallback)');
+
+    return ads;
+  }
 }
 

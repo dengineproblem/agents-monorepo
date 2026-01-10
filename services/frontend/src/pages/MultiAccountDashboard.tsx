@@ -1447,8 +1447,8 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
     return formatCurrency(calculatedCpm);
   };
 
-  const handleCampaignToggle = async (e: React.MouseEvent, checked: boolean) => {
-    e.stopPropagation();
+  const handleCampaignToggle = async (e: React.MouseEvent | null, checked: boolean) => {
+    e?.stopPropagation();
     setIsUpdatingStatus(true);
     try {
       await facebookApi.updateCampaignStatus(campaign.campaign_id, checked);
@@ -1493,7 +1493,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
             checked={campaignActive}
             disabled={isUpdatingStatus}
             onClick={(e) => e.stopPropagation()}
-            onCheckedChange={(checked) => handleCampaignToggle({} as React.MouseEvent, checked)}
+            onCheckedChange={(checked) => handleCampaignToggle(null, checked)}
             className="ml-2"
           />
           <div className="min-w-0 flex-1">

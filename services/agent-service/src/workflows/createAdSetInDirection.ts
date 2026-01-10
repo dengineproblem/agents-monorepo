@@ -1,4 +1,4 @@
-import { graph } from '../adapters/facebook.js';
+import { graph, graphBatch, parseBatchBody, type BatchRequest } from '../adapters/facebook.js';
 import { supabase } from '../lib/supabase.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
@@ -607,74 +607,108 @@ export async function workflowCreateAdSetInDirection(
     userAccountName: userAccountProfile?.username
   }, `🔧 ${log_prefix} STEP 6: Creating ${creative_data.length} ad(s) in ad set...`);
   
-  const created_ads: Array<{ 
-    ad_id: string; 
-    user_creative_id: string; 
+  const created_ads: Array<{
+    ad_id: string;
+    user_creative_id: string;
     fb_creative_id: string;
     media_type: string;
   }> = [];
 
-  for (let i = 0; i < creative_data.length; i++) {
-    const creative = creative_data[i];
-    
-    const adBody: any = {
+  // Используем batch API для создания всех ads за один запрос
+  const batchStartTime = Date.now();
+
+  const batchRequests: BatchRequest[] = creative_data.map(creative => {
+    const body = new URLSearchParams({
       name: creative.ad_name,
-      adset_id,
+      adset_id: adset_id,
       status: auto_activate ? 'ACTIVE' : 'PAUSED',
-      creative: { creative_id: creative.fb_creative_id }
+      creative: JSON.stringify({ creative_id: creative.fb_creative_id })
+    }).toString();
+
+    return {
+      method: 'POST' as const,
+      relative_url: `${normalized_ad_account_id}/ads`,
+      body
     };
+  });
 
-    log.info({
-      ad_index: i + 1,
-      total_ads: creative_data.length,
-      ad_name: creative.ad_name,
-      adset_id,
-      fb_creative_id: creative.fb_creative_id,
-      media_type: creative.media_type,
-      status: auto_activate ? 'ACTIVE' : 'PAUSED'
-    }, `🔧 ${log_prefix} Creating ad ${i + 1}/${creative_data.length}...`);
+  log.info({
+    batchSize: batchRequests.length,
+    adset_id,
+    adAccountId: normalized_ad_account_id,
+    creativeIds: creative_data.map(c => c.fb_creative_id)
+  }, `🔧 ${log_prefix} Creating ${creative_data.length} ad(s) via batch API...`);
 
-    const adResult = await graph(
-      'POST',
-      `${normalized_ad_account_id}/ads`,
-      accessToken,
-      toParams(adBody)
-    );
+  const batchResponses = await graphBatch(accessToken, batchRequests);
+  const batchDuration = Date.now() - batchStartTime;
 
-    const ad_id = adResult?.id;
-    if (!ad_id) {
+  let rateLimitErrors = 0;
+  const failedAds: Array<{ index: number; creative_id: string; errorCode?: number }> = [];
+
+  for (let i = 0; i < batchResponses.length; i++) {
+    const response = batchResponses[i];
+    const creative = creative_data[i];
+    const parsed = parseBatchBody<{ id: string }>(response);
+
+    if (parsed.success && parsed.data?.id) {
+      log.debug({
+        ad_id: parsed.data.id,
+        creative_id: creative.user_creative_id,
+        media_type: creative.media_type,
+        ad_index: i + 1,
+        total_ads: creative_data.length
+      }, `✅ ${log_prefix} Ad ${i + 1}/${creative_data.length} created`);
+
+      created_ads.push({
+        ad_id: parsed.data.id,
+        user_creative_id: creative.user_creative_id,
+        fb_creative_id: creative.fb_creative_id,
+        media_type: creative.media_type
+      });
+    } else {
+      const errorCode = parsed.error?.code;
+      if (errorCode === 17 || errorCode === 4) {
+        rateLimitErrors++;
+      }
+      failedAds.push({ index: i + 1, creative_id: creative.user_creative_id, errorCode });
       log.error({
         creative_id: creative.user_creative_id,
         fb_creative_id: creative.fb_creative_id,
         adset_id,
-        ad_index: i + 1
+        ad_index: i + 1,
+        errorCode,
+        errorMessage: parsed.error?.message?.substring(0, 150)
       }, `❌ ${log_prefix} Failed to create ad ${i + 1}/${creative_data.length}`);
-      
-      throw new Error(`Failed to create ad for creative ${creative.user_creative_id}`);
     }
+  }
 
-    log.info({
-      ad_id,
-      creative_id: creative.user_creative_id,
-      media_type: creative.media_type,
-      ad_index: i + 1,
-      total_ads: creative_data.length
-    }, `✅ ${log_prefix} Ad ${i + 1}/${creative_data.length} created successfully`);
+  // Если не все ads созданы - это ошибка
+  if (created_ads.length < creative_data.length) {
+    log.warn({
+      created: created_ads.length,
+      expected: creative_data.length,
+      failed: failedAds.length,
+      rateLimitErrors,
+      adset_id
+    }, `⚠️ ${log_prefix} Some ads failed to create`);
 
-    created_ads.push({
-      ad_id,
-      user_creative_id: creative.user_creative_id,
-      fb_creative_id: creative.fb_creative_id,
-      media_type: creative.media_type
-    });
+    // Если совсем ничего не создалось - бросаем ошибку
+    if (created_ads.length === 0) {
+      throw new Error(`Failed to create any ads for adset ${adset_id}. Rate limit errors: ${rateLimitErrors}`);
+    }
   }
 
   log.info({
     count: created_ads.length,
-    ads: created_ads.map(a => ({ ad_id: a.ad_id, creative_id: a.user_creative_id })),
+    totalCreatives: creative_data.length,
+    failedCount: failedAds.length,
+    rateLimitErrors,
+    batchDurationMs: batchDuration,
+    avgTimePerAd: Math.round(batchDuration / creative_data.length),
+    ads: created_ads.map(a => a.ad_id),
     adset_id,
     mode: is_use_existing_mode ? 'use_existing' : 'api_create'
-  }, `✅ ${log_prefix} STEP 6: All ${created_ads.length} ad(s) created successfully in ad set`);
+  }, `✅ ${log_prefix} STEP 6: Created ${created_ads.length}/${creative_data.length} ad(s) in ad set (batch)`);
 
   // Инкрементировать счетчик ads для use_existing режима
   if (userAccount?.default_adset_mode === 'use_existing') {
@@ -712,20 +746,24 @@ export async function workflowCreateAdSetInDirection(
   );
 
   // ===================================================
-  // STEP 7: Сохраняем связь AdSet с Direction (опционально)
+  // STEP 7: Сохраняем связь AdSet с Direction
   // ===================================================
-  // Можно добавить запись в asset_directions для трекинга
-  const { error: assetError } = await supabase
-    .from('asset_directions')
+  const { error: adsetLinkError } = await supabase
+    .from('direction_adsets')
     .insert({
       direction_id: direction_id,
       fb_adset_id: adset_id,
-      asset_type: 'adset'
+      adset_name: adset_name,
+      daily_budget_cents: daily_budget_cents,
+      status: auto_activate ? 'ACTIVE' : 'PAUSED',
+      ads_count: created_ads.length
     });
 
-  if (assetError) {
-    log.warn({ err: assetError, adsetId: adset_id, direction_id }, 'Failed to link adset to direction');
+  if (adsetLinkError) {
+    log.warn({ err: adsetLinkError, adsetId: adset_id, direction_id }, 'Failed to link adset to direction');
     // Не блокируем, просто логируем
+  } else {
+    log.info({ adsetId: adset_id, direction_id, adsCount: created_ads.length }, 'Adset linked to direction');
   }
 
   // ===================================================
