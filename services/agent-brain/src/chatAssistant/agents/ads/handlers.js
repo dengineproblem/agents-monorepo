@@ -2065,8 +2065,26 @@ export const adsHandlers = {
    * Trigger a Brain Agent optimization run
    * WARNING: This is a dangerous operation that can modify budgets and pause/resume adsets
    */
-  async triggerBrainOptimizationRun({ direction_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
+  async triggerBrainOptimizationRun({ direction_id, campaign_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
     const dbAccountId = adAccountDbId || null;
+
+    // Логируем входящие параметры
+    logger.info({
+      where: 'triggerBrainOptimizationRun',
+      phase: 'start',
+      userAccountId,
+      adAccountId,
+      adAccountDbId,
+      direction_id: direction_id || null,
+      campaign_id: campaign_id || null,
+      dry_run,
+      reason,
+      message: campaign_id
+        ? `Запуск Brain Mini для кампании ${campaign_id}`
+        : direction_id
+          ? `Запуск Brain Mini для направления ${direction_id}`
+          : 'Запуск Brain Mini для всего аккаунта'
+    });
 
     // ========================================
     // INTERACTIVE MODE: Generate proposals (dry_run=true или false)
@@ -2155,6 +2173,7 @@ export const adsHandlers = {
         },
         {
           directionId: direction_id,
+          campaignId: campaign_id,  // Facebook campaign ID для фильтрации по кампании
           supabase,
           logger,
           accountUUID  // Также передаём в options для directions

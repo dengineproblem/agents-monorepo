@@ -712,7 +712,23 @@ export function registerChatRoutes(fastify) {
   // BRAIN MINI - Direct endpoint (bypasses Meta Orchestrator)
   // ============================================================
   fastify.post('/api/brain/mini/run/stream', async (request, reply) => {
-    const { userAccountId, adAccountId, directionId, dryRun } = request.body;
+    const { userAccountId, adAccountId, directionId, campaignId, dryRun } = request.body;
+
+    // Логируем входящие параметры
+    logger.info({
+      where: 'brain_mini_stream_endpoint',
+      phase: 'request_received',
+      userAccountId,
+      adAccountId,
+      directionId: directionId || null,
+      campaignId: campaignId || null,
+      dryRun: dryRun || false,
+      message: campaignId
+        ? `Brain Mini запущен для кампании ${campaignId}`
+        : directionId
+          ? `Brain Mini запущен для направления ${directionId}`
+          : 'Brain Mini запущен для всего аккаунта'
+    });
 
     if (!userAccountId) {
       return reply.code(400).send({ error: 'userAccountId is required' });
@@ -772,6 +788,7 @@ export function registerChatRoutes(fastify) {
       const result = await adsHandlers.triggerBrainOptimizationRun(
         {
           direction_id: directionId || null,
+          campaign_id: campaignId || null,
           dry_run: dryRun || false,
           reason: 'Direct Brain Mini call from Dashboard'
         },

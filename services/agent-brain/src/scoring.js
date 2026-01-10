@@ -2458,6 +2458,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
   const log = options.logger || logger;
   const directionId = options.directionId || null;
+  const campaignId = options.campaignId || null;  // Facebook campaign ID для фильтрации
   const useLLM = options.useLLM !== false; // default: true
 
   // accountUUID может быть передан через options или через userAccount
@@ -2469,6 +2470,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     phase: 'start',
     userId: userAccountId,
     directionId,
+    campaignId,
     useLLM,
     accountUUID,
     ad_account_id
@@ -2713,8 +2715,48 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     // Если нет данных за сегодня — используем adsetMetricsFromFB (все адсеты за 14 дней)
     // Это позволяет анализировать кампании, которые были на паузе сегодня
     // ========================================
-    const adsetsToAnalyze = todayData.length > 0 ? todayData : adsetMetricsFromFB;
+    let adsetsToAnalyze = todayData.length > 0 ? todayData : adsetMetricsFromFB;
     const usingHistoricalData = todayData.length === 0;
+    const originalAdsetsCount = adsetsToAnalyze.length;
+
+    // ========================================
+    // ФИЛЬТРАЦИЯ ПО КАМПАНИИ
+    // Если передан campaignId или directionId — анализируем только одну кампанию
+    // Приоритет: campaignId (напрямую) > directionId (через fb_campaign_id)
+    // ========================================
+    let targetCampaignId = campaignId || null;
+
+    // Если campaignId не передан, но есть directionId — берём fb_campaign_id из direction
+    if (!targetCampaignId && directionId && directions?.length > 0) {
+      targetCampaignId = directions[0]?.fb_campaign_id;
+    }
+
+    // Фильтруем адсеты по кампании
+    if (targetCampaignId) {
+      adsetsToAnalyze = adsetsToAnalyze.filter(adset => adset.campaign_id === targetCampaignId);
+
+      if (adsetsToAnalyze.length === 0) {
+        log.warn({
+          where: 'interactive_brain',
+          phase: 'filtered_by_campaign',
+          target_campaign_id: targetCampaignId,
+          source: campaignId ? 'campaignId_param' : 'direction_fb_campaign_id',
+          original_count: originalAdsetsCount,
+          filtered_count: 0,
+          message: `ВНИМАНИЕ: После фильтрации не найдено адсетов для кампании ${targetCampaignId}. Возможно кампания на паузе или нет активных адсетов.`
+        });
+      } else {
+        log.info({
+          where: 'interactive_brain',
+          phase: 'filtered_by_campaign',
+          target_campaign_id: targetCampaignId,
+          source: campaignId ? 'campaignId_param' : 'direction_fb_campaign_id',
+          original_count: originalAdsetsCount,
+          filtered_count: adsetsToAnalyze.length,
+          message: `Отфильтровано до ${adsetsToAnalyze.length} адсетов для кампании ${targetCampaignId}`
+        });
+      }
+    }
 
     log.info({
       where: 'interactive_brain',
@@ -2724,9 +2766,12 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       today_adsets_count: todayData.length,
       fb_metrics_adsets_count: adsetMetricsFromFB.length,
       directions_count: directions?.length || 0,
+      filtered_by_campaign: !!targetCampaignId,
+      target_campaign_id: targetCampaignId,
+      original_adsets_count: originalAdsetsCount,
       message: usingHistoricalData
-        ? `Нет данных за сегодня, анализируем ${adsetMetricsFromFB.length} адсетов за 14 дней`
-        : `Начинаем анализ ${todayData.length} адсетов`
+        ? `Нет данных за сегодня, анализируем ${adsetsToAnalyze.length} адсетов за 14 дней`
+        : `Начинаем анализ ${adsetsToAnalyze.length} адсетов`
     });
 
     const proposals = [];

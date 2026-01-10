@@ -512,6 +512,7 @@ export interface BrainMiniParams {
   userAccountId: string;
   adAccountId?: string;
   directionId?: string;
+  campaignId?: string;  // Facebook campaign ID для фильтрации
   dryRun?: boolean;
 }
 

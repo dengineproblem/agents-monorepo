@@ -1508,6 +1508,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
                     accountName,
                     directionId: direction?.id,
                     directionName: direction?.name || campaign.campaign_name,
+                    campaignId: campaign.campaign_id,
                   });
                 }}
               />

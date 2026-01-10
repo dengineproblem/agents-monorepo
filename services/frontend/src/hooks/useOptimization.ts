@@ -20,6 +20,7 @@ export interface OptimizationScope {
   accountName: string;     // Имя аккаунта для отображения
   directionId?: string;    // UUID direction (опционально, для CampaignRow)
   directionName?: string;  // Имя направления для отображения
+  campaignId?: string;     // Facebook campaign ID (для фильтрации по конкретной кампании)
 }
 
 /**
@@ -98,10 +99,19 @@ export function useOptimization() {
       abortController.abort();
     }, 420000);
 
-    // Формируем сообщение - явно указываем вызвать triggerBrainOptimizationRun с dry_run: true
-    const message = scope.directionId
-      ? `Вызови инструмент triggerBrainOptimizationRun с параметрами: direction_id="${scope.directionId}", dry_run=true. Покажи предложения по оптимизации для направления "${scope.directionName || 'направление'}".`
-      : `Вызови инструмент triggerBrainOptimizationRun с параметрами: dry_run=true. Покажи предложения по оптимизации для всего аккаунта "${scope.accountName}".`;
+    // Формируем параметры для triggerBrainOptimizationRun
+    let params = 'dry_run=true';
+    if (scope.directionId) {
+      params += `, direction_id="${scope.directionId}"`;
+    }
+    if (scope.campaignId) {
+      params += `, campaign_id="${scope.campaignId}"`;
+    }
+
+    const targetName = scope.directionName || scope.accountName;
+    const message = (scope.directionId || scope.campaignId)
+      ? `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. Покажи предложения по оптимизации для "${targetName}".`
+      : `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. Покажи предложения по оптимизации для всего аккаунта "${scope.accountName}".`;
 
     // Инициализируем состояние
     const initialState = createInitialStreamingState();
@@ -124,6 +134,9 @@ export function useOptimization() {
         mode: 'plan',
         userAccountId,
         adAccountId: scope.accountId,
+        directionId: scope.directionId,
+        campaignId: scope.campaignId,
+        targetName,
       });
 
       const stream = sendMessageStream(
