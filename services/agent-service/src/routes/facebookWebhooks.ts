@@ -148,6 +148,10 @@ export default async function facebookWebhooks(app: FastifyInstance) {
    * We then retrieve the lead data and create a lead in our database.
    */
   app.post('/facebook/webhook', async (req, res) => {
+    // Debug: explicit console.log to verify request reaches handler
+    console.log('[FB_WEBHOOK_DEBUG] POST /facebook/webhook received at', new Date().toISOString());
+    console.log('[FB_WEBHOOK_DEBUG] Body:', JSON.stringify(req.body, null, 2));
+
     try {
       const body = req.body as any;
 
