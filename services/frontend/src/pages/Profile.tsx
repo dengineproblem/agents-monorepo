@@ -38,7 +38,6 @@ import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
-import { BrainSettingsCard } from '@/components/BrainSettingsCard';
 import { useAppContext } from '@/context/AppContext';
 
 
@@ -1162,8 +1161,9 @@ const Profile: React.FC = () => {
                 </Card>
               )}
 
-              {/* Brain Settings Card - только для обычного режима (в мультиаккаунтном настраивается через AdAccountsManager) */}
-              {!multiAccountEnabled && <BrainSettingsCard />}
+              {/* Brain Settings Card убран для legacy режима:
+                  - Legacy (multi_account_enabled=false) использует user_accounts.autopilot (toggle on/off)
+                  - Multi-account настраивает brain_mode через AdAccountsManager */}
 
               {/* Audience ID Card - скрыто в preview версии и в мультиаккаунтном режиме (настраивается через AdAccountsManager) */}
               {!APP_REVIEW_MODE && !multiAccountEnabled && (
