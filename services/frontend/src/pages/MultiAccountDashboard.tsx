@@ -1672,8 +1672,9 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
 
   const [isHovered, setIsHovered] = React.useState(false);
   const [isEditing, setIsEditing] = React.useState(false);
-  const [editedBudget, setEditedBudget] = React.useState(adset.daily_budget.toFixed(2));
-  const [currentBudget, setCurrentBudget] = React.useState(adset.daily_budget);
+  const dailyBudgetNum = Number(adset.daily_budget) || 0;
+  const [editedBudget, setEditedBudget] = React.useState(dailyBudgetNum.toFixed(2));
+  const [currentBudget, setCurrentBudget] = React.useState(dailyBudgetNum);
   const [adsetActive, setAdsetActive] = React.useState(adset.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
 
