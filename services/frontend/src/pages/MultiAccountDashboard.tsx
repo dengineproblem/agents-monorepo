@@ -1171,6 +1171,10 @@ const AccountRow: React.FC<AccountRowProps> = ({
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
+  // Проверяем, есть ли хотя бы одно WhatsApp направление
+  // Качество лидов показываем только для WhatsApp (messaging_apps), не для лид-форм
+  const hasWhatsAppDirections = directions.some(d => d.objective === 'whatsapp');
+
   // Debug: log when campaigns change for this account
   React.useEffect(() => {
     logger.info('[AccountRow] Rendering with campaigns', {
@@ -1196,8 +1200,14 @@ const AccountRow: React.FC<AccountRowProps> = ({
     impressions: campaigns.reduce((sum, c) => sum + c.impressions, 0),
     clicks: campaigns.reduce((sum, c) => sum + c.clicks, 0),
     get cpl() { return this.leads > 0 ? this.spend / this.leads : 0; },
-    get cpql() { return this.qualityLeads > 0 ? this.spend / this.qualityLeads : 0; },
+    get cpql() {
+      // CPQL только для WhatsApp направлений
+      if (!hasWhatsAppDirections) return 0;
+      return this.qualityLeads > 0 ? this.spend / this.qualityLeads : 0;
+    },
     get qualityRate() {
+      // Качество лидов показываем только для WhatsApp направлений
+      if (!hasWhatsAppDirections) return 0;
       return this.messagingLeads > 0 ? (this.qualityLeads / this.messagingLeads) * 100 : 0;
     },
     get ctr() { return this.impressions > 0 ? (this.clicks / this.impressions) * 100 : 0; },
@@ -1294,7 +1304,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
             {/* Мобильная версия — компактная строка метрик */}
             {stats && (
               <p className="md:hidden text-xs text-muted-foreground truncate">
-                {formatCurrency(stats.spend)} • {formatNumber(stats.leads)} лидов • {formatCurrency(stats.cpl)} CPL • {stats.cpql > 0 ? formatCurrency(stats.cpql) + ' CPQL' : ''} • {stats.qualityRate > 0 ? stats.qualityRate.toFixed(0) + '% качество' : ''}
+                {formatCurrency(stats.spend)} • {formatNumber(stats.leads)} лидов • {formatCurrency(stats.cpl)} CPL • {hasWhatsAppDirections && stats.cpql > 0 ? formatCurrency(stats.cpql) + ' CPQL' : ''} • {hasWhatsAppDirections && stats.qualityRate > 0 ? stats.qualityRate.toFixed(0) + '% качество' : ''}
               </p>
             )}
           </div>
@@ -1335,14 +1345,14 @@ const AccountRow: React.FC<AccountRowProps> = ({
         {/* CPQL */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="font-medium text-sm whitespace-nowrap">
-            {stats && stats.cpql > 0 ? formatCurrency(stats.cpql) : '—'}
+            {stats && hasWhatsAppDirections && stats.cpql > 0 ? formatCurrency(stats.cpql) : '—'}
           </span>
         </div>
 
         {/* Качество лидов */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="font-medium text-sm whitespace-nowrap">
-            {stats && stats.qualityRate > 0 ? `${stats.qualityRate.toFixed(0)}%` : '—'}
+            {stats && hasWhatsAppDirections && stats.qualityRate > 0 ? `${stats.qualityRate.toFixed(0)}%` : '—'}
           </span>
         </div>
 
@@ -1465,6 +1475,11 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   // Находим direction для этой кампании
   const direction = directions.find(d => d.fb_campaign_id === campaign.campaign_id);
 
+  // Качество лидов показываем только для WhatsApp кампаний
+  const isWhatsAppCampaign = direction?.objective === 'whatsapp';
+  const displayQualityRate = isWhatsAppCampaign ? campaign.qualityRate : 0;
+  const displayCpql = isWhatsAppCampaign ? campaign.cpql : 0;
+
   return (
     <div className="divide-y divide-muted/30">
       <div
@@ -1515,7 +1530,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
             </div>
             {/* Мобильная версия — компактная строка метрик */}
             <p className="md:hidden text-xs text-muted-foreground truncate">
-              {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL • {campaign.cpql > 0 ? formatCurrency(campaign.cpql) + ' CPQL' : ''} • {campaign.qualityRate > 0 ? campaign.qualityRate.toFixed(0) + '% качество' : ''}
+              {formatCurrency(campaign.spend)} • {formatNumber(campaign.leads)} лидов • {formatCurrency(campaign.cpl)} CPL • {displayCpql > 0 ? formatCurrency(displayCpql) + ' CPQL' : ''} • {displayQualityRate > 0 ? displayQualityRate.toFixed(0) + '% качество' : ''}
             </p>
           </div>
         </div>
@@ -1545,14 +1560,14 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
         {/* CPQL */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">
-            {campaign.cpql > 0 ? formatCurrency(campaign.cpql) : '—'}
+            {displayCpql > 0 ? formatCurrency(displayCpql) : '—'}
           </span>
         </div>
 
         {/* Качество лидов */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm">
-            {campaign.qualityRate > 0 ? `${campaign.qualityRate.toFixed(0)}%` : '—'}
+            {displayQualityRate > 0 ? `${displayQualityRate.toFixed(0)}%` : '—'}
           </span>
         </div>
 
@@ -1587,6 +1602,7 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
                 isLoading={adsLoading.has(adset.adset_id)}
                 ads={adsData[adset.adset_id] || []}
                 targetCplCents={getTargetCplForLevel(campaign.campaign_id, directions)}
+                isWhatsAppCampaign={isWhatsAppCampaign}
               />
             ))
           )}
@@ -1607,6 +1623,7 @@ interface AdsetRowProps {
   isLoading: boolean;
   ads: AdStats[];
   targetCplCents: number | null;
+  isWhatsAppCampaign: boolean;
 }
 
 const AdsetRow: React.FC<AdsetRowProps> = ({
@@ -1616,7 +1633,12 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
   isLoading,
   ads,
   targetCplCents,
+  isWhatsAppCampaign,
 }) => {
+  // Качество лидов показываем только для WhatsApp кампаний
+  const displayQualityRate = isWhatsAppCampaign ? adset.qualityRate : 0;
+  const displayCpql = isWhatsAppCampaign ? adset.cpql : 0;
+
   const formatCtr = (ctr: number) => `${ctr.toFixed(2)}%`;
   const formatCpm = (impressions: number, spend: number) => {
     const calculatedCpm = impressions > 0 ? (spend / impressions) * 1000 : 0;
@@ -1764,8 +1786,8 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
               <span>{formatNumber(adset.leads)} лидов</span>
               <span>•</span>
               <span>{formatCurrency(adset.cpl)} CPL</span>
-              {adset.cpql > 0 && <><span>•</span><span>{formatCurrency(adset.cpql)} CPQL</span></>}
-              {adset.qualityRate > 0 && <><span>•</span><span>{adset.qualityRate.toFixed(0)}% качество</span></>}
+              {displayCpql > 0 && <><span>•</span><span>{formatCurrency(displayCpql)} CPQL</span></>}
+              {displayQualityRate > 0 && <><span>•</span><span>{displayQualityRate.toFixed(0)}% качество</span></>}
             </div>
           </div>
         </div>
@@ -1829,14 +1851,14 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
         {/* CPQL */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">
-            {adset.cpql > 0 ? formatCurrency(adset.cpql) : '—'}
+            {displayCpql > 0 ? formatCurrency(displayCpql) : '—'}
           </span>
         </div>
 
         {/* Качество лидов */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="text-sm text-muted-foreground">
-            {adset.qualityRate > 0 ? `${adset.qualityRate.toFixed(0)}%` : '—'}
+            {displayQualityRate > 0 ? `${displayQualityRate.toFixed(0)}%` : '—'}
           </span>
         </div>
 
@@ -1863,7 +1885,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             </div>
           ) : (
             ads.map((ad) => (
-              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} adsetBudget={adset.daily_budget} />
+              <AdRow key={ad.ad_id} ad={ad} targetCplCents={targetCplCents} adsetBudget={adset.daily_budget} isWhatsAppCampaign={isWhatsAppCampaign} />
             ))
           )}
         </div>
@@ -1880,9 +1902,10 @@ interface AdRowProps {
   ad: AdStats;
   targetCplCents: number | null;
   adsetBudget: number; // Бюджет родительского адсета
+  isWhatsAppCampaign: boolean;
 }
 
-const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget }) => {
+const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsAppCampaign }) => {
   const [adActive, setAdActive] = React.useState(ad.status === 'ACTIVE');
   const [isUpdatingStatus, setIsUpdatingStatus] = React.useState(false);
 
@@ -1912,8 +1935,11 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget }) => {
     }
   };
 
-  const cpql = ad.cpql || (ad.qualityLeads > 0 ? ad.spend / ad.qualityLeads : 0);
-  const qualityRate = ad.qualityRate || (ad.messagingLeads > 0 ? (ad.qualityLeads / ad.messagingLeads) * 100 : 0);
+  // Качество лидов показываем только для WhatsApp кампаний
+  const rawCpql = ad.cpql || (ad.qualityLeads > 0 ? ad.spend / ad.qualityLeads : 0);
+  const rawQualityRate = ad.qualityRate || (ad.messagingLeads > 0 ? (ad.qualityLeads / ad.messagingLeads) * 100 : 0);
+  const cpql = isWhatsAppCampaign ? rawCpql : 0;
+  const qualityRate = isWhatsAppCampaign ? rawQualityRate : 0;
 
   return (
     <div
