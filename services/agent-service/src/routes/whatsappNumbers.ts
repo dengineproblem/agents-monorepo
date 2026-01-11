@@ -221,6 +221,53 @@ export default async function whatsappNumbersRoutes(app: FastifyInstance) {
     }
   });
 
+  // POST /whatsapp-numbers/:id/reset-connection - сбросить зависший статус подключения
+  app.post('/whatsapp-numbers/:id/reset-connection', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { userAccountId } = request.query as { userAccountId?: string };
+
+    if (!userAccountId) {
+      return reply.status(400).send({ error: 'userAccountId is required' });
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('whatsapp_phone_numbers')
+        .update({
+          connection_status: 'disconnected',
+          instance_name: null,
+        })
+        .eq('id', id)
+        .eq('user_account_id', userAccountId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (!data) {
+        return reply.status(404).send({ error: 'Number not found' });
+      }
+
+      app.log.info({ id, userAccountId }, 'Reset WhatsApp connection status');
+
+      return reply.send({ success: true, number: data });
+    } catch (error: any) {
+      app.log.error('Error resetting WhatsApp connection:', error);
+
+      logErrorToAdmin({
+        user_account_id: userAccountId,
+        error_type: 'evolution',
+        raw_error: error.message || String(error),
+        stack_trace: error.stack,
+        action: 'reset_whatsapp_connection',
+        endpoint: '/whatsapp-numbers/:id/reset-connection',
+        severity: 'warning'
+      }).catch(() => {});
+
+      return reply.status(500).send({ error: error.message || 'Failed to reset connection' });
+    }
+  });
+
   // GET /whatsapp-numbers/default - получить дефолтный номер пользователя
   app.get('/whatsapp-numbers/default', async (request, reply) => {
     const { userAccountId, accountId } = request.query as { userAccountId?: string; accountId?: string };

@@ -48,6 +48,18 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
     refresh(); // Обновить список после успешного подключения
   };
 
+  const handleResetConnection = async (numberId: string) => {
+    if (!userAccountId) return;
+
+    try {
+      await whatsappApi.resetConnection(numberId, userAccountId);
+      refresh(); // Обновить список после сброса
+    } catch (error) {
+      console.error('Failed to reset WhatsApp connection:', error);
+      alert('Не удалось сбросить подключение. Попробуйте позже.');
+    }
+  };
+
   if (loading) {
     return (
       <Card>
@@ -132,16 +144,17 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                   </div>
 
                   <Button
-                    variant={number.connection_status === 'connected' ? 'outline' : 'default'}
+                    variant={number.connection_status === 'connected' || number.connection_status === 'connecting' ? 'outline' : 'default'}
                     size="sm"
                     onClick={() => {
                       if (number.connection_status === 'connected') {
                         handleDisconnect(number.instance_name!);
+                      } else if (number.connection_status === 'connecting') {
+                        handleResetConnection(number.id);
                       } else {
                         handleConnect(number.id, number.phone_number);
                       }
                     }}
-                    disabled={number.connection_status === 'connecting'}
                     className="px-2 sm:px-4"
                   >
                     {number.connection_status === 'connected' ? (
@@ -151,8 +164,8 @@ export const WhatsAppConnectionCard: React.FC<WhatsAppConnectionCardProps> = ({
                       </>
                     ) : number.connection_status === 'connecting' ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
-                        <span className="hidden sm:inline">Подключение...</span>
+                        <X className="h-4 w-4 sm:mr-2" />
+                        <span className="hidden sm:inline">Отменить</span>
                       </>
                     ) : (
                       <>

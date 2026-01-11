@@ -86,4 +86,17 @@ export const whatsappApi = {
       throw new Error('Failed to disconnect instance');
     }
   },
+
+  /**
+   * Сбросить зависший статус подключения
+   */
+  async resetConnection(phoneNumberId: string, userAccountId: string): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/whatsapp-numbers/${phoneNumberId}/reset-connection?userAccountId=${userAccountId}`,
+      { method: 'POST' }
+    );
+    if (!response.ok) {
+      throw new Error('Failed to reset connection');
+    }
+  },
 };
