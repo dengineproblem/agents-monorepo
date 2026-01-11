@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAppContext } from '@/context/AppContext';
 import { adAccountsApi } from '@/services/adAccountsApi';
 import type { AdAccount, CreateAdAccountPayload, UpdateAdAccountPayload } from '@/types/adAccount';
+import { BRAIN_MODE_LABELS, BRAIN_MODE_DESCRIPTIONS, BRAIN_TIMEZONES } from '@/types/adAccount';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,6 +42,7 @@ import {
   MessageSquare,
   Key,
   Building2,
+  Brain,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -58,8 +61,12 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [accountToDelete, setAccountToDelete] = useState<AdAccount | null>(null);
 
-  // Form state
-  const [formData, setFormData] = useState<Partial<CreateAdAccountPayload>>({
+  // Form state (extended with brain fields)
+  const [formData, setFormData] = useState<Partial<CreateAdAccountPayload> & {
+    brain_mode?: 'autopilot' | 'report' | 'semi_auto';
+    brain_schedule_hour?: number;
+    brain_timezone?: string;
+  }>({
     name: '',
     username: '',
     fb_ad_account_id: '',
@@ -77,6 +84,9 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
     prompt4: '',
     openai_api_key: '',
     gemini_api_key: '',
+    brain_mode: 'report',
+    brain_schedule_hour: 8,
+    brain_timezone: 'Asia/Almaty',
   });
 
   // Load accounts
@@ -203,6 +213,9 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       prompt4: '',
       openai_api_key: '',
       gemini_api_key: '',
+      brain_mode: 'report',
+      brain_schedule_hour: 8,
+      brain_timezone: 'Asia/Almaty',
     });
   };
 
@@ -226,6 +239,9 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
       prompt4: account.prompt4 || '',
       openai_api_key: account.openai_api_key || '',
       gemini_api_key: account.gemini_api_key || '',
+      brain_mode: account.brain_mode || 'report',
+      brain_schedule_hour: account.brain_schedule_hour ?? 8,
+      brain_timezone: account.brain_timezone || 'Asia/Almaty',
     });
     setIsEditOpen(true);
   };
@@ -421,22 +437,31 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
 
 // Form component
 interface AccountFormProps {
-  formData: Partial<CreateAdAccountPayload>;
-  setFormData: React.Dispatch<React.SetStateAction<Partial<CreateAdAccountPayload>>>;
+  formData: Partial<CreateAdAccountPayload> & {
+    brain_mode?: 'autopilot' | 'report' | 'semi_auto';
+    brain_schedule_hour?: number;
+    brain_timezone?: string;
+  };
+  setFormData: React.Dispatch<React.SetStateAction<Partial<CreateAdAccountPayload> & {
+    brain_mode?: 'autopilot' | 'report' | 'semi_auto';
+    brain_schedule_hour?: number;
+    brain_timezone?: string;
+  }>>;
 }
 
 function AccountForm({ formData, setFormData }: AccountFormProps) {
-  const updateField = (field: keyof CreateAdAccountPayload, value: string) => {
+  const updateField = (field: string, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   return (
     <Tabs defaultValue="basic" className="w-full">
-      <TabsList className="grid w-full grid-cols-4">
+      <TabsList className="grid w-full grid-cols-5">
         <TabsTrigger value="basic">Основное</TabsTrigger>
         <TabsTrigger value="facebook">Facebook</TabsTrigger>
         <TabsTrigger value="notifications">Уведомления</TabsTrigger>
-        <TabsTrigger value="ai">AI & Промпты</TabsTrigger>
+        <TabsTrigger value="brain">Brain</TabsTrigger>
+        <TabsTrigger value="ai">AI</TabsTrigger>
       </TabsList>
 
       <TabsContent value="basic" className="space-y-4 mt-4">
@@ -563,6 +588,78 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
               onChange={(e) => updateField('telegram_id_4', e.target.value)}
               placeholder="123456789"
             />
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="brain" className="space-y-4 mt-4">
+        <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
+          <Brain className="h-4 w-4" />
+          <span>Настройки AI-оптимизации Brain</span>
+        </div>
+        <div className="grid gap-4">
+          {/* Режим оптимизации */}
+          <div className="grid gap-2">
+            <Label>Режим оптимизации</Label>
+            <Select
+              value={formData.brain_mode || 'report'}
+              onValueChange={(value) => updateField('brain_mode', value)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(BRAIN_MODE_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    <div>
+                      <div>{label}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {BRAIN_MODE_DESCRIPTIONS[value]}
+                      </div>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Время запуска */}
+          <div className="grid gap-2">
+            <Label>Время ежедневного запуска</Label>
+            <Select
+              value={String(formData.brain_schedule_hour ?? 8)}
+              onValueChange={(value) => updateField('brain_schedule_hour', parseInt(value))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 24 }, (_, i) => (
+                  <SelectItem key={i} value={String(i)}>
+                    {String(i).padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label>Часовой пояс</Label>
+            <Select
+              value={formData.brain_timezone || 'Asia/Almaty'}
+              onValueChange={(value) => updateField('brain_timezone', value)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BRAIN_TIMEZONES.map((tz) => (
+                  <SelectItem key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </TabsContent>

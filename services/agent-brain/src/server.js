@@ -3840,6 +3840,460 @@ async function processUser(user) {
   }
 }
 
+// ============================================================================
+// HOURLY SCHEDULED BATCH FUNCTIONS (для индивидуального расписания аккаунтов)
+// ============================================================================
+
+/**
+ * Конвертирует UTC час в локальный час для указанного часового пояса
+ */
+function getLocalHour(utcHour, timezone) {
+  try {
+    const date = new Date();
+    date.setUTCHours(utcHour, 0, 0, 0);
+
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric',
+      hour12: false,
+      timeZone: timezone
+    });
+
+    return parseInt(formatter.format(date), 10);
+  } catch (err) {
+    // Если timezone невалидный, используем UTC
+    fastify.log.warn({
+      where: 'getLocalHour',
+      timezone,
+      error: String(err),
+      fallback: 'UTC'
+    });
+    return utcHour;
+  }
+}
+
+/**
+ * Получить аккаунты, для которых сейчас время запуска
+ */
+async function getAccountsForCurrentHour(utcHour) {
+  if (!supabase) return [];
+
+  // Получаем все активные аккаунты с brain_mode = autopilot или semi_auto
+  const { data: accounts, error } = await supabase
+    .from('ad_accounts')
+    .select(`
+      id, user_account_id, name, fb_ad_account_id, fb_page_id, fb_access_token,
+      brain_mode, brain_schedule_hour, brain_timezone, autopilot,
+      telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
+      default_cpl_target_cents, plan_daily_budget_cents,
+      last_brain_batch_run_at,
+      prompt3, whatsapp_phone_number, ig_seed_audience_id,
+      user_accounts!inner(
+        id, username, access_token, multi_account_enabled, optimization, is_active
+      )
+    `)
+    .eq('is_active', true)
+    .in('brain_mode', ['autopilot', 'semi_auto']);
+
+  if (error) {
+    fastify.log.error({
+      where: 'getAccountsForCurrentHour',
+      error: String(error)
+    });
+    return [];
+  }
+
+  if (!accounts || accounts.length === 0) {
+    return [];
+  }
+
+  const now = new Date();
+  const fiftyMinutesAgo = new Date(now.getTime() - 50 * 60 * 1000);
+
+  // Фильтруем по расписанию и дедупликации
+  const accountsToProcess = accounts.filter(acc => {
+    const timezone = acc.brain_timezone || 'Asia/Almaty';
+    const scheduleHour = acc.brain_schedule_hour ?? 8;
+
+    // Конвертируем UTC час в локальный час аккаунта
+    const localHour = getLocalHour(utcHour, timezone);
+
+    // Проверяем совпадение часа
+    if (localHour !== scheduleHour) {
+      return false;
+    }
+
+    // Дедупликация: не обрабатывать если уже обработан за последние 50 минут
+    if (acc.last_brain_batch_run_at) {
+      const lastRun = new Date(acc.last_brain_batch_run_at);
+      if (lastRun > fiftyMinutesAgo) {
+        fastify.log.debug({
+          where: 'getAccountsForCurrentHour',
+          accountId: acc.id,
+          accountName: acc.name,
+          lastRun: acc.last_brain_batch_run_at,
+          skip: 'already_processed_recently'
+        });
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  fastify.log.info({
+    where: 'getAccountsForCurrentHour',
+    utcHour,
+    totalActive: accounts.length,
+    toProcess: accountsToProcess.length,
+    accountNames: accountsToProcess.map(a => a.name)
+  });
+
+  return accountsToProcess;
+}
+
+/**
+ * Сохранить proposals в pending_brain_proposals и создать уведомление
+ */
+async function savePendingProposals(brainResult, account) {
+  if (!supabase) return;
+
+  const { proposals, summary, adset_analysis } = brainResult;
+
+  if (!proposals || proposals.length === 0) {
+    fastify.log.info({
+      where: 'savePendingProposals',
+      accountId: account.id,
+      accountName: account.name,
+      message: 'Нет proposals для сохранения'
+    });
+    return;
+  }
+
+  try {
+    // 1. Помечаем старые pending как expired
+    await supabase
+      .from('pending_brain_proposals')
+      .update({ status: 'expired' })
+      .eq('ad_account_id', account.id)
+      .eq('status', 'pending');
+
+    // 2. Создаём уведомление
+    const criticalCount = proposals.filter(p => p.priority === 'critical').length;
+    const notificationTitle = criticalCount > 0
+      ? `${proposals.length} предложений (${criticalCount} критических)`
+      : `${proposals.length} предложений по оптимизации`;
+
+    const { data: notification, error: notifError } = await supabase
+      .from('user_notifications')
+      .insert({
+        user_account_id: account.user_account_id,
+        type: 'brain_proposals',
+        title: notificationTitle,
+        message: `Brain проанализировал "${account.name}" и подготовил рекомендации`,
+        metadata: {
+          ad_account_id: account.id,
+          ad_account_name: account.name,
+          proposals_count: proposals.length,
+          critical_count: criticalCount,
+          high_count: proposals.filter(p => p.priority === 'high').length,
+          summary: summary
+        }
+      })
+      .select('id')
+      .single();
+
+    if (notifError) {
+      fastify.log.error({
+        where: 'savePendingProposals',
+        phase: 'create_notification',
+        accountId: account.id,
+        error: String(notifError)
+      });
+    }
+
+    // 3. Сохраняем proposals
+    const { error: proposalError } = await supabase
+      .from('pending_brain_proposals')
+      .insert({
+        ad_account_id: account.id,
+        user_account_id: account.user_account_id,
+        proposals: proposals,
+        context: {
+          summary: summary,
+          adset_analysis: adset_analysis
+        },
+        proposals_count: proposals.length,
+        status: 'pending',
+        notification_id: notification?.id || null
+      });
+
+    if (proposalError) {
+      fastify.log.error({
+        where: 'savePendingProposals',
+        phase: 'save_proposals',
+        accountId: account.id,
+        error: String(proposalError)
+      });
+      return;
+    }
+
+    fastify.log.info({
+      where: 'savePendingProposals',
+      accountId: account.id,
+      accountName: account.name,
+      proposalsCount: proposals.length,
+      criticalCount,
+      notificationId: notification?.id,
+      status: 'saved'
+    });
+
+  } catch (err) {
+    fastify.log.error({
+      where: 'savePendingProposals',
+      accountId: account.id,
+      error: String(err)
+    });
+  }
+}
+
+/**
+ * Обработать один аккаунт по расписанию
+ */
+async function processAccountBrain(account) {
+  const { brain_mode, id: accountId, name: accountName, user_account_id } = account;
+  const userAccount = account.user_accounts;
+  const startTime = Date.now();
+
+  fastify.log.info({
+    where: 'processAccountBrain',
+    accountId,
+    accountName,
+    brain_mode,
+    status: 'started'
+  });
+
+  try {
+    // Формируем userAccount для runInteractiveBrain
+    const userAccountForBrain = {
+      id: user_account_id,
+      ad_account_id: account.fb_ad_account_id,
+      access_token: account.fb_access_token || userAccount.access_token,
+      page_id: account.fb_page_id,
+      account_uuid: accountId,
+      username: userAccount.username,
+      telegram_id: account.telegram_id,
+      telegram_id_2: account.telegram_id_2,
+      telegram_id_3: account.telegram_id_3,
+      telegram_id_4: account.telegram_id_4,
+      default_cpl_target_cents: account.default_cpl_target_cents,
+      plan_daily_budget_cents: account.plan_daily_budget_cents,
+      prompt3: account.prompt3,
+      whatsapp_phone_number: account.whatsapp_phone_number,
+      ig_seed_audience_id: account.ig_seed_audience_id,
+      multi_account_enabled: userAccount.multi_account_enabled
+    };
+
+    // Импортируем и вызываем runInteractiveBrain
+    const { runInteractiveBrain } = await import('./scoring.js');
+
+    const result = await runInteractiveBrain(userAccountForBrain, {
+      accountUUID: accountId,
+      supabase,
+      logger: fastify.log
+    });
+
+    const duration = Date.now() - startTime;
+
+    if (!result.success) {
+      fastify.log.error({
+        where: 'processAccountBrain',
+        accountId,
+        accountName,
+        brain_mode,
+        duration,
+        error: result.error || 'runInteractiveBrain failed'
+      });
+      return { success: false, error: result.error, duration };
+    }
+
+    const { proposals } = result;
+
+    if (brain_mode === 'autopilot') {
+      // Автопилот: выполняем proposals автоматически
+      // Используем существующую логику из /api/brain/run
+      fastify.log.info({
+        where: 'processAccountBrain',
+        accountId,
+        accountName,
+        brain_mode: 'autopilot',
+        proposalsCount: proposals?.length || 0,
+        action: 'execute_proposals'
+      });
+
+      // TODO: Вызвать executeProposals или существующий handler
+      // Пока просто логируем - полная реализация в следующей итерации
+
+    } else if (brain_mode === 'semi_auto') {
+      // Полуавтоматический: сохраняем proposals и ждём одобрения
+      await savePendingProposals(result, account);
+    }
+
+    // Обновляем last_brain_batch_run_at
+    await supabase
+      .from('ad_accounts')
+      .update({ last_brain_batch_run_at: new Date().toISOString() })
+      .eq('id', accountId);
+
+    fastify.log.info({
+      where: 'processAccountBrain',
+      accountId,
+      accountName,
+      brain_mode,
+      proposalsCount: proposals?.length || 0,
+      duration,
+      status: 'completed'
+    });
+
+    return {
+      success: true,
+      accountId,
+      accountName,
+      brain_mode,
+      proposalsCount: proposals?.length || 0,
+      duration
+    };
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    fastify.log.error({
+      where: 'processAccountBrain',
+      accountId,
+      accountName,
+      brain_mode,
+      duration,
+      error: String(err)
+    });
+
+    return {
+      success: false,
+      accountId,
+      accountName,
+      error: String(err),
+      duration
+    };
+  }
+}
+
+/**
+ * Hourly batch: обработка аккаунтов по их индивидуальному расписанию
+ */
+async function processDailyBatchBySchedule(utcHour) {
+  const batchStartTime = Date.now();
+  const lockKey = 'hourly_batch_lock';
+  const instanceId = process.env.HOSTNAME || 'unknown';
+
+  fastify.log.info({
+    where: 'processDailyBatchBySchedule',
+    utcHour,
+    instanceId,
+    status: 'started'
+  });
+
+  // Cleanup expired locks
+  if (supabase) {
+    try {
+      await supabase.rpc('cleanup_expired_batch_locks');
+    } catch (cleanupErr) {
+      fastify.log.warn({
+        where: 'processDailyBatchBySchedule',
+        phase: 'cleanup_locks',
+        error: String(cleanupErr)
+      });
+    }
+  }
+
+  // Получаем аккаунты для текущего часа
+  const accountsToProcess = await getAccountsForCurrentHour(utcHour);
+
+  if (accountsToProcess.length === 0) {
+    fastify.log.info({
+      where: 'processDailyBatchBySchedule',
+      utcHour,
+      status: 'no_accounts_to_process'
+    });
+    return { success: true, processed: 0 };
+  }
+
+  const results = [];
+  const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5');
+
+  // Обрабатываем аккаунты с ограничением concurrency
+  for (let i = 0; i < accountsToProcess.length; i += BATCH_CONCURRENCY) {
+    const batch = accountsToProcess.slice(i, i + BATCH_CONCURRENCY);
+
+    const batchResults = await Promise.all(
+      batch.map(account => processAccountBrain(account))
+    );
+
+    results.push(...batchResults);
+
+    // Пауза между батчами
+    if (i + BATCH_CONCURRENCY < accountsToProcess.length) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  const successCount = results.filter(r => r.success).length;
+  const failureCount = results.filter(r => !r.success).length;
+  const batchDuration = Date.now() - batchStartTime;
+
+  // Сохраняем результаты
+  if (supabase) {
+    try {
+      await supabase.from('batch_execution_results').insert({
+        execution_date: new Date().toISOString().split('T')[0],
+        execution_hour: utcHour,
+        started_at: new Date(batchStartTime).toISOString(),
+        completed_at: new Date().toISOString(),
+        total_users: accountsToProcess.length,
+        success_count: successCount,
+        failure_count: failureCount,
+        total_duration_ms: batchDuration,
+        results: results,
+        instance_id: instanceId
+      });
+    } catch (saveErr) {
+      fastify.log.error({
+        where: 'processDailyBatchBySchedule',
+        phase: 'save_results',
+        error: String(saveErr)
+      });
+    }
+  }
+
+  fastify.log.info({
+    where: 'processDailyBatchBySchedule',
+    utcHour,
+    processed: accountsToProcess.length,
+    success: successCount,
+    failed: failureCount,
+    duration: batchDuration,
+    status: 'completed'
+  });
+
+  return {
+    success: true,
+    processed: accountsToProcess.length,
+    successCount,
+    failureCount,
+    duration: batchDuration
+  };
+}
+
+// ============================================================================
+// LEGACY DAILY BATCH (оставляем для обратной совместимости)
+// ============================================================================
+
 /**
  * Batch-обработка всех активных пользователей (параллельно с ограничением concurrency)
  */
@@ -3889,7 +4343,7 @@ async function processDailyBatch() {
         .upsert({
           lock_key: lockKey,
           instance_id: instanceId,
-          expires_at: new Date(Date.now() + 3600000).toISOString() // 1 час
+          expires_at: new Date(Date.now() + 900000).toISOString() // 15 минут (для hourly cron)
         });
       
       if (lockSetError) {
@@ -3903,7 +4357,7 @@ async function processDailyBatch() {
           where: 'processDailyBatch', 
           phase: 'lock_acquired', 
           instanceId,
-          expiresIn: '1 hour'
+          expiresIn: '15 minutes'
         });
       }
     } catch (lockErr) {
@@ -4474,6 +4928,55 @@ if (CRON_ENABLED) {
   });
 
   fastify.log.info({ where: 'cron', schedule: CRON_SCHEDULE, timezone: 'Asia/Almaty', status: 'scheduled' });
+
+  // Hourly cron для schedule-based обработки (semi_auto и autopilot с индивидуальным расписанием)
+  const HOURLY_CRON_SCHEDULE = '0 * * * *'; // Каждый час в :00
+  const HOURLY_CRON_ENABLED = process.env.HOURLY_CRON_ENABLED !== 'false';
+
+  if (HOURLY_CRON_ENABLED) {
+    cron.schedule(HOURLY_CRON_SCHEDULE, async () => {
+      const utcHour = new Date().getUTCHours();
+
+      fastify.log.info({
+        where: 'hourly_brain_cron',
+        schedule: HOURLY_CRON_SCHEDULE,
+        utcHour,
+        status: 'triggered'
+      });
+
+      // Очистка истёкших locks перед обработкой
+      try {
+        await supabase.rpc('cleanup_expired_batch_locks');
+      } catch (cleanupErr) {
+        fastify.log.warn({
+          where: 'hourly_brain_cron',
+          phase: 'lock_cleanup_failed',
+          error: String(cleanupErr)
+        });
+      }
+
+      try {
+        await processDailyBatchBySchedule(utcHour);
+      } catch (err) {
+        fastify.log.error({
+          where: 'hourly_brain_cron',
+          status: 'failed',
+          utcHour,
+          error: String(err)
+        });
+      }
+    }, {
+      scheduled: true,
+      timezone: "UTC" // UTC для точного расчёта локальных часов
+    });
+
+    fastify.log.info({
+      where: 'hourly_brain_cron',
+      schedule: HOURLY_CRON_SCHEDULE,
+      timezone: 'UTC',
+      status: 'scheduled'
+    });
+  }
 
   // Cron: Отчёт по утреннему batch в 9:00 по Алматы (через час после batch)
   const REPORT_CRON_SCHEDULE = '0 9 * * *';

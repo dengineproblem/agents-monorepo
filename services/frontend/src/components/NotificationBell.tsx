@@ -23,6 +23,7 @@ import { API_BASE_URL } from '@/config/api';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { useBrainProposalsContextOptional } from '@/contexts/BrainProposalsContext';
 
 // =====================================================
 // Types
@@ -47,6 +48,7 @@ const TYPE_COLORS: Record<string, string> = {
   fb_approved: 'bg-green-100 text-green-800 border-green-300',
   fb_rejected: 'bg-red-100 text-red-800 border-red-300',
   stage_changed: 'bg-blue-100 text-blue-800 border-blue-300',
+  brain_proposals: 'bg-purple-100 text-purple-800 border-purple-300',
   default: 'bg-gray-100 text-gray-800 border-gray-300',
 };
 
@@ -59,6 +61,9 @@ const NotificationBell: React.FC = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+
+  // Brain proposals context для открытия модалки
+  const brainProposals = useBrainProposalsContextOptional();
 
   // Get current user ID
   const getUserId = useCallback(() => {
@@ -168,6 +173,23 @@ const NotificationBell: React.FC = () => {
     }
   };
 
+  // Handle notification click
+  const handleNotificationClick = (notification: Notification) => {
+    // Mark as read first
+    if (!notification.is_read) {
+      markAsRead(notification.id);
+    }
+
+    // Handle brain_proposals type
+    if (notification.type === 'brain_proposals' && brainProposals) {
+      const proposalId = (notification.metadata as { proposal_id?: string })?.proposal_id;
+      if (proposalId) {
+        setOpen(false); // Close popover
+        brainProposals.openModal(proposalId);
+      }
+    }
+  };
+
   // Initial fetch and polling
   useEffect(() => {
     fetchUnreadCount();
@@ -235,13 +257,17 @@ const NotificationBell: React.FC = () => {
             </div>
           ) : (
             <div className="divide-y">
-              {notifications.map((notification) => (
+              {notifications.map((notification) => {
+                const isClickable = notification.type === 'brain_proposals';
+                return (
                 <div
                   key={notification.id}
                   className={cn(
                     'p-3 hover:bg-muted/50 transition-colors relative group',
-                    !notification.is_read && 'bg-blue-50/50 dark:bg-blue-950/20'
+                    !notification.is_read && 'bg-blue-50/50 dark:bg-blue-950/20',
+                    isClickable && 'cursor-pointer'
                   )}
+                  onClick={isClickable ? () => handleNotificationClick(notification) : undefined}
                 >
                   <div className="flex items-start gap-3">
                     <div
@@ -290,7 +316,8 @@ const NotificationBell: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </ScrollArea>

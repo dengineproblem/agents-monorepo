@@ -67,6 +67,11 @@ export interface AdAccount {
   plan_daily_budget_cents: number | null;
   default_cpl_target_cents: number | null;
 
+  // Brain settings (новый функционал)
+  brain_mode: 'autopilot' | 'report' | 'semi_auto';
+  brain_schedule_hour: number;
+  brain_timezone: string;
+
   // Status
   connection_status: 'pending' | 'connected' | 'error';
   last_error: string | null;
@@ -186,6 +191,11 @@ export interface UpdateAdAccountPayload {
   optimization?: boolean;
   plan_daily_budget_cents?: number | null;
   default_cpl_target_cents?: number | null;
+
+  // Brain settings
+  brain_mode?: 'autopilot' | 'report' | 'semi_auto';
+  brain_schedule_hour?: number;
+  brain_timezone?: string;
 }
 
 export interface AdAccountsResponse {
@@ -205,3 +215,27 @@ export const CONNECTION_STATUS_COLORS: Record<string, string> = {
   connected: 'text-green-500',
   error: 'text-red-500',
 };
+
+// Brain режимы
+export const BRAIN_MODE_LABELS: Record<string, string> = {
+  report: 'Только отчёты',
+  semi_auto: 'Полуавтоматический',
+  autopilot: 'Автопилот',
+};
+
+export const BRAIN_MODE_DESCRIPTIONS: Record<string, string> = {
+  report: 'Brain анализирует и отправляет отчёты, но не вносит изменения',
+  semi_auto: 'Brain формирует предложения, вы одобряете их в интерфейсе',
+  autopilot: 'Brain автоматически выполняет оптимизацию',
+};
+
+export const BRAIN_TIMEZONES = [
+  { value: 'Asia/Almaty', label: 'Алматы (UTC+5)' },
+  { value: 'Europe/Moscow', label: 'Москва (UTC+3)' },
+  { value: 'Asia/Tbilisi', label: 'Тбилиси (UTC+4)' },
+  { value: 'Asia/Dubai', label: 'Дубай (UTC+4)' },
+  { value: 'Europe/Kiev', label: 'Киев (UTC+2)' },
+  { value: 'Europe/Istanbul', label: 'Стамбул (UTC+3)' },
+  { value: 'Asia/Baku', label: 'Баку (UTC+4)' },
+  { value: 'Asia/Yerevan', label: 'Ереван (UTC+4)' },
+];

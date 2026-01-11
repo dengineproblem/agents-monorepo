@@ -38,6 +38,7 @@ import { appReviewText } from '../utils/appReviewText';
 import { API_BASE_URL } from '@/config/api';
 import { FacebookManualConnectModal } from '@/components/profile/FacebookManualConnectModal';
 import { AdAccountsManager } from '@/components/ad-accounts/AdAccountsManager';
+import { BrainSettingsCard } from '@/components/BrainSettingsCard';
 import { useAppContext } from '@/context/AppContext';
 
 
@@ -1160,6 +1161,9 @@ const Profile: React.FC = () => {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Brain Settings Card - только для обычного режима (в мультиаккаунтном настраивается через AdAccountsManager) */}
+              {!multiAccountEnabled && <BrainSettingsCard />}
 
               {/* Audience ID Card - скрыто в preview версии и в мультиаккаунтном режиме (настраивается через AdAccountsManager) */}
               {!APP_REVIEW_MODE && !multiAccountEnabled && (

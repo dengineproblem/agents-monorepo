@@ -98,6 +98,11 @@ const UpdateAdAccountSchema = z.object({
   // Status
   connection_status: z.enum(['pending', 'connected', 'error']).optional(),
   last_error: z.string().nullable().optional(),
+
+  // Brain settings
+  brain_mode: z.enum(['autopilot', 'report', 'semi_auto']).optional(),
+  brain_schedule_hour: z.number().int().min(0).max(23).optional(),
+  brain_timezone: z.string().optional(),
 });
 
 type CreateAdAccountInput = z.infer<typeof CreateAdAccountSchema>;
@@ -124,6 +129,10 @@ function mapDbToFrontend(dbRecord: Record<string, unknown>): Record<string, unkn
     fb_business_id: dbRecord.business_id,
     // Аватар страницы
     page_picture_url: dbRecord.page_picture_url,
+    // Brain settings
+    brain_mode: dbRecord.brain_mode || 'report',
+    brain_schedule_hour: dbRecord.brain_schedule_hour ?? 8,
+    brain_timezone: dbRecord.brain_timezone || 'Asia/Almaty',
   };
 }
 
@@ -620,6 +629,11 @@ export async function adAccountsRoutes(app: FastifyInstance) {
       // Status
       if (validated.connection_status !== undefined) dbData.connection_status = validated.connection_status;
       if (validated.last_error !== undefined) dbData.last_error = validated.last_error;
+
+      // Brain settings
+      if (validated.brain_mode !== undefined) dbData.brain_mode = validated.brain_mode;
+      if (validated.brain_schedule_hour !== undefined) dbData.brain_schedule_hour = validated.brain_schedule_hour;
+      if (validated.brain_timezone !== undefined) dbData.brain_timezone = validated.brain_timezone;
 
       const { data: adAccount, error } = await supabase
         .from('ad_accounts')

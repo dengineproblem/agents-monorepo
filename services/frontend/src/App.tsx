@@ -53,6 +53,7 @@ import { FacebookManualConnectModal } from './components/profile/FacebookManualC
 import { OnboardingTour } from './components/onboarding/OnboardingTour';
 import { useAppContext } from './context/AppContext';
 import { initSafeStorage } from './utils/safeStorage';
+import { BrainProposalsProvider } from './contexts/BrainProposalsContext';
 
 // Инициализация безопасного хранилища при старте
 initSafeStorage();
@@ -416,11 +417,13 @@ const App = () => {
         <TooltipProvider>
           <LanguageProvider>
             <AppProvider>
-              <Sonner position="top-center" />
-              <Toaster />
-              <BrowserRouter>
-                <AppRoutes />
-              </BrowserRouter>
+              <BrainProposalsProvider>
+                <Sonner position="top-center" />
+                <Toaster />
+                <BrowserRouter>
+                  <AppRoutes />
+                </BrowserRouter>
+              </BrainProposalsProvider>
             </AppProvider>
           </LanguageProvider>
         </TooltipProvider>
