@@ -106,7 +106,7 @@ const CreativeGeneration = () => {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
 
   // State для выбора стиля креатива
-  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle'>('modern_performance');
+  const [selectedStyle, setSelectedStyle] = useState<'modern_performance' | 'live_ugc' | 'visual_hook' | 'premium_minimal' | 'product_hero' | 'freestyle'>('freestyle');
   const [stylePrompt, setStylePrompt] = useState<string>('');  // Промпт для freestyle стиля
 
   // State для модалки референса конкурента
@@ -307,7 +307,7 @@ const CreativeGeneration = () => {
     setIsEditMode(false);
     setEditPrompt('');
     setEditReferenceImages([]);
-    setSelectedStyle('modern_performance');
+    setSelectedStyle('freestyle');
     setStylePrompt('');
   }, [currentAdAccountId]);
 

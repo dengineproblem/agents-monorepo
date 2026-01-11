@@ -47,7 +47,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
   const [isRegeneratingText, setIsRegeneratingText] = useState(false);
 
   // State для шага 3: Генерация изображений
-  const [visualStyle, setVisualStyle] = useState<CarouselVisualStyle>('clean_minimal');
+  const [visualStyle, setVisualStyle] = useState<CarouselVisualStyle>('freestyle');
   const [stylePrompt, setStylePrompt] = useState('');  // Промпт для freestyle стиля
   const [isGeneratingCarousel, setIsGeneratingCarousel] = useState(false);
   const [generatedCarouselId, setGeneratedCarouselId] = useState('');
@@ -174,7 +174,7 @@ export const CarouselTab: React.FC<CarouselTabProps> = ({
     setCardsCount(3);
     setCarouselCards([]);
     setCurrentCardIndex(0);
-    setVisualStyle('clean_minimal');
+    setVisualStyle('freestyle');
     setStylePrompt('');
     setGeneratedCarouselId('');
     setSelectedDirectionId('');
