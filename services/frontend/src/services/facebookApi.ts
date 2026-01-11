@@ -1044,6 +1044,74 @@ export const facebookApi = {
   },
   getAdsetsByCampaign,
   getAdsetStats,
+
+  // Получить бюджеты всех адсетов аккаунта (1 запрос на аккаунт)
+  getAdsetBudgetsByAccount: async (): Promise<Array<{ id: string; campaign_id: string; daily_budget: number; status: string }>> => {
+    try {
+      const FB_API_CONFIG = await getCurrentUserConfig();
+      if (!FB_API_CONFIG.access_token || !FB_API_CONFIG.ad_account_id) {
+        return [];
+      }
+      const endpoint = `${FB_API_CONFIG.ad_account_id}/adsets`;
+      const params = {
+        fields: 'id,campaign_id,daily_budget,status',
+        limit: '500',
+      };
+      const data = await fetchFromFacebookAPI(endpoint, params);
+      return (data.data || []).map((a: any) => ({
+        id: a.id,
+        campaign_id: a.campaign_id,
+        daily_budget: parseFloat(a.daily_budget || '0') / 100,
+        status: a.status,
+      }));
+    } catch (error) {
+      console.error('Ошибка при получении бюджетов адсетов:', error);
+      return [];
+    }
+  },
+
+  // Получить бюджеты адсетов для конкретного аккаунта (с явными параметрами)
+  // Возвращает только активные адсеты из активных кампаний
+  getAdsetBudgetsForAccount: async (adAccountId: string, accessToken: string): Promise<{ totalBudget: number; activeAdsetsCount: number }> => {
+    try {
+      // Параллельно получаем кампании и адсеты
+      const [campaignsRes, adsetsRes] = await Promise.all([
+        fetch(`https://graph.facebook.com/v18.0/${adAccountId}/campaigns?access_token=${accessToken}&fields=id,status&limit=500`),
+        fetch(`https://graph.facebook.com/v18.0/${adAccountId}/adsets?access_token=${accessToken}&fields=id,campaign_id,daily_budget,status&limit=500`)
+      ]);
+
+      if (!campaignsRes.ok || !adsetsRes.ok) {
+        throw new Error('Failed to fetch data');
+      }
+
+      const [campaignsData, adsetsData] = await Promise.all([
+        campaignsRes.json(),
+        adsetsRes.json()
+      ]);
+
+      // Создаём Set активных кампаний
+      const activeCampaignIds = new Set(
+        (campaignsData.data || [])
+          .filter((c: any) => c.status === 'ACTIVE')
+          .map((c: any) => c.id)
+      );
+
+      // Фильтруем адсеты: активные И из активных кампаний
+      const activeAdsets = (adsetsData.data || []).filter((a: any) =>
+        a.status === 'ACTIVE' && activeCampaignIds.has(a.campaign_id)
+      );
+
+      const totalBudget = activeAdsets.reduce((sum: number, a: any) =>
+        sum + parseFloat(a.daily_budget || '0') / 100, 0
+      );
+
+      return { totalBudget, activeAdsetsCount: activeAdsets.length };
+    } catch (error) {
+      console.error(`Ошибка при получении бюджетов адсетов для ${adAccountId}:`, error);
+      return { totalBudget: 0, activeAdsetsCount: 0 };
+    }
+  },
+
   updateAdsetBudget,
   updateAdsetStatus,
   updateAdStatus,

@@ -283,6 +283,9 @@ const MultiAccountDashboard: React.FC = () => {
   const [directionsData, setDirectionsData] = useState<Record<string, Direction[]>>({});
   const [directionsLoading, setDirectionsLoading] = useState<Set<string>>(new Set());
 
+  // Account-level budgets (сумма бюджетов активных адсетов по аккаунту)
+  const [accountBudgets, setAccountBudgets] = useState<Record<string, number>>({});
+
   // Optimization hook
   const optimization = useOptimization();
 
@@ -405,6 +408,28 @@ const MultiAccountDashboard: React.FC = () => {
 
       setAccountStats(data.accounts);
       setError(null);
+
+      // Загружаем бюджеты для всех аккаунтов параллельно
+      const storedAdAccounts = localStorage.getItem('adAccounts');
+      if (storedAdAccounts) {
+        const adAccountsList = JSON.parse(storedAdAccounts);
+        const budgetPromises = adAccountsList.map(async (acc: any) => {
+          if (!acc.ad_account_id || !acc.access_token) return { id: acc.id, budget: 0 };
+          const result = await facebookApi.getAdsetBudgetsForAccount(acc.ad_account_id, acc.access_token);
+          logger.info('Account budget calculation', {
+            accountName: acc.name,
+            activeAdsetsCount: result.activeAdsetsCount,
+            totalBudget: result.totalBudget,
+          });
+          return { id: acc.id, budget: result.totalBudget };
+        });
+        Promise.all(budgetPromises).then(results => {
+          const budgets: Record<string, number> = {};
+          results.forEach(r => { budgets[r.id] = r.budget; });
+          setAccountBudgets(budgets);
+          logger.info('Account budgets loaded', { count: results.length });
+        });
+      }
 
       if (showRefreshIndicator) {
         toast.success('Данные обновлены');
@@ -662,8 +687,11 @@ const MultiAccountDashboard: React.FC = () => {
 
             const campaignsMap = new Map(campaignsList.map(c => [c.id, c.status]));
 
-            // Получаем статистику кампаний (передаём campaignsList чтобы не дублировать запрос)
-            const campaigns = await facebookApi.getCampaignStats(dateRange, false, campaignsList);
+            // Параллельно получаем статистику кампаний и бюджеты адсетов
+            const [campaigns, adsetBudgets] = await Promise.all([
+              facebookApi.getCampaignStats(dateRange, false, campaignsList),
+              facebookApi.getAdsetBudgetsByAccount()
+            ]);
 
             // ПРОВЕРКА: убедимся что currentAdAccountId не изменился пока шел запрос
             if (localStorage.getItem('currentAdAccountId') !== accountId) {
@@ -674,12 +702,22 @@ const MultiAccountDashboard: React.FC = () => {
               return; // Прерываем загрузку
             }
 
+            // Группируем бюджеты активных адсетов по campaign_id
+            const budgetByCampaign = new Map<string, number>();
+            for (const adset of adsetBudgets) {
+              if (adset.status === 'ACTIVE') {
+                const current = budgetByCampaign.get(adset.campaign_id) || 0;
+                budgetByCampaign.set(adset.campaign_id, current + adset.daily_budget);
+              }
+            }
+
             logger.info('Campaign stats loaded', {
               accountId: accountId.slice(0, 8),
-              statsCount: campaigns.length
+              statsCount: campaigns.length,
+              adsetBudgetsCount: adsetBudgets.length
             });
 
-            // Добавляем статусы к кампаниям
+            // Добавляем статусы и бюджеты к кампаниям
             const campaignStats: CampaignStats[] = campaigns.map((c) => ({
                 campaign_id: c.campaign_id,
                 campaign_name: c.campaign_name,
@@ -694,7 +732,7 @@ const MultiAccountDashboard: React.FC = () => {
                 qualityLeads: c.qualityLeads || 0,
                 cpql: c.cpql || 0,
                 qualityRate: c.qualityRate || 0,
-                daily_budget: c.daily_budget || 0,
+                daily_budget: budgetByCampaign.get(c.campaign_id) || 0,
               }));
 
             // ПРОВЕРКА: убедимся что session ID не изменился (не было refresh)
@@ -761,10 +799,12 @@ const MultiAccountDashboard: React.FC = () => {
             const cachedAdsetsList = adsetsListCacheRef.current.get(campaignId);
             let adsetsList: any[];
             let adsets: any[];
+            let budgetsAlreadyConverted = false;
 
             if (cachedAdsetsList && cachedAdsetsList.length > 0) {
               // Используем кэшированный список (CACHE HIT), загружаем только статистику
               adsetsList = cachedAdsetsList;
+              budgetsAlreadyConverted = true;
               adsets = await facebookApi.getAdsetStats(campaignId, dateRange);
               logger.info('Adsets list cache HIT', {
                 campaignId: campaignId.slice(0, 8),
@@ -795,7 +835,7 @@ const MultiAccountDashboard: React.FC = () => {
 
             // Создаём мапы для бюджетов и статусов
             const budgetMap = new Map(
-              adsetsList.map((a: any) => [a.id, a.daily_budget !== undefined ? a.daily_budget : parseFloat(a.daily_budget || '0') / 100])
+              adsetsList.map((a: any) => [a.id, budgetsAlreadyConverted ? a.daily_budget : parseFloat(a.daily_budget || '0') / 100])
             );
             const statusMap = new Map(
               adsetsList.map((a: any) => [a.id, a.status])
@@ -830,6 +870,24 @@ const MultiAccountDashboard: React.FC = () => {
             }
 
             setAdsetsData((prev) => ({ ...prev, [campaignId]: adsetStats }));
+
+            // Обновляем бюджет кампании суммой бюджетов активных адсетов
+            const totalActiveBudget = adsetStats
+              .filter(a => a.status === 'ACTIVE')
+              .reduce((sum, a) => sum + (a.daily_budget || 0), 0);
+
+            setCampaignsData((prev) => {
+              const accountCampaigns = prev[accountId];
+              if (!accountCampaigns) return prev;
+              return {
+                ...prev,
+                [accountId]: accountCampaigns.map(c =>
+                  c.campaign_id === campaignId
+                    ? { ...c, daily_budget: totalActiveBudget }
+                    : c
+                )
+              };
+            });
           } finally {
             // НЕ делаем restore! currentAdAccountId должен остаться на выбранном аккаунте
             // Он изменится только когда пользователь раскроет другой аккаунт
@@ -1084,6 +1142,7 @@ const MultiAccountDashboard: React.FC = () => {
                     dateRange={dateRange}
                     directions={directionsData[account.id] || []}
                     onOptimize={optimization.startOptimization}
+                    accountBudget={accountBudgets[account.id]}
                   />
                 ))}
               </div>
@@ -1172,6 +1231,7 @@ interface AccountRowProps {
   dateRange: { since: string; until: string };
   directions: Direction[];
   onOptimize: (scope: OptimizationScope) => void;
+  accountBudget?: number;
 }
 
 const AccountRow: React.FC<AccountRowProps> = ({
@@ -1191,6 +1251,7 @@ const AccountRow: React.FC<AccountRowProps> = ({
   adsData,
   directions,
   onOptimize,
+  accountBudget,
 }) => {
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -1344,7 +1405,11 @@ const AccountRow: React.FC<AccountRowProps> = ({
         {/* Бюджет */}
         <div className="hidden md:flex col-span-1 items-center justify-end">
           <span className="font-medium text-sm whitespace-nowrap">
-            {campaigns.length > 0 ? formatCurrency(campaigns.reduce((sum, c) => sum + c.daily_budget, 0)) : '—'}
+            {accountBudget !== undefined && accountBudget > 0
+              ? formatCurrency(accountBudget)
+              : campaigns.length > 0
+                ? formatCurrency(campaigns.reduce((sum, c) => sum + c.daily_budget, 0))
+                : '—'}
           </span>
         </div>
 
