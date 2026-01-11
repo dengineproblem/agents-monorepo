@@ -403,7 +403,7 @@ const AppRoutes = () => {
 
 const App = () => {
   const { tg, isReady } = useTelegramWebApp();
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   
   useEffect(() => {
     if (isReady && tg.colorScheme) {
