@@ -51,7 +51,7 @@ interface AdAccountsManagerProps {
 }
 
 export function AdAccountsManager({ className }: AdAccountsManagerProps) {
-  const { multiAccountEnabled, loadAdAccounts } = useAppContext();
+  const { multiAccountEnabled, loadAdAccounts, currentAdAccountId, setCurrentAdAccountId } = useAppContext();
 
   const [accounts, setAccounts] = useState<AdAccount[]>([]);
   const [loading, setLoading] = useState(true);
@@ -336,31 +336,38 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
               const status = STATUS_CONFIG[computedStatus] || STATUS_CONFIG.pending;
               const StatusIcon = status.icon;
 
+              const isSelected = currentAdAccountId === account.id;
+
               return (
                 <div
                   key={account.id}
                   className={cn(
-                    "flex items-center justify-between p-4 border rounded-lg transition-colors",
-                    account.is_active
-                      ? "hover:bg-muted/50"
-                      : "opacity-50 bg-muted/30"
+                    "flex items-center justify-between p-4 border rounded-lg transition-colors cursor-pointer",
+                    isSelected
+                      ? "border-primary bg-primary/5 ring-1 ring-primary"
+                      : account.is_active
+                        ? "hover:bg-muted/50"
+                        : "opacity-50 bg-muted/30"
                   )}
+                  onClick={() => account.is_active && setCurrentAdAccountId(account.id)}
                 >
                   <div className="flex items-center gap-3">
                     <StatusIcon className={cn('h-5 w-5', status.color)} />
                     <div>
                       <div className="flex items-center gap-2">
                         <span className={cn("font-medium", !account.is_active && "line-through")}>{account.name}</span>
+                        {isSelected && (
+                          <span className="text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
+                            Выбран
+                          </span>
+                        )}
                       </div>
-                      {account.username && (
-                        <div className="text-sm text-muted-foreground">@{account.username}</div>
-                      )}
                       <div className="text-xs text-muted-foreground">
                         {account.fb_ad_account_id ? `FB: ${account.fb_ad_account_id}` : 'FB не настроен'}
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
                     <Switch
                       checked={account.is_active}
                       onCheckedChange={(checked) => handleToggleActive(account.id, checked)}
@@ -460,7 +467,7 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
         <TabsTrigger value="basic">Основное</TabsTrigger>
         <TabsTrigger value="facebook">Facebook</TabsTrigger>
         <TabsTrigger value="notifications">Уведомления</TabsTrigger>
-        <TabsTrigger value="brain">Brain</TabsTrigger>
+        <TabsTrigger value="brain">Оптимизация</TabsTrigger>
         <TabsTrigger value="ai">AI</TabsTrigger>
       </TabsList>
 
@@ -473,15 +480,6 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
               value={formData.name || ''}
               onChange={(e) => updateField('name', e.target.value)}
               placeholder="Мой бизнес"
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="username">Имя пользователя</Label>
-            <Input
-              id="username"
-              value={formData.username || ''}
-              onChange={(e) => updateField('username', e.target.value)}
-              placeholder="username"
             />
           </div>
         </div>
@@ -691,24 +689,30 @@ function AccountForm({ formData, setFormData }: AccountFormProps) {
             />
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="prompt1">Промпт #1</Label>
+            <Label htmlFor="prompt1">Контекст бизнеса (для текстов)</Label>
             <Textarea
               id="prompt1"
               value={formData.prompt1 || ''}
               onChange={(e) => updateField('prompt1', e.target.value)}
-              placeholder="Системный промпт..."
-              rows={3}
+              placeholder="Описание бизнеса, целевой аудитории, болей клиентов, конкурентных преимуществ..."
+              rows={4}
             />
+            <p className="text-xs text-muted-foreground">
+              Используется для генерации текстов объявлений и каруселей
+            </p>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="prompt2">Промпт #2</Label>
+            <Label htmlFor="prompt4">Бриф для генерации изображений</Label>
             <Textarea
-              id="prompt2"
-              value={formData.prompt2 || ''}
-              onChange={(e) => updateField('prompt2', e.target.value)}
-              placeholder="Дополнительный промпт..."
-              rows={3}
+              id="prompt4"
+              value={formData.prompt4 || ''}
+              onChange={(e) => updateField('prompt4', e.target.value)}
+              placeholder="Описание стилей визуализации, цветовой палитры, примеры идей для креативов..."
+              rows={4}
             />
+            <p className="text-xs text-muted-foreground">
+              Используется для генерации рекламных изображений (Gemini, DALL-E)
+            </p>
           </div>
         </div>
       </TabsContent>
