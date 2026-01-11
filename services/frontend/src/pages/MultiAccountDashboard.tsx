@@ -1019,14 +1019,23 @@ const MultiAccountDashboard: React.FC = () => {
 
         {/* Accounts Table */}
         <Card className="shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <BarChart3 className="h-5 w-5" />
-              Рекламные аккаунты
-              {isRefreshing && (
-                <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground ml-2" />
-              )}
-            </CardTitle>
+          <CardHeader className="pb-3 bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-transparent dark:to-transparent">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-lg flex items-center justify-center shadow-sm bg-gradient-to-br from-blue-500 to-cyan-600 dark:from-blue-600/70 dark:to-cyan-700/70">
+                <BarChart3 className="h-5 w-5 text-white dark:text-gray-300" />
+              </div>
+              <div>
+                <CardTitle className="text-lg flex items-center gap-1">
+                  Рекламные аккаунты
+                  {isRefreshing && (
+                    <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground ml-2" />
+                  )}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Статистика по всем аккаунтам
+                </p>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {accountStats.length === 0 ? (
