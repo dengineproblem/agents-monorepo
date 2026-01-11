@@ -32,7 +32,7 @@ const FB_API_VERSION = 'v23.0';
 // =============================================================================
 
 const BRAIN_MINI_MODEL = process.env.BRAIN_MODEL || 'gpt-4.1';
-const LLM_TIMEOUT_MS = 240000; // 4 минуты таймаут для LLM (GPT-5 может долго думать)
+const LLM_TIMEOUT_MS = 600000; // 10 минут таймаут для LLM (GPT-5 может долго думать)
 
 /**
  * Вызов OpenAI Responses API для Brain Mini

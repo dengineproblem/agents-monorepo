@@ -22,9 +22,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useDirections } from '@/hooks/useDirections';
 import { OBJECTIVE_LABELS } from '@/types/direction';
 import { useNavigate } from 'react-router-dom';
-import { Target } from 'lucide-react';
+import { Target, Brain } from 'lucide-react';
 import { APP_REVIEW_MODE } from '../config/appReview';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useOptimization } from '@/hooks/useOptimization';
+import OptimizationModal from '@/components/optimization/OptimizationModal';
 
 // Основной вебхук для загрузки видео
 const DEFAULT_WEBHOOK_URL = 'https://n8n.performanteaiagency.com/webhook/downloadvideo';
@@ -130,7 +132,11 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [userData, setUserData] = useState<any>(null);
-  const { refreshData, currentAdAccountId, multiAccountEnabled } = useAppContext();
+  const { refreshData, currentAdAccountId, multiAccountEnabled, adAccounts } = useAppContext();
+
+  // Brain Mini optimization
+  const optimization = useOptimization();
+  const currentAccount = adAccounts.find(a => a.id === currentAdAccountId);
   const [selectedCities, setSelectedCities] = useState<string[]>([]);
   const [dailyBudget, setDailyBudget] = useState(10); // по умолчанию 10$ (используется в форме изображений)
   const [dailyBudgetInstagram, setDailyBudgetInstagram] = useState(10); // Instagram (USD)
@@ -1561,7 +1567,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             </div>
           ) : (
             /* Полный набор кнопок для Instagram */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <Dialog open={launchDialogOpen} onOpenChange={setLaunchDialogOpen}>
                 <DialogTrigger asChild>
                   <Button
@@ -1635,6 +1641,21 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                 <DollarSign className="mr-2 h-4 w-4" />
                 Добавить продажу
               </Button>
+              {/* Brain Mini - оптимизация на уровне аккаунта */}
+              {multiAccountEnabled && currentAdAccountId && currentAccount && (
+                <Button
+                  variant="outline"
+                  onClick={() => optimization.startOptimization({
+                    accountId: currentAdAccountId,
+                    accountName: currentAccount.name || 'Аккаунт',
+                  })}
+                  disabled={isUploading || optimization.state.isLoading}
+                  className="w-full hover:bg-accent hover:shadow-sm transition-all duration-200"
+                >
+                  <Brain className="mr-2 h-4 w-4" />
+                  AI-оптимизация
+                </Button>
+              )}
             </div>
           )
         )}
@@ -3225,6 +3246,21 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Brain Mini Optimization Modal */}
+        <OptimizationModal
+          open={optimization.state.isOpen}
+          onClose={optimization.close}
+          scope={optimization.state.scope}
+          streamingState={optimization.state.streamingState}
+          plan={optimization.state.plan}
+          content={optimization.state.content}
+          isLoading={optimization.state.isLoading}
+          error={optimization.state.error}
+          onApprove={optimization.approveSelected}
+          onReject={optimization.reject}
+          isExecuting={optimization.state.isExecuting}
+        />
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { StreamingMessage, type StreamingState } from '@/components/assistant/StreamingMessage';
+import { MarkdownRenderer } from '@/components/assistant/MarkdownRenderer';
 import type { Plan } from '@/services/assistantApi';
 import type { OptimizationScope } from '@/hooks/useOptimization';
 import { cn } from '@/lib/utils';
@@ -206,10 +207,8 @@ export function OptimizationModal({
           {/* Text Content (when no plan) */}
           {!isLoading && !error && !plan && content && (
             <div className="py-4">
-              <div className="p-4 bg-muted/30 rounded-lg">
-                <p className="text-sm text-foreground whitespace-pre-wrap">
-                  {content}
-                </p>
+              <div className="p-4 bg-muted/30 rounded-lg text-sm">
+                <MarkdownRenderer content={content} />
               </div>
             </div>
           )}

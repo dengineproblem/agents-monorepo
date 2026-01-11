@@ -317,7 +317,7 @@ export const AdsToolDefs = {
       dry_run: dryRunOption.describe('Preview mode — показать что будет сделано без выполнения'),
       reason: z.string().optional().describe('Причина запуска (для логирования)')
     }),
-    meta: { timeout: 360000, retryable: false, dangerous: true } // 6 минут — GPT-5 может думать 3-4 мин
+    meta: { timeout: 600000, retryable: false, dangerous: true } // 10 минут — LLM может думать 4 мин × 2 retry
   },
 
   // ============================================================

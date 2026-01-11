@@ -1475,8 +1475,9 @@ const CampaignRow: React.FC<CampaignRowProps> = ({
   // Находим direction для этой кампании
   const direction = directions.find(d => d.fb_campaign_id === campaign.campaign_id);
 
-  // Качество лидов показываем только для WhatsApp кампаний
-  const isWhatsAppCampaign = direction?.objective === 'whatsapp';
+  // Качество лидов показываем если есть хотя бы один WhatsApp direction в аккаунте
+  const hasWhatsAppDirections = directions.some(d => d.objective === 'whatsapp');
+  const isWhatsAppCampaign = hasWhatsAppDirections;
   const displayQualityRate = isWhatsAppCampaign ? campaign.qualityRate : 0;
   const displayCpql = isWhatsAppCampaign ? campaign.cpql : 0;
 
