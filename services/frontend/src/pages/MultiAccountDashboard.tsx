@@ -28,6 +28,7 @@ import { toast } from 'sonner';
 import { facebookApi } from '@/services/facebookApi';
 import { useOptimization, type OptimizationScope } from '@/hooks/useOptimization';
 import { OptimizeButton, OptimizationModal } from '@/components/optimization';
+import { AllAccountsExecutionsSection } from '@/components/AllAccountsExecutionsSection';
 
 // =============================================================================
 // TYPES
@@ -1072,6 +1073,12 @@ const MultiAccountDashboard: React.FC = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Отчёты и действия по всем аккаунтам */}
+        <AllAccountsExecutionsSection
+          userAccountId={getUserIdFromStorage() || ''}
+          adAccounts={accountStats.map(a => ({ id: a.id, name: a.name }))}
+        />
 
       </div>
 
