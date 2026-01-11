@@ -243,9 +243,9 @@ export default async function facebookWebhooks(app: FastifyInstance) {
 
           // Extract fields from lead form
           const fieldData = leadData.field_data;
-          const name = extractFieldValue(fieldData, ['full_name', 'name', 'first_name', 'имя', 'фио']);
-          const phone = normalizePhone(extractFieldValue(fieldData, ['phone_number', 'phone', 'телефон', 'номер телефона']));
-          const email = extractFieldValue(fieldData, ['email', 'email_address', 'почта', 'e-mail']);
+          const name = extractFieldValue(fieldData, ['full_name', 'name', 'first_name', 'имя', 'фио', 'полное_имя', 'полное имя']);
+          const phone = normalizePhone(extractFieldValue(fieldData, ['phone_number', 'phone', 'телефон', 'номер_телефона', 'номер телефона']));
+          const email = extractFieldValue(fieldData, ['email', 'email_address', 'почта', 'e-mail', 'электронная_почта']);
 
           if (!name && !phone) {
             log.warn({ leadgen_id, fieldData }, 'Lead has no name or phone');
