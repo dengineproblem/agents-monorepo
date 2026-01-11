@@ -516,6 +516,7 @@ const Dashboard: React.FC = () => {
                 aiAutopilotLoading={aiAutopilotLoading}
                 userAccountId={userAccountId}
                 currentAdAccountId={currentAdAccountId}
+                isMultiAccountMode={multiAccountEnabled}
               />
             )}
         

@@ -44,7 +44,8 @@ interface AutopilotSectionProps {
   toggleAiAutopilot: (enabled: boolean) => Promise<void>;
   aiAutopilotLoading: boolean;
   userAccountId: string;
-  currentAdAccountId?: string | null;  // Для мультиаккаунтного режима
+  currentAdAccountId?: string | null;  // Для фильтрации данных
+  isMultiAccountMode?: boolean;  // true = мультиаккаунт (без toggle), false = legacy (с toggle)
 }
 
 // Карта типов действий на понятные названия
@@ -126,7 +127,8 @@ export function AutopilotSection({
   toggleAiAutopilot,
   aiAutopilotLoading,
   userAccountId,
-  currentAdAccountId
+  currentAdAccountId,
+  isMultiAccountMode = false
 }: AutopilotSectionProps) {
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,13 +216,13 @@ export function AutopilotSection({
             <div className="flex items-center gap-3">
               <div className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center shadow-sm transition-all",
-                currentAdAccountId
+                isMultiAccountMode
                   ? "bg-gradient-to-br from-blue-500 to-indigo-600 dark:from-blue-600/70 dark:to-indigo-700/70"
                   : aiAutopilot
                     ? "bg-gradient-to-br from-green-500 to-emerald-600 dark:from-green-600/70 dark:to-emerald-700/70"
                     : "bg-gradient-to-br from-gray-600 to-slate-700 dark:from-gray-700/50 dark:to-slate-800/50"
               )}>
-                {currentAdAccountId ? (
+                {isMultiAccountMode ? (
                   <FileText className="h-5 w-5 text-white dark:text-gray-300" />
                 ) : (
                   <Bot className="h-5 w-5 text-white dark:text-gray-300" />
@@ -228,16 +230,16 @@ export function AutopilotSection({
               </div>
               <div>
                 <CardTitle className="text-lg flex items-center gap-1">
-                  {currentAdAccountId ? 'Отчёты и действия' : 'AI автопилот'}
+                  {isMultiAccountMode ? 'Отчёты и действия' : 'AI автопилот'}
                   <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_STATUS} iconSize="sm" />
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {currentAdAccountId ? 'История оптимизаций' : 'Автоматическое управление кампаниями'}
+                  {isMultiAccountMode ? 'История оптимизаций' : 'Автоматическое управление кампаниями'}
                 </p>
               </div>
             </div>
             {/* Тогл автопилота только для legacy аккаунтов */}
-            {!currentAdAccountId && (
+            {!isMultiAccountMode && (
               <div className="flex items-center gap-2">
                 <span
                   className={cn(
@@ -348,7 +350,7 @@ export function AutopilotSection({
           {/* Пустое состояние */}
           {!loading && executions.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              {currentAdAccountId
+              {isMultiAccountMode
                 ? 'Нет истории оптимизаций'
                 : aiAutopilot
                   ? 'Автопилот активен. Ожидание первого запуска...'

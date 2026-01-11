@@ -261,6 +261,7 @@ const MultiAccountDashboard: React.FC = () => {
   // State
   const [accountStats, setAccountStats] = useState<AccountStats[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasInitiallyLoaded, setHasInitiallyLoaded] = useState(false); // Флаг первой загрузки
   const [error, setError] = useState<string | null>(null);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -438,6 +439,7 @@ const MultiAccountDashboard: React.FC = () => {
     } finally {
       setLoading(false);
       setIsRefreshing(false);
+      setHasInitiallyLoaded(true); // Первая загрузка завершена
     }
   }, [adAccounts, dateRange]);
 
@@ -962,7 +964,13 @@ const MultiAccountDashboard: React.FC = () => {
   // LOADING STATE
   // ==========================================================================
 
-  if (contextLoading || loading) {
+  // Показываем загрузку пока:
+  // 1. Контекст ещё загружается (contextLoading)
+  // 2. Идёт запрос данных (loading)
+  // 3. Или первая загрузка ещё не завершена и нет данных
+  const isInitialLoading = contextLoading || loading || (!hasInitiallyLoaded && accountStats.length === 0);
+
+  if (isInitialLoading) {
     return (
       <div className="bg-background w-full max-w-full overflow-x-hidden">
         <Header onOpenDatePicker={() => setDatePickerOpen(true)} />
