@@ -3680,38 +3680,27 @@ fastify.post('/api/brain/decide', async (request, reply) => {
  */
 async function getActiveUsers() {
   try {
-    // 1. Legacy пользователи (multi_account_enabled = false/null, autopilot = true)
+    // 1. Legacy пользователи (multi_account_enabled = false/null)
+    // Включаем всех активных — autopilot определяет режим (dispatch или report)
     const legacyUsers = await supabaseQuery('user_accounts_legacy',
       async () => await supabase
         .from('user_accounts')
-        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id, autopilot')
         .eq('is_active', true)
         .eq('optimization', 'agent2')
-        .eq('autopilot', true)
         .or('multi_account_enabled.eq.false,multi_account_enabled.is.null'),
       { where: 'getActiveUsers_legacy' }
     );
 
-    // 2. Мультиаккаунтные пользователи (multi_account_enabled = true)
-    // Не проверяем user_accounts.autopilot — проверка будет в processDailyBatch по ad_accounts.autopilot
-    const multiAccountUsers = await supabaseQuery('user_accounts_multi',
-      async () => await supabase
-        .from('user_accounts')
-        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id')
-        .eq('is_active', true)
-        .eq('optimization', 'agent2')
-        .eq('multi_account_enabled', true),
-      { where: 'getActiveUsers_multi' }
-    );
-
-    const allUsers = [...(legacyUsers || []), ...(multiAccountUsers || [])];
+    // Multi-account пользователи обрабатываются ТОЛЬКО через schedule batch (getAccountsForCurrentHour)
+    // Legacy batch — только для пользователей без multi_account_enabled
+    const allUsers = legacyUsers || [];
 
     fastify.log.info({
       where: 'getActiveUsers',
       legacyCount: legacyUsers?.length || 0,
-      multiAccountCount: multiAccountUsers?.length || 0,
       totalCount: allUsers.length,
-      filter: 'legacy: autopilot=true AND multi_account_enabled=false/null; multi: multi_account_enabled=true (autopilot checked per ad_account)'
+      filter: 'legacy only: multi_account_enabled=false/null (multi-account → schedule batch)'
     });
 
     return allUsers;
@@ -3764,17 +3753,25 @@ async function processUser(user) {
   const startTime = Date.now();
   const accountId = user.accountId || null;  // UUID из ad_accounts.id или null для legacy
 
+  // Определяем режим: autopilot=true → dispatch, иначе → только отчёт
+  // Для multi-account режим определяется в processAccountBrain по brain_mode
+  const isAutopilot = user.autopilot !== false;
+  const inputs = isAutopilot
+    ? { dispatch: true }
+    : { dispatch: false, sendReport: true };
+
   fastify.log.info({
     where: 'processUser',
     userId: user.id,
     username: user.username,
     accountId: accountId || 'legacy',
     accountName: user.accountName || null,
+    mode: isAutopilot ? 'autopilot' : 'report',
     status: 'started'
   });
 
   try {
-    // Вызываем основной эндпоинт /api/brain/run с dispatch=true
+    // Вызываем основной эндпоинт /api/brain/run
     // Передаём accountId для мультиаккаунтного режима
     const response = await fetch('http://localhost:7080/api/brain/run', {
       method: 'POST',
@@ -3782,7 +3779,7 @@ async function processUser(user) {
       body: JSON.stringify({
         userAccountId: user.id,
         accountId: accountId,  // UUID из ad_accounts.id для мультиаккаунтности
-        inputs: { dispatch: true }
+        inputs
       })
     });
 
@@ -3873,15 +3870,35 @@ function getLocalHour(utcHour, timezone) {
 
 /**
  * Получить аккаунты, для которых сейчас время запуска
+ * Включает все активные аккаунты — brain_mode определяет поведение:
+ * - autopilot: выполнение proposals
+ * - semi_auto: сохранение proposals на одобрение
+ * - report/manual/disabled/null: только отчёт без действий
  */
 async function getAccountsForCurrentHour(utcHour) {
-  if (!supabase) return [];
+  const startTime = Date.now();
 
-  // Получаем все активные аккаунты с brain_mode = autopilot или semi_auto
+  fastify.log.info({
+    where: 'getAccountsForCurrentHour',
+    utcHour,
+    status: 'started',
+    description: 'Получение аккаунтов для текущего часа по расписанию'
+  });
+
+  if (!supabase) {
+    fastify.log.warn({
+      where: 'getAccountsForCurrentHour',
+      utcHour,
+      message: 'Supabase не инициализирован'
+    });
+    return [];
+  }
+
+  // Получаем все активные аккаунты — brain_mode определяет режим обработки
   const { data: accounts, error } = await supabase
     .from('ad_accounts')
     .select(`
-      id, user_account_id, name, fb_ad_account_id, fb_page_id, fb_access_token,
+      id, user_account_id, name, ad_account_id, page_id, access_token,
       brain_mode, brain_schedule_hour, brain_timezone, autopilot,
       telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
       default_cpl_target_cents, plan_daily_budget_cents,
@@ -3891,13 +3908,15 @@ async function getAccountsForCurrentHour(utcHour) {
         id, username, access_token, multi_account_enabled, optimization, is_active
       )
     `)
-    .eq('is_active', true)
-    .in('brain_mode', ['autopilot', 'semi_auto']);
+    .eq('is_active', true);
 
   if (error) {
     fastify.log.error({
       where: 'getAccountsForCurrentHour',
-      error: String(error)
+      error: error?.message || JSON.stringify(error),
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint
     });
     return [];
   }
@@ -3940,12 +3959,23 @@ async function getAccountsForCurrentHour(utcHour) {
     return true;
   });
 
+  // Группируем по brain_mode для статистики
+  const modeStats = accountsToProcess.reduce((acc, a) => {
+    const mode = a.brain_mode || 'report';
+    acc[mode] = (acc[mode] || 0) + 1;
+    return acc;
+  }, {});
+
+  const duration = Date.now() - startTime;
   fastify.log.info({
     where: 'getAccountsForCurrentHour',
     utcHour,
     totalActive: accounts.length,
     toProcess: accountsToProcess.length,
-    accountNames: accountsToProcess.map(a => a.name)
+    byMode: modeStats,
+    accountNames: accountsToProcess.map(a => `${a.name} (${a.brain_mode || 'report'})`),
+    duration,
+    status: 'completed'
   });
 
   return accountsToProcess;
@@ -4057,6 +4087,111 @@ async function savePendingProposals(brainResult, account) {
 }
 
 /**
+ * Отправить только отчёт Brain без сохранения proposals (режим report)
+ * Используется для аккаунтов с brain_mode = report/manual/disabled/null
+ * @returns {Object} { success: boolean, sentCount: number, totalRecipients: number }
+ */
+async function sendBrainReportOnly(brainResult, account) {
+  const startTime = Date.now();
+  const { summary, llm, proposals } = brainResult;
+
+  fastify.log.info({
+    where: 'sendBrainReportOnly',
+    accountId: account.id,
+    accountName: account.name,
+    brain_mode: account.brain_mode || 'report',
+    proposalsCount: proposals?.length || 0,
+    status: 'started'
+  });
+
+  try {
+    // Формируем текст отчёта с деталями proposals
+    const proposalsSummary = proposals && proposals.length > 0
+      ? proposals.slice(0, 5).map((p, i) => `${i + 1}. ${p.type || p.action}: ${p.description || p.reason || '-'}`).join('\n')
+      : 'Нет предложений';
+
+    const reportLines = [
+      `📊 *Отчёт Brain: ${account.name}*`,
+      '',
+      llm?.summary || 'Анализ завершён.',
+      '',
+      `📋 *Найдено предложений: ${proposals?.length || 0}*`,
+      proposals?.length > 0 ? proposalsSummary : '',
+      proposals?.length > 5 ? `_...и ещё ${proposals.length - 5}_` : '',
+      '',
+      '_Режим: только отчёт (действия не выполняются)_'
+    ].filter(line => line !== '');
+
+    const reportText = reportLines.join('\n');
+
+    // Отправляем в Telegram
+    const telegramIds = [
+      account.telegram_id,
+      account.telegram_id_2,
+      account.telegram_id_3,
+      account.telegram_id_4
+    ].filter(Boolean);
+
+    if (telegramIds.length === 0) {
+      const duration = Date.now() - startTime;
+      fastify.log.warn({
+        where: 'sendBrainReportOnly',
+        accountId: account.id,
+        accountName: account.name,
+        duration,
+        message: 'Нет telegram_id для отправки отчёта'
+      });
+      return { success: false, sentCount: 0, totalRecipients: 0, reason: 'no_telegram_ids' };
+    }
+
+    let sentCount = 0;
+    const errors = [];
+    for (const chatId of telegramIds) {
+      try {
+        await sendTelegram(chatId, reportText, TELEGRAM_BOT_TOKEN);
+        sentCount++;
+      } catch (err) {
+        errors.push({ chatId, error: String(err) });
+        fastify.log.error({
+          where: 'sendBrainReportOnly',
+          accountId: account.id,
+          accountName: account.name,
+          chatId,
+          error: String(err)
+        });
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    fastify.log.info({
+      where: 'sendBrainReportOnly',
+      accountId: account.id,
+      accountName: account.name,
+      brain_mode: account.brain_mode || 'report',
+      proposalsCount: proposals?.length || 0,
+      telegramSent: sentCount,
+      telegramTotal: telegramIds.length,
+      duration,
+      status: 'completed'
+    });
+
+    return { success: sentCount > 0, sentCount, totalRecipients: telegramIds.length };
+
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    fastify.log.error({
+      where: 'sendBrainReportOnly',
+      accountId: account.id,
+      accountName: account.name,
+      duration,
+      error: String(err),
+      status: 'failed'
+    });
+    return { success: false, sentCount: 0, totalRecipients: 0, error: String(err) };
+  }
+}
+
+/**
  * Обработать один аккаунт по расписанию
  */
 async function processAccountBrain(account) {
@@ -4076,9 +4211,9 @@ async function processAccountBrain(account) {
     // Формируем userAccount для runInteractiveBrain
     const userAccountForBrain = {
       id: user_account_id,
-      ad_account_id: account.fb_ad_account_id,
-      access_token: account.fb_access_token || userAccount.access_token,
-      page_id: account.fb_page_id,
+      ad_account_id: account.ad_account_id,
+      access_token: account.access_token || userAccount.access_token,
+      page_id: account.page_id,
       account_uuid: accountId,
       username: userAccount.username,
       telegram_id: account.telegram_id,
@@ -4120,22 +4255,61 @@ async function processAccountBrain(account) {
 
     if (brain_mode === 'autopilot') {
       // Автопилот: выполняем proposals автоматически
-      // Используем существующую логику из /api/brain/run
+      // Используем существующий эндпоинт /api/brain/run с dispatch=true
       fastify.log.info({
         where: 'processAccountBrain',
         accountId,
         accountName,
         brain_mode: 'autopilot',
         proposalsCount: proposals?.length || 0,
-        action: 'execute_proposals'
+        action: 'execute_proposals_via_api'
       });
 
-      // TODO: Вызвать executeProposals или существующий handler
-      // Пока просто логируем - полная реализация в следующей итерации
+      // Вызываем /api/brain/run с dispatch=true для выполнения proposals
+      try {
+        const runResponse = await fetch('http://localhost:7080/api/brain/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userAccountId: user_account_id,
+            accountId: accountId,
+            inputs: { dispatch: true }
+          })
+        });
+
+        const runResult = await runResponse.json();
+
+        fastify.log.info({
+          where: 'processAccountBrain',
+          accountId,
+          accountName,
+          brain_mode: 'autopilot',
+          apiSuccess: runResponse.ok,
+          actionsExecuted: runResult.actions?.length || 0,
+          dispatched: runResult.dispatched,
+          telegramSent: runResult.telegramSent || false
+        });
+
+      } catch (apiErr) {
+        fastify.log.error({
+          where: 'processAccountBrain',
+          accountId,
+          accountName,
+          brain_mode: 'autopilot',
+          action: 'execute_proposals_failed',
+          error: String(apiErr)
+        });
+        // В случае ошибки хотя бы отправим отчёт
+        await sendBrainReportOnly(result, account);
+      }
 
     } else if (brain_mode === 'semi_auto') {
       // Полуавтоматический: сохраняем proposals и ждём одобрения
       await savePendingProposals(result, account);
+    } else {
+      // Режим report (включая manual, disabled, null)
+      // Только отправляем отчёт, не сохраняем proposals и не выполняем действия
+      await sendBrainReportOnly(result, account);
     }
 
     // Обновляем last_brain_batch_run_at
@@ -4606,14 +4780,30 @@ async function processDailyBatch() {
 fastify.get('/api/brain/cron/check-users', async (request, reply) => {
   try {
     const users = await getActiveUsers();
+
+    // Статистика по режимам
+    const stats = {
+      total: users.length,
+      withAutopilot: users.filter(u => u.autopilot === true).length,
+      withoutAutopilot: users.filter(u => u.autopilot === false).length,
+      autopilotNull: users.filter(u => u.autopilot === null || u.autopilot === undefined).length,
+      multiAccountEnabled: users.filter(u => u.multi_account_enabled === true).length,
+      multiAccountDisabled: users.filter(u => u.multi_account_enabled === false || u.multi_account_enabled === null).length
+    };
+
     return reply.send({
       success: true,
       usersCount: users.length,
+      stats,
       users: users.map(u => ({
         id: u.id,
         username: u.username,
+        autopilot: u.autopilot,
+        multi_account_enabled: u.multi_account_enabled,
+        ad_account_id: u.ad_account_id,
         has_telegram: !!(u.telegram_id && u.telegram_bot_token),
-        timezone: u.account_timezone
+        timezone: u.account_timezone,
+        mode: u.autopilot === false ? 'report' : 'autopilot'
       }))
     });
   } catch (err) {
@@ -4628,6 +4818,55 @@ fastify.get('/api/brain/cron/check-users', async (request, reply) => {
       severity: 'warning'
     }).catch(() => {});
 
+    return reply.code(500).send({ error: 'check_failed', details: String(err?.message || err) });
+  }
+});
+
+// Эндпоинт для проверки выборки multi-account аккаунтов по расписанию (без обработки)
+fastify.get('/api/brain/cron/check-schedule', async (request, reply) => {
+  try {
+    const { hour } = request.query; // ?hour=8 для проверки конкретного часа
+    const now = new Date();
+    const utcHour = hour !== undefined ? parseInt(hour) : now.getUTCHours();
+
+    const accounts = await getAccountsForCurrentHour(utcHour);
+
+    // Статистика по режимам
+    const stats = {
+      total: accounts.length,
+      byMode: {
+        autopilot: accounts.filter(a => a.brain_mode === 'autopilot').length,
+        semi_auto: accounts.filter(a => a.brain_mode === 'semi_auto').length,
+        report: accounts.filter(a => !a.brain_mode || a.brain_mode === 'report').length
+      },
+      byScheduleHour: accounts.reduce((acc, a) => {
+        const h = a.brain_schedule_hour ?? 8;
+        acc[h] = (acc[h] || 0) + 1;
+        return acc;
+      }, {})
+    };
+
+    return reply.send({
+      success: true,
+      utcHour,
+      localTimeExample: `UTC ${utcHour}:00 = Asia/Almaty ${(utcHour + 5) % 24}:00`,
+      accountsCount: accounts.length,
+      stats,
+      accounts: accounts.map(a => ({
+        id: a.id,
+        name: a.name,
+        brain_mode: a.brain_mode || 'report',
+        brain_schedule_hour: a.brain_schedule_hour ?? 8,
+        brain_timezone: a.brain_timezone || 'Asia/Almaty',
+        ad_account_id: a.ad_account_id,
+        user_account_id: a.user_account_id,
+        username: a.user_accounts?.username,
+        has_telegram: !!(a.telegram_id),
+        last_run: a.last_brain_batch_run_at
+      }))
+    });
+  } catch (err) {
+    fastify.log.error(err);
     return reply.code(500).send({ error: 'check_failed', details: String(err?.message || err) });
   }
 });

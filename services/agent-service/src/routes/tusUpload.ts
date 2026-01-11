@@ -440,6 +440,23 @@ const tusServer = new Server({
   path: '/tus',
   datastore: new FileStore({ directory: TUS_UPLOAD_DIR }),
   maxSize: 512 * 1024 * 1024, // 512 MB
+  // Учитываем X-Forwarded-* headers от nginx для правильного формирования URL
+  respectForwardedHeaders: true,
+  // Кастомная генерация URL для учёта /api prefix на проде
+  generateUrl: (req, { proto, host, path, id }) => {
+    // В production nginx убирает /api из пути, но клиент ожидает /api/tus
+    // Проверяем, приходит ли запрос через proxy (есть X-Forwarded-Proto)
+    const forwardedProto = req.headers.get('x-forwarded-proto');
+    const forwardedHost = req.headers.get('x-forwarded-host') || req.headers.get('host');
+
+    if (forwardedProto && forwardedHost) {
+      // Production: формируем URL с /api prefix
+      return `${forwardedProto}://${forwardedHost}/api/tus/${id}`;
+    }
+
+    // Local development: используем стандартный URL
+    return `${proto}://${host}${path}/${id}`;
+  },
   onUploadFinish: async (_req, upload) => {
     log.info({ uploadId: upload.id, size: upload.size }, 'TUS upload finished, starting processing');
 
