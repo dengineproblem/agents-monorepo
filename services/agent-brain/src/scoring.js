@@ -483,13 +483,44 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 - Диапазон бюджета: **$3..$100** (300..10000 центов)
 - Новый ad set: **$10-$20** (не больше!)
 
-## ⏰ ВРЕМЕННОЕ ОГРАНИЧЕНИЕ НА СОЗДАНИЕ ADSETS
-**ВАЖНО:** НЕ предлагай создавать новые adsets после 14:00 по времени Алматы (UTC+5)!
-Причина: новый adset начинает откручивать бюджет не сразу. Если запустить во второй
-половине дня — за несколько часов он потратит весь суточный бюджет, а алгоритмы
-Facebook не успеют оптимизироваться. Это обычно приводит к плохим результатам.
-- До 14:00 — можно предлагать createAdSet, launchNewCreatives
-- После 14:00 — НЕ предлагай создание новых adsets, только оптимизируй существующие
+## 🔥 АНАЛИЗ ОБЪЯВЛЕНИЙ (ADS) — ПОИСК ПОЖИРАТЕЛЕЙ
+В каждом adset есть массив \`ads\` с данными по объявлениям за last_7d.
+Каждый ad содержит: ad_id, ad_name, spend, impressions, leads, cpl.
+
+**Алгоритм поиска пожирателя (СТРОГО по критериям!):**
+1. В адсете должно быть **≥2 объявлений** (ads.length >= 2)
+2. Посчитай totalSpend = сумма spend всех объявлений в адсете
+3. Найди topAd = объявление с максимальным spend
+4. **Условие пожирателя:** topAd.spend >= **50%** от totalSpend И (topAd.cpl > target_cpl × 1.3 ИЛИ topAd.leads = 0)
+
+**target_cpl** берётся из:
+- direction.target_cpl_cents / 100 (если адсет привязан к направлению)
+- account_settings.default_cpl_target_cents / 100 (иначе)
+
+Формат proposal для pauseAd:
+- action: "pauseAd"
+- entity_type: "ad"
+- entity_id: ad_id пожирателя
+- entity_name: ad_name пожирателя
+- adset_id: adset_id адсета (ВАЖНО: нужен для выполнения!)
+- priority: "high"
+- reason: "Пожиратель: тратит X% бюджета адсета, CPL=$Y (цель $Z)"
+
+**Применяй для адсетов с hs_class: neutral, slightly_bad, bad!**
+
+## ⏰ ВРЕМЕННОЕ ОГРАНИЧЕНИЕ НА СОЗДАНИЕ ADSETS (КРИТИЧЕСКИ ВАЖНО!)
+**ОБЯЗАТЕЛЬНО** проверь поле \`time_context.can_create_adsets\` в payload!
+
+- Если \`can_create_adsets: true\` → можно предлагать createAdSet, launchNewCreatives
+- Если \`can_create_adsets: false\` → **ЗАПРЕЩЕНО** предлагать создание новых adsets!
+  - Работай ТОЛЬКО с перераспределением бюджета между существующими adsets
+  - Не используй action: "createAdSet" или "launchNewCreatives"!
+  - Весь освободившийся бюджет направляй в лучшие существующие adsets
+
+**Причина:** новый adset начинает откручивать бюджет не сразу. Если запустить во второй
+половине дня — алгоритмы Facebook не успеют оптимизироваться, бюджет сольётся впустую.
+
+**Текущее время и статус указаны в time_context — ПРОВЕРЯЙ ЕГО ПЕРВЫМ ДЕЛОМ!**
 
 ## ВЕСА ПЕРИОДОВ ДЛЯ АНАЛИЗА
 | Период | Вес | Описание |
@@ -520,6 +551,7 @@ Facebook не успеют оптимизироваться. Это обычно
       "entity_type": "adset" | "ad" | "campaign" | "direction",
       "entity_id": "string",
       "entity_name": "string",
+      "adset_id": "string | null", // ОБЯЗАТЕЛЬНО для pauseAd — ID адсета содержащего объявление
       "campaign_id": "string",
       "campaign_type": "internal" | "external",
       "direction_id": "string | null",
@@ -563,10 +595,13 @@ Facebook не успеют оптимизироваться. Это обычно
 **ПРАВИЛО:**
 - Если предлагаешь снизить daily_budget adset_A с $50 до $25 (освобождается $25):
   1. ОБЯЗАТЕЛЬНО предложи увеличить бюджет другого adset (с лучшим HS) на ~$25
-  2. ИЛИ предложи создать новый adset если есть unused_creatives
+  2. ИЛИ предложи создать новый adset если есть unused_creatives **И time_context.can_create_adsets: true**
+  3. Если \`can_create_adsets: false\` → ТОЛЬКО перераспределение на существующие adsets!
 
 - Если предлагаешь паузу adset_B с бюджетом $50:
   1. ОБЯЗАТЕЛЬНО предложи перераспределить $50 на другие adsets
+  2. Если нет хороших adsets — используй best-of-bad логику (лучший из плохих)
+  3. Общий бюджет должен сохраняться!
 
 ## BEST-OF-BAD ЛОГИКА (как в основном Brain)
 Если НЕТ adsets с HS ≥ +25 (very_good):
@@ -3667,12 +3702,67 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         has_brain_report: !!brainReport,
         unused_creatives_count: brainReport?.unused_creatives?.length || 0,
         ready_creatives_count: brainReport?.ready_creatives?.length || 0,
-        message: 'Подготовка payload для LLM'
+        total_ads: adsInsightsData?.length || 0,
+        message: 'Подготовка payload для LLM (ads включены в каждый adset)'
       });
 
       try {
+        // Проверяем время для передачи в LLM
+        const timeContext = isAllowedToCreateAdsets({ logger: log });
+
+        // Группируем ads по adset_id для включения в каждый адсет
+        const adsByAdset = new Map();
+        if (adsInsightsData && adsInsightsData.length > 0) {
+          for (const ad of adsInsightsData) {
+            const adsetId = ad.adset_id;
+            if (!adsetId || !ad.ad_id) continue;
+            if (!adsByAdset.has(adsetId)) {
+              adsByAdset.set(adsetId, []);
+            }
+            // Считаем leads из actions
+            const actions = Array.isArray(ad.actions) ? ad.actions : [];
+            const leads = actions.reduce((sum, a) => {
+              const t = a?.action_type;
+              if (t === 'onsite_conversion.total_messaging_connection' ||
+                  t === 'lead_grouped' ||
+                  t === 'offsite_conversion.fb_pixel_lead') {
+                return sum + parseInt(a.value || 0);
+              }
+              return sum;
+            }, 0);
+            const spend = parseFloat(ad.spend || 0);
+            const cpl = leads > 0 ? spend / leads : (spend > 0 ? Infinity : null);
+
+            adsByAdset.get(adsetId).push({
+              ad_id: ad.ad_id,
+              ad_name: ad.ad_name,
+              spend: spend,
+              impressions: parseInt(ad.impressions || 0),
+              leads: leads,
+              cpl: cpl !== Infinity ? cpl?.toFixed(2) : 'no_leads'
+            });
+          }
+          log.info({
+            where: 'interactive_brain',
+            phase: 'ads_grouped_by_adset',
+            total_ads: adsInsightsData.length,
+            adsets_with_ads: adsByAdset.size
+          });
+        }
+
         // Готовим payload для LLM с полным контекстом
         const llmPayload = {
+          // Контекст времени — LLM должна знать можно ли создавать новые адсеты
+          time_context: {
+            current_time_almaty: timeContext.currentTime,
+            current_hour_almaty: timeContext.currentHour,
+            cutoff_hour: timeContext.cutoffHour,
+            timezone: timeContext.timezone,
+            can_create_adsets: timeContext.allowed,
+            reason: timeContext.allowed
+              ? 'Создание новых адсетов разрешено (до 14:00)'
+              : 'Создание новых адсетов ЗАПРЕЩЕНО (после 14:00) — только перераспределение бюджета!'
+          },
           adsets: adsetAnalysis.map(a => ({
             adset_id: a.adset_id,
             adset_name: a.adset_name,
@@ -3688,7 +3778,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             metrics_source: a.metrics_source,
             metrics: a.metrics,
             // Добавляем бюджет адсета
-            current_budget_cents: adsetBudgets.get(a.adset_id)?.daily_budget_cents || null
+            current_budget_cents: adsetBudgets.get(a.adset_id)?.daily_budget_cents || null,
+            // Объявления внутри адсета (для анализа пожирателей)
+            ads: adsByAdset.get(a.adset_id) || []
           })),
           directions: directions?.map(d => ({
             id: d.id,
@@ -3704,6 +3796,7 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           unused_creatives: brainReport?.unused_creatives?.slice(0, 10) || [],
           ready_creatives: brainReport?.ready_creatives?.slice(0, 10) || [],
           recent_actions_count: recentActions?.length || 0,
+          // NOTE: ads для анализа пожирателей включены внутрь каждого adset (см. adsets[].ads)
           summary: {
             total_adsets: adsetAnalysis.length,
             external_count: externalCount,

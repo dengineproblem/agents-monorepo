@@ -54,28 +54,69 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   PauseAdSet: 'Пауза группы',
   ResumeAdSet: 'Возобновление группы',
   PauseAd: 'Пауза объявления',
+  ResumeAd: 'Включение объявления',
   UpdateAdSetDailyBudget: 'Изменение бюджета',
   ScaleAdSetBudget: 'Масштабирование',
   GetCampaignStatus: 'Проверка статуса',
   'Direction.CreateAdSetWithCreatives': 'Создание группы',
+  // Brain Mini actions
+  updateBudget: '💰 Изменение бюджета',
+  pauseAdSet: '⏸️ Пауза группы',
+  pauseAd: '⏸️ Пауза объявления',
+  enableAdSet: '▶️ Включение группы',
+  enableAd: '▶️ Включение объявления',
+  createAdSet: '➕ Создание группы',
+  launchNewCreatives: '🚀 Запуск креативов',
+  review: '👀 Требует внимания',
 };
 
 function getActionLabel(actionType: string): string {
   return ACTION_TYPE_LABELS[actionType] || actionType.replace('Direction.', '');
 }
 
-// Форматирование параметров действия
+// Форматирование параметров действия для отображения
 function formatActionParams(action: any): string {
   const params = action.params || {};
   const parts: string[] = [];
+  const actionType = action.type || action.action;
 
-  if (params.campaign_id) parts.push(`Кампания: ${params.campaign_id}`);
-  if (params.adset_id) parts.push(`Группа: ${params.adset_id}`);
-  if (params.ad_id) parts.push(`Объявление: ${params.ad_id}`);
-  if (params.adset_name) parts.push(`Название: ${params.adset_name}`);
-  if (params.daily_budget) parts.push(`Бюджет: $${(params.daily_budget / 100).toFixed(2)}`);
-  if (params.daily_budget_cents) parts.push(`Бюджет: $${(params.daily_budget_cents / 100).toFixed(2)}`);
-  if (params.status) parts.push(`Статус: ${params.status}`);
+  // Направление (если есть)
+  if (params.direction_name) {
+    parts.push(`📁 ${params.direction_name}`);
+  }
+
+  // Название сущности (адсет/объявление)
+  if (params.entity_name) {
+    parts.push(params.entity_name);
+  }
+
+  // Для бюджетных действий - показываем изменения
+  if (actionType === 'updateBudget' || actionType === 'UpdateAdSetDailyBudget' || actionType === 'ScaleAdSetBudget') {
+    const currentBudget = params.current_budget_cents;
+    const newBudget = params.new_budget_cents || params.daily_budget_cents || params.daily_budget;
+
+    if (currentBudget && newBudget) {
+      const current = `$${(currentBudget / 100).toFixed(2)}`;
+      const next = `$${(newBudget / 100).toFixed(2)}`;
+      const percentChange = params.increase_percent
+        ? `+${params.increase_percent}%`
+        : params.decrease_percent
+          ? `-${params.decrease_percent}%`
+          : '';
+      parts.push(`${current} → ${next}${percentChange ? ` (${percentChange})` : ''}`);
+    } else if (newBudget) {
+      parts.push(`Бюджет: $${(newBudget / 100).toFixed(2)}`);
+    }
+  }
+
+  // Fallback на ID если нет имён
+  if (parts.length === 0) {
+    if (params.adset_name) parts.push(`Группа: ${params.adset_name}`);
+    else if (params.adset_id) parts.push(`Группа: ${params.adset_id}`);
+    if (params.ad_id && !params.entity_name) parts.push(`Объявление: ${params.ad_id}`);
+    if (params.campaign_id) parts.push(`Кампания: ${params.campaign_id}`);
+    if (params.status) parts.push(`Статус: ${params.status}`);
+  }
 
   return parts.join(' • ') || 'Нет параметров';
 }
@@ -173,39 +214,48 @@ export function AutopilotSection({
             <div className="flex items-center gap-3">
               <div className={cn(
                 "h-10 w-10 rounded-lg flex items-center justify-center shadow-sm transition-all",
-                aiAutopilot
-                  ? "bg-gradient-to-br from-green-500 to-emerald-600 dark:from-green-600/70 dark:to-emerald-700/70"
-                  : "bg-gradient-to-br from-gray-600 to-slate-700 dark:from-gray-700/50 dark:to-slate-800/50"
+                currentAdAccountId
+                  ? "bg-gradient-to-br from-blue-500 to-indigo-600 dark:from-blue-600/70 dark:to-indigo-700/70"
+                  : aiAutopilot
+                    ? "bg-gradient-to-br from-green-500 to-emerald-600 dark:from-green-600/70 dark:to-emerald-700/70"
+                    : "bg-gradient-to-br from-gray-600 to-slate-700 dark:from-gray-700/50 dark:to-slate-800/50"
               )}>
-                <Bot className="h-5 w-5 text-white dark:text-gray-300" />
+                {currentAdAccountId ? (
+                  <FileText className="h-5 w-5 text-white dark:text-gray-300" />
+                ) : (
+                  <Bot className="h-5 w-5 text-white dark:text-gray-300" />
+                )}
               </div>
               <div>
                 <CardTitle className="text-lg flex items-center gap-1">
-                  AI автопилот
+                  {currentAdAccountId ? 'Отчёты и действия' : 'AI автопилот'}
                   <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_STATUS} iconSize="sm" />
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Автоматическое управление кампаниями
+                  {currentAdAccountId ? 'История оптимизаций' : 'Автоматическое управление кампаниями'}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "inline-block w-2.5 h-2.5 rounded-full transition-all",
-                  aiAutopilot
-                    ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm animate-pulse'
-                    : 'bg-gray-300 dark:bg-gray-600'
-                )}
-                title={aiAutopilot ? 'Автопилот включен' : 'Автопилот выключен'}
-              />
-              <Switch
-                checked={aiAutopilot}
-                onCheckedChange={toggleAiAutopilot}
-                disabled={aiAutopilotLoading}
-              />
-              <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_TOGGLE} iconSize="sm" />
-            </div>
+            {/* Тогл автопилота только для legacy аккаунтов */}
+            {!currentAdAccountId && (
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-block w-2.5 h-2.5 rounded-full transition-all",
+                    aiAutopilot
+                      ? 'bg-gradient-to-br from-green-400 to-emerald-500 dark:from-green-500/70 dark:to-emerald-500/70 shadow-sm animate-pulse'
+                      : 'bg-gray-300 dark:bg-gray-600'
+                  )}
+                  title={aiAutopilot ? 'Автопилот включен' : 'Автопилот выключен'}
+                />
+                <Switch
+                  checked={aiAutopilot}
+                  onCheckedChange={toggleAiAutopilot}
+                  disabled={aiAutopilotLoading}
+                />
+                <HelpTooltip tooltipKey={TooltipKeys.AUTOPILOT_TOGGLE} iconSize="sm" />
+              </div>
+            )}
           </div>
         </CardHeader>
 
@@ -298,9 +348,11 @@ export function AutopilotSection({
           {/* Пустое состояние */}
           {!loading && executions.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              {aiAutopilot
-                ? 'Автопилот активен. Ожидание первого запуска...'
-                : 'Включите автопилот для автоматического управления кампаниями'
+              {currentAdAccountId
+                ? 'Нет истории оптимизаций'
+                : aiAutopilot
+                  ? 'Автопилот активен. Ожидание первого запуска...'
+                  : 'Включите автопилот для автоматического управления кампаниями'
               }
             </p>
           )}
@@ -340,21 +392,80 @@ export function AutopilotSection({
             </DialogTitle>
           </DialogHeader>
           <ScrollArea className="max-h-[60vh]">
-            <div className="space-y-2 p-1">
-              {selectedExecution?.actions_json?.map((action, index) => {
-                const actionLabel = getActionLabel(action.type || action.action);
-                return (
-                  <div
-                    key={index}
-                    className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-700"
-                  >
-                    <p className="text-sm font-medium mb-1">{actionLabel}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatActionParams(action)}
-                    </p>
+            <div className="space-y-3 p-1">
+              {(() => {
+                const actions = selectedExecution?.actions_json || [];
+                // Группируем по direction_name
+                const grouped = new Map<string, typeof actions>();
+                actions.forEach((action: any) => {
+                  const dirName = action.params?.direction_name || 'Общие';
+                  if (!grouped.has(dirName)) {
+                    grouped.set(dirName, []);
+                  }
+                  grouped.get(dirName)!.push(action);
+                });
+
+                const showGroups = grouped.size > 1 || !grouped.has('Общие');
+
+                return Array.from(grouped.entries()).map(([dirName, groupActions]) => (
+                  <div key={dirName} className="space-y-2">
+                    {showGroups && (
+                      <div className="flex items-center gap-2 mt-2 mb-1">
+                        <Badge variant="outline" className="text-xs font-medium">
+                          📁 {dirName}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground">
+                          ({groupActions.length})
+                        </span>
+                      </div>
+                    )}
+                    {groupActions.map((action: any, index: number) => {
+                      const actionType = action.type || action.action;
+                      const actionLabel = getActionLabel(actionType);
+                      const entityName = action.params?.entity_name;
+                      const params = action.params || {};
+
+                      // Детали для бюджетных изменений
+                      let budgetDetail = null;
+                      if (actionType === 'updateBudget' || actionType === 'UpdateAdSetDailyBudget') {
+                        const current = params.current_budget_cents;
+                        const newBudget = params.new_budget_cents || params.daily_budget_cents;
+                        if (current && newBudget) {
+                          const percent = params.increase_percent
+                            ? `+${params.increase_percent}%`
+                            : params.decrease_percent
+                              ? `-${params.decrease_percent}%`
+                              : '';
+                          budgetDetail = `$${(current / 100).toFixed(2)} → $${(newBudget / 100).toFixed(2)}${percent ? ` (${percent})` : ''}`;
+                        }
+                      }
+
+                      return (
+                        <div
+                          key={`${dirName}-${index}`}
+                          className="p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/30"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{actionLabel}</p>
+                              {entityName && (
+                                <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                  {entityName}
+                                </p>
+                              )}
+                              {budgetDetail && (
+                                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1 font-medium">
+                                  {budgetDetail}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                ));
+              })()}
             </div>
           </ScrollArea>
         </DialogContent>

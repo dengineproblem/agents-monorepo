@@ -325,6 +325,35 @@ const toolHandlers = {
     return { success: true, message: `Адсет ${adset_id} возобновлён` };
   },
 
+  async pauseAd({ ad_id, adset_id, entity_name }, { accessToken, adAccountId }) {
+    if (!ad_id) {
+      return { success: false, error: 'ad_id обязателен для pauseAd' };
+    }
+
+    await fbGraph('POST', ad_id, accessToken, { status: 'PAUSED' });
+
+    await supabase.from('agent_logs').insert({
+      ad_account_id: adAccountId,
+      level: 'info',
+      message: `Ad ${ad_id} paused via Brain Mini`,
+      context: { ad_id, adset_id, entity_name, source: 'brain_mini' }
+    });
+
+    return {
+      success: true,
+      message: `Объявление ${entity_name || ad_id} поставлено на паузу`
+    };
+  },
+
+  async resumeAd({ ad_id }, { accessToken }) {
+    if (!ad_id) {
+      return { success: false, error: 'ad_id обязателен для resumeAd' };
+    }
+
+    await fbGraph('POST', ad_id, accessToken, { status: 'ACTIVE' });
+    return { success: true, message: `Объявление ${ad_id} возобновлено` };
+  },
+
   async updateBudget({ adset_id, new_budget_cents }, { accessToken, adAccountId }) {
     // Validate budget
     if (new_budget_cents < 500) {

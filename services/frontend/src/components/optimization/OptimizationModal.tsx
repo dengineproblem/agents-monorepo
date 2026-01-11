@@ -171,15 +171,47 @@ export function OptimizationModal({
                       {allSelected ? 'Снять выбор' : 'Выбрать всё'} ({selectedCount}/{stepsCount})
                     </label>
                   </div>
-                  {plan.steps.map((step, index) => (
-                    <PlanStepItem
-                      key={index}
-                      step={step}
-                      index={index}
-                      checked={selectedSteps.has(index)}
-                      onToggle={() => toggleStep(index)}
-                    />
-                  ))}
+                  {/* Группировка по направлениям */}
+                  {(() => {
+                    // Группируем steps по direction_name
+                    const grouped = new Map<string, { steps: typeof plan.steps; indices: number[] }>();
+                    plan.steps.forEach((step, index) => {
+                      const dirName = (step.params as { direction_name?: string })?.direction_name || 'Без направления';
+                      if (!grouped.has(dirName)) {
+                        grouped.set(dirName, { steps: [], indices: [] });
+                      }
+                      grouped.get(dirName)!.steps.push(step);
+                      grouped.get(dirName)!.indices.push(index);
+                    });
+
+                    // Если все в одном направлении - не показываем заголовок группы
+                    const showGroups = grouped.size > 1 || !grouped.has('Без направления');
+
+                    return Array.from(grouped.entries()).map(([dirName, group]) => (
+                      <div key={dirName} className="space-y-2">
+                        {showGroups && (
+                          <div className="flex items-center gap-2 mt-3 mb-1">
+                            <Badge variant="outline" className="text-xs font-medium">
+                              {dirName}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              ({group.steps.length} {group.steps.length === 1 ? 'действие' : 'действий'})
+                            </span>
+                          </div>
+                        )}
+                        {group.steps.map((step, i) => (
+                          <PlanStepItem
+                            key={group.indices[i]}
+                            step={step}
+                            index={group.indices[i]}
+                            checked={selectedSteps.has(group.indices[i])}
+                            onToggle={() => toggleStep(group.indices[i])}
+                            showDirectionName={!showGroups}
+                          />
+                        ))}
+                      </div>
+                    ));
+                  })()}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -248,6 +280,7 @@ interface PlanStepItemProps {
   index: number;
   checked: boolean;
   onToggle: () => void;
+  showDirectionName?: boolean;
 }
 
 /**
@@ -328,7 +361,7 @@ function getPriorityLabel(priority: string | undefined): string | null {
   return labels[priority] || null;
 }
 
-function PlanStepItem({ step, index, checked, onToggle }: PlanStepItemProps) {
+function PlanStepItem({ step, index, checked, onToggle, showDirectionName }: PlanStepItemProps) {
   // Минималистичные цвета границы по приоритету
   const priorityBorders: Record<string, string> = {
     critical: 'border-l-red-500',
@@ -341,8 +374,9 @@ function PlanStepItem({ step, index, checked, onToggle }: PlanStepItemProps) {
   const borderColor = priority ? priorityBorders[priority] || 'border-l-muted-foreground/30' : 'border-l-muted-foreground/30';
   const priorityLabel = getPriorityLabel(priority);
 
-  // Название сущности (адсета) из params
+  // Название сущности (адсета) и направления из params
   const entityName = (step.params as { entity_name?: string })?.entity_name;
+  const directionName = (step.params as { direction_name?: string })?.direction_name;
 
   return (
     <div
@@ -359,9 +393,12 @@ function PlanStepItem({ step, index, checked, onToggle }: PlanStepItemProps) {
           className="mt-0.5"
         />
         <div className="flex-1 min-w-0">
-          {/* Название адсета */}
+          {/* Название адсета с направлением */}
           {entityName && (
             <p className="text-xs text-muted-foreground mb-1 truncate">
+              {showDirectionName && directionName && (
+                <span className="text-primary font-medium">{directionName} → </span>
+              )}
               {entityName}
             </p>
           )}
