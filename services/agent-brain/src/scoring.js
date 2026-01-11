@@ -21,7 +21,8 @@ import {
   TIMEFRAME_WEIGHTS,
   TODAY_COMPENSATION,
   VOLUME_THRESHOLDS,
-  AD_EATER_THRESHOLDS
+  AD_EATER_THRESHOLDS,
+  isAllowedToCreateAdsets
 } from './chatAssistant/shared/brainRules.js';
 
 const FB_API_VERSION = 'v23.0';
@@ -481,6 +482,14 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 - Снижение за шаг: максимум **-50%**
 - Диапазон бюджета: **$3..$100** (300..10000 центов)
 - Новый ad set: **$10-$20** (не больше!)
+
+## ⏰ ВРЕМЕННОЕ ОГРАНИЧЕНИЕ НА СОЗДАНИЕ ADSETS
+**ВАЖНО:** НЕ предлагай создавать новые adsets после 14:00 по времени Алматы (UTC+5)!
+Причина: новый adset начинает откручивать бюджет не сразу. Если запустить во второй
+половине дня — за несколько часов он потратит весь суточный бюджет, а алгоритмы
+Facebook не успеют оптимизироваться. Это обычно приводит к плохим результатам.
+- До 14:00 — можно предлагать createAdSet, launchNewCreatives
+- После 14:00 — НЕ предлагай создание новых adsets, только оптимизируй существующие
 
 ## ВЕСА ПЕРИОДОВ ДЛЯ АНАЛИЗА
 | Период | Вес | Описание |
@@ -3907,7 +3916,21 @@ export async function runInteractiveBrain(userAccount, options = {}) {
       }
 
       // Добавляем отдельный proposal-рекомендацию для запуска новых креативов
-      if (hasExternalCampaigns) {
+      // НО только в первой половине дня (до 14:00 по Алматы)
+      const timeCheckLaunch = isAllowedToCreateAdsets({ logger: log });
+
+      if (hasExternalCampaigns && timeCheckLaunch.allowed) {
+        log.info({
+          where: 'interactive_brain',
+          phase: 'allow_launch_new_creatives',
+          current_time: timeCheckLaunch.currentTime,
+          current_hour: timeCheckLaunch.currentHour,
+          cutoff_hour: timeCheckLaunch.cutoffHour,
+          timezone: timeCheckLaunch.timezone,
+          total_savings_dollars: totalSavingsDollars,
+          message: `Создание launchNewCreatives proposal разрешено (время ${timeCheckLaunch.currentTime})`
+        });
+
         proposals.push({
           action: 'launchNewCreatives',
           priority: 'medium',
@@ -3929,6 +3952,17 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             ]
           }
         });
+      } else if (hasExternalCampaigns && !timeCheckLaunch.allowed) {
+        log.warn({
+          where: 'interactive_brain',
+          phase: 'skip_launch_new_creatives',
+          current_time: timeCheckLaunch.currentTime,
+          current_hour: timeCheckLaunch.currentHour,
+          cutoff_hour: timeCheckLaunch.cutoffHour,
+          timezone: timeCheckLaunch.timezone,
+          total_savings_dollars: totalSavingsDollars,
+          message: `⏰ ПРОПУСК launchNewCreatives: ${timeCheckLaunch.reason}`
+        });
       }
 
       log.info({
@@ -3946,32 +3980,68 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     // ЧАСТЬ 5: АНАЛИЗ НЕИСПОЛЬЗОВАННЫХ КРЕАТИВОВ (из отчёта Brain)
     // ========================================
 
+    // Проверяем время — после 14:00 по Алматы не предлагаем создавать новые adsets
+    const timeCheckCreate = isAllowedToCreateAdsets({ logger: log });
+
     if (brainReport?.unused_creatives?.length > 0) {
-      const byDirection = {};
-      for (const uc of brainReport.unused_creatives) {
-        const dirId = uc.direction_id || 'no_direction';
-        if (!byDirection[dirId]) byDirection[dirId] = [];
-        byDirection[dirId].push(uc);
-      }
+      if (!timeCheckCreate.allowed) {
+        log.warn({
+          where: 'interactive_brain',
+          phase: 'skip_create_adset_proposals',
+          unused_creatives_count: brainReport.unused_creatives.length,
+          current_time: timeCheckCreate.currentTime,
+          current_hour: timeCheckCreate.currentHour,
+          cutoff_hour: timeCheckCreate.cutoffHour,
+          timezone: timeCheckCreate.timezone,
+          message: `⏰ ПРОПУСК createAdSet: ${timeCheckCreate.reason}`
+        });
+      } else {
+        log.info({
+          where: 'interactive_brain',
+          phase: 'allow_create_adset_proposals',
+          unused_creatives_count: brainReport.unused_creatives.length,
+          current_time: timeCheckCreate.currentTime,
+          current_hour: timeCheckCreate.currentHour,
+          cutoff_hour: timeCheckCreate.cutoffHour,
+          timezone: timeCheckCreate.timezone,
+          message: `Создание createAdSet proposals разрешено (время ${timeCheckCreate.currentTime})`
+        });
 
-      for (const [dirId, creatives] of Object.entries(byDirection)) {
-        if (creatives.length > 0 && dirId !== 'no_direction') {
-          const direction = directions?.find(d => d.id === dirId);
+        const byDirection = {};
+        for (const uc of brainReport.unused_creatives) {
+          const dirId = uc.direction_id || 'no_direction';
+          if (!byDirection[dirId]) byDirection[dirId] = [];
+          byDirection[dirId].push(uc);
+        }
 
-          proposals.push({
-            action: 'createAdSet',
-            priority: 'medium',
-            entity_type: 'direction',
-            entity_id: dirId,
-            entity_name: direction?.name || 'Unknown',
-            reason: `${creatives.length} неиспользованных креативов готовы к запуску. Рекомендую протестировать.`,
-            confidence: 0.75,
-            suggested_action_params: {
-              creative_ids: creatives.slice(0, 5).map(c => c.id),
-              creative_titles: creatives.slice(0, 5).map(c => c.title),
-              recommended_budget_cents: BUDGET_LIMITS.NEW_ADSET_MIN
-            }
-          });
+        for (const [dirId, creatives] of Object.entries(byDirection)) {
+          if (creatives.length > 0 && dirId !== 'no_direction') {
+            const direction = directions?.find(d => d.id === dirId);
+
+            log.info({
+              where: 'interactive_brain',
+              phase: 'create_adset_proposal_added',
+              direction_id: dirId,
+              direction_name: direction?.name || 'Unknown',
+              creatives_count: creatives.length,
+              message: `Добавлен createAdSet proposal для направления "${direction?.name || dirId}"`
+            });
+
+            proposals.push({
+              action: 'createAdSet',
+              priority: 'medium',
+              entity_type: 'direction',
+              entity_id: dirId,
+              entity_name: direction?.name || 'Unknown',
+              reason: `${creatives.length} неиспользованных креативов готовы к запуску. Рекомендую протестировать.`,
+              confidence: 0.75,
+              suggested_action_params: {
+                creative_ids: creatives.slice(0, 5).map(c => c.id),
+                creative_titles: creatives.slice(0, 5).map(c => c.title),
+                recommended_budget_cents: BUDGET_LIMITS.NEW_ADSET_MIN
+              }
+            });
+          }
         }
       }
     }

@@ -70,6 +70,99 @@ export const AD_EATER_THRESHOLDS = {
   SPEND_SHARE_CRITICAL: 0.5      // >50% бюджета адсета без результата
 };
 
+/**
+ * Временные ограничения для создания новых adsets
+ *
+ * Причина: новый adset начинает откручивать бюджет не сразу.
+ * Если запустить во второй половине дня — за несколько часов
+ * он потратит весь суточный бюджет, а алгоритмы FB не успеют
+ * оптимизироваться. Это обычно приводит к плохим результатам.
+ */
+export const ADSET_CREATION_TIME_LIMITS = {
+  TIMEZONE: 'Asia/Almaty',       // UTC+5 (Алматы)
+  CUTOFF_HOUR: 14,               // После 14:00 не создавать новые adsets
+  REASON: 'Создание новых адсетов после 14:00 не рекомендуется — алгоритмы FB не успеют оптимизироваться за оставшееся время суток'
+};
+
+/**
+ * Проверяет, разрешено ли создавать новые adsets в текущее время
+ * @param {Object} options - Опции
+ * @param {Object} options.logger - Логгер для записи результатов (опционально)
+ * @returns {{ allowed: boolean, currentHour: number, currentTime: string, reason?: string }}
+ */
+export function isAllowedToCreateAdsets(options = {}) {
+  const { logger } = options;
+  const now = new Date();
+
+  try {
+    // Получаем текущий час по времени Алматы (UTC+5)
+    const almatyHour = new Intl.DateTimeFormat('en-US', {
+      timeZone: ADSET_CREATION_TIME_LIMITS.TIMEZONE,
+      hour: 'numeric',
+      hour12: false
+    }).format(now);
+
+    // Получаем полное время для логов
+    const almatyFullTime = new Intl.DateTimeFormat('ru-RU', {
+      timeZone: ADSET_CREATION_TIME_LIMITS.TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }).format(now);
+
+    const currentHour = parseInt(almatyHour, 10);
+    const allowed = currentHour < ADSET_CREATION_TIME_LIMITS.CUTOFF_HOUR;
+
+    const result = {
+      allowed,
+      currentHour,
+      currentTime: almatyFullTime,
+      timezone: ADSET_CREATION_TIME_LIMITS.TIMEZONE,
+      cutoffHour: ADSET_CREATION_TIME_LIMITS.CUTOFF_HOUR,
+      reason: allowed ? undefined : ADSET_CREATION_TIME_LIMITS.REASON
+    };
+
+    // Логируем результат проверки если передан logger
+    if (logger) {
+      logger.info({
+        where: 'isAllowedToCreateAdsets',
+        phase: 'time_check',
+        allowed: result.allowed,
+        current_hour: result.currentHour,
+        current_time: result.currentTime,
+        cutoff_hour: result.cutoffHour,
+        timezone: result.timezone,
+        message: allowed
+          ? `Создание adsets разрешено (${almatyFullTime} < ${ADSET_CREATION_TIME_LIMITS.CUTOFF_HOUR}:00)`
+          : `Создание adsets заблокировано (${almatyFullTime} >= ${ADSET_CREATION_TIME_LIMITS.CUTOFF_HOUR}:00)`
+      });
+    }
+
+    return result;
+  } catch (error) {
+    // В случае ошибки — разрешаем создание (fail-open), но логируем ошибку
+    if (logger) {
+      logger.error({
+        where: 'isAllowedToCreateAdsets',
+        phase: 'error',
+        error: error.message,
+        stack: error.stack,
+        message: 'Ошибка проверки времени, разрешаем создание adsets (fail-open)'
+      });
+    }
+
+    return {
+      allowed: true,
+      currentHour: -1,
+      currentTime: 'error',
+      timezone: ADSET_CREATION_TIME_LIMITS.TIMEZONE,
+      cutoffHour: ADSET_CREATION_TIME_LIMITS.CUTOFF_HOUR,
+      reason: undefined,
+      error: error.message
+    };
+  }
+}
+
 // =============================================================================
 // ПРОМПТ ДЛЯ ADSAGENT
 // =============================================================================
@@ -141,6 +234,17 @@ HS ∈ [-100; +100] — интегральная оценка ad set / камп�
 - Снижение за шаг: максимум **-50%**
 - Диапазон бюджета: **$3..$100** (300..10000 центов)
 - Новый ad set: **$10-$20** (не больше!)
+
+### ⏰ Временное ограничение создания adsets
+
+⚠️ **НЕ предлагай создавать новые adsets после 14:00 по времени Алматы (UTC+5)!**
+
+Причина: новый adset начинает откручивать бюджет не сразу. Если запустить во второй
+половине дня — за несколько часов он потратит весь суточный бюджет, а алгоритмы
+Facebook не успеют оптимизироваться. Это обычно приводит к плохим результатам.
+
+- До 14:00 — можно предлагать создание новых adsets
+- После 14:00 — НЕ предлагай создание, только оптимизируй существующие
 
 ### Работа с направлениями (Directions)
 

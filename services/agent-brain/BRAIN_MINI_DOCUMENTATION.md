@@ -466,6 +466,47 @@ export const BUDGET_LIMITS = {
 };
 ```
 
+### Временное ограничение создания Adsets
+
+```javascript
+export const ADSET_CREATION_TIME_LIMITS = {
+  TIMEZONE: 'Asia/Almaty',       // UTC+5 (Алматы)
+  CUTOFF_HOUR: 14,               // После 14:00 не создавать новые adsets
+  REASON: 'Создание новых адсетов после 14:00 не рекомендуется — алгоритмы FB не успеют оптимизироваться'
+};
+
+// Функция проверки времени с поддержкой логирования
+export function isAllowedToCreateAdsets(options = {}) {
+  const { logger } = options;
+  // Возвращает:
+  // {
+  //   allowed: boolean,        // true если можно создавать
+  //   currentHour: number,     // текущий час (0-23)
+  //   currentTime: string,     // полное время "HH:MM:SS"
+  //   timezone: string,        // часовой пояс
+  //   cutoffHour: number,      // час отсечки (14)
+  //   reason?: string,         // причина блокировки
+  //   error?: string           // ошибка (если была)
+  // }
+}
+```
+
+**Логика:** Новый adset начинает откручивать бюджет не сразу. Если запустить во второй половине дня — за несколько часов он потратит весь суточный бюджет, а алгоритмы Facebook не успеют оптимизироваться. Это обычно приводит к плохим результатам.
+
+**Поведение:**
+- **До 14:00** — можно предлагать `createAdSet`, `launchNewCreatives`
+- **После 14:00** — НЕ предлагать создание новых adsets, только оптимизировать существующие
+- **При ошибке** — fail-open (разрешаем создание, но логируем ошибку)
+
+**Логирование:**
+```
+# Разрешено (до 14:00):
+{"phase": "allow_create_adset_proposals", "current_time": "12:35:42", "message": "Создание createAdSet proposals разрешено"}
+
+# Заблокировано (после 14:00):
+{"phase": "skip_create_adset_proposals", "current_time": "15:20:15", "message": "⏰ ПРОПУСК createAdSet: ..."}
+```
+
 ### Timeframe Weights
 
 ```javascript
@@ -758,12 +799,17 @@ const ALLOWED_ORIGINS = [
    ├── Input: adsets + metrics + directions + targets
    └── Output: JSON с proposals
 
-4. Форматирование отчёта
+4. Фильтрация proposals по времени (Алматы UTC+5)
+   ├── isAllowedToCreateAdsets() — проверка текущего времени
+   ├── До 14:00 — разрешены createAdSet, launchNewCreatives
+   └── После 14:00 — только updateBudget, pauseAdSet, pauseAd
+
+5. Форматирование отчёта
    ├── Человекочитаемые описания
    ├── Бюджеты в $ (USD)
    └── Группировка по приоритету
 
-5. Сохранение в brain_executions
+6. Сохранение в brain_executions
    └── execution_mode: 'manual_trigger' | 'autopilot'
 ```
 
@@ -775,6 +821,7 @@ const ALLOWED_ORIGINS = [
 
 | Коммит | Описание |
 |--------|----------|
+| `pending` | **Временное ограничение создания adsets** — после 14:00 по Алматы не предлагать createAdSet/launchNewCreatives |
 | `422cb42` | Анализ ads-пожирателей, улучшение отчёта оптимизации |
 | `919d29f` | Выборочное одобрение шагов, reportFormatter.js |
 | `b60adc1` | Фильтрация по конкретной кампании (campaignId) |
