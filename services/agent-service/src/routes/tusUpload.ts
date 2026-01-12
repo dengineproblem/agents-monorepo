@@ -446,16 +446,40 @@ const tusServer = new Server({
   generateUrl: (req, { proto, host, path, id }) => {
     // В production nginx убирает /api из пути, но клиент ожидает /api/tus
     // Проверяем, приходит ли запрос через proxy (есть X-Forwarded-Proto)
-    const forwardedProto = req.headers.get('x-forwarded-proto');
-    const forwardedHost = req.headers.get('x-forwarded-host') || req.headers.get('host');
+    // ВАЖНО: req.headers это объект, а не Web API Headers, поэтому используем [] доступ
+    const headers = req.headers as unknown as Record<string, string | string[] | undefined>;
+
+    // Заголовки могут быть строкой или массивом - берём первое значение
+    const getHeader = (name: string): string | undefined => {
+      const val = headers[name];
+      if (Array.isArray(val)) return val[0];
+      return val;
+    };
+
+    const forwardedProto = getHeader('x-forwarded-proto');
+    const forwardedHost = getHeader('x-forwarded-host') || getHeader('host');
+
+    log.info({
+      forwardedProto,
+      forwardedHost,
+      proto,
+      host,
+      path,
+      id,
+      allHeaders: Object.keys(headers).filter(k => k.toLowerCase().includes('forward') || k.toLowerCase() === 'host')
+    }, '[TUS] generateUrl - generating Location URL');
 
     if (forwardedProto && forwardedHost) {
       // Production: формируем URL с /api prefix
-      return `${forwardedProto}://${forwardedHost}/api/tus/${id}`;
+      const url = `${forwardedProto}://${forwardedHost}/api/tus/${id}`;
+      log.info({ url, mode: 'production' }, '[TUS] Generated URL for client');
+      return url;
     }
 
     // Local development: используем стандартный URL
-    return `${proto}://${host}${path}/${id}`;
+    const url = `${proto}://${host}${path}/${id}`;
+    log.info({ url, mode: 'local' }, '[TUS] Generated URL for client');
+    return url;
   },
   onUploadFinish: async (_req, upload) => {
     log.info({ uploadId: upload.id, size: upload.size }, 'TUS upload finished, starting processing');
@@ -603,13 +627,34 @@ async function handleTusRequest(request: FastifyRequest, reply: FastifyReply) {
 
   // Логируем входящий запрос (кроме OPTIONS)
   if (request.method !== 'OPTIONS') {
-    log.debug({
-      method: request.method,
-      url: request.url,
-      uploadOffset: request.headers['upload-offset'],
-      uploadLength: request.headers['upload-length'],
-      tusResumable: request.headers['tus-resumable']
-    }, '[TUS] Incoming request');
+    // Для POST (создание upload) логируем metadata
+    if (request.method === 'POST') {
+      const metadata = request.headers['upload-metadata'];
+      log.info({
+        method: request.method,
+        url: request.url,
+        uploadLength: request.headers['upload-length'],
+        metadata: metadata ? String(metadata).substring(0, 500) : null,
+        forwardedProto: request.headers['x-forwarded-proto'],
+        forwardedHost: request.headers['x-forwarded-host'],
+        host: request.headers['host'],
+        origin: request.headers['origin']
+      }, '[TUS] POST - Creating new upload');
+    } else if (request.method === 'PATCH') {
+      // Для PATCH логируем прогресс
+      log.info({
+        method: request.method,
+        url: request.url,
+        uploadOffset: request.headers['upload-offset'],
+        contentLength: request.headers['content-length']
+      }, '[TUS] PATCH - Uploading chunk');
+    } else {
+      // HEAD, GET, DELETE
+      log.info({
+        method: request.method,
+        url: request.url
+      }, '[TUS] Request');
+    }
   }
 
   // Устанавливаем необходимые заголовки для TUS
@@ -625,8 +670,27 @@ async function handleTusRequest(request: FastifyRequest, reply: FastifyReply) {
     return;
   }
 
-  // Передаём запрос TUS серверу
-  return tusServer.handle(req, res);
+  // Передаём запрос TUS серверу с обработкой ошибок
+  try {
+    await tusServer.handle(req, res);
+
+    // Логируем успешный ответ для POST (Location header)
+    if (request.method === 'POST' && res.statusCode === 201) {
+      const location = res.getHeader('Location');
+      log.info({
+        statusCode: res.statusCode,
+        location
+      }, '[TUS] POST successful - upload created');
+    }
+  } catch (err: any) {
+    log.error({
+      err,
+      method: request.method,
+      url: request.url,
+      statusCode: res.statusCode
+    }, '[TUS] Error handling request');
+    throw err;
+  }
 }
 
 export default tusUploadRoutes;
