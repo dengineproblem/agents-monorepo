@@ -187,7 +187,8 @@ async function executeActions(
 
       const result = JSON.parse(response.payload);
 
-      if (response.statusCode !== 200) {
+      // 200 OK or 202 Accepted are both success
+      if (response.statusCode < 200 || response.statusCode >= 300) {
         logger.error({
           statusCode: response.statusCode,
           error: result.error || result.message,

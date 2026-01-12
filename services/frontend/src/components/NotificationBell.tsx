@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Bell, Check, CheckCheck, Trash2 } from 'lucide-react';
+import { Bell, Check, CheckCheck, Trash2, ChevronRight, Brain } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import {
@@ -259,28 +259,40 @@ const NotificationBell: React.FC = () => {
             <div className="divide-y">
               {notifications.map((notification) => {
                 const isClickable = notification.type === 'brain_proposals';
+                const isBrainProposal = notification.type === 'brain_proposals';
                 return (
                 <div
                   key={notification.id}
                   className={cn(
                     'p-3 hover:bg-muted/50 transition-colors relative group',
                     !notification.is_read && 'bg-blue-50/50 dark:bg-blue-950/20',
-                    isClickable && 'cursor-pointer'
+                    isClickable && 'cursor-pointer',
+                    isBrainProposal && 'border-l-2 border-l-purple-500'
                   )}
                   onClick={isClickable ? () => handleNotificationClick(notification) : undefined}
                 >
                   <div className="flex items-start gap-3">
-                    <div
-                      className={cn(
-                        'w-2 h-2 rounded-full mt-2 flex-shrink-0',
-                        notification.is_read ? 'bg-gray-300' : 'bg-blue-500'
-                      )}
-                    />
+                    {isBrainProposal ? (
+                      <Brain className="h-4 w-4 mt-0.5 flex-shrink-0 text-purple-500" />
+                    ) : (
+                      <div
+                        className={cn(
+                          'w-2 h-2 rounded-full mt-2 flex-shrink-0',
+                          notification.is_read ? 'bg-gray-300' : 'bg-blue-500'
+                        )}
+                      />
+                    )}
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-sm">{notification.title}</p>
                       <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
                         {notification.message}
                       </p>
+                      {isBrainProposal && (
+                        <p className="text-xs text-purple-600 dark:text-purple-400 mt-1 flex items-center gap-1">
+                          Нажмите для просмотра
+                          <ChevronRight className="h-3 w-3" />
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground mt-1">
                         {formatDistanceToNow(new Date(notification.created_at), {
                           addSuffix: true,

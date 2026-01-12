@@ -146,7 +146,7 @@ export function BrainProposalsModal({
           )}
 
           {/* Summary */}
-          {!isLoading && !error && proposal?.context?.summary && (
+          {!isLoading && !error && proposal?.context?.summary && typeof proposal.context.summary === 'string' && (
             <div className="mb-4 p-3 bg-muted/30 rounded-lg">
               <p className="text-sm text-muted-foreground">
                 {proposal.context.summary}

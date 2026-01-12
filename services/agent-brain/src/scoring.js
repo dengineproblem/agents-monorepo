@@ -2449,7 +2449,26 @@ export async function runScoringAgent(userAccount, options = {}) {
           has_data: stats !== null  // НОВОЕ: флаг наличия данных
         });
       }
-      
+
+      // NEW: Универсальный fb_creative_id (lead_forms и другие objectives)
+      // Используется если старые поля не заполнены (новый формат креативов)
+      if (uc.fb_creative_id && creatives.length === 0) {
+        const stats = await getCreativeMetricsFromDB(
+          supabase,
+          userAccountId,
+          uc.fb_creative_id,
+          30,
+          accountUUID // UUID из ad_accounts.id для мультиаккаунтности
+        );
+
+        creatives.push({
+          objective: 'OUTCOME_LEADS', // Default для lead_forms
+          fb_creative_id: uc.fb_creative_id,
+          performance: stats,
+          has_data: stats !== null
+        });
+      }
+
       if (creatives.length > 0) {
         // Добавляем ROI данные если есть
         const roiData = creativeROIMap.get(uc.id) || null;

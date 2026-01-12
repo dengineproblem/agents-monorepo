@@ -4007,8 +4007,36 @@ async function savePendingProposals(brainResult, account) {
       .eq('ad_account_id', account.id)
       .eq('status', 'pending');
 
-    // 2. Создаём уведомление
+    // 2. Сначала сохраняем proposals (чтобы получить ID для уведомления)
     const criticalCount = proposals.filter(p => p.priority === 'critical').length;
+
+    const { data: savedProposal, error: proposalError } = await supabase
+      .from('pending_brain_proposals')
+      .insert({
+        ad_account_id: account.id,
+        user_account_id: account.user_account_id,
+        proposals: proposals,
+        context: {
+          summary: summary,
+          adset_analysis: adset_analysis
+        },
+        proposals_count: proposals.length,
+        status: 'pending'
+      })
+      .select('id')
+      .single();
+
+    if (proposalError) {
+      fastify.log.error({
+        where: 'savePendingProposals',
+        phase: 'save_proposals',
+        accountId: account.id,
+        error: String(proposalError)
+      });
+      return;
+    }
+
+    // 3. Создаём уведомление с proposal_id в metadata
     const notificationTitle = criticalCount > 0
       ? `${proposals.length} предложений (${criticalCount} критических)`
       : `${proposals.length} предложений по оптимизации`;
@@ -4026,7 +4054,8 @@ async function savePendingProposals(brainResult, account) {
           proposals_count: proposals.length,
           critical_count: criticalCount,
           high_count: proposals.filter(p => p.priority === 'high').length,
-          summary: summary
+          summary: summary,
+          proposal_id: savedProposal.id
         }
       })
       .select('id')
@@ -4041,30 +4070,12 @@ async function savePendingProposals(brainResult, account) {
       });
     }
 
-    // 3. Сохраняем proposals
-    const { error: proposalError } = await supabase
-      .from('pending_brain_proposals')
-      .insert({
-        ad_account_id: account.id,
-        user_account_id: account.user_account_id,
-        proposals: proposals,
-        context: {
-          summary: summary,
-          adset_analysis: adset_analysis
-        },
-        proposals_count: proposals.length,
-        status: 'pending',
-        notification_id: notification?.id || null
-      });
-
-    if (proposalError) {
-      fastify.log.error({
-        where: 'savePendingProposals',
-        phase: 'save_proposals',
-        accountId: account.id,
-        error: String(proposalError)
-      });
-      return;
+    // 4. Обновляем proposal с notification_id
+    if (notification?.id) {
+      await supabase
+        .from('pending_brain_proposals')
+        .update({ notification_id: notification.id })
+        .eq('id', savedProposal.id);
     }
 
     fastify.log.info({
@@ -4073,6 +4084,7 @@ async function savePendingProposals(brainResult, account) {
       accountName: account.name,
       proposalsCount: proposals.length,
       criticalCount,
+      proposalId: savedProposal.id,
       notificationId: notification?.id,
       status: 'saved'
     });
