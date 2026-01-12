@@ -1767,8 +1767,8 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
     setEditedBudget(currentBudget.toFixed(2));
   }, [currentBudget]);
 
-  const handleAdsetToggle = async (e: React.MouseEvent, checked: boolean) => {
-    e.stopPropagation();
+  const handleAdsetToggle = async (e: React.MouseEvent | null, checked: boolean) => {
+    e?.stopPropagation();
     setIsUpdatingStatus(true);
     try {
       await facebookApi.updateAdsetStatus(adset.adset_id, checked);
@@ -1828,7 +1828,7 @@ const AdsetRow: React.FC<AdsetRowProps> = ({
             checked={adsetActive}
             disabled={isUpdatingStatus}
             onClick={(e) => e.stopPropagation()}
-            onCheckedChange={(checked) => handleAdsetToggle({} as React.MouseEvent, checked)}
+            onCheckedChange={(checked) => handleAdsetToggle(null, checked)}
             className="ml-2"
           />
           <div className="min-w-0 flex-1">
@@ -2011,8 +2011,8 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
     return formatCurrency(calculatedCpm);
   };
 
-  const handleAdToggle = async (e: React.MouseEvent, checked: boolean) => {
-    e.stopPropagation();
+  const handleAdToggle = async (e: React.MouseEvent | null, checked: boolean) => {
+    e?.stopPropagation();
     setIsUpdatingStatus(true);
     try {
       await facebookApi.updateAdStatus(ad.ad_id, checked);
@@ -2060,7 +2060,7 @@ const AdRow: React.FC<AdRowProps> = ({ ad, targetCplCents, adsetBudget, isWhatsA
           checked={adActive}
           disabled={isUpdatingStatus}
           onClick={(e) => e.stopPropagation()}
-          onCheckedChange={(checked) => handleAdToggle({} as React.MouseEvent, checked)}
+          onCheckedChange={(checked) => handleAdToggle(null, checked)}
           className="ml-2"
         />
         <div className="min-w-0 flex-1">
