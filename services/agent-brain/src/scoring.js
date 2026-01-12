@@ -1826,7 +1826,7 @@ async function getCreativeMetricsFromDB(supabase, userAccountId, fbCreativeId, d
 /**
  * Получить активные креативы пользователя из user_creatives
  */
-async function getActiveCreatives(supabase, userAccountId, accountId = null) {
+export async function getActiveCreatives(supabase, userAccountId, accountId = null) {
   // ========================================
   // ФИЛЬТРУЕМ КРЕАТИВЫ ПО АКТИВНЫМ НАПРАВЛЕНИЯМ
   // ========================================
@@ -1834,14 +1834,15 @@ async function getActiveCreatives(supabase, userAccountId, accountId = null) {
   let query = supabase
     .from('user_creatives')
     .select(`
-      id, 
-      title, 
-      fb_video_id, 
-      fb_creative_id_whatsapp, 
-      fb_creative_id_instagram_traffic, 
-      fb_creative_id_site_leads, 
-      is_active, 
-      status, 
+      id,
+      title,
+      fb_video_id,
+      fb_creative_id,
+      fb_creative_id_whatsapp,
+      fb_creative_id_instagram_traffic,
+      fb_creative_id_site_leads,
+      is_active,
+      status,
       created_at,
       direction_id,
       account_directions!inner(is_active)
@@ -1864,7 +1865,7 @@ async function getActiveCreatives(supabase, userAccountId, accountId = null) {
   // Также включаем креативы БЕЗ направления (legacy)
   let legacyQuery = supabase
     .from('user_creatives')
-    .select('id, title, fb_video_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, is_active, status, created_at, direction_id')
+    .select('id, title, fb_video_id, fb_creative_id, fb_creative_id_whatsapp, fb_creative_id_instagram_traffic, fb_creative_id_site_leads, fb_creative_id_lead_forms, is_active, status, created_at, direction_id')
     .eq('user_id', userAccountId)
     .eq('is_active', true)
     .eq('status', 'ready')
@@ -1977,7 +1978,7 @@ async function saveMetricsSnapshot(supabase, userAccountId, adsets, accountUUID 
  * @param {string} accessToken - Facebook Access Token
  * @param {string|null} accountUUID - UUID рекламного аккаунта (для мультиаккаунтности), NULL для legacy
  */
-async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken, accountUUID = null) {
+export async function saveCreativeMetricsToHistory(supabase, userAccountId, readyCreatives, adAccountId, accessToken, accountUUID = null) {
   if (!readyCreatives || !readyCreatives.length) return;
   
   // Вчерашний день (метрики собираются на следующий день после показов)
@@ -2487,6 +2488,7 @@ export async function runScoringAgent(userAccount, options = {}) {
           title: uc.title,
           direction_id: uc.direction_id,
           created_at: uc.created_at,
+          fb_creative_id: uc.fb_creative_id,  // НОВОЕ: unified поле для lead forms
           fb_creative_id_whatsapp: uc.fb_creative_id_whatsapp,
           fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: uc.fb_creative_id_site_leads,
@@ -2588,8 +2590,9 @@ export async function runScoringAgent(userAccount, options = {}) {
     const unusedCreatives = [];
     
     for (const uc of userCreatives) {
-      // Проверяем все fb_creative_id этого креатива
+      // Проверяем все fb_creative_id этого креатива (включая новое unified поле)
       const creativeIds = [
+        uc.fb_creative_id,  // НОВОЕ: unified поле для lead forms
         uc.fb_creative_id_whatsapp,
         uc.fb_creative_id_instagram_traffic,
         uc.fb_creative_id_site_leads
@@ -2607,13 +2610,15 @@ export async function runScoringAgent(userAccount, options = {}) {
       if (isUnused || !hasData) {
         // Определяем рекомендуемый objective на основе наличия креативов
         let recommendedObjective = 'WhatsApp'; // По умолчанию
-        if (uc.fb_creative_id_whatsapp) recommendedObjective = 'WhatsApp';
+        if (uc.fb_creative_id) recommendedObjective = 'LeadForms';  // НОВОЕ: unified поле
+        else if (uc.fb_creative_id_whatsapp) recommendedObjective = 'WhatsApp';
         else if (uc.fb_creative_id_instagram_traffic) recommendedObjective = 'Instagram';
         else if (uc.fb_creative_id_site_leads) recommendedObjective = 'SiteLeads';
-        
+
         unusedCreatives.push({
           id: uc.id,
           title: uc.title,
+          fb_creative_id: uc.fb_creative_id,  // НОВОЕ: unified поле для lead forms
           fb_creative_id_whatsapp: uc.fb_creative_id_whatsapp,
           fb_creative_id_instagram_traffic: uc.fb_creative_id_instagram_traffic,
           fb_creative_id_site_leads: uc.fb_creative_id_site_leads,

@@ -4204,80 +4204,288 @@ async function sendBrainReportOnly(brainResult, account) {
 }
 
 /**
+ * Формирует userAccountForBrain со ВСЕМИ необходимыми полями
+ */
+function buildUserAccountForBrain(account, userAccount) {
+  return {
+    id: account.user_account_id,
+    ad_account_id: account.ad_account_id,
+    access_token: account.access_token || userAccount.access_token,  // FALLBACK!
+    page_id: account.page_id,
+    account_uuid: account.id,
+    username: userAccount.username,
+    telegram_id: account.telegram_id,
+    telegram_id_2: account.telegram_id_2,
+    telegram_id_3: account.telegram_id_3,
+    telegram_id_4: account.telegram_id_4,
+    default_cpl_target_cents: account.default_cpl_target_cents,
+    plan_daily_budget_cents: account.plan_daily_budget_cents,
+    prompt3: account.prompt3,
+    whatsapp_phone_number: account.whatsapp_phone_number,
+    ig_seed_audience_id: account.ig_seed_audience_id,
+    multi_account_enabled: userAccount.multi_account_enabled
+  };
+}
+
+/**
+ * Сохраняет метрики в creative_metrics_history только если ещё не сохраняли сегодня
+ * Загружает креативы самостоятельно через getActiveCreatives()
+ * @returns {Object} { saved: boolean, creativesCount: number, error?: string }
+ */
+async function saveMetricsIfNotSavedToday(userAccountId, accountId, adAccountId, accessToken) {
+  const startTime = Date.now();
+
+  fastify.log.info({
+    where: 'saveMetricsIfNotSavedToday',
+    phase: 'started',
+    userAccountId,
+    accountId,
+    adAccountId,
+    hasAccessToken: !!accessToken
+  });
+
+  try {
+    // Проверяем, сохраняем метрики за ВЧЕРА (как в runScoringAgent)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    // Проверяем, есть ли уже записи за вчера для этого аккаунта
+    const { data: existingMetrics, error: checkError } = await supabase
+      .from('creative_metrics_history')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('date', yesterdayStr)
+      .limit(1);
+
+    if (checkError) {
+      fastify.log.warn({
+        where: 'saveMetricsIfNotSavedToday',
+        phase: 'check_existing_failed',
+        accountId,
+        date: yesterdayStr,
+        error: String(checkError),
+        duration: Date.now() - startTime
+      });
+      return { saved: false, creativesCount: 0, error: 'check_existing_failed' };
+    }
+
+    if (existingMetrics && existingMetrics.length > 0) {
+      fastify.log.info({
+        where: 'saveMetricsIfNotSavedToday',
+        phase: 'skipped_already_exists',
+        accountId,
+        date: yesterdayStr,
+        existingRecords: existingMetrics.length,
+        duration: Date.now() - startTime
+      });
+      return { saved: false, creativesCount: 0, reason: 'already_saved' };
+    }
+
+    // Загружаем активные креативы пользователя
+    const { getActiveCreatives, saveCreativeMetricsToHistory } = await import('./scoring.js');
+    const userCreatives = await getActiveCreatives(supabase, userAccountId, accountId);
+
+    if (!userCreatives || userCreatives.length === 0) {
+      fastify.log.info({
+        where: 'saveMetricsIfNotSavedToday',
+        phase: 'skipped_no_creatives',
+        accountId,
+        date: yesterdayStr,
+        duration: Date.now() - startTime
+      });
+      return { saved: false, creativesCount: 0, reason: 'no_creatives' };
+    }
+
+    // Преобразуем в формат для saveCreativeMetricsToHistory
+    const readyCreatives = userCreatives.map(uc => ({
+      user_creative_id: uc.id
+    }));
+
+    fastify.log.info({
+      where: 'saveMetricsIfNotSavedToday',
+      phase: 'saving_metrics',
+      accountId,
+      date: yesterdayStr,
+      creativesCount: readyCreatives.length,
+      creativeIds: readyCreatives.slice(0, 5).map(c => c.user_creative_id)
+    });
+
+    // Сохраняем метрики
+    await saveCreativeMetricsToHistory(
+      supabase,
+      userAccountId,
+      readyCreatives,
+      adAccountId,
+      accessToken,
+      accountId
+    );
+
+    fastify.log.info({
+      where: 'saveMetricsIfNotSavedToday',
+      phase: 'completed',
+      accountId,
+      date: yesterdayStr,
+      creativesCount: readyCreatives.length,
+      duration: Date.now() - startTime
+    });
+
+    return { saved: true, creativesCount: readyCreatives.length };
+
+  } catch (err) {
+    fastify.log.error({
+      where: 'saveMetricsIfNotSavedToday',
+      phase: 'error',
+      accountId,
+      error: String(err),
+      stack: err.stack?.slice(0, 500),
+      duration: Date.now() - startTime
+    });
+    return { saved: false, creativesCount: 0, error: String(err) };
+  }
+}
+
+/**
+ * Отправляет краткое Telegram уведомление о новых proposals для semi_auto режима
+ * @returns {Object} { sent: number, total: number, errors: string[] }
+ */
+async function sendSemiAutoTelegramNotification(brainResult, account) {
+  const startTime = Date.now();
+  const { proposals, summary } = brainResult;
+
+  fastify.log.info({
+    where: 'sendSemiAutoTelegramNotification',
+    phase: 'started',
+    accountId: account.id,
+    accountName: account.name,
+    proposalsCount: proposals?.length || 0
+  });
+
+  if (!proposals || proposals.length === 0) {
+    fastify.log.info({
+      where: 'sendSemiAutoTelegramNotification',
+      phase: 'skipped_no_proposals',
+      accountId: account.id,
+      duration: Date.now() - startTime
+    });
+    return { sent: 0, total: 0, reason: 'no_proposals' };
+  }
+
+  const criticalCount = proposals.filter(p => p.priority === 'critical').length;
+  const highCount = proposals.filter(p => p.priority === 'high').length;
+
+  let priorityText = '';
+  if (criticalCount > 0) priorityText = ` (${criticalCount} критических!)`;
+  else if (highCount > 0) priorityText = ` (${highCount} важных)`;
+
+  const llmSummary = summary?.llm_used && summary?.llm_summary
+    ? `\n💡 ${summary.llm_summary.slice(0, 200)}${summary.llm_summary.length > 200 ? '...' : ''}`
+    : '';
+
+  const reportText = `🔔 *Brain: ${account.name}*
+
+📋 Подготовлено *${proposals.length}* предложений${priorityText}
+${llmSummary}
+
+👉 Откройте приложение для просмотра и одобрения.
+
+_Режим: полуавтоматический_`;
+
+  // Отправляем на все Telegram ID
+  const telegramIds = [
+    account.telegram_id,
+    account.telegram_id_2,
+    account.telegram_id_3,
+    account.telegram_id_4
+  ].filter(Boolean);
+
+  if (telegramIds.length === 0) {
+    fastify.log.warn({
+      where: 'sendSemiAutoTelegramNotification',
+      phase: 'skipped_no_telegram_ids',
+      accountId: account.id,
+      accountName: account.name,
+      proposalsCount: proposals.length,
+      duration: Date.now() - startTime
+    });
+    return { sent: 0, total: 0, reason: 'no_telegram_ids' };
+  }
+
+  let sentCount = 0;
+  const errors = [];
+
+  for (const chatId of telegramIds) {
+    try {
+      await sendTelegram(chatId, reportText, TELEGRAM_BOT_TOKEN);
+      sentCount++;
+    } catch (err) {
+      errors.push({ chatId, error: String(err) });
+      fastify.log.warn({
+        where: 'sendSemiAutoTelegramNotification',
+        phase: 'send_failed',
+        accountId: account.id,
+        chatId,
+        error: String(err)
+      });
+    }
+  }
+
+  fastify.log.info({
+    where: 'sendSemiAutoTelegramNotification',
+    phase: 'completed',
+    accountId: account.id,
+    accountName: account.name,
+    proposalsCount: proposals.length,
+    criticalCount,
+    highCount,
+    telegramsSent: sentCount,
+    telegramsTotal: telegramIds.length,
+    errorsCount: errors.length,
+    duration: Date.now() - startTime
+  });
+
+  return { sent: sentCount, total: telegramIds.length, errors: errors.map(e => e.error) };
+}
+
+/**
  * Обработать один аккаунт по расписанию
+ *
+ * Логика режимов:
+ * - autopilot: Основной Brain (/api/brain/run dispatch=true) → метрики сохраняются автоматически
+ * - semi_auto: Brain Mini → сохранение метрик + proposals + Telegram уведомление
+ * - report: Основной Brain (/api/brain/run dispatch=false) → только отчёт
+ *
+ * @returns {Object} { success, accountId, brain_mode, duration, proposalsCount?, error?, details? }
  */
 async function processAccountBrain(account) {
   const { brain_mode, id: accountId, name: accountName, user_account_id } = account;
   const userAccount = account.user_accounts;
   const startTime = Date.now();
+  const details = {}; // Собираем детали для финального лога
 
   fastify.log.info({
     where: 'processAccountBrain',
+    phase: 'started',
     accountId,
     accountName,
     brain_mode,
-    status: 'started'
+    user_account_id,
+    ad_account_id: account.ad_account_id
   });
 
   try {
-    // Формируем userAccount для runInteractiveBrain
-    const userAccountForBrain = {
-      id: user_account_id,
-      ad_account_id: account.ad_account_id,
-      access_token: account.access_token || userAccount.access_token,
-      page_id: account.page_id,
-      account_uuid: accountId,
-      username: userAccount.username,
-      telegram_id: account.telegram_id,
-      telegram_id_2: account.telegram_id_2,
-      telegram_id_3: account.telegram_id_3,
-      telegram_id_4: account.telegram_id_4,
-      default_cpl_target_cents: account.default_cpl_target_cents,
-      plan_daily_budget_cents: account.plan_daily_budget_cents,
-      prompt3: account.prompt3,
-      whatsapp_phone_number: account.whatsapp_phone_number,
-      ig_seed_audience_id: account.ig_seed_audience_id,
-      multi_account_enabled: userAccount.multi_account_enabled
-    };
-
-    // Импортируем и вызываем runInteractiveBrain
-    const { runInteractiveBrain } = await import('./scoring.js');
-
-    const result = await runInteractiveBrain(userAccountForBrain, {
-      accountUUID: accountId,
-      supabase,
-      logger: fastify.log
-    });
-
-    const duration = Date.now() - startTime;
-
-    if (!result.success) {
-      fastify.log.error({
-        where: 'processAccountBrain',
-        accountId,
-        accountName,
-        brain_mode,
-        duration,
-        error: result.error || 'runInteractiveBrain failed'
-      });
-      return { success: false, error: result.error, duration };
-    }
-
-    const { proposals } = result;
-
     if (brain_mode === 'autopilot') {
-      // Автопилот: выполняем proposals автоматически
-      // Используем существующий эндпоинт /api/brain/run с dispatch=true
+      // ========================================
+      // AUTOPILOT: Основной Brain + выполнение proposals
+      // ========================================
       fastify.log.info({
         where: 'processAccountBrain',
+        phase: 'autopilot_calling_api',
         accountId,
-        accountName,
-        brain_mode: 'autopilot',
-        proposalsCount: proposals?.length || 0,
-        action: 'execute_proposals_via_api'
+        endpoint: '/api/brain/run',
+        dispatch: true
       });
 
-      // Вызываем /api/brain/run с dispatch=true для выполнения proposals
       try {
         const runResponse = await fetch('http://localhost:7080/api/brain/run', {
           method: 'POST',
@@ -4289,55 +4497,304 @@ async function processAccountBrain(account) {
           })
         });
 
+        // Проверяем HTTP статус
+        if (!runResponse.ok) {
+          const errorText = await runResponse.text();
+          throw new Error(`HTTP ${runResponse.status}: ${errorText.slice(0, 200)}`);
+        }
+
         const runResult = await runResponse.json();
+
+        details.apiSuccess = true;
+        details.actionsExecuted = runResult.actions?.length || 0;
+        details.dispatched = runResult.dispatched;
+        details.telegramSent = runResult.telegramSent;
+        details.proposalsCount = runResult.proposalsCount || 0;
 
         fastify.log.info({
           where: 'processAccountBrain',
+          phase: 'autopilot_api_success',
           accountId,
           accountName,
-          brain_mode: 'autopilot',
-          apiSuccess: runResponse.ok,
-          actionsExecuted: runResult.actions?.length || 0,
-          dispatched: runResult.dispatched,
-          telegramSent: runResult.telegramSent || false
+          ...details
         });
 
       } catch (apiErr) {
+        // FALLBACK: если /api/brain/run упал — переключаемся на Brain Mini
         fastify.log.error({
           where: 'processAccountBrain',
+          phase: 'autopilot_api_failed_using_fallback',
           accountId,
           accountName,
-          brain_mode: 'autopilot',
-          action: 'execute_proposals_failed',
+          error: String(apiErr),
+          stack: apiErr.stack?.slice(0, 300)
+        });
+
+        details.fallbackUsed = true;
+        details.apiError = String(apiErr);
+
+        const userAccountForBrain = buildUserAccountForBrain(account, userAccount);
+        const { runInteractiveBrain } = await import('./scoring.js');
+
+        fastify.log.info({
+          where: 'processAccountBrain',
+          phase: 'autopilot_fallback_running_brain_mini',
+          accountId
+        });
+
+        const result = await runInteractiveBrain(userAccountForBrain, {
+          accountUUID: accountId,
+          supabase,
+          logger: fastify.log
+        });
+
+        // Проверяем успех Brain Mini в fallback
+        if (!result.success) {
+          fastify.log.error({
+            where: 'processAccountBrain',
+            phase: 'autopilot_fallback_brain_mini_failed',
+            accountId,
+            error: result.error
+          });
+          details.brainMiniSuccess = false;
+          details.brainMiniError = result.error;
+        } else {
+          details.brainMiniSuccess = true;
+          details.proposalsCount = result.proposals?.length || 0;
+
+          // Сохраняем метрики в fallback режиме
+          const metricsResult = await saveMetricsIfNotSavedToday(
+            user_account_id,
+            accountId,
+            account.ad_account_id,
+            account.access_token || userAccount.access_token
+          );
+          details.metricsSaved = metricsResult?.saved || false;
+
+          // Отправляем отчёт
+          await sendBrainReportOnly(result, account);
+          details.reportSent = true;
+        }
+      }
+
+    } else if (brain_mode === 'report') {
+      // ========================================
+      // REPORT: Основной Brain + только отчёт (с fallback)
+      // ========================================
+      fastify.log.info({
+        where: 'processAccountBrain',
+        phase: 'report_calling_api',
+        accountId,
+        endpoint: '/api/brain/run',
+        dispatch: false,
+        sendReport: true
+      });
+
+      try {
+        const runResponse = await fetch('http://localhost:7080/api/brain/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userAccountId: user_account_id,
+            accountId: accountId,
+            inputs: { dispatch: false, sendReport: true }
+          })
+        });
+
+        // Проверяем HTTP статус
+        if (!runResponse.ok) {
+          const errorText = await runResponse.text();
+          throw new Error(`HTTP ${runResponse.status}: ${errorText.slice(0, 200)}`);
+        }
+
+        const runResult = await runResponse.json();
+
+        details.apiSuccess = true;
+        details.telegramSent = runResult.telegramSent;
+        details.proposalsCount = runResult.proposalsCount || 0;
+
+        fastify.log.info({
+          where: 'processAccountBrain',
+          phase: 'report_api_success',
+          accountId,
+          accountName,
+          ...details
+        });
+
+      } catch (apiErr) {
+        // FALLBACK: если /api/brain/run упал — используем Brain Mini для отчёта
+        fastify.log.error({
+          where: 'processAccountBrain',
+          phase: 'report_api_failed_using_fallback',
+          accountId,
+          accountName,
           error: String(apiErr)
         });
-        // В случае ошибки хотя бы отправим отчёт
-        await sendBrainReportOnly(result, account);
+
+        details.fallbackUsed = true;
+        details.apiError = String(apiErr);
+
+        const userAccountForBrain = buildUserAccountForBrain(account, userAccount);
+        const { runInteractiveBrain } = await import('./scoring.js');
+
+        const result = await runInteractiveBrain(userAccountForBrain, {
+          accountUUID: accountId,
+          supabase,
+          logger: fastify.log
+        });
+
+        if (result.success) {
+          // Сохраняем метрики
+          const metricsResult = await saveMetricsIfNotSavedToday(
+            user_account_id,
+            accountId,
+            account.ad_account_id,
+            account.access_token || userAccount.access_token
+          );
+          details.metricsSaved = metricsResult?.saved || false;
+
+          await sendBrainReportOnly(result, account);
+          details.reportSent = true;
+          details.proposalsCount = result.proposals?.length || 0;
+        } else {
+          details.brainMiniSuccess = false;
+          details.brainMiniError = result.error;
+        }
       }
 
     } else if (brain_mode === 'semi_auto') {
-      // Полуавтоматический: сохраняем proposals и ждём одобрения
-      await savePendingProposals(result, account);
+      // ========================================
+      // SEMI_AUTO: Brain Mini + сохранение метрик + proposals
+      // ========================================
+      fastify.log.info({
+        where: 'processAccountBrain',
+        phase: 'semi_auto_starting_brain_mini',
+        accountId,
+        accountName
+      });
+
+      const userAccountForBrain = buildUserAccountForBrain(account, userAccount);
+      const { runInteractiveBrain } = await import('./scoring.js');
+
+      const result = await runInteractiveBrain(userAccountForBrain, {
+        accountUUID: accountId,
+        supabase,
+        logger: fastify.log
+      });
+
+      // Проверяем успех runInteractiveBrain
+      if (!result.success) {
+        fastify.log.error({
+          where: 'processAccountBrain',
+          phase: 'semi_auto_brain_mini_failed',
+          accountId,
+          accountName,
+          error: result.error || 'runInteractiveBrain failed',
+          duration: Date.now() - startTime
+        });
+        return {
+          success: false,
+          accountId,
+          brain_mode,
+          error: result.error || 'Brain Mini failed',
+          duration: Date.now() - startTime
+        };
+      }
+
+      details.brainMiniSuccess = true;
+      details.proposalsCount = result.proposals?.length || 0;
+      details.criticalCount = result.proposals?.filter(p => p.priority === 'critical').length || 0;
+      details.highCount = result.proposals?.filter(p => p.priority === 'high').length || 0;
+
+      fastify.log.info({
+        where: 'processAccountBrain',
+        phase: 'semi_auto_brain_mini_success',
+        accountId,
+        proposalsCount: details.proposalsCount,
+        criticalCount: details.criticalCount
+      });
+
+      // Шаг 1: Сохраняем метрики (изолировано от ошибок)
+      try {
+        const metricsResult = await saveMetricsIfNotSavedToday(
+          user_account_id,
+          accountId,
+          account.ad_account_id,
+          account.access_token || userAccount.access_token
+        );
+        details.metricsSaved = metricsResult?.saved || false;
+        details.metricsCreativesCount = metricsResult?.creativesCount || 0;
+      } catch (metricsErr) {
+        fastify.log.error({
+          where: 'processAccountBrain',
+          phase: 'semi_auto_save_metrics_error',
+          accountId,
+          error: String(metricsErr)
+        });
+        details.metricsError = String(metricsErr);
+      }
+
+      // Шаг 2: Сохраняем proposals (изолировано от ошибок)
+      try {
+        await savePendingProposals(result, account);
+        details.proposalsSaved = true;
+      } catch (proposalsErr) {
+        fastify.log.error({
+          where: 'processAccountBrain',
+          phase: 'semi_auto_save_proposals_error',
+          accountId,
+          error: String(proposalsErr)
+        });
+        details.proposalsError = String(proposalsErr);
+      }
+
+      // Шаг 3: Отправляем Telegram (изолировано от ошибок)
+      try {
+        const telegramResult = await sendSemiAutoTelegramNotification(result, account);
+        details.telegramSent = telegramResult?.sent || 0;
+        details.telegramTotal = telegramResult?.total || 0;
+      } catch (telegramErr) {
+        fastify.log.error({
+          where: 'processAccountBrain',
+          phase: 'semi_auto_telegram_error',
+          accountId,
+          error: String(telegramErr)
+        });
+        details.telegramError = String(telegramErr);
+      }
+
     } else {
-      // Режим report (включая manual, disabled, null)
-      // Только отправляем отчёт, не сохраняем proposals и не выполняем действия
-      await sendBrainReportOnly(result, account);
+      // ========================================
+      // UNKNOWN MODE: логируем предупреждение
+      // ========================================
+      fastify.log.warn({
+        where: 'processAccountBrain',
+        phase: 'unknown_brain_mode',
+        accountId,
+        accountName,
+        brain_mode,
+        message: 'Unknown brain_mode, skipping processing'
+      });
+      details.skipped = true;
+      details.reason = 'unknown_brain_mode';
     }
 
-    // Обновляем last_brain_batch_run_at
+    // ВСЕГДА обновляем timestamp
     await supabase
       .from('ad_accounts')
       .update({ last_brain_batch_run_at: new Date().toISOString() })
       .eq('id', accountId);
 
+    const duration = Date.now() - startTime;
+
     fastify.log.info({
       where: 'processAccountBrain',
+      phase: 'completed',
       accountId,
       accountName,
       brain_mode,
-      proposalsCount: proposals?.length || 0,
       duration,
-      status: 'completed'
+      ...details
     });
 
     return {
@@ -4345,25 +4802,27 @@ async function processAccountBrain(account) {
       accountId,
       accountName,
       brain_mode,
-      proposalsCount: proposals?.length || 0,
-      duration
+      duration,
+      ...details
     };
 
   } catch (err) {
     const duration = Date.now() - startTime;
     fastify.log.error({
       where: 'processAccountBrain',
+      phase: 'fatal_error',
       accountId,
       accountName,
       brain_mode,
       duration,
-      error: String(err)
+      error: String(err),
+      stack: err.stack?.slice(0, 500)
     });
-
     return {
       success: false,
       accountId,
       accountName,
+      brain_mode,
       error: String(err),
       duration
     };
