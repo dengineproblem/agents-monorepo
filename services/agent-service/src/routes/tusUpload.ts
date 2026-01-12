@@ -444,8 +444,6 @@ const tusServer = new Server({
   respectForwardedHeaders: true,
   // Кастомная генерация URL для учёта /api prefix на проде
   generateUrl: (req, { proto, host, path, id }) => {
-    // В production nginx убирает /api из пути, но клиент ожидает /api/tus
-    // Проверяем, приходит ли запрос через proxy (есть X-Forwarded-Proto)
     // ВАЖНО: req.headers это объект, а не Web API Headers, поэтому используем [] доступ
     const headers = req.headers as unknown as Record<string, string | string[] | undefined>;
 
@@ -457,21 +455,30 @@ const tusServer = new Server({
     };
 
     const forwardedProto = getHeader('x-forwarded-proto');
-    const forwardedHost = getHeader('x-forwarded-host') || getHeader('host');
+    const forwardedHost = getHeader('x-forwarded-host');
+    const hostHeader = getHeader('host');
+
+    // Определяем финальный host - приоритет x-forwarded-host, потом host header, потом от TUS
+    const finalHost = forwardedHost || hostHeader || host;
+
+    // Определяем production по домену (более надёжно чем X-Forwarded-Proto)
+    const isProduction = finalHost.includes('performanteaiagency.com');
 
     log.info({
       forwardedProto,
       forwardedHost,
+      hostHeader,
       proto,
       host,
       path,
       id,
-      allHeaders: Object.keys(headers).filter(k => k.toLowerCase().includes('forward') || k.toLowerCase() === 'host')
+      finalHost,
+      isProduction
     }, '[TUS] generateUrl - generating Location URL');
 
-    if (forwardedProto && forwardedHost) {
-      // Production: формируем URL с /api prefix
-      const url = `${forwardedProto}://${forwardedHost}/api/tus/${id}`;
+    if (isProduction) {
+      // Production: всегда HTTPS и /api prefix (nginx убирает /api при проксировании)
+      const url = `https://${finalHost}/api/tus/${id}`;
       log.info({ url, mode: 'production' }, '[TUS] Generated URL for client');
       return url;
     }
