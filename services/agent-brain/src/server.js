@@ -4194,6 +4194,79 @@ async function sendBrainReportOnly(brainResult, account) {
       status: 'completed'
     });
 
+    // Сохраняем в brain_executions для истории (fallback режимы report/autopilot)
+    if (supabase) {
+      const proposalsCount = proposals?.length || 0;
+      const idemKey = genIdem();
+
+      fastify.log.info({
+        where: 'sendBrainReportOnly',
+        phase: 'save_brain_execution_start',
+        accountId: account.id,
+        accountName: account.name,
+        user_account_id: account.user_account_id,
+        brain_mode: account.brain_mode || 'report',
+        proposalsCount,
+        telegramSentCount: sentCount,
+        idempotency_key: idemKey
+      });
+
+      try {
+        const { data: insertedExec, error: insertErr } = await supabase
+          .from('brain_executions')
+          .insert({
+            user_account_id: account.user_account_id,
+            account_id: account.id,
+            idempotency_key: idemKey,
+            execution_mode: 'batch',
+            plan_json: {
+              mode: 'report_only',
+              brain_mode: account.brain_mode || 'report',
+              proposals_count: proposalsCount,
+              fallback: true,
+              account_name: account.name,
+              telegram_sent: sentCount
+            },
+            actions_json: [],  // Режим report - действия не выполняются
+            report_text: reportText,
+            status: 'success',
+            duration_ms: duration
+          })
+          .select('id')
+          .single();
+
+        if (insertErr) {
+          throw insertErr;
+        }
+
+        fastify.log.info({
+          where: 'sendBrainReportOnly',
+          phase: 'save_brain_execution_success',
+          accountId: account.id,
+          accountName: account.name,
+          brainExecutionId: insertedExec?.id,
+          proposalsCount,
+          duration
+        });
+      } catch (saveErr) {
+        fastify.log.error({
+          where: 'sendBrainReportOnly',
+          phase: 'save_brain_execution_failed',
+          accountId: account.id,
+          accountName: account.name,
+          error: String(saveErr),
+          stack: saveErr?.stack?.slice(0, 300)
+        });
+      }
+    } else {
+      fastify.log.warn({
+        where: 'sendBrainReportOnly',
+        phase: 'save_brain_execution_skipped',
+        accountId: account.id,
+        reason: 'supabase not available'
+      });
+    }
+
     return { success: sentCount > 0, sentCount, totalRecipients: telegramIds.length };
 
   } catch (err) {
@@ -4753,6 +4826,86 @@ async function processAccountBrain(account) {
           error: String(proposalsErr)
         });
         details.proposalsError = String(proposalsErr);
+      }
+
+      // Шаг 2.5: Сохраняем в brain_executions для истории (изолировано от ошибок)
+      if (supabase) {
+        const proposalsCount = result.proposals?.length || 0;
+        const idemKey = genIdem();
+        const durationMs = Date.now() - startTime;
+
+        fastify.log.info({
+          where: 'processAccountBrain',
+          phase: 'save_brain_execution_semi_auto_start',
+          accountId,
+          accountName,
+          user_account_id,
+          proposalsCount,
+          criticalCount: details.criticalCount || 0,
+          highCount: details.highCount || 0,
+          idempotency_key: idemKey
+        });
+
+        try {
+          const { data: insertedExec, error: insertErr } = await supabase
+            .from('brain_executions')
+            .insert({
+              user_account_id: user_account_id,
+              account_id: accountId,
+              idempotency_key: idemKey,
+              execution_mode: 'batch',
+              plan_json: {
+                mode: 'semi_auto',
+                brain_mode: 'semi_auto',
+                proposals_count: proposalsCount,
+                critical_count: details.criticalCount || 0,
+                high_count: details.highCount || 0,
+                summary: result.summary || null,
+                account_name: accountName
+              },
+              actions_json: result.proposals || [],
+              report_text: result.llm?.summary || `Semi-auto: ${proposalsCount} proposals для ${accountName}`,
+              status: 'success',
+              duration_ms: durationMs
+            })
+            .select('id')
+            .single();
+
+          if (insertErr) {
+            throw insertErr;
+          }
+
+          details.brainExecutionSaved = true;
+          details.brainExecutionId = insertedExec?.id || null;
+
+          fastify.log.info({
+            where: 'processAccountBrain',
+            phase: 'save_brain_execution_semi_auto_success',
+            accountId,
+            accountName,
+            brainExecutionId: insertedExec?.id,
+            proposalsCount,
+            durationMs
+          });
+        } catch (brainExecErr) {
+          fastify.log.error({
+            where: 'processAccountBrain',
+            phase: 'save_brain_execution_semi_auto_failed',
+            accountId,
+            accountName,
+            error: String(brainExecErr),
+            stack: brainExecErr?.stack?.slice(0, 300)
+          });
+          details.brainExecutionSaved = false;
+          details.brainExecutionError = String(brainExecErr);
+        }
+      } else {
+        fastify.log.warn({
+          where: 'processAccountBrain',
+          phase: 'save_brain_execution_semi_auto_skipped',
+          accountId,
+          reason: 'supabase not available'
+        });
       }
 
       // Шаг 3: Отправляем Telegram (изолировано от ошибок)
