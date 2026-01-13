@@ -8,6 +8,7 @@ import { fbGraph } from '../../shared/fbGraph.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { supabase } from '../../../lib/supabaseClient.js';
 import { adsDryRunHandlers } from '../../shared/dryRunHandlers.js';
+import { generateAdsetName } from '../../../utils/adsetNaming.js';
 
 /**
  * Get date range with date_from/date_to support
@@ -764,7 +765,7 @@ export const adsHandlers = {
     }
 
     const finalBudget = daily_budget_cents || direction.daily_budget_cents || 500;
-    const finalName = adset_name || `${direction.name} - ${new Date().toISOString().split('T')[0]}`;
+    const finalName = generateAdsetName({ directionName: direction.name, source: 'Brain', objective: direction.objective });
 
     // Dry-run mode
     if (dry_run) {

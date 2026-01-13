@@ -37,6 +37,7 @@ import { getCredentials } from '../lib/adAccountHelper.js';
 import { eventLogger } from '../lib/eventLogger.js';
 import { onAdsLaunched } from '../lib/onboardingHelper.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { generateAdsetName } from '../lib/adsetNaming.js';
 
 const baseLog = createLogger({ module: 'campaignBuilderRoutes' });
 
@@ -545,7 +546,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 campaignId: direction.fb_campaign_id,
                 adAccountId: credentials.fbAdAccountId!,
                 accessToken: credentials.fbAccessToken!,
-                name: `${direction.name} - ${new Date().toISOString().split('T')[0]}`,
+                name: generateAdsetName({ directionName: direction.name, source: 'AI Launch', objective: direction.objective }),
                 dailyBudget: direction.daily_budget_cents,
                 targeting,
                 optimization_goal,
@@ -616,7 +617,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
               direction_name: direction.name,
               campaign_id: direction.fb_campaign_id,
               adset_id: adsetId,
-              adset_name: `${direction.name} - Ad Set`,
+              adset_name: generateAdsetName({ directionName: direction.name, source: 'AI Launch', objective: direction.objective }),
               daily_budget_cents: direction.daily_budget_cents,
               ads_created: ads.length,
               ads: ads, // Массив созданных объявлений с деталями
@@ -895,7 +896,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             campaignId: direction.fb_campaign_id,
             adAccountId: credentials.fbAdAccountId!,
             accessToken: credentials.fbAccessToken!,
-            name: `${direction.name} - Ручной запуск - ${new Date().toISOString().split('T')[0]}`,
+            name: generateAdsetName({ directionName: direction.name, source: 'Manual', objective: direction.objective }),
             dailyBudget: finalBudget,
             targeting: finalTargeting,
             optimization_goal,
@@ -974,7 +975,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           direction_name: direction.name,
           campaign_id: direction.fb_campaign_id,
           adset_id: adsetId,
-          adset_name: `${direction.name} - Ad Set`,
+          adset_name: generateAdsetName({ directionName: direction.name, source: 'Manual', objective: direction.objective }),
           ads_created: ads.length,
           ads: ads.map(ad => ({
             ad_id: ad.ad_id,

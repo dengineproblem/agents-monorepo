@@ -11,6 +11,7 @@ import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirect
 import { getAvailableAdSet, activateAdSet, incrementAdsCount, deactivateAdSetWithAds } from '../lib/directionAdSets.js';
 import { pauseAdSetsForCampaign } from '../lib/campaignBuilder.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
+import { generateAdsetName } from '../lib/adsetNaming.js';
 
 /**
  * Helper: конвертирует объекты в параметры для Facebook API
@@ -448,7 +449,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           direction_id: p.direction_id,
           user_creative_ids: p.user_creative_ids,
           daily_budget_cents: p.daily_budget_cents,
-          adset_name: p.adset_name,
+          source: 'Brain',
           auto_activate: true, // ВСЕГДА включаем
           start_mode: (action as any).params?.start_mode || 'now' // Agent Brain всегда запускает немедленно
         },
@@ -489,7 +490,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
       // Получаем direction чтобы узнать fb_campaign_id
       const { data: direction } = await supabase
         .from('account_directions')
-        .select('fb_campaign_id, name')
+        .select('fb_campaign_id, name, objective')
         .eq('id', p.direction_id)
         .single();
 
@@ -511,7 +512,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
               direction_id: p.direction_id,
               user_creative_ids: adsetConfig.user_creative_ids,
               daily_budget_cents: adsetConfig.daily_budget_cents || 1000,
-              adset_name: adsetConfig.adset_name,
+              source: 'Brain',
               auto_activate: true, // ВСЕГДА включаем
               start_mode: (action as any).params?.start_mode || 'now'
             },
@@ -527,7 +528,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           results.push({
             success: true,
             adset_id: result.adset_id,
-            adset_name: adsetConfig.adset_name || `AdSet ${results.length + 1}`,
+            adset_name: generateAdsetName({ directionName: direction?.name || 'Unknown', source: 'Brain', objective: direction?.objective || '' }),
             ads_created: result.ads.length,
             creatives_count: adsetConfig.user_creative_ids.length
           });

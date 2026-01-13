@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { getDirectionSettings, buildTargeting } from '../lib/settingsHelpers.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { saveAdCreativeMapping } from '../lib/adCreativeMapping.js';
+import { generateAdsetName } from '../lib/adsetNaming.js';
 
 const baseLog = createLogger({ module: 'creativeTestWorkflow' });
 
@@ -297,7 +298,7 @@ export async function workflowStartCreativeTest(
   // STEP 7: Создаем AdSet
   // ===================================================
   const adsetBody: any = {
-    name: `${campaign_name} - AdSet`,
+    name: generateAdsetName({ directionName: direction.name, source: 'Test', objective: direction.objective }),
     campaign_id,
     status: 'ACTIVE',
     billing_event: 'IMPRESSIONS',

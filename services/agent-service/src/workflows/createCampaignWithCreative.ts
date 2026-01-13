@@ -6,6 +6,7 @@ import {
   type CampaignGoal 
 } from '../lib/defaultSettings.js';
 import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
+import { generateAdsetName } from '../lib/adsetNaming.js';
 
 type ObjectiveType = 'WhatsApp' | 'Instagram' | 'SiteLeads' | 'LeadForms';
 
@@ -253,7 +254,7 @@ export async function workflowCreateCampaignWithCreative(
     console.log('[CreateCampaignWithCreative] Using fallback targeting');
   }
   
-  const finalAdsetName = adset_name || `${campaign_name} - AdSet 1`;
+  const finalAdsetName = generateAdsetName({ directionName: campaign_name, source: 'AI Launch', objective });
 
   // Время работы AdSet:
   // - НЕ указываем start_time и end_time при daily_budget

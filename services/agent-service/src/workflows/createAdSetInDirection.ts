@@ -9,6 +9,7 @@ import {
   incrementAdsCount
 } from '../lib/directionAdSets.js';
 import { getCredentials } from '../lib/adAccountHelper.js';
+import { generateAdsetName, type AdsetSource } from '../lib/adsetNaming.js';
 
 const baseLog = createLogger({ module: 'workflowCreateAdSetInDirection' });
 
@@ -20,7 +21,7 @@ type CreateAdSetInDirectionParams = {
   direction_id: string;
   user_creative_ids: string[]; // Массив креативов для создания нескольких ads в adset
   daily_budget_cents?: number; // Опционально - переопределяет бюджет из direction
-  adset_name?: string; // Опционально - название adset
+  source: AdsetSource; // Источник создания: 'Manual' | 'Brain' | 'AI Launch' | 'Test'
   auto_activate?: boolean; // Если true - сразу активирует adset (по умолчанию true)
   start_mode?: 'now' | 'midnight_almaty'; // Когда запускать: сейчас или с ближайшей полуночи (UTC+5)
 };
@@ -76,7 +77,7 @@ export async function workflowCreateAdSetInDirection(
     direction_id,
     user_creative_ids,
     daily_budget_cents,
-    adset_name,
+    source,
     auto_activate = true,
     start_mode = 'now'
   } = params;
@@ -275,7 +276,7 @@ export async function workflowCreateAdSetInDirection(
   // STEP 5: Создаём AdSet в существующей Campaign
   // ===================================================
   const budget = daily_budget_cents || direction.daily_budget_cents;
-  const final_adset_name = adset_name || `${direction.name} - AdSet ${new Date().toISOString().split('T')[0]}`;
+  const final_adset_name = generateAdsetName({ directionName: direction.name, source, objective: direction.objective });
 
   // Получаем настройки из user_accounts (default_adset_mode)
   const { data: userAccount } = await supabase
@@ -753,7 +754,7 @@ export async function workflowCreateAdSetInDirection(
     .insert({
       direction_id: direction_id,
       fb_adset_id: adset_id,
-      adset_name: adset_name,
+      adset_name: final_adset_name,
       daily_budget_cents: daily_budget_cents,
       status: auto_activate ? 'ACTIVE' : 'PAUSED',
       ads_count: created_ads.length
