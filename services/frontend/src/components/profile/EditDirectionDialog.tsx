@@ -305,6 +305,11 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
           pixel_id: pixelId || null,
           utm_tag: utmTag.trim() || DEFAULT_UTM,
         }),
+        ...(direction.objective === 'lead_forms' && {
+          site_url: siteUrl.trim() || null,
+          // Сохраняем pixel_id для CAPI
+          ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
+        }),
       };
 
       if (settingsId) {
@@ -735,6 +740,29 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                     />
                     <p className="text-xs text-muted-foreground">
                       Используйте переменные: {'{'}{'{'} campaign.name {'}'}{'}' }, {'{'}{'{'}  adset.name {'}'}{'}'}, {'{'}{'{'}  ad.name {'}'}{'}'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {direction.objective === 'lead_forms' && (
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-sm">📝 Лид-формы</h3>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-site-url-leadforms">
+                      URL сайта (для image креативов)
+                    </Label>
+                    <Input
+                      id="edit-site-url-leadforms"
+                      type="url"
+                      placeholder="https://yoursite.com"
+                      value={siteUrl}
+                      onChange={(e) => setSiteUrl(e.target.value)}
+                      disabled={isSubmitting}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Обязательно для креативов с картинками. Для видео креативов не требуется.
                     </p>
                   </div>
                 </div>
