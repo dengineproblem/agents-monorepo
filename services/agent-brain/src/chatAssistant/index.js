@@ -812,7 +812,7 @@ export function registerChatRoutes(fastify) {
   // BRAIN MINI - Direct endpoint (bypasses Meta Orchestrator)
   // ============================================================
   fastify.post('/api/brain/mini/run/stream', async (request, reply) => {
-    const { userAccountId, adAccountId, directionId, campaignId, dryRun } = request.body;
+    const { userAccountId, adAccountId, directionId, campaignId, dryRun, proposals } = request.body;
 
     // Логируем входящие параметры
     logger.info({
@@ -823,11 +823,15 @@ export function registerChatRoutes(fastify) {
       directionId: directionId || null,
       campaignId: campaignId || null,
       dryRun: dryRun || false,
-      message: campaignId
-        ? `Brain Mini запущен для кампании ${campaignId}`
-        : directionId
-          ? `Brain Mini запущен для направления ${directionId}`
-          : 'Brain Mini запущен для всего аккаунта'
+      hasProposals: !!proposals?.length,
+      proposalsCount: proposals?.length || 0,
+      message: proposals?.length
+        ? `Brain Mini: выполнение ${proposals.length} готовых proposals`
+        : campaignId
+          ? `Brain Mini запущен для кампании ${campaignId}`
+          : directionId
+            ? `Brain Mini запущен для направления ${directionId}`
+            : 'Brain Mini запущен для всего аккаунта'
     });
 
     if (!userAccountId) {
@@ -875,7 +879,12 @@ export function registerChatRoutes(fastify) {
       }
 
       // Step 3: Run Brain Mini directly (bypass orchestrator)
-      sendEvent({ type: 'progress', phase: 'fetching', message: 'Загружаю данные из Facebook...' });
+      // Если переданы готовые proposals - пропускаем анализ
+      if (proposals?.length > 0) {
+        sendEvent({ type: 'progress', phase: 'executing', message: `Выполняю ${proposals.length} действий...` });
+      } else {
+        sendEvent({ type: 'progress', phase: 'fetching', message: 'Загружаю данные из Facebook...' });
+      }
 
       const toolContext = {
         userAccountId,
@@ -890,7 +899,8 @@ export function registerChatRoutes(fastify) {
           direction_id: directionId || null,
           campaign_id: campaignId || null,
           dry_run: dryRun || false,
-          reason: 'Direct Brain Mini call from Dashboard'
+          reason: 'Direct Brain Mini call from Dashboard',
+          proposals: proposals || null  // Передаём готовые proposals для выполнения
         },
         toolContext
       );

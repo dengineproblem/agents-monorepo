@@ -1,14 +1,16 @@
 import { useState, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import {
-  sendMessageStream,
+  runBrainMiniStream,
   executePlan,
   type Plan,
-  type StreamEvent,
+  type BrainMiniEvent,
+  type BrainMiniProposal,
+  type BrainMiniAdsetAnalysis,
+  type BrainMiniSummary,
 } from '@/services/assistantApi';
 import {
   createInitialStreamingState,
-  updateStreamingState,
   type StreamingState,
 } from '@/components/assistant/StreamingMessage';
 
@@ -32,10 +34,15 @@ export interface OptimizationState {
   scope: OptimizationScope | null;
   streamingState: StreamingState | null;
   plan: Plan | null;
-  content: string | null; // Текстовый ответ от AI
+  content: string | null; // Текстовый ответ от AI (message из done)
   error: string | null;
   conversationId: string | null;
   isExecuting: boolean;
+  // Brain Mini direct API fields
+  proposals: BrainMiniProposal[];
+  adsetAnalysis: BrainMiniAdsetAnalysis[];
+  summary: BrainMiniSummary | null;
+  progressMessage: string | null;
 }
 
 /**
@@ -52,6 +59,10 @@ export function useOptimization() {
     error: null,
     conversationId: null,
     isExecuting: false,
+    proposals: [],
+    adsetAnalysis: [],
+    summary: null,
+    progressMessage: null,
   });
 
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -72,7 +83,7 @@ export function useOptimization() {
   }, []);
 
   /**
-   * Запустить процесс оптимизации
+   * Запустить процесс оптимизации через прямой API (без LLM)
    */
   const startOptimization = useCallback(async (scope: OptimizationScope) => {
     console.log('[Optimization] startOptimization called with scope:', scope);
@@ -95,26 +106,12 @@ export function useOptimization() {
     // Флаг для различения таймаута и ручной отмены
     let isTimeout = false;
 
-    // Таймаут 7 минут (420000 мс) - GPT-5 может думать 3-4 мин + overhead
+    // Таймаут 5 минут (300000 мс) - прямой API быстрее чем через LLM
     const timeoutId = setTimeout(() => {
-      console.log('[Optimization] Timeout reached (7 min), aborting...');
+      console.log('[Optimization] Timeout reached (5 min), aborting...');
       isTimeout = true;
       abortController.abort();
-    }, 420000);
-
-    // Формируем параметры для triggerBrainOptimizationRun
-    let params = 'dry_run=true';
-    if (scope.directionId) {
-      params += `, direction_id="${scope.directionId}"`;
-    }
-    if (scope.campaignId) {
-      params += `, campaign_id="${scope.campaignId}"`;
-    }
-
-    const targetName = scope.directionName || scope.accountName;
-    const message = (scope.directionId || scope.campaignId)
-      ? `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. ВАЖНО: После вызова выведи ТОЛЬКО содержимое поля formatted.text — это готовый отчёт для пользователя. НЕ добавляй своих комментариев, НЕ упоминай dry_run, proposals, plan, adset_id, Brain Mini и другие технические термины. Просто покажи текст из formatted.text как есть.`
-      : `Вызови инструмент triggerBrainOptimizationRun с параметрами: ${params}. ВАЖНО: После вызова выведи ТОЛЬКО содержимое поля formatted.text — это готовый отчёт для пользователя. НЕ добавляй своих комментариев, НЕ упоминай dry_run, proposals, plan, adset_id, Brain Mini и другие технические термины. Просто покажи текст из formatted.text как есть.`;
+    }, 300000);
 
     // Инициализируем состояние
     const initialState = createInitialStreamingState();
@@ -128,71 +125,109 @@ export function useOptimization() {
       error: null,
       conversationId: null,
       isExecuting: false,
+      proposals: [],
+      adsetAnalysis: [],
+      summary: null,
+      progressMessage: 'Запускаю анализ...',
     });
     streamingStateRef.current = initialState;
 
     try {
-      console.log('[Optimization] Starting stream with:', {
-        message,
-        mode: 'plan',
+      console.log('[Optimization] Starting Brain Mini direct stream with:', {
         userAccountId,
         adAccountId: scope.accountId,
         directionId: scope.directionId,
         campaignId: scope.campaignId,
-        targetName,
       });
 
-      const stream = sendMessageStream(
+      // Используем прямой API вместо LLM chat
+      const stream = runBrainMiniStream(
         {
-          message,
-          mode: 'plan', // Режим плана - требует одобрения
           userAccountId,
           adAccountId: scope.accountId,
+          directionId: scope.directionId,
+          campaignId: scope.campaignId,
+          dryRun: true, // Всегда dry_run - показываем предложения для подтверждения
         },
         abortController.signal
       );
 
       let finalPlan: Plan | null = null;
       let finalContent: string | null = null;
-      let conversationId: string | null = null;
+      let finalProposals: BrainMiniProposal[] = [];
+      let finalAdsetAnalysis: BrainMiniAdsetAnalysis[] = [];
+      let finalSummary: BrainMiniSummary | null = null;
       let errorMessage: string | null = null;
 
       for await (const event of stream) {
-        console.log('[Optimization] SSE event:', event.type, event);
+        console.log('[Optimization] Brain Mini event:', event.type, event);
 
         if (abortController.signal.aborted) {
           console.log('[Optimization] Aborted');
           break;
         }
 
-        // Обновляем streaming state
-        const newStreamingState = streamingStateRef.current
-          ? updateStreamingState(streamingStateRef.current, event)
-          : createInitialStreamingState();
-
-        streamingStateRef.current = newStreamingState;
-
-        setState(prev => ({
-          ...prev,
-          streamingState: newStreamingState,
-        }));
-
-        // Обрабатываем специфичные события
+        // Обрабатываем события Brain Mini
         switch (event.type) {
-          case 'init':
-            conversationId = event.conversationId;
-            console.log('[Optimization] Got conversationId:', conversationId);
-            setState(prev => ({ ...prev, conversationId }));
+          case 'progress':
+            console.log('[Optimization] Progress:', event.message);
+            setState(prev => ({
+              ...prev,
+              progressMessage: event.message,
+            }));
             break;
 
           case 'done':
-            console.log('[Optimization] Done event, plan:', event.plan, 'content:', event.content);
-            if (event.plan) {
-              finalPlan = event.plan;
-            }
-            // Сохраняем текстовый ответ
-            if (event.content) {
-              finalContent = event.content;
+            console.log('[Optimization] Done event:', {
+              success: event.success,
+              proposalsCount: event.proposals?.length,
+              hasPlan: !!event.plan,
+            });
+
+            if (event.success) {
+              finalProposals = event.proposals || [];
+              finalAdsetAnalysis = event.adset_analysis || [];
+              finalSummary = event.summary;
+              finalContent = event.message;
+
+              // Конвертируем proposals → plan.steps для отображения в UI
+              // Backend уже содержит все нужные данные (direction_name, budget и т.д.)
+              if (finalProposals.length > 0) {
+                const summaryText = finalSummary
+                  ? `${finalSummary.today_total_spend} расход, ${finalSummary.today_total_leads || 0} лидов. Анализ ${finalSummary.total_adsets_analyzed} адсетов.`
+                  : null;
+
+                finalPlan = {
+                  description: summaryText,
+                  steps: finalProposals.map(p => ({
+                    action: p.action,
+                    description: p.reason,
+                    params: {
+                      entity_id: p.entity_id,
+                      entity_name: p.entity_name,
+                      direction_name: p.direction_name,
+                      direction_id: p.direction_id,
+                      campaign_id: p.campaign_id,
+                      campaign_type: p.campaign_type,
+                      current_budget_cents: p.suggested_action_params?.current_budget_cents as number | undefined,
+                      new_budget_cents: p.suggested_action_params?.new_budget_cents as number | undefined,
+                      increase_percent: p.suggested_action_params?.increase_percent as number | undefined,
+                      decrease_percent: p.suggested_action_params?.decrease_percent as number | undefined,
+                      recommended_budget_cents: p.suggested_action_params?.recommended_budget_cents as number | undefined,
+                      creative_ids: p.suggested_action_params?.creative_ids as string[] | undefined,
+                      creative_titles: p.suggested_action_params?.creative_titles as string[] | undefined,
+                    },
+                    priority: p.priority,
+                    dangerous: p.priority === 'critical',
+                  })),
+                  estimated_impact: event.message,
+                };
+              } else {
+                // Если proposals пустые - используем план от API (если есть)
+                finalPlan = event.plan;
+              }
+            } else {
+              errorMessage = event.message || 'Ошибка при анализе';
             }
             break;
 
@@ -203,7 +238,11 @@ export function useOptimization() {
         }
       }
 
-      console.log('[Optimization] Stream finished, finalPlan:', finalPlan, 'content:', finalContent, 'error:', errorMessage);
+      console.log('[Optimization] Stream finished:', {
+        hasPlan: !!finalPlan,
+        proposalsCount: finalProposals.length,
+        error: errorMessage,
+      });
 
       // Очищаем таймаут
       clearTimeout(timeoutId);
@@ -214,7 +253,11 @@ export function useOptimization() {
         isLoading: false,
         plan: finalPlan,
         content: finalContent,
+        proposals: finalProposals,
+        adsetAnalysis: finalAdsetAnalysis,
+        summary: finalSummary,
         error: errorMessage,
+        progressMessage: null,
       }));
 
     } catch (error) {
@@ -229,7 +272,8 @@ export function useOptimization() {
           setState(prev => ({
             ...prev,
             isLoading: false,
-            error: 'Превышено время ожидания (7 минут). Попробуйте ещё раз или выберите конкретное направление.',
+            error: 'Превышено время ожидания (5 минут). Попробуйте ещё раз или выберите конкретное направление.',
+            progressMessage: null,
           }));
           return;
         }
@@ -243,6 +287,7 @@ export function useOptimization() {
         ...prev,
         isLoading: false,
         error: (error as Error).message || 'Не удалось запустить оптимизацию',
+        progressMessage: null,
       }));
     }
   }, [getUserAccountId]);
@@ -269,48 +314,76 @@ export function useOptimization() {
       error: null,
       conversationId: null,
       isExecuting: false,
+      proposals: [],
+      adsetAnalysis: [],
+      summary: null,
+      progressMessage: null,
     });
   }, []);
 
   /**
-   * Одобрить и выполнить выбранные шаги
+   * Одобрить и выполнить все предложения
+   * Вызывает Brain Mini повторно с dry_run=false
    */
   const approveSelected = useCallback(async (stepIndices: number[]) => {
     const userAccountId = getUserAccountId();
-    if (!userAccountId || !state.conversationId || !state.scope) {
+    if (!userAccountId || !state.scope) {
       toast.error('Недостаточно данных для выполнения');
       return;
     }
 
+    // Brain Mini выполняет все proposals при dry_run=false
+    // Выбор отдельных шагов пока не поддерживается
     if (stepIndices.length === 0) {
-      toast.error('Выберите хотя бы один шаг');
+      toast.error('Нет действий для выполнения');
       return;
     }
 
     setState(prev => ({ ...prev, isExecuting: true }));
 
     try {
-      const result = await executePlan({
-        conversationId: state.conversationId,
-        userAccountId,
-        adAccountId: state.scope.accountId,
-        stepIndices, // Передаём массив индексов
-      });
+      console.log('[Optimization] Executing Brain Mini with proposals:', state.proposals.length);
 
-      if (result.success) {
-        const count = stepIndices.length;
-        toast.success(`Выполнено ${count} ${count === 1 ? 'действие' : count < 5 ? 'действия' : 'действий'}`);
+      // Передаём уже одобренные proposals для выполнения (без повторного анализа)
+      const stream = runBrainMiniStream(
+        {
+          userAccountId,
+          adAccountId: state.scope.accountId,
+          directionId: state.scope.directionId,
+          campaignId: state.scope.campaignId,
+          dryRun: false, // Реальное выполнение
+          proposals: state.proposals, // Передаём готовые proposals
+        },
+        undefined // Без abort signal
+      );
+
+      let success = false;
+      let message = '';
+
+      for await (const event of stream) {
+        console.log('[Optimization] Execute event:', event.type, event);
+
+        if (event.type === 'done') {
+          success = event.success;
+          message = event.message || '';
+        } else if (event.type === 'error') {
+          message = event.message || 'Ошибка при выполнении';
+        }
+      }
+
+      if (success) {
+        toast.success('Оптимизация выполнена');
         closeModal();
       } else {
-        toast.error(result.message || 'Ошибка при выполнении плана');
+        toast.error(message || 'Ошибка при выполнении плана');
       }
     } catch (error) {
-      console.error('Execute plan error:', error);
-      toast.error('Не удалось выполнить план');
+      console.error('Execute Brain Mini error:', error);
+      toast.error('Не удалось выполнить оптимизацию');
     } finally {
       setState(prev => ({ ...prev, isExecuting: false }));
     }
-  }, [getUserAccountId, state.conversationId, state.scope, closeModal]);
+  }, [getUserAccountId, state.scope, state.proposals, closeModal]);
 
   /**
    * Отклонить план

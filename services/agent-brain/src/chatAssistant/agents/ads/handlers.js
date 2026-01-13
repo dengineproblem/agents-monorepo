@@ -3,6 +3,7 @@
  * Tool execution handlers for advertising operations
  */
 
+import crypto from 'crypto';
 import { fbGraph } from '../../shared/fbGraph.js';
 import { getDateRange } from '../../shared/dateUtils.js';
 import { supabase } from '../../../lib/supabaseClient.js';
@@ -644,16 +645,44 @@ export const adsHandlers = {
    * Create AdSet in campaign with creatives
    * Uses direction settings for targeting
    */
-  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, dry_run }, { accessToken, adAccountId, userAccountId, pageId }) {
+  async createAdSet({ direction_id, creative_ids, daily_budget_cents, adset_name, dry_run }, { accessToken, adAccountId, userAccountId, pageId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'createAdSet',
+      direction_id,
+      creative_ids,
+      daily_budget_cents,
+      adset_name,
+      dry_run,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'createAdSet: начало операции');
+
     // 1. Get direction with campaign_id and settings
-    const { data: direction, error: dirError } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let dirQuery = supabase
       .from('account_directions')
       .select('id, name, fb_campaign_id, objective, daily_budget_cents, pixel_id')
-      .eq('id', direction_id)
-      .single();
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      dirQuery = dirQuery.eq('account_id', dbAccountId);
+    } else {
+      dirQuery = dirQuery.is('account_id', null);
+    }
+
+    const { data: direction, error: dirError } = await dirQuery.single();
 
     if (dirError || !direction) {
-      return { success: false, error: `Направление не найдено: ${dirError?.message || 'not found'}` };
+      logger.warn({
+        handler: 'createAdSet',
+        direction_id,
+        dbAccountId,
+        error: dirError?.message,
+        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+      }, 'createAdSet: направление не найдено');
+      return { success: false, error: `Направление не найдено или недоступно: ${dirError?.message || 'not found'}` };
     }
 
     if (!direction.fb_campaign_id) {
@@ -1047,20 +1076,48 @@ export const adsHandlers = {
     };
   },
 
-  async getDirectionCreatives({ direction_id }, { userAccountId }) {
+  // КРИТИЧНО: Добавлен adAccountDbId для мультиаккаунтности
+  async getDirectionCreatives({ direction_id }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+    const filterMode = dbAccountId ? 'multi_account' : 'legacy';
+
+    logger.info({
+      handler: 'getDirectionCreatives',
+      direction_id,
+      userAccountId,
+      dbAccountId,
+      filterMode
+    }, `getDirectionCreatives: загрузка креативов (${filterMode})`);
+
     // Get direction name for context
-    const { data: direction, error: dirError } = await supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let dirQuery = supabase
       .from('account_directions')
       .select('id, name')
-      .eq('id', direction_id)
-      .single();
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      dirQuery = dirQuery.eq('account_id', dbAccountId);
+    } else {
+      dirQuery = dirQuery.is('account_id', null);
+    }
+
+    const { data: direction, error: dirError } = await dirQuery.single();
 
     if (dirError) {
+      logger.warn({
+        handler: 'getDirectionCreatives',
+        direction_id,
+        dbAccountId,
+        error: dirError.message,
+        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+      }, 'getDirectionCreatives: направление не найдено');
       return { success: false, error: dirError.message };
     }
 
     // Get creatives linked to this direction with metrics
-    const { data: creatives, error } = await supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let creativesQuery = supabase
       .from('user_creatives')
       .select(`
         id,
@@ -1074,7 +1131,15 @@ export const adsHandlers = {
         updated_at
       `)
       .eq('direction_id', direction_id)
-      .eq('user_id', userAccountId)
+      .eq('user_id', userAccountId);
+
+    if (dbAccountId) {
+      creativesQuery = creativesQuery.eq('account_id', dbAccountId);
+    } else {
+      creativesQuery = creativesQuery.is('account_id', null);
+    }
+
+    const { data: creatives, error } = await creativesQuery
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -1269,25 +1334,52 @@ export const adsHandlers = {
     };
   },
 
-  async updateDirectionBudget({ direction_id, new_budget, dry_run }, { adAccountId, userAccountId }) {
+  async updateDirectionBudget({ direction_id, new_budget, dry_run }, { adAccountId, userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'updateDirectionBudget',
+      direction_id,
+      new_budget,
+      dry_run,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'updateDirectionBudget: начало операции');
+
     // Dry-run mode: return preview with change % and warnings
     if (dry_run) {
-      return adsDryRunHandlers.updateDirectionBudget({ direction_id, new_budget }, { adAccountId });
+      return adsDryRunHandlers.updateDirectionBudget({ direction_id, new_budget }, { adAccountId, adAccountDbId });
     }
 
     // Convert dollars to cents for storage
     const newBudgetCents = Math.round(new_budget * 100);
 
     // Update direction budget (stored in cents)
-    const { data, error } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let query = supabase
       .from('account_directions')
       .update({ daily_budget_cents: newBudgetCents, updated_at: new Date().toISOString() })
-      .eq('id', direction_id)
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data, error } = await query
       .select('id, name, daily_budget_cents')
       .single();
 
     if (error) {
-      return { success: false, error: error.message };
+      logger.warn({
+        handler: 'updateDirectionBudget',
+        direction_id,
+        dbAccountId,
+        error: error.message,
+        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено в legacy режиме'
+      }, 'updateDirectionBudget: ошибка обновления');
+      return { success: false, error: `Направление не найдено или недоступно: ${error.message}` };
     }
 
     await supabase.from('agent_logs').insert({
@@ -1303,19 +1395,45 @@ export const adsHandlers = {
     };
   },
 
-  async updateDirectionTargetCPL({ direction_id, target_cpl }, { adAccountId }) {
+  async updateDirectionTargetCPL({ direction_id, target_cpl }, { adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'updateDirectionTargetCPL',
+      direction_id,
+      target_cpl,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'updateDirectionTargetCPL: начало операции');
+
     // Convert dollars to cents for storage
     const targetCplCents = Math.round(target_cpl * 100);
 
-    const { data, error } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let query = supabase
       .from('account_directions')
       .update({ target_cpl_cents: targetCplCents, updated_at: new Date().toISOString() })
-      .eq('id', direction_id)
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data, error } = await query
       .select('id, name, target_cpl_cents')
       .single();
 
     if (error) {
-      return { success: false, error: error.message };
+      logger.warn({
+        handler: 'updateDirectionTargetCPL',
+        direction_id,
+        dbAccountId,
+        error: error.message,
+        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+      }, 'updateDirectionTargetCPL: ошибка обновления');
+      return { success: false, error: `Направление не найдено или недоступно: ${error.message}` };
     }
 
     await supabase.from('agent_logs').insert({
@@ -1331,28 +1449,62 @@ export const adsHandlers = {
     };
   },
 
-  async pauseDirection({ direction_id, reason, dry_run }, { adAccountId, accessToken }) {
+  async pauseDirection({ direction_id, reason, dry_run }, { adAccountId, accessToken, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'pauseDirection',
+      direction_id,
+      reason,
+      dry_run,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'pauseDirection: начало операции');
+
     // Dry-run mode: return preview with affected entities
     if (dry_run) {
-      return adsDryRunHandlers.pauseDirection({ direction_id }, { adAccountId });
+      return adsDryRunHandlers.pauseDirection({ direction_id }, { adAccountId, adAccountDbId });
     }
 
     // Get direction with fb_campaign_id
-    const { data: direction, error: fetchError } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let fetchQuery = supabase
       .from('account_directions')
       .select('id, name, fb_campaign_id')
-      .eq('id', direction_id)
-      .single();
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      fetchQuery = fetchQuery.eq('account_id', dbAccountId);
+    } else {
+      fetchQuery = fetchQuery.is('account_id', null);
+    }
+
+    const { data: direction, error: fetchError } = await fetchQuery.single();
 
     if (fetchError) {
-      return { success: false, error: fetchError.message };
+      logger.warn({
+        handler: 'pauseDirection',
+        direction_id,
+        dbAccountId,
+        error: fetchError.message,
+        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+      }, 'pauseDirection: направление не найдено');
+      return { success: false, error: `Направление не найдено или недоступно: ${fetchError.message}` };
     }
 
     // Update direction status (is_active = false)
-    const { error: updateError } = await supabase
+    let updateQuery = supabase
       .from('account_directions')
       .update({ is_active: false, campaign_status: 'PAUSED', updated_at: new Date().toISOString() })
       .eq('id', direction_id);
+
+    if (dbAccountId) {
+      updateQuery = updateQuery.eq('account_id', dbAccountId);
+    } else {
+      updateQuery = updateQuery.is('account_id', null);
+    }
+
+    const { error: updateError } = await updateQuery;
 
     if (updateError) {
       return { success: false, error: updateError.message };
@@ -1382,23 +1534,55 @@ export const adsHandlers = {
     };
   },
 
-  async resumeDirection({ direction_id }, { adAccountId, accessToken }) {
+  async resumeDirection({ direction_id }, { adAccountId, accessToken, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'resumeDirection',
+      direction_id,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'resumeDirection: начало операции');
+
     // Get direction with fb_campaign_id
-    const { data: direction, error: fetchError } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let fetchQuery = supabase
       .from('account_directions')
       .select('id, name, fb_campaign_id')
-      .eq('id', direction_id)
-      .single();
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      fetchQuery = fetchQuery.eq('account_id', dbAccountId);
+    } else {
+      fetchQuery = fetchQuery.is('account_id', null);
+    }
+
+    const { data: direction, error: fetchError } = await fetchQuery.single();
 
     if (fetchError) {
-      return { success: false, error: fetchError.message };
+      logger.warn({
+        handler: 'resumeDirection',
+        direction_id,
+        dbAccountId,
+        error: fetchError.message,
+        hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+      }, 'resumeDirection: направление не найдено');
+      return { success: false, error: `Направление не найдено или недоступно: ${fetchError.message}` };
     }
 
     // Update direction status (is_active = true)
-    const { error: updateError } = await supabase
+    let updateQuery = supabase
       .from('account_directions')
       .update({ is_active: true, campaign_status: 'ACTIVE', updated_at: new Date().toISOString() })
       .eq('id', direction_id);
+
+    if (dbAccountId) {
+      updateQuery = updateQuery.eq('account_id', dbAccountId);
+    } else {
+      updateQuery = updateQuery.is('account_id', null);
+    }
+
+    const { error: updateError } = await updateQuery;
 
     if (updateError) {
       return { success: false, error: updateError.message };
@@ -2071,7 +2255,7 @@ export const adsHandlers = {
    * Trigger a Brain Agent optimization run
    * WARNING: This is a dangerous operation that can modify budgets and pause/resume adsets
    */
-  async triggerBrainOptimizationRun({ direction_id, campaign_id, dry_run, reason }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
+  async triggerBrainOptimizationRun({ direction_id, campaign_id, dry_run, reason, proposals: preApprovedProposals }, { userAccountId, adAccountId, adAccountDbId, accessToken }) {
     const dbAccountId = adAccountDbId || null;
 
     // Логируем входящие параметры
@@ -2085,11 +2269,15 @@ export const adsHandlers = {
       campaign_id: campaign_id || null,
       dry_run,
       reason,
-      message: campaign_id
-        ? `Запуск Brain Mini для кампании ${campaign_id}`
-        : direction_id
-          ? `Запуск Brain Mini для направления ${direction_id}`
-          : 'Запуск Brain Mini для всего аккаунта'
+      hasPreApprovedProposals: !!preApprovedProposals?.length,
+      preApprovedProposalsCount: preApprovedProposals?.length || 0,
+      message: preApprovedProposals?.length
+        ? `Выполнение ${preApprovedProposals.length} готовых proposals`
+        : campaign_id
+          ? `Запуск Brain Mini для кампании ${campaign_id}`
+          : direction_id
+            ? `Запуск Brain Mini для направления ${direction_id}`
+            : 'Запуск Brain Mini для всего аккаунта'
     });
 
     // ========================================
@@ -2106,7 +2294,7 @@ export const adsHandlers = {
       // ========================================
       const { data: userAccount, error: userError } = await supabase
         .from('user_accounts')
-        .select('id, ad_account_id, access_token, multi_account_enabled')
+        .select('id, ad_account_id, access_token, multi_account_enabled, page_id')
         .eq('id', userAccountId)
         .single();
 
@@ -2120,10 +2308,11 @@ export const adsHandlers = {
       let accountUUID = null;
 
       // Мультиаккаунтный режим: загружаем из ad_accounts
+      let pageId = null;
       if (userAccount.multi_account_enabled && adAccountDbId) {
         const { data: adAccount, error: adAccountError } = await supabase
           .from('ad_accounts')
-          .select('id, access_token, ad_account_id')
+          .select('id, access_token, ad_account_id, page_id')
           .eq('id', adAccountDbId)
           .eq('user_account_id', userAccountId)
           .single();
@@ -2143,6 +2332,7 @@ export const adsHandlers = {
         finalAdAccountId = adAccount.ad_account_id;
         finalAccessToken = accessToken || adAccount.access_token;
         accountUUID = adAccount.id;
+        pageId = adAccount.page_id;
 
         logger.info({
           where: 'triggerBrainOptimizationRun',
@@ -2150,14 +2340,18 @@ export const adsHandlers = {
           userAccountId,
           adAccountDbId,
           finalAdAccountId,
-          accountUUID
+          accountUUID,
+          pageId
         });
       } else {
+        // Legacy режим: pageId из user_accounts
+        pageId = userAccount.page_id;
         logger.info({
           where: 'triggerBrainOptimizationRun',
           phase: 'legacy_mode',
           userAccountId,
-          finalAdAccountId: userAccount.ad_account_id
+          finalAdAccountId: userAccount.ad_account_id,
+          pageId
         });
       }
 
@@ -2167,6 +2361,206 @@ export const adsHandlers = {
 
       if (!finalAdAccountId) {
         return { success: false, error: 'Ad account ID не найден' };
+      }
+
+      // ========================================
+      // FAST PATH: Если переданы готовые proposals - сразу выполняем без анализа
+      // ========================================
+      if (preApprovedProposals?.length > 0 && !dry_run) {
+        logger.info({
+          where: 'triggerBrainOptimizationRun',
+          phase: 'fast_path_execution',
+          proposalsCount: preApprovedProposals.length,
+          userAccountId,
+          adAccountDbId
+        }, `FAST PATH: Параллельное выполнение ${preApprovedProposals.length} proposals`);
+
+        const toolContext = {
+          accessToken: finalAccessToken,
+          adAccountId: finalAdAccountId,
+          userAccountId,
+          adAccountDbId,
+          pageId
+        };
+
+        // Функция выполнения одного proposal
+        const executeProposal = async (proposal) => {
+          const params = proposal.suggested_action_params || {};
+
+          logger.info({
+            where: 'triggerBrainOptimizationRun',
+            phase: 'executing_proposal',
+            action: proposal.action,
+            entityType: proposal.entity_type,
+            entityId: proposal.entity_id,
+            entityName: proposal.entity_name
+          }, `Executing: ${proposal.action}`);
+
+          let executionResult;
+
+          switch (proposal.action) {
+            case 'updateBudget':
+              executionResult = await this.updateBudget(
+                { adset_id: proposal.entity_id, new_budget_cents: params.new_budget_cents },
+                toolContext
+              );
+              break;
+
+            case 'pauseAdSet':
+              executionResult = await this.pauseAdSet(
+                { adset_id: proposal.entity_id, reason: proposal.reason },
+                toolContext
+              );
+              break;
+
+            case 'pauseAd':
+              executionResult = await this.pauseAd(
+                { ad_id: proposal.entity_id, reason: proposal.reason },
+                toolContext
+              );
+              break;
+
+            case 'enableAdSet':
+              executionResult = await this.resumeAdSet(
+                { adset_id: proposal.entity_id },
+                toolContext
+              );
+              break;
+
+            case 'enableAd':
+              executionResult = await this.resumeAd(
+                { ad_id: proposal.entity_id },
+                toolContext
+              );
+              break;
+
+            case 'createAdSet':
+            case 'launchNewCreatives':
+              executionResult = await this.createAdSet(
+                {
+                  direction_id: proposal.direction_id,
+                  creative_ids: params.creative_ids || [],
+                  daily_budget_cents: params.recommended_budget_cents
+                },
+                toolContext
+              );
+              break;
+
+            case 'review':
+              executionResult = { success: true, message: 'Отмечено для ручной проверки', skipped: true };
+              break;
+
+            default:
+              executionResult = { success: false, error: `Unknown action: ${proposal.action}` };
+          }
+
+          logger.info({
+            where: 'triggerBrainOptimizationRun',
+            phase: 'proposal_executed',
+            action: proposal.action,
+            success: executionResult.success !== false,
+            message: executionResult.message
+          }, `Proposal ${proposal.action} executed`);
+
+          return {
+            proposal: {
+              action: proposal.action,
+              entity_id: proposal.entity_id,
+              entity_name: proposal.entity_name,
+              direction_name: proposal.direction_name
+            },
+            success: executionResult.success !== false,
+            message: executionResult.message,
+            error: executionResult.error
+          };
+        };
+
+        // ПАРАЛЛЕЛЬНОЕ выполнение всех proposals
+        const startTime = Date.now();
+        const results = await Promise.allSettled(
+          preApprovedProposals.map(p => executeProposal(p))
+        );
+        const duration = Date.now() - startTime;
+
+        // Собираем результаты
+        const executionResults = results.map((result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          } else {
+            logger.error({
+              where: 'triggerBrainOptimizationRun',
+              phase: 'proposal_execution_error',
+              action: preApprovedProposals[index].action,
+              error: result.reason?.message
+            }, `Error executing proposal: ${preApprovedProposals[index].action}`);
+
+            return {
+              proposal: {
+                action: preApprovedProposals[index].action,
+                entity_id: preApprovedProposals[index].entity_id,
+                entity_name: preApprovedProposals[index].entity_name
+              },
+              success: false,
+              error: result.reason?.message || 'Unknown error'
+            };
+          }
+        });
+
+        const successCount = executionResults.filter(r => r.success).length;
+        const failCount = executionResults.length - successCount;
+
+        logger.info({
+          where: 'triggerBrainOptimizationRun',
+          phase: 'fast_path_complete',
+          totalProposals: preApprovedProposals.length,
+          successCount,
+          failCount,
+          durationMs: duration,
+          durationSec: Math.round(duration / 1000)
+        }, `FAST PATH завершён: ${successCount}/${preApprovedProposals.length} за ${Math.round(duration / 1000)} сек`);
+
+        // Save to brain_executions
+        try {
+          await supabase.from('brain_executions').insert({
+            user_account_id: userAccountId,
+            account_id: adAccountDbId,
+            execution_mode: 'manual_trigger',
+            idempotency_key: crypto.randomUUID(),
+            plan_json: {
+              triggered_by: 'brain_mini_fast_path',
+              reason: reason || 'Brain Mini execution (fast path)',
+              direction_id: direction_id || null,
+              proposals: preApprovedProposals.map(p => ({
+                action: p.action,
+                entity_id: p.entity_id,
+                entity_name: p.entity_name,
+                reason: p.reason
+              }))
+            },
+            actions_json: executionResults.map(r => ({
+              type: r.proposal.action,
+              params: r.proposal,
+              success: r.success,
+              message: r.message || r.error
+            })),
+            report_text: `Brain Mini (fast path): ${successCount}/${executionResults.length} действий выполнено`,
+            status: failCount === 0 ? 'success' : 'partial',
+            actions_taken: successCount,
+            actions_failed: failCount
+          });
+        } catch (saveError) {
+          logger.error({ error: saveError.message }, 'Failed to save brain_executions (fast path)');
+        }
+
+        return {
+          success: failCount === 0,
+          mode: 'executed',
+          dry_run: false,
+          message: `Brain Mini: выполнено ${successCount}/${executionResults.length} действий`,
+          execution_results: executionResults,
+          success_count: successCount,
+          fail_count: failCount
+        };
       }
 
       // Run interactive brain с правильными credentials
@@ -2185,6 +2579,227 @@ export const adsHandlers = {
           accountUUID  // Также передаём в options для directions
         }
       );
+
+      // ========================================
+      // EXECUTION MODE: If dry_run=false AND has proposals, execute them
+      // ========================================
+      if (!dry_run && result.proposals && result.proposals.length > 0) {
+        logger.info({
+          where: 'triggerBrainOptimizationRun',
+          phase: 'execution_mode_start',
+          proposalsCount: result.proposals.length,
+          userAccountId,
+          adAccountDbId
+        }, 'Starting execution of Brain Mini proposals');
+
+        const executionResults = [];
+        const toolContext = {
+          accessToken: finalAccessToken,
+          adAccountId: finalAdAccountId,
+          userAccountId,
+          adAccountDbId,
+          pageId
+        };
+
+        for (const proposal of result.proposals) {
+          try {
+            let executionResult;
+            const params = proposal.suggested_action_params || {};
+
+            logger.info({
+              where: 'triggerBrainOptimizationRun',
+              phase: 'executing_proposal',
+              action: proposal.action,
+              entityType: proposal.entity_type,
+              entityId: proposal.entity_id,
+              entityName: proposal.entity_name
+            }, `Executing proposal: ${proposal.action}`);
+
+            switch (proposal.action) {
+              case 'updateBudget':
+                executionResult = await this.updateBudget(
+                  { adset_id: proposal.entity_id, new_budget_cents: params.new_budget_cents },
+                  toolContext
+                );
+                break;
+
+              case 'pauseAdSet':
+                executionResult = await this.pauseAdSet(
+                  { adset_id: proposal.entity_id, reason: proposal.reason },
+                  toolContext
+                );
+                break;
+
+              case 'pauseAd':
+                executionResult = await this.pauseAd(
+                  { ad_id: proposal.entity_id, reason: proposal.reason },
+                  toolContext
+                );
+                break;
+
+              case 'enableAdSet':
+                executionResult = await this.resumeAdSet(
+                  { adset_id: proposal.entity_id },
+                  toolContext
+                );
+                break;
+
+              case 'enableAd':
+                executionResult = await this.resumeAd(
+                  { ad_id: proposal.entity_id },
+                  toolContext
+                );
+                break;
+
+              case 'createAdSet':
+                executionResult = await this.createAdSet(
+                  {
+                    direction_id: proposal.direction_id,
+                    creative_ids: params.creative_ids || [],
+                    daily_budget_cents: params.recommended_budget_cents
+                  },
+                  toolContext
+                );
+                break;
+
+              case 'launchNewCreatives':
+                // Same as createAdSet
+                executionResult = await this.createAdSet(
+                  {
+                    direction_id: proposal.direction_id,
+                    creative_ids: params.creative_ids || [],
+                    daily_budget_cents: params.recommended_budget_cents
+                  },
+                  toolContext
+                );
+                break;
+
+              case 'review':
+                // review action doesn't execute anything, just acknowledge
+                executionResult = { success: true, message: 'Отмечено для ручной проверки', skipped: true };
+                break;
+
+              default:
+                executionResult = { success: false, error: `Unknown action: ${proposal.action}` };
+            }
+
+            executionResults.push({
+              proposal: {
+                action: proposal.action,
+                entity_id: proposal.entity_id,
+                entity_name: proposal.entity_name,
+                direction_name: proposal.direction_name
+              },
+              success: executionResult.success !== false,
+              message: executionResult.message,
+              error: executionResult.error,
+              data: executionResult.data || executionResult.preview
+            });
+
+            logger.info({
+              where: 'triggerBrainOptimizationRun',
+              phase: 'proposal_executed',
+              action: proposal.action,
+              success: executionResult.success !== false,
+              message: executionResult.message,
+              error: executionResult.error
+            }, `Proposal ${proposal.action} executed`);
+
+          } catch (error) {
+            logger.error({
+              where: 'triggerBrainOptimizationRun',
+              phase: 'proposal_execution_error',
+              action: proposal.action,
+              error: error.message,
+              stack: error.stack
+            }, `Error executing proposal: ${proposal.action}`);
+
+            executionResults.push({
+              proposal: {
+                action: proposal.action,
+                entity_id: proposal.entity_id,
+                entity_name: proposal.entity_name
+              },
+              success: false,
+              error: error.message
+            });
+          }
+        }
+
+        // Calculate success stats
+        const successCount = executionResults.filter(r => r.success).length;
+        const failCount = executionResults.length - successCount;
+
+        // Log execution completion
+        await supabase.from('agent_logs').insert({
+          ad_account_id: adAccountId,
+          level: failCount > 0 ? 'warn' : 'info',
+          message: `Brain Mini execution completed: ${successCount}/${executionResults.length} successful`,
+          context: {
+            direction_id,
+            reason,
+            execution_mode: true,
+            success_count: successCount,
+            fail_count: failCount,
+            source: 'chat_assistant',
+            agent: 'AdsAgent',
+            mode: 'interactive_execute'
+          }
+        });
+
+        // Save to brain_executions for history
+        try {
+          const { error: insertError } = await supabase.from('brain_executions').insert({
+            user_account_id: userAccountId,
+            account_id: adAccountDbId,
+            execution_mode: 'manual_trigger',
+            idempotency_key: crypto.randomUUID(),
+            plan_json: {
+              triggered_by: 'brain_mini_execute',
+              reason: reason || 'Brain Mini execution',
+              direction_id: direction_id || null,
+              proposals: result.proposals.map(p => ({
+                action: p.action,
+                entity_id: p.entity_id,
+                entity_name: p.entity_name,
+                reason: p.reason
+              }))
+            },
+            actions_json: executionResults.map(r => ({
+              type: r.proposal.action,
+              params: r.proposal,
+              success: r.success,
+              message: r.message || r.error
+            })),
+            report_text: `Brain Mini: ${successCount}/${executionResults.length} действий выполнено`,
+            status: failCount === 0 ? 'success' : 'partial',
+            actions_taken: successCount,
+            actions_failed: failCount
+          });
+
+          if (insertError) {
+            logger.error({ error: insertError.message }, 'Failed to save brain_executions');
+          }
+        } catch (saveError) {
+          logger.error({ error: saveError.message }, 'Error saving to brain_executions');
+        }
+
+        // Return execution results
+        return {
+          success: failCount === 0,
+          mode: 'executed',
+          dry_run: false,
+          message: `Brain Mini: выполнено ${successCount}/${executionResults.length} действий`,
+          execution_results: executionResults,
+          summary: result.summary,
+          success_count: successCount,
+          fail_count: failCount
+        };
+      }
+
+      // ========================================
+      // ANALYSIS MODE (dry_run=true or no proposals): Return proposals for approval
+      // ========================================
 
       // Log the action
       await supabase.from('agent_logs').insert({
@@ -2433,6 +3048,17 @@ export const adsHandlers = {
   async getDirectionInsights({ direction_id, period, date_from, date_to, compare }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
 
+    logger.info({
+      handler: 'getDirectionInsights',
+      direction_id,
+      period,
+      date_from,
+      date_to,
+      compare,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'getDirectionInsights: начало операции');
+
     // Support date_from/date_to with priority over period
     let currentStart, currentEnd, periodDays;
     const now = new Date();
@@ -2461,11 +3087,19 @@ export const adsHandlers = {
     }
 
     // Get direction info including target CPL
-    const { data: direction } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let dirQuery = supabase
       .from('account_directions')
       .select('id, name, target_cpl_cents, daily_budget_cents')
-      .eq('id', direction_id)
-      .single();
+      .eq('id', direction_id);
+
+    if (dbAccountId) {
+      dirQuery = dirQuery.eq('account_id', dbAccountId);
+    } else {
+      dirQuery = dirQuery.is('account_id', null);
+    }
+
+    const { data: direction } = await dirQuery.single();
 
     const targetCpl = direction?.target_cpl_cents ? direction.target_cpl_cents / 100 : null;
 

@@ -28,6 +28,50 @@ import {
 const FB_API_VERSION = 'v23.0';
 
 // =============================================================================
+// RETRY HELPER ДЛЯ СЕТЕВЫХ ЗАПРОСОВ
+// =============================================================================
+
+/**
+ * Выполняет функцию с retry логикой и экспоненциальной задержкой
+ * @param {Function} fn - Функция для выполнения
+ * @param {number} maxRetries - Максимальное количество попыток (по умолчанию 3)
+ * @param {number} baseDelay - Базовая задержка в мс (по умолчанию 1000)
+ * @returns {Promise} - Результат функции
+ */
+async function withRetry(fn, maxRetries = 3, baseDelay = 1000) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const isRetryable = error.message?.includes('fetch failed') ||
+                          error.message?.includes('ECONNRESET') ||
+                          error.message?.includes('ETIMEDOUT') ||
+                          error.message?.includes('network') ||
+                          error.code === 'ECONNRESET' ||
+                          error.code === 'ETIMEDOUT';
+
+      if (!isRetryable || attempt === maxRetries) {
+        throw error;
+      }
+
+      const delay = baseDelay * Math.pow(2, attempt - 1); // 1s, 2s, 4s
+      logger.warn({
+        where: 'withRetry',
+        attempt,
+        maxRetries,
+        delay,
+        error: error.message,
+        message: `Retry attempt ${attempt}/${maxRetries} after ${delay}ms`
+      });
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
+// =============================================================================
 // LLM FUNCTIONS ДЛЯ BRAIN MINI
 // =============================================================================
 
@@ -476,6 +520,16 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 | **neutral** | Держать | Не предлагать изменений |
 | **slightly_bad** | Снижать | -20..-50% бюджета |
 | **bad** | Пауза/снижение | -50% если CPL x2-3; полная пауза если CPL > x3 |
+| **special** | createAdSet | Создать новый адсет если есть unused_creatives И can_create_adsets: true |
+| **special** | enableAdSet | Включить ранее остановленный адсет если показатели улучшились |
+| **special** | enableAd | Включить ранее остановленное объявление |
+| **special** | review | ТОЛЬКО при аномалиях: технические проблемы, подозрительные метрики. НЕ вместо конкретного действия! |
+
+⚠️ **action "review" — КОГДА ИСПОЛЬЗОВАТЬ:**
+- Технические проблемы (ошибки API, статус DISAPPROVED)
+- Аномальные метрики (внезапный CPM x10, CTR = 0 при показах)
+- Недостаточно данных для принятия решения (< 100 impressions за 7 дней)
+- **НЕ используй** review как fallback когда не знаешь что делать — всегда есть конкретное действие!
 
 ## ОГРАНИЧЕНИЯ БЮДЖЕТОВ
 - Повышение за шаг: максимум **+30%**
@@ -508,19 +562,30 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 
 **Применяй для адсетов с hs_class: neutral, slightly_bad, bad!**
 
-## ⏰ ВРЕМЕННОЕ ОГРАНИЧЕНИЕ НА СОЗДАНИЕ ADSETS (КРИТИЧЕСКИ ВАЖНО!)
-**ОБЯЗАТЕЛЬНО** проверь поле \`time_context.can_create_adsets\` в payload!
+## ⏰ РЕЖИМЫ РАБОТЫ (time_context.mode) — КРИТИЧЕСКИ ВАЖНО!
+**ОБЯЗАТЕЛЬНО** проверь поле \`time_context.mode\` и \`time_context.can_create_adsets\` в payload!
 
-- Если \`can_create_adsets: true\` → можно предлагать createAdSet, launchNewCreatives
-- Если \`can_create_adsets: false\` → **ЗАПРЕЩЕНО** предлагать создание новых adsets!
-  - Работай ТОЛЬКО с перераспределением бюджета между существующими adsets
-  - Не используй action: "createAdSet" или "launchNewCreatives"!
-  - Весь освободившийся бюджет направляй в лучшие существующие adsets
+### mode: "with_creation" (до 18:00 Almaty)
+- ✅ Создавать новые адсеты (createAdSet, launchNewCreatives)
+- ✅ Увеличивать бюджеты хороших адсетов
+- ✅ Снижать бюджеты плохих адсетов
+- ✅ Останавливать пожиратели
+- **Цель:** Закрыть gap бюджета направления любым способом
 
-**Причина:** новый adset начинает откручивать бюджет не сразу. Если запустить во второй
-половине дня — алгоритмы Facebook не успеют оптимизироваться, бюджет сольётся впустую.
+### mode: "rebalance_only" (после 18:00 Almaty)
+- 🚫 Создание адсетов **ЗАПРЕЩЕНО** (createAdSet, launchNewCreatives)!
+- ✅ Перераспределять: снижать плохие → увеличивать хорошие
+- ✅ Останавливать пожиратели (CPL > 3x target)
+- ✅ Best-of-bad: если все плохие — увеличить наименее плохой
+- **Цель:** Сохранить бюджет направления через перераспределение
 
-**Текущее время и статус указаны в time_context — ПРОВЕРЯЙ ЕГО ПЕРВЫМ ДЕЛОМ!**
+**⚠️ ВАЖНО для rebalance_only:**
+- НЕ просто резать все бюджеты!
+- Если снижаешь адсет A на $20 → увеличь адсет B на $20
+- Сумма бюджетов направления должна остаться ≈ той же
+- Освободившийся бюджет ВСЕГДА перераспределяй на лучшие адсеты!
+
+**Текущее время и режим указаны в time_context — ПРОВЕРЯЙ ИХ ПЕРВЫМ ДЕЛОМ!**
 
 ## ВЕСА ПЕРИОДОВ ДЛЯ АНАЛИЗА
 | Период | Вес | Описание |
@@ -531,6 +596,79 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 | last_30d | 5% | Долгосрочный тренд |
 
 Если данных за сегодня недостаточно (< 300 impressions), увеличь вес yesterday до 50%.
+
+## 📊 НАПРАВЛЕНИЯ БИЗНЕСА (КРИТИЧНО!)
+Каждое направление (direction) — это отдельная услуга/продукт бизнеса:
+- \`direction_id\` — UUID направления
+- \`direction_name\` — название (например: "Виниры", "Имплантация", "Брекеты")
+- \`direction_daily_budget_cents\` — дневной бюджет направления
+- \`direction_target_cpl_cents\` — целевая стоимость лида для направления
+
+В payload.directions[] — список направлений с бюджетами и целями.
+В payload.adsets[] — каждый адсет имеет \`direction_id\` привязки.
+
+⚠️ **ВАЖНО:** При createAdSet работай ТОЛЬКО с креативами этого направления!
+
+## 🔮 READY_CREATIVES И UNUSED_CREATIVES (КРИТИЧНО!)
+В payload передаются:
+- \`ready_creatives\`: АКТИВНЫЕ креативы с historical performance (avg_cpl, impressions, leads)
+- \`unused_creatives\`: креативы готовые к запуску, НЕ используемые в активных ads
+
+**Структура unused_creatives:**
+- \`id\`: UUID креатива (использовать в creative_ids)
+- \`title\`: название креатива
+- \`direction_id\`: UUID направления (⚠️ КРИТИЧНО ДЛЯ МАТЧИНГА!)
+- \`recommended_objective\`: рекомендуемая цель кампании
+- \`first_run\`: true если ещё не запускался
+- \`not_in_active_ads\`: true если не используется
+
+## 🎯 ПРИОРИТЕТЫ КРЕАТИВОВ ДЛЯ НАПРАВЛЕНИЯ
+При выборе креативов для createAdSet следуй приоритетам:
+
+**ПРИОРИТЕТ 1: Хорошие ready_creatives** (avg_cpl ≤ 1.3 × target)
+- Выбирай 1-3 лучших с наименьшим avg_cpl
+- ТОЛЬКО с direction_id === direction_id направления!
+
+**ПРИОРИТЕТ 2: Новые креативы** (unused_creatives с first_run: true)
+- Новый креатив без данных ЛУЧШЕ чем креатив с плохими результатами!
+- Создай ОДНУ группу с ВСЕМИ новыми креативами направления
+- Facebook сам выберет лучший!
+
+**ПРИОРИТЕТ 3: Ротация плохих ready_creatives** (если нет хороших и новых)
+- Выбирай с наименьшим avg_cpl даже если выше плана
+
+**ПРИОРИТЕТ 4: LAL дубль** (последний шанс)
+- Если всё совсем плохо — предложи тестирование новой LAL аудитории
+
+## ⚠️ ПРАВИЛА createAdSet (КРИТИЧЕСКИ ВАЖНО!)
+1. Выбирай ТОЛЬКО креативы с \`direction_id === direction_id направления\`!
+2. НИКОГДА не смешивай креативы из разных направлений!
+3. Используй НЕСКОЛЬКО креативов (2-4) в ОДНОМ адсете, НЕ по одному!
+4. Передавай ВСЕ creative_ids МАССИВОМ: \`["uuid-1", "uuid-2", "uuid-3"]\`
+5. Бюджет: 1000-2000 центов ($10-$20), НЕ больше!
+6. В suggested_action_params ОБЯЗАТЕЛЬНО укажи:
+   - \`creative_ids\`: массив UUID креативов
+   - \`creative_titles\`: массив названий креативов
+   - \`direction_id\`: UUID направления
+   - \`recommended_budget_cents\`: бюджет в центах
+
+## 🛡️ ИСТОРИЯ ДЕЙСТВИЙ (ЗАЩИТА ОТ ДЁРГОТНИ)
+В payload может быть поле \`recent_actions_count\` — количество действий за последние 24 часа.
+
+Если recent_actions_count > 3:
+- Снижай confidence на 0.2 для всех proposals
+- В reason укажи: "⚠️ Много недавних изменений — рекомендую подождать стабилизации"
+- Не предлагай резкие изменения (паузы, большие снижения) без крайней необходимости
+
+## 💰 ПРАВИЛО СОХРАНЕНИЯ БЮДЖЕТА (КРИТИЧЕСКИ ВАЖНО!)
+При снижении/паузе любого адсета ВСЕГДА предлагай перераспределение!
+
+**ПРАВИЛО:**
+- Если снижаешь бюджет с $50 до $25 → предложи увеличить лучший адсет на ~$25
+- Если паузишь адсет с бюджетом $50 → предложи создать новый ИЛИ увеличить лучшие
+- Общий бюджет направления должен сохраняться в коридоре 95-105%!
+
+⚠️ НЕ ПРЕДЛАГАЙ только снижения если это приведёт к недобору плана!
 
 ## МЕТРИКИ ПО ТИПАМ КАМПАНИЙ
 | Objective | Метрика | Формула |
@@ -546,7 +684,7 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
   "planNote": "краткое техническое описание анализа",
   "proposals": [
     {
-      "action": "updateBudget" | "pauseAdSet" | "pauseAd" | "createAdSet" | "review",
+      "action": "updateBudget" | "pauseAdSet" | "pauseAd" | "enableAdSet" | "enableAd" | "createAdSet" | "launchNewCreatives" | "review",
       "priority": "critical" | "high" | "medium" | "low",
       "entity_type": "adset" | "ad" | "campaign" | "direction",
       "entity_id": "string",
@@ -566,7 +704,12 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
         "current_budget_cents": number,
         "new_budget_cents": number,
         "min_budget_cents": 300,
-        "max_budget_cents": 10000
+        "max_budget_cents": 10000,
+        // Для createAdSet/launchNewCreatives:
+        "creative_ids": ["uuid-1", "uuid-2"] | null,  // МАССИВ UUID креативов!
+        "creative_titles": ["Название 1", "Название 2"] | null,
+        "direction_id": "uuid" | null,
+        "recommended_budget_cents": number | null
       },
       "metrics": {
         "today_spend": number,
@@ -620,13 +763,55 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 3. ⚠️ НЕ ПРЕДЛАГАЙ только снижения если это приведёт к недобору плана!
 4. Итоговая сумма proposals должна сохранять бюджет в коридоре
 
+## 🔄 EXTERNAL КАМПАНИИ (campaign_type="EXTERNAL")
+Для адсетов с campaign_type="EXTERNAL" (без привязки к direction):
+- Используй **account_settings.default_cpl_target_cents** как target CPL
+- Используй **summary.account_budget_status** для контроля бюджета:
+  - plan_budget_cents — плановый бюджет на уровне аккаунта
+  - current_total_budget_cents — текущая сумма всех адсетов
+  - external_campaigns_budget_cents — бюджет ТОЛЬКО внешних кампаний
+  - gap_cents — недобор (план - текущий)
+  - status — "UNDERFUNDED" если < 95% плана
+
+**ЕСЛИ account_budget_status.status = "UNDERFUNDED":**
+1. Увеличивай бюджеты EXTERNAL адсетов с лучшим HS
+2. Не режь бюджеты если это увеличит недобор
+3. Приоритет — закрыть gap до 95% плана
+
+## 🎯 КОНТРОЛЬ БЮДЖЕТА НАПРАВЛЕНИЙ (КРИТИЧЕСКИ ВАЖНО!)
+Для каждого направления в \`directions[]\` проверь:
+- \`daily_budget_cents\` — ПЛАНОВЫЙ бюджет направления
+- \`installed_adsets_budget_cents\` — СУММА установленных бюджетов всех адсетов направления
+- \`budget_gap_cents\` — разница (план - установлено), положительное = недобор
+- \`is_underfunded\` — true если недобор > 5%
+
+**ПРАВИЛО БАЛАНСА:**
+\`\`\`
+sum(adsets.daily_budget) в направлении ДОЛЖЕН ≈ direction.daily_budget
+\`\`\`
+
+**Если направление UNDERFUNDED (is_underfunded: true):**
+1. Найди адсеты этого направления с лучшим HS
+2. Увеличь их бюджеты чтобы закрыть gap
+3. Если mode="with_creation" — можешь создать новый адсет
+4. Если mode="rebalance_only" — ТОЛЬКО увеличивай существующие!
+
+**НЕ ДОПУСКАЙ:**
+- Сумму proposals на снижение > суммы на увеличение (если направление underfunded)
+- Паузу ВСЕХ адсетов направления без компенсации
+- Недобор > 20% от планового бюджета направления
+
+**Проверь summary.underfunded_directions_count** — если > 0, приоритетно добирай эти направления!
+
 ## ПОРЯДОК ДОБОРА БЮДЖЕТА (при недоборе)
 1. Сначала — adsets с HS ≥ +25 (very_good): +10..+30%
 2. Затем — adsets с HS +5..+24 (good): +5..+10%
 3. Если таких нет — best-of-bad: +10..+20%
 4. Ограничение: один adset не должен занимать >40% от планового бюджета
 
-## ПРИМЕР PROPOSAL
+## ПРИМЕРЫ PROPOSALS
+
+### Пример 1: updateBudget (увеличение)
 {
   "action": "updateBudget",
   "priority": "high",
@@ -656,6 +841,73 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
     "metrics_source": "today"
   }
 }
+
+### Пример 2: createAdSet (ОБЯЗАТЕЛЬНЫЙ ФОРМАТ с creative_ids!)
+{
+  "action": "createAdSet",
+  "priority": "medium",
+  "entity_type": "direction",
+  "entity_id": "direction-uuid-12345",
+  "entity_name": "Виниры",
+  "campaign_id": null,
+  "campaign_type": "internal",
+  "direction_id": "direction-uuid-12345",
+  "direction_name": "Виниры",
+  "health_score": 0,
+  "hs_class": "neutral",
+  "reason": "Направление «Виниры» имеет 3 неиспользуемых креатива. Рекомендую запустить новый адсет для тестирования. Бюджет $15.",
+  "confidence": 0.75,
+  "suggested_action_params": {
+    "creative_ids": ["uuid-creative-1", "uuid-creative-2", "uuid-creative-3"],
+    "creative_titles": ["Виниры скидка 30%", "Виниры без боли", "Виниры за 1 день"],
+    "direction_id": "direction-uuid-12345",
+    "recommended_budget_cents": 1500
+  },
+  "metrics": null
+}
+
+### Пример 3: pauseAd (пожиратель)
+{
+  "action": "pauseAd",
+  "priority": "high",
+  "entity_type": "ad",
+  "entity_id": "120111222333",
+  "entity_name": "Плохой креатив",
+  "adset_id": "120444555666",
+  "campaign_id": "120777888999",
+  "campaign_type": "internal",
+  "direction_id": "direction-uuid",
+  "direction_name": "Имплантация",
+  "health_score": -30,
+  "hs_class": "bad",
+  "reason": "Пожиратель: тратит 65% бюджета адсета, CPL $12.50 (цель $5.00). Остановить для перераспределения бюджета.",
+  "confidence": 0.9
+}
+
+## ⚠️ САМОПРОВЕРКА ПЕРЕД ВЫВОДОМ (КРИТИЧЕСКИ ВАЖНО!)
+Перед выводом JSON убедись:
+
+1. **Для КАЖДОГО createAdSet/launchNewCreatives:**
+   - ВСЕ creative_ids имеют direction_id === entity_id направления!
+   - НЕ смешаны креативы из разных направлений!
+   - creative_ids содержит 2-4 креатива (НЕ 1!)
+   - Указан recommended_budget_cents (1000-2000)
+
+2. **Для КАЖДОГО updateBudget:**
+   - Указан current_budget_cents и new_budget_cents
+   - Изменение в пределах ±30%/-50%
+
+3. **Для КАЖДОГО pauseAd:**
+   - Указан adset_id (обязательно для выполнения!)
+   - В reason есть % бюджета и сравнение с целью
+
+4. **Общий бюджет:**
+   - При снижениях/паузах есть компенсирующие предложения
+   - Итоговая сумма в коридоре 95-105% плана
+
+5. **action "review":**
+   - Используется ТОЛЬКО для технических проблем/аномалий
+   - НЕ используется как fallback!
 
 Теперь проанализируй входные данные и сгенерируй JSON с proposals.`;
 }
@@ -1177,6 +1429,9 @@ async function fetchAdsInsights(adAccountId, accessToken, maxRetries = 2) {
     'campaign_id', 'campaign_name', 'spend',
     'impressions', 'clicks', 'ctr', 'actions'
   ].join(','));
+  // КРИТИЧНО: Без action_breakdowns Facebook возвращает actions БЕЗ action_type,
+  // и extractLeads() не может распознать лиды (возвращает 0)
+  url.searchParams.set('action_breakdowns', 'action_type');
   url.searchParams.set('limit', '500');
   url.searchParams.set('access_token', accessToken);
 
@@ -1997,10 +2252,28 @@ export async function saveCreativeMetricsToHistory(supabase, userAccountId, read
   for (const creative of readyCreatives) {
     try {
       // Получить список ads через ad_creative_mapping
-      const { data: mappings, error } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      const filterMode = accountUUID ? 'multi_account' : 'legacy';
+
+      let mappingsQuery = supabase
         .from('ad_creative_mapping')
         .select('ad_id, adset_id, campaign_id, fb_creative_id')
         .eq('user_creative_id', creative.user_creative_id);
+
+      if (accountUUID) {
+        mappingsQuery = mappingsQuery.eq('account_id', accountUUID);
+      } else {
+        mappingsQuery = mappingsQuery.is('account_id', null);
+      }
+
+      logger.debug({
+        where: 'saveCreativeMetricsToHistory',
+        creative_id: creative.user_creative_id,
+        accountUUID,
+        filterMode
+      }, `Загрузка ad_creative_mapping в режиме ${filterMode}`);
+
+      const { data: mappings, error } = await mappingsQuery;
 
       if (error) {
         logger.warn({ 
@@ -2373,11 +2646,12 @@ export async function runScoringAgent(userAccount, options = {}) {
     // ========================================
     
     logger.info({ where: 'scoring_agent', phase: 'fetching_roi' });
-    
+
     let creativeROIMap = new Map();
     try {
       const { calculateCreativeROI } = await import('../../agent-service/src/lib/roiCalculator.js');
-      creativeROIMap = await calculateCreativeROI(userAccountId, null, 30, supabase);
+      // КРИТИЧНО: Передаём accountUUID для фильтрации по аккаунту в мультиаккаунтном режиме
+      creativeROIMap = await calculateCreativeROI(userAccountId, null, 30, supabase, accountUUID);
       
       logger.info({ 
         where: 'scoring_agent', 
@@ -2807,20 +3081,25 @@ export async function runInteractiveBrain(userAccount, options = {}) {
 
     let todayData, yesterdayData, dailyData, actionsData, adsetsConfigData, adsInsightsData;
     try {
-      [todayData, yesterdayData, dailyData, actionsData, adsetsConfigData, adsInsightsData] = await Promise.all([
-        fetchAdsets(ad_account_id, access_token, 'today'),
-        fetchAdsets(ad_account_id, access_token, 'yesterday'),
-        fetchAdsetsDaily(ad_account_id, access_token, 14),  // 14 дней для трендов
-        fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),  // actions за 7 дней
-        fetchAdsetsConfig(ad_account_id, access_token, log),  // конфиг с бюджетами
-        fetchAdsInsights(ad_account_id, access_token)  // ads insights для анализа пожирателей
-      ]);
+      // Используем withRetry для устойчивости к временным сетевым ошибкам
+      [todayData, yesterdayData, dailyData, actionsData, adsetsConfigData, adsInsightsData] = await withRetry(
+        () => Promise.all([
+          fetchAdsets(ad_account_id, access_token, 'today'),
+          fetchAdsets(ad_account_id, access_token, 'yesterday'),
+          fetchAdsetsDaily(ad_account_id, access_token, 14),  // 14 дней для трендов
+          fetchAdsetsActions(ad_account_id, access_token, 'last_7d'),  // actions за 7 дней
+          fetchAdsetsConfig(ad_account_id, access_token, log),  // конфиг с бюджетами
+          fetchAdsInsights(ad_account_id, access_token)  // ads insights для анализа пожирателей
+        ]),
+        3,  // 3 попытки
+        2000  // начальная задержка 2 секунды
+      );
     } catch (fbError) {
       log.error({
         where: 'interactive_brain',
         phase: 'fb_api_error',
         error: String(fbError),
-        message: 'Ошибка при запросе данных из Facebook API'
+        message: 'Ошибка при запросе данных из Facebook API (после 3 попыток)'
       });
       throw new Error(`FB API fetch failed: ${fbError.message}`);
     }
@@ -2906,14 +3185,46 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     log.info({ where: 'interactive_brain', phase: 'loading_brain_report' });
 
     // Получаем последний успешный scoring_output (отчёт основного Brain)
-    const { data: lastExecution } = await supabase
+    // Мультиаккаунтность: фильтруем по account_id консистентно с directions
+    let executionQuery = supabase
       .from('scoring_executions')
       .select('scoring_output, completed_at')
       .eq('user_account_id', userAccountId)
-      .eq('status', 'success')
+      .eq('status', 'success');
+
+    if (accountUUID) {
+      executionQuery = executionQuery.eq('account_id', accountUUID);
+      log.info({
+        where: 'interactive_brain',
+        phase: 'scoring_execution_filter',
+        accountUUID,
+        filterMode: 'multi_account',
+        message: 'Фильтрация scoring_executions по account_id (мультиаккаунт)'
+      });
+    } else {
+      executionQuery = executionQuery.is('account_id', null);
+      log.info({
+        where: 'interactive_brain',
+        phase: 'scoring_execution_filter',
+        filterMode: 'legacy',
+        message: 'Фильтрация scoring_executions: account_id IS NULL (legacy режим)'
+      });
+    }
+
+    const { data: lastExecution, error: executionError } = await executionQuery
       .order('completed_at', { ascending: false })
       .limit(1)
       .single();
+
+    if (executionError && executionError.code !== 'PGRST116') {
+      log.warn({
+        where: 'interactive_brain',
+        phase: 'scoring_execution_error',
+        error: executionError.message,
+        accountUUID,
+        message: 'Ошибка загрузки scoring_execution'
+      });
+    }
 
     const brainReport = lastExecution?.scoring_output || null;
     const brainReportAge = lastExecution?.completed_at
@@ -3010,13 +3321,171 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     });
 
     // Загружаем последние действия Brain для защиты от дёрготни
-    const { data: recentActions } = await supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    const brainFilterMode = accountUUID ? 'multi_account' : 'legacy';
+
+    let recentActionsQuery = supabase
       .from('brain_executions')
       .select('proposals_json, completed_at')
       .eq('user_account_id', userAccountId)
-      .in('status', ['proposals_generated', 'executed'])
+      .in('status', ['proposals_generated', 'executed']);
+
+    if (accountUUID) {
+      recentActionsQuery = recentActionsQuery.eq('account_id', accountUUID);
+    } else {
+      recentActionsQuery = recentActionsQuery.is('account_id', null);
+    }
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'loading_recent_actions',
+      userAccountId,
+      accountUUID,
+      filterMode: brainFilterMode
+    }, `Загрузка brain_executions в режиме ${brainFilterMode}`);
+
+    const { data: recentActions } = await recentActionsQuery
       .order('completed_at', { ascending: false })
       .limit(3);
+
+    // ========================================
+    // ЧАСТЬ 3.5: ПОДСЧЁТ УСТАНОВЛЕННЫХ БЮДЖЕТОВ ПО НАПРАВЛЕНИЯМ
+    // Для контроля: sum(adsets.daily_budget) должен ≈ direction.daily_budget
+    // ========================================
+
+    // Создаём map campaign_id → direction для быстрого поиска
+    const campaignToDirection = new Map();
+    const directionsById = new Map(); // Для быстрого поиска по id
+    if (directions?.length > 0) {
+      for (const dir of directions) {
+        directionsById.set(dir.id, dir);
+        if (dir.fb_campaign_id) {
+          campaignToDirection.set(dir.fb_campaign_id, dir);
+        }
+      }
+    }
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'direction_maps_created',
+      directions_count: directions?.length || 0,
+      campaigns_mapped: campaignToDirection.size,
+      directions_with_campaign: Array.from(campaignToDirection.entries()).map(([campId, dir]) => ({
+        campaign_id: campId,
+        direction_id: dir.id,
+        direction_name: dir.name,
+        plan_budget_cents: dir.daily_budget_cents
+      })),
+      message: 'Созданы maps для связи campaign_id → direction'
+    });
+
+    // Собираем все адсеты с их campaign_id (из todayData, yesterdayData, dailyData)
+    const allAdsetsWithCampaign = new Map();
+    const sourceStats = { today: 0, yesterday: 0, daily: 0 };
+
+    for (const adset of todayData) {
+      if (adset.adset_id && adset.campaign_id && !allAdsetsWithCampaign.has(adset.adset_id)) {
+        allAdsetsWithCampaign.set(adset.adset_id, adset.campaign_id);
+        sourceStats.today++;
+      }
+    }
+    for (const adset of yesterdayData) {
+      if (adset.adset_id && adset.campaign_id && !allAdsetsWithCampaign.has(adset.adset_id)) {
+        allAdsetsWithCampaign.set(adset.adset_id, adset.campaign_id);
+        sourceStats.yesterday++;
+      }
+    }
+    for (const adset of (dailyData || [])) {
+      if (adset.adset_id && adset.campaign_id && !allAdsetsWithCampaign.has(adset.adset_id)) {
+        allAdsetsWithCampaign.set(adset.adset_id, adset.campaign_id);
+        sourceStats.daily++;
+      }
+    }
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'adsets_campaign_mapping',
+      total_adsets_mapped: allAdsetsWithCampaign.size,
+      adsets_from_today: sourceStats.today,
+      adsets_from_yesterday: sourceStats.yesterday,
+      adsets_from_daily: sourceStats.daily,
+      adset_budgets_available: adsetBudgets.size,
+      message: 'Собраны campaign_id для всех адсетов'
+    });
+
+    // Считаем сумму УСТАНОВЛЕННЫХ бюджетов по каждому direction
+    const installedBudgetByDirection = new Map();
+    const adsetsByDirection = new Map(); // Для подсчёта количества адсетов
+    let adsetsWithoutCampaign = 0;
+    let adsetsWithoutDirection = 0;
+    let adsetsWithoutBudget = 0;
+
+    for (const [adsetId, budgetInfo] of adsetBudgets.entries()) {
+      const campaignId = allAdsetsWithCampaign.get(adsetId);
+      if (!campaignId) {
+        adsetsWithoutCampaign++;
+        continue;
+      }
+
+      const direction = campaignToDirection.get(campaignId);
+      if (!direction) {
+        adsetsWithoutDirection++;
+        continue;
+      }
+
+      if (!budgetInfo?.daily_budget_cents) {
+        adsetsWithoutBudget++;
+        continue;
+      }
+
+      const current = installedBudgetByDirection.get(direction.id) || 0;
+      installedBudgetByDirection.set(direction.id, current + budgetInfo.daily_budget_cents);
+
+      // Считаем количество адсетов по направлениям
+      const adsetCount = adsetsByDirection.get(direction.id) || 0;
+      adsetsByDirection.set(direction.id, adsetCount + 1);
+    }
+
+    // Формируем детальный отчёт по направлениям
+    const directionsReport = directions?.map(dir => {
+      const installedBudget = installedBudgetByDirection.get(dir.id) || 0;
+      const planBudget = dir.daily_budget_cents || 0;
+      const gap = planBudget - installedBudget;
+      const utilizationPct = planBudget > 0 ? Math.round(installedBudget / planBudget * 100) : null;
+      const isUnderfunded = planBudget > 0 && installedBudget < planBudget * 0.95;
+      const adsetCount = adsetsByDirection.get(dir.id) || 0;
+
+      return {
+        direction_id: dir.id,
+        direction_name: dir.name,
+        plan_budget_cents: planBudget,
+        installed_budget_cents: installedBudget,
+        gap_cents: gap,
+        utilization_pct: utilizationPct,
+        is_underfunded: isUnderfunded,
+        adsets_count: adsetCount,
+        status: !planBudget ? 'no_plan' : isUnderfunded ? 'UNDERFUNDED' : 'ok'
+      };
+    }) || [];
+
+    const underfundedCount = directionsReport.filter(d => d.is_underfunded).length;
+
+    log.info({
+      where: 'interactive_brain',
+      phase: 'budget_by_direction_calculated',
+      directions_count: directions?.length || 0,
+      directions_with_installed_budget: installedBudgetByDirection.size,
+      underfunded_directions_count: underfundedCount,
+      skipped_stats: {
+        without_campaign_id: adsetsWithoutCampaign,
+        without_direction: adsetsWithoutDirection,
+        without_budget: adsetsWithoutBudget
+      },
+      directions_report: directionsReport,
+      message: underfundedCount > 0
+        ? `⚠️ ВНИМАНИЕ: ${underfundedCount} направлений с НЕДОБОРОМ бюджета!`
+        : 'Бюджеты направлений в норме'
+    });
 
     // ========================================
     // ЧАСТЬ 4: АНАЛИЗ С HEALTH SCORE
@@ -3734,6 +4203,21 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         // Проверяем время для передачи в LLM
         const timeContext = isAllowedToCreateAdsets({ logger: log });
 
+        // Логируем режим работы
+        log.info({
+          where: 'interactive_brain',
+          phase: 'time_context_resolved',
+          current_time_almaty: timeContext.currentTime,
+          current_hour_almaty: timeContext.currentHour,
+          cutoff_hour: timeContext.cutoffHour,
+          can_create_adsets: timeContext.allowed,
+          mode: timeContext.allowed ? 'with_creation' : 'rebalance_only',
+          reason: timeContext.reason || null,
+          message: timeContext.allowed
+            ? `✅ Режим WITH_CREATION: создание адсетов РАЗРЕШЕНО (до ${timeContext.cutoffHour}:00)`
+            : `⚠️ Режим REBALANCE_ONLY: создание адсетов ЗАПРЕЩЕНО (после ${timeContext.cutoffHour}:00)`
+        });
+
         // Группируем ads по adset_id для включения в каждый адсет
         const adsByAdset = new Map();
         if (adsInsightsData && adsInsightsData.length > 0) {
@@ -3743,17 +4227,9 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             if (!adsByAdset.has(adsetId)) {
               adsByAdset.set(adsetId, []);
             }
-            // Считаем leads из actions
+            // Считаем leads из actions (используем extractLeads для консистентности)
             const actions = Array.isArray(ad.actions) ? ad.actions : [];
-            const leads = actions.reduce((sum, a) => {
-              const t = a?.action_type;
-              if (t === 'onsite_conversion.total_messaging_connection' ||
-                  t === 'lead_grouped' ||
-                  t === 'offsite_conversion.fb_pixel_lead') {
-                return sum + parseInt(a.value || 0);
-              }
-              return sum;
-            }, 0);
+            const leads = extractLeads(actions);
             const spend = parseFloat(ad.spend || 0);
             const cpl = leads > 0 ? spend / leads : (spend > 0 ? Infinity : null);
 
@@ -3783,9 +4259,11 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             cutoff_hour: timeContext.cutoffHour,
             timezone: timeContext.timezone,
             can_create_adsets: timeContext.allowed,
+            // Режим работы: with_creation (до cutoff) или rebalance_only (после cutoff)
+            mode: timeContext.allowed ? 'with_creation' : 'rebalance_only',
             reason: timeContext.allowed
-              ? 'Создание новых адсетов разрешено (до 14:00)'
-              : 'Создание новых адсетов ЗАПРЕЩЕНО (после 14:00) — только перераспределение бюджета!'
+              ? 'Создание новых адсетов разрешено (до 18:00). Можно создавать и перераспределять.'
+              : 'Режим ПЕРЕРАСПРЕДЕЛЕНИЯ (после 18:00): создание запрещено, но ОБЯЗАТЕЛЬНО перераспределять бюджеты между существующими адсетами, останавливать пожиратели. НЕ просто резать всё!'
           },
           adsets: adsetAnalysis.map(a => ({
             adset_id: a.adset_id,
@@ -3811,7 +4289,17 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             name: d.name,
             objective: d.objective,
             daily_budget_cents: d.daily_budget_cents,
-            target_cpl_cents: d.target_cpl_cents
+            target_cpl_cents: d.target_cpl_cents,
+            // Сумма установленных бюджетов всех адсетов этого направления
+            installed_adsets_budget_cents: installedBudgetByDirection.get(d.id) || 0,
+            // Разница: план минус установлено (положительное = недобор)
+            budget_gap_cents: d.daily_budget_cents
+              ? d.daily_budget_cents - (installedBudgetByDirection.get(d.id) || 0)
+              : 0,
+            // Флаг недобора: установлено < 95% от плана
+            is_underfunded: d.daily_budget_cents
+              ? (installedBudgetByDirection.get(d.id) || 0) < d.daily_budget_cents * 0.95
+              : false
           })) || [],
           account_settings: {
             default_cpl_target_cents: adAccountSettings?.default_cpl_target_cents || null,
@@ -3837,7 +4325,42 @@ export async function runInteractiveBrain(userAccount, options = {}) {
             current_total_budget_cents: Array.from(adsetBudgets.values()).reduce((sum, b) => sum + (b?.daily_budget_cents || 0), 0),
             plan_daily_budget_cents: adAccountSettings?.plan_daily_budget_cents || null,
             best_adset: adsetAnalysis.length > 0 ? adsetAnalysis.reduce((best, curr) => (curr.health_score > (best?.health_score ?? -Infinity)) ? curr : best, null) : null,
-            has_good_adsets: adsetAnalysis.some(a => a.hs_class === 'very_good' || a.hs_class === 'good')
+            has_good_adsets: adsetAnalysis.some(a => a.hs_class === 'very_good' || a.hs_class === 'good'),
+            // Статус бюджетов по направлениям (для контроля недобора)
+            directions_budget_status: directions?.map(d => ({
+              id: d.id,
+              name: d.name,
+              plan_budget_cents: d.daily_budget_cents,
+              installed_budget_cents: installedBudgetByDirection.get(d.id) || 0,
+              gap_cents: d.daily_budget_cents
+                ? d.daily_budget_cents - (installedBudgetByDirection.get(d.id) || 0)
+                : 0,
+              status: !d.daily_budget_cents ? 'no_budget' :
+                      (installedBudgetByDirection.get(d.id) || 0) >= d.daily_budget_cents * 0.95 ? 'ok' :
+                      'underfunded'
+            })) || [],
+            // Количество направлений с недобором
+            underfunded_directions_count: directions?.filter(d =>
+              d.daily_budget_cents &&
+              (installedBudgetByDirection.get(d.id) || 0) < d.daily_budget_cents * 0.95
+            ).length || 0,
+            // Account-level budget status (для EXTERNAL кампаний без direction)
+            account_budget_status: (() => {
+              const planBudget = adAccountSettings?.plan_daily_budget_cents || 0;
+              const currentBudget = Array.from(adsetBudgets.values()).reduce((sum, b) => sum + (b?.daily_budget_cents || 0), 0);
+              const externalBudget = adsetAnalysis
+                .filter(a => a.campaign_type === 'external')
+                .reduce((sum, a) => sum + (adsetBudgets.get(a.adset_id)?.daily_budget_cents || 0), 0);
+              const utilizationPct = planBudget > 0 ? Math.round((currentBudget / planBudget) * 100) : 0;
+              return {
+                plan_budget_cents: planBudget,
+                current_total_budget_cents: currentBudget,
+                external_campaigns_budget_cents: externalBudget,
+                gap_cents: planBudget - currentBudget,
+                utilization_pct: utilizationPct,
+                status: planBudget === 0 ? 'no_plan' : utilizationPct >= 95 ? 'ok' : 'UNDERFUNDED'
+              };
+            })()
           }
         };
 
@@ -3846,7 +4369,20 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           phase: 'llm_payload_prepared',
           payload_size: JSON.stringify(llmPayload).length,
           adsets_in_payload: llmPayload.adsets.length,
-          message: 'Отправка запроса в LLM'
+          directions_in_payload: llmPayload.directions.length,
+          mode: llmPayload.time_context.mode,
+          can_create_adsets: llmPayload.time_context.can_create_adsets,
+          underfunded_directions: llmPayload.summary.underfunded_directions_count,
+          unused_creatives_count: llmPayload.unused_creatives?.length || 0,
+          account_budget_status: llmPayload.summary.account_budget_status,
+          directions_summary: llmPayload.directions.map(d => ({
+            name: d.name,
+            plan: d.daily_budget_cents,
+            installed: d.installed_adsets_budget_cents,
+            gap: d.budget_gap_cents,
+            underfunded: d.is_underfunded
+          })),
+          message: `Отправка запроса в LLM (mode: ${llmPayload.time_context.mode}, underfunded: ${llmPayload.summary.underfunded_directions_count})`
         });
 
         const systemPrompt = SYSTEM_PROMPT_MINI();
@@ -3895,12 +4431,41 @@ export async function runInteractiveBrain(userAccount, options = {}) {
                 pauseAdSet: llmProposals.filter(p => p.action === 'pauseAdSet').length,
                 pauseAd: llmProposals.filter(p => p.action === 'pauseAd').length,
                 createAdSet: llmProposals.filter(p => p.action === 'createAdSet').length,
+                enableAdSet: llmProposals.filter(p => p.action === 'enableAdSet').length,
+                enableAd: llmProposals.filter(p => p.action === 'enableAd').length,
                 review: llmProposals.filter(p => p.action === 'review').length
               },
               proposals_by_type: {
                 internal: llmProposals.filter(p => p.campaign_type === 'internal').length,
                 external: llmProposals.filter(p => p.campaign_type === 'external').length
               },
+              // Анализ баланса бюджета
+              budget_balance_analysis: (() => {
+                let totalIncrease = 0;
+                let totalDecrease = 0;
+                let totalPause = 0;
+                let totalCreate = 0;
+                for (const p of llmProposals) {
+                  if (p.action === 'updateBudget' && p.suggested_action_params) {
+                    const current = p.suggested_action_params.current_budget_cents || 0;
+                    const newBudget = p.suggested_action_params.new_budget_cents || 0;
+                    if (newBudget > current) totalIncrease += (newBudget - current);
+                    else totalDecrease += (current - newBudget);
+                  } else if (p.action === 'pauseAdSet' && p.suggested_action_params?.current_budget_cents) {
+                    totalPause += p.suggested_action_params.current_budget_cents;
+                  } else if (p.action === 'createAdSet' && p.suggested_action_params?.recommended_budget_cents) {
+                    totalCreate += p.suggested_action_params.recommended_budget_cents;
+                  }
+                }
+                return {
+                  increase_cents: totalIncrease,
+                  decrease_cents: totalDecrease,
+                  pause_cents: totalPause,
+                  create_cents: totalCreate,
+                  net_change_cents: totalIncrease + totalCreate - totalDecrease - totalPause,
+                  is_balanced: Math.abs(totalIncrease + totalCreate - totalDecrease - totalPause) < 1000 // < $10 разница
+                };
+              })(),
               llm_summary_preview: llmSummary?.substring(0, 150),
               llm_plan_note_preview: llmPlanNote?.substring(0, 150),
               validation_warnings: llmResult.validation?.warnings,
@@ -4032,55 +4597,10 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         }
       }
 
-      // Добавляем отдельный proposal-рекомендацию для запуска новых креативов
-      // НО только в первой половине дня (до 14:00 по Алматы)
-      const timeCheckLaunch = isAllowedToCreateAdsets({ logger: log });
-
-      if (hasExternalCampaigns && timeCheckLaunch.allowed) {
-        log.info({
-          where: 'interactive_brain',
-          phase: 'allow_launch_new_creatives',
-          current_time: timeCheckLaunch.currentTime,
-          current_hour: timeCheckLaunch.currentHour,
-          cutoff_hour: timeCheckLaunch.cutoffHour,
-          timezone: timeCheckLaunch.timezone,
-          total_savings_dollars: totalSavingsDollars,
-          message: `Создание launchNewCreatives proposal разрешено (время ${timeCheckLaunch.currentTime})`
-        });
-
-        proposals.push({
-          action: 'launchNewCreatives',
-          priority: 'medium',
-          entity_type: 'account',
-          entity_id: ad_account_id,
-          entity_name: 'Рекламный аккаунт',
-          campaign_type: 'external',
-          health_score: null,
-          hs_class: null,
-          reason: `💡 Все текущие адсеты неэффективны. Рекомендуем запустить новые адсеты с улучшенными креативами: свежие визуалы, новые тексты, возможно другие аудитории. Освободившийся бюджет $${totalSavingsDollars} можно направить на тестирование новых связок.`,
-          confidence: 0.7,
-          suggested_action_params: {
-            recommended_budget_cents: totalSavingsCents,
-            suggestions: [
-              'Обновить визуалы (новые фото/видео)',
-              'Переписать тексты объявлений',
-              'Протестировать новые аудитории',
-              'Изменить формат (карусель, reels, stories)'
-            ]
-          }
-        });
-      } else if (hasExternalCampaigns && !timeCheckLaunch.allowed) {
-        log.warn({
-          where: 'interactive_brain',
-          phase: 'skip_launch_new_creatives',
-          current_time: timeCheckLaunch.currentTime,
-          current_hour: timeCheckLaunch.currentHour,
-          cutoff_hour: timeCheckLaunch.cutoffHour,
-          timezone: timeCheckLaunch.timezone,
-          total_savings_dollars: totalSavingsDollars,
-          message: `⏰ ПРОПУСК launchNewCreatives: ${timeCheckLaunch.reason}`
-        });
-      }
+      // УДАЛЕНО: Детерминированное создание launchNewCreatives
+      // LLM сам решает, нужно ли создавать новые адсеты.
+      // Если LLM не предложил createAdSet — значит на то есть причины
+      // (бюджет исчерпан, креативы не подходят, время неподходящее и т.д.)
 
       log.info({
         where: 'interactive_brain',
@@ -4089,79 +4609,18 @@ export async function runInteractiveBrain(userAccount, options = {}) {
         total_savings_dollars: totalSavingsDollars,
         decrease_proposals_count: decreaseProposals.length,
         has_external_campaigns: hasExternalCampaigns,
-        message: 'Все адсеты плохие, некуда перераспределять. Предложено запустить новые креативы.'
+        message: 'Все адсеты плохие, некуда перераспределять. LLM решает, создавать ли новые.'
       });
     }
 
     // ========================================
-    // ЧАСТЬ 5: АНАЛИЗ НЕИСПОЛЬЗОВАННЫХ КРЕАТИВОВ (из отчёта Brain)
+    // ЧАСТЬ 5: УДАЛЕНА — createAdSet решает LLM
     // ========================================
-
-    // Проверяем время — после 14:00 по Алматы не предлагаем создавать новые adsets
-    const timeCheckCreate = isAllowedToCreateAdsets({ logger: log });
-
-    if (brainReport?.unused_creatives?.length > 0) {
-      if (!timeCheckCreate.allowed) {
-        log.warn({
-          where: 'interactive_brain',
-          phase: 'skip_create_adset_proposals',
-          unused_creatives_count: brainReport.unused_creatives.length,
-          current_time: timeCheckCreate.currentTime,
-          current_hour: timeCheckCreate.currentHour,
-          cutoff_hour: timeCheckCreate.cutoffHour,
-          timezone: timeCheckCreate.timezone,
-          message: `⏰ ПРОПУСК createAdSet: ${timeCheckCreate.reason}`
-        });
-      } else {
-        log.info({
-          where: 'interactive_brain',
-          phase: 'allow_create_adset_proposals',
-          unused_creatives_count: brainReport.unused_creatives.length,
-          current_time: timeCheckCreate.currentTime,
-          current_hour: timeCheckCreate.currentHour,
-          cutoff_hour: timeCheckCreate.cutoffHour,
-          timezone: timeCheckCreate.timezone,
-          message: `Создание createAdSet proposals разрешено (время ${timeCheckCreate.currentTime})`
-        });
-
-        const byDirection = {};
-        for (const uc of brainReport.unused_creatives) {
-          const dirId = uc.direction_id || 'no_direction';
-          if (!byDirection[dirId]) byDirection[dirId] = [];
-          byDirection[dirId].push(uc);
-        }
-
-        for (const [dirId, creatives] of Object.entries(byDirection)) {
-          if (creatives.length > 0 && dirId !== 'no_direction') {
-            const direction = directions?.find(d => d.id === dirId);
-
-            log.info({
-              where: 'interactive_brain',
-              phase: 'create_adset_proposal_added',
-              direction_id: dirId,
-              direction_name: direction?.name || 'Unknown',
-              creatives_count: creatives.length,
-              message: `Добавлен createAdSet proposal для направления "${direction?.name || dirId}"`
-            });
-
-            proposals.push({
-              action: 'createAdSet',
-              priority: 'medium',
-              entity_type: 'direction',
-              entity_id: dirId,
-              entity_name: direction?.name || 'Unknown',
-              reason: `${creatives.length} неиспользованных креативов готовы к запуску. Рекомендую протестировать.`,
-              confidence: 0.75,
-              suggested_action_params: {
-                creative_ids: creatives.slice(0, 5).map(c => c.id),
-                creative_titles: creatives.slice(0, 5).map(c => c.title),
-                recommended_budget_cents: BUDGET_LIMITS.NEW_ADSET_MIN
-              }
-            });
-          }
-        }
-      }
-    }
+    // LLM получает unused_creatives в payload и сам решает:
+    // - Какие креативы запустить
+    // - С каким бюджетом
+    // - Учитывая общую картину (расход, target CPL, состояние адсетов)
+    // Детерминированное создание адсетов убрано, чтобы избежать дублирования.
 
     // ========================================
     // ЧАСТЬ 6: HIGH RISK ИЗ ОТЧЁТА BRAIN
@@ -4275,8 +4734,10 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     };
 
     // Сохраняем запуск для аудита
+    // КРИТИЧНО: Добавлен account_id для мультиаккаунтности
     await supabase.from('brain_executions').insert({
       user_account_id: userAccountId,
+      account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
       mode: 'interactive',
       direction_id: directionId,
       started_at: new Date(startTime).toISOString(),
@@ -4356,8 +4817,10 @@ export async function runInteractiveBrain(userAccount, options = {}) {
     });
 
     // Сохраняем ошибку
+    // КРИТИЧНО: Добавлен account_id для мультиаккаунтности
     await supabase.from('brain_executions').insert({
       user_account_id: userAccountId,
+      account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
       mode: 'interactive',
       direction_id: directionId,
       started_at: new Date(startTime).toISOString(),

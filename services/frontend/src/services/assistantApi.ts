@@ -516,6 +516,7 @@ export interface BrainMiniParams {
   directionId?: string;
   campaignId?: string;  // Facebook campaign ID для фильтрации
   dryRun?: boolean;
+  proposals?: BrainMiniProposal[];  // Передать для выполнения без повторного анализа
 }
 
 export interface BrainMiniProposal {
