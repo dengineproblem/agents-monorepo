@@ -1,0 +1,9 @@
+# LOCAL DEVELOPMENT OVERRIDES
+# Этот файл автоматически применяется при docker-compose up
+# На проде НЕ используется (там docker-compose -f docker-compose.yml up)
+
+services:
+  agent-brain:
+    environment:
+      - CRON_ENABLED=false
+      - HOURLY_CRON_ENABLED=false
