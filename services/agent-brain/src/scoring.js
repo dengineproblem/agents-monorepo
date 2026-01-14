@@ -393,7 +393,7 @@ async function llmPlanMini(systemPrompt, userPayload) {
   }
 
   // Валидация структуры ответа
-  const validation = { valid: false, errors: [], warnings: [] };
+  const validation = { valid: false, errors: [], warnings: [], budget_analysis: {} };
 
   if (parsed) {
     // Проверяем наличие обязательных полей
@@ -408,6 +408,107 @@ async function llmPlanMini(systemPrompt, userPayload) {
         if (!p.entity_id) validation.errors.push(`proposals[${idx}]: missing entity_id`);
         if (!p.entity_type) validation.warnings.push(`proposals[${idx}]: missing entity_type`);
         if (typeof p.health_score !== 'number') validation.warnings.push(`proposals[${idx}]: health_score is not a number`);
+
+        // Валидация createAdSet
+        if (p.action === 'createAdSet') {
+          const params = p.suggested_action_params || {};
+          if (!params.creative_ids || !Array.isArray(params.creative_ids) || params.creative_ids.length === 0) {
+            validation.errors.push(`proposals[${idx}]: createAdSet must have creative_ids array`);
+          }
+          if (!params.direction_id) {
+            validation.errors.push(`proposals[${idx}]: createAdSet must have direction_id`);
+          }
+          const budget = params.recommended_budget_cents || 0;
+          if (budget < 1000 || budget > 2000) {
+            validation.warnings.push(`proposals[${idx}]: createAdSet budget ${budget}c outside recommended range 1000-2000c`);
+          }
+        }
+
+        // Валидация updateBudget
+        if (p.action === 'updateBudget') {
+          const params = p.suggested_action_params || {};
+          if (typeof params.current_budget_cents !== 'number') {
+            validation.warnings.push(`proposals[${idx}]: updateBudget missing current_budget_cents`);
+          }
+          if (typeof params.new_budget_cents !== 'number') {
+            validation.errors.push(`proposals[${idx}]: updateBudget missing new_budget_cents`);
+          }
+
+          // Проверка на слишком агрессивное снижение
+          const current = params.current_budget_cents || 0;
+          const newBudget = params.new_budget_cents || 0;
+          if (current > 0 && newBudget < current) {
+            const decreasePercent = Math.round((current - newBudget) / current * 100);
+            if (decreasePercent >= 50) {
+              // -50% допустимо ТОЛЬКО при CPL x2-3 (см. reason для контекста)
+              const reason = (p.reason || '').toLowerCase();
+              const hasX2X3 = reason.includes('x2') || reason.includes('x3') ||
+                             reason.includes('×2') || reason.includes('×3') ||
+                             reason.includes('+100%') || reason.includes('+150%') ||
+                             reason.includes('+200%');
+              if (!hasX2X3) {
+                validation.warnings.push(
+                  `⚠️ proposals[${idx}] "${p.entity_name}": снижение -${decreasePercent}% без указания CPL x2-3 в reason. ` +
+                  `По правилам -50% допустимо ТОЛЬКО при CPL x2-3 (отклонение +100-200%)`
+                );
+              }
+            } else if (decreasePercent >= 40) {
+              // -40% допустимо при CPL +50-100%
+              validation.warnings.push(
+                `proposals[${idx}] "${p.entity_name}": снижение -${decreasePercent}% — проверьте что CPL отклонение +50-100%`
+              );
+            }
+          }
+        }
+
+        // Валидация pauseAd - обязательно нужен adset_id
+        if (p.action === 'pauseAd' && !p.adset_id) {
+          validation.errors.push(`proposals[${idx}]: pauseAd must have adset_id`);
+        }
+      });
+
+      // Анализ бюджетного баланса по направлениям
+      const directionBudgetChanges = {};
+      parsed.proposals.forEach(p => {
+        const dirId = p.direction_id;
+        if (!dirId) return;
+
+        if (!directionBudgetChanges[dirId]) {
+          directionBudgetChanges[dirId] = { increases: 0, decreases: 0, creates: 0, pauses: 0 };
+        }
+
+        const params = p.suggested_action_params || {};
+
+        if (p.action === 'updateBudget') {
+          const current = params.current_budget_cents || 0;
+          const newBudget = params.new_budget_cents || 0;
+          const diff = newBudget - current;
+          if (diff > 0) {
+            directionBudgetChanges[dirId].increases += diff;
+          } else {
+            directionBudgetChanges[dirId].decreases += Math.abs(diff);
+          }
+        } else if (p.action === 'createAdSet') {
+          directionBudgetChanges[dirId].creates += params.recommended_budget_cents || 0;
+        } else if (p.action === 'pauseAdSet') {
+          directionBudgetChanges[dirId].pauses += params.current_budget_cents || 0;
+        }
+      });
+
+      // Сохраняем анализ бюджета для логов
+      validation.budget_analysis = {};
+      Object.entries(directionBudgetChanges).forEach(([dirId, changes]) => {
+        const netChange = changes.increases + changes.creates - changes.decreases - changes.pauses;
+        validation.budget_analysis[dirId] = {
+          ...changes,
+          net_change_cents: netChange,
+          net_change_dollars: (netChange / 100).toFixed(2)
+        };
+
+        // Предупреждение если снижаем без компенсации
+        if (netChange < -500) { // более $5 снижение
+          validation.warnings.push(`Direction ${dirId.slice(0, 8)}: net_change=$${(netChange/100).toFixed(2)} - возможно недобор!`);
+        }
       });
     }
 
@@ -417,6 +518,14 @@ async function llmPlanMini(systemPrompt, userPayload) {
     validation.valid = validation.errors.length === 0;
   }
 
+  // Подсчёт статистики по типам proposals
+  const actionStats = {};
+  if (parsed?.proposals) {
+    parsed.proposals.forEach(p => {
+      actionStats[p.action] = (actionStats[p.action] || 0) + 1;
+    });
+  }
+
   logger.info({
     where: 'llmPlanMini',
     phase: 'complete',
@@ -424,11 +533,34 @@ async function llmPlanMini(systemPrompt, userPayload) {
     parse_success: !!parsed,
     parse_error: parseError,
     proposals_count: parsed?.proposals?.length || 0,
+    proposals_by_action: actionStats,
     validation_valid: validation.valid,
     validation_errors: validation.errors,
     validation_warnings: validation.warnings,
+    budget_analysis: validation.budget_analysis,
+    planNote: parsed?.planNote?.slice(0, 200) || null,
     llm_usage: resp?.usage
   });
+
+  // Детальный лог по каждому proposal для отладки
+  if (parsed?.proposals?.length > 0) {
+    logger.debug({
+      where: 'llmPlanMini',
+      phase: 'proposals_detail',
+      proposals: parsed.proposals.map(p => ({
+        action: p.action,
+        entity_name: p.entity_name?.slice(0, 50),
+        direction_id: p.direction_id?.slice(0, 8),
+        hs_class: p.hs_class,
+        budget_change: p.action === 'updateBudget'
+          ? `${p.suggested_action_params?.current_budget_cents}c → ${p.suggested_action_params?.new_budget_cents}c`
+          : p.action === 'createAdSet'
+            ? `+${p.suggested_action_params?.recommended_budget_cents}c`
+            : null,
+        reason: p.reason?.slice(0, 100)
+      }))
+    });
+  }
 
   return {
     parsed,
@@ -477,6 +609,19 @@ function SYSTEM_PROMPT_MINI() {
 - В предложениях помечай их как campaign_type: "external"
 - МОЖЕШЬ и ДОЛЖЕН предлагать действия для внешних кампаний!
 
+## ⚠️ ТЕСТОВЫЕ КАМПАНИИ (КРИТИЧНО! НЕ ТРОГАТЬ!)
+
+Это автоматические тесты креативов с названиями начинающимися с **"ТЕСТ |"**
+Формат: \`"ТЕСТ | Ad: {id} | {дата} | {название}"\`
+
+**СТРОГИЕ ПРАВИЛА:**
+- ❌ НЕ анализировать их Health Score
+- ❌ НЕ применять к ним НИКАКИЕ действия
+- ❌ НЕ учитывать их бюджет при расчёте общего бюджета направления
+- ❌ НЕ включать в ребалансировку
+
+**Почему:** Эти кампании запускаются на $20/день, работают 2-4 часа и автоматически останавливаются. Управляет ими отдельный Creative Test Analyzer.
+
 ## HEALTH SCORE (HS) — оценка эффективности
 HS ∈ [-100; +100] — интегральная оценка ad set:
 
@@ -518,12 +663,36 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 | **very_good** | Масштабировать | +10..+30% бюджета |
 | **good** | Держать | При недоборе плана: +0..+10% |
 | **neutral** | Держать | Если есть «пожиратель» — PauseAd для него |
-| **slightly_bad** | Снижать | -20..-50% бюджета |
-| **bad** | Пауза/снижение | -50% если CPL x2-3; полная пауза если CPL > x3 |
+| **slightly_bad** | Снижать | -20..-30% бюджета (НЕ БОЛЕЕ!) |
+| **bad** | См. таблицу ниже | Зависит от отклонения CPL |
 | **special** | createAdSet | Создать новый адсет если есть unused_creatives И can_create_adsets: true |
 | **special** | enableAdSet | Включить ранее остановленный адсет если показатели улучшились |
 | **special** | enableAd | Включить ранее остановленное объявление |
 | **special** | review | ТОЛЬКО при аномалиях: технические проблемы, подозрительные метрики. НЕ вместо конкретного действия! |
+
+### ⛔ ПРАВИЛА СНИЖЕНИЯ БЮДЖЕТА ПО ОТКЛОНЕНИЮ CPL (КРИТИЧНО!)
+
+**Формула отклонения:** deviation = (CPL_actual - CPL_target) / CPL_target × 100%
+
+| Отклонение CPL | Действие | Пример |
+|----------------|----------|--------|
+| **+10..+30%** | Снижение **-15..-25%** | CPL $4.90 при цели $4 (+22%) → снижение -20% |
+| **+30..+50%** | Снижение **-25..-35%** | CPL $5.50 при цели $4 (+37%) → снижение -30% |
+| **+50..+100%** | Снижение **-35..-45%** | CPL $7 при цели $4 (+75%) → снижение -40% |
+| **+100..+200% (x2-3)** | Снижение **-50%** | CPL $10 при цели $4 (+150%) → снижение -50% |
+| **>+200% (>x3)** | **Пауза** | CPL $15 при цели $4 (+275%) → pauseAdSet |
+
+**⛔ ЗАПРЕЩЕНО:**
+- Снижать на -50% при отклонении <+100% (CPL < x2 target)
+- Снижать на -40% при отклонении <+50%
+- Ставить на паузу при отклонении <+200%
+
+**Пример НЕПРАВИЛЬНЫЙ ❌:**
+CPL $4.90 при цели $4.00 = отклонение +22.5% → снижение -50%
+Это ОШИБКА! При +22% снижение должно быть только -20%!
+
+**Пример ПРАВИЛЬНЫЙ ✅:**
+CPL $4.90 при цели $4.00 = отклонение +22.5% → снижение -20%
 
 ⚠️ **action "review" — КОГДА ИСПОЛЬЗОВАТЬ:**
 - Технические проблемы (ошибки API, статус DISAPPROVED)
@@ -533,7 +702,7 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 
 ## ОГРАНИЧЕНИЯ БЮДЖЕТОВ
 - Повышение за шаг: максимум **+30%**
-- Снижение за шаг: максимум **-50%**
+- Снижение за шаг: максимум **-50%** (ТОЛЬКО при CPL x2-3!)
 - Диапазон бюджета: **$3..$100** (300..10000 центов)
 - Новый ad set: **$10-$20** (не больше!)
 
@@ -653,12 +822,35 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
    - \`recommended_budget_cents\`: бюджет в центах
 
 ## 🛡️ ИСТОРИЯ ДЕЙСТВИЙ (ЗАЩИТА ОТ ДЁРГОТНИ)
-В payload может быть поле \`recent_actions_count\` — количество действий за последние 24 часа.
 
-Если recent_actions_count > 3:
+В payload может быть поле \`recent_actions_count\` и \`action_history\`.
+
+**Правила использования:**
+
+1. **Избегай повторных действий:**
+   - Если вчера уже снижал адсет — не снижай снова сегодня (если CPL не вырос ещё)
+
+2. **Учитывай период обучения:**
+   - 48ч после создания/повышения — не дёргай агрессивно
+
+3. **Анализируй паттерны:**
+   - Если 3 раза снижал один адсет за неделю → предложи паузу или ротацию креативов
+
+4. **Избегай колебаний:**
+   - Не повышай то, что вчера снижал (и наоборот) без веской причины
+   - Дай 1-2 дня на стабилизацию
+
+5. **Проверяй результаты:**
+   - Перед новым действием проверь результат предыдущего
+
+**⚠️ ВАЖНО:** action_history — НЕ жёсткое ограничение!
+- Если CPL вырос в 5 раз — действуй немедленно, игнорируя историю
+- action_history помогает избежать дёрготни, но НЕ причина оставить направление с недобором!
+
+**При recent_actions_count > 3:**
 - Снижай confidence на 0.2 для всех proposals
-- В reason укажи: "⚠️ Много недавних изменений — рекомендую подождать стабилизации"
-- Не предлагай резкие изменения (паузы, большие снижения) без крайней необходимости
+- В reason укажи: "⚠️ Много недавних изменений — рекомендую подождать"
+- Не предлагай резкие изменения без крайней необходимости
 
 ## 💰 ПРАВИЛО СОХРАНЕНИЯ БЮДЖЕТА (КРИТИЧЕСКИ ВАЖНО!)
 При снижении/паузе любого адсета ВСЕГДА предлагай перераспределение!
@@ -737,14 +929,14 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 
 **ПРАВИЛО:**
 - Если предлагаешь снизить daily_budget adset_A с $50 до $25 (освобождается $25):
-  1. ОБЯЗАТЕЛЬНО предложи увеличить бюджет другого adset (с лучшим HS) на ~$25
+  1. ⛔ **ОШИБКА** если не предложил увеличить бюджет другого adset (с лучшим HS) на ~$25
   2. ИЛИ предложи создать новый adset если есть unused_creatives **И time_context.can_create_adsets: true**
   3. Если \`can_create_adsets: false\` → ТОЛЬКО перераспределение на существующие adsets!
 
 - Если предлагаешь паузу adset_B с бюджетом $50:
-  1. ОБЯЗАТЕЛЬНО предложи перераспределить $50 на другие adsets
+  1. ⛔ **ОШИБКА** если не предложил перераспределить $50 на другие adsets
   2. Если нет хороших adsets — используй best-of-bad логику (лучший из плохих)
-  3. Общий бюджет должен сохраняться!
+  3. ⛔ **ПЛАН НЕДОПУСТИМ** если общий бюджет направления падает ниже 95% плана!
 
 ## BEST-OF-BAD ЛОГИКА (как в основном Brain)
 Если НЕТ adsets с HS ≥ +25 (very_good):
@@ -757,11 +949,11 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 Если указан plan_daily_budget_cents в account_settings:
 1. Посчитай current_total_budget_cents (сумма всех adsets)
 2. Сравни с планом:
-   - Если < 95% плана → НЕДОБОР: добирай через увеличение лучших или best-of-bad
+   - Если < 95% плана → ⛔ **НЕДОБОР: ПЛАН НЕДОПУСТИМ!** Добирай через увеличение лучших или best-of-bad
    - Если > 105% плана → ПЕРЕБОР: режь у худших по HS
-   - Если в коридоре 95-105% → ОК
-3. ⚠️ НЕ ПРЕДЛАГАЙ только снижения если это приведёт к недобору плана!
-4. Итоговая сумма proposals должна сохранять бюджет в коридоре
+   - Если в коридоре 95-105% → ✅ OK
+3. ⛔ **ОШИБКА** если net_change < 0 при недоборе направления! (снижаешь больше чем добираешь)
+4. Итоговая сумма proposals ДОЛЖНА сохранять бюджет в коридоре — иначе **ПЛАН НЕДОПУСТИМ!**
 
 ## 🔄 EXTERNAL КАМПАНИИ (campaign_type="EXTERNAL")
 Для адсетов с campaign_type="EXTERNAL" (без привязки к direction):
@@ -786,9 +978,12 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 3. Анализируй **ВСЕ адсеты ВСЕХ направлений** — не пропускай!
 
 ### ЛОГИКА ДОБОРА БЮДЖЕТА НАПРАВЛЕНИЯ
-Даже если вчера ты уже снижал бюджет ad set'а, если сегодня суммарный бюджет по направлению < 95% от плана, ты **ОБЯЗАН** аккуратно добрать бюджет до коридора:
-- через повышение бюджета лучших ad set'ов (HS ≥ good или best-of-bad)
-- через создание новых ad set'ов (если mode="with_creation")
+⛔ **НЕДОПУСТИМО** оставить направление с недобором >5% от плана!
+
+Даже если вчера ты уже снижал бюджет ad set'а, если сегодня суммарный бюджет по направлению < 95% от плана:
+- ⛔ **ПЛАН НЕДОПУСТИМ К ВЫВОДУ** пока не добрал бюджет до коридора!
+- Добирай через повышение бюджета лучших ad set'ов (HS ≥ good или best-of-bad)
+- Добирай через создание новых ad set'ов (если mode="with_creation")
 
 ### ПОРЯДОК ДОБОРА (при недоборе направления)
 1. Сначала — увеличь adsets с HS ≥ +25 (very_good): +10..+30%
@@ -796,17 +991,127 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
 3. Если таких нет — best-of-bad: выбери адсет с максимальным HS и увеличь на +10..+20%
 4. Если mode="with_creation" — создать новый адсет с unused/ready креативами
 
+### 🚨 ФИНАЛЬНАЯ ПРОВЕРКА БЮДЖЕТОВ (ВЫПОЛНИ ПЕРЕД ВЫВОДОМ!)
+
+⛔ **ПЛАН НЕДОПУСТИМ К ВЫВОДУ**, пока не пройдёт эту проверку!
+
+**Алгоритм для КАЖДОГО направления:**
+
+**ШАГ 1. Посчитай ИТОГОВЫЙ бюджет направления:**
+\`\`\`
+final_budget_cents =
+  + сумма daily_budget ВСЕХ активных адсетов направления
+  + сумма бюджетов НОВЫХ адсетов (createAdSet)
+  + сумма УВЕЛИЧЕНИЙ существующих адсетов
+  - сумма СНИЖЕНИЙ существующих адсетов
+  - бюджеты ПАУЗЯЩИХСЯ адсетов (pauseAdSet)
+\`\`\`
+
+**ШАГ 2. Сравни с планом:**
+- target = direction_daily_budget_cents
+- lower_bound = 0.95 × target
+- upper_bound = 1.05 × target
+
+**ШАГ 3. Проверь коридор:**
+
+| Условие | Статус | Действие |
+|---------|--------|----------|
+| final_budget < lower_bound | ❌ ОШИБКА | ДОБАВЬ proposals до попадания в коридор |
+| lower_bound ≤ final_budget ≤ upper_bound | ✅ OK | Можно выводить |
+| final_budget > upper_bound | ⚠️ ПЕРЕБОР | Добавь снижения худших адсетов |
+
+**⛔ КРИТИЧНО:**
+- Недобор ниже 95% плана = **ОШИБКА**
+- Такой план **НЕДОПУСТИМ К ВЫВОДУ**
+- Продолжай добавлять proposals пока final_budget ≥ 95% плана
+
+**ПРИМЕР ПРАВИЛЬНОГО РАСЧЁТА:**
+\`\`\`
+Направление: Имплантация
+План: $100 (10000 центов)
+Текущий бюджет: $80 (сумма активных адсетов)
+
+Мои proposals:
+- Снизить AdSet_A: $30 → $15 (снижение $15)
+- Снизить AdSet_B: $20 → $10 (снижение $10)
+- Создать AdSet_C: $20
+
+Расчёт:
+final = $80 - $15 - $10 + $20 = $75
+
+Проверка: $75 < $95 (95% от $100) → ❌ НЕДОПУСТИМО!
+
+Добавляю:
+- Создать AdSet_D: $15
+- Увеличить AdSet_E: +$10
+
+Новый расчёт:
+final = $75 + $15 + $10 = $100 ✅
+\`\`\`
+
+### ⚠️ UNUSED_CREATIVES — ПРАВИЛА ТЕСТИРОВАНИЯ
+
+Если у направления есть unused_creatives (first_run=true):
+
+**⛔ ВАЖНО: Сначала освободи бюджет, потом тестируй!**
+
+| Ситуация | Действие |
+|----------|----------|
+| gap > $10 (недобор) | Создай адсет на freed_budget |
+| gap = 0 или < $10 | Сначала снизь/поставь на паузу плохие адсеты, ПОТОМ создай новый |
+| gap < 0 (перерасход) | Обязательно снизь сначала, потом создай на освобождённый бюджет |
+
+**Алгоритм при gap ≈ 0:**
+1. Найди адсеты с HS ≤ -25 (bad) или slightly_bad
+2. Снизь их бюджет по правилам (освободи $10-15)
+3. Создай новый адсет на освобождённый бюджет для unused_creatives
+
+**⛔ ЗАПРЕЩЕНО:**
+- Создавать адсет БЕЗ предварительного освобождения бюджета при gap ≤ 0
+- Просто добавлять адсет и выходить за пределы планового бюджета
+- Тестировать креативы ценой перерасхода направления
+
 ### ПРАВИЛА БАЛАНСА
 - sum(adsets.daily_budget) в направлении ДОЛЖЕН ≈ direction.daily_budget
 - При снижении плохих → компенсируй увеличением хороших или созданием новых
 - Не допускай недобор > 20% от плана
 - Один adset не должен занимать >40% от планового бюджета
 
-### ВАЖНО: НЕ ПРОПУСКАЙ НАПРАВЛЕНИЯ!
+### 🧮 РАЗБИЕНИЕ ОСВОБОЖДЁННОГО БЮДЖЕТА НА НЕСКОЛЬКО НОВЫХ AD SET'ОВ
+
+Для КАЖДОГО направления сначала посчитай:
+- freed_budget_cents = сумма бюджета, которая освободилась в этом запуске
+  за счёт снижения и паузы ad set'ов в этом направлении.
+
+**Правила разбиения:**
+
+| freed_budget_cents | Действие |
+|--------------------|----------|
+| < 1000 ($10) | НЕ создавай новый адсет. Добавь к существующим лучшим (HS≥good или best-of-bad) |
+| 1000-1500 ($10-15) | 1 новый адсет ~$10-15 |
+| 1500-2500 ($15-25) | 1 адсет $15-20 ИЛИ 2 адсета по $8-12 |
+| 2500-3500 ($25-35) | 2 адсета по $12-17 |
+| ≥3500 ($35+) | 3 адсета по $12-18 |
+
+**Примеры:**
+- freed = $15 → 1 адсет ~1500 центов
+- freed = $28 → 2 адсета по ~1400 центов
+- freed = $45 → 3 адсета по ~1500 центов
+
+**НИКОГДА:**
+- Не создавай 1 адсет на весь большой бюджет (>$20)
+- Не оставляй "хвост" без распределения
+
+**Хвост бюджета** (если остаётся <$10 после создания адсетов):
+- Добавь к существующим лучшим адсетам
+- ИЛИ слегка увеличь бюджеты новых адсетов (но НЕ >$20 на каждый)
+
+### НЕ ПРОПУСКАЙ НАПРАВЛЕНИЯ!
 - Анализируй ВСЕ адсеты по их HS классу
 - Для neutral адсетов: держи (только пожирателей паузим)
 - Для good/very_good: можно увеличивать при недоборе направления
 - Для slightly_bad/bad: снижай/паузь независимо от gap
+- Если есть unused_creatives — ТЕСТИРУЙ их!
 
 ## ПРИМЕРЫ PROPOSALS
 
@@ -881,6 +1186,84 @@ HS ∈ [-100; +100] — интегральная оценка ad set:
   "hs_class": "bad",
   "reason": "Пожиратель: тратит 65% бюджета адсета, CPL $12.50 (цель $5.00). Остановить для перераспределения бюджета.",
   "confidence": 0.9
+}
+
+### Пример 4: Ребаланс при недоборе (ПРАВИЛЬНЫЙ РАСЧЁТ БЮДЖЕТА)
+{
+  "planNote": "Имплантация: gap $45, снижаю плохие -$25, создаю 3 адсета +$60, увеличиваю хороший +$10 = закрытие gap",
+  "proposals": [
+    {
+      "action": "updateBudget",
+      "priority": "high",
+      "entity_type": "adset",
+      "entity_id": "123456789",
+      "entity_name": "Плохой адсет 1",
+      "hs_class": "bad",
+      "suggested_action_params": {
+        "decrease_percent": 50,
+        "current_budget_cents": 3000,
+        "new_budget_cents": 1500
+      },
+      "reason": "CPL $8 при цели $2 (x4). Снижаю бюджет на 50%."
+    },
+    {
+      "action": "createAdSet",
+      "priority": "high",
+      "entity_type": "direction",
+      "entity_id": "direction-uuid-implantation",
+      "entity_name": "Имплантация",
+      "suggested_action_params": {
+        "creative_ids": ["cr1", "cr2", "cr3"],
+        "creative_titles": ["Креатив 1", "Креатив 2", "Креатив 3"],
+        "direction_id": "direction-uuid-implantation",
+        "recommended_budget_cents": 2000
+      },
+      "reason": "Создаю адсет #1 для тестирования 3 новых креативов. Бюджет $20."
+    },
+    {
+      "action": "createAdSet",
+      "priority": "high",
+      "entity_type": "direction",
+      "entity_id": "direction-uuid-implantation",
+      "entity_name": "Имплантация",
+      "suggested_action_params": {
+        "creative_ids": ["cr4", "cr5"],
+        "creative_titles": ["Креатив 4", "Креатив 5"],
+        "direction_id": "direction-uuid-implantation",
+        "recommended_budget_cents": 2000
+      },
+      "reason": "Создаю адсет #2 для тестирования 2 новых креативов. Бюджет $20."
+    },
+    {
+      "action": "createAdSet",
+      "priority": "medium",
+      "entity_type": "direction",
+      "entity_id": "direction-uuid-implantation",
+      "entity_name": "Имплантация",
+      "suggested_action_params": {
+        "creative_ids": ["cr6"],
+        "creative_titles": ["Креатив 6"],
+        "direction_id": "direction-uuid-implantation",
+        "recommended_budget_cents": 2000
+      },
+      "reason": "Создаю адсет #3 для тестирования 1 нового креатива. Бюджет $20."
+    },
+    {
+      "action": "updateBudget",
+      "priority": "medium",
+      "entity_type": "adset",
+      "entity_id": "987654321",
+      "entity_name": "Хороший адсет",
+      "hs_class": "good",
+      "suggested_action_params": {
+        "increase_percent": 20,
+        "current_budget_cents": 5000,
+        "new_budget_cents": 6000
+      },
+      "reason": "Увеличиваю бюджет хорошего адсета на $10 для закрытия gap."
+    }
+  ],
+  "summary": "Имплантация: снижение плохого -$15, создание 3 адсетов +$60, увеличение хорошего +$10 = net +$55, gap закрыт ✅"
 }
 
 ## ⚠️ САМОПРОВЕРКА ПЕРЕД ВЫВОДОМ (КРИТИЧЕСКИ ВАЖНО!)
@@ -4363,6 +4746,20 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           }
         };
 
+        // Группировка unused_creatives по направлениям
+        const unusedByDirection = {};
+        (llmPayload.unused_creatives || []).forEach(c => {
+          const dirId = c.direction_id || 'external';
+          if (!unusedByDirection[dirId]) {
+            unusedByDirection[dirId] = { count: 0, first_run: 0, titles: [] };
+          }
+          unusedByDirection[dirId].count++;
+          if (c.first_run) unusedByDirection[dirId].first_run++;
+          if (unusedByDirection[dirId].titles.length < 3) {
+            unusedByDirection[dirId].titles.push(c.title?.slice(0, 30));
+          }
+        });
+
         log.info({
           where: 'interactive_brain',
           phase: 'llm_payload_prepared',
@@ -4373,15 +4770,23 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           can_create_adsets: llmPayload.time_context.can_create_adsets,
           underfunded_directions: llmPayload.summary.underfunded_directions_count,
           unused_creatives_count: llmPayload.unused_creatives?.length || 0,
+          unused_creatives_by_direction: Object.entries(unusedByDirection).map(([dirId, data]) => ({
+            direction_id: dirId.slice(0, 8),
+            direction_name: llmPayload.directions.find(d => d.id === dirId)?.name || 'external',
+            total: data.count,
+            first_run: data.first_run,
+            sample_titles: data.titles
+          })),
           account_budget_status: llmPayload.summary.account_budget_status,
           directions_summary: llmPayload.directions.map(d => ({
             name: d.name,
             plan: d.daily_budget_cents,
             installed: d.installed_adsets_budget_cents,
             gap: d.budget_gap_cents,
-            underfunded: d.is_underfunded
+            underfunded: d.is_underfunded,
+            unused_creatives: unusedByDirection[d.id]?.first_run || 0
           })),
-          message: `Отправка запроса в LLM (mode: ${llmPayload.time_context.mode}, underfunded: ${llmPayload.summary.underfunded_directions_count})`
+          message: `Отправка запроса в LLM (mode: ${llmPayload.time_context.mode}, underfunded: ${llmPayload.summary.underfunded_directions_count}, unused_creatives: ${llmPayload.unused_creatives?.length || 0})`
         });
 
         const systemPrompt = SYSTEM_PROMPT_MINI();
@@ -4468,9 +4873,74 @@ export async function runInteractiveBrain(userAccount, options = {}) {
               llm_summary_preview: llmSummary?.substring(0, 150),
               llm_plan_note_preview: llmPlanNote?.substring(0, 150),
               validation_warnings: llmResult.validation?.warnings,
+              budget_analysis_per_direction: llmResult.validation?.budget_analysis,
               llm_usage: llmResult.meta?.usage,
               message: 'LLM успешно сгенерировал proposals'
             });
+
+            // POST-VALIDATION: Проверяем покрытие направлений
+            const postValidationIssues = [];
+            const budgetAnalysis = llmResult.validation?.budget_analysis || {};
+
+            // 1. Проверяем баланс: для unused_creatives при gap > $10 должен быть createAdSet
+            // При gap ≤ $10 — LLM должен сначала освободить бюджет, потом создать адсет
+            if (llmPayload.time_context.can_create_adsets) {
+              const directionsWithUnused = new Set(
+                (llmPayload.unused_creatives || [])
+                  .filter(c => c.first_run)
+                  .map(c => c.direction_id)
+                  .filter(Boolean)
+              );
+
+              const directionsWithCreateAdSet = new Set(
+                llmProposals
+                  .filter(p => p.action === 'createAdSet')
+                  .map(p => p.direction_id || p.suggested_action_params?.direction_id)
+                  .filter(Boolean)
+              );
+
+              directionsWithUnused.forEach(dirId => {
+                if (!directionsWithCreateAdSet.has(dirId)) {
+                  const dir = llmPayload.directions.find(d => d.id === dirId);
+                  const dirName = dir?.name || dirId.slice(0, 8);
+                  const gapCents = dir?.gap_cents || 0;
+
+                  // Проверяем есть ли снижения в этом направлении (freed budget)
+                  const dirAnalysis = budgetAnalysis[dirId] || {};
+                  const freedBudget = (dirAnalysis.decrease_cents || 0) + (dirAnalysis.pause_cents || 0);
+
+                  if (gapCents > 1000) {
+                    // gap > $10 — можно было создать адсет напрямую
+                    postValidationIssues.push(`ℹ️ Direction "${dirName}" has unused_creatives and gap $${(gapCents/100).toFixed(2)}, but no createAdSet (OK if testing via existing adsets)`);
+                  } else if (freedBudget < 1000) {
+                    // gap ≤ $10 и не освободили бюджет — проблема
+                    postValidationIssues.push(`⚠️ Direction "${dirName}" has unused_creatives, gap $${(gapCents/100).toFixed(2)}, freed only $${(freedBudget/100).toFixed(2)} — need to free ≥$10 to test!`);
+                  } else {
+                    // Освободили бюджет но не создали адсет — предупреждение
+                    postValidationIssues.push(`ℹ️ Direction "${dirName}": freed $${(freedBudget/100).toFixed(2)} but no createAdSet for unused_creatives`);
+                  }
+                }
+              });
+            }
+
+            // 2. Проверяем что underfunded directions имеют положительный net_change
+            llmPayload.directions.filter(d => d.is_underfunded).forEach(dir => {
+              const analysis = budgetAnalysis[dir.id];
+              if (analysis && analysis.net_change_cents < 0) {
+                postValidationIssues.push(`⚠️ Direction "${dir.name}" is underfunded but net_change is negative ($${(analysis.net_change_cents/100).toFixed(2)})!`);
+              }
+            });
+
+            if (postValidationIssues.length > 0) {
+              log.warn({
+                where: 'interactive_brain',
+                phase: 'llm_post_validation_issues',
+                issues: postValidationIssues,
+                directions_with_unused: (llmPayload.unused_creatives || []).filter(c => c.first_run).length,
+                underfunded_directions: llmPayload.directions.filter(d => d.is_underfunded).map(d => d.name),
+                message: 'LLM proposals имеют потенциальные проблемы — проверьте результат!'
+              });
+            }
           }
         } else {
           // LLM вернул невалидный ответ
