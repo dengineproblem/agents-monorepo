@@ -12,7 +12,7 @@ services:
       - BRAIN_DRY_RUN=false
       - BRAIN_MAX_ACTIONS_PER_RUN=100
       - BRAIN_DEBUG_LLM=true
-      - BRAIN_MODEL=gpt-5-mini
+      - BRAIN_MODEL=gpt-5.2
       - BRAIN_TEST_MODE=false
       - AGENT_SERVICE_URL=http://agent-service:8082
       - CRON_ENABLED=true
