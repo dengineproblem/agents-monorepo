@@ -205,8 +205,8 @@ export const AdsToolDefs = {
     schema: z.object({
       adset_id: nonEmptyString('adset_id').describe('ID адсета'),
       new_budget_cents: z.number()
-        .min(500, 'Minimum budget is 500 cents ($5)')
-        .describe('Новый дневной бюджет в центах (минимум 500, т.е. $5)'),
+        .min(300, 'Minimum budget is 300 cents ($3)')
+        .describe('Новый дневной бюджет в центах (минимум 300, т.е. $3)'),
       dry_run: dryRunOption,
       operation_id: operationIdOption
     }),

@@ -332,8 +332,6 @@ export function useOptimization() {
       return;
     }
 
-    // Brain Mini выполняет все proposals при dry_run=false
-    // Выбор отдельных шагов пока не поддерживается
     if (stepIndices.length === 0) {
       toast.error('Нет действий для выполнения');
       return;
@@ -342,9 +340,11 @@ export function useOptimization() {
     setState(prev => ({ ...prev, isExecuting: true }));
 
     try {
-      console.log('[Optimization] Executing Brain Mini with proposals:', state.proposals.length);
+      // Фильтруем только выбранные proposals по индексам
+      const selectedProposals = stepIndices.map(i => state.proposals[i]).filter(Boolean);
+      console.log('[Optimization] Executing Brain Mini with selected proposals:', selectedProposals.length, 'of', state.proposals.length);
 
-      // Передаём уже одобренные proposals для выполнения (без повторного анализа)
+      // Передаём только выбранные proposals для выполнения (без повторного анализа)
       const stream = runBrainMiniStream(
         {
           userAccountId,
@@ -352,7 +352,7 @@ export function useOptimization() {
           directionId: state.scope.directionId,
           campaignId: state.scope.campaignId,
           dryRun: false, // Реальное выполнение
-          proposals: state.proposals, // Передаём готовые proposals
+          proposals: selectedProposals, // Передаём ТОЛЬКО выбранные proposals
         },
         undefined // Без abort signal
       );

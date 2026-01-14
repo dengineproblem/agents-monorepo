@@ -458,3 +458,304 @@ ${lines.join('\n')}
 - Если бюджет уже снижали — дай время на стабилизацию
 - Если создали новый adset — проверь его результаты прежде чем предлагать ещё`;
 }
+
+// =============================================================================
+// HEALTH SCORE CALCULATION (синхронизировано с server.js)
+// =============================================================================
+
+/**
+ * Веса для расчёта Health Score
+ */
+export const HS_WEIGHTS = {
+  cpl_gap: 45,      // Основной вес для CPL gap
+  trend: 15,        // Тренды (d3 vs d7, d7 vs d30)
+  ctr_penalty: 8,   // Штраф за низкий CTR
+  cpm_penalty: 12,  // Штраф за высокий CPM
+  freq_penalty: 10  // Штраф за высокую частоту
+};
+
+/**
+ * Пороги классов для Health Score
+ */
+export const HS_CLASS_THRESHOLDS = {
+  very_good: 25,
+  good: 5,
+  bad: -25,
+  neutral_low: -5
+};
+
+/**
+ * Извлекает лиды из Facebook actions breakdowns
+ * @param {Object} bucket - Данные периода с actions
+ * @returns {{ leads: number, qualityLeads: number }}
+ */
+export function computeLeadsFromActions(bucket) {
+  if (!bucket) return { leads: 0, qualityLeads: 0 };
+
+  // Если leads уже посчитаны напрямую
+  if (typeof bucket.leads === 'number') {
+    return {
+      leads: bucket.leads,
+      qualityLeads: bucket.quality_leads || bucket.qualityLeads || 0
+    };
+  }
+
+  // Извлекаем из actions
+  const actions = bucket.actions || [];
+  let leads = 0;
+  let qualityLeads = 0;
+
+  for (const a of actions) {
+    const val = parseInt(a.value, 10) || 0;
+    switch (a.action_type) {
+      case 'onsite_conversion.total_messaging_connection':
+        leads += val;
+        break;
+      case 'onsite_conversion.messaging_user_depth_2_message_send':
+        qualityLeads += val;
+        break;
+      case 'onsite_conversion.lead_grouped':
+        leads += val;
+        break;
+      case 'offsite_conversion.fb_pixel_lead':
+        leads += val;
+        break;
+    }
+  }
+
+  return { leads, qualityLeads };
+}
+
+/**
+ * Вычисляет медиану массива чисел
+ * @param {number[]} arr - Массив чисел
+ * @returns {number|null}
+ */
+function median(arr) {
+  if (!arr || arr.length === 0) return null;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * Рассчитывает Health Score для ad set используя взвешенные периоды
+ * СИНХРОНИЗИРОВАНО с server.js computeHealthScoreForAdset
+ *
+ * @param {Object} opts - Параметры
+ * @param {Object} opts.windows - Данные по периодам { y: yesterday, d3, d7, d30, today }
+ * @param {Object} opts.targets - Целевые показатели { cpl_cents }
+ * @param {Object} opts.peers - Данные peers для сравнения { cpm: number[] }
+ * @param {Object} opts.weights - Веса (по умолчанию HS_WEIGHTS)
+ * @param {Object} opts.classes - Пороги классов (по умолчанию HS_CLASS_THRESHOLDS)
+ * @param {boolean} opts.isWhatsApp - Использовать качественные лиды для WhatsApp
+ * @param {boolean} opts.isTrafficObjective - Для instagram_traffic использовать link_clicks
+ * @returns {{ score: number, cls: string, eCplY: number, ctr: number, cpm: number, freq: number, breakdown: Object[] }}
+ */
+export function computeHealthScoreForAdset(opts) {
+  const {
+    windows = {},
+    targets = {},
+    peers = {},
+    weights = HS_WEIGHTS,
+    classes = HS_CLASS_THRESHOLDS,
+    isWhatsApp = false,
+    isTrafficObjective = false
+  } = opts;
+
+  const { y = {}, d3 = {}, d7 = {}, d30 = {}, today = {} } = windows;
+
+  const breakdown = [];
+
+  // Объём данных — коэффициент доверия
+  const impressions = y.impressions || 0;
+  const volumeFactor = impressions >= 1000 ? 1.0 :
+    (impressions <= 100 ? 0.6 : 0.6 + 0.4 * Math.min(1, (impressions - 100) / 900));
+
+  // Целевой CPL
+  const targetCpl = targets.cpl_cents || 200;
+
+  // Функция расчёта eCPL из bucket
+  function eCPLFromBucket(b) {
+    if (isTrafficObjective) {
+      // Для Instagram Traffic: используем link_clicks
+      const clicks = b.link_clicks || 0;
+      return clicks > 0 ? (b.spend * 100) / clicks : Infinity;
+    }
+    const L = computeLeadsFromActions(b);
+    const d = (isWhatsApp && L.qualityLeads >= 3) ? L.qualityLeads : L.leads;
+    return d > 0 ? (b.spend * 100) / d : Infinity;
+  }
+
+  // eCPL по периодам
+  const eCplY = eCPLFromBucket(y);
+  const e3 = eCPLFromBucket(d3);
+  const e7 = eCPLFromBucket(d7);
+  const e30 = eCPLFromBucket(d30);
+
+  // 1. ТРЕНДЫ (d3 vs d7, d7 vs d30)
+  let trendScore = 0;
+  if (Number.isFinite(e3) && Number.isFinite(e7)) {
+    if (e3 < e7) {
+      trendScore += weights.trend;
+      breakdown.push({ factor: 'trend_3d_vs_7d', value: weights.trend, reason: 'CPL 3d лучше 7d (улучшение)' });
+    } else if (e3 > e7 * 1.1) {
+      trendScore -= weights.trend / 2;
+      breakdown.push({ factor: 'trend_3d_vs_7d', value: -weights.trend / 2, reason: 'CPL 3d хуже 7d (ухудшение)' });
+    }
+  }
+  if (Number.isFinite(e7) && Number.isFinite(e30)) {
+    if (e7 < e30) {
+      trendScore += weights.trend;
+      breakdown.push({ factor: 'trend_7d_vs_30d', value: weights.trend, reason: 'CPL 7d лучше 30d (улучшение)' });
+    } else if (e7 > e30 * 1.1) {
+      trendScore -= weights.trend / 2;
+      breakdown.push({ factor: 'trend_7d_vs_30d', value: -weights.trend / 2, reason: 'CPL 7d хуже 30d (ухудшение)' });
+    }
+  }
+
+  // 2. CPL GAP к TARGET (основной показатель по YESTERDAY)
+  let cplScore = 0;
+  const yesterdaySpend = y.spend || 0;
+
+  // Zero leads при spend >= 2x target — это проблема
+  // При меньшем spend лид может прийти в любой момент, не штрафуем
+  if (!Number.isFinite(eCplY) && yesterdaySpend > 0) {
+    // CPL = Infinity (leads = 0), но деньги потрачены
+    const spendCents = yesterdaySpend * 100;
+    if (spendCents >= targetCpl * 2) {
+      // Потратили 2x target и 0 лидов — штраф
+      cplScore = -weights.cpl_gap; // -45
+      breakdown.push({
+        factor: 'zero_leads_over_2x',
+        value: cplScore,
+        reason: `0 лидов при spend $${yesterdaySpend.toFixed(2)} (${Math.round(spendCents/targetCpl)}x target)`
+      });
+    }
+    // При spend < 2x target не штрафуем — лид может прийти
+  } else if (Number.isFinite(eCplY)) {
+    const ratio = eCplY / targetCpl;
+    if (ratio <= 0.7) {
+      cplScore = weights.cpl_gap;
+      breakdown.push({ factor: 'cpl_gap', value: weights.cpl_gap, reason: `CPL ${Math.round((1-ratio)*100)}% ниже target` });
+    } else if (ratio <= 0.9) {
+      cplScore = Math.round(weights.cpl_gap * 2 / 3);
+      breakdown.push({ factor: 'cpl_gap', value: cplScore, reason: `CPL ${Math.round((1-ratio)*100)}% ниже target` });
+    } else if (ratio <= 1.1) {
+      cplScore = 10;
+      breakdown.push({ factor: 'cpl_gap', value: 10, reason: 'CPL в пределах ±10% от target' });
+    } else if (ratio <= 1.3) {
+      cplScore = -Math.round(weights.cpl_gap * 2 / 3);
+      breakdown.push({ factor: 'cpl_gap', value: cplScore, reason: `CPL ${Math.round((ratio-1)*100)}% выше target` });
+    } else {
+      cplScore = -weights.cpl_gap;
+      breakdown.push({ factor: 'cpl_gap', value: -weights.cpl_gap, reason: `CPL ${Math.round((ratio-1)*100)}% выше target` });
+    }
+  }
+
+  // 3. ДИАГНОСТИКА
+  let diag = 0;
+  const ctr = y.ctr || 0;
+  if (ctr > 0 && ctr < 1) {
+    diag -= weights.ctr_penalty;
+    breakdown.push({ factor: 'low_ctr', value: -weights.ctr_penalty, reason: `CTR ${ctr.toFixed(2)}% < 1%` });
+  }
+
+  const medianCpm = median(peers.cpm || []);
+  const cpm = y.cpm || 0;
+  if (medianCpm && cpm > medianCpm * 1.3) {
+    diag -= weights.cpm_penalty;
+    breakdown.push({ factor: 'high_cpm', value: -weights.cpm_penalty, reason: `CPM $${cpm.toFixed(2)} > медианы на 30%+` });
+  }
+
+  const freq = y.frequency || d7.frequency || 0;
+  if (freq > 2) {
+    diag -= weights.freq_penalty;
+    breakdown.push({ factor: 'high_frequency', value: -weights.freq_penalty, reason: `Frequency ${freq.toFixed(1)} > 2` });
+  }
+
+  // 4. TODAY-КОМПЕНСАЦИЯ
+  let todayAdj = 0;
+  const todayImpressions = today.impressions || 0;
+  const todayLeadsData = computeLeadsFromActions(today);
+  const todayHasLeads = todayLeadsData.leads > 0;
+
+  // Порог impressions снижен если сегодня есть лиды (лиды важнее показов)
+  const effectiveMinImpressions = todayHasLeads ? 100 : VOLUME_THRESHOLDS.TODAY_MIN_IMPRESSIONS;
+
+  if (todayImpressions >= effectiveMinImpressions) {
+    const eToday = eCPLFromBucket(today);
+
+    // Случай 1: Вчера были лиды — сравниваем today vs yesterday
+    if (Number.isFinite(eCplY) && Number.isFinite(eToday) && eCplY > 0) {
+      if (eToday <= TODAY_COMPENSATION.FULL * eCplY) {
+        // Сегодня в 2+ раза лучше вчера — полная компенсация
+        todayAdj = Math.abs(Math.min(0, cplScore)) + 15;
+        breakdown.push({ factor: 'today_compensation', value: todayAdj, reason: `СЕГОДНЯ CPL в ${(eCplY/eToday).toFixed(1)}x лучше вчера! Полная компенсация.` });
+      } else if (eToday <= TODAY_COMPENSATION.PARTIAL * eCplY) {
+        // На 30% лучше — 60% компенсация
+        todayAdj = Math.round(Math.abs(Math.min(0, cplScore)) * 0.6) + 10;
+        breakdown.push({ factor: 'today_compensation', value: todayAdj, reason: `Сегодня CPL на ${Math.round((1 - eToday/eCplY)*100)}% лучше вчера (60% компенсация)` });
+      } else if (eToday <= TODAY_COMPENSATION.SLIGHT * eCplY) {
+        // Небольшое улучшение
+        todayAdj = 5;
+        breakdown.push({ factor: 'today_compensation', value: 5, reason: 'Небольшое улучшение CPL сегодня' });
+      }
+    }
+    // Случай 2: Вчера было 0 лидов, но СЕГОДНЯ есть лиды — сравниваем today vs TARGET
+    else if (!Number.isFinite(eCplY) && Number.isFinite(eToday)) {
+      const todayRatio = eToday / targetCpl;
+      if (todayRatio <= 0.7) {
+        // Сегодня CPL 30%+ ниже target — полная компенсация штрафа за zero_leads
+        todayAdj = Math.abs(Math.min(0, cplScore)) + 15;
+        breakdown.push({
+          factor: 'today_recovery',
+          value: todayAdj,
+          reason: `ВОССТАНОВЛЕНИЕ: сегодня CPL $${(eToday/100).toFixed(2)} (${Math.round((1-todayRatio)*100)}% ниже target)!`
+        });
+      } else if (todayRatio <= 1.0) {
+        // Сегодня CPL в пределах target — частичная компенсация
+        todayAdj = Math.round(Math.abs(Math.min(0, cplScore)) * 0.7) + 10;
+        breakdown.push({
+          factor: 'today_recovery',
+          value: todayAdj,
+          reason: `Сегодня CPL $${(eToday/100).toFixed(2)} в пределах target (70% компенсация)`
+        });
+      } else if (todayRatio <= 1.3) {
+        // Сегодня CPL чуть выше target — небольшая компенсация
+        todayAdj = Math.round(Math.abs(Math.min(0, cplScore)) * 0.3);
+        breakdown.push({
+          factor: 'today_recovery',
+          value: todayAdj,
+          reason: `Сегодня появились лиды, CPL $${(eToday/100).toFixed(2)} (30% компенсация)`
+        });
+      }
+    }
+  }
+
+  // Итоговый score
+  let score = cplScore + trendScore + diag + todayAdj;
+
+  // Применяем коэффициент объёма
+  if (impressions < 1000) {
+    score = Math.round(score * volumeFactor);
+    breakdown.push({ factor: 'volume_factor', value: null, reason: `Коэффициент доверия ${(volumeFactor*100).toFixed(0)}% (${impressions} impr)` });
+  }
+
+  // Определяем класс
+  let cls = 'neutral';
+  if (score >= classes.very_good) cls = 'very_good';
+  else if (score >= classes.good) cls = 'good';
+  else if (score <= classes.bad) cls = 'bad';
+  else if (score <= classes.neutral_low) cls = 'slightly_bad';
+
+  return {
+    score,
+    cls,
+    eCplY,
+    ctr,
+    cpm,
+    freq,
+    breakdown
+  };
+}

@@ -168,8 +168,21 @@ export const creativeHandlers = {
     };
   },
 
+  // КРИТИЧНО: Добавлена фильтрация по account_id для мультиаккаунтности
   async getCreativeDetails({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
-    const { data: creative, error } = await supabase
+    const dbAccountId = adAccountDbId || null;
+    const filterMode = dbAccountId ? 'multi_account' : 'legacy';
+
+    logger.info({
+      handler: 'getCreativeDetails',
+      creative_id,
+      userAccountId,
+      dbAccountId,
+      filterMode
+    }, `getCreativeDetails: загрузка данных креатива (${filterMode})`);
+
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let creativeQuery = supabase
       .from('user_creatives')
       .select(`
         *,
@@ -177,24 +190,49 @@ export const creativeHandlers = {
         creative_transcripts(text, lang, status)
       `)
       .eq('id', creative_id)
-      .eq('user_id', userAccountId)
-      .single();
+      .eq('user_id', userAccountId);
+
+    if (dbAccountId) {
+      creativeQuery = creativeQuery.eq('account_id', dbAccountId);
+    } else {
+      creativeQuery = creativeQuery.is('account_id', null);
+    }
+
+    const { data: creative, error } = await creativeQuery.single();
 
     if (error || !creative) {
-      return { success: false, error: 'Креатив не найден' };
+      return { success: false, error: 'Креатив не найден или недоступен' };
     }
 
     // Get ad mappings
-    const { data: adMappings } = await supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let adMappingsQuery = supabase
       .from('ad_creative_mapping')
       .select('ad_id, adset_id, campaign_id, source, created_at')
       .eq('user_creative_id', creative_id);
 
+    if (dbAccountId) {
+      adMappingsQuery = adMappingsQuery.eq('account_id', dbAccountId);
+    } else {
+      adMappingsQuery = adMappingsQuery.is('account_id', null);
+    }
+
+    const { data: adMappings } = await adMappingsQuery;
+
     // Get latest analysis
-    const { data: analysis } = await supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let analysisQuery = supabase
       .from('creative_analysis')
       .select('score, verdict, reasoning, created_at')
-      .eq('creative_id', creative_id)
+      .eq('creative_id', creative_id);
+
+    if (dbAccountId) {
+      analysisQuery = analysisQuery.eq('account_id', dbAccountId);
+    } else {
+      analysisQuery = analysisQuery.is('account_id', null);
+    }
+
+    const { data: analysis } = await analysisQuery
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
@@ -294,21 +332,36 @@ export const creativeHandlers = {
     };
   },
 
+  // КРИТИЧНО: Исправлена фильтрация по account_id для мультиаккаунтности
   async getCreativeAnalysis({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
     const dbAccountId = adAccountDbId || null;
+    const filterMode = dbAccountId ? 'multi_account' : 'legacy';
+
+    logger.info({
+      handler: 'getCreativeAnalysis',
+      creative_id,
+      userAccountId,
+      dbAccountId,
+      filterMode
+    }, `getCreativeAnalysis: загрузка анализа креатива (${filterMode})`);
 
     let query = supabase
       .from('creative_analysis')
       .select('*')
       .eq('creative_id', creative_id)
-      .eq('user_account_id', userAccountId)
+      .eq('user_account_id', userAccountId);
+
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data, error } = await query
       .order('created_at', { ascending: false })
-      .limit(1);
-
-    // Фильтр по account_id для мультиаккаунтности (если колонка есть в таблице)
-    // Примечание: creative_analysis может не иметь account_id, тогда фильтр не применяется
-
-    const { data, error } = await query.single();
+      .limit(1)
+      .single();
 
     if (error || !data) {
       return {
@@ -601,11 +654,23 @@ export const creativeHandlers = {
     };
   },
 
-  async getCreativeTranscript({ creative_id }, { userAccountId }) {
-    const { data, error } = await supabase
+  // КРИТИЧНО: Добавлен adAccountDbId для мультиаккаунтности
+  async getCreativeTranscript({ creative_id }, { userAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let query = supabase
       .from('creative_transcripts')
       .select('*')
-      .eq('creative_id', creative_id)
+      .eq('creative_id', creative_id);
+
+    if (dbAccountId) {
+      query = query.eq('account_id', dbAccountId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data, error } = await query
       .order('created_at', { ascending: false })
       .limit(1)
       .single();
@@ -846,12 +911,20 @@ export const creativeHandlers = {
     }
 
     // Check if test already running
-    const { data: existingTest } = await supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    let existingTestQuery = supabase
       .from('creative_tests')
       .select('id, status')
       .eq('user_creative_id', creative_id)
-      .eq('status', 'running')
-      .single();
+      .eq('status', 'running');
+
+    if (dbAccountId) {
+      existingTestQuery = existingTestQuery.eq('account_id', dbAccountId);
+    } else {
+      existingTestQuery = existingTestQuery.is('account_id', null);
+    }
+
+    const { data: existingTest } = await existingTestQuery.single();
 
     if (existingTest) {
       return { success: false, error: 'Тест уже запущен для этого креатива' };

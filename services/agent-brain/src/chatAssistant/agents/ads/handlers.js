@@ -593,14 +593,24 @@ export const adsHandlers = {
   },
 
   async updateBudget({ adset_id, new_budget_cents, dry_run }, { accessToken, adAccountId }) {
-    // Validate minimum budget
-    if (new_budget_cents < 500) {
-      return { success: false, error: 'Минимальный бюджет $5 (500 центов)' };
+    const MIN_BUDGET_CENTS = 300; // $3 минимум (FB позволяет от $1)
+
+    // Фолбэк на минималку если бюджет слишком низкий
+    let finalBudgetCents = new_budget_cents;
+    if (new_budget_cents < MIN_BUDGET_CENTS) {
+      logger.warn({
+        handler: 'updateBudget',
+        adset_id,
+        requested_budget: new_budget_cents,
+        fallback_budget: MIN_BUDGET_CENTS,
+        reason: 'fallback_to_minimum'
+      }, `updateBudget: бюджет ${new_budget_cents}¢ ниже минимума, фолбэк на ${MIN_BUDGET_CENTS}¢ ($${MIN_BUDGET_CENTS/100})`);
+      finalBudgetCents = MIN_BUDGET_CENTS;
     }
 
     // Dry-run mode: return preview with change % and warnings
     if (dry_run) {
-      return adsDryRunHandlers.updateBudget({ adset_id, new_budget_cents }, { accessToken });
+      return adsDryRunHandlers.updateBudget({ adset_id, new_budget_cents: finalBudgetCents }, { accessToken });
     }
 
     // Get current budget before change
@@ -611,33 +621,38 @@ export const adsHandlers = {
     } catch (e) { /* ignore */ }
 
     await fbGraph('POST', adset_id, accessToken, {
-      daily_budget: new_budget_cents
+      daily_budget: finalBudgetCents
     });
 
     // Post-check verification
-    const verification = await verifyAdSetBudget(adset_id, new_budget_cents, accessToken);
+    const verification = await verifyAdSetBudget(adset_id, finalBudgetCents, accessToken);
 
     await supabase.from('agent_logs').insert({
       ad_account_id: adAccountId,
       level: 'info',
-      message: `Budget updated for AdSet ${adset_id}: $${(new_budget_cents / 100).toFixed(2)}`,
+      message: `Budget updated for AdSet ${adset_id}: $${(finalBudgetCents / 100).toFixed(2)}`,
       context: {
-        new_budget_cents,
+        requested_budget_cents: new_budget_cents,
+        final_budget_cents: finalBudgetCents,
         before_budget_cents: beforeBudget,
         verified: verification.verified,
         source: 'chat_assistant',
-        agent: 'AdsAgent'
+        agent: 'AdsAgent',
+        fallback_applied: new_budget_cents !== finalBudgetCents
       }
     });
 
     return {
       success: true,
-      message: `Бюджет адсета ${adset_id} изменён на $${(new_budget_cents / 100).toFixed(2)}/день`,
+      message: finalBudgetCents !== new_budget_cents
+        ? `Бюджет адсета ${adset_id} изменён на $${(finalBudgetCents / 100).toFixed(2)}/день (запрошено $${(new_budget_cents / 100).toFixed(2)}, применён минимум)`
+        : `Бюджет адсета ${adset_id} изменён на $${(finalBudgetCents / 100).toFixed(2)}/день`,
       verification: {
         verified: verification.verified,
         before: beforeBudget ? `$${(beforeBudget / 100).toFixed(2)}` : null,
         after: verification.after ? `$${(verification.after / 100).toFixed(2)}` : null,
-        warning: verification.warning
+        warning: verification.warning,
+        fallback_applied: new_budget_cents !== finalBudgetCents
       }
     };
   },
@@ -664,7 +679,7 @@ export const adsHandlers = {
     // Мультиаккаунтность: проверяем владение направлением через account_id
     let dirQuery = supabase
       .from('account_directions')
-      .select('id, name, fb_campaign_id, objective, daily_budget_cents, pixel_id')
+      .select('id, name, fb_campaign_id, objective, daily_budget_cents')
       .eq('id', direction_id);
 
     if (dbAccountId) {
@@ -764,7 +779,7 @@ export const adsHandlers = {
       promoted_object = { page_id: pageId };
     }
 
-    const finalBudget = daily_budget_cents || direction.daily_budget_cents || 500;
+    const finalBudget = daily_budget_cents || direction.daily_budget_cents || 300;
     const finalName = generateAdsetName({ directionName: direction.name, source: 'Brain', objective: direction.objective });
 
     // Dry-run mode
@@ -844,15 +859,19 @@ export const adsHandlers = {
           creative_title: creative.title
         });
 
-        // Save mapping for lead tracking
-        await supabase.from('ad_creative_mapping').insert({
-          ad_id: adResult.id,
-          user_creative_id: creative.id,
-          direction_id,
-          user_id: userAccountId,
-          adset_id: adsetId,
-          campaign_id: direction.fb_campaign_id
-        }).catch(() => {});
+        // Save mapping for lead tracking (ignore errors - non-critical)
+        try {
+          await supabase.from('ad_creative_mapping').insert({
+            ad_id: adResult.id,
+            user_creative_id: creative.id,
+            direction_id,
+            user_id: userAccountId,
+            adset_id: adsetId,
+            campaign_id: direction.fb_campaign_id
+          });
+        } catch {
+          // Ignore mapping errors - non-critical
+        }
 
       } catch (adError) {
         logger.error({ err: adError, creativeId: creative.id }, 'createAdSet: failed to create ad');
