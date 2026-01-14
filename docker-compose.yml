@@ -15,8 +15,8 @@ services:
       - BRAIN_MODEL=gpt-5-mini
       - BRAIN_TEST_MODE=false
       - AGENT_SERVICE_URL=http://agent-service:8082
-      - CRON_ENABLED=false
-      - HOURLY_CRON_ENABLED=false
+      - CRON_ENABLED=true
+      - HOURLY_CRON_ENABLED=true
       - CRON_SCHEDULE=0 8 * * *
       - LOG_ALERT_TELEGRAM_BOT_TOKEN=${LOG_ALERT_TELEGRAM_BOT_TOKEN}
       - LOG_ALERT_TELEGRAM_CHAT_ID=${LOG_ALERT_TELEGRAM_CHAT_ID}
