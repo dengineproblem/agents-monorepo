@@ -256,25 +256,83 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
    - Отправляет `ViewContent` через `sendCapiEventAtomic()`
    - Обновляет `capi_interest_sent = true`
 
-#### Level 2, 3 (Qualified/Scheduled) — через AI анализ
+#### Level 2, 3 (Qualified/Scheduled) — через Cron + AI анализ
 
-1. **Входящее сообщение** → chatbot-service `/process-message`
-   - Собирает сообщения (5 сек буфер)
-   - Генерирует ответ бота
-   - **В фоне:** запускает qualificationAgent
+**Архитектура:** Cron job раз в час анализирует диалоги, а не реактивно при каждом сообщении. Это экономит токены и не зависит от включённого бота.
 
-2. **qualificationAgent**
-   - Загружает настройки CAPI направления
-   - Проверяет `capi_enabled` и `capi_source`
-   - Если `capi_source === 'whatsapp'`:
-     - Анализирует через GPT-4o-mini
-     - Определяет уровни: is_qualified, is_scheduled
+**Критерии выборки для cron (SQL с JOIN):**
+```sql
+SELECT da.*, ad.name as direction_name
+FROM dialog_analysis da
+INNER JOIN account_directions ad ON da.direction_id = ad.id
+WHERE da.capi_interest_sent = true        -- есть Interest (Level 1)
+  AND da.capi_qualified_sent = false      -- нет Level 2
+  AND da.capi_scheduled_sent = false      -- нет Level 3
+  AND da.last_message > NOW() - INTERVAL '1 hour'  -- активность за час
+  AND da.direction_id IS NOT NULL         -- есть направление
+  AND ad.capi_enabled = true              -- CAPI включён для направления
+ORDER BY da.last_message DESC
+LIMIT 50;
+```
+
+**Поток:**
+
+1. **Cron каждый час** (`capiAnalysisCron.ts`)
+   - Выбирает диалоги по критериям выше (с JOIN на `account_directions`)
+   - Использует lock (`isRunning`) для защиты от параллельного запуска
+   - Batch processing с rate limiting между анализами
+
+2. **Для каждого диалога:**
+   - Загружает сообщения через `getDialogForCapi()`
+   - Проверяет `capi_source` направления (whatsapp или crm)
+   - Анализирует через GPT-4o-mini (`analyzeQualification()`)
+   - Определяет: is_qualified, is_scheduled
 
 3. **metaCapiClient**
-   - Проверяет, какие события ещё не отправлены
-   - Отправляет события в Meta CAPI
-   - Обновляет флаги в dialog_analysis
-   - Логирует в capi_events_log
+   - Отправляет события в Meta CAPI атомарно
+   - Обновляет флаги `capi_qualified_sent`, `capi_scheduled_sent`
+   - Логирует в `capi_events_log`
+
+**Преимущества cron-подхода:**
+- Не зависит от включённого AI-бота
+- Экономит токены (анализ только при активности)
+- Работает автономно
+- Легко масштабируется (batch processing)
+- Lock предотвращает race conditions при длинных запусках
+
+**ENV переменные:**
+```bash
+CAPI_CRON_ENABLED=true              # Включить cron
+CAPI_CRON_SCHEDULE="0 * * * *"      # Каждый час (cron format)
+CAPI_CRON_BATCH_SIZE=50             # Макс диалогов за запуск
+CAPI_CRON_ACTIVITY_WINDOW=60        # Минут активности (default: 60)
+CAPI_CRON_DELAY_MS=100              # Задержка между анализами (rate limiting)
+```
+
+**Ручной триггер для тестирования:**
+```
+POST /capi/trigger-analysis
+Host: chatbot-service:8083
+
+Response:
+{
+  "success": true,
+  "dialogs_found": 15,
+  "dialogs_processed": 12,
+  "dialogs_skipped": 2,
+  "errors": 1,
+  "duration_ms": 4523
+}
+```
+
+**Логирование cron:**
+```
+[capiAnalysisCron] === Starting CAPI analysis cron ===
+[capiAnalysisCron] Found dialogs for CAPI analysis { count: 15 }
+[capiAnalysisCron] Starting CAPI analysis for dialog { dialogId, contactPhone, directionName }
+[capiAnalysisCron] CAPI analysis completed for dialog { dialogId, durationMs }
+[capiAnalysisCron] === CAPI analysis cron completed === { found, processed, skipped, errors, avgTimePerDialog }
+```
 
 ### Источник: CRM (field mapping)
 

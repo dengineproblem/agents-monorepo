@@ -15,8 +15,8 @@ services:
       - BRAIN_MODEL=gpt-5.2
       - BRAIN_TEST_MODE=false
       - AGENT_SERVICE_URL=http://agent-service:8082
-      - CRON_ENABLED=true
-      - HOURLY_CRON_ENABLED=true
+      - CRON_ENABLED=false
+      - HOURLY_CRON_ENABLED=false
       - CRON_SCHEDULE=0 8 * * *
       - LOG_ALERT_TELEGRAM_BOT_TOKEN=${LOG_ALERT_TELEGRAM_BOT_TOKEN}
       - LOG_ALERT_TELEGRAM_CHAT_ID=${LOG_ALERT_TELEGRAM_CHAT_ID}
@@ -101,12 +101,24 @@ services:
       - REDIS_URL=redis://redis-chatbot:6379
       - EVOLUTION_API_URL=http://evolution-api:8080
       - CRM_BACKEND_URL=http://crm-backend:8084
+      # Evolution PostgreSQL (for reading WhatsApp messages directly)
+      - EVOLUTION_DB_HOST=evolution-postgres
+      - EVOLUTION_DB_PORT=5432
+      - EVOLUTION_DB_USER=evolution
+      - EVOLUTION_DB_PASSWORD=${EVOLUTION_DB_PASSWORD}
+      - EVOLUTION_DB_NAME=evolution
+      # CAPI Analysis Cron (Level 2-3 qualification)
+      - CAPI_CRON_ENABLED=true
+      - CAPI_CRON_SCHEDULE=0 * * * *
+      - CAPI_CRON_BATCH_SIZE=50
+      - CAPI_CRON_ACTIVITY_WINDOW=60
     ports:
       - "8083:8083"
     restart: unless-stopped
     depends_on:
       - redis-chatbot
       - crm-backend
+      - evolution-postgres
 
   # Redis for Chatbot (message queues, reactivation campaigns)
   redis-chatbot:

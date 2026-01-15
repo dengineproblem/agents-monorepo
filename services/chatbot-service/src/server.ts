@@ -10,6 +10,7 @@ import { startReactivationCron } from './cron/reactivationCron.js';
 import { startCampaignCron } from './cron/campaignCron.js';
 import { startKeyStageTransitionCron } from './cron/keyStageTransitionCron.js';
 import { startLeadSnapshotCron } from './cron/leadSnapshotCron.js';
+import { startCapiAnalysisCron, triggerCapiAnalysisCron } from './cron/capiAnalysisCron.js';
 import { startReactivationWorker } from './workers/reactivationWorker.js';
 import { startCampaignWorker } from './workers/campaignWorker.js';
 import { startDelayedFollowUpWorker } from './workers/delayedFollowUpWorker.js';
@@ -114,7 +115,7 @@ app.post('/process-message', async (request, reply) => {
     const { processIncomingMessage, getBotConfigForInstance } = await import('./lib/aiBotEngine.js');
     const { supabase } = await import('./lib/supabase.js');
     const { markCampaignReply } = await import('./lib/campaignAnalytics.js');
-    const { getDialogForCapi, processDialogForCapi } = await import('./lib/qualificationAgent.js');
+    // CAPI Level 2-3 анализ через cron (capiAnalysisCron.ts), импорт не нужен здесь
 
     // Проверить, есть ли бот из конструктора для этого инстанса
     const botConfig = await getBotConfigForInstance(instanceName);
@@ -143,21 +144,8 @@ app.post('/process-message', async (request, reply) => {
         await markCampaignReply(lead.id);
       }
 
-      // Запустить CAPI анализ в фоне (не блокирует ответ)
-      // Using Promise.resolve().then() for proper error handling
-      Promise.resolve().then(async () => {
-        const dialogData = await getDialogForCapi(instanceName, contactPhone);
-        if (dialogData) {
-          await processDialogForCapi(dialogData);
-        }
-      }).catch((capiError: Error) => {
-        app.log.error({
-          error: capiError.message,
-          stack: capiError.stack,
-          contactPhone,
-          instanceName
-        }, 'Error in CAPI qualification processing (AI bot)');
-      });
+      // CAPI Level 2-3 анализ теперь через cron (capiAnalysisCron.ts)
+      // Реактивный вызов убран для экономии токенов
 
       return reply.send({ success: result.processed, reason: result.reason });
     }
@@ -191,22 +179,8 @@ app.post('/process-message', async (request, reply) => {
     // @ts-ignore
     await collectMessages(contactPhone, instanceName, messageText, app);
 
-    // Запустить LLM-агент квалификации в фоне (не блокирует ответ бота)
-    // Анализирует диалог и отправляет CAPI события если нужно
-    // Using Promise.resolve().then() for proper error handling
-    Promise.resolve().then(async () => {
-      const dialogData = await getDialogForCapi(instanceName, contactPhone);
-      if (dialogData) {
-        await processDialogForCapi(dialogData);
-      }
-    }).catch((capiError: Error) => {
-      app.log.error({
-        error: capiError.message,
-        stack: capiError.stack,
-        contactPhone,
-        instanceName
-      }, 'Error in CAPI qualification processing (legacy)');
-    });
+    // CAPI Level 2-3 анализ теперь через cron (capiAnalysisCron.ts)
+    // Реактивный вызов убран для экономии токенов
 
     return reply.send({ success: true });
   } catch (error: any) {
@@ -409,6 +383,35 @@ app.post('/capi/interest-event', async (request, reply) => {
   }
 });
 
+// Manual trigger for CAPI analysis cron (for testing/debugging)
+app.post('/capi/trigger-analysis', async (request, reply) => {
+  try {
+    app.log.info('Manual trigger of CAPI analysis cron');
+
+    const result = await triggerCapiAnalysisCron();
+
+    app.log.info({
+      found: result.found,
+      processed: result.processed,
+      skipped: result.skipped,
+      errors: result.errors,
+      durationMs: result.durationMs,
+    }, 'CAPI analysis cron triggered manually');
+
+    return reply.send({
+      success: true,
+      dialogs_found: result.found,
+      dialogs_processed: result.processed,
+      dialogs_skipped: result.skipped,
+      errors: result.errors,
+      duration_ms: result.durationMs,
+    });
+  } catch (error: any) {
+    app.log.error({ error: error.message }, 'Error triggering CAPI analysis');
+    return reply.status(500).send({ error: error.message });
+  }
+});
+
 // Запускаем cron для реанимационных рассылок (ежедневно в 00:00)
 // @ts-ignore
 startReactivationCron();
@@ -424,6 +427,10 @@ startKeyStageTransitionCron();
 // Запускаем cron для ежедневных снимков лидов (ежедневно в 23:55)
 // @ts-ignore
 startLeadSnapshotCron();
+
+// Запускаем cron для CAPI Level 2-3 анализа (ежечасно)
+// @ts-ignore
+startCapiAnalysisCron();
 
 // Запускаем worker для отправки реанимационных сообщений (каждую минуту)
 // @ts-ignore - Type mismatch between fastify and pino logger
