@@ -326,6 +326,89 @@ app.post('/capi/resend', async (request, reply) => {
   }
 });
 
+// Interest (ViewContent) событие по счётчику сообщений
+// Вызывается из agent-service когда лид достиг порога capi_msg_count
+// Qualified и Scheduled отправляются через AI анализ в processDialogForCapi
+app.post('/capi/interest-event', async (request, reply) => {
+  try {
+    const { instanceName, contactPhone } = request.body as {
+      instanceName: string;
+      contactPhone: string;
+    };
+
+    if (!instanceName || !contactPhone) {
+      return reply.status(400).send({ error: 'Missing required fields: instanceName, contactPhone' });
+    }
+
+    app.log.info({ instanceName, contactPhone }, 'Interest CAPI event request');
+
+    const { getDialogForCapi } = await import('./lib/qualificationAgent.js');
+    const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS } = await import('./lib/metaCapiClient.js');
+    const { supabase } = await import('./lib/supabase.js');
+
+    const dialog = await getDialogForCapi(instanceName, contactPhone);
+
+    if (!dialog) {
+      return reply.status(404).send({ error: 'Dialog not found' });
+    }
+
+    if (!dialog.direction_id) {
+      return reply.status(400).send({ error: 'No direction_id - cannot send CAPI' });
+    }
+
+    // Получить pixel и access_token
+    const pixelInfo = await getDirectionPixelInfo(dialog.direction_id);
+
+    if (!pixelInfo.pixelId || !pixelInfo.accessToken) {
+      return reply.status(400).send({ error: 'No pixel or access_token configured for direction' });
+    }
+
+    // Получить lead_id для логов
+    const { data: leadRecord } = await supabase
+      .from('leads')
+      .select('id')
+      .eq('chat_id', contactPhone)
+      .eq('user_account_id', dialog.user_account_id)
+      .maybeSingle();
+
+    // Отправить ViewContent (Interest) - Level 1
+    const response = await sendCapiEventAtomic({
+      pixelId: pixelInfo.pixelId,
+      accessToken: pixelInfo.accessToken,
+      eventName: CAPI_EVENTS.INTEREST,  // ViewContent
+      eventLevel: 1,
+      phone: contactPhone,
+      ctwaClid: dialog.ctwa_clid || undefined,
+      dialogAnalysisId: dialog.id,
+      leadId: leadRecord?.id,
+      userAccountId: dialog.user_account_id,
+      directionId: dialog.direction_id,
+    });
+
+    if (response.success) {
+      app.log.info({
+        contactPhone,
+        dialogId: dialog.id,
+        directionId: dialog.direction_id,
+      }, 'Interest CAPI event (ViewContent) sent successfully');
+
+      return reply.send({ success: true, event: 'ViewContent', eventId: response.eventId });
+    } else {
+      app.log.warn({
+        contactPhone,
+        dialogId: dialog.id,
+        error: response.error,
+      }, 'Interest CAPI event failed or already sent');
+
+      return reply.status(200).send({ success: false, error: response.error });
+    }
+
+  } catch (error: any) {
+    app.log.error({ error: error.message }, 'Error sending Interest CAPI event');
+    return reply.status(500).send({ error: error.message });
+  }
+});
+
 // Запускаем cron для реанимационных рассылок (ежедневно в 00:00)
 // @ts-ignore
 startReactivationCron();

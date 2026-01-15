@@ -503,6 +503,16 @@ async function processAdLead(params: {
     }
   }
 
+  // Сбросить CAPI счётчик для нового клика на рекламу
+  // (чтобы повторный клик того же контакта снова запустил воронку)
+  await supabase
+    .from('dialog_analysis')
+    .update({ capi_msg_count: 0, capi_interest_sent: false })
+    .eq('instance_name', instanceName)
+    .eq('contact_phone', clientPhone);
+
+  app.log.debug({ instanceName, clientPhone }, 'Reset CAPI counter for new ad click');
+
   // НОВОЕ: Создать/обновить запись в dialog_analysis для чат-бота
   await upsertDialogAnalysis({
     userAccountId,
@@ -526,52 +536,108 @@ async function processAdLead(params: {
 }
 
 /**
+ * Проверить, является ли контакт рекламным лидом (есть source_id в leads)
+ */
+async function isAdLead(contactPhone: string, userAccountId: string): Promise<boolean> {
+  const { data: lead } = await supabase
+    .from('leads')
+    .select('source_id')
+    .eq('chat_id', contactPhone)
+    .eq('user_account_id', userAccountId)
+    .not('source_id', 'is', null)
+    .maybeSingle();
+
+  return !!lead?.source_id;
+}
+
+/**
+ * Отправить CAPI Interest (ViewContent) событие через chatbot-service
+ */
+async function sendCapiInterestEvent(
+  app: FastifyInstance,
+  instanceName: string,
+  contactPhone: string
+): Promise<void> {
+  try {
+    const chatbotUrl = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
+
+    const response = await fetch(`${chatbotUrl}/capi/interest-event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instanceName, contactPhone })
+    });
+
+    if (response.ok) {
+      // Пометить что отправили
+      await supabase
+        .from('dialog_analysis')
+        .update({ capi_interest_sent: true })
+        .eq('instance_name', instanceName)
+        .eq('contact_phone', contactPhone);
+
+      app.log.info({ instanceName, contactPhone }, 'CAPI Interest event sent successfully');
+    } else {
+      const errorText = await response.text();
+      app.log.error({ status: response.status, error: errorText }, 'CAPI Interest event failed');
+    }
+  } catch (error: any) {
+    app.log.error({ error: error.message }, 'Failed to send CAPI Interest event');
+  }
+}
+
+/**
  * Создать или обновить запись в dialog_analysis
+ * С CAPI Interest (ViewContent) логикой по счётчику сообщений
  */
 async function upsertDialogAnalysis(params: {
   userAccountId: string;
   accountId?: string | null;  // UUID для мультиаккаунтности
   instanceName: string;
   contactPhone: string;
-  contactName?: string;  // ✅ НОВОЕ: имя контакта из WhatsApp (pushName)
+  contactName?: string;  // имя контакта из WhatsApp (pushName)
   messageText: string;
-  ctwaClid?: string | null;  // ✅ НОВОЕ: Click-to-WhatsApp Click ID для CAPI
+  ctwaClid?: string | null;  // Click-to-WhatsApp Click ID для CAPI
   timestamp: Date;
+  isIncoming?: boolean;  // true если входящее сообщение от клиента (default: true)
 }, app: FastifyInstance) {
-  const { userAccountId, accountId, instanceName, contactPhone, contactName, messageText, ctwaClid, timestamp } = params;
+  const {
+    userAccountId, accountId, instanceName, contactPhone,
+    contactName, messageText, ctwaClid, timestamp,
+    isIncoming = true
+  } = params;
 
-  // DEBUG: Логируем входящие данные для диагностики ctwa_clid
-  app.log.info({
+  // DEBUG: Логируем входящие данные
+  app.log.debug({
     contactPhone,
     instanceName,
     ctwaClid: ctwaClid || null,
-    hasCtwaClid: !!ctwaClid
+    isIncoming
   }, 'upsertDialogAnalysis: incoming params');
 
   // Проверить существование записи
   const { data: existing } = await supabase
     .from('dialog_analysis')
-    .select('id, ctwa_clid, contact_name')  // ✅ НОВОЕ: получаем contact_name для проверки
+    .select('id, ctwa_clid, contact_name, capi_msg_count, capi_interest_sent, direction_id')
     .eq('contact_phone', contactPhone)
     .eq('instance_name', instanceName)
     .maybeSingle();
 
+  // Проверить, является ли это рекламным лидом (есть source_id в leads)
+  const isFromAd = await isAdLead(contactPhone, userAccountId);
+
   if (existing) {
     // Обновить существующую запись
-    // НЕ перезаписываем contact_name если оно уже есть (клиент мог сам назвать имя)
     const finalCtwaClid = ctwaClid || existing.ctwa_clid;
 
-    // DEBUG: Логируем что записываем при UPDATE
-    app.log.info({
-      existingId: existing.id,
-      existingCtwaClid: existing.ctwa_clid,
-      newCtwaClid: ctwaClid,
-      finalCtwaClid
-    }, 'upsertDialogAnalysis: updating with ctwa_clid');
+    // CAPI: Инкрементируем счётчик только для входящих сообщений от рекламных лидов
+    const newCapiMsgCount = (isIncoming && isFromAd)
+      ? (existing.capi_msg_count || 0) + 1
+      : (existing.capi_msg_count || 0);
 
     const updateData: Record<string, any> = {
-      last_message: timestamp.toISOString(),  // timestamp, не текст сообщения
+      last_message: timestamp.toISOString(),
       ctwa_clid: finalCtwaClid,
+      capi_msg_count: newCapiMsgCount,
       analyzed_at: timestamp.toISOString()
     };
 
@@ -585,36 +651,57 @@ async function upsertDialogAnalysis(params: {
       .update(updateData)
       .eq('id', existing.id);
 
-    // DEBUG: Проверяем ошибку UPDATE
     if (updateError) {
       app.log.error({ error: updateError, existingId: existing.id }, 'Failed to update dialog_analysis');
     }
-  } else {
-    // DEBUG: Логируем что записываем при INSERT
-    app.log.info({
-      contactPhone,
-      ctwaClid: ctwaClid || null
-    }, 'upsertDialogAnalysis: creating new record with ctwa_clid');
 
+    // CAPI: Проверить порог для ViewContent (Interest)
+    const INTEREST_THRESHOLD = parseInt(process.env.CAPI_INTEREST_THRESHOLD || '3', 10);
+
+    if (
+      isFromAd &&                              // Рекламный лид
+      newCapiMsgCount >= INTEREST_THRESHOLD && // Достиг порога
+      !existing.capi_interest_sent &&          // Ещё не отправляли
+      existing.direction_id                    // Есть direction для CAPI
+    ) {
+      app.log.info({
+        contactPhone,
+        capiMsgCount: newCapiMsgCount,
+        threshold: INTEREST_THRESHOLD,
+        directionId: existing.direction_id
+      }, 'CAPI threshold reached, sending ViewContent');
+
+      await sendCapiInterestEvent(app, instanceName, contactPhone);
+    }
+
+  } else {
     // Создать новую запись
-    // NOTE: НЕ указываем interest_level - constraint разрешает только hot/warm/cold
-    // chatbot-service установит interest_level при анализе
+    // CAPI: Начинаем счёт с 1 только если это входящее сообщение от рекламного лида
+    const initialCapiMsgCount = (isIncoming && isFromAd) ? 1 : 0;
+
+    app.log.debug({
+      contactPhone,
+      ctwaClid: ctwaClid || null,
+      isFromAd,
+      initialCapiMsgCount
+    }, 'upsertDialogAnalysis: creating new record');
+
     const { error: insertError } = await supabase
       .from('dialog_analysis')
       .insert({
         user_account_id: userAccountId,
-        account_id: accountId || null,  // UUID для мультиаккаунтности
+        account_id: accountId || null,
         instance_name: instanceName,
         contact_phone: contactPhone,
-        contact_name: contactName || null,  // ✅ НОВОЕ: сохраняем имя из WhatsApp
-        first_message: timestamp.toISOString(),  // время первого сообщения
-        last_message: timestamp.toISOString(),   // время последнего сообщения (timestamp, не текст!)
-        ctwa_clid: ctwaClid || null,  // ✅ НОВОЕ: сохраняем ctwa_clid для CAPI
+        contact_name: contactName || null,
+        first_message: timestamp.toISOString(),
+        last_message: timestamp.toISOString(),
+        ctwa_clid: ctwaClid || null,
+        capi_msg_count: initialCapiMsgCount,
         funnel_stage: 'new_lead',
         analyzed_at: timestamp.toISOString()
       });
 
-    // DEBUG: Проверяем ошибку INSERT
     if (insertError) {
       app.log.error({ error: insertError, contactPhone }, 'Failed to create dialog_analysis');
     }

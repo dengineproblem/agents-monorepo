@@ -13,11 +13,13 @@
 
 | Уровень | Событие | Условие (WhatsApp) | Условие (CRM) |
 |---------|---------|---------------------|---------------|
-| 1 | `ViewContent` (INTEREST) | Клиент отправил 3+ сообщения | Поле CRM установлено в нужное значение |
-| 2 | `CompleteRegistration` (QUALIFIED) | Клиент ответил на все квалификационные вопросы | Поле CRM установлено в нужное значение |
-| 3 | `Purchase` (BOOKED) | Клиент записался на ключевой этап | Поле CRM установлено в нужное значение |
+| 1 | `ViewContent` (INTEREST) | **Счётчик:** клиент с рекламы отправил 3+ сообщения | Поле CRM установлено в нужное значение |
+| 2 | `CompleteRegistration` (QUALIFIED) | **AI анализ:** клиент ответил на все квалификационные вопросы | Поле CRM установлено в нужное значение |
+| 3 | `Purchase` (BOOKED) | **AI анализ:** клиент записался на ключевой этап | Поле CRM установлено в нужное значение |
 
-> Уровень 3 использует `event_name = Purchase`, даже если фактически это “запись”.
+> Уровень 3 использует `event_name = Purchase`, даже если фактически это "запись".
+
+**Важно:** Level 1 (Interest) определяется детерминированно по счётчику сообщений, а Level 2 и 3 — через AI анализ переписки.
 
 ## Архитектура
 
@@ -26,7 +28,7 @@ WhatsApp → Evolution API → agent-service → chatbot-service
                                │                 │
                                │                 ├── chatbotEngine (ответы бота)
                                │                 │
-                               │                 └── qualificationAgent
+                               │                 └── qualificationAgent (Level 2, 3)
                                │                          │
                                │                    ┌─────┴─────┐
                                │                    │           │
@@ -38,6 +40,20 @@ WhatsApp → Evolution API → agent-service → chatbot-service
                                │                    metaCapiClient
                                │                          │
                                └──────────────────────────└── Meta CAPI
+
+Level 1 (Interest) поток:
+WhatsApp → Evolution API → agent-service
+                               │
+                               ├── handleAdLead() — если source_id в сообщении
+                               │       └── Сброс capi_msg_count=0 (для повторных кликов)
+                               │
+                               └── upsertDialogAnalysis()
+                                       │
+                                       ├── isAdLead() = true? → capi_msg_count++
+                                       │
+                                       └── capi_msg_count >= 3? → POST /capi/interest-event
+                                                                        │
+                                                                        └── chatbot-service → Meta CAPI
 ```
 
 ### CRM Webhooks (для CRM источника)
@@ -107,12 +123,23 @@ const CAPI_EVENTS = {
 **dialog_analysis:**
 - `capi_interest_sent` / `_sent_at` / `_event_id` - флаги Level 1
 - `capi_qualified_sent` / `_sent_at` / `_event_id` - флаги Level 2
--- `capi_scheduled_sent` / `_sent_at` / `_event_id` - флаги Level 3 (Scheduled → Purchase event_name)
+- `capi_scheduled_sent` / `_sent_at` / `_event_id` - флаги Level 3 (Scheduled → Purchase event_name)
 
 **capi_events_log:**
 - Аудит-лог всех отправленных событий
 - Статус: `success` / `error` / `skipped`
 - Ответ от Facebook API
+
+### Миграция 153_add_capi_msg_count.sql
+
+**dialog_analysis (новые поля):**
+- `capi_msg_count` (INT, default 0) — счётчик входящих сообщений от рекламных лидов
+- Считает только сообщения от контактов с `source_id` в таблице `leads`
+- Сбрасывается в 0 при повторном клике на рекламу (для отправки нового ViewContent)
+
+**Важно:** `capi_msg_count` отделён от `incoming_count` — это позволяет:
+- Считать только сообщения ПОСЛЕ клика по рекламе
+- Не ломать существующую статистику
 
 ### Миграция 127_direction_capi_settings.sql
 
@@ -169,13 +196,23 @@ const CAPI_EVENTS = {
 - Если настроено несколько полей — используется логика OR
 - Событие отправляется при совпадении хотя бы одного поля
 
-### 2. Access Token
+### 2. Порог Interest события
+
+ENV переменная для настройки порога счётчика сообщений:
+
+```bash
+CAPI_INTEREST_THRESHOLD=3  # default: 3 сообщения
+```
+
+Событие ViewContent отправляется когда `capi_msg_count >= CAPI_INTEREST_THRESHOLD`.
+
+### 3. Access Token
 
 Берётся из:
 1. `ad_accounts.access_token` (multi-account mode)
 2. `user_accounts.access_token` (fallback)
 
-### 3. ctwa_clid (Click-to-WhatsApp Click ID, legacy)
+### 4. ctwa_clid (Click-to-WhatsApp Click ID, legacy)
 
 ctwa_clid сохраняется для справки/атрибуции, но **не используется** в текущем Pixel/CAPI потоке и **не требуется** для отправки событий (action_source = `system_generated`).
 
@@ -198,27 +235,42 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
 
 ## Поток данных
 
-### Источник: WhatsApp (LLM анализ)
+### Источник: WhatsApp
+
+#### Level 1 (Interest/ViewContent) — по счётчику сообщений
 
 1. **Входящее сообщение** → `evolutionWebhooks.ts`
-   - Извлекает ctwa_clid из `contextInfo.externalAdReply` (опционально)
-   - Вызывает `upsertDialogAnalysis()` с ctwa_clid (если есть)
-   - Сохраняет в `dialog_analysis.ctwa_clid` (опционально)
-   - Отправляет в chatbot-service
+   - Если есть `source_id` в сообщении:
+     - `handleAdLead()` создаёт/обновляет lead
+     - **Сброс:** `capi_msg_count = 0`, `capi_interest_sent = false`
+   - Вызывает `upsertDialogAnalysis()`
 
-2. **chatbot-service** → `/process-message`
+2. **upsertDialogAnalysis()** → `evolutionWebhooks.ts`
+   - Проверяет `isAdLead()` — есть ли `source_id` в таблице `leads`
+   - Если рекламный лид: `capi_msg_count++`
+   - Если `capi_msg_count >= CAPI_INTEREST_THRESHOLD` (default: 3):
+     - Вызывает `sendCapiInterestEvent()` → `POST /capi/interest-event`
+
+3. **chatbot-service** → `/capi/interest-event`
+   - Получает `pixelId` и `accessToken` через `getDirectionPixelInfo()`
+   - Отправляет `ViewContent` через `sendCapiEventAtomic()`
+   - Обновляет `capi_interest_sent = true`
+
+#### Level 2, 3 (Qualified/Scheduled) — через AI анализ
+
+1. **Входящее сообщение** → chatbot-service `/process-message`
    - Собирает сообщения (5 сек буфер)
    - Генерирует ответ бота
    - **В фоне:** запускает qualificationAgent
 
-3. **qualificationAgent**
+2. **qualificationAgent**
    - Загружает настройки CAPI направления
    - Проверяет `capi_enabled` и `capi_source`
    - Если `capi_source === 'whatsapp'`:
      - Анализирует через GPT-4o-mini
-     - Определяет уровни: is_interested, is_qualified, is_scheduled
+     - Определяет уровни: is_qualified, is_scheduled
 
-4. **metaCapiClient**
+3. **metaCapiClient**
    - Проверяет, какие события ещё не отправлены
    - Отправляет события в Meta CAPI
    - Обновляет флаги в dialog_analysis
@@ -241,16 +293,91 @@ const hasExternalAdReply = !!message?.contextInfo?.externalAdReply;
    - Отправляет события по совпавшим уровням
    - Обновляет флаги и логирует
 
+## Счётчик сообщений (capi_msg_count)
+
+### Логика работы
+
+1. **Клиент кликает на рекламу, пишет первое сообщение:**
+   - `handleAdLead()` создаёт lead с `source_id`
+   - Сброс: `capi_msg_count = 0`, `capi_interest_sent = false`
+   - `upsertDialogAnalysis()` инкрементирует: `capi_msg_count = 1`
+
+2. **Клиент пишет второе, третье сообщение:**
+   - `isAdLead() = true` (source_id есть в leads)
+   - `capi_msg_count++` при каждом входящем сообщении
+
+3. **При достижении порога (default: 3):**
+   - Отправляется ViewContent через `/capi/interest-event`
+   - `capi_interest_sent = true`
+
+### Повторный клик на рекламу
+
+Если тот же контакт кликнет на рекламу снова (даже с тем же `source_id`):
+- `handleAdLead()` сбрасывает `capi_msg_count = 0`
+- `capi_interest_sent = false`
+- ViewContent отправится снова после 3 сообщений
+
+Это корректное поведение — фактически происходит новое событие интереса.
+
+### Клиент писал ДО рекламы
+
+```
+Сообщение 1 (без рекламы) → isAdLead = false → capi_msg_count = 0
+Сообщение 2 (без рекламы) → isAdLead = false → capi_msg_count = 0
+Сообщение 3 (С РЕКЛАМЫ!)  → handleAdLead сброс → capi_msg_count = 1
+Сообщение 4              → isAdLead = true → capi_msg_count = 2
+Сообщение 5              → isAdLead = true → capi_msg_count = 3 → CAPI!
+```
+
+Счётчик считает только сообщения ПОСЛЕ появления `source_id` в leads.
+
+### API endpoint
+
+```
+POST /capi/interest-event
+Host: chatbot-service:8083
+
+Body:
+{
+  "instanceName": "my-instance",
+  "contactPhone": "+77001234567"
+}
+
+Response (success):
+{
+  "success": true,
+  "event": "ViewContent",
+  "eventId": "abc123..."
+}
+
+Response (already sent):
+{
+  "success": false,
+  "error": "Event already sent or dialog not found"
+}
+```
+
 ## Дедупликация
 
 - Флаги `capi_*_sent` предотвращают повторную отправку
 - `event_id` генерируется детерминированно: `wa_{leadId}_{interest|qualified|purchase}_v1`
 - Facebook использует event_id для дедупликации на своей стороне
+- **Interest:** сбрасывается при повторном клике на рекламу (новый цикл воронки)
 
 ## Логирование
 
 Подробные логи во всех компонентах:
 
+**Level 1 (Interest) — счётчик сообщений:**
+```
+[evolutionWebhooks] Reset CAPI counter for new ad click { instanceName, clientPhone }
+[evolutionWebhooks] CAPI threshold reached, sending ViewContent { contactPhone, capiMsgCount, threshold, directionId }
+[evolutionWebhooks] CAPI Interest event sent successfully { instanceName, contactPhone }
+[chatbot-service] Interest CAPI event request { instanceName, contactPhone }
+[chatbot-service] Interest CAPI event (ViewContent) sent successfully { contactPhone, dialogId, directionId }
+```
+
+**Level 2, 3 — AI анализ:**
 ```
 [qualificationAgent] Starting qualification analysis
 [qualificationAgent] Qualification analysis complete { isInterested, isQualified, isScheduled }
@@ -526,6 +653,59 @@ SELECT
   capi_scheduled_sent
 FROM dialog_analysis
 WHERE capi_interest_sent = true;
+```
+
+### Interest не отправляется (счётчик)
+
+**Симптомы:**
+- `capi_msg_count` не инкрементируется
+- ViewContent не отправляется после 3 сообщений
+
+**Проверка:**
+
+```sql
+-- Проверить счётчик для конкретного лида
+SELECT
+  contact_phone,
+  capi_msg_count,
+  capi_interest_sent,
+  direction_id
+FROM dialog_analysis
+WHERE contact_phone = '+7...';
+
+-- Проверить, есть ли source_id в leads (рекламный лид)
+SELECT
+  chat_id,
+  source_id,
+  created_at
+FROM leads
+WHERE chat_id = '+7...';
+```
+
+**Возможные причины:**
+
+1. **Нет source_id в leads:**
+   - `isAdLead()` возвращает false
+   - Счётчик не инкрементируется
+   - Решение: проверить `handleAdLead()` и логи
+
+2. **direction_id = null:**
+   - Условие `existing.direction_id` не выполняется
+   - CAPI не отправляется даже при достижении порога
+   - Решение: проверить триггер миграции 129
+
+3. **capi_interest_sent = true:**
+   - Событие уже было отправлено
+   - Решение: сбросить флаг или дождаться нового клика на рекламу
+
+**Диагностика в логах:**
+
+```bash
+# Проверить логи счётчика
+docker logs -f agent-service 2>&1 | grep -E "(capi_msg_count|CAPI threshold|isAdLead)"
+
+# Проверить логи endpoint
+docker logs -f chatbot-service 2>&1 | grep "Interest CAPI"
 ```
 
 ## Оптимизация рекламы
