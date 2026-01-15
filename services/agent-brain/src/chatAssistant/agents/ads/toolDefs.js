@@ -17,6 +17,7 @@ const extendedPeriodEnum = z.enum(['today', 'yesterday', 'last_3d', 'last_7d', '
 // Period can be preset (today, yesterday, etc.) or specific date (30 ноября, 2024-11-30, 30.11.2024)
 const periodSchema = z.string().describe('Период: today, yesterday, last_7d, last_30d или конкретная дата (30 ноября, 2024-11-30)');
 const campaignStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'all']);
+const campaignTypeSchema = z.enum(['internal', 'external', 'all']).describe('internal = привязаны к directions, external = без directions, all = все');
 const directionStatusSchema = z.enum(['active', 'paused', 'all']);
 const directionPeriodSchema = z.enum(['7d', '14d', '30d', '90d', '6m', '12m']);
 const groupBySchema = z.enum(['campaign', 'day', 'total']);
@@ -38,12 +39,13 @@ export const AdsToolDefs = {
   // ============================================================
 
   getCampaigns: {
-    description: 'Получить список кампаний с метриками (расходы, лиды, CPL, CTR) за указанный период',
+    description: 'Получить список кампаний с метриками (расходы, лиды, CPL, CTR) за указанный период. Поддерживает фильтрацию по типу: internal (созданные в приложении) или external (внешние)',
     schema: z.object({
       period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
       date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
       date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
-      status: campaignStatusSchema.optional().describe('Фильтр по статусу кампаний')
+      status: campaignStatusSchema.optional().describe('Фильтр по статусу кампаний'),
+      campaign_type: campaignTypeSchema.optional().describe('Фильтр по типу кампании')
     }),
     meta: { timeout: 25000, retryable: true }
   },
@@ -57,12 +59,13 @@ export const AdsToolDefs = {
   },
 
   getAdSets: {
-    description: 'Получить список адсетов кампании с метриками',
+    description: 'Получить список адсетов кампании с метриками. Можно фильтровать по campaign_id или campaign_type',
     schema: z.object({
-      campaign_id: nonEmptyString('campaign_id').describe('ID кампании'),
+      campaign_id: z.string().optional().describe('ID кампании (опционально, если указан campaign_type)'),
       period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
       date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
-      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
+      campaign_type: campaignTypeSchema.optional().describe('Фильтр по типу кампании (если не указан campaign_id)')
     }),
     meta: { timeout: 20000, retryable: true }
   },
@@ -73,7 +76,8 @@ export const AdsToolDefs = {
       campaign_id: z.string().optional().describe('ID кампании (опционально). Если не указан - все объявления аккаунта'),
       period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
       date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
-      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
+      campaign_type: campaignTypeSchema.optional().describe('Фильтр по типу кампании')
     }),
     meta: { timeout: 30000, retryable: true }
   },
@@ -286,6 +290,21 @@ export const AdsToolDefs = {
       date_to: z.string().optional().describe('Конец периода YYYY-MM-DD'),
       compare_by: z.enum(['creative', 'direction']).default('creative').describe('По чему сравнивать'),
       top_n: z.number().min(1).max(20).default(5).describe('Количество топ элементов для вывода')
+    }),
+    meta: { timeout: 30000, retryable: true }
+  },
+
+  // ============================================================
+  // EXTERNAL CAMPAIGNS TOOLS
+  // ============================================================
+
+  getExternalCampaignMetrics: {
+    description: 'Получить метрики ВНЕШНИХ кампаний (созданных не через приложение) с расчётом CPL, health score и сравнением с target. Target CPL берётся из маппинга (saveCampaignMapping) или fallback на default аккаунта.',
+    schema: z.object({
+      campaign_id: z.string().optional().describe('ID конкретной кампании (опционально). Если не указан - все external кампании'),
+      period: extendedPeriodEnum.optional().describe('Preset период (игнорируется если указаны date_from/date_to)'),
+      date_from: z.string().optional().describe('Начало периода YYYY-MM-DD (приоритет над period)'),
+      date_to: z.string().optional().describe('Конец периода YYYY-MM-DD')
     }),
     meta: { timeout: 30000, retryable: true }
   },

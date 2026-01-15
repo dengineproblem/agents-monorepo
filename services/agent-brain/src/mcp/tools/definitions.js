@@ -150,6 +150,8 @@ export const adsTools = [
   // READ tools - ROI Reports
   createMCPTool('getROIReport', AdsToolDefs.getROIReport, adsHandlers.getROIReport, 'ads'),
   createMCPTool('getROIComparison', AdsToolDefs.getROIComparison, adsHandlers.getROIComparison, 'ads'),
+  // READ tools - External Campaigns
+  createMCPTool('getExternalCampaignMetrics', AdsToolDefs.getExternalCampaignMetrics, adsHandlers.getExternalCampaignMetrics, 'ads'),
   // READ tools - Lead Quality
   createMCPTool('getLeadsEngagementRate', AdsToolDefs.getLeadsEngagementRate, adsHandlers.getLeadsEngagementRate, 'ads'),
   // READ tools - Account & Actions
@@ -169,7 +171,9 @@ export const adsTools = [
   createMCPTool('resumeDirection', AdsToolDefs.resumeDirection, adsHandlers.resumeDirection, 'ads'),
   // Advanced tools
   createMCPTool('triggerBrainOptimizationRun', AdsToolDefs.triggerBrainOptimizationRun, adsHandlers.triggerBrainOptimizationRun, 'ads'),
-  createMCPTool('customFbQuery', AdsToolDefs.customFbQuery, adsHandlers.customFbQuery, 'ads')
+  createMCPTool('customFbQuery', AdsToolDefs.customFbQuery, adsHandlers.customFbQuery, 'ads'),
+  // Manual mode tools
+  createMCPTool('saveCampaignMapping', AdsToolDefs.saveCampaignMapping, adsHandlers.saveCampaignMapping, 'ads')
 ];
 
 /**

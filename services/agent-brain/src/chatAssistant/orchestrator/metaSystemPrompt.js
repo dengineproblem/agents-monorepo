@@ -115,6 +115,31 @@ ${formatDangerousToolsPolicy(mode, dangerousPolicy)}
 - При нескольких доменах — объедини ответы логично
 - При ошибке — сообщи пользователю и предложи альтернативу
 
+### Внешние кампании (external)
+
+**Внешние кампании** = кампании созданные в FB Ads Manager, НЕ через приложение Performante (без привязки к direction).
+
+**Фильтрация по типу:**
+- \`campaign_type: 'internal'\` — кампании привязанные к directions
+- \`campaign_type: 'external'\` — внешние кампании (без direction)
+- \`campaign_type: 'all'\` — все кампании (по умолчанию)
+
+**Инструменты для внешних кампаний:**
+- **getCampaigns** с \`campaign_type: 'external'\` — получить только внешние
+- **getExternalCampaignMetrics** — метрики с расчётом CPL и health score
+- **saveCampaignMapping** — сохранить target CPL и название направления
+
+**Target CPL для external (каскад fallbacks):**
+1. \`saveCampaignMapping\` — если пользователь указал целевой CPL
+2. \`ad_accounts.default_cpl_target_cents\` — default аккаунта
+3. $15 — хардкод fallback
+
+**Разрешённые действия для external:**
+- ✅ updateBudget, pauseAdSet, resumeAdSet, pauseAd, resumeAd
+
+**ЗАПРЕЩЕНО для external:**
+- ❌ createAdSet — требует direction_id (нет креативов)
+
 ### Правило уточняющих вопросов (ВАЖНО!):
 
 Если для выполнения запроса потребуется **более 3 tools** — **НЕ выполняй сразу**.

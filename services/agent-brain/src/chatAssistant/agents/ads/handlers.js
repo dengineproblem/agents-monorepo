@@ -44,7 +44,9 @@ export const adsHandlers = {
   // READ HANDLERS
   // ============================================================
 
-  async getCampaigns({ period, date_from, date_to, status }, { accessToken, adAccountId }) {
+  async getCampaigns({ period, date_from, date_to, status, campaign_type }, { accessToken, adAccountId, userAccountId }) {
+    logger.debug({ period, date_from, date_to, status, campaign_type, userAccountId }, '[getCampaigns] Starting');
+
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
 
     // Use dynamic time_range instead of hardcoded date_preset(today)
@@ -62,10 +64,30 @@ export const adsHandlers = {
       time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
     };
 
+    // ALWAYS load directions for campaign_type determination
+    // This is needed to correctly mark campaigns as internal/external
+    const { data: directions, error: directionsError } = await supabase
+      .from('account_directions')
+      .select('fb_campaign_id')
+      .eq('user_account_id', userAccountId);
+
+    if (directionsError) {
+      logger.warn({ error: directionsError }, '[getCampaigns] Failed to load directions');
+    }
+
+    const internalCampaignIds = new Set(
+      (directions || []).map(d => d.fb_campaign_id).filter(Boolean)
+    );
+
+    logger.debug({
+      internalCount: internalCampaignIds.size,
+      campaign_type
+    }, '[getCampaigns] Loaded directions for campaign_type filtering');
+
     const result = await fbGraph('GET', path, accessToken, params);
 
     // Parse insights and format response
-    const campaigns = (result.data || []).map(c => {
+    let campaigns = (result.data || []).map(c => {
       const insights = c.insights?.data?.[0] || {};
       const spend = parseFloat(insights.spend || 0);
 
@@ -96,6 +118,9 @@ export const adsHandlers = {
 
       const leads = messagingLeads + siteLeads + leadFormLeads;
 
+      // Determine campaign type: internal (has direction) or external (no direction)
+      const isInternal = internalCampaignIds.has(c.id);
+
       return {
         id: c.id,
         name: c.name,
@@ -106,9 +131,31 @@ export const adsHandlers = {
         leads: leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
         impressions: parseInt(insights.impressions || 0),
-        clicks: parseInt(insights.clicks || 0)
+        clicks: parseInt(insights.clicks || 0),
+        campaign_type: isInternal ? 'internal' : 'external'
       };
     });
+
+    // Filter by campaign_type if specified
+    const beforeFilterCount = campaigns.length;
+    if (campaign_type === 'internal') {
+      campaigns = campaigns.filter(c => c.campaign_type === 'internal');
+    } else if (campaign_type === 'external') {
+      campaigns = campaigns.filter(c => c.campaign_type === 'external');
+    }
+
+    // Count by type for logging
+    const internalCount = campaigns.filter(c => c.campaign_type === 'internal').length;
+    const externalCount = campaigns.filter(c => c.campaign_type === 'external').length;
+
+    logger.info({
+      total: campaigns.length,
+      beforeFilter: beforeFilterCount,
+      filter: campaign_type || 'all',
+      internal: internalCount,
+      external: externalCount,
+      period: { since: dateRange.since, until: dateRange.until }
+    }, '[getCampaigns] Completed');
 
     // Add entity refs for entity linking
     const campaignsWithRefs = attachRefs(campaigns, 'c');
@@ -119,6 +166,8 @@ export const adsHandlers = {
       period,
       campaigns: campaignsWithRefs,
       total: campaigns.length,
+      internal_count: internalCount,
+      external_count: externalCount,
       _entityMap: entityMap  // For saving to focus_entities
     };
   },
@@ -143,18 +192,73 @@ export const adsHandlers = {
     };
   },
 
-  async getAdSets({ campaign_id, period, date_from, date_to }, { accessToken }) {
+  async getAdSets({ campaign_id, period, date_from, date_to, campaign_type }, { accessToken, adAccountId, userAccountId }) {
+    logger.debug({ campaign_id, period, campaign_type, userAccountId }, '[getAdSets] Starting');
+
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
     // Use dynamic time_range instead of hardcoded date_preset(today)
     const timeRangeStr = `{"since":"${dateRange.since}","until":"${dateRange.until}"}`;
-    const fields = `id,name,status,daily_budget,targeting,insights.time_range(${timeRangeStr}){spend,impressions,clicks,actions}`;
+    const fields = `id,name,status,daily_budget,targeting,campaign_id,insights.time_range(${timeRangeStr}){spend,impressions,clicks,actions}`;
 
-    const result = await fbGraph('GET', `${campaign_id}/adsets`, accessToken, {
-      fields,
-      time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
-    });
+    // ALWAYS load directions for campaign_type determination
+    const { data: directions, error: directionsError } = await supabase
+      .from('account_directions')
+      .select('fb_campaign_id')
+      .eq('user_account_id', userAccountId);
 
-    const adsets = (result.data || []).map(a => {
+    if (directionsError) {
+      logger.warn({ error: directionsError }, '[getAdSets] Failed to load directions');
+    }
+
+    const internalCampaignIds = new Set(
+      (directions || []).map(d => d.fb_campaign_id).filter(Boolean)
+    );
+
+    logger.debug({ internalCount: internalCampaignIds.size }, '[getAdSets] Loaded directions');
+
+    // If campaign_type filter specified without campaign_id, get campaigns first
+    let campaignIds = campaign_id ? [campaign_id] : [];
+
+    if (!campaign_id && campaign_type && campaign_type !== 'all') {
+      // Get all campaigns from FB
+      const normalizedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+      const allCampaigns = await fbGraph('GET', `${normalizedAccountId}/campaigns`, accessToken, {
+        fields: 'id',
+        limit: 500
+      });
+
+      // Filter by campaign_type
+      campaignIds = (allCampaigns.data || [])
+        .filter(c => {
+          const isInternal = internalCampaignIds.has(c.id);
+          return campaign_type === 'internal' ? isInternal : !isInternal;
+        })
+        .map(c => c.id);
+
+      logger.debug({ campaignIds: campaignIds.length, filter: campaign_type }, '[getAdSets] Filtered campaigns');
+    }
+
+    // Fetch adsets for each campaign (or single campaign_id)
+    let allAdsets = [];
+    const normalizedAccountId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    if (campaignIds.length > 0) {
+      for (const cid of campaignIds) {
+        const result = await fbGraph('GET', `${cid}/adsets`, accessToken, {
+          fields,
+          time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
+        });
+        allAdsets.push(...(result.data || []));
+      }
+    } else if (campaign_id) {
+      const result = await fbGraph('GET', `${campaign_id}/adsets`, accessToken, {
+        fields,
+        time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
+      });
+      allAdsets = result.data || [];
+    }
+
+    const adsets = allAdsets.map(a => {
       const insights = a.insights?.data?.[0] || {};
       const spend = parseFloat(insights.spend || 0);
 
@@ -181,12 +285,15 @@ export const adsHandlers = {
       }
 
       const leads = messagingLeads + siteLeads + leadFormLeads;
+      const isInternal = internalCampaignIds.has(a.campaign_id);
 
       return {
         id: a.id,
         name: a.name,
         status: a.status,
         daily_budget: a.daily_budget ? parseInt(a.daily_budget) / 100 : null,
+        campaign_id: a.campaign_id,
+        campaign_type: isInternal ? 'internal' : 'external',
         spend,
         leads: leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null
@@ -196,9 +303,25 @@ export const adsHandlers = {
     return { success: true, adsets };
   },
 
-  async getAds({ campaign_id, period, date_from, date_to }, { accessToken, adAccountId }) {
-    console.log('[getAds] adAccountId from context:', adAccountId);
+  async getAds({ campaign_id, period, date_from, date_to, campaign_type }, { accessToken, adAccountId, userAccountId }) {
+    logger.debug({ campaign_id, period, campaign_type, adAccountId }, '[getAds] Starting');
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
+
+    // ALWAYS load directions for campaign_type determination
+    const { data: directions, error: directionsError } = await supabase
+      .from('account_directions')
+      .select('fb_campaign_id')
+      .eq('user_account_id', userAccountId);
+
+    if (directionsError) {
+      logger.warn({ error: directionsError }, '[getAds] Failed to load directions');
+    }
+
+    const internalCampaignIds = new Set(
+      (directions || []).map(d => d.fb_campaign_id).filter(Boolean)
+    );
+
+    logger.debug({ internalCount: internalCampaignIds.size }, '[getAds] Loaded directions');
 
     // Определяем endpoint: кампания или весь аккаунт
     const normalizedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
@@ -207,13 +330,13 @@ export const adsHandlers = {
     const fields = 'id,name,status,effective_status,campaign{id,name}';
 
     // Получаем список объявлений
-    console.log('[getAds] endpoint:', endpoint, 'campaign_id:', campaign_id || 'ALL');
+    logger.debug({ endpoint, campaign_id: campaign_id || 'ALL' }, '[getAds] Fetching ads from FB');
     const result = await fbGraph('GET', endpoint, accessToken, {
       fields,
       limit: 500
     });
 
-    console.log('[getAds] Got', result.data?.length || 0, 'ads from FB');
+    logger.debug({ count: result.data?.length || 0 }, '[getAds] Got ads from FB');
 
     if (!result.data || result.data.length === 0) {
       return { success: true, ads: [], totals: { spend: 0, leads: 0, cpl: null } };
@@ -230,7 +353,7 @@ export const adsHandlers = {
     });
 
     // Создаём map insights по ad_id
-    console.log('[getAds] Got', insightsResult.data?.length || 0, 'insights from FB for', adIds.length, 'ads');
+    logger.debug({ insightsCount: insightsResult.data?.length || 0, adsCount: adIds.length }, '[getAds] Got insights from FB');
     const insightsMap = {};
     for (const insight of (insightsResult.data || [])) {
       insightsMap[insight.ad_id] = insight;
@@ -269,21 +392,35 @@ export const adsHandlers = {
       totalSpend += spend;
       totalLeads += leads;
 
+      // Determine campaign type
+      const campaignId = ad.campaign?.id || null;
+      const isInternal = campaignId ? internalCampaignIds.has(campaignId) : false;
+
       return {
         id: ad.id,
         name: insights.ad_name || ad.name,
         status: ad.effective_status || ad.status,
-        campaign_id: ad.campaign?.id || null,
+        campaign_id: campaignId,
         campaign_name: ad.campaign?.name || null,
+        campaign_type: isInternal ? 'internal' : 'external',
         spend: spend.toFixed(2),
         leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
         impressions: parseInt(insights.impressions || 0),
         clicks: parseInt(insights.clicks || 0)
       };
-    }).filter(ad => parseFloat(ad.spend) > 0 || ad.leads > 0); // Только с активностью
+    }).filter(ad => {
+      // Filter by activity
+      const hasActivity = parseFloat(ad.spend) > 0 || ad.leads > 0;
+      if (!hasActivity) return false;
 
-    console.log('[getAds] After filter:', ads.length, 'ads with activity. Total spend:', totalSpend.toFixed(2), 'leads:', totalLeads);
+      // Filter by campaign_type if specified
+      if (campaign_type === 'internal') return ad.campaign_type === 'internal';
+      if (campaign_type === 'external') return ad.campaign_type === 'external';
+      return true;
+    });
+
+    logger.debug({ adsCount: ads.length, totalSpend: totalSpend.toFixed(2), totalLeads }, '[getAds] After filter');
 
     // Агрегация по кампаниям для LLM (чтобы не терялись данные в большом списке)
     const campaignStats = {};
@@ -304,7 +441,7 @@ export const adsHandlers = {
       cpl: c.leads > 0 ? (c.spend / c.leads).toFixed(2) : null
     }));
 
-    console.log('[getAds] campaigns_summary:', JSON.stringify(campaigns_summary));
+    logger.debug({ campaignsCount: campaigns_summary.length }, '[getAds] Campaigns summary ready');
 
     return {
       success: true,
@@ -2134,6 +2271,169 @@ export const adsHandlers = {
         ...(report.message && sorted.length === 0 ? { message: report.message } : {})
       };
     }
+  },
+
+  // ============================================================
+  // EXTERNAL CAMPAIGNS HANDLERS
+  // ============================================================
+
+  /**
+   * Get metrics for external campaigns (campaigns without directions)
+   * Calculates CPL, health score using fallback target CPL logic
+   */
+  async getExternalCampaignMetrics({ campaign_id, period, date_from, date_to }, { accessToken, adAccountId, userAccountId }) {
+    logger.debug({ campaign_id, period, date_from, date_to, adAccountId }, '[getExternalCampaignMetrics] Starting');
+    const dateRange = getDateRangeWithDates({ date_from, date_to, period });
+
+    // 1. Load directions to identify internal campaigns
+    const { data: directions, error: directionsError } = await supabase
+      .from('account_directions')
+      .select('fb_campaign_id, target_cpl_cents')
+      .eq('user_account_id', userAccountId);
+
+    if (directionsError) {
+      logger.warn({ error: directionsError }, '[getExternalCampaignMetrics] Failed to load directions');
+    }
+
+    const internalCampaignIds = new Set(
+      (directions || []).map(d => d.fb_campaign_id).filter(Boolean)
+    );
+    logger.debug({ internalCount: internalCampaignIds.size }, '[getExternalCampaignMetrics] Loaded directions');
+
+    // 2. Load campaign mappings from agent_notes (for external campaigns)
+    const { data: notes, error: notesError } = await supabase
+      .from('agent_notes')
+      .select('content')
+      .eq('user_account_id', userAccountId)
+      .eq('key', 'campaign_mapping')
+      .single();
+
+    if (notesError && notesError.code !== 'PGRST116') {
+      logger.warn({ error: notesError }, '[getExternalCampaignMetrics] Failed to load campaign mappings');
+    }
+
+    const campaignMappings = notes?.content || {};
+    logger.debug({ mappingsCount: Object.keys(campaignMappings).length }, '[getExternalCampaignMetrics] Loaded mappings');
+
+    // 3. Load account default CPL
+    const { data: adAccount, error: accountError } = await supabase
+      .from('ad_accounts')
+      .select('default_cpl_target_cents')
+      .eq('fb_ad_account_id', adAccountId)
+      .single();
+
+    if (accountError && accountError.code !== 'PGRST116') {
+      logger.warn({ error: accountError }, '[getExternalCampaignMetrics] Failed to load account defaults');
+    }
+
+    const defaultTargetCPL = adAccount?.default_cpl_target_cents || 1500; // $15 fallback
+    logger.debug({ defaultTargetCPL, source: adAccount?.default_cpl_target_cents ? 'account' : 'fallback' }, '[getExternalCampaignMetrics] Target CPL defaults');
+
+    // 4. Get all campaigns from FB
+    const timeRangeStr = `{"since":"${dateRange.since}","until":"${dateRange.until}"}`;
+    const fields = `id,name,status,objective,daily_budget,insights.time_range(${timeRangeStr}){spend,impressions,clicks,actions}`;
+    const actId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    const result = await fbGraph('GET', `${actId}/campaigns`, accessToken, {
+      fields,
+      filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: ['ACTIVE', 'PAUSED'] }]),
+      time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
+    });
+
+    logger.debug({ totalCampaigns: result.data?.length || 0 }, '[getExternalCampaignMetrics] Got campaigns from FB');
+
+    // 5. Filter and enrich external campaigns
+    const externalCampaigns = (result.data || [])
+      .filter(c => {
+        // Filter to external only (not in directions)
+        const isInternal = internalCampaignIds.has(c.id);
+        if (isInternal) return false;
+        // Filter to specific campaign_id if provided
+        if (campaign_id && c.id !== campaign_id) return false;
+        return true;
+      })
+      .map(c => {
+        const insights = c.insights?.data?.[0] || {};
+        const spendCents = Math.round(parseFloat(insights.spend || 0) * 100);
+
+        // Count leads
+        let leads = 0;
+        if (insights.actions && Array.isArray(insights.actions)) {
+          for (const action of insights.actions) {
+            if (action.action_type === 'onsite_conversion.total_messaging_connection') {
+              leads += parseInt(action.value || '0', 10);
+            } else if (action.action_type === 'offsite_conversion.fb_pixel_lead') {
+              leads += parseInt(action.value || '0', 10);
+            } else if (action.action_type === 'onsite_conversion.lead_grouped') {
+              leads += parseInt(action.value || '0', 10);
+            }
+          }
+        }
+
+        // Get target CPL: mapping > account default > hardcoded fallback
+        const mapping = campaignMappings[c.id];
+        const targetCPLCents = mapping?.target_cpl_cents || defaultTargetCPL;
+        const actualCPLCents = leads > 0 ? Math.round(spendCents / leads) : null;
+
+        // Calculate CPL gap and health score
+        let cplGapPercent = null;
+        let healthScore = 0;
+
+        if (actualCPLCents !== null && targetCPLCents > 0) {
+          cplGapPercent = ((actualCPLCents - targetCPLCents) / targetCPLCents * 100).toFixed(1);
+
+          // Health score: 0 = at target, negative = over target (bad), positive = under target (good)
+          // Scale: -100 (200% over) to +100 (100% under)
+          const gapRatio = (targetCPLCents - actualCPLCents) / targetCPLCents;
+          healthScore = Math.max(-100, Math.min(100, Math.round(gapRatio * 100)));
+        }
+
+        return {
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          objective: c.objective,
+          daily_budget_cents: c.daily_budget ? parseInt(c.daily_budget) : null,
+          campaign_type: 'external',
+          direction_name: mapping?.direction_name || null,
+          target_cpl_cents: targetCPLCents,
+          target_cpl_source: mapping?.target_cpl_cents ? 'mapping' : (adAccount?.default_cpl_target_cents ? 'account_default' : 'fallback'),
+          spend_cents: spendCents,
+          leads,
+          actual_cpl_cents: actualCPLCents,
+          cpl_gap_percent: cplGapPercent,
+          health_score: healthScore,
+          impressions: parseInt(insights.impressions || 0),
+          clicks: parseInt(insights.clicks || 0)
+        };
+      });
+
+    // Sort by spend descending
+    externalCampaigns.sort((a, b) => b.spend_cents - a.spend_cents);
+
+    const totalSpend = externalCampaigns.reduce((sum, c) => sum + c.spend_cents, 0);
+    const totalLeads = externalCampaigns.reduce((sum, c) => sum + c.leads, 0);
+
+    logger.info({
+      externalCount: externalCampaigns.length,
+      totalSpendCents: totalSpend,
+      totalLeads,
+      avgCPL: totalLeads > 0 ? Math.round(totalSpend / totalLeads) : null
+    }, '[getExternalCampaignMetrics] Completed');
+
+    return {
+      success: true,
+      period: { since: dateRange.since, until: dateRange.until },
+      campaigns: externalCampaigns,
+      totals: {
+        count: externalCampaigns.length,
+        spend_cents: totalSpend,
+        leads: totalLeads,
+        avg_cpl_cents: totalLeads > 0 ? Math.round(totalSpend / totalLeads) : null
+      },
+      default_target_cpl_cents: defaultTargetCPL,
+      tip: 'Используй saveCampaignMapping чтобы указать целевой CPL для внешних кампаний'
+    };
   },
 
   // ============================================================
