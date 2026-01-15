@@ -51,6 +51,32 @@ export interface CreateAdInDirectionResult {
   message: string;
 }
 
+export interface CreateAdGroupWithCreativesParams {
+  user_creative_ids: string[];
+  direction_id: string;
+  daily_budget?: number;
+  adgroup_name?: string;
+  auto_activate?: boolean;
+}
+
+export interface CreateAdGroupWithCreativesContext {
+  user_account_id: string;
+  ad_account_id?: string;
+}
+
+export interface CreateAdGroupWithCreativesResult {
+  success: boolean;
+  adgroup_id: string;
+  tiktok_adgroup_id: string;
+  ads: Array<{
+    ad_id: string;
+    user_creative_id: string;
+    tiktok_video_id: string;
+  }>;
+  ads_count: number;
+  message: string;
+}
+
 // ============================================================
 // DIRECTION ADGROUP HELPERS
 // ============================================================
@@ -159,19 +185,26 @@ export async function deactivateTikTokAdGroupWithAds(
   accessToken: string
 ): Promise<void> {
   try {
+    const getTikTokStatus = (entity: { operation_status?: string; status?: string }) =>
+      entity?.operation_status || entity?.status;
+
     // 1. Получить все ads в AdGroup
     const adsResponse = await tt.getAds(advertiserId, accessToken, {
       adgroupIds: [tikTokAdGroupId],
       pageSize: 100
     });
 
-    const ads = adsResponse.ads || [];
-    logger.info({ tikTokAdGroupId, adsCount: ads.length }, 'Fetched ads from ad group');
+    const ads = adsResponse?.data?.list || adsResponse?.ads || [];
+    logger.info({
+      tikTokAdGroupId,
+      adsCount: ads.length,
+      responseKeys: adsResponse?.data ? Object.keys(adsResponse.data) : Object.keys(adsResponse || {})
+    }, 'Fetched ads from ad group');
 
     // 2. Остановить все ENABLE ads
     let pausedCount = 0;
     for (const ad of ads) {
-      if (ad.status === 'ENABLE') {
+      if (getTikTokStatus(ad) === 'ENABLE') {
         await tt.pauseAd(advertiserId, accessToken, ad.ad_id);
         pausedCount++;
       }
@@ -264,6 +297,11 @@ export async function hasAvailableTikTokAdGroups(directionId: string): Promise<b
     .lt('ads_count', 50);
 
   return (count || 0) > 0;
+}
+
+function toTikTokTimestamp(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toISOString().replace('T', ' ').substring(0, 19);
 }
 
 // ============================================================
@@ -491,8 +529,225 @@ export async function workflowCreateAdInDirection(
   };
 }
 
+/**
+ * Workflow: Создать новый TikTok AdGroup + Ads внутри направления
+ */
+export async function workflowCreateAdGroupWithCreatives(
+  params: CreateAdGroupWithCreativesParams,
+  context: CreateAdGroupWithCreativesContext
+): Promise<CreateAdGroupWithCreativesResult> {
+  const {
+    user_creative_ids,
+    direction_id,
+    daily_budget,
+    adgroup_name,
+    auto_activate = true
+  } = params;
+
+  const { user_account_id, ad_account_id } = context;
+
+  logger.info({
+    direction_id,
+    user_creative_ids,
+    daily_budget,
+    auto_activate
+  }, '[TIKTOK:CreateAdGroupWithCreatives] Starting workflow');
+
+  const creds = await getTikTokCredentials(user_account_id, ad_account_id);
+  if (!creds) {
+    throw new Error('TikTok credentials not found. Please connect TikTok account first.');
+  }
+
+  const { accessToken, advertiserId, identityId } = creds;
+
+  const directionSettings = await getTikTokDirectionSettings(direction_id, user_account_id);
+  if (!directionSettings) {
+    throw new Error(`Direction ${direction_id} not found or has no TikTok settings`);
+  }
+
+  const { data: direction, error: directionError } = await supabase
+    .from('account_directions')
+    .select('id, name, tiktok_campaign_id, tiktok_objective, tiktok_identity_id')
+    .eq('id', direction_id)
+    .eq('user_account_id', user_account_id)
+    .single();
+
+  if (directionError || !direction) {
+    throw new Error(`Direction ${direction_id} not found`);
+  }
+
+  if (!direction.tiktok_campaign_id) {
+    throw new Error(`Direction ${direction_id} has no TikTok campaign_id`);
+  }
+
+  const objective = direction.tiktok_objective || 'traffic';
+  const finalBudget = daily_budget || directionSettings.daily_budget || 20;
+  const finalAdGroupName = adgroup_name || `${direction.name || 'Direction'} - AdGroup ${new Date().toISOString().slice(0, 10)}`;
+
+  const { data: creatives, error: creativesError } = await supabase
+    .from('user_creatives')
+    .select('*')
+    .in('id', user_creative_ids)
+    .eq('user_id', user_account_id)
+    .eq('status', 'ready');
+
+  if (creativesError || !creatives || creatives.length === 0) {
+    throw new Error(`Creatives not found or not ready: ${user_creative_ids.join(', ')}`);
+  }
+
+  const creative_data: Array<{
+    user_creative_id: string;
+    tiktok_video_id: string;
+    title: string;
+    ad_name: string;
+    description: string;
+  }> = [];
+
+  for (let i = 0; i < creatives.length; i++) {
+    const creative = creatives[i];
+    let tiktok_video_id = creative.tiktok_video_id;
+
+    if (!tiktok_video_id) {
+      if (!creative.media_url) {
+        throw new Error(`Creative ${creative.id} has no media_url and no tiktok_video_id`);
+      }
+
+      logger.info({
+        creative_id: creative.id
+      }, '[TIKTOK:CreateAdGroupWithCreatives] Uploading video for creative');
+
+      const uploadResult = await tt.uploadVideo(
+        advertiserId,
+        accessToken,
+        creative.media_url
+      );
+
+      tiktok_video_id = uploadResult.video_id;
+
+      await supabase
+        .from('user_creatives')
+        .update({
+          tiktok_video_id,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', creative.id);
+    }
+
+    creative_data.push({
+      user_creative_id: creative.id,
+      tiktok_video_id,
+      title: creative.title || `Ad ${i + 1}`,
+      ad_name: `${finalAdGroupName} - Ad ${i + 1}`,
+      description: creative.description || ''
+    });
+  }
+
+  const scheduleStartTime = toTikTokTimestamp(new Date());
+
+  const adGroupParams = {
+    adgroup_name: finalAdGroupName,
+    campaign_id: direction.tiktok_campaign_id,
+    optimization_goal: directionSettings.objective_config.optimization_goal,
+    billing_event: directionSettings.objective_config.billing_event,
+    bid_type: 'BID_TYPE_NO_BID' as const,
+    budget: finalBudget,
+    budget_mode: 'BUDGET_MODE_DAY' as const,
+    schedule_type: 'SCHEDULE_FROM_NOW' as const,
+    schedule_start_time: scheduleStartTime,
+    location_ids: directionSettings.targeting.location_ids,
+    age_groups: directionSettings.targeting.age_groups,
+    gender: directionSettings.targeting.gender,
+    pacing: 'PACING_MODE_SMOOTH' as const,
+    placement_type: 'PLACEMENT_TYPE_AUTOMATIC' as const,
+    operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
+    ...(directionSettings.pixel_id && objective === 'conversions' && { pixel_id: directionSettings.pixel_id }),
+    ...(directionSettings.identity_id && { identity_id: directionSettings.identity_id, identity_type: 'TT_USER' as const }),
+    ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const }),
+    ...(direction.tiktok_identity_id && { identity_id: direction.tiktok_identity_id, identity_type: 'TT_USER' as const })
+  };
+
+  const adGroupResult = await tt.createAdGroup(advertiserId, accessToken, adGroupParams);
+  const tiktok_adgroup_id = adGroupResult.adgroup_id;
+  if (!tiktok_adgroup_id) {
+    throw new Error('Failed to create TikTok ad group');
+  }
+
+  const created_ads: Array<{
+    ad_id: string;
+    user_creative_id: string;
+    tiktok_video_id: string;
+  }> = [];
+
+  for (const creative of creative_data) {
+    const adParams = {
+      ad_name: creative.ad_name,
+      adgroup_id: tiktok_adgroup_id,
+      ad_format: 'SINGLE_VIDEO' as const,
+      video_id: creative.tiktok_video_id,
+      ad_text: creative.description || creative.title,
+      call_to_action: 'LEARN_MORE',
+      operation_status: auto_activate ? 'ENABLE' as const : 'DISABLE' as const,
+      ...(directionSettings.identity_id && { identity_id: directionSettings.identity_id, identity_type: 'TT_USER' as const }),
+      ...(identityId && { identity_id: identityId, identity_type: 'TT_USER' as const })
+    };
+
+    const adResult = await tt.createAd(advertiserId, accessToken, adParams);
+    const ad_id = adResult.ad_id;
+    if (!ad_id) {
+      throw new Error(`Failed to create ad for creative ${creative.user_creative_id}`);
+    }
+
+    created_ads.push({
+      ad_id,
+      user_creative_id: creative.user_creative_id,
+      tiktok_video_id: creative.tiktok_video_id
+    });
+  }
+
+  await supabase
+    .from('direction_tiktok_adgroups')
+    .insert({
+      direction_id,
+      tiktok_adgroup_id,
+      adgroup_name: finalAdGroupName,
+      daily_budget: finalBudget,
+      status: auto_activate ? 'ENABLE' : 'DISABLE',
+      ads_count: created_ads.length,
+      last_used_at: auto_activate ? new Date().toISOString() : null,
+      is_active: true
+    });
+
+  try {
+    await saveAdCreativeMappingBatch(
+      created_ads.map(ad => ({
+        ad_id: ad.ad_id,
+        user_creative_id: ad.user_creative_id,
+        direction_id: direction_id,
+        user_id: user_account_id,
+        account_id: ad_account_id || undefined,
+        adset_id: tiktok_adgroup_id,
+        campaign_id: direction.tiktok_campaign_id,
+        fb_creative_id: ad.tiktok_video_id,
+        source: 'tiktok_direction'
+      }))
+    );
+  } catch (mappingError) {
+    logger.error({ error: mappingError }, '[TIKTOK:CreateAdGroupWithCreatives] Failed to save mapping');
+  }
+
+  return {
+    success: true,
+    adgroup_id: tiktok_adgroup_id,
+    tiktok_adgroup_id,
+    ads: created_ads,
+    ads_count: created_ads.length,
+    message: `Created TikTok AdGroup "${finalAdGroupName}" with ${created_ads.length} ad(s)`
+  };
+}
+
 export default {
   workflowCreateAdInDirection,
+  workflowCreateAdGroupWithCreatives,
   getAvailableTikTokAdGroup,
   activateTikTokAdGroup,
   deactivateTikTokAdGroupWithAds,

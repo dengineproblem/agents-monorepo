@@ -41,6 +41,10 @@ function parseMetrics(metrics) {
   };
 }
 
+function getTikTokStatus(entity) {
+  return entity?.operation_status || entity?.status;
+}
+
 export const tikTokHandlers = {
   // ============================================================
   // READ HANDLERS - Campaigns & AdGroups
@@ -60,14 +64,15 @@ export const tikTokHandlers = {
     // Get campaigns
     const campaignsResult = await tikTokGraph('GET', 'campaign/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
-      page_size: 100
+      page_size: 100,
+      fields: ['campaign_id', 'campaign_name', 'operation_status', 'objective_type', 'budget', 'budget_mode', 'create_time']
     });
 
     const campaigns = campaignsResult.data?.list || [];
 
     // Filter by status if needed
     const filteredCampaigns = status && status !== 'all'
-      ? campaigns.filter(c => c.status === status)
+      ? campaigns.filter(c => getTikTokStatus(c) === status)
       : campaigns;
 
     // Get metrics for campaigns
@@ -110,7 +115,7 @@ export const tikTokHandlers = {
       return {
         id: c.campaign_id,
         name: c.campaign_name,
-        status: c.status,
+        status: getTikTokStatus(c),
         objective: c.objective_type,
         budget: c.budget,
         budget_mode: c.budget_mode,
@@ -147,7 +152,8 @@ export const tikTokHandlers = {
     // Get campaign info
     const campaignResult = await tikTokGraph('GET', 'campaign/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
-      filtering: JSON.stringify({ campaign_ids: [campaign_id] })
+      filtering: JSON.stringify({ campaign_ids: [campaign_id] }),
+      fields: ['campaign_id', 'campaign_name', 'operation_status', 'objective_type', 'budget', 'budget_mode', 'create_time']
     });
 
     const campaign = campaignResult.data?.list?.[0];
@@ -159,7 +165,8 @@ export const tikTokHandlers = {
     const adGroupsResult = await tikTokGraph('GET', 'adgroup/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       filtering: JSON.stringify({ campaign_ids: [campaign_id] }),
-      page_size: 100
+      page_size: 100,
+      fields: ['adgroup_id', 'adgroup_name', 'campaign_id', 'operation_status', 'budget', 'optimization_goal']
     });
 
     const adGroups = adGroupsResult.data?.list || [];
@@ -172,10 +179,18 @@ export const tikTokHandlers = {
       const adsResult = await tikTokGraph('GET', 'ad/get/', tikTokAccessToken, {
         advertiser_id: tikTokAdvertiserId,
         filtering: JSON.stringify({ adgroup_ids: adGroupIds }),
-        page_size: 100
+        page_size: 100,
+        fields: ['ad_id', 'ad_name', 'adgroup_id', 'campaign_id', 'operation_status', 'video_id']
       });
       ads = adsResult.data?.list || [];
     }
+
+    logger.info({
+      advertiserId: tikTokAdvertiserId,
+      campaign_id,
+      adgroupsCount: adGroups.length,
+      adsCount: ads.length
+    }, '[TikTok:Handler:getCampaignDetails] ✅ Campaign details fetched');
 
     return {
       success: true,
@@ -183,7 +198,7 @@ export const tikTokHandlers = {
       campaign: {
         id: campaign.campaign_id,
         name: campaign.campaign_name,
-        status: campaign.status,
+        status: getTikTokStatus(campaign),
         objective: campaign.objective_type,
         budget: campaign.budget,
         budget_mode: campaign.budget_mode,
@@ -191,14 +206,14 @@ export const tikTokHandlers = {
         adgroups: adGroups.map(ag => ({
           id: ag.adgroup_id,
           name: ag.adgroup_name,
-          status: ag.status,
+          status: getTikTokStatus(ag),
           budget: ag.budget,
           optimization_goal: ag.optimization_goal
         })),
         ads: ads.map(ad => ({
           id: ad.ad_id,
           name: ad.ad_name,
-          status: ad.status,
+          status: getTikTokStatus(ad),
           video_id: ad.video_id
         }))
       }
@@ -212,7 +227,8 @@ export const tikTokHandlers = {
     const result = await tikTokGraph('GET', 'adgroup/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       filtering: JSON.stringify({ campaign_ids: [campaign_id] }),
-      page_size: 100
+      page_size: 100,
+      fields: ['adgroup_id', 'adgroup_name', 'campaign_id', 'operation_status', 'budget', 'optimization_goal']
     });
 
     const adGroups = result.data?.list || [];
@@ -250,7 +266,7 @@ export const tikTokHandlers = {
       return {
         id: ag.adgroup_id,
         name: ag.adgroup_name,
-        status: ag.status,
+        status: getTikTokStatus(ag),
         budget: ag.budget,
         optimization_goal: ag.optimization_goal,
         ...parsed,
@@ -278,7 +294,8 @@ export const tikTokHandlers = {
     const result = await tikTokGraph('GET', 'ad/get/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       filtering: Object.keys(filtering).length > 0 ? JSON.stringify(filtering) : undefined,
-      page_size: 100
+      page_size: 100,
+      fields: ['ad_id', 'ad_name', 'adgroup_id', 'campaign_id', 'operation_status', 'video_id']
     });
 
     const ads = result.data?.list || [];
@@ -316,7 +333,7 @@ export const tikTokHandlers = {
       return {
         id: ad.ad_id,
         name: ad.ad_name,
-        status: ad.status,
+        status: getTikTokStatus(ad),
         adgroup_id: ad.adgroup_id,
         video_id: ad.video_id,
         ...parsed,
@@ -532,7 +549,7 @@ export const tikTokHandlers = {
     await tikTokGraph('POST', 'campaign/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       campaign_ids: JSON.stringify([campaign_id]),
-      status: 'DISABLE'
+      operation_status: 'DISABLE'
     });
 
     logger.info({
@@ -559,7 +576,7 @@ export const tikTokHandlers = {
     await tikTokGraph('POST', 'campaign/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       campaign_ids: JSON.stringify([campaign_id]),
-      status: 'ENABLE'
+      operation_status: 'ENABLE'
     });
 
     logger.info({
@@ -602,7 +619,7 @@ export const tikTokHandlers = {
     await tikTokGraph('POST', 'adgroup/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       adgroup_ids: JSON.stringify([adgroup_id]),
-      status: 'DISABLE'
+      operation_status: 'DISABLE'
     });
 
     logger.info({
@@ -624,7 +641,7 @@ export const tikTokHandlers = {
     await tikTokGraph('POST', 'adgroup/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       adgroup_ids: JSON.stringify([adgroup_id]),
-      status: 'ENABLE'
+      operation_status: 'ENABLE'
     });
 
     return {
@@ -679,7 +696,7 @@ export const tikTokHandlers = {
     await tikTokGraph('POST', 'ad/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       ad_ids: JSON.stringify([ad_id]),
-      status: 'DISABLE'
+      operation_status: 'DISABLE'
     });
 
     return {
@@ -695,7 +712,7 @@ export const tikTokHandlers = {
     await tikTokGraph('POST', 'ad/status/update/', tikTokAccessToken, {
       advertiser_id: tikTokAdvertiserId,
       ad_ids: JSON.stringify([ad_id]),
-      status: 'ENABLE'
+      operation_status: 'ENABLE'
     });
 
     return {
@@ -754,7 +771,7 @@ export const tikTokHandlers = {
       await tikTokGraph('POST', 'campaign/status/update/', tikTokAccessToken, {
         advertiser_id: tikTokAdvertiserId,
         campaign_ids: JSON.stringify([direction.tiktok_campaign_id]),
-        status: 'DISABLE'
+        operation_status: 'DISABLE'
       });
     }
 
@@ -796,7 +813,7 @@ export const tikTokHandlers = {
       await tikTokGraph('POST', 'campaign/status/update/', tikTokAccessToken, {
         advertiser_id: tikTokAdvertiserId,
         campaign_ids: JSON.stringify([direction.tiktok_campaign_id]),
-        status: 'ENABLE'
+        operation_status: 'ENABLE'
       });
     }
 

@@ -600,10 +600,18 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
 
       const campaigns = await tt.getCampaigns(creds.advertiserId, creds.accessToken);
 
+      const campaignList = campaigns?.data?.list || [];
+      const pageInfo = campaigns?.data?.page_info || campaigns?.page_info || {};
+      log.info({
+        advertiserId: creds.advertiserId,
+        campaignsCount: campaignList.length,
+        pageInfo
+      }, 'TikTok campaigns fetched');
+
       return reply.send({
         success: true,
-        campaigns: campaigns.campaigns,
-        total: campaigns.page_info?.total_number || campaigns.campaigns.length
+        campaigns: campaignList,
+        total: pageInfo.total_number || campaignList.length
       });
 
     } catch (error: any) {

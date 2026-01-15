@@ -2,16 +2,19 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ActionsEnvelope, ActionInput } from '../actions/schema.js';
 import { fb, graph } from '../adapters/facebook.js';
+import { tt } from '../adapters/tiktok.js';
 import { supabase } from '../lib/supabase.js';
 import { executeByManifest, getActionSpec } from '../actions/engine.js';
 import { workflowDuplicateAndPauseOriginal, workflowDuplicateKeepOriginalActive, workflowDuplicateAdsetWithAudience } from '../workflows/campaignDuplicate.js';
 import { workflowCreateCampaignWithCreative } from '../workflows/createCampaignWithCreative.js';
 import { workflowStartCreativeTest } from '../workflows/creativeTest.js';
 import { workflowCreateAdSetInDirection } from '../workflows/createAdSetInDirection.js';
+import { workflowCreateAdGroupWithCreatives } from '../workflows/tiktok/createAdGroupInDirection.js';
 import { getAvailableAdSet, activateAdSet, incrementAdsCount, deactivateAdSetWithAds } from '../lib/directionAdSets.js';
 import { pauseAdSetsForCampaign } from '../lib/campaignBuilder.js';
 import { logErrorToAdmin } from '../lib/errorLogger.js';
 import { generateAdsetName } from '../lib/adsetNaming.js';
+import { getTikTokCredentials } from '../lib/tiktokSettings.js';
 
 /**
  * Helper: конвертирует объекты в параметры для Facebook API
@@ -44,6 +47,12 @@ export async function actionsRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'validation_error', issues: parsed.error.flatten() });
       }
       const { idempotencyKey, account, actions, source } = parsed.data;
+      const isTikTokOnly = actions.every((a) => String(a.type || '').startsWith('TikTok.'));
+      const isFacebookOnly = actions.every((a) => !String(a.type || '').startsWith('TikTok.'));
+
+      if (!isTikTokOnly && !isFacebookOnly) {
+        return reply.code(400).send({ error: 'mixed_platform_actions', message: 'Do not mix TikTok and Facebook actions in the same batch' });
+      }
 
       // Если actions пустой - возвращаем успешный response без выполнения
       // Это происходит когда Brain Agent определяет что действия не нужны (хорошие показатели или reportOnlyMode)
@@ -63,12 +72,25 @@ export async function actionsRoutes(app: FastifyInstance) {
         return reply.code(202).send({ executionId: 'dry-run', executed: ok, dryRun: true, actionsCount: actions.length, validations });
       }
 
-      const tokenInfo = await resolveAccessToken(account);
-      if (!tokenInfo.ok) {
-        return reply.code(400).send({ error: 'missing_token', message: tokenInfo.message });
+      let tokenInfo: ResolveOk | null = null;
+      let tiktokInfo: ResolveTikTokOk | null = null;
+
+      if (isTikTokOnly) {
+        const creds = await resolveTikTokCredentials(account);
+        if (!creds.ok) {
+          return reply.code(400).send({ error: 'missing_tiktok_credentials', message: creds.message });
+        }
+        tiktokInfo = creds;
+      } else {
+        const fbTokenInfo = await resolveAccessToken(account);
+        if (!fbTokenInfo.ok) {
+          return reply.code(400).send({ error: 'missing_token', message: fbTokenInfo.message });
+        }
+        tokenInfo = fbTokenInfo;
       }
-      const accessToken = tokenInfo.accessToken!;
-      const resolvedAdAccountId = account.adAccountId || tokenInfo.adAccountId || null;
+
+      const accessToken = tokenInfo?.accessToken;
+      const resolvedAdAccountId = account.adAccountId || tokenInfo?.adAccountId || tiktokInfo?.advertiserId || null;
 
       if (idempotencyKey) {
         const { data: dup } = await supabase
@@ -118,28 +140,39 @@ export async function actionsRoutes(app: FastifyInstance) {
         try {
           const spec = getActionSpec(act.type);
           let result: any;
-          // Force manual handler for PauseAd (accepts ad_id/adId)
-          if (act.type === 'PauseAd') {
-            result = await handleAction(act as any, accessToken, {
-              pageId: tokenInfo.pageId,
+
+          if (isTikTokOnly && tiktokInfo) {
+            result = await handleTikTokAction(act as any, {
+              accessToken: tiktokInfo.accessToken,
+              advertiserId: tiktokInfo.advertiserId,
+              identityId: tiktokInfo.identityId,
               userAccountId: account.userAccountId || undefined,
-              adAccountId: resolvedAdAccountId ?? undefined,
-              accountId: tokenInfo.accountId, // UUID из ad_accounts
-              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
-              skipWhatsAppNumberInApi: tokenInfo.skipWhatsAppNumberInApi
+              accountId: tiktokInfo.accountId
             });
-          } else if (spec) {
-            result = await executeByManifest(act.type, act.params as any, accessToken);
           } else {
-            result = await handleAction(act as any, accessToken, {
-              pageId: tokenInfo.pageId,
-              userAccountId: account.userAccountId || undefined,
-              adAccountId: resolvedAdAccountId ?? undefined,
-              accountId: tokenInfo.accountId, // UUID из ad_accounts
-              instagramId: tokenInfo.instagramId,
-              whatsappPhoneNumber: tokenInfo.whatsappPhoneNumber,
-              skipWhatsAppNumberInApi: tokenInfo.skipWhatsAppNumberInApi
-            });
+            // Force manual handler for PauseAd (accepts ad_id/adId)
+            if (act.type === 'PauseAd') {
+              result = await handleAction(act as any, accessToken!, {
+                pageId: tokenInfo?.pageId,
+                userAccountId: account.userAccountId || undefined,
+                adAccountId: resolvedAdAccountId ?? undefined,
+                accountId: tokenInfo?.accountId, // UUID из ad_accounts
+                whatsappPhoneNumber: tokenInfo?.whatsappPhoneNumber,
+                skipWhatsAppNumberInApi: tokenInfo?.skipWhatsAppNumberInApi
+              });
+            } else if (spec) {
+              result = await executeByManifest(act.type, act.params as any, accessToken!);
+            } else {
+              result = await handleAction(act as any, accessToken!, {
+                pageId: tokenInfo?.pageId,
+                userAccountId: account.userAccountId || undefined,
+                adAccountId: resolvedAdAccountId ?? undefined,
+                accountId: tokenInfo?.accountId, // UUID из ad_accounts
+                instagramId: tokenInfo?.instagramId,
+                whatsappPhoneNumber: tokenInfo?.whatsappPhoneNumber,
+                skipWhatsAppNumberInApi: tokenInfo?.skipWhatsAppNumberInApi
+              });
+            }
           }
 
           await supabase.from('agent_actions')
@@ -191,6 +224,8 @@ export async function actionsRoutes(app: FastifyInstance) {
 
 type ResolveOk = { ok: true; accessToken: string; adAccountId?: string; accountId?: string; pageId?: string; instagramId?: string; whatsappPhoneNumber?: string; skipWhatsAppNumberInApi?: boolean };
 type ResolveErr = { ok: false; message: string };
+type ResolveTikTokOk = { ok: true; accessToken: string; advertiserId: string; identityId?: string; accountId?: string };
+type ResolveTikTokErr = { ok: false; message: string };
 
 async function resolveAccessToken(account: { userAccountId?: string | null; accessToken?: string | null; adAccountId?: string | null; whatsappPhoneNumber?: string | null; accountId?: string | null; pageId?: string | null }): Promise<ResolveOk | ResolveErr> {
   if (account.accessToken && account.accessToken.length >= 10) {
@@ -239,6 +274,25 @@ async function resolveAccessToken(account: { userAccountId?: string | null; acce
     pageId: (data as any).page_id || undefined,
     instagramId: (data as any).instagram_id || undefined,
     whatsappPhoneNumber: account.whatsappPhoneNumber || (data as any).whatsapp_phone_number || undefined
+  };
+}
+
+async function resolveTikTokCredentials(account: { userAccountId?: string | null; accountId?: string | null }): Promise<ResolveTikTokOk | ResolveTikTokErr> {
+  if (!account.userAccountId) {
+    return { ok: false, message: 'Provide userAccountId for TikTok actions' };
+  }
+
+  const creds = await getTikTokCredentials(account.userAccountId, account.accountId || undefined);
+  if (!creds) {
+    return { ok: false, message: 'TikTok credentials not found for provided account' };
+  }
+
+  return {
+    ok: true,
+    accessToken: creds.accessToken,
+    advertiserId: creds.advertiserId,
+    identityId: creds.identityId,
+    accountId: account.accountId || undefined
   };
 }
 
@@ -940,6 +994,73 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
   }
 }
 
+async function handleTikTokAction(
+  action: ActionInput,
+  ctx: { accessToken: string; advertiserId: string; identityId?: string; userAccountId?: string; accountId?: string }
+) {
+  switch ((action as any).type) {
+    case 'TikTok.GetCampaignStatus': {
+      const p = (action as any).params as { campaign_id: string };
+      return tt.getCampaigns(ctx.advertiserId, ctx.accessToken, { filtering: { campaign_ids: [p.campaign_id] } });
+    }
+    case 'TikTok.PauseCampaign': {
+      const p = (action as any).params as { campaign_id: string };
+      return tt.pauseCampaign(ctx.advertiserId, ctx.accessToken, p.campaign_id);
+    }
+    case 'TikTok.ResumeCampaign': {
+      const p = (action as any).params as { campaign_id: string };
+      return tt.resumeCampaign(ctx.advertiserId, ctx.accessToken, p.campaign_id);
+    }
+    case 'TikTok.PauseAdGroup': {
+      const p = (action as any).params as { adgroup_id: string };
+      return tt.pauseAdGroup(ctx.advertiserId, ctx.accessToken, p.adgroup_id);
+    }
+    case 'TikTok.ResumeAdGroup': {
+      const p = (action as any).params as { adgroup_id: string };
+      return tt.resumeAdGroup(ctx.advertiserId, ctx.accessToken, p.adgroup_id);
+    }
+    case 'TikTok.UpdateAdGroupBudget': {
+      const p = (action as any).params as { adgroup_id: string; new_budget: number };
+      return tt.updateAdGroupBudget(ctx.advertiserId, ctx.accessToken, p.adgroup_id, p.new_budget);
+    }
+    case 'TikTok.PauseAd': {
+      const p = (action as any).params as { ad_id: string };
+      return tt.pauseAd(ctx.advertiserId, ctx.accessToken, p.ad_id);
+    }
+    case 'TikTok.ResumeAd': {
+      const p = (action as any).params as { ad_id: string };
+      return tt.resumeAd(ctx.advertiserId, ctx.accessToken, p.ad_id);
+    }
+    case 'TikTok.Direction.CreateAdGroupWithCreatives': {
+      const p = (action as any).params as {
+        direction_id: string;
+        user_creative_ids: string[];
+        daily_budget: number;
+        adgroup_name?: string;
+        auto_activate?: boolean;
+      };
+      if (!ctx.userAccountId) {
+        throw new Error('TikTok.Direction.CreateAdGroupWithCreatives: userAccountId is required');
+      }
+      return workflowCreateAdGroupWithCreatives(
+        {
+          direction_id: p.direction_id,
+          user_creative_ids: p.user_creative_ids,
+          daily_budget: p.daily_budget,
+          adgroup_name: p.adgroup_name,
+          auto_activate: p.auto_activate
+        },
+        {
+          user_account_id: ctx.userAccountId,
+          ad_account_id: ctx.accountId
+        }
+      );
+    }
+    default:
+      throw new Error(`Unknown TikTok action: ${(action as any).type}`);
+  }
+}
+
 function validateActionShape(action: ActionInput): { type: string; valid: boolean; issues?: string[] } {
   const type = (action as any).type;
   const params = (action as any).params || {};
@@ -967,6 +1088,46 @@ function validateActionShape(action: ActionInput): { type: string; valid: boolea
   } else {
     // Minimal checks for manual actions
     switch (type) {
+      case 'TikTok.GetCampaignStatus': {
+        if (!params.campaign_id) issues.push('TikTok.GetCampaignStatus: campaign_id required');
+        break;
+      }
+      case 'TikTok.PauseCampaign':
+      case 'TikTok.ResumeCampaign': {
+        if (!params.campaign_id) issues.push(`${type}: campaign_id required`);
+        break;
+      }
+      case 'TikTok.PauseAdGroup':
+      case 'TikTok.ResumeAdGroup': {
+        if (!params.adgroup_id) issues.push(`${type}: adgroup_id required`);
+        break;
+      }
+      case 'TikTok.UpdateAdGroupBudget': {
+        if (!params.adgroup_id) issues.push('TikTok.UpdateAdGroupBudget: adgroup_id required');
+        if (typeof params.new_budget !== 'number') issues.push('TikTok.UpdateAdGroupBudget: new_budget number required');
+        break;
+      }
+      case 'TikTok.PauseAd':
+      case 'TikTok.ResumeAd': {
+        if (!params.ad_id) issues.push(`${type}: ad_id required`);
+        break;
+      }
+      case 'TikTok.Direction.CreateAdGroupWithCreatives': {
+        if (!params.direction_id) issues.push('TikTok.Direction.CreateAdGroupWithCreatives: direction_id required');
+        if (!params.user_creative_ids) {
+          issues.push('TikTok.Direction.CreateAdGroupWithCreatives: user_creative_ids required');
+        }
+        if (params.user_creative_ids && !Array.isArray(params.user_creative_ids)) {
+          issues.push('TikTok.Direction.CreateAdGroupWithCreatives: user_creative_ids must be an array');
+        }
+        if (params.user_creative_ids && Array.isArray(params.user_creative_ids) && params.user_creative_ids.length === 0) {
+          issues.push('TikTok.Direction.CreateAdGroupWithCreatives: user_creative_ids must have at least 1 creative');
+        }
+        if (params.daily_budget && typeof params.daily_budget !== 'number') {
+          issues.push('TikTok.Direction.CreateAdGroupWithCreatives: daily_budget must be a number');
+        }
+        break;
+      }
       case 'PauseAd': if (!params.adId) issues.push('PauseAd: adId required'); break;
       case 'ResumeAd': if (!params.adId) issues.push('ResumeAd: adId required'); break;
       case 'PauseAdset': if (!params.adsetId) issues.push('PauseAdset: adsetId required'); break;

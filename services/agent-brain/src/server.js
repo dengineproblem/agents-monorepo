@@ -14,6 +14,8 @@ import { analyzeCreativeTest } from './creativeAnalyzer.js';
 import { registerChatRoutes } from './chatAssistant/index.js';
 import { logErrorToAdmin, logFacebookError } from './lib/errorLogger.js';
 import { registerMCPRoutes, MCP_CONFIG } from './mcp/index.js';
+import { getTikTokAdvertiserInfo, getTikTokReport, getTikTokCampaigns, getTikTokAdGroups } from './chatAssistant/shared/tikTokGraph.js';
+import { getUsdToKzt, convertUsdToKzt } from './chatAssistant/shared/currencyRate.js';
 
 // Основной бот для отправки отчётов клиентам и в мониторинг
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -486,6 +488,22 @@ const ALLOWED_TYPES = new Set([
   'Direction.UseExistingAdSetWithCreatives'
 ]);
 
+const TIKTOK_ALLOWED_TYPES = new Set([
+  'TikTok.GetCampaignStatus',
+  'TikTok.PauseCampaign',
+  'TikTok.ResumeCampaign',
+  'TikTok.PauseAdGroup',
+  'TikTok.ResumeAdGroup',
+  'TikTok.UpdateAdGroupBudget',
+  'TikTok.PauseAd',
+  'TikTok.ResumeAd',
+  'TikTok.Direction.CreateAdGroupWithCreatives'
+]);
+
+const TIKTOK_MIN_DAILY_BUDGET_USD = Number(process.env.TIKTOK_MIN_DAILY_BUDGET_USD || 20);
+const TIKTOK_MAX_DAILY_BUDGET_KZT = Number(process.env.TIKTOK_MAX_DAILY_BUDGET_KZT || 100000000);
+const TIKTOK_DEFAULT_CPL_KZT = Number(process.env.TIKTOK_DEFAULT_CPL_KZT || 5000);
+
 function genIdem() {
   const d = new Date();
   const p = (n)=>String(n).padStart(2,'0');
@@ -497,7 +515,7 @@ async function getUserAccount(userAccountId) {
   return await supabaseQuery('user_accounts',
     async () => await supabase
       .from('user_accounts')
-      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode, multi_account_enabled')
+      .select('id, access_token, ad_account_id, page_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, username, prompt3, plan_daily_budget_cents, default_cpl_target_cents, whatsapp_phone_number, ig_seed_audience_id, default_adset_mode, multi_account_enabled, account_timezone, tiktok_access_token, tiktok_business_id, tiktok_account_id, autopilot_tiktok')
       .eq('id', userAccountId)
       .single(),
     { userAccountId }
@@ -769,6 +787,212 @@ function computeLeadsFromActions(stat) {
   // - lead_forms кампании: только formLeads
   const leads = messagingLeads + siteLeads + formLeads;
   return { messagingLeads, qualityLeads, siteLeads, formLeads, leads };
+}
+
+function formatDateInTimeZone(date, timeZone) {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    return formatter.format(date);
+  } catch (err) {
+    return new Date(date).toISOString().split('T')[0];
+  }
+}
+
+function getDateRangePreset(preset, timeZone) {
+  const now = new Date();
+  const todayStr = formatDateInTimeZone(now, timeZone);
+  const [year, month, day] = todayStr.split('-').map(Number);
+  const base = new Date(Date.UTC(year, month - 1, day, 12));
+  const shift = (days) => {
+    const d = new Date(base);
+    d.setUTCDate(d.getUTCDate() + days);
+    return formatDateInTimeZone(d, timeZone);
+  };
+
+  switch (preset) {
+    case 'today':
+      return { startDate: todayStr, endDate: todayStr };
+    case 'yesterday': {
+      const y = shift(-1);
+      return { startDate: y, endDate: y };
+    }
+    case 'last_3d':
+      return { startDate: shift(-3), endDate: todayStr };
+    case 'last_7d':
+      return { startDate: shift(-7), endDate: todayStr };
+    case 'last_30d':
+      return { startDate: shift(-30), endDate: todayStr };
+    default:
+      return { startDate: todayStr, endDate: todayStr };
+  }
+}
+
+function parseTikTokMetrics(metrics = {}) {
+  return {
+    spend: Number(metrics.spend) || 0,
+    impressions: Number(metrics.impressions) || 0,
+    clicks: Number(metrics.clicks) || 0,
+    conversions: Number(metrics.conversions) || 0
+  };
+}
+
+function mergeTikTokMetrics(target, incoming) {
+  target.spend += incoming.spend;
+  target.impressions += incoming.impressions;
+  target.clicks += incoming.clicks;
+  target.conversions += incoming.conversions;
+  return target;
+}
+
+function finalizeTikTokMetrics(metrics) {
+  const spend = Number(metrics.spend) || 0;
+  const impressions = Number(metrics.impressions) || 0;
+  const clicks = Number(metrics.clicks) || 0;
+  const conversions = Number(metrics.conversions) || 0;
+  return {
+    spend,
+    impressions,
+    clicks,
+    conversions,
+    cpm: impressions > 0 ? (spend / impressions) * 1000 : 0,
+    ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+    cpc: clicks > 0 ? (spend / clicks) : 0
+  };
+}
+
+function indexTikTokReportBy(rows, dimensionKey) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const id = row?.dimensions?.[dimensionKey];
+    if (!id) continue;
+    const metrics = parseTikTokMetrics(row?.metrics || {});
+    const prev = map.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+    map.set(id, mergeTikTokMetrics(prev, metrics));
+  }
+  for (const [id, metrics] of map.entries()) {
+    map.set(id, finalizeTikTokMetrics(metrics));
+  }
+  return map;
+}
+
+function indexTikTokAdsByAdgroup(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    const adgroupId = row?.dimensions?.adgroup_id;
+    const adId = row?.dimensions?.ad_id;
+    if (!adgroupId || !adId) continue;
+    const metrics = finalizeTikTokMetrics(parseTikTokMetrics(row?.metrics || {}));
+    const list = map.get(adgroupId) || [];
+    list.push({
+      ad_id: adId,
+      spend: metrics.spend,
+      impressions: metrics.impressions,
+      clicks: metrics.clicks,
+      conversions: metrics.conversions
+    });
+    map.set(adgroupId, list);
+  }
+  return map;
+}
+
+function computeTikTokLeads(metrics, objective) {
+  const obj = String(objective || '').toLowerCase();
+  const clicks = Number(metrics?.clicks) || 0;
+  const conversions = Number(metrics?.conversions) || 0;
+
+  if (obj.includes('traffic') || obj.includes('click')) {
+    return { leads: clicks, lead_type: 'click' };
+  }
+  if (obj.includes('lead')) {
+    return { leads: conversions, lead_type: 'lead' };
+  }
+  if (obj.includes('conversion')) {
+    return { leads: conversions, lead_type: 'conversion' };
+  }
+  return { leads: conversions > 0 ? conversions : clicks, lead_type: conversions > 0 ? 'conversion' : 'click' };
+}
+
+function computeHealthScoreForTikTokAdgroup(opts) {
+  const { weights, classes, targets, windows, peers, objective } = opts;
+  const { y, d3, d7, d30, today } = windows;
+  const impressions = y.impressions || 0;
+  const volumeFactor = impressions >= 1000 ? 1.0 : (impressions <= 100 ? 0.6 : 0.6 + 0.4 * Math.min(1, (impressions - 100) / 900));
+  const spendY = y.spend || 0;
+  const leadsY = computeTikTokLeads(y, objective).leads || 0;
+  const targetCpl = targets.cpl_kzt || 5000;
+  const eCplY = leadsY > 0 ? (spendY / leadsY) : Infinity;
+
+  function eCPLFromBucket(bucket) {
+    const L = computeTikTokLeads(bucket, objective).leads || 0;
+    return L > 0 ? (bucket.spend / L) : Infinity;
+  }
+
+  const e3 = eCPLFromBucket(d3);
+  const e7 = eCPLFromBucket(d7);
+  const e30 = eCPLFromBucket(d30);
+  let trendScore = 0;
+  if (Number.isFinite(e3) && Number.isFinite(e7)) trendScore += (e3 < e7 ? weights.trend : -weights.trend / 2);
+  if (Number.isFinite(e7) && Number.isFinite(e30)) trendScore += (e7 < e30 ? weights.trend : -weights.trend / 2);
+
+  let cplScore = 0;
+  if (Number.isFinite(eCplY)) {
+    const ratio = eCplY / targetCpl;
+    if (ratio <= 0.7) cplScore = weights.cpl_gap;
+    else if (ratio <= 0.9) cplScore = Math.round(weights.cpl_gap * 2 / 3);
+    else if (ratio <= 1.1) cplScore = 10;
+    else if (ratio <= 1.3) cplScore = -Math.round(weights.cpl_gap * 2 / 3);
+    else cplScore = -weights.cpl_gap;
+  }
+
+  let diag = 0;
+  const ctr = y.ctr || 0;
+  if (ctr < 1) diag -= weights.ctr_penalty;
+  const medianCpm = median(peers.cpm || []);
+  const cpm = y.cpm || 0;
+  if (medianCpm && cpm > medianCpm * 1.3) diag -= weights.cpm_penalty;
+
+  let todayAdj = 0;
+  if ((today.impressions || 0) >= 300) {
+    const eToday = eCPLFromBucket(today);
+    if (Number.isFinite(eCplY) && Number.isFinite(eToday)) {
+      if (eToday <= 0.5 * eCplY) {
+        todayAdj = Math.abs(Math.min(0, cplScore)) + 15;
+      } else if (eToday <= 0.7 * eCplY) {
+        todayAdj = Math.round(Math.abs(Math.min(0, cplScore)) * 0.6) + 10;
+      } else if (eToday <= 0.9 * eCplY) {
+        todayAdj = 5;
+      }
+    }
+  }
+
+  let score = cplScore + trendScore + diag + todayAdj;
+  if (impressions < 1000) score = Math.round(score * volumeFactor);
+
+  let cls = 'neutral';
+  if (score >= classes.very_good) cls = 'very_good';
+  else if (score >= classes.good) cls = 'good';
+  else if (score <= classes.bad) cls = 'bad';
+  else if (score <= classes.neutral_low) cls = 'neutral_low';
+
+  return { score, cls, eCplY, ctr, cpm, freq: 0 };
+}
+
+async function fetchTikTokReportPreset({ advertiserId, accessToken, preset, dataLevel, dimensions, metrics, timeZone, filtering }) {
+  const { startDate, endDate } = getDateRangePreset(preset, timeZone);
+  const result = await getTikTokReport(advertiserId, accessToken, {
+    dataLevel,
+    dimensions,
+    metrics,
+    startDate,
+    endDate,
+    ...(filtering ? { filtering } : {})
+  });
+  return result?.data?.list || [];
 }
 
 function indexByAdset(rows) {
@@ -1790,6 +2014,62 @@ const SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = 
   '    (увеличение бюджета / создание новых ad set\'ов) до попадания в коридор.'
 ].join('\n');
 
+const TIKTOK_SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyReason = null, minBudgetKzt = null) => [
+  (clientPrompt || '').trim(),
+  '',
+  ...(reportOnlyMode && reportOnlyReason === 'account_inactive' ? [
+    '💡 ВАЖНО: РЕЖИМ "ТОЛЬКО ОТЧЕТ" - АККАУНТ НЕАКТИВЕН',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '📊 СИТУАЦИЯ: TikTok рекламный кабинет неактивен (status != STATUS_ENABLE).',
+    '',
+    '📋 ТВОЯ ЗАДАЧА:',
+    '  1. ✅ СОЗДАТЬ ОТЧЕТ о затратах и результатах за вчера',
+    '  2. ℹ️ Указать, что аккаунт TikTok сейчас неактивен',
+    '  3. ⚙️ actions массив должен быть ПУСТЫМ: []',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+  ] : []),
+  ...(reportOnlyMode && reportOnlyReason === 'campaigns_inactive' ? [
+    '💡 ВАЖНО: РЕЖИМ "ТОЛЬКО ОТЧЕТ"',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '📊 СИТУАЦИЯ: За вчера были затраты, НО все кампании TikTok неактивны.',
+    '',
+    '📋 ТВОЯ ЗАДАЧА:',
+    '  1. ✅ СОЗДАТЬ ОТЧЕТ о затратах и результатах за вчера',
+    '  2. ℹ️ Упомяни, что кампании выключены пользователем',
+    '  3. ⚙️ actions массив должен быть ПУСТЫМ: []',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '',
+  ] : []),
+  'ОБЩИЙ КОНТЕКСТ',
+  '- Ты — таргетолог-агент, управляющий рекламой в TikTok Ads.',
+  '- Бюджеты и CPL считаем в тенге (KZT).',
+  minBudgetKzt ? `- Минимальный дневной бюджет TikTok: ${minBudgetKzt} ₸` : '- Минимальный дневной бюджет TikTok: 20 USD в эквиваленте KZT.',
+  '',
+  '📊 НАПРАВЛЕНИЯ (КРИТИЧНО!)',
+  '- Каждое направление = отдельная TikTok Campaign (tiktok_campaign_id).',
+  '- У каждого направления свой дневной бюджет и целевой CPL.',
+  '- Внутри кампании несколько AdGroups (adgroup_id).',
+  '- Сумма бюджетов активных AdGroups не должна превышать дневной бюджет направления.',
+  '',
+  'ЦЕЛИ И ЛИДЫ:',
+  '- lead_generation / conversions → лиды считаем по conversions.',
+  '- traffic → лиды считаем по clicks (стоимость действия = CPC).',
+  '',
+  'РАЗРЕШЕННЫЕ ДЕЙСТВИЯ:',
+  '- TikTok.GetCampaignStatus',
+  '- TikTok.PauseCampaign / TikTok.ResumeCampaign',
+  '- TikTok.PauseAdGroup / TikTok.ResumeAdGroup',
+  '- TikTok.UpdateAdGroupBudget',
+  '- TikTok.PauseAd / TikTok.ResumeAd',
+  '- TikTok.Direction.CreateAdGroupWithCreatives (создает новый AdGroup + объявления)',
+  '',
+  'ФОРМАТ ОТВЕТА:',
+  '- Выведи ОДИН JSON: { "planNote": string, "actions": Action[], "reportText": string }',
+  '- Если reportOnlyMode=true → actions обязательно пустой массив.',
+  '- reportText использует шаблон из входных данных report.report_template или report.header_first_lines.'
+].join('\n');
+
 function validateAndNormalizeActions(actions) {
   if (!Array.isArray(actions)) throw new Error('actions must be array');
   const cleaned = [];
@@ -1864,6 +2144,59 @@ function validateAndNormalizeActions(actions) {
   }
   // В режиме reportOnlyMode пустой массив actions допустим
   // if (!cleaned.length) throw new Error('No valid actions');
+  return cleaned;
+}
+
+function normalizeTikTokBudget(value, bounds) {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return null;
+  const minBudget = bounds?.minBudget ?? raw;
+  const maxBudget = bounds?.maxBudget ?? raw;
+  const rounded = Math.round(raw);
+  return Math.max(minBudget, Math.min(maxBudget, rounded));
+}
+
+function validateAndNormalizeTikTokActions(actions, bounds) {
+  if (!Array.isArray(actions)) throw new Error('actions must be array');
+  const cleaned = [];
+  for (const a of actions) {
+    if (!a || typeof a !== 'object') continue;
+    const type = String(a.type || '');
+    if (!TIKTOK_ALLOWED_TYPES.has(type)) continue;
+    const params = a.params && typeof a.params === 'object' ? { ...a.params } : {};
+
+    if (type === 'TikTok.GetCampaignStatus') {
+      if (!params.campaign_id) throw new Error('TikTok.GetCampaignStatus: campaign_id required');
+    }
+    if (type === 'TikTok.PauseCampaign' || type === 'TikTok.ResumeCampaign') {
+      if (!params.campaign_id) throw new Error(`${type}: campaign_id required`);
+    }
+    if (type === 'TikTok.PauseAdGroup' || type === 'TikTok.ResumeAdGroup') {
+      if (!params.adgroup_id) throw new Error(`${type}: adgroup_id required`);
+    }
+    if (type === 'TikTok.UpdateAdGroupBudget') {
+      if (!params.adgroup_id) throw new Error('TikTok.UpdateAdGroupBudget: adgroup_id required');
+      const nb = normalizeTikTokBudget(params.new_budget, bounds);
+      if (nb === null) throw new Error('TikTok.UpdateAdGroupBudget: new_budget number required');
+      params.new_budget = nb;
+    }
+    if (type === 'TikTok.PauseAd' || type === 'TikTok.ResumeAd') {
+      if (!params.ad_id) throw new Error(`${type}: ad_id required`);
+    }
+    if (type === 'TikTok.Direction.CreateAdGroupWithCreatives') {
+      if (!params.direction_id) throw new Error('TikTok.Direction.CreateAdGroupWithCreatives: direction_id required');
+      if (!params.user_creative_ids || !Array.isArray(params.user_creative_ids) || params.user_creative_ids.length === 0) {
+        throw new Error('TikTok.Direction.CreateAdGroupWithCreatives: user_creative_ids array required');
+      }
+      if (params.daily_budget !== undefined) {
+        const nb = normalizeTikTokBudget(params.daily_budget, bounds);
+        if (nb === null) throw new Error('TikTok.Direction.CreateAdGroupWithCreatives: daily_budget must be number');
+        params.daily_budget = nb;
+      }
+    }
+
+    cleaned.push({ type, params });
+  }
   return cleaned;
 }
 
@@ -2297,6 +2630,20 @@ function getAccountStatusText(accountStatus) {
   }
 }
 
+function getTikTokAccountStatusText(accountInfo) {
+  if (!accountInfo || accountInfo.error) {
+    return '⚠️ Не удалось получить статус';
+  }
+  const status = accountInfo.status || accountInfo.account_status || '';
+  if (status === 'STATUS_ENABLE' || status === 'ENABLE') {
+    return '✅ Активен';
+  }
+  if (status === 'STATUS_DISABLE' || status === 'DISABLE') {
+    return '⚠️ Отключен';
+  }
+  return status ? `⚠️ Статус: ${status}` : '⚠️ Неизвестный статус';
+}
+
 function buildReport({ date, accountStatus, insights, actions, lastReports }) {
   // Проверяем, были ли ошибки при получении данных из Facebook
   let statusLine;
@@ -2325,6 +2672,60 @@ function buildReport({ date, accountStatus, insights, actions, lastReports }) {
   ].join('\n');
 
   return text;
+}
+
+function formatKztAmount(amount) {
+  const value = Number(amount) || 0;
+  return `${Math.round(value).toLocaleString('ru-RU')} ₸`;
+}
+
+function buildTikTokReport({ date, accountStatusText, campaigns, actions, totalSpend, totalLeads }) {
+  const avgCpl = totalLeads > 0 ? (totalSpend / totalLeads) : null;
+
+  const campaignLines = campaigns.length > 0
+    ? campaigns.map((c, i) => {
+      const cpl = c.leads > 0 ? (c.spend / c.leads) : null;
+      return [
+        `${i + 1}. Кампания "${c.name}" (ID: ${c.id})`,
+        `   - Статус: ${c.status || 'н/д'}`,
+        `   - Затраты: ${formatKztAmount(c.spend)}`,
+        `   - Лидов/кликов: ${c.leads}`,
+        `   - CPL/СРА: ${cpl !== null ? formatKztAmount(cpl) : 'н/д'}`
+      ].join('\n');
+    }).join('\n')
+    : 'Нет кампаний с результатами';
+
+  const executed = actions?.length
+    ? actions.map((a, i) => `${i + 1}. ${a.type} — ${JSON.stringify(a.params)}`).join('\n')
+    : 'Действия не выполнялись';
+
+  const reportLines = [
+    `📅 Дата отчета: ${date}`,
+    '',
+    `🏢 Статус рекламного кабинета: ${accountStatusText || 'н/д'}`,
+    '',
+    '📈 Общая сводка:',
+    `- Общие затраты по всем кампаниям: ${formatKztAmount(totalSpend)}`,
+    `- Общее количество полученных лидов/кликов: ${totalLeads}`,
+    `- Средняя стоимость действия: ${avgCpl !== null ? formatKztAmount(avgCpl) : 'н/д'}`,
+    '',
+    '📊 Сводка по отдельным кампаниям:',
+    campaignLines,
+    '',
+    '📊 Качество лидов:',
+    '- Качество лидов для TikTok пока не рассчитывается.',
+    '',
+    '✅ Выполненные действия:',
+    executed,
+    '',
+    '📊 Аналитика в динамике:',
+    '- н/д',
+    '',
+    'Для дальнейшей оптимизации обращаем внимание на:',
+    '- Проверьте креативы и ставки для удержания CPL.'
+  ];
+
+  return reportLines.join('\n');
 }
 
 // ТЕСТОВЫЙ ПРОМТ для проверки инструментов дублирования
@@ -2498,7 +2899,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
     if (ua.multi_account_enabled && accountUUID) {
       const { data: adAccount, error: adAccountError } = await supabase
         .from('ad_accounts')
-        .select('access_token, ad_account_id, page_id, whatsapp_phone_number, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, name, username, default_cpl_target_cents, plan_daily_budget_cents, prompt3, ig_seed_audience_id')
+        .select('access_token, ad_account_id, page_id, whatsapp_phone_number, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, name, username, default_cpl_target_cents, plan_daily_budget_cents, prompt3, ig_seed_audience_id, brain_timezone, tiktok_access_token, tiktok_business_id, tiktok_account_id, autopilot_tiktok')
         .eq('id', accountUUID)
         .eq('user_account_id', userAccountId)
         .single();
@@ -2532,6 +2933,11 @@ fastify.post('/api/brain/run', async (request, reply) => {
         ig_seed_audience_id: adAccount.ig_seed_audience_id || ua.ig_seed_audience_id,
         default_cpl_target_cents: adAccount.default_cpl_target_cents ?? ua.default_cpl_target_cents,
         plan_daily_budget_cents: adAccount.plan_daily_budget_cents ?? ua.plan_daily_budget_cents,
+        tiktok_access_token: adAccount.tiktok_access_token || ua.tiktok_access_token,
+        tiktok_business_id: adAccount.tiktok_business_id || ua.tiktok_business_id,
+        tiktok_account_id: adAccount.tiktok_account_id || ua.tiktok_account_id,
+        autopilot_tiktok: adAccount.autopilot_tiktok ?? ua.autopilot_tiktok,
+        account_timezone: adAccount.brain_timezone || ua.account_timezone,
         accountName: adAccount.name || adAccount.ad_account_id || null,
         accountUsername: adAccount.username || null
       };
@@ -3480,6 +3886,7 @@ fastify.post('/api/brain/run', async (request, reply) => {
         await supabase.from('campaign_reports').insert({
           telegram_id: String(ua.telegram_id || ''),
           account_id: accountUUID || null,  // UUID для мультиаккаунтности, NULL для legacy
+          platform: 'facebook',
           report_data: { text: reportText, date, planNote, actions }
         });
       } catch (e) {
@@ -3495,7 +3902,8 @@ fastify.post('/api/brain/run', async (request, reply) => {
           executor_response_json: agentResponse,
           report_text: reportText,
           status: execStatus,
-          duration_ms: Date.now() - started
+          duration_ms: Date.now() - started,
+          platform: 'facebook'
         });
       } catch (e) {
         fastify.log.warn({ msg:'save_brain_execution_failed', error:String(e) });
@@ -3644,6 +4052,726 @@ ${err?.stack || 'N/A'}`;
   }
 });
 
+// POST /api/brain/run-tiktok { idempotencyKey?, userAccountId, accountId?, inputs?:{ dispatch?:boolean } }
+fastify.post('/api/brain/run-tiktok', async (request, reply) => {
+  const started = Date.now();
+  let userAccountId = null;
+  let accountId = null;
+  let inputs = null;
+
+  try {
+    const { idempotencyKey, userAccountId: reqUserAccountId, accountId: reqAccountId, inputs: reqInputs } = request.body || {};
+    userAccountId = reqUserAccountId || null;
+    accountId = reqAccountId || null;
+    inputs = reqInputs || null;
+    if (!userAccountId) return reply.code(400).send({ error: 'userAccountId required' });
+
+    const idem = idempotencyKey || genIdem();
+
+    let ua = await getUserAccount(userAccountId);
+
+    // Получаем UUID рекламного аккаунта для мультиаккаунтного режима
+    let accountUUID = accountId || await getAccountUUID(userAccountId, ua);
+
+    if (ua.multi_account_enabled && !accountUUID) {
+      const { data: defaultAccounts, error: defaultError } = await supabase
+        .from('ad_accounts')
+        .select('id')
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1);
+
+      fastify.log.info({
+        where: 'tiktok_brain_run',
+        phase: 'lookup_default_ad_account',
+        userId: userAccountId,
+        found: defaultAccounts?.length || 0,
+        error: defaultError?.message || null
+      });
+
+      if (defaultAccounts && defaultAccounts.length > 0) {
+        accountUUID = defaultAccounts[0].id;
+        fastify.log.info({
+          where: 'tiktok_brain_run',
+          phase: 'using_default_ad_account',
+          userId: userAccountId,
+          accountUUID
+        });
+      }
+    }
+
+    if (ua.multi_account_enabled && accountUUID) {
+      const { data: adAccount, error: adAccountError } = await supabase
+        .from('ad_accounts')
+        .select('tiktok_access_token, tiktok_business_id, tiktok_account_id, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, name, username, brain_timezone, autopilot_tiktok')
+        .eq('id', accountUUID)
+        .eq('user_account_id', userAccountId)
+        .single();
+
+      if (adAccountError || !adAccount) {
+        fastify.log.error({
+          where: 'tiktok_brain_run',
+          phase: 'load_ad_account_credentials',
+          userId: userAccountId,
+          accountUUID,
+          error: adAccountError?.message || 'ad_account not found'
+        });
+        return reply.code(400).send({
+          error: 'Failed to load ad account credentials',
+          details: adAccountError?.message
+        });
+      }
+
+      ua = {
+        ...ua,
+        tiktok_access_token: adAccount.tiktok_access_token || ua.tiktok_access_token,
+        tiktok_business_id: adAccount.tiktok_business_id || ua.tiktok_business_id,
+        tiktok_account_id: adAccount.tiktok_account_id || ua.tiktok_account_id,
+        autopilot_tiktok: adAccount.autopilot_tiktok ?? ua.autopilot_tiktok,
+        telegram_id: adAccount.telegram_id || ua.telegram_id,
+        telegram_id_2: adAccount.telegram_id_2 || ua.telegram_id_2,
+        telegram_id_3: adAccount.telegram_id_3 || ua.telegram_id_3,
+        telegram_id_4: adAccount.telegram_id_4 || ua.telegram_id_4,
+        accountName: adAccount.name || ua.accountName || null,
+        accountUsername: adAccount.username || ua.accountUsername || null,
+        account_timezone: adAccount.brain_timezone || ua.account_timezone
+      };
+    }
+
+    const tikTokAccessToken = ua?.tiktok_access_token || null;
+    const tikTokAdvertiserId = ua?.tiktok_business_id || null;
+
+    if (!tikTokAccessToken || !tikTokAdvertiserId) {
+      return reply.code(400).send({
+        error: 'tiktok_credentials_missing',
+        message: 'TikTok credentials not found. Please connect TikTok account first.'
+      });
+    }
+
+    const usdRate = await getUsdToKzt();
+    const minBudgetKzt = convertUsdToKzt(TIKTOK_MIN_DAILY_BUDGET_USD, usdRate);
+    const budgetBounds = { minBudget: minBudgetKzt, maxBudget: TIKTOK_MAX_DAILY_BUDGET_KZT };
+
+    let advertiserInfo = null;
+    try {
+      advertiserInfo = await getTikTokAdvertiserInfo(tikTokAdvertiserId, tikTokAccessToken);
+    } catch (err) {
+      fastify.log.warn({
+        where: 'tiktok_brain_run',
+        phase: 'advertiser_info_failed',
+        userId: userAccountId,
+        error: String(err?.message || err)
+      });
+      advertiserInfo = { error: String(err?.message || err) };
+    }
+
+    const accountTimezone = advertiserInfo?.timezone || ua?.account_timezone || 'Asia/Almaty';
+    const date = formatDateInTimeZone(new Date(), accountTimezone);
+    const accountStatusText = getTikTokAccountStatusText(advertiserInfo);
+
+    const directions = await getUserDirections(userAccountId, accountUUID);
+    const tiktokDirections = (directions || []).filter(d => {
+      const platform = String(d.platform || '').toLowerCase();
+      return platform === 'tiktok' || platform === 'both' || !!d.tiktok_campaign_id;
+    });
+
+    if (accountUUID && (!tiktokDirections || tiktokDirections.length === 0)) {
+      fastify.log.warn({
+        where: 'tiktok_brain_run',
+        phase: 'no_directions',
+        userId: userAccountId,
+        accountId: accountUUID,
+        message: 'No TikTok directions found for account, skipping'
+      });
+      return reply.send({
+        success: false,
+        skipped: true,
+        reason: 'no_directions',
+        message: 'Аккаунт пропущен: нет направлений TikTok'
+      });
+    }
+
+    const directionCampaignIds = tiktokDirections
+      .map(d => d.tiktok_campaign_id)
+      .filter(Boolean);
+
+    const reportFiltering = directionCampaignIds.length
+      ? JSON.stringify([{
+        field_name: 'campaign_ids',
+        filter_type: 'IN',
+        filter_value: JSON.stringify(directionCampaignIds)
+      }])
+      : undefined;
+
+    const [campaigns, adgroups] = await Promise.all([
+      getTikTokCampaigns(tikTokAdvertiserId, tikTokAccessToken, directionCampaignIds.length ? { filtering: { campaign_ids: directionCampaignIds } } : {}),
+      getTikTokAdGroups(tikTokAdvertiserId, tikTokAccessToken, directionCampaignIds.length ? { campaignIds: directionCampaignIds } : {})
+    ]);
+
+    const getTikTokStatus = (entity) => entity?.operation_status || entity?.status;
+    const isActiveStatus = (status) => status === 'ENABLE' || status === 'STATUS_ENABLE';
+    const activeCampaigns = (campaigns || []).filter(c => isActiveStatus(getTikTokStatus(c)));
+    const accountInactive = advertiserInfo?.status && !isActiveStatus(advertiserInfo.status);
+
+    let reportOnlyMode = !!accountInactive;
+    let reportOnlyReason = accountInactive ? 'account_inactive' : null;
+    const accountStatusError = !!advertiserInfo?.error;
+    const accountStatusMissing = !advertiserInfo?.status;
+    if (!reportOnlyMode && (accountStatusError || accountStatusMissing)) {
+      reportOnlyMode = true;
+      reportOnlyReason = accountStatusError ? 'account_status_error' : 'account_status_missing';
+    }
+
+    fastify.log.info({
+      where: 'tiktok_brain_run',
+      phase: 'fetched_tiktok_entities',
+      userId: userAccountId,
+      accountId: accountUUID,
+      campaignsCount: campaigns?.length || 0,
+      adgroupsCount: adgroups?.length || 0,
+      reportOnlyMode,
+      reportOnlyReason
+    });
+
+    const reportMetrics = ['spend', 'impressions', 'clicks', 'conversions'];
+    const [
+      yCampaignRows,
+      yAdgroupRows,
+      d3AdgroupRows,
+      d7AdgroupRows,
+      d30AdgroupRows,
+      todayAdgroupRows,
+      yAdRows
+    ] = await Promise.all([
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'yesterday',
+        dataLevel: 'AUCTION_CAMPAIGN',
+        dimensions: ['campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'yesterday',
+        dataLevel: 'AUCTION_ADGROUP',
+        dimensions: ['adgroup_id', 'campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'last_3d',
+        dataLevel: 'AUCTION_ADGROUP',
+        dimensions: ['adgroup_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'last_7d',
+        dataLevel: 'AUCTION_ADGROUP',
+        dimensions: ['adgroup_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'last_30d',
+        dataLevel: 'AUCTION_ADGROUP',
+        dimensions: ['adgroup_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'today',
+        dataLevel: 'AUCTION_ADGROUP',
+        dimensions: ['adgroup_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      }),
+      fetchTikTokReportPreset({
+        advertiserId: tikTokAdvertiserId,
+        accessToken: tikTokAccessToken,
+        preset: 'yesterday',
+        dataLevel: 'AUCTION_AD',
+        dimensions: ['ad_id', 'adgroup_id', 'campaign_id'],
+        metrics: reportMetrics,
+        timeZone: accountTimezone,
+        filtering: reportFiltering
+      })
+    ]);
+
+    const byCampaignY = indexTikTokReportBy(yCampaignRows, 'campaign_id');
+    const byAdgroupY = indexTikTokReportBy(yAdgroupRows, 'adgroup_id');
+    const byAdgroup3 = indexTikTokReportBy(d3AdgroupRows, 'adgroup_id');
+    const byAdgroup7 = indexTikTokReportBy(d7AdgroupRows, 'adgroup_id');
+    const byAdgroup30 = indexTikTokReportBy(d30AdgroupRows, 'adgroup_id');
+    const byAdgroupToday = indexTikTokReportBy(todayAdgroupRows, 'adgroup_id');
+    const adsByAdgroupY = indexTikTokAdsByAdgroup(yAdRows);
+
+    const directionByCampaignId = new Map();
+    for (const d of tiktokDirections || []) {
+      if (d.tiktok_campaign_id) {
+        directionByCampaignId.set(String(d.tiktok_campaign_id), d);
+      }
+    }
+
+    const getDirectionBudgetKzt = (direction) => {
+      const explicitBudget = Number(direction?.tiktok_daily_budget);
+      if (Number.isFinite(explicitBudget) && explicitBudget > 0) return Math.round(explicitBudget);
+      if (Number.isFinite(direction?.daily_budget_cents)) {
+        return convertUsdToKzt(direction.daily_budget_cents / 100, usdRate);
+      }
+      return null;
+    };
+
+    const getTargetCplKzt = (direction) => {
+      const explicitTarget = Number(direction?.tiktok_target_cpl_kzt ?? direction?.tiktok_target_cpl);
+      if (Number.isFinite(explicitTarget) && explicitTarget > 0) return explicitTarget;
+      if (Number.isFinite(direction?.target_cpl_cents)) {
+        return convertUsdToKzt(direction.target_cpl_cents / 100, usdRate);
+      }
+      return TIKTOK_DEFAULT_CPL_KZT;
+    };
+
+    const campaignsWithResults = (campaigns || [])
+      .map(c => {
+        const metrics = byCampaignY.get(c.campaign_id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+        const direction = directionByCampaignId.get(String(c.campaign_id));
+        const objective = direction?.tiktok_objective || direction?.objective || c.objective_type || 'traffic';
+        const leads = computeTikTokLeads(metrics, objective).leads || 0;
+        return {
+          id: c.campaign_id,
+          name: c.campaign_name || c.name,
+          status: getTikTokStatus(c),
+          spend: metrics.spend || 0,
+          leads,
+          objective
+        };
+      })
+      .filter(c => c.spend > 0 || c.leads > 0);
+
+    const totalSpend = campaignsWithResults.reduce((s, c) => s + (c.spend || 0), 0);
+    const totalLeads = campaignsWithResults.reduce((s, c) => s + (c.leads || 0), 0);
+
+    if (!reportOnlyMode && campaignsWithResults.length > 0 && activeCampaigns.length === 0) {
+      reportOnlyMode = true;
+      reportOnlyReason = 'campaigns_inactive';
+    }
+
+    const weights = { cpl_gap: 45, trend: 15, ctr_penalty: 8, cpm_penalty: 12, freq_penalty: 10 };
+    const classes = { very_good: 25, good: 5, neutral_low: -5, bad: -25 };
+    const peers = { cpm: [] };
+    for (const metrics of byAdgroupY.values()) {
+      if (metrics.cpm > 0) peers.cpm.push(metrics.cpm);
+    }
+
+    const hsSummary = [];
+    const decisions = [];
+    for (const ag of adgroups || []) {
+      const id = ag.adgroup_id;
+      const metricsY = byAdgroupY.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 };
+      const direction = directionByCampaignId.get(String(ag.campaign_id));
+      const objective = direction?.tiktok_objective || direction?.objective || 'traffic';
+      const leadsY = computeTikTokLeads(metricsY, objective).leads || 0;
+      const hasResults = (metricsY.spend || 0) > 0 || leadsY > 0;
+
+      if (!hasResults) continue;
+
+      const windows = {
+        y: metricsY,
+        d3: byAdgroup3.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 },
+        d7: byAdgroup7.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 },
+        d30: byAdgroup30.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 },
+        today: byAdgroupToday.get(id) || { spend: 0, impressions: 0, clicks: 0, conversions: 0 }
+      };
+
+      const targetCplKzt = getTargetCplKzt(direction);
+      const hs = computeHealthScoreForTikTokAdgroup({
+        weights,
+        classes,
+        targets: { cpl_kzt: targetCplKzt },
+        windows,
+        peers,
+        objective
+      });
+
+      hsSummary.push({
+        adgroup_id: id,
+        name: ag.adgroup_name,
+        campaign_id: ag.campaign_id,
+        hs: hs.score,
+        cls: hs.cls,
+        ctr: hs.ctr,
+        cpm: hs.cpm
+      });
+
+      if (reportOnlyMode || !isActiveStatus(getTikTokStatus(ag))) continue;
+
+      const currentBudget = Number(ag.budget) || 0;
+      if (currentBudget > 0) {
+        let nextBudget = currentBudget;
+        if (hs.cls === 'very_good') nextBudget = Math.round(currentBudget * 1.3);
+        else if (hs.cls === 'bad') nextBudget = Math.round(currentBudget * 0.5);
+        const normalized = normalizeTikTokBudget(nextBudget, budgetBounds);
+        if (normalized !== null && normalized !== currentBudget) {
+          decisions.push({ type: 'TikTok.UpdateAdGroupBudget', params: { adgroup_id: id, new_budget: normalized } });
+        }
+      }
+
+      const adsForAdgroup = adsByAdgroupY.get(id) || [];
+      const adSpendTotal = adsForAdgroup.reduce((s, a) => s + (a.spend || 0), 0);
+      if (adSpendTotal > 0 && adsForAdgroup.length >= 2) {
+        const top = adsForAdgroup.reduce((best, a) => (a.spend > best.spend ? a : best), adsForAdgroup[0]);
+        const leadsTop = computeTikTokLeads(top, objective).leads || 0;
+        const cplTop = leadsTop > 0 ? (top.spend / leadsTop) : Infinity;
+        if (!Number.isFinite(cplTop) || cplTop > targetCplKzt * 1.3) {
+          decisions.push({ type: 'TikTok.PauseAd', params: { ad_id: top.ad_id } });
+        }
+      }
+    }
+
+    if (reportOnlyMode) {
+      decisions.length = 0;
+    }
+
+    const directionsWithAdGroups = await Promise.all((tiktokDirections || []).map(async (d) => {
+      let precreated_adgroups = [];
+      if (String(d.tiktok_adgroup_mode || '').toLowerCase() === 'use_existing') {
+        const { data: adgroupsData } = await supabaseQuery('direction_tiktok_adgroups',
+          async () => await supabase
+            .from('direction_tiktok_adgroups')
+            .select('id, tiktok_adgroup_id, ads_count, status')
+            .eq('direction_id', d.id)
+            .eq('is_active', true)
+            .eq('status', 'DISABLE')
+            .lt('ads_count', 50)
+            .order('ads_count', { ascending: true })
+            .order('linked_at', { ascending: true }),
+          { direction_id: d.id }
+        );
+        precreated_adgroups = adgroupsData || [];
+      }
+
+      return {
+        id: d.id,
+        name: d.name,
+        objective: d.tiktok_objective || d.objective,
+        tiktok_campaign_id: d.tiktok_campaign_id,
+        daily_budget_kzt: getDirectionBudgetKzt(d),
+        target_cpl_kzt: getTargetCplKzt(d),
+        tiktok_adgroup_mode: d.tiktok_adgroup_mode || null,
+        precreated_adgroups
+      };
+    }));
+
+    const llmInput = {
+      platform: 'tiktok',
+      userAccountId,
+      account: {
+        timezone: accountTimezone,
+        report_date: date,
+        dispatch: !!inputs?.dispatch,
+        report_only_mode: reportOnlyMode,
+        account_name: ua?.accountName || null,
+        currency: advertiserInfo?.currency || 'KZT'
+      },
+      limits: {
+        min_budget_kzt: budgetBounds.minBudget,
+        max_budget_kzt: budgetBounds.maxBudget,
+        step_up: 0.30,
+        step_down: 0.50
+      },
+      targets: {
+        default_cpl_kzt: TIKTOK_DEFAULT_CPL_KZT
+      },
+      directions: directionsWithAdGroups,
+      analysis: {
+        hsSummary,
+        totals: {
+          installed_daily_budget_kzt_all: (adgroups || []).reduce((s, a) => s + (Number(a.budget) || 0), 0),
+          installed_daily_budget_kzt_active: (adgroups || []).filter(a => isActiveStatus(getTikTokStatus(a))).reduce((s, a) => s + (Number(a.budget) || 0), 0)
+        },
+        campaigns: (campaigns || []).map(c => {
+          const direction = directionByCampaignId.get(String(c.campaign_id));
+          return {
+            campaign_id: c.campaign_id,
+            name: c.campaign_name || c.name,
+            status: getTikTokStatus(c),
+            objective: direction?.tiktok_objective || direction?.objective || c.objective_type || null,
+            direction_id: direction?.id || null,
+            direction_name: direction?.name || null,
+            direction_daily_budget_kzt: getDirectionBudgetKzt(direction),
+            direction_target_cpl_kzt: getTargetCplKzt(direction),
+            windows: {
+              yesterday: byCampaignY.get(c.campaign_id) || {},
+              last_3d: {},
+              last_7d: {},
+              last_30d: {},
+              today: {}
+            }
+          };
+        }),
+        adgroups: (adgroups || []).map(ag => {
+          const direction = directionByCampaignId.get(String(ag.campaign_id));
+          const objective = direction?.tiktok_objective || direction?.objective || 'traffic';
+          const current = Number(ag.budget) || 0;
+          const maxUp = Math.max(0, Math.round(current * 1.3) - current);
+          const maxDown = Math.max(0, current - Math.round(current * 0.5));
+          const adsForAdgroup = (adsByAdgroupY.get(ag.adgroup_id) || []).map(ad => ({
+            ad_id: ad.ad_id,
+            spend: ad.spend || 0,
+            impressions: ad.impressions || 0,
+            clicks: ad.clicks || 0,
+            conversions: ad.conversions || 0
+          }));
+
+          return {
+            adgroup_id: ag.adgroup_id,
+            name: ag.adgroup_name,
+            campaign_id: ag.campaign_id,
+            objective,
+            daily_budget_kzt: current,
+            status: getTikTokStatus(ag),
+            step_constraints: { step_up_max_pct: 0.30, step_down_max_pct: 0.50 },
+            step_bounds_kzt: { max_increase: maxUp, max_decrease: maxDown },
+            windows: {
+              yesterday: byAdgroupY.get(ag.adgroup_id) || {},
+              last_3d: byAdgroup3.get(ag.adgroup_id) || {},
+              last_7d: byAdgroup7.get(ag.adgroup_id) || {},
+              last_30d: byAdgroup30.get(ag.adgroup_id) || {},
+              today: byAdgroupToday.get(ag.adgroup_id) || {}
+            },
+            ads: adsForAdgroup
+          };
+        })
+      },
+      report: {
+        report_date: date,
+        timezone: accountTimezone,
+        dispatch: !!inputs?.dispatch,
+        yesterday_totals: {
+          spend_kzt: Math.round(totalSpend),
+          leads_total: totalLeads,
+          avg_cpl_kzt: totalLeads > 0 ? Math.round(totalSpend / totalLeads) : null
+        },
+        header_first_lines: [
+          `📅 Дата отчета: ${date}`,
+          '',
+          `🏢 Статус рекламного кабинета: ${accountStatusText}`,
+          '',
+          '📈 Общая сводка:',
+          `- Общие затраты по всем кампаниям: ${formatKztAmount(totalSpend)}`,
+          `- Общее количество полученных лидов/кликов: ${totalLeads}`,
+          `- Средняя стоимость действия: ${totalLeads > 0 ? formatKztAmount(totalSpend / totalLeads) : 'н/д'}`
+        ].join('\n'),
+        campaigns_yesterday: campaignsWithResults.map(c => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          spend_kzt: Math.round(c.spend || 0),
+          leads: c.leads || 0
+        })),
+        report_template: '📅 Дата отчета: <YYYY-MM-DD>\\n\\n🏢 Статус рекламного кабинета: <Активен|Неактивен>\\n\\n📈 Общая сводка:\\n- Общие затраты по всем кампаниям: <amount> ₸\\n- Общее количество полученных лидов/кликов: <int>\\n- Средняя стоимость действия: <amount> ₸\\n\\n📊 Сводка по отдельным кампаниям:\\n<n>. Кампания \"<name>\" (ID: <id>)\\n   - Статус: <Активна|Неактивна>\\n   - Затраты: <amount> ₸\\n   - Лидов/кликов: <int>\\n   - CPL/СРА: <amount> ₸\\n\\n📊 Качество лидов:\\n- <описание>\\n\\n✅ Выполненные действия:\\n1. Кампания \"<name>\":\\n   - <краткая причина/действие>\\n\\n📊 Аналитика в динамике:\\n- <наблюдение 1>\\n- <наблюдение 2>\\n\\nДля дальнейшей оптимизации обращаем внимание на:\\n- <рекомендация 1>\\n- <рекомендация 2>'
+      },
+      action_history: []
+    };
+
+    let actions;
+    let planNote;
+    let planLLMRaw = null;
+    let reportTextFromLLM = null;
+
+    if (CAN_USE_LLM) {
+      try {
+        const system = TIKTOK_SYSTEM_PROMPT(ua?.prompt3 || '', reportOnlyMode, reportOnlyReason, minBudgetKzt);
+        const { parsed, rawText, parseError } = await llmPlan(system, llmInput);
+        planLLMRaw = { rawText, parseError, parsed };
+
+        if (!parsed || !Array.isArray(parsed.actions)) throw new Error(parseError || 'LLM invalid output');
+        actions = validateAndNormalizeTikTokActions(parsed.actions, budgetBounds);
+        planNote = parsed.planNote || 'tiktok_llm_plan_v1';
+        if (typeof parsed.reportText === 'string' && parsed.reportText.trim()) {
+          reportTextFromLLM = parsed.reportText.trim();
+        }
+      } catch (e) {
+        fastify.log.error({
+          where: 'tiktok_llm_plan_failed',
+          error: String(e?.message || e),
+          stack: e?.stack,
+          fallback_to_deterministic: true
+        });
+
+        const limited = Array.isArray(decisions) ? decisions.slice(0, Math.max(0, BRAIN_MAX_ACTIONS_PER_RUN)) : [];
+        actions = validateAndNormalizeTikTokActions(limited, budgetBounds);
+        planNote = 'tiktok_deterministic_fallback_v1';
+      }
+    } else {
+      const limited = Array.isArray(decisions) ? decisions.slice(0, Math.max(0, BRAIN_MAX_ACTIONS_PER_RUN)) : [];
+      actions = validateAndNormalizeTikTokActions(limited, budgetBounds);
+      planNote = 'tiktok_deterministic_plan_v1';
+    }
+
+    if (reportOnlyMode) {
+      actions = [];
+    }
+
+    fastify.log.info({
+      where: 'tiktok_brain_run',
+      phase: 'actions_planned',
+      userId: userAccountId,
+      accountId: accountUUID,
+      reportOnlyMode,
+      reportOnlyReason,
+      actionsCount: Array.isArray(actions) ? actions.length : 0,
+      planNote
+    });
+
+    let agentResponse = null;
+    let dispatchFailed = false;
+
+    if (inputs?.dispatch) {
+      try {
+        agentResponse = await sendActionsBatch(idem, userAccountId, actions, null, accountUUID);
+      } catch (dispatchErr) {
+        dispatchFailed = true;
+        fastify.log.error({
+          msg: 'tiktok_actions_dispatch_failed',
+          where: 'tiktok_actions_dispatch_failed',
+          userAccountId,
+          userAccountName: ua?.username,
+          error: String(dispatchErr?.message || dispatchErr),
+          stack: dispatchErr?.stack
+        });
+      }
+    }
+
+    const reportTextRaw = reportTextFromLLM && reportTextFromLLM.trim()
+      ? reportTextFromLLM
+      : buildTikTokReport({
+        date,
+        accountStatusText,
+        campaigns: campaignsWithResults,
+        actions: inputs?.dispatch ? actions : [],
+        totalSpend,
+        totalLeads
+      });
+
+    const reportText = finalizeReportText(reportTextRaw, { adAccountId: null, dateStr: date });
+    const plan = { planNote, actions, reportText: reportTextFromLLM || null };
+
+    if (supabase) {
+      try {
+        await supabase.from('campaign_reports').insert({
+          telegram_id: String(ua.telegram_id || ''),
+          account_id: accountUUID || null,
+          platform: 'tiktok',
+          report_data: { text: reportText, date, planNote, actions, platform: 'tiktok' }
+        });
+      } catch (e) {
+        fastify.log.warn({ msg: 'save_tiktok_campaign_report_failed', error: String(e) });
+      }
+      try {
+        await supabase.from('brain_executions').insert({
+          user_account_id: userAccountId,
+          account_id: accountUUID || null,
+          idempotency_key: idem,
+          plan_json: plan,
+          actions_json: actions,
+          executor_response_json: agentResponse,
+          report_text: reportText,
+          status: 'success',
+          duration_ms: Date.now() - started,
+          platform: 'tiktok'
+        });
+      } catch (e) {
+        fastify.log.warn({ msg: 'save_tiktok_brain_execution_failed', error: String(e) });
+      }
+    }
+
+    const shouldSendTelegram = inputs?.sendReport !== undefined
+      ? inputs.sendReport
+      : (inputs?.dispatch === true);
+
+    let sent = false;
+    let monitoringSent = false;
+
+    if (shouldSendTelegram) {
+      if (!dispatchFailed) {
+        try {
+          const clientResult = await sendToMultipleTelegramIds(ua, reportText);
+          sent = clientResult.success;
+        } catch (err) {
+          fastify.log.error({
+            where: 'tiktok_telegram_send_error',
+            error: String(err?.message || err),
+            stack: err?.stack
+          });
+        }
+      }
+
+      try {
+        monitoringSent = await sendToMonitoringBot(ua, reportText, dispatchFailed);
+      } catch (err) {
+        fastify.log.error({
+          where: 'tiktok_monitoring_send_error',
+          error: String(err?.message || err)
+        });
+      }
+    }
+
+    return reply.send({
+      idempotencyKey: idem,
+      planNote,
+      actions,
+      dispatched: !!inputs?.dispatch,
+      agentResponse,
+      telegramSent: sent,
+      monitoringSent,
+      reportText,
+      platform: 'tiktok',
+      ...(BRAIN_DEBUG_LLM ? { llm: { used: CAN_USE_LLM, model: MODEL, input: llmInput, plan: planLLMRaw } } : {})
+    });
+  } catch (err) {
+    const duration = Date.now() - started;
+    request.log.error({
+      where: 'tiktok_brain_run',
+      phase: 'fatal_error',
+      userId: userAccountId,
+      duration,
+      error: String(err?.message || err),
+      stack: err?.stack
+    });
+
+    logErrorToAdmin({
+      user_account_id: userAccountId,
+      error_type: 'api',
+      raw_error: String(err?.message || err),
+      stack_trace: err?.stack,
+      action: 'tiktok_brain_run',
+      endpoint: '/api/brain/run-tiktok',
+      severity: 'critical'
+    }).catch(() => {});
+
+    return reply.code(500).send({ error: 'tiktok_brain_run_failed', details: String(err?.message || err) });
+  }
+});
+
 // Старая совместимость: /api/brain/decide (только план, без FB fetch) — опционально, оставлено
 fastify.post('/api/brain/decide', async (request, reply) => {
   try {
@@ -3692,7 +4820,7 @@ async function getActiveUsers() {
     const legacyUsers = await supabaseQuery('user_accounts_legacy',
       async () => await supabase
         .from('user_accounts')
-        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id, autopilot')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, ad_account_id, autopilot, autopilot_tiktok, tiktok_access_token, tiktok_business_id, tiktok_account_id')
         .eq('is_active', true)
         .eq('optimization', 'agent2')
         .or('multi_account_enabled.eq.false,multi_account_enabled.is.null'),
@@ -3713,6 +4841,30 @@ async function getActiveUsers() {
     return allUsers;
   } catch (err) {
     fastify.log.error({ where: 'getActiveUsers', err: String(err) });
+    return [];
+  }
+}
+
+/**
+ * Получить всех активных пользователей с TikTok (legacy)
+ */
+async function getActiveUsersTikTok() {
+  try {
+    const legacyUsers = await supabaseQuery('user_accounts_tiktok',
+      async () => await supabase
+        .from('user_accounts')
+        .select('id, username, telegram_id, telegram_id_2, telegram_id_3, telegram_id_4, telegram_bot_token, account_timezone, multi_account_enabled, autopilot_tiktok, tiktok_access_token, tiktok_business_id, tiktok_account_id')
+        .eq('is_active', true)
+        .eq('optimization', 'agent2')
+        .or('multi_account_enabled.eq.false,multi_account_enabled.is.null')
+        .not('tiktok_access_token', 'is', null)
+        .not('tiktok_business_id', 'is', null),
+      { where: 'getActiveUsersTikTok_legacy' }
+    );
+
+    return legacyUsers || [];
+  } catch (err) {
+    fastify.log.error({ where: 'getActiveUsersTikTok', err: String(err) });
     return [];
   }
 }
@@ -3825,6 +4977,88 @@ async function processUser(user) {
     const duration = Date.now() - startTime;
     fastify.log.error({
       where: 'processUser',
+      userId: user.id,
+      username: user.username,
+      accountId: accountId || 'legacy',
+      status: 'failed',
+      duration,
+      error: String(err?.message || err)
+    });
+
+    return {
+      userId: user.id,
+      username: user.username,
+      accountId: accountId,
+      success: false,
+      error: String(err?.message || err),
+      duration
+    };
+  }
+}
+
+/**
+ * Обработать одного пользователя TikTok (legacy)
+ */
+async function processUserTikTok(user) {
+  const startTime = Date.now();
+  const accountId = user.accountId || null;
+  const isAutopilot = user.autopilot_tiktok === true;
+  const inputs = isAutopilot
+    ? { dispatch: true }
+    : { dispatch: false, sendReport: true };
+
+  fastify.log.info({
+    where: 'processUserTikTok',
+    userId: user.id,
+    username: user.username,
+    accountId: accountId || 'legacy',
+    mode: isAutopilot ? 'autopilot' : 'report',
+    status: 'started'
+  });
+
+  try {
+    const response = await fetch('http://localhost:7080/api/brain/run-tiktok', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAccountId: user.id,
+        accountId: accountId,
+        inputs
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`TikTok brain run failed: ${response.status}`);
+    }
+
+    const result = await response.json();
+    const duration = Date.now() - startTime;
+
+    fastify.log.info({
+      where: 'processUserTikTok',
+      userId: user.id,
+      username: user.username,
+      accountId: accountId || 'legacy',
+      status: 'completed',
+      duration,
+      actionsCount: result.actions?.length || 0,
+      dispatched: result.dispatched,
+      telegramSent: result.telegramSent || false
+    });
+
+    return {
+      userId: user.id,
+      username: user.username,
+      accountId: accountId,
+      success: true,
+      actionsCount: result.actions?.length || 0,
+      telegramSent: result.telegramSent || false,
+      duration
+    };
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    fastify.log.error({
+      where: 'processUserTikTok',
       userId: user.id,
       username: user.username,
       accountId: accountId || 'legacy',
@@ -3981,6 +5215,84 @@ async function getAccountsForCurrentHour(utcHour) {
     toProcess: accountsToProcess.length,
     byMode: modeStats,
     accountNames: accountsToProcess.map(a => `${a.name} (${a.brain_mode || 'report'})`),
+    duration,
+    status: 'completed'
+  });
+
+  return accountsToProcess;
+}
+
+/**
+ * Получить TikTok аккаунты для текущего часа (без дедупликации last_brain_batch_run_at)
+ */
+async function getTikTokAccountsForCurrentHour(utcHour) {
+  const startTime = Date.now();
+
+  fastify.log.info({
+    where: 'getTikTokAccountsForCurrentHour',
+    utcHour,
+    status: 'started'
+  });
+
+  if (!supabase) {
+    fastify.log.warn({
+      where: 'getTikTokAccountsForCurrentHour',
+      utcHour,
+      message: 'Supabase не инициализирован'
+    });
+    return [];
+  }
+
+  const { data: accounts, error } = await supabase
+    .from('ad_accounts')
+    .select(`
+      id, user_account_id, name, tiktok_access_token, tiktok_business_id, tiktok_account_id,
+      autopilot_tiktok, brain_schedule_hour, brain_timezone,
+      telegram_id, telegram_id_2, telegram_id_3, telegram_id_4,
+      user_accounts!inner(
+        id, username, multi_account_enabled, optimization, is_active
+      )
+    `)
+    .eq('is_active', true)
+    .not('tiktok_access_token', 'is', null)
+    .not('tiktok_business_id', 'is', null);
+
+  if (error) {
+    fastify.log.error({
+      where: 'getTikTokAccountsForCurrentHour',
+      error: error?.message || JSON.stringify(error),
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint
+    });
+    return [];
+  }
+
+  if (!accounts || accounts.length === 0) {
+    return [];
+  }
+
+  const accountsToProcess = accounts.filter(acc => {
+    const timezone = acc.brain_timezone || 'Asia/Almaty';
+    const scheduleHour = acc.brain_schedule_hour ?? 8;
+    const localHour = getLocalHour(utcHour, timezone);
+    return localHour === scheduleHour;
+  });
+
+  const modeStats = accountsToProcess.reduce((acc, a) => {
+    const mode = a.autopilot_tiktok === true ? 'autopilot' : 'report';
+    acc[mode] = (acc[mode] || 0) + 1;
+    return acc;
+  }, {});
+
+  const duration = Date.now() - startTime;
+  fastify.log.info({
+    where: 'getTikTokAccountsForCurrentHour',
+    utcHour,
+    totalActive: accounts.length,
+    toProcess: accountsToProcess.length,
+    byMode: modeStats,
+    accountNames: accountsToProcess.map(a => `${a.name} (${a.autopilot_tiktok ? 'autopilot' : 'report'})`),
     duration,
     status: 'completed'
   });
@@ -4219,6 +5531,7 @@ async function sendBrainReportOnly(brainResult, account) {
             account_id: account.id,
             idempotency_key: idemKey,
             execution_mode: 'batch',
+            platform: 'facebook',
             plan_json: {
               mode: 'report_only',
               brain_mode: account.brain_mode || 'report',
@@ -4854,6 +6167,7 @@ async function processAccountBrain(account) {
               account_id: accountId,
               idempotency_key: idemKey,
               execution_mode: 'batch',
+              platform: 'facebook',
               plan_json: {
                 mode: 'semi_auto',
                 brain_mode: 'semi_auto',
@@ -4990,6 +6304,83 @@ async function processAccountBrain(account) {
 }
 
 /**
+ * Обработать один аккаунт TikTok по расписанию (multi-account)
+ */
+async function processAccountTikTok(account) {
+  const startTime = Date.now();
+  const isAutopilot = account.autopilot_tiktok === true;
+  const inputs = isAutopilot
+    ? { dispatch: true }
+    : { dispatch: false, sendReport: true };
+
+  fastify.log.info({
+    where: 'processAccountTikTok',
+    phase: 'started',
+    accountId: account.id,
+    accountName: account.name,
+    user_account_id: account.user_account_id,
+    mode: isAutopilot ? 'autopilot' : 'report'
+  });
+
+  try {
+    const runResponse = await fetch('http://localhost:7080/api/brain/run-tiktok', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAccountId: account.user_account_id,
+        accountId: account.id,
+        inputs
+      })
+    });
+
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text();
+      throw new Error(`HTTP ${runResponse.status}: ${errorText.slice(0, 200)}`);
+    }
+
+    const runResult = await runResponse.json();
+    const duration = Date.now() - startTime;
+
+    fastify.log.info({
+      where: 'processAccountTikTok',
+      phase: 'completed',
+      accountId: account.id,
+      accountName: account.name,
+      duration,
+      actionsCount: runResult.actions?.length || 0,
+      dispatched: runResult.dispatched,
+      telegramSent: runResult.telegramSent || false
+    });
+
+    return {
+      success: true,
+      accountId: account.id,
+      accountName: account.name,
+      duration,
+      actionsCount: runResult.actions?.length || 0,
+      telegramSent: runResult.telegramSent || false
+    };
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    fastify.log.error({
+      where: 'processAccountTikTok',
+      phase: 'failed',
+      accountId: account.id,
+      accountName: account.name,
+      duration,
+      error: String(err)
+    });
+    return {
+      success: false,
+      accountId: account.id,
+      accountName: account.name,
+      error: String(err),
+      duration
+    };
+  }
+}
+
+/**
  * Hourly batch: обработка аккаунтов по их индивидуальному расписанию
  */
 async function processDailyBatchBySchedule(utcHour) {
@@ -5078,6 +6469,67 @@ async function processDailyBatchBySchedule(utcHour) {
 
   fastify.log.info({
     where: 'processDailyBatchBySchedule',
+    utcHour,
+    processed: accountsToProcess.length,
+    success: successCount,
+    failed: failureCount,
+    duration: batchDuration,
+    status: 'completed'
+  });
+
+  return {
+    success: true,
+    processed: accountsToProcess.length,
+    successCount,
+    failureCount,
+    duration: batchDuration
+  };
+}
+
+/**
+ * Hourly batch: обработка TikTok аккаунтов по их индивидуальному расписанию
+ */
+async function processDailyBatchByScheduleTikTok(utcHour) {
+  const batchStartTime = Date.now();
+
+  fastify.log.info({
+    where: 'processDailyBatchByScheduleTikTok',
+    utcHour,
+    status: 'started'
+  });
+
+  const accountsToProcess = await getTikTokAccountsForCurrentHour(utcHour);
+
+  if (accountsToProcess.length === 0) {
+    fastify.log.info({
+      where: 'processDailyBatchByScheduleTikTok',
+      utcHour,
+      status: 'no_accounts_to_process'
+    });
+    return { success: true, processed: 0 };
+  }
+
+  const results = [];
+  const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5');
+
+  for (let i = 0; i < accountsToProcess.length; i += BATCH_CONCURRENCY) {
+    const batch = accountsToProcess.slice(i, i + BATCH_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(account => processAccountTikTok(account))
+    );
+    results.push(...batchResults);
+
+    if (i + BATCH_CONCURRENCY < accountsToProcess.length) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  }
+
+  const successCount = results.filter(r => r.success).length;
+  const failureCount = results.filter(r => !r.success).length;
+  const batchDuration = Date.now() - batchStartTime;
+
+  fastify.log.info({
+    where: 'processDailyBatchByScheduleTikTok',
     utcHour,
     processed: accountsToProcess.length,
     success: successCount,
@@ -5401,6 +6853,136 @@ async function processDailyBatch() {
           where: 'processDailyBatch', 
           phase: 'lock_release_failed', 
           error: String(unlockErr) 
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Legacy batch для TikTok (только legacy users без multi_account)
+ */
+async function processDailyBatchTikTok() {
+  const batchStartTime = Date.now();
+  const lockKey = 'daily_batch_tiktok_lock';
+  const instanceId = process.env.HOSTNAME || 'unknown';
+
+  fastify.log.info({ where: 'processDailyBatchTikTok', status: 'started', instanceId });
+
+  if (supabase) {
+    try {
+      const { data: existingLock } = await supabase
+        .from('batch_locks')
+        .select('*')
+        .eq('lock_key', lockKey)
+        .maybeSingle();
+
+      if (existingLock && new Date(existingLock.expires_at) > new Date()) {
+        fastify.log.warn({
+          where: 'processDailyBatchTikTok',
+          status: 'locked',
+          lockedBy: existingLock.instance_id,
+          expiresAt: existingLock.expires_at
+        });
+        return {
+          success: false,
+          reason: 'locked_by_another_instance',
+          lockedBy: existingLock.instance_id
+        };
+      }
+
+      await supabase
+        .from('batch_locks')
+        .upsert({
+          lock_key: lockKey,
+          instance_id: instanceId,
+          expires_at: new Date(Date.now() + 900000).toISOString()
+        });
+    } catch (lockErr) {
+      fastify.log.error({
+        where: 'processDailyBatchTikTok',
+        phase: 'lock_error',
+        error: String(lockErr)
+      });
+    }
+  }
+
+  try {
+    const users = await getActiveUsersTikTok();
+
+    if (users.length === 0) {
+      fastify.log.info({ where: 'processDailyBatchTikTok', status: 'no_active_users' });
+      return { success: true, usersProcessed: 0, results: [] };
+    }
+
+    const expandedUsers = users.map(user => ({
+      ...user,
+      accountId: null,
+      accountName: null
+    }));
+
+    const BATCH_CONCURRENCY = Number(process.env.BRAIN_BATCH_CONCURRENCY || '5');
+    const results = [];
+
+    for (let i = 0; i < expandedUsers.length; i += BATCH_CONCURRENCY) {
+      const batch = expandedUsers.slice(i, i + BATCH_CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map(user => processUserTikTok(user))
+      );
+      results.push(...batchResults);
+
+      if (i + BATCH_CONCURRENCY < expandedUsers.length) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    const batchDuration = Date.now() - batchStartTime;
+    const successCount = results.filter(r => r.success).length;
+    const failureCount = results.filter(r => !r.success).length;
+
+    fastify.log.info({
+      where: 'processDailyBatchTikTok',
+      status: 'completed',
+      totalUsers: users.length,
+      successCount,
+      failureCount,
+      totalDuration: batchDuration
+    });
+
+    return {
+      success: true,
+      usersProcessed: users.length,
+      successCount,
+      failureCount,
+      results,
+      totalDuration: batchDuration
+    };
+  } catch (err) {
+    const batchDuration = Date.now() - batchStartTime;
+    fastify.log.error({
+      where: 'processDailyBatchTikTok',
+      status: 'error',
+      totalDuration: batchDuration,
+      error: String(err?.message || err)
+    });
+    return {
+      success: false,
+      error: String(err?.message || err),
+      totalDuration: batchDuration
+    };
+  } finally {
+    if (supabase) {
+      try {
+        await supabase
+          .from('batch_locks')
+          .delete()
+          .eq('lock_key', lockKey)
+          .eq('instance_id', instanceId);
+      } catch (unlockErr) {
+        fastify.log.error({
+          where: 'processDailyBatchTikTok',
+          phase: 'lock_release_failed',
+          error: String(unlockErr)
         });
       }
     }
@@ -5792,6 +7374,7 @@ if (CRON_ENABLED) {
   cron.schedule(CRON_SCHEDULE, async () => {
     fastify.log.info({ where: 'cron', schedule: CRON_SCHEDULE, status: 'triggered' });
     await processDailyBatch();
+    await processDailyBatchTikTok();
   }, {
     scheduled: true,
     timezone: "Asia/Almaty" // Можно сделать динамическим если нужно
@@ -5830,6 +7413,17 @@ if (CRON_ENABLED) {
       } catch (err) {
         fastify.log.error({
           where: 'hourly_brain_cron',
+          status: 'failed',
+          utcHour,
+          error: String(err)
+        });
+      }
+
+      try {
+        await processDailyBatchByScheduleTikTok(utcHour);
+      } catch (err) {
+        fastify.log.error({
+          where: 'hourly_tiktok_cron',
           status: 'failed',
           utcHour,
           error: String(err)

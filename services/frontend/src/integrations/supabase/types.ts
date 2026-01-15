@@ -13,6 +13,7 @@ export type Database = {
         Row: {
           id: string
           user_account_id: string
+          account_id: string | null
           idempotency_key: string | null
           plan_json: Json
           actions_json: Json
@@ -20,11 +21,13 @@ export type Database = {
           report_text: string | null
           status: string
           duration_ms: number | null
+          platform: string | null
           created_at: string
         }
         Insert: {
           id?: string
           user_account_id: string
+          account_id?: string | null
           idempotency_key?: string | null
           plan_json?: Json
           actions_json?: Json
@@ -32,11 +35,13 @@ export type Database = {
           report_text?: string | null
           status?: string
           duration_ms?: number | null
+          platform?: string | null
           created_at?: string
         }
         Update: {
           id?: string
           user_account_id?: string
+          account_id?: string | null
           idempotency_key?: string | null
           plan_json?: Json
           actions_json?: Json
@@ -44,6 +49,7 @@ export type Database = {
           report_text?: string | null
           status?: string
           duration_ms?: number | null
+          platform?: string | null
           created_at?: string
         }
         Relationships: [
@@ -63,6 +69,8 @@ export type Database = {
           report_data: Json
           telegram_id: string
           updated_at: string
+          account_id: string | null
+          platform: string | null
         }
         Insert: {
           created_at?: string
@@ -70,6 +78,8 @@ export type Database = {
           report_data: Json
           telegram_id: string
           updated_at?: string
+          account_id?: string | null
+          platform?: string | null
         }
         Update: {
           created_at?: string
@@ -77,6 +87,8 @@ export type Database = {
           report_data?: Json
           telegram_id?: string
           updated_at?: string
+          account_id?: string | null
+          platform?: string | null
         }
         Relationships: []
       }
@@ -203,6 +215,7 @@ export type Database = {
           access_token: string
           ad_account_id: string
           autopilot: boolean | null
+          autopilot_tiktok: boolean | null
           city_id: string | null
           created_at: string | null
           creative_generations_available: number | null
@@ -238,6 +251,7 @@ export type Database = {
           access_token: string
           ad_account_id: string
           autopilot?: boolean | null
+          autopilot_tiktok?: boolean | null
           city_id?: string | null
           created_at?: string | null
           creative_generations_available?: number | null
@@ -273,6 +287,7 @@ export type Database = {
           access_token?: string
           ad_account_id?: string
           autopilot?: boolean | null
+          autopilot_tiktok?: boolean | null
           city_id?: string | null
           created_at?: string | null
           creative_generations_available?: number | null
@@ -350,6 +365,15 @@ export type Database = {
           fb_creative_id_whatsapp: string | null
           fb_creative_id_instagram_traffic: string | null
           fb_creative_id_site_leads: string | null
+          direction_id: string | null
+          account_id: string | null
+          media_type: string | null
+          image_url: string | null
+          thumbnail_url: string | null
+          carousel_data: Json | null
+          generated_creative_id: string | null
+          tiktok_video_id: string | null
+          creative_group_id: string | null
           status: string
           is_active: boolean
           error_text: string | null
@@ -364,6 +388,15 @@ export type Database = {
           fb_creative_id_whatsapp?: string | null
           fb_creative_id_instagram_traffic?: string | null
           fb_creative_id_site_leads?: string | null
+          direction_id?: string | null
+          account_id?: string | null
+          media_type?: string | null
+          image_url?: string | null
+          thumbnail_url?: string | null
+          carousel_data?: Json | null
+          generated_creative_id?: string | null
+          tiktok_video_id?: string | null
+          creative_group_id?: string | null
           status?: string
           is_active?: boolean
           error_text?: string | null
@@ -378,6 +411,15 @@ export type Database = {
           fb_creative_id_whatsapp?: string | null
           fb_creative_id_instagram_traffic?: string | null
           fb_creative_id_site_leads?: string | null
+          direction_id?: string | null
+          account_id?: string | null
+          media_type?: string | null
+          image_url?: string | null
+          thumbnail_url?: string | null
+          carousel_data?: Json | null
+          generated_creative_id?: string | null
+          tiktok_video_id?: string | null
+          creative_group_id?: string | null
           status?: string
           is_active?: boolean
           error_text?: string | null
