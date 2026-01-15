@@ -196,9 +196,10 @@ export const adsHandlers = {
     logger.debug({ campaign_id, period, campaign_type, userAccountId }, '[getAdSets] Starting');
 
     const dateRange = getDateRangeWithDates({ date_from, date_to, period });
-    // Use dynamic time_range instead of hardcoded date_preset(today)
-    const timeRangeStr = `{"since":"${dateRange.since}","until":"${dateRange.until}"}`;
-    const fields = `id,name,status,daily_budget,targeting,campaign_id,insights.time_range(${timeRangeStr}){spend,impressions,clicks,actions}`;
+    const normalizedAccountId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
+
+    // Fields WITHOUT embedded insights - we'll fetch insights separately
+    const fields = 'id,name,status,daily_budget,targeting,campaign_id';
 
     // ALWAYS load directions for campaign_type determination
     const { data: directions, error: directionsError } = await supabase
@@ -221,7 +222,6 @@ export const adsHandlers = {
 
     if (!campaign_id && campaign_type && campaign_type !== 'all') {
       // Get all campaigns from FB
-      const normalizedAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
       const allCampaigns = await fbGraph('GET', `${normalizedAccountId}/campaigns`, accessToken, {
         fields: 'id',
         limit: 500
@@ -240,32 +240,58 @@ export const adsHandlers = {
 
     // Fetch adsets for each campaign (or single campaign_id)
     let allAdsets = [];
-    const normalizedAccountId = adAccountId?.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
     if (campaignIds.length > 0) {
       for (const cid of campaignIds) {
         const result = await fbGraph('GET', `${cid}/adsets`, accessToken, {
           fields,
-          time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
+          limit: 500
         });
         allAdsets.push(...(result.data || []));
       }
     } else if (campaign_id) {
       const result = await fbGraph('GET', `${campaign_id}/adsets`, accessToken, {
         fields,
-        time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until })
+        limit: 500
       });
       allAdsets = result.data || [];
     }
 
+    logger.debug({ adsetCount: allAdsets.length }, '[getAdSets] Got adsets from FB');
+
+    if (allAdsets.length === 0) {
+      return { success: true, adsets: [], totals: { spend: 0, leads: 0, cpl: null } };
+    }
+
+    // Fetch insights separately via account-level endpoint (like getAds does)
+    const adsetIds = allAdsets.map(a => a.id);
+    const insightsResult = await fbGraph('GET', `${normalizedAccountId}/insights`, accessToken, {
+      level: 'adset',
+      fields: 'adset_id,adset_name,spend,impressions,clicks,inline_link_clicks,actions',
+      time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
+      filtering: JSON.stringify([{ field: 'adset.id', operator: 'IN', value: adsetIds }]),
+      limit: 500
+    });
+
+    // Create insights map by adset_id
+    logger.debug({ insightsCount: insightsResult.data?.length || 0, adsetCount: adsetIds.length }, '[getAdSets] Got insights from FB');
+    const insightsMap = {};
+    for (const insight of (insightsResult.data || [])) {
+      insightsMap[insight.adset_id] = insight;
+    }
+
+    let totalSpend = 0;
+    let totalLeads = 0;
+
     const adsets = allAdsets.map(a => {
-      const insights = a.insights?.data?.[0] || {};
+      const insights = insightsMap[a.id] || {};
       const spend = parseFloat(insights.spend || 0);
 
-      // Count leads from ALL sources like dashboard:
+      // Count leads from ALL sources + messaging_conversations_started
       let messagingLeads = 0;
       let siteLeads = 0;
       let leadFormLeads = 0;
+      let messagingConversations = 0;
 
       if (insights.actions && Array.isArray(insights.actions)) {
         for (const action of insights.actions) {
@@ -278,13 +304,17 @@ export const adsHandlers = {
             siteLeads = parseInt(action.value || '0', 10);
           } else if (action.action_type === 'onsite_conversion.lead_grouped') {
             // Facebook Lead Forms - only onsite_conversion.lead_grouped
-            // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
             leadFormLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.messaging_conversation_started_7d') {
+            // Messaging conversations started (для анализа качества диалогов)
+            messagingConversations = parseInt(action.value || '0', 10);
           }
         }
       }
 
       const leads = messagingLeads + siteLeads + leadFormLeads;
+      totalSpend += spend;
+      totalLeads += leads;
       const isInternal = internalCampaignIds.has(a.campaign_id);
 
       return {
@@ -295,12 +325,26 @@ export const adsHandlers = {
         campaign_id: a.campaign_id,
         campaign_type: isInternal ? 'internal' : 'external',
         spend,
-        leads: leads,
-        cpl: leads > 0 ? (spend / leads).toFixed(2) : null
+        leads,
+        cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
+        impressions: parseInt(insights.impressions || 0),
+        clicks: parseInt(insights.clicks || 0),
+        link_clicks: parseInt(insights.inline_link_clicks || 0),
+        messaging_conversations: messagingConversations
       };
     });
 
-    return { success: true, adsets };
+    logger.debug({ totalAdsets: adsets.length, totalSpend, totalLeads }, '[getAdSets] Completed');
+
+    return {
+      success: true,
+      adsets,
+      totals: {
+        spend: totalSpend.toFixed(2),
+        leads: totalLeads,
+        cpl: totalLeads > 0 ? (totalSpend / totalLeads).toFixed(2) : null
+      }
+    };
   },
 
   async getAds({ campaign_id, period, date_from, date_to, campaign_type }, { accessToken, adAccountId, userAccountId }) {
@@ -346,7 +390,7 @@ export const adsHandlers = {
     const adIds = result.data.map(ad => ad.id);
     const insightsResult = await fbGraph('GET', `${normalizedAccountId}/insights`, accessToken, {
       level: 'ad',
-      fields: 'ad_id,ad_name,spend,impressions,clicks,actions',
+      fields: 'ad_id,ad_name,spend,impressions,clicks,inline_link_clicks,actions',
       time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
       filtering: JSON.stringify([{ field: 'ad.id', operator: 'IN', value: adIds }]),
       limit: 500
@@ -366,10 +410,11 @@ export const adsHandlers = {
       const insights = insightsMap[ad.id] || {};
       const spend = parseFloat(insights.spend || 0);
 
-      // Count leads from ALL sources
+      // Count leads from ALL sources + messaging_conversations_started
       let messagingLeads = 0;
       let siteLeads = 0;
       let leadFormLeads = 0;
+      let messagingConversations = 0;
 
       if (insights.actions && Array.isArray(insights.actions)) {
         for (const action of insights.actions) {
@@ -382,8 +427,10 @@ export const adsHandlers = {
             siteLeads = parseInt(action.value || '0', 10);
           } else if (action.action_type === 'onsite_conversion.lead_grouped') {
             // Facebook Lead Forms - only onsite_conversion.lead_grouped
-            // DON'T count 'lead' - it's an aggregate that duplicates pixel_lead for site campaigns
             leadFormLeads = parseInt(action.value || '0', 10);
+          } else if (action.action_type === 'onsite_conversion.messaging_conversation_started_7d') {
+            // Messaging conversations started (для анализа качества диалогов)
+            messagingConversations = parseInt(action.value || '0', 10);
           }
         }
       }
@@ -407,7 +454,9 @@ export const adsHandlers = {
         leads,
         cpl: leads > 0 ? (spend / leads).toFixed(2) : null,
         impressions: parseInt(insights.impressions || 0),
-        clicks: parseInt(insights.clicks || 0)
+        clicks: parseInt(insights.clicks || 0),
+        link_clicks: parseInt(insights.inline_link_clicks || 0),
+        messaging_conversations: messagingConversations
       };
     }).filter(ad => {
       // Filter by activity
