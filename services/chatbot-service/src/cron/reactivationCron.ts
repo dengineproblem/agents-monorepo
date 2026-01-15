@@ -23,7 +23,7 @@ export function startReactivationCron() {
         .eq('active', true);
       
       if (error || !users) {
-        console.error('[Reactivation Cron] Error fetching users:', error);
+        console.error('[Reactivation Cron] Error fetching users:', error?.message || JSON.stringify(error));
         return;
       }
       

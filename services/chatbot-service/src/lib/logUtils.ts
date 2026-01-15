@@ -908,6 +908,7 @@ export function logProcessingSummary(
     tokensUsed?: number;
     costCents?: number;
     errorMessage?: string;
+    isExpected?: boolean;  // Для ожидаемых ситуаций (дубликаты, rate limits) - логировать как info
   }
 ): void {
   const timings = ctxLog.getTimings();
@@ -920,6 +921,13 @@ export function logProcessingSummary(
       costCents: data.costCents,
       ...timings
     }, '[Flow] === PROCESSING COMPLETED SUCCESSFULLY ===', ['processing']);
+  } else if (data.isExpected) {
+    // Ожидаемые ситуации (дубликаты, rate limits) - не логируем как error
+    ctxLog.info({
+      finalStage: data.finalStage,
+      reason: data.errorMessage,
+      ...timings
+    }, '[Flow] === PROCESSING SKIPPED (expected) ===', ['processing']);
   } else {
     ctxLog.error(new Error(data.errorMessage || 'Unknown error'),
       '[Flow] === PROCESSING FAILED ===',

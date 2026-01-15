@@ -2377,7 +2377,8 @@ export async function processIncomingMessage(
       logProcessingSummary(ctxLog, {
         success: false,
         finalStage: 'received',
-        errorMessage: 'Rate limit exceeded'
+        errorMessage: 'Rate limit exceeded',
+        isExpected: true
       });
 
       return { processed: false, reason: 'rate_limited', correlationId: ctxLog.context.correlationId };
@@ -2388,7 +2389,8 @@ export async function processIncomingMessage(
       logProcessingSummary(ctxLog, {
         success: false,
         finalStage: 'received',
-        errorMessage: 'Duplicate message'
+        errorMessage: 'Duplicate message',
+        isExpected: true
       });
 
       return { processed: false, reason: 'duplicate_message', correlationId: ctxLog.context.correlationId };

@@ -284,6 +284,12 @@ async function handleIncomingMessage(event: any, app: FastifyInstance) {
       }, app);
     }
 
+    // Валидация перед вызовом бота - не отправляем запрос с пустыми полями
+    if (!clientPhone || !instance) {
+      app.log.warn({ clientPhone, instance, remoteJid }, 'Missing clientPhone or instance, skipping bot response');
+      return;
+    }
+
     await tryBotResponse(clientPhone, instance, messageText, messageType, app);
 
     return;
@@ -510,6 +516,12 @@ async function processAdLead(params: {
   }, app);
 
   // НОВОЕ: Проверить, должен ли бот ответить
+  // Валидация перед вызовом бота - не отправляем запрос с пустыми полями
+  if (!clientPhone || !instanceName) {
+    app.log.warn({ clientPhone, instanceName }, 'Missing clientPhone or instanceName, skipping bot response');
+    return;
+  }
+
   await tryBotResponse(clientPhone, instanceName, messageText, 'text', app);
 }
 

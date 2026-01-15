@@ -172,11 +172,10 @@ async function handlePauseBot(
     const dbLatencyMs = Date.now() - dbStartTime;
 
     if (error) {
-      log.error({
+      log.error(new Error(error.message || 'Database error'), '[handlePauseBot] Failed to pause bot in database', {
         leadId: maskUuid(lead.id),
-        error: error.message,
         dbLatencyMs
-      }, '[handlePauseBot] Failed to pause bot in database', {}, ['processing', 'db']);
+      }, ['processing', 'db']);
       return 'Не удалось поставить бота на паузу.';
     }
 
