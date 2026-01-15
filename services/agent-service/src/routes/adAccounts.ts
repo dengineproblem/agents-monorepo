@@ -525,8 +525,8 @@ export async function adAccountsRoutes(app: FastifyInstance) {
 
       if (error) {
         log.error({ error }, 'Error creating ad account');
-        if (error.message.includes('Maximum 5')) {
-          return reply.status(400).send({ error: 'Maximum 5 advertising accounts allowed' });
+        if (error.message.includes('Maximum 10')) {
+          return reply.status(400).send({ error: 'Maximum 10 advertising accounts allowed' });
         }
         return reply.status(500).send({ error: 'Failed to create ad account' });
       }

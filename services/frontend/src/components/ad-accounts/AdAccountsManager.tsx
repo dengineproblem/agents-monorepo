@@ -279,7 +279,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
               Рекламные аккаунты
             </CardTitle>
             <CardDescription>
-              Управление рекламными аккаунтами (до 5 аккаунтов)
+              Управление рекламными аккаунтами (до 10 аккаунтов)
             </CardDescription>
           </div>
           <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
@@ -287,7 +287,7 @@ export function AdAccountsManager({ className }: AdAccountsManagerProps) {
               <Button
                 variant="outline"
                 size="sm"
-                disabled={accounts.length >= 5}
+                disabled={accounts.length >= 10}
                 onClick={() => {
                   resetForm();
                   setIsCreateOpen(true);
