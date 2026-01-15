@@ -174,16 +174,46 @@ export function BrainProposalsModal({
                     </label>
                   </div>
 
-                  {/* Список proposals */}
-                  {proposal.proposals.map((p, index) => (
-                    <ProposalItem
-                      key={index}
-                      proposal={p}
-                      index={index}
-                      checked={selectedSteps.has(index)}
-                      onToggle={() => toggleStep(index)}
-                    />
-                  ))}
+                  {/* Список proposals с группировкой по направлениям */}
+                  {(() => {
+                    // Группируем proposals по direction_name
+                    const grouped = new Map<string, { proposals: typeof proposal.proposals; indices: number[] }>();
+                    proposal.proposals.forEach((p, index) => {
+                      const dirName = p.direction_name || 'Без направления';
+                      if (!grouped.has(dirName)) {
+                        grouped.set(dirName, { proposals: [], indices: [] });
+                      }
+                      grouped.get(dirName)!.proposals.push(p);
+                      grouped.get(dirName)!.indices.push(index);
+                    });
+
+                    // Если все в одном направлении - не показываем заголовок группы
+                    const showGroups = grouped.size > 1 || !grouped.has('Без направления');
+
+                    return Array.from(grouped.entries()).map(([dirName, group]) => (
+                      <div key={dirName} className="space-y-2">
+                        {showGroups && (
+                          <div className="flex items-center gap-2 mt-3 mb-1">
+                            <Badge variant="outline" className="text-xs font-medium">
+                              {dirName}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              ({group.proposals.length})
+                            </span>
+                          </div>
+                        )}
+                        {group.proposals.map((p, i) => (
+                          <ProposalItem
+                            key={group.indices[i]}
+                            proposal={p}
+                            index={group.indices[i]}
+                            checked={selectedSteps.has(group.indices[i])}
+                            onToggle={() => toggleStep(group.indices[i])}
+                          />
+                        ))}
+                      </div>
+                    ));
+                  })()}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-8 text-center">

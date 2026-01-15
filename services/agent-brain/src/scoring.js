@@ -1265,6 +1265,22 @@ function analyzeAdsForEaters(adsInsights, options = {}) {
     const leads = extractLeads(ad.actions);
     const impressions = parseInt(ad.impressions || 0);
 
+    // Debug: логируем каждый ad для диагностики (временно info для диагностики)
+    // Извлекаем сырые actions для анализа откуда берётся lead
+    const rawActions = (ad.actions || []).map(a => ({ type: a.action_type, value: a.value }));
+    logger.info({
+      where: 'analyzeAdsForEaters',
+      ad_id: ad.ad_id,
+      ad_name: ad.ad_name?.substring(0, 40),
+      campaign_id: ad.campaign_id,
+      spend,
+      leads,
+      impressions,
+      will_skip_spend: spend < thresholds.MIN_SPEND_FOR_ANALYSIS,
+      will_skip_impressions: impressions < thresholds.MIN_IMPRESSIONS,
+      raw_actions: rawActions.length > 0 ? rawActions : 'none'
+    }, `[analyzeAdsForEaters] Checking ad: ${ad.ad_name?.substring(0, 30)} - $${spend.toFixed(2)}, ${leads} leads, ${impressions} impr`);
+
     // Пропускаем ads с малым расходом — недостаточно данных для выводов
     if (spend < thresholds.MIN_SPEND_FOR_ANALYSIS) {
       skippedLowSpend++;
@@ -4173,7 +4189,22 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           unused_creatives: freshUnusedCreatives.slice(0, 15),
           ready_creatives: brainReport?.ready_creatives?.slice(0, 10) || [],
           recent_actions_count: recentActions?.length || 0,
-          // NOTE: ads для анализа пожирателей включены внутрь каждого adset (см. adsets[].ads)
+          // Явный список обнаруженных пожирателей (для LLM)
+          ad_eaters: adEaters.map(e => ({
+            ad_id: e.ad_id,
+            ad_name: e.ad_name,
+            adset_id: e.adset_id,
+            adset_name: e.adset_name,
+            campaign_id: e.campaign_id,
+            direction_id: adsetAnalysis.find(a => a.adset_id === e.adset_id)?.direction_id || null,
+            direction_name: adsetAnalysis.find(a => a.adset_id === e.adset_id)?.direction_name || null,
+            spend: e.spend,
+            leads: e.leads,
+            cpl: e.cpl,
+            priority: e.priority,
+            is_critical: e.is_critical,
+            reasons: e.reasons
+          })),
           summary: {
             total_adsets: adsetAnalysis.length,
             external_count: externalCount,

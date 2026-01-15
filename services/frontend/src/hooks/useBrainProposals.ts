@@ -11,6 +11,10 @@ export interface BrainProposal {
   entity_type: string;
   entity_id: string;
   entity_name: string;
+  direction_id?: string;
+  direction_name?: string;
+  campaign_id?: string;
+  campaign_type?: 'internal' | 'external';
   health_score?: number;
   hs_class?: string;
   reason: string;
