@@ -1,70 +1,144 @@
 # TikTok Integration
 
-This document describes the current TikTok Ads integration in the monorepo. It focuses on backend services,
-data model, and the frontend ROI helper that are already implemented.
+This document reflects the current state of TikTok Ads integration in the monorepo based on the
+latest code (agent-service, agent-brain, frontend) and DB migrations.
 
-## Scope
-- Campaign builder for TikTok (campaign, ad group, ad creation).
-- Brain/autopilot reporting and action dispatch for TikTok.
-- ROI analytics fetches via proxy in the frontend.
+## Status snapshot
+
+### Implemented (current code)
+- Platform separation: UI tabs for Instagram/TikTok and API filtering for directions, reports, and executions.
+- TikTok campaign builder: auto/manual launch, create/list/pause/resume campaigns, report, available creatives, advertiser info.
+- Direction model: platform column (facebook/tiktok), TikTok fields (objective, daily budget, target CPL, adgroup mode); `platform=both` creates two directions.
+- TikTok creatives: video-only creation with `tiktok_video_id` or `media_url` upload fallback; KZT budgets for TikTok.
+- Brain/batch: `/api/brain/run-tiktok` with `autopilot_tiktok` gating, platform-tagged reports/executions, Telegram message per platform.
+- Dashboard/ROI tabs: platform separation; TikTok dashboard data loaded through proxy in `tiktokApi`.
+- DB migrations for TikTok: 112, 150, 152, 155.
+
+### Pending / not implemented yet
+- UI controls for `autopilot_tiktok` and TikTok credentials in multi-account mode (Profile/AdAccountsManager).
+- Cross-platform creative sync via `creative_group_id` is not wired in UI/backend logic.
+- TikTok metrics ingestion into `creative_metrics_history` is not present in this repo; ROI relies on that table so TikTok ROI can be empty unless an external process writes metrics.
+- TikTok lead attribution / CRM qualification flows (CAPI/WhatsApp conversions, lead quality) are not implemented.
+- TikTok account status checks are not surfaced in the UI (Dashboard still uses Facebook account status only).
+
+## Platform separation (UI vs DB)
+- UI uses `platform = instagram | tiktok` in `AppContext`.
+- Backend uses `platform = facebook | tiktok` for directions, reports, and executions.
+- Mapping: `instagram` in UI maps to `facebook` in DB/API.
+- Legacy directions can have `platform = null`; code treats them as Facebook.
+- Directions, reports, and executions are filtered by platform in API and UI.
 
 ## Architecture
+
 ### agent-service
-- TikTok API adapter and error handling live in `services/agent-service/src/adapters/tiktok.ts` and `services/agent-service/src/lib/tiktokErrors.ts`.
-- TikTok settings, targeting conversion, and credentials helpers live in `services/agent-service/src/lib/tiktokSettings.ts`.
-- Campaign builder endpoints are in `services/agent-service/src/routes/tiktokCampaignBuilder.ts`.
-- OAuth exchange for TikTok credentials is in `services/agent-service/src/routes/tiktokOAuth.ts`.
-- Workflows for creation live in `services/agent-service/src/workflows/tiktok/createCampaignWithCreative.ts` and `services/agent-service/src/workflows/tiktok/createAdGroupInDirection.ts`.
+- TikTok API wrapper and error mapping:
+  - `services/agent-service/src/adapters/tiktok.ts`
+  - `services/agent-service/src/lib/tiktokErrors.ts`
+- TikTok settings and targeting conversion:
+  - `services/agent-service/src/lib/tiktokSettings.ts`
+  - `services/agent-service/src/lib/defaultSettings.ts`
+  - `services/agent-service/src/lib/settingsHelpers.ts`
+- Directions API (platform-aware creation and updates):
+  - `services/agent-service/src/routes/directions.ts`
+- TikTok campaign builder:
+  - `services/agent-service/src/routes/tiktokCampaignBuilder.ts`
+- OAuth exchange:
+  - `services/agent-service/src/routes/tiktokOAuth.ts`
+- TikTok workflows:
+  - `services/agent-service/src/workflows/tiktok/createCampaignWithCreative.ts`
+  - `services/agent-service/src/workflows/tiktok/createAdGroupInDirection.ts`
 
 ### agent-brain
-- TikTok API wrapper for brain and tools lives in `services/agent-brain/src/chatAssistant/shared/tikTokGraph.js`.
-- Brain endpoint for TikTok optimization is implemented in `services/agent-brain/src/server.js` (POST `/api/brain/run-tiktok`).
-- MCP tool schemas and handlers are in `services/agent-brain/src/chatAssistant/agents/tiktok/toolDefs.js` and `services/agent-brain/src/chatAssistant/agents/tiktok/handlers.js`.
+- TikTok API wrapper for brain:
+  - `services/agent-brain/src/chatAssistant/shared/tikTokGraph.js`
+- Brain endpoint:
+  - `services/agent-brain/src/server.js` (`POST /api/brain/run-tiktok`)
+- MCP tool schemas and handlers:
+  - `services/agent-brain/src/chatAssistant/agents/tiktok/toolDefs.js`
+  - `services/agent-brain/src/chatAssistant/agents/tiktok/handlers.js`
 
 ### frontend
-- TikTok ROI analytics service uses a proxy in `services/frontend/src/services/tiktokApi.ts`.
+- Platform selection (Instagram/TikTok tabs):
+  - `services/frontend/src/pages/Dashboard.tsx`
+  - `services/frontend/src/pages/ROIAnalytics.tsx`
+- TikTok manual launch (KZT budgets, endpoint switch):
+  - `services/frontend/src/services/manualLaunchApi.ts`
+  - `services/frontend/src/pages/Creatives.tsx`
+  - `services/frontend/src/components/VideoUpload.tsx`
+- TikTok dashboard data (proxy):
+  - `services/frontend/src/services/tiktokApi.ts`
+  - `services/frontend/src/context/AppContext.tsx`
+- ROI analytics:
+  - `services/frontend/src/services/salesApi.ts`
+  - `services/frontend/src/pages/ROIAnalytics.tsx`
+- Reports and autopilot history filtered by platform:
+  - `services/frontend/src/hooks/useReports.ts`
+  - `services/frontend/src/components/AutopilotSection.tsx`
+  - `services/frontend/src/components/AllAccountsExecutionsSection.tsx`
 
 ## Authentication and credentials
-- OAuth exchange endpoint: `POST /tiktok/oauth/exchange`.
+- OAuth exchange endpoint: `POST /tiktok/oauth/exchange`
   - Exchanges `auth_code` for `access_token`.
   - Fetches advertiser accounts and TT_USER identity.
-  - Persists credentials to `user_accounts`.
-- Multi-account mode uses `ad_accounts` as the source of TikTok credentials.
+  - Persists credentials to `user_accounts` or `ad_accounts`.
+- Backend credential resolution:
+  - Multi-account mode uses `ad_accounts` for TikTok credentials.
+  - Legacy mode uses `user_accounts`.
+- Frontend `tiktokApi` reads credentials from localStorage user object.
 - Environment variables:
-  - `TIKTOK_APP_ID` and `TIKTOK_APP_SECRET` for OAuth.
-  - `TIKTOK_API_VERSION` for API versioning (defaults to `v1.3`).
-  - `VITE_TIKTOK_PROXY_URL` (frontend) for ROI analytics proxy.
+  - `TIKTOK_APP_ID`, `TIKTOK_APP_SECRET`
+  - `TIKTOK_API_VERSION` (default `v1.3`)
+  - `VITE_TIKTOK_PROXY_URL` (frontend proxy for dashboard)
+- Feature flag:
+  - `FEATURES.SHOW_TIKTOK` hides TikTok UI in app review mode.
 
-## Data model
-### user_accounts
-- `tiktok_access_token`, `tiktok_business_id`, `tiktok_account_id`
-- `autopilot_tiktok`
-
-### ad_accounts
-- `tiktok_access_token`, `tiktok_business_id`, `tiktok_account_id`
-- `autopilot_tiktok`
+## Data model and migrations
 
 ### account_directions
-- Migration adds: `tiktok_campaign_id`, `tiktok_pixel_id`, `tiktok_identity_id` in `migrations/112_create_direction_tiktok_adgroups_table.sql`.
-- Code also expects fields used by TikTok flows:
-  - `platform` (facebook/tiktok/both)
-  - `tiktok_objective`, `tiktok_daily_budget`
-  - `tiktok_target_cpl_kzt` or `tiktok_target_cpl`
-  - `tiktok_adgroup_mode` (e.g. `use_existing`)
+Relevant migrations:
+- `migrations/112_create_direction_tiktok_adgroups_table.sql` adds:
+  - `tiktok_campaign_id`, `tiktok_pixel_id`, `tiktok_identity_id`
+- `migrations/152_add_platform_and_tiktok_fields_to_account_directions.sql` adds:
+  - `platform` (facebook or tiktok, default facebook)
+  - `tiktok_objective`, `tiktok_daily_budget`, `tiktok_target_cpl_kzt`, `tiktok_target_cpl`
+  - `tiktok_adgroup_mode` (use_existing or create_new)
+  - unique constraint `(user_account_id, name, platform)`
+
+Notes:
+- `platform = both` is a create-time option only. Backend creates two directions (`facebook` and `tiktok`) instead of storing `both`.
+- For legacy rows, `platform` is treated as `facebook`.
 
 ### direction_tiktok_adgroups
-- Table for pre-created TikTok ad groups used in `use_existing` mode.
-- Defined in `migrations/112_create_direction_tiktok_adgroups_table.sql`.
-- Key columns: `direction_id`, `tiktok_adgroup_id`, `adgroup_name`, `daily_budget`, `status`, `ads_count`, `last_used_at`, `is_active`.
+Defined in `migrations/112_create_direction_tiktok_adgroups_table.sql`.
+Key columns:
+- `direction_id`, `tiktok_adgroup_id`, `adgroup_name`, `daily_budget`, `status`
+- `ads_count`, `last_used_at`, `is_active`
 
 ### user_creatives
-- `tiktok_video_id` is used to store uploaded video references.
-- `creative_group_id` is used to link creatives across platforms in `migrations/150_tiktok_autopilot_platform_reports_creative_groups.sql`.
+Relevant migrations:
+- `migrations/150_tiktok_autopilot_platform_reports_creative_groups.sql`:
+  - `creative_group_id` (link creatives across platforms)
+- `migrations/155_add_tiktok_video_id_to_user_creatives.sql`:
+  - `tiktok_video_id` (TikTok video identifier)
 
-### campaign_reports and brain_executions
-- `platform` column added in `migrations/150_tiktok_autopilot_platform_reports_creative_groups.sql` to separate TikTok vs Facebook reports.
+Notes:
+- TikTok creatives are identified by `tiktok_video_id`.
+- TikTok creation workflows accept `tiktok_video_id` or fall back to `media_url` (video upload).
+- Image/carousel creation endpoints reject TikTok directions.
+
+### user_accounts and ad_accounts
+Relevant migration:
+- `migrations/150_tiktok_autopilot_platform_reports_creative_groups.sql`:
+  - `autopilot_tiktok` flag
+
+### brain_executions and campaign_reports
+Relevant migration:
+- `migrations/150_tiktok_autopilot_platform_reports_creative_groups.sql`:
+  - `platform` column added to separate TikTok vs Facebook reports
 
 ## API endpoints (agent-service)
+
+### TikTok campaign builder
 ```
 POST /api/tiktok-campaign-builder/auto-launch
 POST /api/tiktok-campaign-builder/manual-launch
@@ -75,12 +149,35 @@ POST /api/tiktok-campaign-builder/resume-campaign
 GET  /api/tiktok-campaign-builder/report
 GET  /api/tiktok-campaign-builder/available-creatives
 GET  /api/tiktok-campaign-builder/advertiser-info
-
-POST /tiktok/oauth/exchange
 ```
 
-## Actions (agent-service /api/actions)
-Supported action types are routed through `services/agent-service/src/routes/actions.ts`:
+Manual launch specifics:
+- Body: `daily_budget` (KZT), `objective`, `direction_id`, `creative_ids`.
+- If `direction.tiktok_adgroup_mode = use_existing`, creates ads in existing ad groups.
+- Otherwise creates a new campaign and ad group.
+
+### Directions
+```
+GET  /api/directions?userAccountId=...&platform=facebook|tiktok&accountId=...
+POST /api/directions
+PATCH /api/directions/:id
+DELETE /api/directions/:id
+```
+
+Create direction payload (TikTok):
+- `platform: tiktok | both`
+- `tiktok_objective`, `tiktok_daily_budget`, `tiktok_target_cpl_kzt`, `tiktok_adgroup_mode`
+- `facebook_default_settings`, `tiktok_default_settings` (optional)
+- `default_settings` (shared settings for single platform)
+
+### Autopilot and reports
+```
+GET /api/autopilot/executions?userAccountId=...&platform=facebook|tiktok&accountId=...
+GET /api/autopilot/reports?telegramId=...&platform=facebook|tiktok&accountId=...
+```
+
+### Actions
+Supported TikTok actions via `POST /api/actions`:
 - `TikTok.GetCampaignStatus`
 - `TikTok.PauseCampaign` / `TikTok.ResumeCampaign`
 - `TikTok.PauseAdGroup` / `TikTok.ResumeAdGroup`
@@ -89,56 +186,76 @@ Supported action types are routed through `services/agent-service/src/routes/act
 - `TikTok.Direction.CreateAdGroupWithCreatives`
 
 ## Workflows
+
+### Direction creation
+- `platform = both` creates two directions: one Facebook, one TikTok.
+- Each direction can have separate `default_ad_settings`:
+  - `facebook_default_settings` for Facebook
+  - `tiktok_default_settings` for TikTok
+- If separate settings are not provided, `default_settings` is used as shared fallback.
+
 ### Create campaign with creatives
-`workflowCreateTikTokCampaignWithCreative` in `services/agent-service/src/workflows/tiktok/createCampaignWithCreative.ts`:
-- Loads creatives and uploads videos to TikTok if `tiktok_video_id` is missing.
-- Creates Campaign -> AdGroup -> Ads.
-- Saves creative mapping via `saveAdCreativeMappingBatch`.
+`workflowCreateTikTokCampaignWithCreative`:
+- Validates creatives are video-only.
+- Uses `tiktok_video_id` when present.
+- If missing, uploads video from `media_url` and stores `tiktok_video_id`.
+- Creates campaign -> ad group -> ads and persists mapping.
 
 ### Use existing ad groups
-`workflowCreateAdInDirection` in `services/agent-service/src/workflows/tiktok/createAdGroupInDirection.ts`:
+`workflowCreateAdInDirection`:
 - Uses `direction_tiktok_adgroups` with `status = DISABLE` and `ads_count < 50`.
-- Activates ad group (ENABLE) when needed.
-- Creates ads and increments `ads_count`.
+- Enables ad group when needed.
+- Increments `ads_count` after ad creation.
 
 ### Create ad group inside a direction
-`workflowCreateAdGroupWithCreatives` in `services/agent-service/src/workflows/tiktok/createAdGroupInDirection.ts`:
+`workflowCreateAdGroupWithCreatives`:
 - Creates a new ad group under `direction.tiktok_campaign_id`.
-- Adds ads and stores the ad group in `direction_tiktok_adgroups`.
+- Stores it in `direction_tiktok_adgroups`.
 
 ## Brain and batch
-### TikTok brain run
-`POST /api/brain/run-tiktok` in `services/agent-brain/src/server.js`:
+`POST /api/brain/run-tiktok`:
 - Loads TikTok credentials from `user_accounts` or `ad_accounts`.
-- Fetches advertiser info, campaigns, ad groups, and reports for multiple time windows.
+- Fetches advertiser info, campaigns, ad groups, and reports.
 - Computes leads based on objective and health score per ad group.
-- Generates actions via LLM prompt or deterministic fallback.
-- Dispatches actions via `/api/actions` when `inputs.dispatch = true`.
-- Saves reports to `campaign_reports` and executions to `brain_executions` with `platform = 'tiktok'`.
-- Sends Telegram report if dispatch is enabled.
+- Generates actions via LLM or deterministic fallback.
+- Dispatches actions via `/api/actions` when enabled.
+- Writes `campaign_reports` and `brain_executions` with `platform = tiktok`.
+- Sends Telegram report messages separately from Facebook.
 
-### Batch scheduling
-- Daily batch for legacy users: `processDailyBatchTikTok`.
-- Hourly schedule for multi-account: `processDailyBatchByScheduleTikTok`.
-- Both rely on `autopilot_tiktok` to decide between report-only vs action dispatch.
+Batch scheduling:
+- Legacy users: `processDailyBatchTikTok`
+- Multi-account: `processDailyBatchByScheduleTikTok`
+- Both use `autopilot_tiktok` to decide report-only vs action dispatch.
 
-## Objectives, metrics, and budgets
-- Objective mapping is defined in `services/agent-service/src/lib/tiktokSettings.ts`.
-- Lead computation in brain:
-  - `traffic` or `click` uses clicks.
-  - `lead` or `conversion` uses conversions.
-  - Otherwise uses conversions if present, else clicks.
-- TikTok statuses: `ENABLE`, `DISABLE`, `DELETE` (API field is `operation_status`).
-- Budgets are passed as raw numbers in account currency. Brain uses KZT defaults and converts USD
-  defaults when explicit TikTok budgets are missing.
+## UI behavior and constraints
+- Dashboard and ROI pages show Instagram/TikTok tabs.
+- Directions list is filtered by platform.
+- TikTok uses KZT budgets; minimum daily budget is 2500 (KZT).
+- TikTok objectives supported: `traffic`, `conversions`, `lead_generation`.
+- TikTok creatives are video-only; image/carousel endpoints reject TikTok directions.
+- Video upload for TikTok uses the webhook in `services/frontend/src/components/VideoUpload.tsx`.
+- Quality metrics and CAPI sections are hidden for TikTok in UI.
 
-## Frontend ROI analytics
-- `services/frontend/src/services/tiktokApi.ts` fetches TikTok metrics through a proxy endpoint.
-- Reads credentials from localStorage `user` payload (`tiktok_access_token`, `tiktok_business_id`).
-- Falls back to mock data if no credentials are available.
+## ROI analytics (current behavior)
+`salesApi.getROIData`:
+- Loads `user_creatives` and separates platforms by `tiktok_video_id`.
+- Aggregates `creative_metrics_history` for spend, clicks, leads.
+- Uses `leads`, `purchases`, and `capi_events_log` to compute revenue/conversions.
+- Converts Facebook spend from USD to KZT using a fixed rate in code.
+- TikTok spend uses raw values (KZT).
 
-## Notes and checks
-- MCP handlers in `services/agent-brain/src/chatAssistant/agents/tiktok/handlers.js` send `status`
-  in update calls; TikTok API expects `operation_status`. Verify if this should be aligned.
-- Several TikTok-specific direction fields are referenced in code but are not created by migrations in this repo.
-  Ensure the database schema contains the required columns listed above.
+Important limitation:
+- TikTok metrics are only shown if `creative_metrics_history` contains TikTok rows. There is no TikTok metrics writer in this repo.
+
+## Troubleshooting
+- ROI 400 on `user_creatives` filter:
+  - Apply `migrations/155_add_tiktok_video_id_to_user_creatives.sql`.
+- Directions not showing:
+  - Apply `migrations/112_create_direction_tiktok_adgroups_table.sql`.
+  - Apply `migrations/152_add_platform_and_tiktok_fields_to_account_directions.sql`.
+- TikTok dashboard shows mock data:
+  - Check TikTok credentials in localStorage (`tiktok_access_token`, `tiktok_business_id`).
+- TikTok ad creation fails:
+  - Verify `tiktok_video_id` or `media_url` exists for the creative.
+- Platform mismatch:
+  - UI uses `instagram` but DB uses `facebook`. Confirm filters map correctly.
