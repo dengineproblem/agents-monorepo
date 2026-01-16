@@ -645,7 +645,7 @@ export async function createWhatsAppCreative(
   params: {
     videoId: string;
     pageId: string;
-    instagramId: string;
+    instagramId?: string;
     message: string;
     clientQuestion: string;
     whatsappPhoneNumber?: string;
@@ -686,11 +686,15 @@ export async function createWhatsAppCreative(
     videoData.image_hash = params.thumbnailHash;
   }
   
-  const objectStorySpec = {
+  const objectStorySpec: any = {
     page_id: params.pageId,
-    instagram_user_id: params.instagramId,
     video_data: videoData
   };
+
+  // Instagram ID опционален - без него реклама будет показываться от имени страницы
+  if (params.instagramId) {
+    objectStorySpec.instagram_user_id = params.instagramId;
+  }
 
   return await graph('POST', `${adAccountId}/adcreatives`, token, {
     name: "Video CTWA – WhatsApp",

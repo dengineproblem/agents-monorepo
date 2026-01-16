@@ -68,6 +68,18 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
       throw new Error('user_id is required in metadata');
     }
 
+    if (directionId) {
+      const { data: direction } = await supabase
+        .from('account_directions')
+        .select('platform')
+        .eq('id', directionId)
+        .maybeSingle();
+
+      if (direction?.platform === 'tiktok') {
+        throw new Error('TikTok directions are not supported for Facebook creatives');
+      }
+    }
+
     // Проверяем существование и размер файла
     let fileStats;
     try {
@@ -250,18 +262,24 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     let siteUrl = null;
     let utm = null;
     let leadFormId: string | null = null;
-    let objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp';
+    let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp';
+    let useInstagram = true; // По умолчанию используем Instagram
 
     if (directionId) {
       const { data: direction } = await supabase
         .from('account_directions')
-        .select('objective')
+        .select('objective, use_instagram')
         .eq('id', directionId)
         .maybeSingle();
 
       if (direction?.objective) {
         objective = direction.objective as typeof objective;
       }
+      if (direction?.use_instagram !== undefined) {
+        useInstagram = direction.use_instagram;
+      }
+
+      log.info({ directionId, objective, useInstagram, directionData: direction }, '[TUS] Direction settings loaded');
 
       const { data: defaultSettings } = await supabase
         .from('default_ad_settings')
@@ -281,11 +299,11 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     // Создаём креатив в Facebook
     let fbCreativeId = '';
 
-    if (objective === 'whatsapp') {
+    if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
       const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
         videoId: fbVideo.id,
         pageId: pageId,
-        instagramId: instagramId,
+        instagramId: useInstagram ? instagramId : undefined, // Передаём Instagram только если use_instagram = true
         message: description,
         clientQuestion: clientQuestion,
         whatsappPhoneNumber: whatsappPhoneNumber || undefined,
@@ -351,7 +369,7 @@ async function processCompletedUpload(uploadId: string, metadata: Record<string,
     };
     if (thumbnailUrl) updateData.thumbnail_url = thumbnailUrl;
     // Сохраняем fb_creative_id в соответствующее поле по типу objective
-    if (objective === 'whatsapp') updateData.fb_creative_id_whatsapp = fbCreativeId;
+    if (objective === 'whatsapp' || objective === 'whatsapp_conversions') updateData.fb_creative_id_whatsapp = fbCreativeId;
     else if (objective === 'instagram_traffic') updateData.fb_creative_id_instagram_traffic = fbCreativeId;
     else if (objective === 'site_leads') updateData.fb_creative_id_site_leads = fbCreativeId;
     else if (objective === 'lead_forms') updateData.fb_creative_id_lead_forms = fbCreativeId;

@@ -3,9 +3,12 @@ import { z } from 'zod';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import { resolveFacebookError } from '../lib/facebookErrors.js';
+import { resolveTikTokError } from '../lib/tiktokErrors.js';
 import { onDirectionCreated } from '../lib/onboardingHelper.js';
 import { shouldFilterByAccountId } from '../lib/multiAccountHelper.js';
 import { getPageAccessToken, subscribePageToLeadgen } from '../lib/facebookHelpers.js';
+import { getTikTokCredentials, getTikTokObjectiveConfig } from '../lib/tiktokSettings.js';
+import { tt } from '../adapters/tiktok.js';
 
 const log = createLogger({ module: 'directionsRoutes' });
 
@@ -23,32 +26,85 @@ const CapiFieldConfigSchema = z.object({
   entity_type: z.string().optional(), // for Bitrix24
 });
 
+const DirectionPlatformSchema = z.enum(['facebook', 'tiktok', 'both']);
+const TikTokObjectiveSchema = z.enum(['traffic', 'conversions', 'lead_generation']);
+const TikTokAdGroupModeSchema = z.enum(['use_existing', 'create_new']);
+const DefaultSettingsSchema = z.object({
+  cities: z.array(z.string()).optional(),
+  age_min: z.number().int().min(18).max(65).optional(),
+  age_max: z.number().int().min(18).max(65).optional(),
+  gender: z.enum(['all', 'male', 'female']).optional(),
+  description: z.string().optional(),
+  // WhatsApp specific
+  client_question: z.string().optional(),
+  // Instagram specific
+  instagram_url: z.string().url().optional(),
+  // Site Leads specific
+  site_url: z.string().url().optional(),
+  pixel_id: z.string().nullable().optional(),
+  utm_tag: z.string().optional(),
+  // Lead Forms specific
+  lead_form_id: z.string().optional(),
+});
+
+type DirectionPlatform = z.infer<typeof DirectionPlatformSchema>;
+type TikTokObjectiveInput = z.infer<typeof TikTokObjectiveSchema>;
+type DirectionObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+
+const TIKTOK_MIN_DAILY_BUDGET = 2500;
+const DEFAULT_FB_DAILY_BUDGET_CENTS = 500;
+const DEFAULT_FB_TARGET_CPL_CENTS = 50;
+
+const TIKTOK_OBJECTIVE_TO_DIRECTION_OBJECTIVE: Record<
+  TikTokObjectiveInput,
+  DirectionObjective
+> = {
+  traffic: 'instagram_traffic',
+  conversions: 'site_leads',
+  lead_generation: 'lead_forms',
+};
+
+function mapTikTokObjectiveToDirectionObjective(objective: TikTokObjectiveInput): DirectionObjective {
+  return TIKTOK_OBJECTIVE_TO_DIRECTION_OBJECTIVE[objective] || 'instagram_traffic';
+}
+
+function getTikTokObjectiveLabel(objective: TikTokObjectiveInput) {
+  switch (objective) {
+    case 'traffic':
+      return 'Traffic';
+    case 'conversions':
+      return 'Conversions';
+    case 'lead_generation':
+      return 'Lead Gen';
+    default:
+      return 'Traffic';
+  }
+}
+
+function normalizeDirectionPlatform(platform?: string | null): 'facebook' | 'tiktok' {
+  return platform === 'tiktok' ? 'tiktok' : 'facebook';
+}
+
 const CreateDirectionSchema = z.object({
   userAccountId: z.string().uuid(),
   accountId: z.string().uuid().optional().nullable(), // UUID из ad_accounts.id для мультиаккаунтности
+  platform: DirectionPlatformSchema.optional(),
   name: z.string().min(2).max(100),
-  objective: z.enum(['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms']),
-  daily_budget_cents: z.number().int().min(500), // минимум $5
-  target_cpl_cents: z.number().int().min(10), // минимум $0.10 для instagram_traffic, проверяется в refine
+  objective: z.enum(['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms']).optional(),
+  optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
+  use_instagram: z.boolean().optional(),
+  daily_budget_cents: z.number().int().min(500).optional(), // минимум $5
+  target_cpl_cents: z.number().int().min(10).optional(), // минимум $0.10 для instagram_traffic, проверяется в refine
   whatsapp_phone_number: z.string().optional(), // Номер передается напрямую, не ID
+  tiktok_objective: TikTokObjectiveSchema.optional(),
+  tiktok_daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET).optional(),
+  tiktok_target_cpl_kzt: z.number().min(0).optional(),
+  tiktok_target_cpl: z.number().min(0).optional(),
+  tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
   // Опциональные дефолтные настройки рекламы
-  default_settings: z.object({
-    cities: z.array(z.string()).optional(),
-    age_min: z.number().int().min(18).max(65).optional(),
-    age_max: z.number().int().min(18).max(65).optional(),
-    gender: z.enum(['all', 'male', 'female']).optional(),
-    description: z.string().optional(),
-    // WhatsApp specific
-    client_question: z.string().optional(),
-    // Instagram specific
-    instagram_url: z.string().url().optional(),
-    // Site Leads specific
-    site_url: z.string().url().optional(),
-    pixel_id: z.string().nullable().optional(),
-    utm_tag: z.string().optional(),
-    // Lead Forms specific
-    lead_form_id: z.string().optional(),
-  }).optional(),
+  default_settings: DefaultSettingsSchema.optional(),
+  facebook_default_settings: DefaultSettingsSchema.optional(),
+  tiktok_default_settings: DefaultSettingsSchema.optional(),
   // CAPI settings (direction-level)
   capi_enabled: z.boolean().optional(),
   capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
@@ -56,13 +112,63 @@ const CreateDirectionSchema = z.object({
   capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
-}).refine((data) => {
-  // Для instagram_traffic минимум 10 центов ($0.10), для остальных 50 центов ($0.50)
-  const minCents = data.objective === 'instagram_traffic' ? 10 : 50;
-  return data.target_cpl_cents >= minCents;
-}, {
-  message: 'target_cpl_cents is below minimum for this objective',
-  path: ['target_cpl_cents'],
+}).superRefine((data, ctx) => {
+  const platform = data.platform || 'facebook';
+  const needsFacebook = platform === 'facebook' || platform === 'both';
+  const needsTikTok = platform === 'tiktok' || platform === 'both';
+
+  if (needsFacebook) {
+    if (!data.objective) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'objective is required for Facebook',
+        path: ['objective'],
+      });
+    }
+    if (data.daily_budget_cents === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'daily_budget_cents is required for Facebook',
+        path: ['daily_budget_cents'],
+      });
+    }
+    if (data.target_cpl_cents === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'target_cpl_cents is required for Facebook',
+        path: ['target_cpl_cents'],
+      });
+    }
+  }
+
+  if (needsTikTok) {
+    if (!data.tiktok_objective) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'tiktok_objective is required for TikTok',
+        path: ['tiktok_objective'],
+      });
+    }
+    if (data.tiktok_daily_budget === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `tiktok_daily_budget is required and must be >= ${TIKTOK_MIN_DAILY_BUDGET}`,
+        path: ['tiktok_daily_budget'],
+      });
+    }
+  }
+
+  if (data.objective && data.target_cpl_cents !== undefined) {
+    // Для instagram_traffic минимум 10 центов ($0.10), для остальных 50 центов ($0.50)
+    const minCents = data.objective === 'instagram_traffic' ? 10 : 50;
+    if (data.target_cpl_cents < minCents) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'target_cpl_cents is below minimum for this objective',
+        path: ['target_cpl_cents'],
+      });
+    }
+  }
 });
 
 const UpdateDirectionSchema = z.object({
@@ -71,6 +177,11 @@ const UpdateDirectionSchema = z.object({
   target_cpl_cents: z.number().int().min(10).optional(), // минимум проверяется в handler по objective
   is_active: z.boolean().optional(),
   whatsapp_phone_number: z.string().nullable().optional(), // Номер передается напрямую
+  tiktok_objective: TikTokObjectiveSchema.optional(),
+  tiktok_daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET).optional(),
+  tiktok_target_cpl_kzt: z.number().min(0).optional(),
+  tiktok_target_cpl: z.number().min(0).optional(),
+  tiktok_adgroup_mode: TikTokAdGroupModeSchema.optional(),
   // CAPI settings (direction-level)
   capi_enabled: z.boolean().optional(),
   capi_source: z.enum(['whatsapp', 'crm']).nullable().optional(),
@@ -78,6 +189,8 @@ const UpdateDirectionSchema = z.object({
   capi_interest_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_qualified_fields: z.array(CapiFieldConfigSchema).optional(),
   capi_scheduled_fields: z.array(CapiFieldConfigSchema).optional(),
+  // WhatsApp-conversions optimization level
+  optimization_level: z.enum(['level_1', 'level_2', 'level_3']).optional(),
 });
 
 type CreateDirectionInput = z.infer<typeof CreateDirectionSchema>;
@@ -94,7 +207,7 @@ async function createFacebookCampaign(
   adAccountId: string,
   accessToken: string,
   directionName: string,
-  objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms'
+  objective: DirectionObjective
 ): Promise<{ campaign_id: string; status: string }> {
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -106,6 +219,10 @@ async function createFacebookCampaign(
     case 'whatsapp':
       fbObjective = 'OUTCOME_ENGAGEMENT';
       objectiveReadable = 'WhatsApp';
+      break;
+    case 'whatsapp_conversions':
+      fbObjective = 'OUTCOME_SALES';
+      objectiveReadable = 'WhatsApp-конверсии';
       break;
     case 'instagram_traffic':
       fbObjective = 'OUTCOME_TRAFFIC';
@@ -175,6 +292,57 @@ async function createFacebookCampaign(
   } catch (error: any) {
     log.error({ err: error, adAccount: normalizedAdAccountId }, 'Failed to create Facebook campaign');
     throw new Error(`Failed to create Facebook campaign: ${error.message}`);
+  }
+}
+
+/**
+ * Создать TikTok Campaign для направления
+ */
+async function createTikTokCampaign(
+  advertiserId: string,
+  accessToken: string,
+  directionName: string,
+  objective: TikTokObjectiveInput,
+  dailyBudget: number,
+  isActive: boolean
+): Promise<{ campaign_id: string; status: 'ACTIVE' | 'PAUSED' }> {
+  const objectiveConfig = getTikTokObjectiveConfig(objective);
+  const objectiveLabel = getTikTokObjectiveLabel(objective);
+  const campaignName = `[${directionName}] ${objectiveLabel}`;
+  const operationStatus = isActive ? 'ENABLE' : 'DISABLE';
+
+  log.info({
+    advertiserId,
+    campaignName,
+    objective: objectiveConfig.objective_type,
+    dailyBudget,
+    operationStatus
+  }, 'Creating TikTok campaign');
+
+  try {
+    const result = await tt.createCampaign(advertiserId, accessToken, {
+      campaign_name: campaignName,
+      objective_type: objectiveConfig.objective_type,
+      budget: dailyBudget,
+      budget_mode: 'BUDGET_MODE_DAY',
+      operation_status: operationStatus
+    });
+
+    log.info({ campaignId: result.campaign_id, campaignName }, 'TikTok campaign created');
+
+    return {
+      campaign_id: result.campaign_id,
+      status: isActive ? 'ACTIVE' : 'PAUSED'
+    };
+  } catch (error: any) {
+    const resolution = error?.tiktok ? resolveTikTokError(error.tiktok) : undefined;
+    log.error({
+      err: error,
+      resolution,
+      advertiserId,
+      campaignName
+    }, 'Failed to create TikTok campaign');
+    throw new Error(`Failed to create TikTok campaign: ${error.message}`);
   }
 }
 
@@ -283,6 +451,7 @@ export async function directionsRoutes(app: FastifyInstance) {
     try {
       const userAccountId = (request.query as any).userAccountId;
       const accountId = (request.query as any).accountId; // UUID из ad_accounts.id (опционально)
+      const platform = (request.query as any).platform; // 'facebook' | 'tiktok' (опционально)
 
       if (!userAccountId) {
         return reply.code(400).send({
@@ -304,6 +473,20 @@ export async function directionsRoutes(app: FastifyInstance) {
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
+      }
+
+      if (platform) {
+        if (!['facebook', 'tiktok'].includes(platform)) {
+          return reply.code(400).send({
+            success: false,
+            error: 'platform must be facebook or tiktok',
+          });
+        }
+        if (platform === 'facebook') {
+          query = query.or('platform.eq.facebook,platform.is.null');
+        } else {
+          query = query.eq('platform', platform);
+        }
       }
 
       const { data: directions, error } = await query.order('created_at', { ascending: false });
@@ -337,7 +520,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
   /**
    * POST /api/directions
-   * Создать новое направление + Facebook Campaign
+   * Создать новое направление + Facebook/TikTok Campaign
    */
   app.post('/directions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -362,6 +545,11 @@ export async function directionsRoutes(app: FastifyInstance) {
       }
 
       const input: CreateDirectionInput = validationResult.data;
+      const requestedPlatform = input.platform || 'facebook';
+      const platformsToCreate: Array<Exclude<DirectionPlatform, 'both'>> =
+        requestedPlatform === 'both' ? ['facebook', 'tiktok'] : [requestedPlatform];
+      const needsFacebook = platformsToCreate.includes('facebook');
+      const needsTikTok = platformsToCreate.includes('tiktok');
 
       // Проверяем флаг multi_account_enabled у пользователя
       const { data: userAccountCheck, error: userCheckError } = await supabase
@@ -378,7 +566,45 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      // Получаем данные для Facebook API в зависимости от режима
+      if (userAccountCheck.multi_account_enabled && !input.accountId) {
+        return reply.code(400).send({
+          success: false,
+          error: 'accountId is required for multi-account mode',
+        });
+      }
+
+      const directionsNeeded = platformsToCreate.length;
+
+      // Для мультиаккаунта лимит считается по ad_account, для обычного - по user_account
+      let activeCountQuery = supabase
+        .from('account_directions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_account_id', userAccountId)
+        .eq('is_active', true);
+
+      if (userAccountCheck.multi_account_enabled && input.accountId) {
+        activeCountQuery = activeCountQuery.eq('account_id', input.accountId);
+      }
+
+      const { count: activeCount, error: activeCountError } = await activeCountQuery;
+
+      if (activeCountError) {
+        log.error({ err: activeCountError, userAccountId }, 'Failed to count active directions');
+        return reply.code(500).send({
+          success: false,
+          error: 'Failed to validate directions limit',
+        });
+      }
+
+      const maxDirections = userAccountCheck.multi_account_enabled ? 10 : 5;
+      if ((activeCount || 0) + directionsNeeded > maxDirections) {
+        return reply.code(400).send({
+          success: false,
+          error: `Maximum ${maxDirections} active directions per ${userAccountCheck.multi_account_enabled ? 'ad account' : 'user'}`,
+        });
+      }
+
+      // Получаем данные для Facebook API в зависимости от режима (если нужно)
       let fbAdAccountId: string | null = null;
       let fbAccessToken: string | null = null;
       let userAccountName: string | undefined;
@@ -386,66 +612,76 @@ export async function directionsRoutes(app: FastifyInstance) {
       let pageAccessToken: string | null = null;
       let accountRecordId: string | null = null;
 
-      if (userAccountCheck.multi_account_enabled) {
-        // Мультиаккаунтный режим: данные в ad_accounts
-        const accountIdToUse = input.accountId;
+      if (needsFacebook) {
+        if (userAccountCheck.multi_account_enabled) {
+          // Мультиаккаунтный режим: данные в ad_accounts
+          const accountIdToUse = input.accountId as string;
 
-        if (!accountIdToUse) {
+          const { data: adAccount, error: adAccountError } = await supabase
+            .from('ad_accounts')
+            .select('ad_account_id, access_token, name, page_id, fb_page_access_token')
+            .eq('id', accountIdToUse)
+            .eq('user_account_id', userAccountId)
+            .single();
+
+          if (adAccountError || !adAccount) {
+            log.error({
+              userAccountId,
+              accountId: accountIdToUse,
+              error: adAccountError
+            }, 'Ad account not found');
+            return reply.code(404).send({
+              success: false,
+              error: 'Ad account not found',
+            });
+          }
+
+          fbAdAccountId = adAccount.ad_account_id;
+          fbAccessToken = adAccount.access_token;
+          userAccountName = adAccount.name || undefined;
+          pageId = adAccount.page_id || null;
+          pageAccessToken = adAccount.fb_page_access_token || null;
+          accountRecordId = accountIdToUse;
+        } else {
+          // Legacy режим: данные в user_accounts
+          fbAdAccountId = userAccountCheck.ad_account_id;
+          fbAccessToken = userAccountCheck.access_token;
+          userAccountName = userAccountCheck.username || undefined;
+          pageId = userAccountCheck.page_id || null;
+          pageAccessToken = userAccountCheck.fb_page_access_token || null;
+        }
+      } else if (userAccountCheck.multi_account_enabled) {
+        accountRecordId = input.accountId || null;
+      }
+
+      let tiktokCreds: { accessToken: string; advertiserId: string; identityId?: string } | null = null;
+      if (needsTikTok) {
+        tiktokCreds = await getTikTokCredentials(userAccountId, input.accountId || undefined);
+        if (!tiktokCreds) {
           return reply.code(400).send({
             success: false,
-            error: 'accountId is required for multi-account mode',
+            error: 'TikTok не подключен. Заполните данные рекламного кабинета.',
           });
         }
-
-        const { data: adAccount, error: adAccountError } = await supabase
-          .from('ad_accounts')
-          .select('ad_account_id, access_token, name, page_id, fb_page_access_token')
-          .eq('id', accountIdToUse)
-          .eq('user_account_id', userAccountId)
-          .single();
-
-        if (adAccountError || !adAccount) {
-          log.error({
-            userAccountId,
-            accountId: accountIdToUse,
-            error: adAccountError
-          }, 'Ad account not found');
-          return reply.code(404).send({
-            success: false,
-            error: 'Ad account not found',
-          });
-        }
-
-        fbAdAccountId = adAccount.ad_account_id;
-        fbAccessToken = adAccount.access_token;
-        userAccountName = adAccount.name || undefined;
-        pageId = adAccount.page_id || null;
-        pageAccessToken = adAccount.fb_page_access_token || null;
-        accountRecordId = accountIdToUse;
-      } else {
-        // Legacy режим: данные в user_accounts
-        fbAdAccountId = userAccountCheck.ad_account_id;
-        fbAccessToken = userAccountCheck.access_token;
-        userAccountName = userAccountCheck.username || undefined;
-        pageId = userAccountCheck.page_id || null;
-        pageAccessToken = userAccountCheck.fb_page_access_token || null;
       }
 
       log.info({
         user_account_id: userAccountId,
         name: input.name,
-        objective: input.objective,
-        daily_budget: `$${input.daily_budget_cents / 100}`,
-        target_cpl: `$${input.target_cpl_cents / 100}`,
+        platform: requestedPlatform,
+        facebook_objective: input.objective || null,
+        tiktok_objective: input.tiktok_objective || null,
+        daily_budget_cents: input.daily_budget_cents || null,
+        tiktok_daily_budget: input.tiktok_daily_budget || null,
         userAccountName
       }, 'Creating direction');
 
       // Если указан WhatsApp номер, создаем или находим запись в whatsapp_phone_numbers
       let whatsapp_phone_number_id: string | null = null;
-      
-      if (input.whatsapp_phone_number && input.whatsapp_phone_number.trim()) {
+
+      if (needsFacebook && input.whatsapp_phone_number && input.whatsapp_phone_number.trim()) {
         const phoneNumber = input.whatsapp_phone_number.trim();
-        
+
         // Проверяем, существует ли уже такой номер
         const { data: existingNumber, error: checkError } = await supabase
           .from('whatsapp_phone_numbers')
@@ -496,14 +732,14 @@ export async function directionsRoutes(app: FastifyInstance) {
       }
 
       // Проверяем что есть данные для Facebook API
-      if (!fbAdAccountId || !fbAccessToken) {
+      if (needsFacebook && (!fbAdAccountId || !fbAccessToken)) {
         return reply.code(400).send({
           success: false,
           error: 'Facebook не подключен. Заполните данные рекламного кабинета.',
         });
       }
 
-      if (input.objective === 'lead_forms') {
+      if (needsFacebook && input.objective === 'lead_forms') {
         if (!pageId) {
           return reply.code(400).send({
             success: false,
@@ -524,7 +760,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
         if (!effectivePageAccessToken) {
           log.info({ pageId, userAccountId }, 'Fetching Page Access Token for lead_forms');
-          effectivePageAccessToken = await getPageAccessToken(pageId, fbAccessToken);
+          effectivePageAccessToken = await getPageAccessToken(pageId, fbAccessToken as string);
           fetchedPageAccessToken = true;
           if (effectivePageAccessToken) {
             const updateTarget = userAccountCheck.multi_account_enabled ? 'ad_accounts' : 'user_accounts';
@@ -553,7 +789,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
           if (!subscribed && !fetchedPageAccessToken) {
             log.warn({ pageId, userAccountId }, 'Leadgen subscription failed, retrying with fresh Page Access Token');
-            const refreshedToken = await getPageAccessToken(pageId, fbAccessToken);
+            const refreshedToken = await getPageAccessToken(pageId, fbAccessToken as string);
 
             if (refreshedToken && refreshedToken !== effectivePageAccessToken) {
               const updateTarget = userAccountCheck.multi_account_enabled ? 'ad_accounts' : 'user_accounts';
@@ -590,106 +826,229 @@ export async function directionsRoutes(app: FastifyInstance) {
         }
       }
 
-      // Создаём Facebook Campaign
-      let fbCampaign;
-      try {
-        fbCampaign = await createFacebookCampaign(
-          fbAdAccountId,
-          fbAccessToken,
-          input.name,
-          input.objective
-        );
-      } catch (fbError: any) {
-        log.error({ err: fbError, userAccountId }, 'Failed to create Facebook campaign during direction creation');
-        return reply.code(500).send({
-          success: false,
-          error: 'Failed to create Facebook campaign',
-          details: fbError.message,
-        });
-      }
+      const createdDirections: any[] = [];
+      const createdDefaultSettings: any[] = [];
+      const createdCampaigns: Array<{ platform: 'facebook' | 'tiktok'; campaignId: string }> = [];
+      const createdDirectionIds: string[] = [];
 
-      let direction;
-      try {
-        const insertResult = await supabase
-          .from('account_directions')
-          .insert({
-            user_account_id: userAccountId,
-            account_id: input.accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
-            name: input.name,
-            objective: input.objective,
-            daily_budget_cents: input.daily_budget_cents,
-            target_cpl_cents: input.target_cpl_cents,
-            whatsapp_phone_number_id: whatsapp_phone_number_id,
-            fb_campaign_id: fbCampaign.campaign_id,
-            campaign_status: fbCampaign.status,
-            is_active: true,
-            // CAPI settings (direction-level)
-            capi_enabled: input.capi_enabled || false,
-            capi_source: input.capi_source || null,
-            capi_crm_type: input.capi_crm_type || null,
-            capi_interest_fields: input.capi_interest_fields || [],
-            capi_qualified_fields: input.capi_qualified_fields || [],
-            capi_scheduled_fields: input.capi_scheduled_fields || [],
-          })
-          .select()
-          .single();
+      const createDefaultSettings = async (
+        directionId: string,
+        campaignGoal: DirectionObjective,
+        settingsOverride?: CreateDirectionInput['default_settings']
+      ) => {
+        const settingsInput = settingsOverride ?? input.default_settings;
 
-        direction = insertResult.data;
-        if (insertResult.error || !direction) {
-          throw insertResult.error || new Error('Direction insert failed');
-        }
-      } catch (directionError: any) {
-        log.error({ err: directionError }, 'Error creating direction');
+        log.info({
+          directionId,
+          hasSettingsOverride: !!settingsOverride,
+          hasInputDefaultSettings: !!input.default_settings,
+          hasFacebookDefaultSettings: !!input.facebook_default_settings,
+          settingsInput: settingsInput ? { cities: settingsInput.cities, age_min: settingsInput.age_min } : null,
+        }, 'createDefaultSettings called');
 
-        try {
-          await archiveFacebookCampaign(fbCampaign.campaign_id, fbAccessToken);
-        } catch (rollbackError: any) {
-          log.error({ err: rollbackError, fbCampaignId: fbCampaign.campaign_id }, 'Failed to roll back direction after FB error');
+        if (!settingsInput) {
+          log.warn({ directionId }, 'No settings input provided, skipping default_ad_settings creation');
+          return null;
         }
 
-        return reply.code(500).send({
-          success: false,
-          error: directionError?.message || 'Failed to create direction',
-        });
-      }
+        log.info({ directionId }, 'Creating default settings for direction');
 
-      log.info({
-        direction_id: direction.id,
-        fb_campaign_id: fbCampaign.campaign_id,
-      }, 'Direction created successfully');
-
-      // Создаём дефолтные настройки, если они переданы
-      let defaultSettings = null;
-      if (input.default_settings) {
-        log.info({ directionId: direction.id }, 'Creating default settings for direction');
-        
         const { data: settings, error: settingsError } = await supabase
           .from('default_ad_settings')
           .insert({
-            direction_id: direction.id,
-            campaign_goal: input.objective, // используем objective направления
-            cities: input.default_settings.cities,
-            age_min: input.default_settings.age_min,
-            age_max: input.default_settings.age_max,
-            gender: input.default_settings.gender || 'all',
-            description: input.default_settings.description,
-            client_question: input.default_settings.client_question,
-            instagram_url: input.default_settings.instagram_url,
-            site_url: input.default_settings.site_url,
-            pixel_id: input.default_settings.pixel_id,
-            utm_tag: input.default_settings.utm_tag,
-            lead_form_id: input.default_settings.lead_form_id,
+            direction_id: directionId,
+            campaign_goal: campaignGoal,
+            cities: settingsInput.cities,
+            age_min: settingsInput.age_min,
+            age_max: settingsInput.age_max,
+            gender: settingsInput.gender || 'all',
+            description: settingsInput.description,
+            client_question: settingsInput.client_question,
+            instagram_url: settingsInput.instagram_url,
+            site_url: settingsInput.site_url,
+            pixel_id: settingsInput.pixel_id,
+            utm_tag: settingsInput.utm_tag,
+            lead_form_id: settingsInput.lead_form_id,
           })
           .select()
           .single();
 
         if (settingsError) {
           log.error({ err: settingsError }, 'Error creating default settings');
-          // Не падаем, просто логируем — направление уже создано
-        } else {
-          defaultSettings = settings;
-          log.info('Default settings created successfully');
+          return null;
         }
+
+        log.info({ directionId }, 'Default settings created successfully');
+        return settings;
+      };
+
+      const rollbackDirections = async () => {
+        if (createdDirectionIds.length > 0) {
+          const { error: deleteError } = await supabase
+            .from('account_directions')
+            .delete()
+            .in('id', createdDirectionIds);
+          if (deleteError) {
+            log.warn({ err: deleteError, directionIds: createdDirectionIds }, 'Failed to roll back directions');
+          }
+        }
+
+        for (const campaign of createdCampaigns) {
+          try {
+            if (campaign.platform === 'facebook' && fbAccessToken) {
+              await archiveFacebookCampaign(campaign.campaignId, fbAccessToken);
+            }
+            if (campaign.platform === 'tiktok' && tiktokCreds) {
+              await tt.pauseCampaign(tiktokCreds.advertiserId, tiktokCreds.accessToken, campaign.campaignId);
+            }
+          } catch (rollbackError: any) {
+            log.warn({ err: rollbackError, campaignId: campaign.campaignId }, 'Failed to roll back campaign');
+          }
+        }
+      };
+
+      try {
+        if (needsFacebook) {
+          const fbCampaign = await createFacebookCampaign(
+            fbAdAccountId as string,
+            fbAccessToken as string,
+            input.name,
+            input.objective as DirectionObjective
+          );
+
+          createdCampaigns.push({ platform: 'facebook', campaignId: fbCampaign.campaign_id });
+
+          // Логируем создание направления WhatsApp-конверсии с деталями CAPI
+          if (input.objective === 'whatsapp_conversions') {
+            log.info({
+              userAccountId,
+              directionName: input.name,
+              objective: input.objective,
+              optimization_level: input.optimization_level || 'level_1',
+              fb_campaign_id: fbCampaign.campaign_id,
+              has_capi_enabled: input.capi_enabled,
+              capi_source: input.capi_source,
+            }, 'Создаём направление WhatsApp-конверсии с CAPI оптимизацией');
+          }
+
+          const insertResult = await supabase
+            .from('account_directions')
+            .insert({
+              user_account_id: userAccountId,
+              account_id: input.accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
+              name: input.name,
+              platform: 'facebook',
+              objective: input.objective,
+              daily_budget_cents: input.daily_budget_cents,
+              target_cpl_cents: input.target_cpl_cents,
+              whatsapp_phone_number_id: whatsapp_phone_number_id,
+              fb_campaign_id: fbCampaign.campaign_id,
+              campaign_status: fbCampaign.status,
+              is_active: true,
+              // CAPI settings (direction-level)
+              capi_enabled: input.capi_enabled || false,
+              capi_source: input.capi_source || null,
+              capi_crm_type: input.capi_crm_type || null,
+              capi_interest_fields: input.capi_interest_fields || [],
+              capi_qualified_fields: input.capi_qualified_fields || [],
+              capi_scheduled_fields: input.capi_scheduled_fields || [],
+              // WhatsApp-conversions optimization level
+              optimization_level: input.optimization_level || 'level_1',
+              // Instagram account usage
+              use_instagram: input.use_instagram !== undefined ? input.use_instagram : true,
+            })
+            .select()
+            .single();
+
+          const direction = insertResult.data;
+          if (insertResult.error || !direction) {
+            throw insertResult.error || new Error('Direction insert failed');
+          }
+
+          createdDirections.push(direction);
+          createdDirectionIds.push(direction.id);
+
+          const defaultSettings = await createDefaultSettings(
+            direction.id,
+            input.objective as DirectionObjective,
+            input.facebook_default_settings
+          );
+          if (defaultSettings) {
+            createdDefaultSettings.push(defaultSettings);
+          }
+        }
+
+        if (needsTikTok) {
+          const tiktokObjective = (input.tiktok_objective || 'traffic') as TikTokObjectiveInput;
+          const tiktokDailyBudget = input.tiktok_daily_budget ?? TIKTOK_MIN_DAILY_BUDGET;
+          const tiktokCampaign = await createTikTokCampaign(
+            tiktokCreds!.advertiserId,
+            tiktokCreds!.accessToken,
+            input.name,
+            tiktokObjective,
+            tiktokDailyBudget,
+            true
+          );
+
+          createdCampaigns.push({ platform: 'tiktok', campaignId: tiktokCampaign.campaign_id });
+
+          const mappedObjective = mapTikTokObjectiveToDirectionObjective(tiktokObjective);
+          const insertResult = await supabase
+            .from('account_directions')
+            .insert({
+              user_account_id: userAccountId,
+              account_id: input.accountId || null, // UUID из ad_accounts.id для мультиаккаунтности
+              name: input.name,
+              platform: 'tiktok',
+              objective: mappedObjective,
+              daily_budget_cents: DEFAULT_FB_DAILY_BUDGET_CENTS,
+              target_cpl_cents: DEFAULT_FB_TARGET_CPL_CENTS,
+              whatsapp_phone_number_id: null,
+              tiktok_campaign_id: tiktokCampaign.campaign_id,
+              tiktok_objective: tiktokObjective,
+              tiktok_daily_budget: tiktokDailyBudget,
+              tiktok_target_cpl_kzt: input.tiktok_target_cpl_kzt ?? null,
+              tiktok_target_cpl: input.tiktok_target_cpl ?? null,
+              tiktok_adgroup_mode: input.tiktok_adgroup_mode ?? null,
+              tiktok_identity_id: tiktokCreds?.identityId || null,
+              campaign_status: tiktokCampaign.status,
+              is_active: true,
+              // CAPI settings are Facebook-only for now
+              capi_enabled: false,
+              capi_source: null,
+              capi_crm_type: null,
+              capi_interest_fields: [],
+              capi_qualified_fields: [],
+              capi_scheduled_fields: [],
+              optimization_level: 'level_1',
+            })
+            .select()
+            .single();
+
+          const direction = insertResult.data;
+          if (insertResult.error || !direction) {
+            throw insertResult.error || new Error('Direction insert failed');
+          }
+
+          createdDirections.push(direction);
+          createdDirectionIds.push(direction.id);
+
+          const defaultSettings = await createDefaultSettings(
+            direction.id,
+            mappedObjective,
+            input.tiktok_default_settings
+          );
+          if (defaultSettings) {
+            createdDefaultSettings.push(defaultSettings);
+          }
+        }
+      } catch (directionError: any) {
+        log.error({ err: directionError }, 'Error creating direction');
+        await rollbackDirections();
+        return reply.code(500).send({
+          success: false,
+          error: directionError?.message || 'Failed to create direction',
+        });
       }
 
       // Обновляем этап онбординга
@@ -697,10 +1056,16 @@ export async function directionsRoutes(app: FastifyInstance) {
         log.warn({ err, userId: input.userAccountId }, 'Failed to update onboarding stage');
       });
 
+      const primaryDirection = createdDirections[0] || null;
+      const defaultSettingsPayload = createdDefaultSettings.length === 0
+        ? null
+        : (createdDefaultSettings.length === 1 ? createdDefaultSettings[0] : createdDefaultSettings);
+
       return reply.code(201).send({
         success: true,
-        direction: direction,
-        default_settings: defaultSettings, // возвращаем созданные настройки (или null)
+        direction: primaryDirection,
+        directions: createdDirections,
+        default_settings: defaultSettingsPayload,
       });
     } catch (error: any) {
       log.error({ err: error }, 'Error creating direction');
@@ -748,6 +1113,9 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
+      const directionPlatform = normalizeDirectionPlatform(existingDirection.platform);
+      const isTikTokDirection = directionPlatform === 'tiktok';
+
       // Проверка минимума target_cpl_cents в зависимости от objective
       if (input.target_cpl_cents !== undefined) {
         const minCents = existingDirection.objective === 'instagram_traffic' ? 10 : 50;
@@ -763,6 +1131,7 @@ export async function directionsRoutes(app: FastifyInstance) {
       const userAccountsData = existingDirection.user_accounts as any;
       log.info({
         directionId: id,
+        platform: directionPlatform,
         user_account_id: existingDirection.user_account_id,
         account_id: existingDirection.account_id,
         fb_campaign_id: existingDirection.fb_campaign_id,
@@ -777,44 +1146,46 @@ export async function directionsRoutes(app: FastifyInstance) {
 
       // Получаем access_token в зависимости от режима
       let accessToken: string | null = null;
-      const isMultiAccount = (existingDirection.user_accounts as any).multi_account_enabled;
-      const hasAccountId = !!existingDirection.account_id;
+      if (!isTikTokDirection) {
+        const isMultiAccount = (existingDirection.user_accounts as any).multi_account_enabled;
+        const hasAccountId = !!existingDirection.account_id;
 
-      log.info({
-        directionId: id,
-        isMultiAccount,
-        hasAccountId,
-        accountId: existingDirection.account_id,
-      }, 'Determining access token source');
+        log.info({
+          directionId: id,
+          isMultiAccount,
+          hasAccountId,
+          accountId: existingDirection.account_id,
+        }, 'Determining access token source');
 
-      if (isMultiAccount && hasAccountId) {
-        // Мультиаккаунтный режим: токен в ad_accounts
-        const { data: adAccount, error: adAccountError } = await supabase
-          .from('ad_accounts')
-          .select('access_token')
-          .eq('id', existingDirection.account_id)
-          .single();
+        if (isMultiAccount && hasAccountId) {
+          // Мультиаккаунтный режим: токен в ad_accounts
+          const { data: adAccount, error: adAccountError } = await supabase
+            .from('ad_accounts')
+            .select('access_token')
+            .eq('id', existingDirection.account_id)
+            .single();
 
-        if (adAccountError) {
-          log.error({ err: adAccountError, accountId: existingDirection.account_id }, 'Failed to fetch ad_account for token');
+          if (adAccountError) {
+            log.error({ err: adAccountError, accountId: existingDirection.account_id }, 'Failed to fetch ad_account for token');
+          }
+
+          accessToken = adAccount?.access_token || null;
+          log.info({
+            directionId: id,
+            tokenSource: 'ad_accounts',
+            hasToken: !!accessToken,
+            tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
+          }, 'Using multi-account token');
+        } else {
+          // Legacy режим: токен в user_accounts
+          accessToken = (existingDirection.user_accounts as any).access_token;
+          log.info({
+            directionId: id,
+            tokenSource: 'user_accounts',
+            hasToken: !!accessToken,
+            tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
+          }, 'Using legacy token');
         }
-
-        accessToken = adAccount?.access_token || null;
-        log.info({
-          directionId: id,
-          tokenSource: 'ad_accounts',
-          hasToken: !!accessToken,
-          tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
-        }, 'Using multi-account token');
-      } else {
-        // Legacy режим: токен в user_accounts
-        accessToken = (existingDirection.user_accounts as any).access_token;
-        log.info({
-          directionId: id,
-          tokenSource: 'user_accounts',
-          hasToken: !!accessToken,
-          tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
-        }, 'Using legacy token');
       }
 
       // Обрабатываем WhatsApp номер если он передан
@@ -870,44 +1241,127 @@ export async function directionsRoutes(app: FastifyInstance) {
         }
       }
 
-      // Если изменился статус is_active, обновляем Facebook кампанию
-      if (input.is_active !== undefined && existingDirection.is_active !== input.is_active && existingDirection.fb_campaign_id) {
+      let tiktokCreds: { accessToken: string; advertiserId: string } | null = null;
+      const ensureTikTokCreds = async () => {
+        if (tiktokCreds) {
+          return tiktokCreds;
+        }
+        tiktokCreds = await getTikTokCredentials(
+          existingDirection.user_account_id,
+          existingDirection.account_id || undefined
+        );
+        if (!tiktokCreds) {
+          throw new Error('TikTok credentials not found');
+        }
+        return tiktokCreds;
+      };
+
+      // Если изменился статус is_active, обновляем кампанию в нужной платформе
+      if (input.is_active !== undefined && existingDirection.is_active !== input.is_active) {
         const newCampaignStatus = input.is_active ? 'ACTIVE' : 'PAUSED';
 
+        if (isTikTokDirection) {
+          if (!existingDirection.tiktok_campaign_id) {
+            return reply.code(400).send({
+              success: false,
+              error: 'TikTok campaign_id is missing for this direction',
+            });
+          }
+
+          try {
+            const creds = await ensureTikTokCreds();
+            log.info({
+              directionId: id,
+              campaignId: existingDirection.tiktok_campaign_id,
+              oldStatus: existingDirection.is_active ? 'ACTIVE' : 'PAUSED',
+              newStatus: newCampaignStatus,
+            }, 'About to update TikTok campaign status');
+
+            if (input.is_active) {
+              await tt.resumeCampaign(creds.advertiserId, creds.accessToken, existingDirection.tiktok_campaign_id);
+            } else {
+              await tt.pauseCampaign(creds.advertiserId, creds.accessToken, existingDirection.tiktok_campaign_id);
+            }
+
+            updateData.campaign_status = newCampaignStatus;
+            log.info({ directionId: id, newCampaignStatus }, 'TikTok campaign status updated successfully');
+          } catch (ttError: any) {
+            log.error({
+              err: ttError,
+              directionId: id,
+              campaignId: existingDirection.tiktok_campaign_id
+            }, 'Failed to update TikTok campaign status');
+
+            return reply.code(500).send({
+              success: false,
+              error: 'Не удалось обновить статус кампании в TikTok',
+              details: ttError.message,
+            });
+          }
+        } else if (existingDirection.fb_campaign_id) {
+          try {
+            log.info({
+              directionId: id,
+              campaignId: existingDirection.fb_campaign_id,
+              oldStatus: existingDirection.is_active ? 'ACTIVE' : 'PAUSED',
+              newStatus: newCampaignStatus,
+              tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
+            }, 'About to update Facebook campaign status');
+
+            if (!accessToken) {
+              throw new Error('Access token not found');
+            }
+            await updateFacebookCampaignStatus(
+              existingDirection.fb_campaign_id,
+              accessToken,
+              newCampaignStatus as 'ACTIVE' | 'PAUSED'
+            );
+
+            // Обновляем campaign_status в базе данных
+            updateData.campaign_status = newCampaignStatus;
+
+            log.info({ directionId: id, newCampaignStatus }, 'Facebook campaign status updated successfully');
+          } catch (fbError: any) {
+            log.error({
+              err: fbError,
+              directionId: id,
+              campaignId: existingDirection.fb_campaign_id
+            }, 'Failed to update Facebook campaign status');
+
+            // Возвращаем ошибку, не обновляем направление
+            return reply.code(500).send({
+              success: false,
+              error: 'Не удалось обновить статус кампании в Facebook',
+              details: fbError.message,
+            });
+          }
+        }
+      }
+
+      if (isTikTokDirection && input.tiktok_daily_budget !== undefined && existingDirection.tiktok_campaign_id) {
         try {
+          const creds = await ensureTikTokCreds();
+          await tt.updateCampaignBudget(
+            creds.advertiserId,
+            creds.accessToken,
+            existingDirection.tiktok_campaign_id,
+            input.tiktok_daily_budget
+          );
           log.info({
             directionId: id,
-            campaignId: existingDirection.fb_campaign_id,
-            oldStatus: existingDirection.is_active ? 'ACTIVE' : 'PAUSED',
-            newStatus: newCampaignStatus,
-            tokenPreview: accessToken ? `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}` : null,
-          }, 'About to update Facebook campaign status');
-
-          if (!accessToken) {
-            throw new Error('Access token not found');
-          }
-          await updateFacebookCampaignStatus(
-            existingDirection.fb_campaign_id,
-            accessToken,
-            newCampaignStatus as 'ACTIVE' | 'PAUSED'
-          );
-
-          // Обновляем campaign_status в базе данных
-          updateData.campaign_status = newCampaignStatus;
-
-          log.info({ directionId: id, newCampaignStatus }, 'Facebook campaign status updated successfully');
-        } catch (fbError: any) {
+            campaignId: existingDirection.tiktok_campaign_id,
+            newBudget: input.tiktok_daily_budget
+          }, 'TikTok campaign budget updated successfully');
+        } catch (ttError: any) {
           log.error({
-            err: fbError,
+            err: ttError,
             directionId: id,
-            campaignId: existingDirection.fb_campaign_id
-          }, 'Failed to update Facebook campaign status');
-
-          // Возвращаем ошибку, не обновляем направление
+            campaignId: existingDirection.tiktok_campaign_id
+          }, 'Failed to update TikTok campaign budget');
           return reply.code(500).send({
             success: false,
-            error: 'Не удалось обновить статус кампании в Facebook',
-            details: fbError.message,
+            error: 'Не удалось обновить бюджет кампании в TikTok',
+            details: ttError.message,
           });
         }
       }
@@ -954,7 +1408,7 @@ export async function directionsRoutes(app: FastifyInstance) {
 
   /**
    * DELETE /api/directions/:id
-   * Удалить направление (архивирует кампанию в Facebook)
+   * Удалить направление (архивирует/останавливает кампанию)
    */
   app.delete('/directions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
@@ -976,31 +1430,56 @@ export async function directionsRoutes(app: FastifyInstance) {
         });
       }
 
-      // Получаем access_token в зависимости от режима
-      let accessToken: string | null = null;
-      if ((direction.user_accounts as any).multi_account_enabled && direction.account_id) {
-        // Мультиаккаунтный режим: токен в ad_accounts
-        const { data: adAccount } = await supabase
-          .from('ad_accounts')
-          .select('access_token')
-          .eq('id', direction.account_id)
-          .single();
-        accessToken = adAccount?.access_token || null;
-      } else {
-        // Legacy режим: токен в user_accounts
-        accessToken = (direction.user_accounts as any).access_token;
-      }
+      const directionPlatform = normalizeDirectionPlatform(direction.platform);
 
-      // Архивируем кампанию в Facebook
-      if (direction.fb_campaign_id && accessToken) {
-        try {
-          await archiveFacebookCampaign(
-            direction.fb_campaign_id,
-            accessToken
+      if (directionPlatform === 'tiktok') {
+        if (direction.tiktok_campaign_id) {
+          const tiktokCreds = await getTikTokCredentials(
+            direction.user_account_id,
+            direction.account_id || undefined
           );
-        } catch (fbError) {
-          log.error({ err: fbError, campaignId: direction.fb_campaign_id }, 'Failed to archive Facebook campaign');
-          // Продолжаем удаление даже если не удалось заархивировать
+          if (!tiktokCreds) {
+            log.warn({ directionId: id }, 'TikTok credentials not found while deleting direction');
+          } else {
+            try {
+              await tt.pauseCampaign(
+                tiktokCreds.advertiserId,
+                tiktokCreds.accessToken,
+                direction.tiktok_campaign_id
+              );
+            } catch (ttError: any) {
+              log.error({ err: ttError, campaignId: direction.tiktok_campaign_id }, 'Failed to pause TikTok campaign');
+              // Продолжаем удаление даже если не удалось остановить
+            }
+          }
+        }
+      } else {
+        // Получаем access_token в зависимости от режима
+        let accessToken: string | null = null;
+        if ((direction.user_accounts as any).multi_account_enabled && direction.account_id) {
+          // Мультиаккаунтный режим: токен в ad_accounts
+          const { data: adAccount } = await supabase
+            .from('ad_accounts')
+            .select('access_token')
+            .eq('id', direction.account_id)
+            .single();
+          accessToken = adAccount?.access_token || null;
+        } else {
+          // Legacy режим: токен в user_accounts
+          accessToken = (direction.user_accounts as any).access_token;
+        }
+
+        // Архивируем кампанию в Facebook
+        if (direction.fb_campaign_id && accessToken) {
+          try {
+            await archiveFacebookCampaign(
+              direction.fb_campaign_id,
+              accessToken
+            );
+          } catch (fbError) {
+            log.error({ err: fbError, campaignId: direction.fb_campaign_id }, 'Failed to archive Facebook campaign');
+            // Продолжаем удаление даже если не удалось заархивировать
+          }
         }
       }
 

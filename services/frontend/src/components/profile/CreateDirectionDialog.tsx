@@ -16,8 +16,14 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { ChevronDown, AlertCircle, CheckCircle2 } from 'lucide-react';
-import type { DirectionObjective, CreateDefaultSettingsInput } from '@/types/direction';
-import { OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
+import type {
+  DirectionObjective,
+  CreateDefaultSettingsInput,
+  DirectionPlatform,
+  TikTokObjective,
+  OptimizationLevel,
+} from '@/types/direction';
+import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
@@ -63,6 +69,7 @@ export type CrmType = 'amocrm' | 'bitrix24';
 export type CapiSource = 'whatsapp' | 'crm';
 
 const MAX_CAPI_FIELDS = 3;
+const TIKTOK_MIN_DAILY_BUDGET = 2500;
 
 // CRM Field Selector Component
 interface CrmFieldSelectorProps {
@@ -254,16 +261,27 @@ export interface DirectionCapiSettings {
 interface CreateDirectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (data: {
-    name: string;
-    objective: DirectionObjective;
-    daily_budget_cents: number;
-    target_cpl_cents: number;
-    whatsapp_phone_number?: string;
-    adSettings: CreateDefaultSettingsInput;
-    capiSettings?: DirectionCapiSettings;
-  }) => Promise<void>;
+  onSubmit: (data: CreateDirectionFormData) => Promise<void>;
   userAccountId: string;
+  defaultPlatform?: DirectionPlatform;
+}
+
+export interface CreateDirectionFormData {
+  name: string;
+  platform: DirectionPlatform;
+  objective?: DirectionObjective;
+  optimization_level?: OptimizationLevel;
+  use_instagram?: boolean;
+  daily_budget_cents?: number;
+  target_cpl_cents?: number;
+  tiktok_objective?: TikTokObjective;
+  tiktok_daily_budget?: number;
+  tiktok_target_cpl_kzt?: number;
+  whatsapp_phone_number?: string;
+  adSettings?: CreateDefaultSettingsInput;
+  facebookAdSettings?: CreateDefaultSettingsInput;
+  tiktokAdSettings?: CreateDefaultSettingsInput;
+  capiSettings?: DirectionCapiSettings;
 }
 
 export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
@@ -271,15 +289,23 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   onOpenChange,
   onSubmit,
   userAccountId,
+  defaultPlatform = 'facebook',
 }) => {
   // Ref для порталинга Popover внутрь Dialog
   const dialogContentRef = React.useRef<HTMLDivElement>(null);
 
   // Основная информация
   const [name, setName] = useState('');
+  const [directionPlatform, setDirectionPlatform] = useState<DirectionPlatform>(defaultPlatform);
   const [objective, setObjective] = useState<DirectionObjective>('whatsapp');
+  const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('level_1');
+  const [useInstagram, setUseInstagram] = useState(true);
   const [dailyBudget, setDailyBudget] = useState('50');
   const [targetCpl, setTargetCpl] = useState('2.00');
+  const [tiktokObjective, setTiktokObjective] = useState<TikTokObjective>('traffic');
+  const [tiktokDailyBudget, setTikTokDailyBudget] = useState(String(TIKTOK_MIN_DAILY_BUDGET));
+  const [tiktokTargetCpl, setTikTokTargetCpl] = useState('');
+  const [separateTikTokSettings, setSeparateTikTokSettings] = useState(false);
   
   // WhatsApp номер (вводится напрямую)
   const [whatsappPhoneNumber, setWhatsappPhoneNumber] = useState<string>('');
@@ -290,9 +316,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [ageMin, setAgeMin] = useState<number>(18);
   const [ageMax, setAgeMax] = useState<number>(65);
   const [gender, setGender] = useState<'all' | 'male' | 'female'>('all');
+  const [tiktokSelectedCities, setTikTokSelectedCities] = useState<string[]>([]);
+  const [tiktokCityPopoverOpen, setTikTokCityPopoverOpen] = useState(false);
+  const [tiktokAgeMin, setTikTokAgeMin] = useState<number>(18);
+  const [tiktokAgeMax, setTikTokAgeMax] = useState<number>(65);
+  const [tiktokGender, setTikTokGender] = useState<'all' | 'male' | 'female'>('all');
   
   // Настройки рекламы - Контент
   const [description, setDescription] = useState('Напишите нам, чтобы узнать подробности');
+  const [tiktokDescription, setTikTokDescription] = useState('Напишите нам, чтобы узнать подробности');
   
   // Настройки рекламы - Специфичные для целей
   const [clientQuestion, setClientQuestion] = useState('Здравствуйте! Хочу узнать об этом подробнее.');
@@ -334,9 +366,51 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const needsFacebook = directionPlatform === 'facebook' || directionPlatform === 'both';
+  const needsTikTok = directionPlatform === 'tiktok' || directionPlatform === 'both';
+
+  const mapTikTokObjectiveToDirectionObjective = (value: TikTokObjective): DirectionObjective => {
+    switch (value) {
+      case 'lead_generation':
+        return 'lead_forms';
+      case 'conversions':
+        return 'site_leads';
+      case 'traffic':
+      default:
+        return 'instagram_traffic';
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      setDirectionPlatform(defaultPlatform);
+    }
+  }, [open, defaultPlatform]);
+
+  useEffect(() => {
+    if (directionPlatform !== 'both' && separateTikTokSettings) {
+      setSeparateTikTokSettings(false);
+    }
+  }, [directionPlatform, separateTikTokSettings]);
+
+  useEffect(() => {
+    if (separateTikTokSettings) {
+      setTikTokSelectedCities(selectedCities);
+      setTikTokAgeMin(ageMin);
+      setTikTokAgeMax(ageMax);
+      setTikTokGender(gender);
+      setTikTokDescription(description);
+    }
+  }, [separateTikTokSettings]);
+
   // Загрузка пикселей для всех типов целей (для Meta CAPI)
   // Для site_leads пиксель обязателен, для остальных — опционален
   useEffect(() => {
+    if (!open || !needsFacebook) {
+      setPixels([]);
+      return;
+    }
+
     const loadPixels = async () => {
       setIsLoadingPixels(true);
       try {
@@ -351,7 +425,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       }
     };
     loadPixels();
-  }, []); // Загружаем один раз при открытии диалога
+  }, [open, needsFacebook]); // Загружаем при открытии диалога для Facebook
 
   // Обновление дефолта целевой стоимости при смене objective
   useEffect(() => {
@@ -363,8 +437,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
   // Загрузка лидформ при выборе цели "Lead Forms"
   useEffect(() => {
     const loadLeadForms = async () => {
-      if (objective !== 'lead_forms') {
-        // Сброс лидформ при переключении на другую цель
+      if (!open || !needsFacebook || objective !== 'lead_forms') {
+        // Сброс лидформ при переключении на другую цель или платформу
         setLeadForms([]);
         setLeadFormId('');
         return;
@@ -382,10 +456,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       }
     };
     loadLeadForms();
-  }, [objective]);
+  }, [objective, open, needsFacebook]);
 
   // Load connected CRMs on mount
   useEffect(() => {
+    if (!open || !needsFacebook) {
+      setConnectedCrms([]);
+      return;
+    }
+
     const loadConnectedCrms = async () => {
       setIsLoadingCrms(true);
       const crms: CrmType[] = [];
@@ -420,15 +499,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       setIsLoadingCrms(false);
     };
 
-    if (open && userAccountId) {
+    if (userAccountId) {
       loadConnectedCrms();
     }
-  }, [open, userAccountId]);
+  }, [open, userAccountId, needsFacebook]);
 
   // Load CRM fields when CRM type changes and CAPI source is CRM
   useEffect(() => {
     const loadCrmFields = async () => {
-      if (!capiEnabled || capiSource !== 'crm') {
+      if (!needsFacebook || !capiEnabled || capiSource !== 'crm') {
         setCrmFields([]);
         return;
       }
@@ -453,10 +532,15 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     };
 
     loadCrmFields();
-  }, [capiEnabled, capiSource, capiCrmType, userAccountId]);
+  }, [capiEnabled, capiSource, capiCrmType, userAccountId, needsFacebook]);
 
   // Load existing CAPI directions for pixel reuse option
   useEffect(() => {
+    if (!open || !needsFacebook || !userAccountId || pixels.length === 0) {
+      setExistingCapiDirections([]);
+      return;
+    }
+
     const loadExistingCapiDirections = async () => {
       try {
         const response = await fetch(
@@ -487,10 +571,8 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       }
     };
 
-    if (open && userAccountId && pixels.length > 0) {
-      loadExistingCapiDirections();
-    }
-  }, [open, userAccountId, pixels]);
+    loadExistingCapiDirections();
+  }, [open, userAccountId, pixels, needsFacebook]);
 
   const handleCitySelection = (cityId: string) => {
     // Простая логика как в VideoUpload
@@ -512,6 +594,21 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
     setSelectedCities(nextSelection);
   };
 
+  const handleTikTokCitySelection = (cityId: string) => {
+    let nextSelection = [...tiktokSelectedCities];
+    if (nextSelection.includes(cityId)) {
+      nextSelection = nextSelection.filter(id => id !== cityId);
+    } else {
+      if (cityId === 'KZ') {
+        nextSelection = ['KZ'];
+      } else {
+        nextSelection = nextSelection.filter(id => id !== 'KZ');
+        nextSelection = [...nextSelection, cityId];
+      }
+    }
+    setTikTokSelectedCities(nextSelection);
+  };
+
   const handleSubmit = async () => {
     // Валидация основной информации
     if (!name.trim() || name.trim().length < 2) {
@@ -519,94 +616,154 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
       return;
     }
 
-    const budgetValue = parseFloat(dailyBudget);
-    if (isNaN(budgetValue) || budgetValue < 5) {
-      setError('Минимальный бюджет: $5/день');
-      return;
+    let budgetValue = 0;
+    let cplValue = 0;
+    let tiktokBudgetValue = 0;
+    let tiktokTargetCplValue: number | null = null;
+
+    if (needsFacebook) {
+      budgetValue = parseFloat(dailyBudget);
+      if (isNaN(budgetValue) || budgetValue < 5) {
+        setError('Минимальный бюджет: $5/день');
+        return;
+      }
+
+      cplValue = parseFloat(targetCpl);
+      const minCost = objective === 'instagram_traffic' ? 0.10 : 0.50;
+      if (isNaN(cplValue) || cplValue < minCost) {
+        const label = objective === 'instagram_traffic' ? 'перехода' : 'заявки';
+        setError(`Минимальная стоимость ${label}: $${minCost.toFixed(2)}`);
+        return;
+      }
     }
 
-    const cplValue = parseFloat(targetCpl);
-    const minCost = objective === 'instagram_traffic' ? 0.10 : 0.50;
-    if (isNaN(cplValue) || cplValue < minCost) {
-      const label = objective === 'instagram_traffic' ? 'перехода' : 'заявки';
-      setError(`Минимальная стоимость ${label}: $${minCost.toFixed(2)}`);
-      return;
+    if (needsTikTok) {
+      tiktokBudgetValue = parseFloat(tiktokDailyBudget);
+      if (isNaN(tiktokBudgetValue) || tiktokBudgetValue < TIKTOK_MIN_DAILY_BUDGET) {
+        setError(`Минимальный бюджет: ${TIKTOK_MIN_DAILY_BUDGET} KZT/день`);
+        return;
+      }
+
+      if (tiktokTargetCpl.trim()) {
+        const parsedTarget = parseFloat(tiktokTargetCpl);
+        if (isNaN(parsedTarget) || parsedTarget < 0) {
+          setError('Проверьте целевую стоимость для TikTok');
+          return;
+        }
+        tiktokTargetCplValue = Math.round(parsedTarget);
+      }
     }
 
     // Валидация настроек рекламы
-    if (selectedCities.length === 0) {
-      setError('Выберите хотя бы один город');
-      return;
-    }
-
-    if (ageMin < 13 || ageMax > 65 || ageMin >= ageMax) {
-      setError('Проверьте возрастной диапазон (13-65 лет)');
-      return;
-    }
-
-    if (!description.trim()) {
-      setError('Введите текст под видео');
-      return;
-    }
-
-    // Валидация специфичных полей
-    if (objective === 'whatsapp') {
-      if (!clientQuestion.trim()) {
-        setError('Введите вопрос клиента для WhatsApp');
+    const usesSharedSettings = needsFacebook || (!separateTikTokSettings && needsTikTok);
+    if (usesSharedSettings) {
+      if (selectedCities.length === 0) {
+        setError('Выберите хотя бы один город');
         return;
       }
-      
-      // Валидация номера WhatsApp (если указан)
-      if (whatsappPhoneNumber.trim() && !whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
-        setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+
+      if (ageMin < 13 || ageMax > 65 || ageMin >= ageMax) {
+        setError('Проверьте возрастной диапазон (13-65 лет)');
+        return;
+      }
+
+      if (!description.trim()) {
+        setError('Введите текст под видео');
         return;
       }
     }
 
-    if (objective === 'instagram_traffic' && !instagramUrl.trim()) {
-      setError('Введите Instagram URL');
-      return;
+    if (needsTikTok && separateTikTokSettings) {
+      if (tiktokSelectedCities.length === 0) {
+        setError('Выберите хотя бы один город для TikTok');
+        return;
+      }
+
+      if (tiktokAgeMin < 13 || tiktokAgeMax > 65 || tiktokAgeMin >= tiktokAgeMax) {
+        setError('Проверьте возрастной диапазон TikTok (13-65 лет)');
+        return;
+      }
+
+      if (!tiktokDescription.trim()) {
+        setError('Введите текст под видео для TikTok');
+        return;
+      }
     }
 
-    if (objective === 'site_leads' && !siteUrl.trim()) {
-      setError('Введите URL сайта');
-      return;
-    }
+    // Валидация специфичных полей (Facebook)
+    if (needsFacebook) {
+      if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
+        if (!clientQuestion.trim()) {
+          setError('Введите вопрос клиента для WhatsApp');
+          return;
+        }
 
-    if (objective === 'lead_forms' && !leadFormId) {
-      setError('Выберите лидформу');
-      return;
+        // Валидация номера WhatsApp (если указан)
+        if (whatsappPhoneNumber.trim() && !whatsappPhoneNumber.match(/^\+[1-9][0-9]{7,14}$/)) {
+          setError('Неверный формат WhatsApp номера. Используйте международный формат: +12345678901');
+          return;
+        }
+      }
+
+      if (objective === 'instagram_traffic' && !instagramUrl.trim()) {
+        setError('Введите Instagram URL');
+        return;
+      }
+
+      if (objective === 'site_leads' && !siteUrl.trim()) {
+        setError('Введите URL сайта');
+        return;
+      }
+
+      if (objective === 'lead_forms' && !leadFormId) {
+        setError('Выберите лидформу');
+        return;
+      }
     }
 
     setIsSubmitting(true);
     setError(null);
 
     try {
-      const adSettings: CreateDefaultSettingsInput = {
-        direction_id: '', // Будет установлен после создания направления
-        campaign_goal: objective,
-        cities: selectedCities,
-        age_min: ageMin,
-        age_max: ageMax,
-        gender,
-        description: description.trim(),
-        // ✅ НОВОЕ: pixel_id передаётся для ВСЕХ типов целей (для Meta CAPI)
-        // Для site_leads обязателен, для остальных — опционален
-        pixel_id: pixelId || null,
-        ...(objective === 'whatsapp' && { client_question: clientQuestion.trim() }),
-        ...(objective === 'instagram_traffic' && { instagram_url: instagramUrl.trim() }),
-        ...(objective === 'site_leads' && {
-          site_url: siteUrl.trim(),
-          utm_tag: utmTag.trim() || DEFAULT_UTM,
-        }),
-        ...(objective === 'lead_forms' && {
-          lead_form_id: leadFormId,
-          ...(siteUrl.trim() && { site_url: siteUrl.trim() }),
-        }),
-      };
+      const facebookAdSettings: CreateDefaultSettingsInput | undefined = needsFacebook
+        ? {
+            direction_id: '', // Будет установлен после создания направления
+            campaign_goal: objective,
+            cities: selectedCities,
+            age_min: ageMin,
+            age_max: ageMax,
+            gender,
+            description: description.trim(),
+            // ✅ НОВОЕ: pixel_id передаётся для ВСЕХ типов целей (для Meta CAPI)
+            // Для site_leads обязателен, для остальных — опционален
+            pixel_id: pixelId || null,
+            ...((objective === 'whatsapp' || objective === 'whatsapp_conversions') && { client_question: clientQuestion.trim() }),
+            ...(objective === 'instagram_traffic' && { instagram_url: instagramUrl.trim() }),
+            ...(objective === 'site_leads' && {
+              site_url: siteUrl.trim(),
+              utm_tag: utmTag.trim() || DEFAULT_UTM,
+            }),
+            ...(objective === 'lead_forms' && {
+              lead_form_id: leadFormId,
+              ...(siteUrl.trim() && { site_url: siteUrl.trim() }),
+            }),
+          }
+        : undefined;
+
+      const tiktokAdSettings: CreateDefaultSettingsInput | undefined = needsTikTok
+        ? {
+            direction_id: '',
+            campaign_goal: mapTikTokObjectiveToDirectionObjective(tiktokObjective),
+            cities: separateTikTokSettings ? tiktokSelectedCities : selectedCities,
+            age_min: separateTikTokSettings ? tiktokAgeMin : ageMin,
+            age_max: separateTikTokSettings ? tiktokAgeMax : ageMax,
+            gender: separateTikTokSettings ? tiktokGender : gender,
+            description: (separateTikTokSettings ? tiktokDescription : description).trim(),
+          }
+        : undefined;
 
       // Build CAPI settings if enabled
-      const capiSettings: DirectionCapiSettings | undefined = capiEnabled && pixelId ? {
+      const capiSettings: DirectionCapiSettings | undefined = needsFacebook && capiEnabled && pixelId ? {
         capi_enabled: true,
         capi_source: capiSource,
         capi_crm_type: capiSource === 'crm' ? capiCrmType : null,
@@ -617,11 +774,28 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
       await onSubmit({
         name: name.trim(),
-        objective,
-        daily_budget_cents: Math.round(budgetValue * 100),
-        target_cpl_cents: Math.round(cplValue * 100),
-        whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
-        adSettings,
+        platform: directionPlatform,
+        ...(needsFacebook && {
+          objective,
+          ...(objective === 'whatsapp_conversions' && { optimization_level: optimizationLevel }),
+          use_instagram: useInstagram,
+          daily_budget_cents: Math.round(budgetValue * 100),
+          target_cpl_cents: Math.round(cplValue * 100),
+          whatsapp_phone_number: whatsappPhoneNumber.trim() || undefined,
+        }),
+        ...(needsTikTok && {
+          tiktok_objective: tiktokObjective,
+          tiktok_daily_budget: Math.round(tiktokBudgetValue),
+          ...(tiktokTargetCplValue !== null && { tiktok_target_cpl_kzt: tiktokTargetCplValue }),
+        }),
+        ...(separateTikTokSettings && needsFacebook && needsTikTok
+          ? {
+              facebookAdSettings,
+              tiktokAdSettings,
+            }
+          : {
+              adSettings: facebookAdSettings || tiktokAdSettings,
+            }),
         capiSettings,
       });
 
@@ -637,15 +811,26 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
 
   const resetForm = () => {
     setName('');
+    setDirectionPlatform(defaultPlatform);
     setObjective('whatsapp');
+    setOptimizationLevel('level_1');
     setDailyBudget('50');
     setTargetCpl('2.00');
+    setTiktokObjective('traffic');
+    setTikTokDailyBudget(String(TIKTOK_MIN_DAILY_BUDGET));
+    setTikTokTargetCpl('');
+    setSeparateTikTokSettings(false);
     setWhatsappPhoneNumber('');
     setSelectedCities([]);
     setAgeMin(18);
     setAgeMax(65);
     setGender('all');
+    setTikTokSelectedCities([]);
+    setTikTokAgeMin(18);
+    setTikTokAgeMax(65);
+    setTikTokGender('all');
     setDescription('Напишите нам, чтобы узнать подробности');
+    setTikTokDescription('Напишите нам, чтобы узнать подробности');
     setClientQuestion('Здравствуйте! Хочу узнать об этом подробнее.');
     setInstagramUrl('');
     setSiteUrl('');
@@ -792,256 +977,775 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
               </p>
             </div>
 
-            {/* Тип кампании */}
+            {/* Площадка */}
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label>
-                  Тип кампании <span className="text-red-500">*</span>
-                </Label>
-                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_OBJECTIVE} />
-              </div>
-              <RadioGroup
-                value={objective}
-                onValueChange={(value) => setObjective(value as DirectionObjective)}
+              <Label>
+                Площадка <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={directionPlatform}
+                onValueChange={(value) => setDirectionPlatform(value as DirectionPlatform)}
                 disabled={isSubmitting}
               >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="whatsapp" id="obj-whatsapp" />
-                  <Label htmlFor="obj-whatsapp" className="font-normal cursor-pointer">
-                    {OBJECTIVE_DESCRIPTIONS.whatsapp}
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="instagram_traffic" id="obj-instagram" />
-                  <Label htmlFor="obj-instagram" className="font-normal cursor-pointer">
-                    {OBJECTIVE_DESCRIPTIONS.instagram_traffic}
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="site_leads" id="obj-site" />
-                  <Label htmlFor="obj-site" className="font-normal cursor-pointer">
-                    {OBJECTIVE_DESCRIPTIONS.site_leads}
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="lead_forms" id="obj-lead-forms" />
-                  <Label htmlFor="obj-lead-forms" className="font-normal cursor-pointer">
-                    {OBJECTIVE_DESCRIPTIONS.lead_forms}
-                  </Label>
-                </div>
-              </RadioGroup>
+                <SelectTrigger>
+                  <SelectValue placeholder="Выберите площадку" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="facebook">Instagram</SelectItem>
+                  <SelectItem value="tiktok">TikTok</SelectItem>
+                  <SelectItem value="both">Instagram + TikTok</SelectItem>
+                </SelectContent>
+              </Select>
+              {directionPlatform === 'both' && (
+                <p className="text-xs text-muted-foreground">
+                  Будут созданы два независимых направления для каждой площадки
+                </p>
+              )}
             </div>
 
-            {/* Суточный бюджет */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="daily-budget">
-                  Суточный бюджет <span className="text-red-500">*</span>
-                </Label>
-                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_BUDGET} />
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="daily-budget"
-                  type="number"
-                  min="5"
-                  step="1"
-                  placeholder="50"
-                  value={dailyBudget}
-                  onChange={(e) => setDailyBudget(e.target.value)}
+            {/* Цель Instagram */}
+            {needsFacebook && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label>
+                    Цель Instagram <span className="text-red-500">*</span>
+                  </Label>
+                  <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_OBJECTIVE} />
+                </div>
+                <RadioGroup
+                  value={objective}
+                  onValueChange={(value) => setObjective(value as DirectionObjective)}
                   disabled={isSubmitting}
-                  className="flex-1"
-                />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  $ / день
-                </span>
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="whatsapp" id="obj-whatsapp" />
+                    <Label htmlFor="obj-whatsapp" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.whatsapp}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="whatsapp_conversions" id="obj-whatsapp-conv" />
+                    <Label htmlFor="obj-whatsapp-conv" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.whatsapp_conversions}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="instagram_traffic" id="obj-instagram" />
+                    <Label htmlFor="obj-instagram" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.instagram_traffic}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="site_leads" id="obj-site" />
+                    <Label htmlFor="obj-site" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.site_leads}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="lead_forms" id="obj-lead-forms" />
+                    <Label htmlFor="obj-lead-forms" className="font-normal cursor-pointer">
+                      {OBJECTIVE_DESCRIPTIONS.lead_forms}
+                    </Label>
+                  </div>
+                </RadioGroup>
               </div>
-              <p className="text-xs text-muted-foreground">Минимум: $5/день</p>
-            </div>
+            )}
 
-            {/* Целевая стоимость (CPL для лидов, CPC для трафика) */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="target-cpl">
-                  {objective === 'instagram_traffic'
-                    ? 'Целевая стоимость перехода (CPC)'
-                    : 'Целевая стоимость заявки (CPL)'} <span className="text-red-500">*</span>
-                </Label>
-                <HelpTooltip tooltipKey={objective === 'instagram_traffic' ? TooltipKeys.DIRECTION_TARGET_CPC : TooltipKeys.DIRECTION_TARGET_CPL} />
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="target-cpl"
-                  type="number"
-                  min={objective === 'instagram_traffic' ? '0.1' : '0.5'}
-                  step="0.01"
-                  placeholder={objective === 'instagram_traffic' ? '0.10' : '2.00'}
-                  value={targetCpl}
-                  onChange={(e) => setTargetCpl(e.target.value)}
+            {/* Уровень оптимизации для WhatsApp-конверсий */}
+            {needsFacebook && objective === 'whatsapp_conversions' && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label>
+                    Уровень оптимизации <span className="text-red-500">*</span>
+                  </Label>
+                </div>
+                <RadioGroup
+                  value={optimizationLevel}
+                  onValueChange={(value) => setOptimizationLevel(value as OptimizationLevel)}
                   disabled={isSubmitting}
-                  className="flex-1"
-                />
-                <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  {objective === 'instagram_traffic' ? '$ / переход' : '$ / заявка'}
-                </span>
+                >
+                  <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="level_1" id="opt-level-1" />
+                    <div>
+                      <Label htmlFor="opt-level-1" className="font-normal cursor-pointer">
+                        Level 1: Интерес
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        ViewContent — 3+ сообщения от клиента
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="level_2" id="opt-level-2" />
+                    <div>
+                      <Label htmlFor="opt-level-2" className="font-normal cursor-pointer">
+                        Level 2: Квалификация
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        CompleteRegistration — клиент квалифицирован
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-2">
+                    <RadioGroupItem value="level_3" id="opt-level-3" />
+                    <div>
+                      <Label htmlFor="opt-level-3" className="font-normal cursor-pointer">
+                        Level 3: Запись/Покупка
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Purchase — клиент записался или купил
+                      </p>
+                    </div>
+                  </div>
+                </RadioGroup>
               </div>
+            )}
+
+            {/* Чекбокс использования Instagram аккаунта */}
+            {needsFacebook && (
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="use-instagram"
+                  checked={useInstagram}
+                  onChange={(e) => setUseInstagram(e.target.checked)}
+                  disabled={isSubmitting}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                <Label htmlFor="use-instagram" className="font-normal cursor-pointer">
+                  Использовать Instagram аккаунт
+                </Label>
+              </div>
+            )}
+            {needsFacebook && !useInstagram && (
               <p className="text-xs text-muted-foreground">
-                {objective === 'instagram_traffic' ? 'Минимум: $0.10/переход' : 'Минимум: $0.50/заявка'}
+                Реклама будет показываться от имени Facebook страницы без привязки к Instagram
               </p>
-            </div>
+            )}
+
+            {/* Цель TikTok */}
+            {needsTikTok && (
+              <div className="space-y-2">
+                <Label>
+                  Цель TikTok <span className="text-red-500">*</span>
+                </Label>
+                <RadioGroup
+                  value={tiktokObjective}
+                  onValueChange={(value) => setTiktokObjective(value as TikTokObjective)}
+                  disabled={isSubmitting}
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="traffic" id="obj-tt-traffic" />
+                    <Label htmlFor="obj-tt-traffic" className="font-normal cursor-pointer">
+                      {TIKTOK_OBJECTIVE_DESCRIPTIONS.traffic}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="conversions" id="obj-tt-conversions" />
+                    <Label htmlFor="obj-tt-conversions" className="font-normal cursor-pointer">
+                      {TIKTOK_OBJECTIVE_DESCRIPTIONS.conversions}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="lead_generation" id="obj-tt-lead-gen" />
+                    <Label htmlFor="obj-tt-lead-gen" className="font-normal cursor-pointer">
+                      {TIKTOK_OBJECTIVE_DESCRIPTIONS.lead_generation}
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+            )}
+
+            {/* Суточный бюджет Instagram */}
+            {needsFacebook && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="daily-budget">
+                    Суточный бюджет Instagram <span className="text-red-500">*</span>
+                  </Label>
+                  <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_BUDGET} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="daily-budget"
+                    type="number"
+                    min="5"
+                    step="1"
+                    placeholder="50"
+                    value={dailyBudget}
+                    onChange={(e) => setDailyBudget(e.target.value)}
+                    disabled={isSubmitting}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    $ / день
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">Минимум: $5/день</p>
+              </div>
+            )}
+
+            {/* Суточный бюджет TikTok */}
+            {needsTikTok && (
+              <div className="space-y-2">
+                <Label htmlFor="tiktok-daily-budget">
+                  Суточный бюджет TikTok <span className="text-red-500">*</span>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="tiktok-daily-budget"
+                    type="number"
+                    min={TIKTOK_MIN_DAILY_BUDGET.toString()}
+                    step="1"
+                    placeholder={TIKTOK_MIN_DAILY_BUDGET.toString()}
+                    value={tiktokDailyBudget}
+                    onChange={(e) => setTikTokDailyBudget(e.target.value)}
+                    disabled={isSubmitting}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    KZT / день
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Минимум: {TIKTOK_MIN_DAILY_BUDGET} KZT/день
+                </p>
+              </div>
+            )}
+
+            {/* Целевая стоимость Instagram */}
+            {needsFacebook && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="target-cpl">
+                    {objective === 'instagram_traffic'
+                      ? 'Целевая стоимость перехода (CPC)'
+                      : 'Целевая стоимость заявки (CPL)'} <span className="text-red-500">*</span>
+                  </Label>
+                  <HelpTooltip tooltipKey={objective === 'instagram_traffic' ? TooltipKeys.DIRECTION_TARGET_CPC : TooltipKeys.DIRECTION_TARGET_CPL} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="target-cpl"
+                    type="number"
+                    min={objective === 'instagram_traffic' ? '0.1' : '0.5'}
+                    step="0.01"
+                    placeholder={objective === 'instagram_traffic' ? '0.10' : '2.00'}
+                    value={targetCpl}
+                    onChange={(e) => setTargetCpl(e.target.value)}
+                    disabled={isSubmitting}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    {objective === 'instagram_traffic' ? '$ / переход' : '$ / заявка'}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {objective === 'instagram_traffic' ? 'Минимум: $0.10/переход' : 'Минимум: $0.50/заявка'}
+                </p>
+              </div>
+            )}
+
+            {/* Целевая стоимость TikTok */}
+            {needsTikTok && (
+              <div className="space-y-2">
+                <Label htmlFor="tiktok-target-cpl">
+                  Целевая стоимость TikTok (опционально)
+                </Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="tiktok-target-cpl"
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="1500"
+                    value={tiktokTargetCpl}
+                    onChange={(e) => setTikTokTargetCpl(e.target.value)}
+                    disabled={isSubmitting}
+                    className="flex-1"
+                  />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    KZT
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Можно оставить пустым — будет использовано значение по умолчанию
+                </p>
+              </div>
+            )}
           </div>
 
           <Separator />
 
           {/* СЕКЦИЯ 2: Таргетинг */}
           <div className="space-y-4">
-            <h3 className="font-semibold text-sm">📍 Таргетинг</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-sm">📍 Таргетинг</h3>
+              {needsFacebook && needsTikTok && (
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">
+                    Отдельные настройки TikTok
+                  </Label>
+                  <Switch
+                    checked={separateTikTokSettings}
+                    onCheckedChange={setSeparateTikTokSettings}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              )}
+            </div>
 
-            {/* География */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label>
-                  География <span className="text-red-500">*</span>
-                </Label>
-                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
-              </div>
-              <Popover 
-                open={cityPopoverOpen} 
-                onOpenChange={setCityPopoverOpen} 
-                modal={false}
-              >
-                <PopoverTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    disabled={isSubmitting} 
-                    className="w-full justify-between"
-                  >
-                    <span>
-                      {selectedCities.length === 0 ? 'Выберите города' : `Выбрано: ${selectedCities.length}`}
-                    </span>
-                    <ChevronDown className="h-4 w-4 opacity-50" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent 
-                  container={dialogContentRef.current}
-                  className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
-                  side="bottom"
-                  align="start"
-                  sideOffset={6}
-                >
-                  <div className="font-medium text-sm mb-2">Выберите города или страны</div>
-                  <div className="flex flex-col gap-1">
-                    {CITIES_AND_COUNTRIES.map(city => {
-                      const isKZ = city.id === 'KZ';
-                      const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
-                      const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
-                      const isKZSelected = selectedCities.includes('KZ');
-                      const isDisabled = isSubmitting ||
-                        (isKZ && anyCitySelected) ||
-                        (!isKZ && !isOtherCountry && isKZSelected);
-                      
-                      return (
-                        <div
-                          key={city.id} 
-                          className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!isDisabled) {
-                              handleCitySelection(city.id);
-                            }
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedCities.includes(city.id)}
-                            disabled={isDisabled}
-                            onChange={() => {
-                              if (!isDisabled) {
-                                handleCitySelection(city.id);
-                              }
-                            }}
-                          />
-                          <span>{city.name}</span>
-                        </div>
-                      );
-                    })}
+            {!separateTikTokSettings && (
+              <>
+                {/* География */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label>
+                      География <span className="text-red-500">*</span>
+                    </Label>
+                    <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
                   </div>
-                  <Button
-                    className="mt-2"
-                    onClick={() => setCityPopoverOpen(false)}
-                    variant="outline"
-                    size="sm"
+                  <Popover 
+                    open={cityPopoverOpen} 
+                    onOpenChange={setCityPopoverOpen} 
+                    modal={false}
                   >
-                    ОК
-                  </Button>
-                </PopoverContent>
-              </Popover>
-            </div>
+                    <PopoverTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        disabled={isSubmitting} 
+                        className="w-full justify-between"
+                      >
+                        <span>
+                          {selectedCities.length === 0 ? 'Выберите города' : `Выбрано: ${selectedCities.length}`}
+                        </span>
+                        <ChevronDown className="h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent 
+                      container={dialogContentRef.current}
+                      className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
+                      side="bottom"
+                      align="start"
+                      sideOffset={6}
+                    >
+                      <div className="font-medium text-sm mb-2">Выберите города или страны</div>
+                      <div className="flex flex-col gap-1">
+                        {CITIES_AND_COUNTRIES.map(city => {
+                          const isKZ = city.id === 'KZ';
+                          const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
+                          const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
+                          const isKZSelected = selectedCities.includes('KZ');
+                          const isDisabled = isSubmitting ||
+                            (isKZ && anyCitySelected) ||
+                            (!isKZ && !isOtherCountry && isKZSelected);
+                          
+                          return (
+                            <div
+                              key={city.id} 
+                              className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!isDisabled) {
+                                  handleCitySelection(city.id);
+                                }
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedCities.includes(city.id)}
+                                disabled={isDisabled}
+                                onChange={() => {
+                                  if (!isDisabled) {
+                                    handleCitySelection(city.id);
+                                  }
+                                }}
+                              />
+                              <span>{city.name}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <Button
+                        className="mt-2"
+                        onClick={() => setCityPopoverOpen(false)}
+                        variant="outline"
+                        size="sm"
+                      >
+                        ОК
+                      </Button>
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
-            {/* Возраст */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label>
-                  Возраст <span className="text-red-500">*</span>
-                </Label>
-                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="13"
-                  max="65"
-                  value={ageMin}
-                  onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
-                  disabled={isSubmitting}
-                  className="w-24"
-                />
-                <span className="text-muted-foreground">—</span>
-                <Input
-                  type="number"
-                  min="13"
-                  max="65"
-                  value={ageMax}
-                  onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
-                  disabled={isSubmitting}
-                  className="w-24"
-                />
-                <span className="text-sm text-muted-foreground">лет</span>
-              </div>
-            </div>
+                {/* Возраст */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label>
+                      Возраст <span className="text-red-500">*</span>
+                    </Label>
+                    <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="13"
+                      max="65"
+                      value={ageMin}
+                      onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
+                      disabled={isSubmitting}
+                      className="w-24"
+                    />
+                    <span className="text-muted-foreground">—</span>
+                    <Input
+                      type="number"
+                      min="13"
+                      max="65"
+                      value={ageMax}
+                      onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
+                      disabled={isSubmitting}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-muted-foreground">лет</span>
+                  </div>
+                </div>
 
-            {/* Пол */}
-            <div className="space-y-2">
-              <div className="flex items-center gap-1.5">
-                <Label>Пол</Label>
-                <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
-              </div>
-              <RadioGroup
-                value={gender}
-                onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
-                disabled={isSubmitting}
-                className="flex gap-4"
-              >
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="all" id="gender-all" />
-                  <Label htmlFor="gender-all" className="font-normal cursor-pointer">
-                    Все
-                  </Label>
+                {/* Пол */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label>Пол</Label>
+                    <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
+                  </div>
+                  <RadioGroup
+                    value={gender}
+                    onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
+                    disabled={isSubmitting}
+                    className="flex gap-4"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="all" id="gender-all" />
+                      <Label htmlFor="gender-all" className="font-normal cursor-pointer">
+                        Все
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="male" id="gender-male" />
+                      <Label htmlFor="gender-male" className="font-normal cursor-pointer">
+                        Мужчины
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="female" id="gender-female" />
+                      <Label htmlFor="gender-female" className="font-normal cursor-pointer">
+                        Женщины
+                      </Label>
+                    </div>
+                  </RadioGroup>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="male" id="gender-male" />
-                  <Label htmlFor="gender-male" className="font-normal cursor-pointer">
-                    Мужчины
-                  </Label>
+              </>
+            )}
+
+            {separateTikTokSettings && needsFacebook && needsTikTok && (
+              <>
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-muted-foreground">Instagram</h4>
+                  {/* География */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label>
+                        География <span className="text-red-500">*</span>
+                      </Label>
+                      <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
+                    </div>
+                    <Popover 
+                      open={cityPopoverOpen} 
+                      onOpenChange={setCityPopoverOpen} 
+                      modal={false}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button 
+                          variant="outline" 
+                          disabled={isSubmitting} 
+                          className="w-full justify-between"
+                        >
+                          <span>
+                            {selectedCities.length === 0 ? 'Выберите города' : `Выбрано: ${selectedCities.length}`}
+                          </span>
+                          <ChevronDown className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent 
+                        container={dialogContentRef.current}
+                        className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
+                        side="bottom"
+                        align="start"
+                        sideOffset={6}
+                      >
+                        <div className="font-medium text-sm mb-2">Выберите города или страны</div>
+                        <div className="flex flex-col gap-1">
+                          {CITIES_AND_COUNTRIES.map(city => {
+                            const isKZ = city.id === 'KZ';
+                            const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
+                            const anyCitySelected = selectedCities.some(id => !COUNTRY_IDS.includes(id));
+                            const isKZSelected = selectedCities.includes('KZ');
+                            const isDisabled = isSubmitting ||
+                              (isKZ && anyCitySelected) ||
+                              (!isKZ && !isOtherCountry && isKZSelected);
+                            
+                            return (
+                              <div
+                                key={city.id} 
+                                className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isDisabled) {
+                                    handleCitySelection(city.id);
+                                  }
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedCities.includes(city.id)}
+                                  disabled={isDisabled}
+                                  onChange={() => {
+                                    if (!isDisabled) {
+                                      handleCitySelection(city.id);
+                                    }
+                                  }}
+                                />
+                                <span>{city.name}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <Button
+                          className="mt-2"
+                          onClick={() => setCityPopoverOpen(false)}
+                          variant="outline"
+                          size="sm"
+                        >
+                          ОК
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* Возраст */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label>
+                        Возраст <span className="text-red-500">*</span>
+                      </Label>
+                      <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="13"
+                        max="65"
+                        value={ageMin}
+                        onChange={(e) => setAgeMin(parseInt(e.target.value) || 13)}
+                        disabled={isSubmitting}
+                        className="w-24"
+                      />
+                      <span className="text-muted-foreground">—</span>
+                      <Input
+                        type="number"
+                        min="13"
+                        max="65"
+                        value={ageMax}
+                        onChange={(e) => setAgeMax(parseInt(e.target.value) || 65)}
+                        disabled={isSubmitting}
+                        className="w-24"
+                      />
+                      <span className="text-sm text-muted-foreground">лет</span>
+                    </div>
+                  </div>
+
+                  {/* Пол */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label>Пол</Label>
+                      <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
+                    </div>
+                    <RadioGroup
+                      value={gender}
+                      onValueChange={(value) => setGender(value as 'all' | 'male' | 'female')}
+                      disabled={isSubmitting}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="all" id="gender-all" />
+                        <Label htmlFor="gender-all" className="font-normal cursor-pointer">
+                          Все
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="male" id="gender-male" />
+                        <Label htmlFor="gender-male" className="font-normal cursor-pointer">
+                          Мужчины
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="female" id="gender-female" />
+                        <Label htmlFor="gender-female" className="font-normal cursor-pointer">
+                          Женщины
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="female" id="gender-female" />
-                  <Label htmlFor="gender-female" className="font-normal cursor-pointer">
-                    Женщины
-                  </Label>
+
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-muted-foreground">TikTok</h4>
+                  {/* География */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label>
+                        География <span className="text-red-500">*</span>
+                      </Label>
+                      <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_CITIES} />
+                    </div>
+                    <Popover 
+                      open={tiktokCityPopoverOpen} 
+                      onOpenChange={setTikTokCityPopoverOpen} 
+                      modal={false}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button 
+                          variant="outline" 
+                          disabled={isSubmitting} 
+                          className="w-full justify-between"
+                        >
+                          <span>
+                            {tiktokSelectedCities.length === 0 ? 'Выберите города' : `Выбрано: ${tiktokSelectedCities.length}`}
+                          </span>
+                          <ChevronDown className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent 
+                        container={dialogContentRef.current}
+                        className="z-50 w-64 max-h-60 overflow-y-auto p-4 flex flex-col gap-2"
+                        side="bottom"
+                        align="start"
+                        sideOffset={6}
+                      >
+                        <div className="font-medium text-sm mb-2">Выберите города или страны</div>
+                        <div className="flex flex-col gap-1">
+                          {CITIES_AND_COUNTRIES.map(city => {
+                            const isKZ = city.id === 'KZ';
+                            const isOtherCountry = ['BY', 'KG', 'UZ'].includes(city.id);
+                            const anyCitySelected = tiktokSelectedCities.some(id => !COUNTRY_IDS.includes(id));
+                            const isKZSelected = tiktokSelectedCities.includes('KZ');
+                            const isDisabled = isSubmitting ||
+                              (isKZ && anyCitySelected) ||
+                              (!isKZ && !isOtherCountry && isKZSelected);
+                            
+                            return (
+                              <div
+                                key={city.id} 
+                                className="flex items-center gap-2 cursor-pointer text-sm py-1 hover:bg-accent px-2 rounded select-none"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!isDisabled) {
+                                    handleTikTokCitySelection(city.id);
+                                  }
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={tiktokSelectedCities.includes(city.id)}
+                                  disabled={isDisabled}
+                                  onChange={() => {
+                                    if (!isDisabled) {
+                                      handleTikTokCitySelection(city.id);
+                                    }
+                                  }}
+                                />
+                                <span>{city.name}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <Button
+                          className="mt-2"
+                          onClick={() => setTikTokCityPopoverOpen(false)}
+                          variant="outline"
+                          size="sm"
+                        >
+                          ОК
+                        </Button>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* Возраст */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label>
+                        Возраст <span className="text-red-500">*</span>
+                      </Label>
+                      <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_AGE} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min="13"
+                        max="65"
+                        value={tiktokAgeMin}
+                        onChange={(e) => setTikTokAgeMin(parseInt(e.target.value) || 13)}
+                        disabled={isSubmitting}
+                        className="w-24"
+                      />
+                      <span className="text-muted-foreground">—</span>
+                      <Input
+                        type="number"
+                        min="13"
+                        max="65"
+                        value={tiktokAgeMax}
+                        onChange={(e) => setTikTokAgeMax(parseInt(e.target.value) || 65)}
+                        disabled={isSubmitting}
+                        className="w-24"
+                      />
+                      <span className="text-sm text-muted-foreground">лет</span>
+                    </div>
+                  </div>
+
+                  {/* Пол */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Label>Пол</Label>
+                      <HelpTooltip tooltipKey={TooltipKeys.DIRECTION_GENDER} />
+                    </div>
+                    <RadioGroup
+                      value={tiktokGender}
+                      onValueChange={(value) => setTikTokGender(value as 'all' | 'male' | 'female')}
+                      disabled={isSubmitting}
+                      className="flex gap-4"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="all" id="gender-tt-all" />
+                        <Label htmlFor="gender-tt-all" className="font-normal cursor-pointer">
+                          Все
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="male" id="gender-tt-male" />
+                        <Label htmlFor="gender-tt-male" className="font-normal cursor-pointer">
+                          Мужчины
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <RadioGroupItem value="female" id="gender-tt-female" />
+                        <Label htmlFor="gender-tt-female" className="font-normal cursor-pointer">
+                          Женщины
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
                 </div>
-              </RadioGroup>
-            </div>
+              </>
+            )}
           </div>
 
           <Separator />
@@ -1050,26 +1754,59 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           <div className="space-y-4">
             <h3 className="font-semibold text-sm">📝 Контент</h3>
 
-            {/* Текст под видео */}
-            <div className="space-y-2">
-              <Label htmlFor="description">
-                Текст под видео <span className="text-red-500">*</span>
-              </Label>
-              <Textarea
-                id="description"
-                placeholder="Напишите нам, чтобы узнать подробности"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                disabled={isSubmitting}
-                rows={3}
-              />
-            </div>
+            {!separateTikTokSettings && (
+              <div className="space-y-2">
+                <Label htmlFor="description">
+                  Текст под видео <span className="text-red-500">*</span>
+                </Label>
+                <Textarea
+                  id="description"
+                  placeholder="Напишите нам, чтобы узнать подробности"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  disabled={isSubmitting}
+                  rows={3}
+                />
+              </div>
+            )}
+
+            {separateTikTokSettings && needsFacebook && needsTikTok && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="description">
+                    Текст под видео (Instagram) <span className="text-red-500">*</span>
+                  </Label>
+                  <Textarea
+                    id="description"
+                    placeholder="Напишите нам, чтобы узнать подробности"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    disabled={isSubmitting}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="tiktok-description">
+                    Текст под видео (TikTok) <span className="text-red-500">*</span>
+                  </Label>
+                  <Textarea
+                    id="tiktok-description"
+                    placeholder="Напишите нам, чтобы узнать подробности"
+                    value={tiktokDescription}
+                    onChange={(e) => setTikTokDescription(e.target.value)}
+                    disabled={isSubmitting}
+                    rows={3}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <Separator />
 
           {/* СЕКЦИЯ 4: Специфичные настройки в зависимости от цели */}
-          {objective === 'whatsapp' && (
+          {needsFacebook && (objective === 'whatsapp' || objective === 'whatsapp_conversions') && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
               
@@ -1110,7 +1847,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {objective === 'instagram_traffic' && (
+          {needsFacebook && objective === 'instagram_traffic' && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">📱 Instagram</h3>
               
@@ -1130,7 +1867,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {objective === 'site_leads' && (
+          {needsFacebook && objective === 'site_leads' && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">🌐 Лиды на сайте</h3>
               
@@ -1205,7 +1942,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
             </div>
           )}
 
-          {objective === 'lead_forms' && (
+          {needsFacebook && objective === 'lead_forms' && (
             <div className="space-y-4">
               <h3 className="font-semibold text-sm">📋 Лидформы Facebook</h3>
 
@@ -1276,7 +2013,7 @@ export const CreateDirectionDialog: React.FC<CreateDirectionDialogProps> = ({
           )}
 
           {/* СЕКЦИЯ: Meta CAPI - расширенная конфигурация */}
-          {objective !== 'site_leads' && (
+          {needsFacebook && objective !== 'site_leads' && (
             <div className="space-y-4">
               <Separator />
               <div className="flex items-center justify-between">
