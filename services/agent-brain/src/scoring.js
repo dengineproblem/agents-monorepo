@@ -4129,6 +4129,48 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           });
         }
 
+        // ========================================
+        // Группируем ad_ids по adset для проверки пожирателей
+        // ========================================
+        const adIdsByAdset = new Map();
+        if (adsInsightsData && adsInsightsData.length > 0) {
+          for (const ad of adsInsightsData) {
+            if (!ad.adset_id || !ad.ad_id) continue;
+            if (!adIdsByAdset.has(ad.adset_id)) {
+              adIdsByAdset.set(ad.adset_id, new Set());
+            }
+            adIdsByAdset.get(ad.adset_id).add(ad.ad_id);
+          }
+        }
+
+        // Группируем пожирателей по adset
+        const eaterIdsByAdset = new Map();
+        for (const eater of adEaters) {
+          if (!eaterIdsByAdset.has(eater.adset_id)) {
+            eaterIdsByAdset.set(eater.adset_id, new Set());
+          }
+          eaterIdsByAdset.get(eater.adset_id).add(eater.ad_id);
+        }
+
+        // Находим adsets которые останутся пустыми после отключения всех пожирателей
+        const adsetsWillBeEmpty = [];
+        for (const [adsetId, eaterIds] of eaterIdsByAdset) {
+          const totalAds = adIdsByAdset.get(adsetId)?.size || 0;
+          if (totalAds > 0 && totalAds === eaterIds.size) {
+            adsetsWillBeEmpty.push(adsetId);
+          }
+        }
+
+        if (adsetsWillBeEmpty.length > 0) {
+          log.warn({
+            where: 'interactive_brain',
+            phase: 'ad_eaters_empty_adsets_warning',
+            empty_adset_ids: adsetsWillBeEmpty,
+            count: adsetsWillBeEmpty.length,
+            message: `⚠️ ${adsetsWillBeEmpty.length} адсетов останутся БЕЗ активных объявлений после отключения всех пожирателей`
+          });
+        }
+
         // Готовим payload для LLM с полным контекстом
         const llmPayload = {
           // Контекст времени — LLM должна знать можно ли создавать новые адсеты
@@ -4189,22 +4231,33 @@ export async function runInteractiveBrain(userAccount, options = {}) {
           unused_creatives: freshUnusedCreatives.slice(0, 15),
           ready_creatives: brainReport?.ready_creatives?.slice(0, 10) || [],
           recent_actions_count: recentActions?.length || 0,
-          // Явный список обнаруженных пожирателей (для LLM)
-          ad_eaters: adEaters.map(e => ({
-            ad_id: e.ad_id,
-            ad_name: e.ad_name,
-            adset_id: e.adset_id,
-            adset_name: e.adset_name,
-            campaign_id: e.campaign_id,
-            direction_id: adsetAnalysis.find(a => a.adset_id === e.adset_id)?.direction_id || null,
-            direction_name: adsetAnalysis.find(a => a.adset_id === e.adset_id)?.direction_name || null,
-            spend: e.spend,
-            leads: e.leads,
-            cpl: e.cpl,
-            priority: e.priority,
-            is_critical: e.is_critical,
-            reasons: e.reasons
-          })),
+          // Явный список обнаруженных пожирателей (для LLM) с контекстом об активных ads в adset
+          ad_eaters: adEaters.map(e => {
+            const totalAdsInAdset = adIdsByAdset.get(e.adset_id)?.size || 0;
+            const eatersInAdset = eaterIdsByAdset.get(e.adset_id)?.size || 0;
+            const remainingAdsAfterPause = totalAdsInAdset - eatersInAdset;
+
+            return {
+              ad_id: e.ad_id,
+              ad_name: e.ad_name,
+              adset_id: e.adset_id,
+              adset_name: e.adset_name,
+              campaign_id: e.campaign_id,
+              direction_id: adsetAnalysis.find(a => a.adset_id === e.adset_id)?.direction_id || null,
+              direction_name: adsetAnalysis.find(a => a.adset_id === e.adset_id)?.direction_name || null,
+              spend: e.spend,
+              leads: e.leads,
+              cpl: e.cpl,
+              priority: e.priority,
+              is_critical: e.is_critical,
+              reasons: e.reasons,
+              // НОВЫЕ ПОЛЯ: контекст об активных объявлениях в адсете
+              total_ads_in_adset: totalAdsInAdset,
+              eaters_in_adset: eatersInAdset,
+              remaining_ads_after_pause: remainingAdsAfterPause,
+              will_adset_be_empty: remainingAdsAfterPause === 0
+            };
+          }),
           summary: {
             total_adsets: adsetAnalysis.length,
             external_count: externalCount,
