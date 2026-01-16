@@ -21,7 +21,6 @@ import { CompetitorCreativesList } from '@/components/competitors/CompetitorCrea
 import type { Competitor, CompetitorCreative, CompetitorsPagination } from '@/types/competitor';
 import { useTranslation } from '@/i18n/LanguageContext';
 import { useAppContext } from '@/context/AppContext';
-import { AdAccountSwitcher } from '@/components/ad-accounts/AdAccountSwitcher';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
 import {
@@ -263,14 +262,14 @@ export default function Competitors() {
   return (
     <>
       <Header />
-      <PageHero
-        title={t('competitors.title')}
-        subtitle={t('competitors.subtitle')}
-        rightContent={<AdAccountSwitcher />}
-        tooltipKey={TooltipKeys.COMPETITOR_ADD_HOW}
-      />
+      <div className="container mx-auto px-4 pt-[76px]">
+        <PageHero
+          title={t('competitors.title')}
+          subtitle={t('competitors.subtitle')}
+          tooltipKey={TooltipKeys.COMPETITOR_ADD_HOW}
+        />
 
-      <div className="container mx-auto px-4 py-6" data-tour="competitors-content">
+        <div data-tour="competitors-content">
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Левая колонка - список конкурентов */}
           <div className="w-full lg:w-72 flex-shrink-0 space-y-4">
@@ -370,6 +369,7 @@ export default function Competitors() {
               </CardContent>
             </Card>
           </div>
+        </div>
         </div>
       </div>
 

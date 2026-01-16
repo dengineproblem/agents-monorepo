@@ -45,6 +45,9 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
       if (dirError || !direction) {
         return reply.status(404).send({ error: 'Direction not found' });
       }
+      if (direction.platform === 'tiktok') {
+        return reply.status(400).send({ error: 'TikTok directions do not support Facebook ad sets' });
+      }
 
       // 2. Получить access token (с поддержкой multi-account режима)
       const { data: userAccount, error: userError } = await supabase
@@ -168,6 +171,9 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
       if (dirError || !direction) {
         return reply.status(404).send({ error: 'Direction not found' });
       }
+      if ((direction as any).platform === 'tiktok') {
+        return reply.status(400).send({ error: 'TikTok directions do not support Facebook ad sets' });
+      }
 
       // Получить список ad sets
       const { data: adsets, error: adsetsError } = await supabase
@@ -223,6 +229,9 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
 
       if (dirError || !direction) {
         return reply.status(404).send({ error: 'Direction not found' });
+      }
+      if ((direction as any).platform === 'tiktok') {
+        return reply.status(400).send({ error: 'TikTok directions do not support Facebook ad sets' });
       }
 
       // Мягкое удаление (is_active = false)
@@ -375,7 +384,6 @@ export default async function directionAdSetsRoutes(app: FastifyInstance) {
     }
   });
 }
-
 
 
 

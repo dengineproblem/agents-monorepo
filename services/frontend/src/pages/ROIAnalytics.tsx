@@ -31,7 +31,8 @@ import {
   Video,
   Image,
   Images,
-  Download
+  Download,
+  Instagram
 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
@@ -52,6 +53,7 @@ import { LeadsTab } from '@/components/roi/LeadsTab';
 import { CreativeFunnelModal } from '@/components/CreativeFunnelModal';
 import { API_BASE_URL, ANALYTICS_API_BASE_URL } from '@/config/api';
 import { creativesApi } from '@/services/creativesApi';
+import { FEATURES } from '@/config/appReview';
 
 // Конфигурация для badge типа медиа
 type MediaType = 'video' | 'image' | 'carousel' | null | undefined;
@@ -117,7 +119,8 @@ const getThumbnailUrl = (url: string | null | undefined, width = 200, height = 2
 
 const ROIAnalytics: React.FC = () => {
   // Получаем currentAdAccountId из контекста для мультиаккаунтности
-  const { currentAdAccountId } = useAppContext();
+  const { currentAdAccountId, platform, setPlatform } = useAppContext();
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
 
   const [roiData, setRoiData] = useState<ROIData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -193,6 +196,12 @@ const ROIAnalytics: React.FC = () => {
   const formatPercent = (percent: number) => {
     return `${percent.toFixed(1)}%`;
   };
+
+  const TikTokIcon = () => (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
+    </svg>
+  );
 
   const getMediaTypeLabel = (type: string | null | undefined) => {
     switch (type) {
@@ -336,7 +345,7 @@ const ROIAnalytics: React.FC = () => {
   // Загрузка направлений
   const loadDirections = async (userAccountId: string) => {
     try {
-      const { data, error } = await salesApi.getDirections(userAccountId);
+      const { data, error } = await salesApi.getDirections(userAccountId, directionsPlatform);
       if (error) {
         console.error('Ошибка загрузки направлений:', error);
         return;
@@ -391,7 +400,8 @@ const ROIAnalytics: React.FC = () => {
         selectedDirectionId,
         tf || 'all',
         mediaTypeFilter === 'all' ? null : mediaTypeFilter,
-        currentAdAccountId || undefined  // UUID для мультиаккаунтности
+        currentAdAccountId || undefined,  // UUID для мультиаккаунтности
+        platform
       );
       
       console.log('✅ ROI данные загружены:', data);
@@ -441,24 +451,21 @@ const ROIAnalytics: React.FC = () => {
   };
 
   useEffect(() => {
-    // Инициализация при монтировании
+    // Инициализация при монтировании / смене платформы
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
       const userData = JSON.parse(storedUser);
       const userId = userData?.id || '';
       setUserAccountId(userId);
-      
-      // Загружаем направления
       if (userId) {
         loadDirections(userId);
       }
     }
-    
-    loadROIData();
+    setSelectedDirectionId(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [platform]);
 
-  // Перезагрузка при смене направления, типа медиа или аккаунта
+  // Перезагрузка при смене направления, типа медиа, аккаунта или платформы
   useEffect(() => {
     if (userAccountId) {
       loadROIData();
@@ -493,7 +500,7 @@ const ROIAnalytics: React.FC = () => {
       */
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDirectionId, directions, mediaTypeFilter, currentAdAccountId]);
+  }, [selectedDirectionId, directions, mediaTypeFilter, currentAdAccountId, platform]);
 
   const getROIBadgeVariant = (roi: number) => {
     if (roi > 0) return 'outline';
@@ -730,6 +737,40 @@ const ROIAnalytics: React.FC = () => {
             <HelpTooltip tooltipKey={TooltipKeys.ROI_OVERVIEW} iconSize="md" />
           </div>
           <p className="text-muted-foreground mt-2">Отслеживайте окупаемость ваших рекламных кампаний</p>
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-sm font-medium text-muted-foreground">Платформа:</span>
+            <Tabs
+              value={platform}
+              onValueChange={(value) => setPlatform(value as 'instagram' | 'tiktok')}
+            >
+              <TabsList className="h-auto bg-transparent p-0 gap-2">
+                <TabsTrigger
+                  value="instagram"
+                  className={cn(
+                    "gap-2 transition-all duration-200",
+                    "data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:hover:from-purple-600 data-[state=active]:hover:to-pink-600 data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
+                    "data-[state=inactive]:border data-[state=inactive]:border-purple-200 data-[state=inactive]:text-purple-600 data-[state=inactive]:hover:bg-purple-50 data-[state=inactive]:hover:border-purple-300 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
+                  )}
+                >
+                  <Instagram className="h-4 w-4" />
+                  Instagram
+                </TabsTrigger>
+                {FEATURES.SHOW_TIKTOK && (
+                  <TabsTrigger
+                    value="tiktok"
+                    className={cn(
+                      "gap-2 transition-all duration-200",
+                      "data-[state=active]:bg-gradient-to-r data-[state=active]:from-black data-[state=active]:to-gray-900 data-[state=active]:hover:from-gray-900 data-[state=active]:hover:to-black data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
+                      "data-[state=inactive]:border data-[state=inactive]:border-gray-300 data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-50 data-[state=inactive]:hover:border-gray-400 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
+                    )}
+                  >
+                    <TikTokIcon />
+                    TikTok
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
         
         {/* Подраздел: Обзор */}
@@ -1111,33 +1152,43 @@ const ROIAnalytics: React.FC = () => {
                                 </td>
                                 <td className="py-2 px-3 text-left text-sm">
                                   {campaign.leads > 0
-                                    ? formatUSD(campaign.spend / 530 / campaign.leads)
+                                    ? (platform === 'tiktok'
+                                        ? formatCurrency(campaign.spend / campaign.leads)
+                                        : formatUSD(campaign.spend / 530 / campaign.leads))
                                     : '—'
                                   }
                                 </td>
                                 <td className="py-2 px-3 text-left text-sm">
-                                  {campaign.qualification?.rate !== undefined
-                                    ? `${campaign.qualification.rate.toFixed(1)}%`
-                                    : '—'
+                                  {platform === 'tiktok'
+                                    ? '—'
+                                    : (campaign.qualification?.rate !== undefined
+                                        ? `${campaign.qualification.rate.toFixed(1)}%`
+                                        : '—')
                                   }
                                 </td>
                                 {/* CAPI события */}
                                 <td className="py-2 px-3 text-center text-sm">
-                                  {campaign.capi_events?.interest !== undefined && campaign.capi_events.interest > 0
-                                    ? <span className="text-blue-600 dark:text-blue-400 font-medium">{campaign.capi_events.interest}</span>
-                                    : <span className="text-muted-foreground">—</span>
+                                  {platform === 'tiktok'
+                                    ? <span className="text-muted-foreground">—</span>
+                                    : (campaign.capi_events?.interest !== undefined && campaign.capi_events.interest > 0
+                                        ? <span className="text-blue-600 dark:text-blue-400 font-medium">{campaign.capi_events.interest}</span>
+                                        : <span className="text-muted-foreground">—</span>)
                                   }
                                 </td>
                                 <td className="py-2 px-3 text-center text-sm">
-                                  {campaign.capi_events?.qualified !== undefined && campaign.capi_events.qualified > 0
-                                    ? <span className="text-green-600 dark:text-green-400 font-medium">{campaign.capi_events.qualified}</span>
-                                    : <span className="text-muted-foreground">—</span>
+                                  {platform === 'tiktok'
+                                    ? <span className="text-muted-foreground">—</span>
+                                    : (campaign.capi_events?.qualified !== undefined && campaign.capi_events.qualified > 0
+                                        ? <span className="text-green-600 dark:text-green-400 font-medium">{campaign.capi_events.qualified}</span>
+                                        : <span className="text-muted-foreground">—</span>)
                                   }
                                 </td>
                                 <td className="py-2 px-3 text-center text-sm">
-                                  {campaign.capi_events?.scheduled !== undefined && campaign.capi_events.scheduled > 0
-                                    ? <span className="text-purple-600 dark:text-purple-400 font-medium">{campaign.capi_events.scheduled}</span>
-                                    : <span className="text-muted-foreground">—</span>
+                                  {platform === 'tiktok'
+                                    ? <span className="text-muted-foreground">—</span>
+                                    : (campaign.capi_events?.scheduled !== undefined && campaign.capi_events.scheduled > 0
+                                        ? <span className="text-purple-600 dark:text-purple-400 font-medium">{campaign.capi_events.scheduled}</span>
+                                        : <span className="text-muted-foreground">—</span>)
                                   }
                                 </td>
                                 <td className="py-2 px-3 text-left text-sm">
@@ -1446,9 +1497,20 @@ const ROIAnalytics: React.FC = () => {
                                                 <div className="font-medium"><span className="text-muted-foreground">Клики:</span> {formatNumber(totalMetrics.clicks)}</div>
                                                 <div className="font-medium"><span className="text-muted-foreground">CTR:</span> {totalCTR.toFixed(2)}%</div>
                                                 <div className="font-medium"><span className="text-muted-foreground">Лиды:</span> {formatNumber(totalMetrics.leads)}</div>
-                                                <div className="font-medium"><span className="text-muted-foreground">Расход:</span> {formatUSD(totalMetrics.spend)}</div>
-                                                <div className="font-medium"><span className="text-muted-foreground">CPM:</span> {formatUSD(totalCPM)}</div>
-                                                <div className="font-medium"><span className="text-muted-foreground">CPL:</span> {totalMetrics.leads > 0 ? formatUSD(totalCPL) : '—'}</div>
+                                                <div className="font-medium">
+                                                  <span className="text-muted-foreground">Расход:</span>{' '}
+                                                  {platform === 'tiktok' ? formatCurrency(totalMetrics.spend) : formatUSD(totalMetrics.spend)}
+                                                </div>
+                                                <div className="font-medium">
+                                                  <span className="text-muted-foreground">CPM:</span>{' '}
+                                                  {platform === 'tiktok' ? formatCurrency(totalCPM) : formatUSD(totalCPM)}
+                                                </div>
+                                                <div className="font-medium">
+                                                  <span className="text-muted-foreground">CPL:</span>{' '}
+                                                  {totalMetrics.leads > 0
+                                                    ? (platform === 'tiktok' ? formatCurrency(totalCPL) : formatUSD(totalCPL))
+                                                    : '—'}
+                                                </div>
                                                 {/* Показываем видео-метрики только после анализа */}
                                                 {creativeAnalysis && totalMetrics.video_views > 0 && (
                                                   <>
@@ -1581,23 +1643,27 @@ const ROIAnalytics: React.FC = () => {
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">CPL:</span>
                           <span className="font-medium">
-                            {campaign.leads > 0
-                              ? formatUSD(campaign.spend / 530 / campaign.leads)
-                              : '—'
-                            }
+                              {campaign.leads > 0
+                                ? (platform === 'tiktok'
+                                    ? formatCurrency(campaign.spend / campaign.leads)
+                                    : formatUSD(campaign.spend / 530 / campaign.leads))
+                                : '—'
+                              }
                           </span>
                         </div>
                         <div className="flex justify-between text-xs">
                           <span className="text-muted-foreground">% квал:</span>
                           <span className="font-medium">
-                            {campaign.qualification?.rate !== undefined
-                              ? `${campaign.qualification.rate.toFixed(1)}%`
-                              : '—'
+                            {platform === 'tiktok'
+                              ? '—'
+                              : (campaign.qualification?.rate !== undefined
+                                  ? `${campaign.qualification.rate.toFixed(1)}%`
+                                  : '—')
                             }
                           </span>
                         </div>
                         {/* CAPI события (мобильная версия) */}
-                        {campaign.capi_events && (campaign.capi_events.interest > 0 || campaign.capi_events.qualified > 0 || campaign.capi_events.scheduled > 0) && (
+                        {platform !== 'tiktok' && campaign.capi_events && (campaign.capi_events.interest > 0 || campaign.capi_events.qualified > 0 || campaign.capi_events.scheduled > 0) && (
                           <div className="flex justify-between text-xs pt-1 border-t border-dashed">
                             <span className="text-muted-foreground">CAPI:</span>
                             <span className="font-medium flex gap-2">
@@ -1744,9 +1810,20 @@ const ROIAnalytics: React.FC = () => {
                                       <div className="font-medium"><span className="text-muted-foreground">Клики:</span> {formatNumber(totalMetrics.clicks)}</div>
                                       <div className="font-medium"><span className="text-muted-foreground">CTR:</span> {totalCTR.toFixed(2)}%</div>
                                       <div className="font-medium"><span className="text-muted-foreground">Лиды:</span> {formatNumber(totalMetrics.leads)}</div>
-                                      <div className="font-medium"><span className="text-muted-foreground">Расход:</span> {formatUSD(totalMetrics.spend)}</div>
-                                      <div className="font-medium"><span className="text-muted-foreground">CPM:</span> {formatUSD(totalCPM)}</div>
-                                      <div className="font-medium"><span className="text-muted-foreground">CPL:</span> {totalMetrics.leads > 0 ? formatUSD(totalCPL) : '—'}</div>
+                                      <div className="font-medium">
+                                        <span className="text-muted-foreground">Расход:</span>{' '}
+                                        {platform === 'tiktok' ? formatCurrency(totalMetrics.spend) : formatUSD(totalMetrics.spend)}
+                                      </div>
+                                      <div className="font-medium">
+                                        <span className="text-muted-foreground">CPM:</span>{' '}
+                                        {platform === 'tiktok' ? formatCurrency(totalCPM) : formatUSD(totalCPM)}
+                                      </div>
+                                      <div className="font-medium">
+                                        <span className="text-muted-foreground">CPL:</span>{' '}
+                                        {totalMetrics.leads > 0
+                                          ? (platform === 'tiktok' ? formatCurrency(totalCPL) : formatUSD(totalCPL))
+                                          : '—'}
+                                      </div>
                                       {/* Показываем видео-метрики только после анализа */}
                                       {creativeAnalysis && totalMetrics.video_views > 0 && (
                                         <>

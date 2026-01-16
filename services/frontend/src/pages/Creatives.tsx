@@ -26,7 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useDirections } from "@/hooks/useDirections";
-import { OBJECTIVE_LABELS } from "@/types/direction";
+import { getDirectionObjectiveLabel, OBJECTIVE_LABELS } from "@/types/direction";
 import { useNavigate } from "react-router-dom";
 import { getCreativeAnalytics, type CreativeAnalytics } from "@/services/creativeAnalyticsApi";
 import { TestStatusIndicator } from "@/components/TestStatusIndicator";
@@ -160,6 +160,9 @@ const formatSeconds = (seconds: number | null | undefined) => {
   return `${mins} мин ${secs.toString().padStart(2, "0")} сек`;
 };
 
+const FACEBOOK_MIN_DAILY_BUDGET = 10;
+const TIKTOK_MIN_DAILY_BUDGET = 2500;
+
 // Генерация цвета для направления на основе его ID
 const getDirectionColor = (directionId: string): string => {
   const colors = [
@@ -291,7 +294,7 @@ const DirectionBadge: React.FC<DirectionBadgeProps> = ({
                 />
                 <span className="flex-1 truncate">{dir.name}</span>
                 <span className="text-xs text-muted-foreground">
-                  {OBJECTIVE_LABELS[dir.objective]}
+                  {getDirectionObjectiveLabel(dir)}
                 </span>
               </button>
             ))}
@@ -1355,9 +1358,9 @@ const CreativeDetails: React.FC<CreativeDetailsProps> = ({ creativeId, fbCreativ
 
 const Creatives: React.FC = () => {
   const navigate = useNavigate();
-  const { currentAdAccountId } = useAppContext();
+  const { currentAdAccountId, platform } = useAppContext();
   // Передаём currentAdAccountId для фильтрации креативов по выбранному рекламному аккаунту
-  const { items, loading, reload, testStatuses } = useUserCreatives(currentAdAccountId);
+  const { items, loading, reload, testStatuses } = useUserCreatives(currentAdAccountId, platform);
 
   const [queue, setQueue] = useState<UploadItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1370,18 +1373,40 @@ const Creatives: React.FC = () => {
 
   // Состояния для Manual Launch модалки
   const [manualLaunchDialogOpen, setManualLaunchDialogOpen] = useState(false);
-  const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(10);
+  const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(
+    platform === 'tiktok' ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET
+  );
   const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('now');
   const [launchResult, setLaunchResult] = useState<ManualLaunchResponse | null>(null);
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
-  const [launchedBudget, setLaunchedBudget] = useState<number>(10);
+  const [launchedBudget, setLaunchedBudget] = useState<number>(
+    platform === 'tiktok' ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET
+  );
   const [launchDirectionId, setLaunchDirectionId] = useState<string>('');
+  const isTikTokPlatform = platform === 'tiktok';
+  const manualLaunchMinBudget = isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET;
+  const manualLaunchBudgetSymbol = isTikTokPlatform ? '₸' : '$';
+  const manualLaunchBudgetLabel = isTikTokPlatform ? 'KZT' : 'USD';
+  const manualLaunchMinBudgetText = isTikTokPlatform
+    ? `${manualLaunchMinBudget}₸`
+    : `${manualLaunchBudgetSymbol}${manualLaunchMinBudget}`;
+  const adGroupId =
+    launchResult?.adset_id || launchResult?.adgroup_id || launchResult?.tiktok_adgroup_id;
+  const adGroupTitle = isTikTokPlatform ? 'Ad Group' : 'Ad Set';
+  const launchedBudgetLabel = isTikTokPlatform
+    ? `${launchedBudget.toLocaleString('ru-RU')} ₸`
+    : `${manualLaunchBudgetSymbol}${launchedBudget}`;
 
   // Фильтрация креативов по типу медиа
   const filteredItems = useMemo(() => {
     if (mediaTypeFilter === 'all') return items;
     return items.filter(item => item.media_type === mediaTypeFilter);
   }, [items, mediaTypeFilter]);
+
+  useEffect(() => {
+    setManualLaunchBudget(manualLaunchMinBudget);
+    setLaunchedBudget(manualLaunchMinBudget);
+  }, [manualLaunchMinBudget]);
 
   // Обработчик обновления названия креатива
   const handleTitleUpdate = async (id: string, newTitle: string) => {
@@ -1474,8 +1499,8 @@ const Creatives: React.FC = () => {
       return;
     }
 
-    if (manualLaunchBudget < 10) {
-      toast.error('Минимальный бюджет - $10');
+    if (manualLaunchBudget < manualLaunchMinBudget) {
+      toast.error(`Минимальный бюджет - ${manualLaunchMinBudgetText}`);
       return;
     }
 
@@ -1492,12 +1517,20 @@ const Creatives: React.FC = () => {
       setLaunchedBudget(manualLaunchBudget);
 
       const result = await manualLaunchAds({
+        platform: isTikTokPlatform ? 'tiktok' : 'facebook',
         user_account_id: direction.user_account_id,
         account_id: currentAdAccountId || undefined,
         direction_id: launchDirectionId,
         creative_ids: Array.from(selectedCreativeIds),
-        start_mode: manualStartMode,
-        daily_budget_cents: Math.round(manualLaunchBudget * 100),
+        ...(isTikTokPlatform
+          ? {
+              daily_budget: manualLaunchBudget,
+              objective: direction.tiktok_objective || undefined,
+            }
+          : {
+              start_mode: manualStartMode,
+              daily_budget_cents: Math.round(manualLaunchBudget * 100),
+            }),
       });
 
       if (result.success) {
@@ -1508,7 +1541,7 @@ const Creatives: React.FC = () => {
 
         // Сброс
         setSelectedCreativeIds(new Set());
-        setManualLaunchBudget(10);
+        setManualLaunchBudget(manualLaunchMinBudget);
         setManualStartMode('now');
       } else {
         toast.error(result.error || 'Ошибка создания adset');
@@ -1532,7 +1565,12 @@ const Creatives: React.FC = () => {
   });
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
-  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
+  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId, directionsPlatform);
+  const launchDirection = useMemo(
+    () => directions.find(d => d.id === launchDirectionId),
+    [directions, launchDirectionId]
+  );
   
   // Сбрасываем выбранное направление при смене аккаунта
   useEffect(() => {
@@ -1764,7 +1802,7 @@ const Creatives: React.FC = () => {
                     <SelectContent>
                       {directions.map((direction) => (
                         <SelectItem key={direction.id} value={direction.id}>
-                          {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                          {direction.name} ({getDirectionObjectiveLabel(direction)})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1794,12 +1832,12 @@ const Creatives: React.FC = () => {
                 </div>
               )}
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Button
                   variant="outline"
                   onClick={() => inputRef.current?.click()}
                   disabled={isProcessing || directions.length === 0 || !selectedDirectionId}
-                  className="w-full"
+                  className="flex-1 min-w-[140px]"
                 >
                   <Upload className="mr-2 h-4 w-4" />
                   Добавить файл
@@ -1832,7 +1870,7 @@ const Creatives: React.FC = () => {
                     Повторить всё
                   </Button>
                 )}
-                <Button variant="ghost" onClick={clearCompleted} disabled={isProcessing}>
+                <Button variant="ghost" onClick={clearCompleted} disabled={isProcessing} className="shrink-0">
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
@@ -2156,10 +2194,10 @@ const Creatives: React.FC = () => {
               <div className="space-y-2">
                 <Label>Направление</Label>
                 <div className="p-3 bg-muted/30 rounded-lg text-sm">
-                  {directions.find(d => d.id === launchDirectionId)?.name || 'Не выбрано'}
-                  {directions.find(d => d.id === launchDirectionId)?.objective && (
+                  {launchDirection?.name || 'Не выбрано'}
+                  {launchDirection && (
                     <span className="text-muted-foreground ml-2">
-                      ({OBJECTIVE_LABELS[directions.find(d => d.id === launchDirectionId)!.objective]})
+                      ({getDirectionObjectiveLabel(launchDirection)})
                     </span>
                   )}
                 </div>
@@ -2167,13 +2205,13 @@ const Creatives: React.FC = () => {
 
               {/* Дневной бюджет */}
               <div className="space-y-2">
-                <Label htmlFor="manual-budget">Дневной бюджет (USD)</Label>
+                <Label htmlFor="manual-budget">Дневной бюджет ({manualLaunchBudgetLabel})</Label>
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl">$</span>
+                  <span className="text-2xl">{manualLaunchBudgetSymbol}</span>
                   <input
                     id="manual-budget"
                     type="number"
-                    min="10"
+                    min={manualLaunchMinBudget}
                     step="1"
                     value={manualLaunchBudget}
                     onChange={(e) => setManualLaunchBudget(Number(e.target.value))}
@@ -2182,28 +2220,30 @@ const Creatives: React.FC = () => {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Минимальный бюджет: $10 в день
+                  Минимальный бюджет: {manualLaunchMinBudgetText} в день
                 </p>
               </div>
 
               {/* Время запуска */}
-              <div className="space-y-2">
-                <Label>Время запуска</Label>
-                <RadioGroup
-                  value={manualStartMode}
-                  onValueChange={(v: 'now' | 'midnight_almaty') => setManualStartMode(v)}
-                  className="grid grid-cols-1 gap-2"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="midnight_almaty" id="start-midnight" />
-                    <Label htmlFor="start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="now" id="start-now" />
-                    <Label htmlFor="start-now" className="cursor-pointer">Сейчас</Label>
-                  </div>
-                </RadioGroup>
-              </div>
+              {!isTikTokPlatform && (
+                <div className="space-y-2">
+                  <Label>Время запуска</Label>
+                  <RadioGroup
+                    value={manualStartMode}
+                    onValueChange={(v: 'now' | 'midnight_almaty') => setManualStartMode(v)}
+                    className="grid grid-cols-1 gap-2"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="midnight_almaty" id="start-midnight" />
+                      <Label htmlFor="start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="now" id="start-now" />
+                      <Label htmlFor="start-now" className="cursor-pointer">Сейчас</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-4 border-t">
@@ -2211,7 +2251,7 @@ const Creatives: React.FC = () => {
                 variant="outline"
                 onClick={() => {
                   setManualLaunchDialogOpen(false);
-                  setManualLaunchBudget(10);
+                  setManualLaunchBudget(manualLaunchMinBudget);
                   setManualStartMode('now');
                 }}
                 disabled={isLaunching}
@@ -2259,22 +2299,28 @@ const Creatives: React.FC = () => {
                       <span className="text-muted-foreground">Направление:</span>{' '}
                       <span className="font-medium">{launchResult.direction_name}</span>
                     </div>
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Campaign ID:</span>{' '}
-                      <span className="font-mono text-xs">{launchResult.campaign_id}</span>
-                    </div>
+                    {launchResult.campaign_id && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                        <span className="font-mono text-xs">{launchResult.campaign_id}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Информация об Ad Set */}
                   <div className="p-4 bg-muted/30 rounded-lg space-y-2">
-                    <div className="text-sm font-medium">Ad Set</div>
-                    <div className="text-sm text-muted-foreground">{launchResult.adset_name}</div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      ID: {launchResult.adset_id}
+                    <div className="text-sm font-medium">{adGroupTitle}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {launchResult.adset_name || '—'}
                     </div>
+                    {adGroupId && (
+                      <div className="text-xs text-muted-foreground font-mono">
+                        ID: {adGroupId}
+                      </div>
+                    )}
                     <div className="text-sm pt-2 border-t border-border/50">
                       <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                      <span className="font-medium">${launchedBudget}</span>
+                      <span className="font-medium">{launchedBudgetLabel}</span>
                     </div>
                   </div>
 

@@ -30,7 +30,7 @@ export interface CreateTikTokCampaignParams {
   objective: TikTokObjectiveType;
   campaign_name: string;
   adgroup_name?: string;
-  daily_budget: number;  // В долларах (TikTok использует доллары, не центы)
+  daily_budget: number;  // В валюте аккаунта TikTok (например, KZT)
   targeting?: TikTokTargeting;  // Если указан - переопределяет дефолтные
   use_default_settings?: boolean;  // По умолчанию true
   auto_activate?: boolean;  // Если true - сразу активирует (по умолчанию true)
@@ -71,6 +71,29 @@ function withStep(step: string, payload: Record<string, any>, fn: () => Promise<
     e.payload = payload;
     throw e;
   });
+}
+
+function assertTikTokVideoCreatives(creatives: any[]) {
+  const invalid = creatives.filter((creative) => {
+    const mediaType = creative?.media_type ? String(creative.media_type).toLowerCase() : null;
+    const hasVideoId = Boolean(creative?.tiktok_video_id);
+    const hasMediaUrl = Boolean(creative?.media_url);
+
+    if (mediaType && mediaType !== 'video') {
+      return true;
+    }
+
+    if (!hasVideoId && !hasMediaUrl) {
+      return true;
+    }
+
+    return false;
+  });
+
+  if (invalid.length > 0) {
+    const invalidIds = invalid.map((creative) => creative.id).join(', ');
+    throw new Error(`TikTok supports only video creatives with a video source. Invalid creatives: ${invalidIds}`);
+  }
 }
 
 /**
@@ -163,6 +186,8 @@ export async function workflowCreateTikTokCampaignWithCreative(
   if (creativesError || !creatives || creatives.length === 0) {
     throw new Error(`Creatives not found or not ready: ${user_creative_ids.join(', ')}`);
   }
+
+  assertTikTokVideoCreatives(creatives);
 
   if (creatives.length !== user_creative_ids.length) {
     log.warn({
@@ -274,7 +299,7 @@ export async function workflowCreateTikTokCampaignWithCreative(
     () => tt.createCampaign(advertiserId!, accessToken!, {
       campaign_name,
       objective_type: objectiveConfig.objective_type,
-      budget: daily_budget,  // TikTok принимает в долларах
+      budget: daily_budget,  // TikTok принимает в валюте аккаунта
       budget_mode: 'BUDGET_MODE_DAY',
       operation_status: auto_activate ? 'ENABLE' : 'DISABLE'
     })

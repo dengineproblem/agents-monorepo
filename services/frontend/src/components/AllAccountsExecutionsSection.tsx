@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { API_BASE_URL } from '@/config/api';
+import { useAppContext } from '@/context/AppContext';
 
 interface BrainExecution {
   id: string;
@@ -35,6 +36,7 @@ interface BrainExecution {
   duration_ms: number;
   created_at: string;
   execution_mode?: 'batch' | 'manual_trigger' | 'interactive';
+  platform?: string | null;
 }
 
 interface AdAccount {
@@ -78,6 +80,7 @@ export function AllAccountsExecutionsSection({
   userAccountId,
   adAccounts
 }: AllAccountsExecutionsSectionProps) {
+  const { platform } = useAppContext();
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -102,6 +105,7 @@ export function AllAccountsExecutionsSection({
         const url = new URL(`${API_BASE_URL}/autopilot/executions`);
         url.searchParams.set('userAccountId', userAccountId);
         url.searchParams.set('limit', '20');
+        url.searchParams.set('platform', platform === 'tiktok' ? 'tiktok' : 'facebook');
         // НЕ передаём accountId - получаем все
 
         const res = await fetch(url.toString());
@@ -121,7 +125,7 @@ export function AllAccountsExecutionsSection({
     fetchData();
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [userAccountId]);
+  }, [userAccountId, platform]);
 
   const openReport = (exec: BrainExecution) => {
     setSelectedExecution(exec);

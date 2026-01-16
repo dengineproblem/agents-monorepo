@@ -26,6 +26,7 @@ import { ru } from 'date-fns/locale';
 import { API_BASE_URL } from '@/config/api';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
+import { useAppContext } from '@/context/AppContext';
 
 interface BrainExecution {
   id: string;
@@ -37,6 +38,7 @@ interface BrainExecution {
   duration_ms: number;
   created_at: string;
   execution_mode?: 'batch' | 'manual_trigger' | 'interactive';
+  platform?: string | null;
 }
 
 interface AutopilotSectionProps {
@@ -93,20 +95,29 @@ function formatActionParams(action: any): string {
 
   // Для бюджетных действий - показываем изменения
   if (actionType === 'updateBudget' || actionType === 'UpdateAdSetDailyBudget' || actionType === 'ScaleAdSetBudget') {
-    const currentBudget = params.current_budget_cents;
-    const newBudget = params.new_budget_cents || params.daily_budget_cents || params.daily_budget;
+    const currentBudgetCents = params.current_budget_cents;
+    const newBudgetCents = params.new_budget_cents || params.daily_budget_cents;
+    const currentBudgetKzt = params.current_budget ?? params.current_budget_kzt;
+    const newBudgetKzt = params.new_budget ?? params.daily_budget ?? params.daily_budget_kzt;
+    const hasCents = currentBudgetCents !== undefined || newBudgetCents !== undefined;
 
-    if (currentBudget && newBudget) {
-      const current = `$${(currentBudget / 100).toFixed(2)}`;
-      const next = `$${(newBudget / 100).toFixed(2)}`;
+    if (hasCents && currentBudgetCents && newBudgetCents) {
+      const current = `$${(currentBudgetCents / 100).toFixed(2)}`;
+      const next = `$${(newBudgetCents / 100).toFixed(2)}`;
       const percentChange = params.increase_percent
         ? `+${params.increase_percent}%`
         : params.decrease_percent
           ? `-${params.decrease_percent}%`
           : '';
       parts.push(`${current} → ${next}${percentChange ? ` (${percentChange})` : ''}`);
-    } else if (newBudget) {
-      parts.push(`Бюджет: $${(newBudget / 100).toFixed(2)}`);
+    } else if (hasCents && newBudgetCents) {
+      parts.push(`Бюджет: $${(newBudgetCents / 100).toFixed(2)}`);
+    } else if (!hasCents && (currentBudgetKzt || newBudgetKzt)) {
+      if (currentBudgetKzt && newBudgetKzt) {
+        parts.push(`${Number(currentBudgetKzt).toLocaleString('ru-RU')} ₸ → ${Number(newBudgetKzt).toLocaleString('ru-RU')} ₸`);
+      } else if (newBudgetKzt) {
+        parts.push(`Бюджет: ${Number(newBudgetKzt).toLocaleString('ru-RU')} ₸`);
+      }
     }
   }
 
@@ -130,6 +141,7 @@ export function AutopilotSection({
   currentAdAccountId,
   isMultiAccountMode = false
 }: AutopilotSectionProps) {
+  const { platform } = useAppContext();
   const [executions, setExecutions] = useState<BrainExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -154,6 +166,7 @@ export function AutopilotSection({
         const url = new URL(`${API_BASE_URL}/autopilot/executions`);
         url.searchParams.set('userAccountId', userAccountId);
         url.searchParams.set('limit', '10');
+        url.searchParams.set('platform', platform === 'tiktok' ? 'tiktok' : 'facebook');
 
         // В мультиаккаунтном режиме фильтруем по конкретному аккаунту
         if (currentAdAccountId) {
@@ -195,7 +208,7 @@ export function AutopilotSection({
     fetchData();
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [userAccountId, currentAdAccountId]);
+  }, [userAccountId, currentAdAccountId, platform]);
 
   const openReport = (exec: BrainExecution) => {
     setSelectedExecution(exec);

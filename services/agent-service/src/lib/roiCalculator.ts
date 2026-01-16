@@ -72,18 +72,20 @@ async function getAdSpend(
 
 /**
  * Рассчитать ROI по каждому креативу
- * 
+ *
  * @param userAccountId - UUID пользователя
  * @param directionId - UUID направления (опционально)
  * @param timeframeDays - Период для анализа (по умолчанию 30 дней)
  * @param supabase - Supabase клиент (опционально, создается автоматически)
+ * @param accountId - UUID рекламного аккаунта для мультиаккаунтности (опционально)
  * @returns Map<creative_id, CreativeROIData>
  */
 export async function calculateCreativeROI(
   userAccountId: string,
   directionId?: string | null,
   timeframeDays: 7 | 30 | 90 | 'all' = 30,
-  supabase?: SupabaseClient
+  supabase?: SupabaseClient,
+  accountId?: string | null  // КРИТИЧНО: Для мультиаккаунтности
 ): Promise<Map<string, CreativeROIData>> {
   
   const supabaseClient = supabase || createClient(
@@ -102,15 +104,37 @@ export async function calculateCreativeROI(
     })();
 
     // 1. Загружаем лиды с фильтрацией
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+    const filterMode = accountId !== undefined
+      ? (accountId ? 'multi_account' : 'legacy')
+      : 'no_filter';
+
+    console.info('[ROI Calculator] Starting calculation', {
+      userAccountId,
+      directionId: directionId || null,
+      accountId: accountId ?? 'undefined',
+      filterMode,
+      timeframeDays
+    });
+
     let leadsQuery = supabaseClient
       .from('leads')
       .select('id, chat_id, sale_amount, source_id, creative_id, created_at, direction_id')
       .eq('user_account_id', userAccountId);
-    
+
+    // Фильтрация по account_id для мультиаккаунтности
+    if (accountId) {
+      leadsQuery = leadsQuery.eq('account_id', accountId);
+    } else if (accountId === null) {
+      // Legacy режим - явно ищем записи с account_id = null
+      leadsQuery = leadsQuery.is('account_id', null);
+    }
+    // Если accountId === undefined - не фильтруем (обратная совместимость)
+
     if (directionId) {
       leadsQuery = leadsQuery.eq('direction_id', directionId);
     }
-    
+
     if (since) {
       leadsQuery = leadsQuery.gte('created_at', since);
     }
@@ -123,18 +147,35 @@ export async function calculateCreativeROI(
     }
 
     if (!leadsStats || leadsStats.length === 0) {
+      console.info('[ROI Calculator] No leads found', { userAccountId, accountId: accountId ?? 'undefined', filterMode });
       return new Map(); // Нет лидов - нет ROI данных
     }
 
+    console.info('[ROI Calculator] Leads loaded', {
+      count: leadsStats.length,
+      filterMode,
+      accountId: accountId ?? 'undefined'
+    });
+
     // 2. Загружаем продажи через JOIN с leads (по client_phone)
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
     const leadPhones = leadsStats.map(l => l.chat_id).filter(Boolean);
-    
+
     let purchasesQuery = supabaseClient
       .from('purchases')
       .select('id, client_phone, amount, created_at')
       .eq('user_account_id', userAccountId)
       .in('client_phone', leadPhones.length > 0 ? leadPhones : ['__no_match__']);
-    
+
+    // Фильтрация по account_id для мультиаккаунтности
+    if (accountId) {
+      purchasesQuery = purchasesQuery.eq('account_id', accountId);
+    } else if (accountId === null) {
+      // Legacy режим - явно ищем записи с account_id = null
+      purchasesQuery = purchasesQuery.is('account_id', null);
+    }
+    // Если accountId === undefined - не фильтруем (обратная совместимость)
+
     if (since) {
       purchasesQuery = purchasesQuery.gte('created_at', since);
     }

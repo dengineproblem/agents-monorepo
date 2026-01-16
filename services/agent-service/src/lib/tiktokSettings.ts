@@ -7,6 +7,8 @@
 
 import { supabase } from './supabase.js';
 
+const TIKTOK_MIN_DAILY_BUDGET = 2500;
+
 // ============================================================
 // LOCATION MAPPINGS
 // ============================================================
@@ -344,9 +346,11 @@ export async function getTikTokDirectionSettings(
   const objective = direction.tiktok_objective || direction.objective || 'traffic';
   const objective_config = getTikTokObjectiveConfig(objective);
 
+  const daily_budget = direction.tiktok_daily_budget ?? TIKTOK_MIN_DAILY_BUDGET;
+
   return {
     targeting,
-    daily_budget: direction.tiktok_daily_budget || direction.daily_budget_cents / 100 || 20,
+    daily_budget,
     objective_config,
     pixel_id: settings.tiktok_pixel_id,
     identity_id: direction.tiktok_identity_id

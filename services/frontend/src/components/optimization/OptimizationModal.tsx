@@ -30,6 +30,7 @@ interface OptimizationModalProps {
   onApprove: (stepIndices: number[]) => void; // Массив выбранных индексов
   onReject: () => void;
   isExecuting: boolean;
+  progressMessage?: string | null; // Сообщение прогресса от Brain Mini
 }
 
 /**
@@ -47,6 +48,7 @@ export function OptimizationModal({
   onApprove,
   onReject,
   isExecuting,
+  progressMessage,
 }: OptimizationModalProps) {
   // Состояние для выбранных шагов
   const [selectedSteps, setSelectedSteps] = useState<Set<number>>(new Set());
@@ -124,8 +126,16 @@ export function OptimizationModal({
         </DialogHeader>
 
         <ScrollArea className="flex-1 min-h-[200px] max-h-[50vh] pr-4 overflow-y-auto">
-          {/* Streaming Progress */}
-          {isLoading && streamingState && (
+          {/* Progress Message from Brain Mini */}
+          {isLoading && progressMessage && (
+            <div className="flex items-center gap-3 py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <span className="text-sm text-muted-foreground">{progressMessage}</span>
+            </div>
+          )}
+
+          {/* Streaming Progress (legacy, for backward compatibility) */}
+          {isLoading && !progressMessage && streamingState && (
             <div className="py-2">
               <StreamingMessage state={streamingState} />
             </div>
@@ -336,8 +346,15 @@ function getActionLabel(step: Plan['steps'][0]): string {
       return '▶️ Включить адсет';
     case 'enableAd':
       return '▶️ Включить объявление';
-    case 'createAdSet':
+    case 'createAdSet': {
+      const budgetCents = (step.params as { recommended_budget_cents?: number })?.recommended_budget_cents;
+      const creativeIds = (step.params as { creative_ids?: string[] })?.creative_ids;
+      const creativesCount = creativeIds?.length || 0;
+      if (budgetCents) {
+        return `➕ Создать новый адсет ($${(budgetCents / 100).toFixed(0)}${creativesCount > 0 ? `, ${creativesCount} креативов` : ''})`;
+      }
       return '➕ Создать новый адсет';
+    }
     case 'review':
       return '👀 Требует внимания';
     case 'launchNewCreatives':

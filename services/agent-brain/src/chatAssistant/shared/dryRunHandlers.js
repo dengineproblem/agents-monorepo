@@ -202,32 +202,74 @@ export const adsDryRunHandlers = {
   /**
    * Preview pauseDirection
    */
-  async pauseDirection({ direction_id }, { adAccountId }) {
+  async pauseDirection({ direction_id }, { adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'dryRun:pauseDirection',
+      direction_id,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'dryRun:pauseDirection: preview операции');
+
     try {
       // Get direction from DB
-      const { data: direction, error } = await supabase
+      // Мультиаккаунтность: проверяем владение направлением через account_id
+      let query = supabase
         .from('account_directions')
         .select('id, name, status, budget_per_day, fb_adset_id, fb_campaign_id')
-        .eq('id', direction_id)
-        .single();
+        .eq('id', direction_id);
+
+      if (dbAccountId) {
+        query = query.eq('account_id', dbAccountId);
+      } else {
+        query = query.is('account_id', null);
+      }
+
+      const { data: direction, error } = await query.single();
 
       if (error || !direction) {
-        return { success: false, error: 'Направление не найдено' };
+        logger.warn({
+          handler: 'dryRun:pauseDirection',
+          direction_id,
+          dbAccountId,
+          error: error?.message,
+          hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+        }, 'dryRun:pauseDirection: направление не найдено');
+        return { success: false, error: 'Направление не найдено или недоступно' };
       }
 
       // Count active creatives
-      const { count: creativesCount } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let creativesQuery = supabase
         .from('user_creatives')
         .select('*', { count: 'exact', head: true })
         .eq('direction_id', direction_id)
         .in('status', ['ready', 'active']);
 
+      if (dbAccountId) {
+        creativesQuery = creativesQuery.eq('account_id', dbAccountId);
+      } else {
+        creativesQuery = creativesQuery.is('account_id', null);
+      }
+
+      const { count: creativesCount } = await creativesQuery;
+
       // Count active ads
-      const { count: adsCount } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let adsQuery = supabase
         .from('ads')
         .select('*', { count: 'exact', head: true })
         .eq('direction_id', direction_id)
         .eq('status', 'ACTIVE');
+
+      if (dbAccountId) {
+        adsQuery = adsQuery.eq('account_id', dbAccountId);
+      } else {
+        adsQuery = adsQuery.is('account_id', null);
+      }
+
+      const { count: adsCount } = await adsQuery;
 
       const warnings = [];
       if (direction.status === 'active') {
@@ -278,16 +320,41 @@ export const adsDryRunHandlers = {
   /**
    * Preview updateDirectionBudget
    */
-  async updateDirectionBudget({ direction_id, new_budget }, { adAccountId }) {
+  async updateDirectionBudget({ direction_id, new_budget }, { adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'dryRun:updateDirectionBudget',
+      direction_id,
+      new_budget,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'dryRun:updateDirectionBudget: preview операции');
+
     try {
-      const { data: direction, error } = await supabase
+      // Мультиаккаунтность: проверяем владение направлением через account_id
+      let query = supabase
         .from('account_directions')
         .select('id, name, status, budget_per_day, fb_adset_id')
-        .eq('id', direction_id)
-        .single();
+        .eq('id', direction_id);
+
+      if (dbAccountId) {
+        query = query.eq('account_id', dbAccountId);
+      } else {
+        query = query.is('account_id', null);
+      }
+
+      const { data: direction, error } = await query.single();
 
       if (error || !direction) {
-        return { success: false, error: 'Направление не найдено' };
+        logger.warn({
+          handler: 'dryRun:updateDirectionBudget',
+          direction_id,
+          dbAccountId,
+          error: error?.message,
+          hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+        }, 'dryRun:updateDirectionBudget: направление не найдено');
+        return { success: false, error: 'Направление не найдено или недоступно' };
       }
 
       const currentBudget = direction.budget_per_day || 0;
@@ -342,28 +409,68 @@ export const creativeDryRunHandlers = {
   /**
    * Preview launchCreative
    */
-  async launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId }) {
+  async launchCreative({ creative_id, direction_id }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'dryRun:launchCreative',
+      creative_id,
+      direction_id,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'dryRun:launchCreative: preview операции');
+
     try {
       // Get creative
-      const { data: creative, error: creativeError } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let creativeQuery = supabase
         .from('user_creatives')
         .select('id, title, media_type, status, thumbnail_url, video_url')
-        .eq('id', creative_id)
-        .single();
+        .eq('id', creative_id);
+
+      if (dbAccountId) {
+        creativeQuery = creativeQuery.eq('account_id', dbAccountId);
+      } else {
+        creativeQuery = creativeQuery.is('account_id', null);
+      }
+
+      const { data: creative, error: creativeError } = await creativeQuery.single();
 
       if (creativeError || !creative) {
-        return { success: false, error: 'Креатив не найден' };
+        logger.warn({
+          handler: 'dryRun:launchCreative',
+          creative_id,
+          dbAccountId,
+          error: creativeError?.message,
+          hint: dbAccountId ? 'Креатив не найден или не принадлежит этому аккаунту' : 'Креатив не найден'
+        }, 'dryRun:launchCreative: креатив не найден');
+        return { success: false, error: 'Креатив не найден или недоступен' };
       }
 
       // Get direction
-      const { data: direction, error: dirError } = await supabase
+      // Мультиаккаунтность: проверяем владение направлением через account_id
+      let dirQuery = supabase
         .from('account_directions')
         .select('id, name, status, objective, fb_campaign_id, budget_per_day')
-        .eq('id', direction_id)
-        .single();
+        .eq('id', direction_id);
+
+      if (dbAccountId) {
+        dirQuery = dirQuery.eq('account_id', dbAccountId);
+      } else {
+        dirQuery = dirQuery.is('account_id', null);
+      }
+
+      const { data: direction, error: dirError } = await dirQuery.single();
 
       if (dirError || !direction) {
-        return { success: false, error: 'Направление не найдено' };
+        logger.warn({
+          handler: 'dryRun:launchCreative',
+          direction_id,
+          dbAccountId,
+          error: dirError?.message,
+          hint: dbAccountId ? 'Направление не найдено или не принадлежит этому аккаунту' : 'Направление не найдено'
+        }, 'dryRun:launchCreative: направление не найдено');
+        return { success: false, error: 'Направление не найдено или недоступно' };
       }
 
       const warnings = [];
@@ -423,24 +530,58 @@ export const creativeDryRunHandlers = {
   /**
    * Preview pauseCreative
    */
-  async pauseCreative({ creative_id }, { userAccountId, adAccountId }) {
+  // КРИТИЧНО: Добавлен adAccountDbId для мультиаккаунтности
+  async pauseCreative({ creative_id }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'dryRun:pauseCreative',
+      creative_id,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'dryRun:pauseCreative: preview операции');
+
     try {
-      const { data: creative, error } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let creativeQuery = supabase
         .from('user_creatives')
         .select('id, title, status')
-        .eq('id', creative_id)
-        .single();
+        .eq('id', creative_id);
+
+      if (dbAccountId) {
+        creativeQuery = creativeQuery.eq('account_id', dbAccountId);
+      } else {
+        creativeQuery = creativeQuery.is('account_id', null);
+      }
+
+      const { data: creative, error } = await creativeQuery.single();
 
       if (error || !creative) {
-        return { success: false, error: 'Креатив не найден' };
+        logger.warn({
+          handler: 'dryRun:pauseCreative',
+          creative_id,
+          dbAccountId,
+          error: error?.message,
+          hint: dbAccountId ? 'Креатив не найден или не принадлежит этому аккаунту' : 'Креатив не найден'
+        }, 'dryRun:pauseCreative: креатив не найден');
+        return { success: false, error: 'Креатив не найден или недоступен' };
       }
 
       // Count active ads with this creative
-      const { count: adsCount } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let adsQuery = supabase
         .from('ads')
         .select('*', { count: 'exact', head: true })
         .eq('creative_id', creative_id)
         .eq('status', 'ACTIVE');
+
+      if (dbAccountId) {
+        adsQuery = adsQuery.eq('account_id', dbAccountId);
+      } else {
+        adsQuery = adsQuery.is('account_id', null);
+      }
+
+      const { count: adsCount } = await adsQuery;
 
       const warnings = [];
       if (adsCount > 0) {
@@ -484,25 +625,58 @@ export const creativeDryRunHandlers = {
   /**
    * Preview startCreativeTest
    */
-  async startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId }) {
+  // КРИТИЧНО: Добавлен adAccountDbId для мультиаккаунтности
+  async startCreativeTest({ creative_id, objective }, { userAccountId, adAccountId, adAccountDbId }) {
+    const dbAccountId = adAccountDbId || null;
+
+    logger.info({
+      handler: 'dryRun:startCreativeTest',
+      creative_id,
+      dbAccountId,
+      filterMode: dbAccountId ? 'multi_account' : 'legacy'
+    }, 'dryRun:startCreativeTest: preview операции');
+
     try {
-      const { data: creative, error } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let creativeQuery = supabase
         .from('user_creatives')
         .select('id, title, status, media_type')
-        .eq('id', creative_id)
-        .single();
+        .eq('id', creative_id);
+
+      if (dbAccountId) {
+        creativeQuery = creativeQuery.eq('account_id', dbAccountId);
+      } else {
+        creativeQuery = creativeQuery.is('account_id', null);
+      }
+
+      const { data: creative, error } = await creativeQuery.single();
 
       if (error || !creative) {
-        return { success: false, error: 'Креатив не найден' };
+        logger.warn({
+          handler: 'dryRun:startCreativeTest',
+          creative_id,
+          dbAccountId,
+          error: error?.message,
+          hint: dbAccountId ? 'Креатив не найден или не принадлежит этому аккаунту' : 'Креатив не найден'
+        }, 'dryRun:startCreativeTest: креатив не найден');
+        return { success: false, error: 'Креатив не найден или недоступен' };
       }
 
       // Check for existing active test
-      const { data: existingTest } = await supabase
+      // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
+      let testQuery = supabase
         .from('creative_tests')
         .select('id, status')
         .eq('creative_id', creative_id)
-        .eq('status', 'running')
-        .single();
+        .eq('status', 'running');
+
+      if (dbAccountId) {
+        testQuery = testQuery.eq('account_id', dbAccountId);
+      } else {
+        testQuery = testQuery.is('account_id', null);
+      }
+
+      const { data: existingTest } = await testQuery.single();
 
       const warnings = [];
       if (existingTest) {

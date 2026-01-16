@@ -79,7 +79,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
       // 2. Загружаем direction для получения objective
       const { data: direction, error: directionError } = await supabase
         .from('account_directions')
-        .select('objective')
+        .select('objective, platform')
         .eq('id', direction_id)
         .single();
 
@@ -91,7 +91,14 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
-      const objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+      if (direction.platform === 'tiktok') {
+        return reply.status(400).send({
+          success: false,
+          error: 'TikTok directions are not supported for Facebook carousel creatives'
+        });
+      }
+
+      const objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
       app.log.info({ objective }, 'Direction objective');
 
       // 3. Загружаем настройки из default_ad_settings
@@ -231,7 +238,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
 
       let fbCreativeId = '';
 
-      if (objective === 'whatsapp') {
+      if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
         const result = await createWhatsAppCarouselCreative(normalizedAdAccountId, ACCESS_TOKEN, {
           cards: cardParams,
           pageId: pageId,
@@ -306,7 +313,7 @@ export const carouselCreativeRoutes: FastifyPluginAsync = async (app) => {
           // Данные карусели для отображения миниатюр и текстов
           carousel_data: carouselData,
           // Старые поля для обратной совместимости (deprecated)
-          ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
+          ...((objective === 'whatsapp' || objective === 'whatsapp_conversions') && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
           ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
           ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })

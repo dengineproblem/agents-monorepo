@@ -5,17 +5,18 @@ import { supabase } from '@/integrations/supabase/client';
 /**
  * Хук для получения креативов пользователя
  * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
+ * @param platform - 'instagram' | 'tiktok' для фильтрации по платформе (опционально)
  *                    Если передан - возвращает креативы только этого аккаунта
  *                    Если null/undefined - возвращает все креативы пользователя (legacy режим)
  */
-export const useUserCreatives = (accountId?: string | null) => {
+export const useUserCreatives = (accountId?: string | null, platform?: 'instagram' | 'tiktok') => {
   const [items, setItems] = useState<UserCreative[]>([]);
   const [loading, setLoading] = useState(false);
   const [testStatuses, setTestStatuses] = useState<Record<string, CreativeTestStatus>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await creativesApi.list(accountId);
+    const data = await creativesApi.list(accountId, platform);
     setItems(data);
 
     // Загружаем статусы тестов для всех креативов
@@ -26,7 +27,7 @@ export const useUserCreatives = (accountId?: string | null) => {
     }
 
     setLoading(false);
-  }, [accountId]);
+  }, [accountId, platform]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -122,4 +123,3 @@ export const useUserCreatives = (accountId?: string | null) => {
     testStatuses,
   };
 };
-

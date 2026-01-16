@@ -7,7 +7,10 @@ export interface ManualLaunchRequest {
   account_id?: string; // UUID рекламного аккаунта для мультиаккаунтности, undefined для legacy
   direction_id: string;
   creative_ids: string[];
+  platform?: 'facebook' | 'tiktok';
   daily_budget_cents?: number;
+  daily_budget?: number;
+  objective?: 'traffic' | 'conversions' | 'lead_generation' | 'reach' | 'video_views';
   start_mode?: 'now' | 'midnight_almaty';
   targeting?: {
     geo_locations?: {
@@ -28,6 +31,9 @@ export interface ManualLaunchResponse {
   campaign_id?: string;
   adset_id?: string;
   adset_name?: string;
+  adgroup_id?: string;
+  tiktok_adgroup_id?: string;
+  mode?: 'use_existing' | 'create_new';
   ads_created?: number;
   ads?: Array<{
     ad_id: string;
@@ -44,12 +50,35 @@ export async function manualLaunchAds(
   request: ManualLaunchRequest
 ): Promise<ManualLaunchResponse> {
   try {
-    const response = await fetch(`${API_BASE_URL}/campaign-builder/manual-launch`, {
+    const isTikTok = request.platform === 'tiktok';
+    const endpoint = isTikTok
+      ? '/tiktok-campaign-builder/manual-launch'
+      : '/campaign-builder/manual-launch';
+    const payload = isTikTok
+      ? {
+          user_account_id: request.user_account_id,
+          account_id: request.account_id ?? null,
+          direction_id: request.direction_id,
+          creative_ids: request.creative_ids,
+          daily_budget: request.daily_budget,
+          objective: request.objective,
+        }
+      : {
+          user_account_id: request.user_account_id,
+          account_id: request.account_id ?? null,
+          direction_id: request.direction_id,
+          creative_ids: request.creative_ids,
+          daily_budget_cents: request.daily_budget_cents,
+          start_mode: request.start_mode,
+          targeting: request.targeting,
+        };
+
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify(payload),
     });
 
     const data = await response.json();
@@ -67,4 +96,3 @@ export async function manualLaunchAds(
     };
   }
 }
-

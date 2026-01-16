@@ -11,7 +11,8 @@ export const useReports = () => {
   const [reports, setReports] = useState<CampaignReport[]>([]);
   const [loading, setLoading] = useState(false);
   const { user } = useTelegramWebApp();
-  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled, platform } = useAppContext();
+  const reportPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
   
   const fetchReports = async () => {
     if (!user?.id) {
@@ -32,6 +33,8 @@ export const useReports = () => {
         .from('campaign_reports')
         .select('*')
         .eq('telegram_id', user.id.toString());
+
+      query = query.eq('platform', reportPlatform);
 
       if (multiAccountEnabled && currentAdAccountId) {
         query = query.eq('account_id', currentAdAccountId);
@@ -62,7 +65,7 @@ export const useReports = () => {
     if (user?.id) {
       fetchReports();
     }
-  }, [user?.id, currentAdAccountId, multiAccountEnabled]);
+  }, [user?.id, currentAdAccountId, multiAccountEnabled, platform]);
   
   return {
     reports,

@@ -6,7 +6,7 @@
 import { supabase } from './supabase.js';
 import { buildTargeting } from './settingsHelpers.js';
 
-export type CampaignGoal = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignGoal = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
 
 export interface DefaultAdSettings {
   id: string;

@@ -681,11 +681,12 @@ fastify.post('/analyze-batch', async (request, reply) => {
 fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
   try {
     const { user_creative_id } = request.params;
-    const { user_id, force } = request.query;
-    
+    // КРИТИЧНО: Добавлен account_id для мультиаккаунтности
+    const { user_id, force, account_id } = request.query;
+
     if (!user_creative_id || !user_id) {
-      return reply.code(400).send({ 
-        error: 'user_creative_id and user_id are required' 
+      return reply.code(400).send({
+        error: 'user_creative_id and user_id are required'
       });
     }
 
@@ -704,17 +705,25 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
       }
     }
 
-    fastify.log.info({ user_creative_id, user_id }, 'Fetching creative analytics');
+    const filterMode = account_id ? 'multi_account' : 'no_filter';
+    fastify.log.info({
+      user_creative_id,
+      user_id,
+      account_id: account_id || null,
+      filterMode
+    }, `Fetching creative analytics (${filterMode})`);
 
     // ===================================================
     // STEP 1: Получаем креатив из Supabase
+    // КРИТИЧНО: Фильтрация по account_id для мультиаккаунтности
     // ===================================================
-    const { data: creative, error: creativeError } = await supabase
+    let creativeQuery = supabase
       .from('user_creatives')
       .select(`
         id,
         title,
         user_id,
+        account_id,
         status,
         fb_video_id,
         fb_creative_id_whatsapp,
@@ -728,8 +737,14 @@ fastify.get('/creative-analytics/:user_creative_id', async (request, reply) => {
         )
       `)
       .eq('id', user_creative_id)
-      .eq('user_id', user_id)
-      .single();
+      .eq('user_id', user_id);
+
+    // Фильтрация по account_id для мультиаккаунтности
+    if (account_id) {
+      creativeQuery = creativeQuery.eq('account_id', account_id);
+    }
+
+    const { data: creative, error: creativeError } = await creativeQuery.single();
 
     if (creativeError || !creative) {
       fastify.log.error({ user_creative_id, error: creativeError }, 'Creative not found');
@@ -1057,11 +1072,18 @@ fastify.post('/analyze-creative', async (request, reply) => {
     // STEP 1: Получаем последние агрегированные метрики креатива
     // ===================================================
     // Сначала получаем account_id креатива для фильтрации метрик
+    // КРИТИЧНО: Добавлена проверка user_id для безопасности (мультиаккаунтность)
     const { data: creativeForAccountId, error: creativeAccountError } = await supabase
       .from('user_creatives')
       .select('account_id')
       .eq('id', creative_id)
+      .eq('user_id', user_id)  // SECURITY: Проверяем что креатив принадлежит пользователю
       .single();
+
+    if (creativeAccountError || !creativeForAccountId) {
+      fastify.log.warn({ creative_id, user_id, error: creativeAccountError?.message }, 'Creative not found or does not belong to user');
+      return reply.code(404).send({ error: 'Creative not found or access denied' });
+    }
 
     const accountId = creativeForAccountId?.account_id || null;
 
@@ -1081,11 +1103,13 @@ fastify.post('/analyze-creative', async (request, reply) => {
       .order('date', { ascending: false })
       .limit(30); // Берем последние 30 дней
 
+    const filterMode = accountId ? 'multi_account' : 'legacy';
     fastify.log.info({
       where: 'analyzeCreative',
       creative_id,
       user_id,
       account_id: accountId,
+      filterMode,
       metricsFound: metricsHistory?.length || 0,
       metricsError: metricsError?.message
     });

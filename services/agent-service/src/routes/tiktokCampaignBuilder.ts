@@ -27,6 +27,14 @@ import { logErrorToAdmin } from '../lib/errorLogger.js';
 
 const baseLog = createLogger({ module: 'tiktokCampaignBuilder' });
 
+function isTikTokCreativeEligible(creative: any) {
+  const mediaType = creative?.media_type ? String(creative.media_type).toLowerCase() : null;
+  if (mediaType && mediaType !== 'video') {
+    return false;
+  }
+  return Boolean(creative?.tiktok_video_id || creative?.media_url);
+}
+
 function getWorkflowLogger(request: FastifyRequest, workflow: string) {
   const parent = (request?.log as any) ?? baseLog;
   const child = parent.child({ module: 'tiktokCampaignBuilder', workflow });
@@ -153,7 +161,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               .eq('direction_id', direction.id)
               .eq('is_active', true)
               .eq('status', 'ready')
-              .limit(5);  // Максимум 5 креативов
+              .limit(20);  // Берем больше, фильтруем ниже
 
             if (creativesError || !creatives || creatives.length === 0) {
               log.warn({ directionId: direction.id }, 'No creatives for TikTok direction');
@@ -162,6 +170,18 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
                 direction_name: direction.name,
                 skipped: true,
                 reason: 'No ready creatives for this direction'
+              });
+              continue;
+            }
+
+            const eligibleCreatives = creatives.filter(isTikTokCreativeEligible).slice(0, 5);
+            if (eligibleCreatives.length === 0) {
+              log.warn({ directionId: direction.id }, 'No eligible TikTok video creatives found');
+              results.push({
+                direction_id: direction.id,
+                direction_name: direction.name,
+                skipped: true,
+                reason: 'No eligible TikTok video creatives for this direction'
               });
               continue;
             }
@@ -187,7 +207,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               // Используем workflow для добавления в существующий AdGroup
               const result = await workflowCreateAdInDirection(
                 {
-                  user_creative_ids: creatives.map(c => c.id),
+                  user_creative_ids: eligibleCreatives.map(c => c.id),
                   direction_id: direction.id,
                   auto_activate: true
                 },
@@ -212,10 +232,10 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               // Режим создания новой кампании
               const result = await workflowCreateTikTokCampaignWithCreative(
                 {
-                  user_creative_ids: creatives.map(c => c.id),
+                  user_creative_ids: eligibleCreatives.map(c => c.id),
                   objective: (direction.tiktok_objective || 'traffic') as TikTokObjectiveType,
                   campaign_name: direction.name,
-                  daily_budget: direction.tiktok_daily_budget || direction.daily_budget_cents / 100 || 20,
+                  daily_budget: direction.tiktok_daily_budget || 2500,
                   auto_activate: true
                 },
                 {
@@ -246,7 +266,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
               {
                 directionId: direction.id,
                 directionName: direction.name,
-                creativesCount: creatives.length,
+                creativesCount: eligibleCreatives.length,
                 platform: 'tiktok'
               },
               account_id
@@ -318,7 +338,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             },
             direction_id: { type: 'string', format: 'uuid' },
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
-            daily_budget: { type: 'number', minimum: 20 },  // TikTok minimum $20/day
+            daily_budget: { type: 'number', minimum: 2500 },  // TikTok minimum daily budget (KZT)
             objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] }
           }
         }
@@ -359,13 +379,14 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
           .select('*')
           .eq('id', direction_id)
           .eq('user_account_id', user_account_id)
+          .eq('platform', 'tiktok')
           .eq('is_active', true)
           .single();
 
         if (directionError || !direction) {
           return reply.status(404).send({
             success: false,
-            error: 'Direction not found or inactive'
+            error: 'Direction not found, inactive, or not TikTok'
           });
         }
 
@@ -415,7 +436,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         } else {
           // Режим создания новой кампании
           const finalObjective = objective || direction.tiktok_objective || 'traffic';
-          const finalBudget = daily_budget || direction.tiktok_daily_budget || 20;
+          const finalBudget = daily_budget || direction.tiktok_daily_budget || 2500;
 
           const result = await workflowCreateTikTokCampaignWithCreative(
             {
@@ -505,7 +526,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             creative_ids: { type: 'array', items: { type: 'string', format: 'uuid' }, minItems: 1 },
             campaign_name: { type: 'string', minLength: 1 },
             objective: { type: 'string', enum: ['traffic', 'conversions', 'reach', 'video_views', 'lead_generation'] },
-            daily_budget: { type: 'number', minimum: 20 },
+            daily_budget: { type: 'number', minimum: 2500 },
             auto_activate: { type: 'boolean' }
           }
         }
@@ -543,7 +564,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
             user_creative_ids: body.creative_ids,
             objective: body.objective || 'traffic',
             campaign_name: body.campaign_name,
-            daily_budget: body.daily_budget || 20,
+            daily_budget: body.daily_budget || 2500,
             auto_activate: body.auto_activate ?? true
           },
           {
@@ -805,7 +826,7 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
     try {
       let creativesQuery = supabase
         .from('user_creatives')
-        .select('id, title, description, media_url, tiktok_video_id, created_at, updated_at')
+        .select('id, title, description, media_url, tiktok_video_id, media_type, created_at, updated_at')
         .eq('user_id', query.user_account_id)
         .eq('is_active', true)
         .eq('status', 'ready')
@@ -821,10 +842,12 @@ export const tiktokCampaignBuilderRoutes: FastifyPluginAsync = async (fastify) =
         throw error;
       }
 
+      const eligibleCreatives = (creatives || []).filter(isTikTokCreativeEligible);
+
       return reply.send({
         success: true,
-        creatives: creatives || [],
-        count: creatives?.length || 0
+        creatives: eligibleCreatives,
+        count: eligibleCreatives.length
       });
 
     } catch (error: any) {

@@ -14,10 +14,11 @@ export async function autopilotRoutes(app: FastifyInstance) {
    */
   app.get('/autopilot/executions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { userAccountId, accountId, limit = '10' } = request.query as {
+      const { userAccountId, accountId, limit = '10', platform } = request.query as {
         userAccountId?: string;
         accountId?: string; // UUID FK к ad_accounts.id
         limit?: string;
+        platform?: string;
       };
 
       if (!userAccountId) {
@@ -29,16 +30,30 @@ export async function autopilotRoutes(app: FastifyInstance) {
 
       const limitNum = Math.min(parseInt(limit, 10) || 10, 50);
 
-      log.info({ userAccountId, accountId, limit: limitNum }, 'Fetching brain executions');
+      log.info({ userAccountId, accountId, platform, limit: limitNum }, 'Fetching brain executions');
 
       let query = supabase
         .from('brain_executions')
-        .select('id, user_account_id, account_id, plan_json, actions_json, report_text, status, duration_ms, created_at, execution_mode')
+        .select('id, user_account_id, account_id, plan_json, actions_json, report_text, status, duration_ms, created_at, execution_mode, platform')
         .eq('user_account_id', userAccountId);
 
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (await shouldFilterByAccountId(supabase, userAccountId, accountId)) {
         query = query.eq('account_id', accountId);
+      }
+
+      if (platform) {
+        if (!['facebook', 'tiktok'].includes(platform)) {
+          return reply.code(400).send({
+            success: false,
+            error: 'platform must be facebook or tiktok',
+          });
+        }
+        if (platform === 'facebook') {
+          query = query.or('platform.eq.facebook,platform.is.null');
+        } else {
+          query = query.eq('platform', platform);
+        }
       }
 
       const { data: executions, error } = await query
@@ -83,11 +98,12 @@ export async function autopilotRoutes(app: FastifyInstance) {
    */
   app.get('/autopilot/reports', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { telegramId, userAccountId, accountId, limit = '10' } = request.query as {
+      const { telegramId, userAccountId, accountId, limit = '10', platform } = request.query as {
         telegramId?: string;
         userAccountId?: string;
         accountId?: string; // UUID FK к ad_accounts.id
         limit?: string;
+        platform?: string;
       };
 
       if (!telegramId) {
@@ -99,11 +115,11 @@ export async function autopilotRoutes(app: FastifyInstance) {
 
       const limitNum = Math.min(parseInt(limit, 10) || 10, 50);
 
-      log.info({ telegramId, userAccountId, accountId, limit: limitNum }, 'Fetching campaign reports');
+      log.info({ telegramId, userAccountId, accountId, platform, limit: limitNum }, 'Fetching campaign reports');
 
       let query = supabase
         .from('campaign_reports')
-        .select('id, telegram_id, account_id, report_data, created_at')
+        .select('id, telegram_id, account_id, report_data, created_at, platform')
         .eq('telegram_id', telegramId);
 
       let resolvedUserAccountId = userAccountId;
@@ -124,6 +140,20 @@ export async function autopilotRoutes(app: FastifyInstance) {
 
       if (resolvedUserAccountId && await shouldFilterByAccountId(supabase, resolvedUserAccountId, accountId)) {
         query = query.eq('account_id', accountId);
+      }
+
+      if (platform) {
+        if (!['facebook', 'tiktok'].includes(platform)) {
+          return reply.code(400).send({
+            success: false,
+            error: 'platform must be facebook or tiktok',
+          });
+        }
+        if (platform === 'facebook') {
+          query = query.or('platform.eq.facebook,platform.is.null');
+        } else {
+          query = query.eq('platform', platform);
+        }
       }
 
       const { data: reports, error } = await query

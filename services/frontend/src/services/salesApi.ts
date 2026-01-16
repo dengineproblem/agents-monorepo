@@ -130,9 +130,16 @@ class SalesApiService {
   }
 
   // Получение списка направлений пользователя
-  async getDirections(userAccountId: string): Promise<{ data: Direction[]; error: any }> {
+  async getDirections(
+    userAccountId: string,
+    platform?: 'facebook' | 'tiktok'
+  ): Promise<{ data: Direction[]; error: any }> {
     try {
-      const response = await fetch(`${API_BASE_URL}/directions?userAccountId=${userAccountId}`);
+      const params = new URLSearchParams({ userAccountId });
+      if (platform) {
+        params.append('platform', platform);
+      }
+      const response = await fetch(`${API_BASE_URL}/directions?${params.toString()}`);
       const result = await response.json();
       
       if (!result.success) {
@@ -309,10 +316,12 @@ class SalesApiService {
     directionId: string | null = null,
     timeframeDays: 7 | 30 | 90 | 'all' = 'all',
     mediaType: 'video' | 'image' | 'carousel' | null = null,
-    accountId?: string
+    accountId?: string,
+    platform?: 'instagram' | 'tiktok'
   ): Promise<ROIData> {
     try {
       console.log('🔄 Загружаем ROI данные для user_account_id:', userAccountId, 'direction:', directionId || 'все');
+      const effectivePlatform = platform || 'instagram';
 
       // Фильтрация по периоду
       const since = (() => {
@@ -338,6 +347,13 @@ class SalesApiService {
       // Фильтр по account_id ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (shouldFilterByAccountId(accountId)) {
         creativesQuery = creativesQuery.eq('account_id', accountId);
+      }
+
+      // Фильтр по платформе
+      if (effectivePlatform === 'tiktok') {
+        creativesQuery = creativesQuery.not('tiktok_video_id', 'is', null);
+      } else {
+        creativesQuery = creativesQuery.is('tiktok_video_id', null);
       }
 
       // Фильтрация по направлению
@@ -609,7 +625,9 @@ class SalesApiService {
         const qualifiedCount = revenueData.qualifiedCount;
         // % квал считаем от количества лидов из FB метрик, а не от локальных лидов
         const qualificationRate = leads > 0 ? (qualifiedCount / leads) * 100 : 0;
-        const spend = Math.round(metrics.spend * usdToKztRate); // spend в USD -> KZT
+        const spend = effectivePlatform === 'tiktok'
+          ? Math.round(metrics.spend)
+          : Math.round(metrics.spend * usdToKztRate); // spend в USD -> KZT
         const revenue = revenueData.revenue;
         const conversions = revenueData.conversions;
 
@@ -618,7 +636,9 @@ class SalesApiService {
 
         // Определяем URL креатива в зависимости от типа
         let creativeUrl = '';
-        if (creative.media_type === 'video' && creative.fb_video_id) {
+        if (effectivePlatform === 'tiktok') {
+          creativeUrl = creative.thumbnail_url || creative.image_url || '';
+        } else if (creative.media_type === 'video' && creative.fb_video_id) {
           // Для видео - ссылка на Facebook видео
           creativeUrl = `https://www.facebook.com/watch/?v=${creative.fb_video_id}`;
         } else if (creative.media_type === 'image' && creative.image_url) {

@@ -660,7 +660,7 @@ export const tikTokHandlers = {
         action: 'update_adgroup_budget',
         adgroup_id,
         new_budget,
-        message: `Would update TikTok ad group budget to $${new_budget}`
+        message: `Would update TikTok ad group budget to ${new_budget} ₸`
       };
     }
 
@@ -674,7 +674,8 @@ export const tikTokHandlers = {
       success: true,
       action: 'update_adgroup_budget',
       adgroup_id,
-      new_budget_usd: new_budget
+      new_budget: new_budget,
+      new_budget_kzt: new_budget
     };
   },
 
@@ -852,7 +853,7 @@ export const tikTokHandlers = {
         direction_name: direction.name,
         current_budget: direction.tiktok_daily_budget,
         new_budget,
-        message: `Would update direction budget from $${direction.tiktok_daily_budget} to $${new_budget}`
+        message: `Would update direction budget from ${direction.tiktok_daily_budget} ₸ to ${new_budget} ₸`
       };
     }
 

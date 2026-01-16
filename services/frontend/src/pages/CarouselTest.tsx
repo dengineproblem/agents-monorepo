@@ -9,9 +9,10 @@ import { useAppContext } from '@/context/AppContext';
 const CarouselTest = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [creativeGenerationsAvailable, setCreativeGenerationsAvailable] = useState(0);
-  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled, platform } = useAppContext();
   // Загрузка направлений с фильтрацией по currentAdAccountId для мультиаккаунтности
-  const { directions } = useDirections(userId, currentAdAccountId);
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
+  const { directions } = useDirections(userId, currentAdAccountId, directionsPlatform);
 
   useEffect(() => {
     const fetchUser = async () => {

@@ -77,6 +77,29 @@ export interface CreateAdGroupWithCreativesResult {
   message: string;
 }
 
+function assertTikTokVideoCreatives(creatives: any[]) {
+  const invalid = creatives.filter((creative) => {
+    const mediaType = creative?.media_type ? String(creative.media_type).toLowerCase() : null;
+    const hasVideoId = Boolean(creative?.tiktok_video_id);
+    const hasMediaUrl = Boolean(creative?.media_url);
+
+    if (mediaType && mediaType !== 'video') {
+      return true;
+    }
+
+    if (!hasVideoId && !hasMediaUrl) {
+      return true;
+    }
+
+    return false;
+  });
+
+  if (invalid.length > 0) {
+    const invalidIds = invalid.map((creative) => creative.id).join(', ');
+    throw new Error(`TikTok supports only video creatives with a video source. Invalid creatives: ${invalidIds}`);
+  }
+}
+
 // ============================================================
 // DIRECTION ADGROUP HELPERS
 // ============================================================
@@ -375,6 +398,8 @@ export async function workflowCreateAdInDirection(
     throw new Error(`Creatives not found or not ready: ${user_creative_ids.join(', ')}`);
   }
 
+  assertTikTokVideoCreatives(creatives);
+
   // ===================================================
   // STEP 5: Подготовка данных креативов (загрузка видео если нужно)
   // ===================================================
@@ -594,6 +619,8 @@ export async function workflowCreateAdGroupWithCreatives(
   if (creativesError || !creatives || creatives.length === 0) {
     throw new Error(`Creatives not found or not ready: ${user_creative_ids.join(', ')}`);
   }
+
+  assertTikTokVideoCreatives(creatives);
 
   const creative_data: Array<{
     user_creative_id: string;

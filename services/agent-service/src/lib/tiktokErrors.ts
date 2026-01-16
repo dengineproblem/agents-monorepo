@@ -115,7 +115,7 @@ const TIKTOK_ERROR_CODES: Record<number, TikTokErrorResolution> = {
   52001: {
     msgCode: 'tiktok_budget_too_low',
     userMessage: 'Budget is too low',
-    userMessageRu: 'Бюджет слишком маленький. Минимум $20/день.',
+    userMessageRu: 'Бюджет слишком маленький. Минимум 2500₸/день.',
     retryable: false,
     action: 'increase_budget'
   },

@@ -19,6 +19,7 @@ import { OptimizationModal } from '@/components/optimization';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Instagram, AlertCircle, Calendar } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -390,44 +391,43 @@ const Dashboard: React.FC = () => {
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center gap-3">
                     <span className="text-sm font-medium text-muted-foreground">{t('dashboard.platform')}</span>
-                    <div className="flex gap-2">
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant={platform === 'instagram' ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setPlatform('instagram')}
-                          className={cn(
-                            "gap-2 transition-all duration-200",
-                            platform === 'instagram'
-                              ? "bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground"
-                              : "border-purple-200 text-purple-600 hover:bg-purple-50 hover:border-purple-300 dark:border dark:text-foreground dark:hover:bg-accent"
-                          )}
-                        >
-                          <Instagram className="h-4 w-4" />
-                          Instagram
-                        </Button>
-                        <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_INSTAGRAM} iconSize="sm" />
-                      </div>
-                      {FEATURES.SHOW_TIKTOK && (
+                    <Tabs
+                      value={platform}
+                      onValueChange={(value) => setPlatform(value as 'instagram' | 'tiktok')}
+                    >
+                      <TabsList className="h-auto bg-transparent p-0 gap-2">
                         <div className="flex items-center gap-1">
-                          <Button
-                            variant={platform === 'tiktok' ? 'default' : 'outline'}
-                            size="sm"
-                            onClick={() => setPlatform('tiktok')}
+                          <TabsTrigger
+                            value="instagram"
                             className={cn(
                               "gap-2 transition-all duration-200",
-                              platform === 'tiktok'
-                                ? "bg-gradient-to-r from-black to-gray-900 hover:from-gray-900 hover:to-black text-white border-0 shadow-md dark:from-transparent dark:to-transparent dark:bg-accent dark:border-2 dark:border-foreground"
-                                : "border-gray-300 text-gray-700 hover:bg-gray-50 hover:border-gray-400 dark:border dark:text-foreground dark:hover:bg-accent"
+                              "data-[state=active]:bg-gradient-to-r data-[state=active]:from-purple-500 data-[state=active]:to-pink-500 data-[state=active]:hover:from-purple-600 data-[state=active]:hover:to-pink-600 data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
+                              "data-[state=inactive]:border data-[state=inactive]:border-purple-200 data-[state=inactive]:text-purple-600 data-[state=inactive]:hover:bg-purple-50 data-[state=inactive]:hover:border-purple-300 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
                             )}
                           >
-                            <TikTokIcon />
-                            TikTok
-                          </Button>
-                          <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_TIKTOK} iconSize="sm" />
+                            <Instagram className="h-4 w-4" />
+                            Instagram
+                          </TabsTrigger>
+                          <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_INSTAGRAM} iconSize="sm" />
                         </div>
-                      )}
-                    </div>
+                        {FEATURES.SHOW_TIKTOK && (
+                          <div className="flex items-center gap-1">
+                            <TabsTrigger
+                              value="tiktok"
+                              className={cn(
+                                "gap-2 transition-all duration-200",
+                                "data-[state=active]:bg-gradient-to-r data-[state=active]:from-black data-[state=active]:to-gray-900 data-[state=active]:hover:from-gray-900 data-[state=active]:hover:to-black data-[state=active]:text-white data-[state=active]:border-0 data-[state=active]:shadow-md data-[state=active]:dark:from-transparent data-[state=active]:dark:to-transparent data-[state=active]:dark:bg-accent data-[state=active]:dark:border-2 data-[state=active]:dark:border-foreground",
+                                "data-[state=inactive]:border data-[state=inactive]:border-gray-300 data-[state=inactive]:text-gray-700 data-[state=inactive]:hover:bg-gray-50 data-[state=inactive]:hover:border-gray-400 data-[state=inactive]:dark:border data-[state=inactive]:dark:text-foreground data-[state=inactive]:dark:hover:bg-accent"
+                              )}
+                            >
+                              <TikTokIcon />
+                              TikTok
+                            </TabsTrigger>
+                            <HelpTooltip tooltipKey={TooltipKeys.PLATFORM_TIKTOK} iconSize="sm" />
+                          </div>
+                        )}
+                      </TabsList>
+                    </Tabs>
                   </div>
                   {platform === 'instagram' && !isFbConnected && (
                     <div className="p-3 rounded-lg border bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-transparent dark:to-transparent text-blue-700 dark:text-foreground flex items-center justify-between gap-3">
@@ -499,10 +499,10 @@ const Dashboard: React.FC = () => {
               <DirectionsTable />
               
               {/* План/Факт анализ за месяц */}
-              <MonthlyPlanFact />
+              {platform === 'instagram' && <MonthlyPlanFact />}
               
               {/* Журнал действий таргетолога */}
-              <TargetologJournal />
+              {platform === 'instagram' && <TargetologJournal />}
             </div>
           </>
         ) : (
@@ -562,6 +562,7 @@ const Dashboard: React.FC = () => {
         onApprove={optimization.approveSelected}
         onReject={optimization.reject}
         isExecuting={optimization.state.isExecuting}
+        progressMessage={optimization.state.progressMessage}
       />
     </div>
   );

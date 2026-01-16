@@ -15,7 +15,11 @@ export const directionsApi = {
    * @param userAccountId - ID пользователя из user_accounts
    * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
    */
-  async list(userAccountId: string, accountId?: string | null): Promise<Direction[]> {
+  async list(
+    userAccountId: string,
+    accountId?: string | null,
+    platform?: 'facebook' | 'tiktok'
+  ): Promise<Direction[]> {
     try {
       console.log('[directionsApi.list] Запрос направлений для user_account_id:', userAccountId, 'account_id:', accountId);
 
@@ -24,6 +28,9 @@ export const directionsApi = {
       // Передаём accountId ТОЛЬКО в multi-account режиме (см. MULTI_ACCOUNT_GUIDE.md)
       if (shouldFilterByAccountId(accountId)) {
         params.append('accountId', accountId!);
+      }
+      if (platform) {
+        params.append('platform', platform);
       }
 
       const response = await fetch(`${API_BASE_URL}/directions?${params.toString()}`);
@@ -57,6 +64,7 @@ export const directionsApi = {
   async create(payload: CreateDirectionPayload): Promise<{ 
     success: boolean; 
     direction?: Direction; 
+    directions?: Direction[];
     default_settings?: any;
     error?: string;
   }> {
@@ -81,6 +89,7 @@ export const directionsApi = {
       return {
         success: true,
         direction: data.direction,
+        directions: data.directions,
         default_settings: data.default_settings || null,
       };
     } catch (error) {
@@ -160,4 +169,3 @@ export const directionsApi = {
     }
   },
 };
-

@@ -197,13 +197,21 @@ export async function verifyAdStatus(adId, expectedStatus, accessToken) {
  * Verify Supabase direction status change
  * Note: account_directions uses is_active (boolean) instead of status (string)
  */
-export async function verifyDirectionStatus(directionId, expectedActive) {
+export async function verifyDirectionStatus(directionId, expectedActive, adAccountDbId = null) {
   try {
-    const { data, error } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let query = supabase
       .from('account_directions')
       .select('id, is_active, campaign_status')
-      .eq('id', directionId)
-      .single();
+      .eq('id', directionId);
+
+    if (adAccountDbId) {
+      query = query.eq('account_id', adAccountDbId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data, error } = await query.single();
 
     if (error) {
       return {
@@ -232,13 +240,21 @@ export async function verifyDirectionStatus(directionId, expectedActive) {
  * Verify Supabase direction budget change
  * Note: account_directions stores budget in cents (daily_budget_cents)
  */
-export async function verifyDirectionBudget(directionId, expectedBudgetCents) {
+export async function verifyDirectionBudget(directionId, expectedBudgetCents, adAccountDbId = null) {
   try {
-    const { data, error } = await supabase
+    // Мультиаккаунтность: проверяем владение направлением через account_id
+    let query = supabase
       .from('account_directions')
       .select('id, daily_budget_cents')
-      .eq('id', directionId)
-      .single();
+      .eq('id', directionId);
+
+    if (adAccountDbId) {
+      query = query.eq('account_id', adAccountDbId);
+    } else {
+      query = query.is('account_id', null);
+    }
+
+    const { data, error } = await query.single();
 
     if (error) {
       return {

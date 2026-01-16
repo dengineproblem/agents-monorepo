@@ -128,6 +128,7 @@ export async function workflowStartCreativeTest(
     // Фолбэк на старые поля (deprecated)
     switch (direction.objective) {
       case 'whatsapp':
+      case 'whatsapp_conversions':
         fb_creative_id = creative.fb_creative_id_whatsapp;
         break;
       case 'instagram_traffic':
@@ -135,6 +136,9 @@ export async function workflowStartCreativeTest(
         break;
       case 'site_leads':
         fb_creative_id = creative.fb_creative_id_site_leads;
+        break;
+      case 'lead_forms':
+        fb_creative_id = creative.fb_creative_id_lead_forms;
         break;
       default:
         throw new Error(`Unknown objective: ${direction.objective}`);
@@ -247,6 +251,31 @@ export async function workflowStartCreativeTest(
         page_id: String(page_id)
       };
       log.info({ lead_form_id: defaultSettings.lead_form_id }, 'Using lead_form_id for lead_forms (in creative CTA)');
+      break;
+
+    case 'whatsapp_conversions':
+      fb_objective = 'OUTCOME_SALES';
+      optimization_goal = 'OFFSITE_CONVERSIONS';
+      destination_type = 'WHATSAPP';
+
+      if (defaultSettings?.pixel_id) {
+        promoted_object = {
+          pixel_id: String(defaultSettings.pixel_id),
+          custom_event_type: 'PURCHASE'
+        };
+        if (context.whatsapp_phone_number) {
+          promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
+        }
+        log.info({ pixel_id: defaultSettings.pixel_id }, 'Using pixel_id for whatsapp_conversions');
+      } else {
+        promoted_object = {
+          page_id: String(page_id)
+        };
+        if (context.whatsapp_phone_number) {
+          promoted_object.whatsapp_phone_number = context.whatsapp_phone_number;
+        }
+        log.warn('No pixel_id found in default settings for whatsapp_conversions');
+      }
       break;
 
     default:

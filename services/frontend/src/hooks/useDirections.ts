@@ -6,8 +6,13 @@ import type { Direction, CreateDirectionPayload, UpdateDirectionPayload } from '
  * Хук для работы с направлениями
  * @param userAccountId - ID пользователя из user_accounts
  * @param accountId - UUID из ad_accounts.id для фильтрации по рекламному аккаунту (опционально)
+ * @param platform - 'facebook' | 'tiktok' для фильтрации по платформе (опционально)
  */
-export const useDirections = (userAccountId: string | null, accountId?: string | null) => {
+export const useDirections = (
+  userAccountId: string | null,
+  accountId?: string | null,
+  platform?: 'facebook' | 'tiktok'
+) => {
   const [directions, setDirections] = useState<Direction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +29,7 @@ export const useDirections = (userAccountId: string | null, accountId?: string |
     setError(null);
 
     try {
-      const data = await directionsApi.list(userAccountId, accountId);
+      const data = await directionsApi.list(userAccountId, accountId, platform);
       setDirections(data);
     } catch (err) {
       console.error('Ошибка при загрузке направлений:', err);
@@ -32,7 +37,7 @@ export const useDirections = (userAccountId: string | null, accountId?: string |
     } finally {
       setLoading(false);
     }
-  }, [userAccountId, accountId]);
+  }, [userAccountId, accountId, platform]);
 
   // Создание направления
   const createDirection = useCallback(
@@ -89,7 +94,7 @@ export const useDirections = (userAccountId: string | null, accountId?: string |
     // При смене accountId сначала очищаем список, потом загружаем новый
     setDirections([]);
     setLoading(true);
-  }, [accountId]);
+  }, [accountId, platform]);
 
   // Загружаем направления при монтировании или смене зависимостей
   useEffect(() => {
@@ -106,4 +111,3 @@ export const useDirections = (userAccountId: string | null, accountId?: string |
     deleteDirection,
   };
 };
-

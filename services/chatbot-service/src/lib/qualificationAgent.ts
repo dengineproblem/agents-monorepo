@@ -18,6 +18,7 @@ import {
   CAPI_EVENTS,
   type CapiEventLevel,
 } from './metaCapiClient.js';
+import { getContactMessages, isEvolutionDbAvailable } from './evolutionDb.js';
 
 const log = createLogger({ module: 'qualificationAgent' });
 
@@ -756,12 +757,41 @@ export async function getDialogForCapi(
       }, 'No direction_id found for dialog - CAPI will be skipped');
     }
 
+    // If messages is empty, try to fetch from Evolution PostgreSQL
+    // This enables CAPI for users without AI bot
+    let messages = dialog.messages || [];
+
+    if (messages.length === 0 && isEvolutionDbAvailable()) {
+      log.info({
+        dialogId: dialog.id,
+        instanceName,
+        contactPhone,
+      }, 'Messages empty in dialog_analysis, fetching from Evolution DB');
+
+      try {
+        messages = await getContactMessages(instanceName, contactPhone);
+        log.info({
+          dialogId: dialog.id,
+          instanceName,
+          contactPhone,
+          messageCount: messages.length,
+        }, 'Fetched messages from Evolution DB');
+      } catch (error) {
+        log.error({
+          error: error instanceof Error ? error.message : String(error),
+          instanceName,
+          contactPhone,
+        }, 'Failed to fetch messages from Evolution DB, proceeding with empty messages');
+        messages = [];
+      }
+    }
+
     return {
       ...dialog,
       lead_id: leadId,
       direction_id: directionId || undefined,
       ctwa_clid: ctwaClid || undefined,
-      messages: dialog.messages || [],
+      messages,
     } as DialogData;
   } catch (error) {
     log.error({

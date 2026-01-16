@@ -15,8 +15,9 @@ import { z } from 'zod';
 const extendedPeriodEnum = z.enum(['today', 'yesterday', 'last_3d', 'last_7d', 'last_14d', 'last_30d', 'last_90d', 'last_6m', 'last_12m', 'all']);
 const periodSchema = z.string().describe('Период: today, yesterday, last_7d, last_30d или конкретная дата');
 const campaignStatusSchema = z.enum(['ENABLE', 'DISABLE', 'all']);
-const objectiveSchema = z.enum(['traffic', 'conversions', 'reach', 'video_views', 'lead_generation']);
+const objectiveSchema = z.enum(['traffic', 'conversions', 'lead_generation']);
 const groupBySchema = z.enum(['campaign', 'adgroup', 'ad', 'day', 'total']);
+const TIKTOK_MIN_DAILY_BUDGET_KZT = 2500;
 
 // UUID validation with custom message
 const uuidSchema = z.string().uuid('Invalid UUID format');
@@ -183,12 +184,12 @@ export const TikTokToolDefs = {
   },
 
   updateTikTokAdGroupBudget: {
-    description: 'Изменить дневной бюджет TikTok адгруппы. Минимум $20/день.',
+    description: 'Изменить дневной бюджет TikTok адгруппы. Минимум 2500 ₸/день.',
     schema: z.object({
       adgroup_id: nonEmptyString('adgroup_id').describe('ID адгруппы'),
       new_budget: z.number()
-        .min(20, 'Minimum TikTok budget is $20/day')
-        .describe('Новый дневной бюджет в долларах (минимум $20)'),
+        .min(TIKTOK_MIN_DAILY_BUDGET_KZT, `Minimum TikTok budget is ${TIKTOK_MIN_DAILY_BUDGET_KZT} ₸/day`)
+        .describe('Новый дневной бюджет в тенге (минимум 2500 ₸)'),
       dry_run: dryRunOption,
       operation_id: operationIdOption
     }),
@@ -227,9 +228,9 @@ export const TikTokToolDefs = {
     description: 'Создать новую TikTok рекламную кампанию с креативами. Полный workflow: Campaign -> AdGroup -> Ad.',
     schema: z.object({
       campaign_name: nonEmptyString('campaign_name').describe('Название кампании'),
-      objective: objectiveSchema.describe('Цель кампании: traffic, conversions, reach, video_views, lead_generation'),
+      objective: objectiveSchema.describe('Цель кампании: traffic (Traffic Clicky), conversions (Website Conversions), lead_generation (Leadform)'),
       creative_ids: z.array(uuidSchema).min(1).describe('UUID креативов из user_creatives'),
-      daily_budget: z.number().min(20).describe('Дневной бюджет в долларах (минимум $20)'),
+      daily_budget: z.number().min(TIKTOK_MIN_DAILY_BUDGET_KZT).describe('Дневной бюджет в тенге (минимум 2500 ₸)'),
       auto_activate: z.boolean().optional().describe('Сразу активировать кампанию'),
       dry_run: dryRunOption,
       operation_id: operationIdOption
@@ -274,12 +275,12 @@ export const TikTokToolDefs = {
   },
 
   updateTikTokDirectionBudget: {
-    description: 'Изменить суточный бюджет TikTok направления.',
+    description: 'Изменить суточный бюджет TikTok направления (KZT).',
     schema: z.object({
       direction_id: uuidSchema.describe('UUID направления'),
       new_budget: z.number()
-        .min(20, 'TikTok minimum is $20/day')
-        .describe('Новый суточный бюджет в долларах'),
+        .min(TIKTOK_MIN_DAILY_BUDGET_KZT, `TikTok minimum is ${TIKTOK_MIN_DAILY_BUDGET_KZT} ₸/day`)
+        .describe('Новый суточный бюджет в тенге'),
       dry_run: dryRunOption,
       operation_id: operationIdOption
     }),

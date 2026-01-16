@@ -20,6 +20,8 @@ export type UserCreative = {
   fb_creative_id_whatsapp: string | null;
   fb_creative_id_instagram_traffic: string | null;
   fb_creative_id_site_leads: string | null;
+  tiktok_video_id?: string | null;
+  creative_group_id?: string | null;
   status: 'uploaded' | 'processing' | 'partial_ready' | 'ready' | 'error';
   is_active: boolean;
   error_text: string | null;
@@ -67,9 +69,10 @@ export const creativesApi = {
    *
    * @param accountId - UUID из ad_accounts.id (используется ТОЛЬКО в multi-account режиме)
    */
-  async list(accountId?: string | null): Promise<UserCreative[]> {
+  async list(accountId?: string | null, platform?: 'instagram' | 'tiktok'): Promise<UserCreative[]> {
     const userId = getUserId();
     if (!userId) return [];
+    const effectivePlatform = platform || 'instagram';
 
     let query = supabase
       .from('user_creatives')
@@ -95,11 +98,18 @@ export const creativesApi = {
     // Если у креатива нет fb_video_id - значит он не был успешно загружен на Facebook
     const rawCreatives = (data as unknown as UserCreative[]) || [];
     const creatives = rawCreatives.filter(creative => {
-      // Для видео требуем наличие fb_video_id
-      if (creative.media_type === 'video' || (!creative.media_type && !creative.image_url && !creative.carousel_data)) {
+      const isVideo = creative.media_type === 'video'
+        || (!creative.media_type && !creative.image_url && !creative.carousel_data);
+
+      if (effectivePlatform === 'tiktok') {
+        // TikTok принимает только видео и требует tiktok_video_id
+        return isVideo && creative.tiktok_video_id != null;
+      }
+
+      // Instagram/Facebook
+      if (isVideo) {
         return creative.fb_video_id != null;
       }
-      // Для изображений и каруселей - достаточно status ready/partial_ready
       return true;
     });
 
@@ -586,4 +596,3 @@ export const creativesApi = {
     });
   },
 };
-

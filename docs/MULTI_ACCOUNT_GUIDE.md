@@ -1982,6 +1982,36 @@ WHERE user_account_id = 'user-uuid'
 | 2025-12-08 | 2.6 | - | Исправление dispatch actions: sendActionsBatch + resolveAccessToken поддержка ad_accounts |
 | 2025-12-08 | 2.7 | - | Batch Monitoring Report: cron 9:00, explainError(), Telegram отчёт |
 | 2026-01-04 | 2.8 | - | Изоляция автопилота по аккаунтам: независимое включение/выключение для каждого ad_account |
+| 2026-01-13 | 2.9 | - | Полный аудит agent-brain: 15 исправлений изоляции данных (см. ниже) |
+
+### Версия 2.9 — Аудит изоляции данных agent-brain
+
+**Проведён полный аудит** кода agent-brain на наличие проблем изоляции данных между аккаунтами. Исправлено 15 уязвимостей.
+
+**Критические исправления:**
+
+| Файл | Функция | Проблема |
+|------|---------|----------|
+| `scoring.js` | `saveCreativeMetricsToHistory()` | `ad_creative_mapping` без фильтра по `account_id` |
+| `scoring.js` | `interactiveBrain()` SELECT | `brain_executions` без фильтра |
+| `scoring.js` | `interactiveBrain()` INSERT | Не сохранялся `account_id` |
+| `roiCalculator.ts` | `calculateCreativeROI()` | Не фильтровал leads/purchases по `account_id` |
+| `analyzerService.js` | `/creative-analytics` | Нет фильтра по `account_id` |
+| `analyzerService.js` | `/analyze-creative` | Нет проверки ownership (security) |
+
+**Высокие исправления:**
+
+| Файл | Функция |
+|------|---------|
+| `ads/handlers.js` | `getDirectionCreatives()` |
+| `dryRunHandlers.js` | `pauseCreative()`, `launchCreative()`, `startCreativeTest()`, `pauseDirection` |
+| `creative/handlers.js` | `getCreativeDetails()`, `getCreativeAnalysis()`, `getCreativeTranscript()`, `startCreativeTest()` |
+
+**Добавленное логирование:**
+
+Все исправленные функции теперь логируют `filterMode: 'multi_account' | 'legacy'` для диагностики.
+
+**Детали:** см. `docs/BUGFIX_MULTI_ACCOUNT_2026_01_13.md`
 
 ### Версия 2.2 — Детали имплементации
 

@@ -269,18 +269,25 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let siteUrl = null;
       let utm = null;
       let leadFormId: string | null = null;
-      let objective: 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp'; // default
+      let objective: 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms' = 'whatsapp'; // default
 
       if (body.direction_id) {
         // Загружаем direction для получения objective
         const { data: direction } = await supabase
           .from('account_directions')
-          .select('objective')
+          .select('objective, platform')
           .eq('id', body.direction_id)
           .maybeSingle();
 
+        if (direction?.platform === 'tiktok') {
+          return reply.status(400).send({
+            success: false,
+            error: 'TikTok directions are not supported for Facebook video creatives'
+          });
+        }
+
         if (direction?.objective) {
-          objective = direction.objective as 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+          objective = direction.objective as 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
           app.log.info({ direction_id: body.direction_id, objective }, 'Loaded objective from direction');
         }
 
@@ -323,7 +330,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
       let fbCreativeId = '';
 
       try {
-        if (objective === 'whatsapp') {
+        if (objective === 'whatsapp' || objective === 'whatsapp_conversions') {
           const whatsappCreative = await createWhatsAppCreative(normalizedAdAccountId, ACCESS_TOKEN, {
             videoId: fbVideo.id,
             pageId: pageId,
@@ -400,7 +407,7 @@ export const videoRoutes: FastifyPluginAsync = async (app) => {
           // Thumbnail URL для превью видео
           ...(thumbnailUrl && { thumbnail_url: thumbnailUrl }),
           // Старые поля для обратной совместимости (deprecated)
-          ...(objective === 'whatsapp' && { fb_creative_id_whatsapp: fbCreativeId }),
+          ...((objective === 'whatsapp' || objective === 'whatsapp_conversions') && { fb_creative_id_whatsapp: fbCreativeId }),
           ...(objective === 'instagram_traffic' && { fb_creative_id_instagram_traffic: fbCreativeId }),
           ...(objective === 'site_leads' && { fb_creative_id_site_leads: fbCreativeId }),
           ...(objective === 'lead_forms' && { fb_creative_id_lead_forms: fbCreativeId })

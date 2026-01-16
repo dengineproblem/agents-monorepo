@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDirections } from '@/hooks/useDirections';
-import { OBJECTIVE_LABELS } from '@/types/direction';
+import { getDirectionObjectiveLabel } from '@/types/direction';
 import { useNavigate } from 'react-router-dom';
 import { Target, Brain } from 'lucide-react';
 import { APP_REVIEW_MODE } from '../config/appReview';
@@ -37,6 +37,8 @@ const MAX_FILE_SIZE = 512 * 1024 * 1024; // 512 МиБ
 const MAX_RETRY_ATTEMPTS = 3; // Максимум 3 попытки
 const RETRY_DELAYS = [2000, 5000, 10000]; // Задержки между попытками: 2с, 5с, 10с
 const DEFAULT_UTM = 'utm_source=facebook&utm_campaign={{campaign.name}}&utm_medium={{ad.id}}';
+const FACEBOOK_MIN_DAILY_BUDGET = 10;
+const TIKTOK_MIN_DAILY_BUDGET = 2500;
 
 // Список городов Казахстана и других стран
 // Instagram/Meta IDs сохраняем как были (для IG). Для TikTok используем отдельную карту ID.
@@ -128,6 +130,7 @@ interface VideoUploadProps {
 export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }: VideoUploadProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const isTikTokPlatform = platform === 'tiktok';
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -160,7 +163,12 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   const [selectedDirectionId, setSelectedDirectionId] = useState<string>('');
   
   // Загрузка списка направлений (с фильтрацией по currentAdAccountId для мультиаккаунтности)
-  const { directions, loading: directionsLoading } = useDirections(userData?.id || null, currentAdAccountId);
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
+  const { directions, loading: directionsLoading } = useDirections(
+    userData?.id || null,
+    currentAdAccountId,
+    directionsPlatform
+  );
 
   // Сброс состояния при смене аккаунта
   useEffect(() => {
@@ -222,9 +230,30 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
   // Для результатов auto-launch
   const [autoLaunchResults, setAutoLaunchResults] = useState<any[] | null>(null);
   const [autoLaunchResultDialogOpen, setAutoLaunchResultDialogOpen] = useState(false);
-  const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(10); // Дневной бюджет в USD
-  const [launchedBudget, setLaunchedBudget] = useState<number>(10); // Сохраненный бюджет для показа в результате
+  const [manualLaunchBudget, setManualLaunchBudget] = useState<number>(
+    isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET
+  );
+  const [launchedBudget, setLaunchedBudget] = useState<number>(
+    isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET
+  );
   const [manualStartMode, setManualStartMode] = useState<'now' | 'midnight_almaty'>('now'); // По умолчанию "Сейчас"
+  const manualLaunchMinBudget = isTikTokPlatform ? TIKTOK_MIN_DAILY_BUDGET : FACEBOOK_MIN_DAILY_BUDGET;
+  const manualLaunchBudgetSymbol = isTikTokPlatform ? '₸' : '$';
+  const manualLaunchBudgetLabel = isTikTokPlatform ? 'KZT' : 'USD';
+  const manualLaunchMinBudgetText = isTikTokPlatform
+    ? `${manualLaunchMinBudget}₸`
+    : `${manualLaunchBudgetSymbol}${manualLaunchMinBudget}`;
+  const adGroupId =
+    launchResult?.adset_id || launchResult?.adgroup_id || launchResult?.tiktok_adgroup_id;
+  const adGroupTitle = isTikTokPlatform ? 'Ad Group' : 'Ad Set';
+  const launchedBudgetLabel = isTikTokPlatform
+    ? `${launchedBudget.toLocaleString('ru-RU')} ₸`
+    : `${manualLaunchBudgetSymbol}${launchedBudget}`;
+
+  useEffect(() => {
+    setManualLaunchBudget(manualLaunchMinBudget);
+    setLaunchedBudget(manualLaunchMinBudget);
+  }, [manualLaunchMinBudget]);
 
   useEffect(() => {
     async function fetchUserData() {
@@ -397,8 +426,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       return;
     }
 
-    if (manualLaunchBudget < 10) {
-      toast.error('Минимальный бюджет - $10');
+    if (manualLaunchBudget < manualLaunchMinBudget) {
+      toast.error(`Минимальный бюджет - ${manualLaunchMinBudgetText}`);
       return;
     }
 
@@ -408,13 +437,22 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
       // Сохраняем бюджет для показа в результате
       setLaunchedBudget(manualLaunchBudget);
       
+      const direction = directions.find(d => d.id === selectedManualDirection);
       const result = await manualLaunchAds({
+        platform: isTikTokPlatform ? 'tiktok' : 'facebook',
         user_account_id: userData.id,
         account_id: currentAdAccountId || undefined, // UUID для мультиаккаунтности
         direction_id: selectedManualDirection,
         creative_ids: selectedCreativeIds,
-        start_mode: manualStartMode,
-        daily_budget_cents: Math.round(manualLaunchBudget * 100), // Конвертируем в центы
+        ...(isTikTokPlatform
+          ? {
+              daily_budget: manualLaunchBudget,
+              objective: direction?.tiktok_objective || undefined,
+            }
+          : {
+              start_mode: manualStartMode,
+              daily_budget_cents: Math.round(manualLaunchBudget * 100), // Конвертируем в центы
+            }),
       });
 
       if (result.success) {
@@ -427,7 +465,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
         setSelectedManualDirection('');
         setSelectedCreativeIds([]);
         setAvailableCreatives([]);
-        setManualLaunchBudget(10);
+        setManualLaunchBudget(manualLaunchMinBudget);
         setManualStartMode('now'); // Сбрасываем на "Сейчас"
       } else {
         toast.error(result.error || 'Ошибка запуска рекламы');
@@ -1831,8 +1869,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                               .filter(d => !campaignGoal || d.objective === campaignGoal)
                               .map((direction) => (
                                 <SelectItem key={direction.id} value={direction.id}>
-                                  <span className="block truncate max-w-[350px]" title={`${direction.name} (${OBJECTIVE_LABELS[direction.objective]})`}>
-                                    {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                                  <span className="block truncate max-w-[350px]" title={`${direction.name} (${getDirectionObjectiveLabel(direction)})`}>
+                                    {direction.name} ({getDirectionObjectiveLabel(direction)})
                                   </span>
                                 </SelectItem>
                               ))}
@@ -2883,8 +2921,8 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                         .filter((d) => d.is_active)
                         .map((direction) => (
                           <SelectItem key={direction.id} value={direction.id}>
-                            <span className="block truncate max-w-[350px]" title={`${direction.name} (${OBJECTIVE_LABELS[direction.objective]})`}>
-                              {direction.name} ({OBJECTIVE_LABELS[direction.objective]})
+                            <span className="block truncate max-w-[350px]" title={`${direction.name} (${getDirectionObjectiveLabel(direction)})`}>
+                              {direction.name} ({getDirectionObjectiveLabel(direction)})
                             </span>
                           </SelectItem>
                         ))
@@ -2910,13 +2948,13 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
 
               {/* Дневной бюджет */}
               <div className="space-y-2">
-                <Label htmlFor="manual-budget">Дневной бюджет (USD)</Label>
+                <Label htmlFor="manual-budget">Дневной бюджет ({manualLaunchBudgetLabel})</Label>
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl">$</span>
+                  <span className="text-2xl">{manualLaunchBudgetSymbol}</span>
                   <input
                     id="manual-budget"
                     type="number"
-                    min="10"
+                    min={manualLaunchMinBudget}
                     step="1"
                     value={manualLaunchBudget}
                     onChange={(e) => setManualLaunchBudget(Number(e.target.value))}
@@ -2925,28 +2963,30 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Минимальный бюджет: $10 в день
+                  Минимальный бюджет: {manualLaunchMinBudgetText} в день
                 </p>
               </div>
 
               {/* Время запуска */}
-              <div className="space-y-2">
-                <Label>Время запуска</Label>
-                <RadioGroup
-                  value={manualStartMode}
-                  onValueChange={(v: 'now' | 'midnight_almaty') => setManualStartMode(v)}
-                  className="grid grid-cols-1 gap-2"
-                >
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="midnight_almaty" id="start-midnight" />
-                    <Label htmlFor="start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <RadioGroupItem value="now" id="start-now" />
-                    <Label htmlFor="start-now" className="cursor-pointer">Сейчас</Label>
-                  </div>
-                </RadioGroup>
-              </div>
+              {!isTikTokPlatform && (
+                <div className="space-y-2">
+                  <Label>Время запуска</Label>
+                  <RadioGroup
+                    value={manualStartMode}
+                    onValueChange={(v: 'now' | 'midnight_almaty') => setManualStartMode(v)}
+                    className="grid grid-cols-1 gap-2"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="midnight_almaty" id="start-midnight" />
+                      <Label htmlFor="start-midnight" className="cursor-pointer">С полуночи (Алматы)</Label>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value="now" id="start-now" />
+                      <Label htmlFor="start-now" className="cursor-pointer">Сейчас</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+              )}
 
               {/* Выбор креативов */}
               {selectedManualDirection && (
@@ -3006,7 +3046,7 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                   setManualLaunchDialogOpen(false);
                   setSelectedManualDirection('');
                   setSelectedCreativeIds([]);
-                  setManualLaunchBudget(10);
+                  setManualLaunchBudget(manualLaunchMinBudget);
                 }}
                 disabled={manualLaunchLoading}
               >
@@ -3057,22 +3097,28 @@ export function VideoUpload({ showOnlyAddSale = false, platform = 'instagram' }:
                       <span className="text-muted-foreground shrink-0">Направление:</span>{' '}
                       <span className="font-medium truncate" title={launchResult.direction_name}>{launchResult.direction_name}</span>
                     </div>
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Campaign ID:</span>{' '}
-                      <span className="font-mono text-xs">{launchResult.campaign_id}</span>
-                    </div>
+                    {launchResult.campaign_id && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Campaign ID:</span>{' '}
+                        <span className="font-mono text-xs">{launchResult.campaign_id}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Информация об Ad Set */}
                   <div className="p-4 bg-muted/30 rounded-lg space-y-2">
-                    <div className="text-sm font-medium">Ad Set</div>
-                    <div className="text-sm text-muted-foreground truncate" title={launchResult.adset_name}>{launchResult.adset_name}</div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      ID: {launchResult.adset_id}
+                    <div className="text-sm font-medium">{adGroupTitle}</div>
+                    <div className="text-sm text-muted-foreground truncate" title={launchResult.adset_name}>
+                      {launchResult.adset_name || '—'}
                     </div>
+                    {adGroupId && (
+                      <div className="text-xs text-muted-foreground font-mono">
+                        ID: {adGroupId}
+                      </div>
+                    )}
                     <div className="text-sm pt-2 border-t border-border/50">
                       <span className="text-muted-foreground">Дневной бюджет:</span>{' '}
-                      <span className="font-medium">${launchedBudget}</span>
+                      <span className="font-medium">{launchedBudgetLabel}</span>
                     </div>
                   </div>
 

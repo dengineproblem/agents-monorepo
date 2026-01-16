@@ -53,6 +53,7 @@ interface DirectionItemProps {
   isExpanded: boolean;
   onToggle: (direction: string) => void;
   formatCurrency: (amount: number) => string;
+  showQuality: boolean;
 }
 
 const DirectionItem: React.FC<DirectionItemProps> = ({ 
@@ -60,7 +61,8 @@ const DirectionItem: React.FC<DirectionItemProps> = ({
   data, 
   isExpanded, 
   onToggle, 
-  formatCurrency 
+  formatCurrency,
+  showQuality
 }) => {
   const {
     attributes,
@@ -143,7 +145,9 @@ const DirectionItem: React.FC<DirectionItemProps> = ({
           <div>
             <div className="text-muted-foreground text-xs">Качество</div>
             <div className="font-medium">
-              {data.mainStats.qualityRate > 0 ? `${data.mainStats.qualityRate.toFixed(0)}%` : '0%'}
+              {showQuality
+                ? (data.mainStats.qualityRate > 0 ? `${data.mainStats.qualityRate.toFixed(0)}%` : '0%')
+                : 'н/д'}
             </div>
           </div>
         </div>
@@ -180,7 +184,9 @@ const DirectionItem: React.FC<DirectionItemProps> = ({
                 <div>
                   <div className="text-muted-foreground text-xs">Качество</div>
                   <div className="font-medium">
-                    {stats.qualityRate > 0 ? `${stats.qualityRate.toFixed(0)}%` : '0%'}
+                    {showQuality
+                      ? (stats.qualityRate > 0 ? `${stats.qualityRate.toFixed(0)}%` : '0%')
+                      : 'н/д'}
                   </div>
                 </div>
               </div>
@@ -193,7 +199,7 @@ const DirectionItem: React.FC<DirectionItemProps> = ({
 };
 
 const DirectionsTable: React.FC = () => {
-  const { campaignStats, loading } = useAppContext();
+  const { campaignStats, loading, platform } = useAppContext();
   const [expandedDirections, setExpandedDirections] = useState<Set<string>>(new Set());
   const [directionOrder, setDirectionOrder] = useState<string[]>([]);
   
@@ -336,6 +342,14 @@ const DirectionsTable: React.FC = () => {
   };
 
   const formatCurrency = (amount: number) => {
+    if (platform === 'tiktok') {
+      return new Intl.NumberFormat('ru-RU', {
+        style: 'currency',
+        currency: 'KZT',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(amount);
+    }
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
@@ -422,6 +436,7 @@ const DirectionsTable: React.FC = () => {
                     isExpanded={expandedDirections.has(mainDirection)}
                     onToggle={toggleDirection}
                     formatCurrency={formatCurrency}
+                    showQuality={platform !== 'tiktok'}
                   />
                 );
               })}

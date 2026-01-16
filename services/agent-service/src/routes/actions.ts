@@ -796,7 +796,7 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
         
         // Определить fb_creative_id по objective направления
         let fb_creative_id;
-        if (direction.objective === 'whatsapp') fb_creative_id = creative.fb_creative_id_whatsapp;
+        if (direction.objective === 'whatsapp' || direction.objective === 'whatsapp_conversions') fb_creative_id = creative.fb_creative_id_whatsapp;
         else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
         else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
         else if (direction.objective === 'lead_forms') fb_creative_id = creative.fb_creative_id_lead_forms;
@@ -942,9 +942,10 @@ async function handleAction(action: ActionInput, token: string, ctx?: { pageId?:
           
           // Определить fb_creative_id по objective направления
           let fb_creative_id;
-          if (direction.objective === 'whatsapp') fb_creative_id = creative.fb_creative_id_whatsapp;
+          if (direction.objective === 'whatsapp' || direction.objective === 'whatsapp_conversions') fb_creative_id = creative.fb_creative_id_whatsapp;
           else if (direction.objective === 'instagram_traffic') fb_creative_id = creative.fb_creative_id_instagram_traffic;
           else if (direction.objective === 'site_leads') fb_creative_id = creative.fb_creative_id_site_leads;
+          else if (direction.objective === 'lead_forms') fb_creative_id = creative.fb_creative_id_lead_forms;
           
           if (!fb_creative_id) continue;
           

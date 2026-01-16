@@ -16,12 +16,14 @@ import { Separator } from '@/components/ui/separator';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { ChevronDown, Loader2 } from 'lucide-react';
-import type { Direction, DefaultAdSettings, UpdateDefaultSettingsInput, CapiSource, CapiFieldConfig } from '@/types/direction';
-import { OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
+import type { Direction, UpdateDefaultSettingsInput, CapiSource, CapiFieldConfig, OptimizationLevel } from '@/types/direction';
+import { OBJECTIVE_DESCRIPTIONS, TIKTOK_OBJECTIVE_DESCRIPTIONS } from '@/types/direction';
 import { CITIES_AND_COUNTRIES, COUNTRY_IDS, DEFAULT_UTM } from '@/constants/cities';
 import { defaultSettingsApi } from '@/services/defaultSettingsApi';
 import { facebookApi } from '@/services/facebookApi';
 import { toast } from 'sonner';
+
+const TIKTOK_MIN_DAILY_BUDGET = 2500;
 
 // CAPI settings for update
 export interface EditDirectionCapiSettings {
@@ -36,10 +38,13 @@ interface EditDirectionDialogProps {
   direction: Direction | null;
   onSubmit: (data: {
     name: string;
-    daily_budget_cents: number;
-    target_cpl_cents: number;
+    daily_budget_cents?: number;
+    target_cpl_cents?: number;
+    tiktok_daily_budget?: number;
+    tiktok_target_cpl_kzt?: number;
     is_active: boolean;
     whatsapp_phone_number?: string | null;
+    optimization_level?: OptimizationLevel;
     capiSettings?: EditDirectionCapiSettings;
   }) => Promise<void>;
 }
@@ -57,7 +62,10 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [name, setName] = useState('');
   const [dailyBudget, setDailyBudget] = useState('');
   const [targetCpl, setTargetCpl] = useState('');
+  const [tiktokDailyBudget, setTikTokDailyBudget] = useState('');
+  const [tiktokTargetCpl, setTikTokTargetCpl] = useState('');
   const [isActive, setIsActive] = useState(true);
+  const [optimizationLevel, setOptimizationLevel] = useState<OptimizationLevel>('level_1');
 
   // Настройки рекламы
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -81,6 +89,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
   const [isLoadingSettings, setIsLoadingSettings] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isTikTok = direction?.platform === 'tiktok';
 
   // CAPI settings
   const [capiEnabled, setCapiEnabled] = useState(false);
@@ -94,7 +103,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       const needPixels = direction?.objective === 'site_leads' ||
         (direction?.objective !== 'site_leads' && capiEnabled);
 
-      if (!direction || !needPixels) {
+      if (!direction || isTikTok || !needPixels) {
         if (direction?.objective !== 'site_leads') {
           // Не сбрасываем пиксели для site_leads
           setPixels([]);
@@ -114,7 +123,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       }
     };
     loadPixels();
-  }, [direction?.objective, capiEnabled]);
+  }, [direction?.objective, capiEnabled, isTikTok]);
 
   // Заполнение формы при открытии диалога
   useEffect(() => {
@@ -122,19 +131,38 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
 
     // Основная информация
     setName(direction.name);
-    setDailyBudget((direction.daily_budget_cents / 100).toFixed(2));
-    setTargetCpl((direction.target_cpl_cents / 100).toFixed(2));
     setIsActive(direction.is_active);
+    setOptimizationLevel(direction.optimization_level || 'level_1');
     setWhatsappPhoneNumber(direction.whatsapp_phone_number || '');
     setError(null);
 
     // CAPI settings
-    setCapiEnabled(direction.capi_enabled || false);
-    setCapiSource(direction.capi_source || 'whatsapp');
+    setCapiEnabled(!isTikTok && (direction.capi_enabled || false));
+    setCapiSource(!isTikTok ? (direction.capi_source || 'whatsapp') : 'whatsapp');
+
+    if (isTikTok) {
+      setTikTokDailyBudget(
+        direction.tiktok_daily_budget ? String(direction.tiktok_daily_budget) : String(TIKTOK_MIN_DAILY_BUDGET)
+      );
+      setTikTokTargetCpl(
+        direction.tiktok_target_cpl_kzt != null
+          ? String(direction.tiktok_target_cpl_kzt)
+          : direction.tiktok_target_cpl != null
+            ? String(direction.tiktok_target_cpl)
+            : ''
+      );
+      setDailyBudget('');
+      setTargetCpl('');
+    } else {
+      setDailyBudget((direction.daily_budget_cents / 100).toFixed(2));
+      setTargetCpl((direction.target_cpl_cents / 100).toFixed(2));
+      setTikTokDailyBudget('');
+      setTikTokTargetCpl('');
+    }
 
     // Загружаем настройки рекламы
     loadAdSettings(direction.id);
-  }, [direction, open]);
+  }, [direction, open, isTikTok]);
 
   const loadAdSettings = async (directionId: string) => {
     setIsLoadingSettings(true);
@@ -217,18 +245,40 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       return;
     }
 
-    const budgetValue = parseFloat(dailyBudget);
-    if (isNaN(budgetValue) || budgetValue < 5) {
-      setError('Минимальный бюджет: $5/день');
-      return;
-    }
+    let budgetValue = 0;
+    let cplValue = 0;
+    let tiktokBudgetValue = 0;
+    let tiktokTargetCplValue: number | null = null;
 
-    const cplValue = parseFloat(targetCpl);
-    const minCost = direction?.objective === 'instagram_traffic' ? 0.10 : 0.50;
-    if (isNaN(cplValue) || cplValue < minCost) {
-      const label = direction?.objective === 'instagram_traffic' ? 'перехода' : 'заявки';
-      setError(`Минимальная стоимость ${label}: $${minCost.toFixed(2)}`);
-      return;
+    if (!isTikTok) {
+      budgetValue = parseFloat(dailyBudget);
+      if (isNaN(budgetValue) || budgetValue < 5) {
+        setError('Минимальный бюджет: $5/день');
+        return;
+      }
+
+      cplValue = parseFloat(targetCpl);
+      const minCost = direction?.objective === 'instagram_traffic' ? 0.10 : 0.50;
+      if (isNaN(cplValue) || cplValue < minCost) {
+        const label = direction?.objective === 'instagram_traffic' ? 'перехода' : 'заявки';
+        setError(`Минимальная стоимость ${label}: $${minCost.toFixed(2)}`);
+        return;
+      }
+    } else {
+      tiktokBudgetValue = parseFloat(tiktokDailyBudget);
+      if (isNaN(tiktokBudgetValue) || tiktokBudgetValue < TIKTOK_MIN_DAILY_BUDGET) {
+        setError(`Минимальный бюджет: ${TIKTOK_MIN_DAILY_BUDGET} KZT/день`);
+        return;
+      }
+
+      if (tiktokTargetCpl.trim()) {
+        const parsedTarget = parseFloat(tiktokTargetCpl);
+        if (isNaN(parsedTarget) || parsedTarget < 0) {
+          setError('Проверьте целевую стоимость для TikTok');
+          return;
+        }
+        tiktokTargetCplValue = Math.round(parsedTarget);
+      }
     }
 
     // Валидация настроек рекламы
@@ -247,20 +297,22 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       return;
     }
 
-    // Валидация специфичных полей
-    if (direction.objective === 'whatsapp' && !clientQuestion.trim()) {
-      setError('Введите вопрос клиента для WhatsApp');
-      return;
-    }
+    // Валидация специфичных полей (Facebook)
+    if (!isTikTok) {
+      if (direction.objective === 'whatsapp' && !clientQuestion.trim()) {
+        setError('Введите вопрос клиента для WhatsApp');
+        return;
+      }
 
-    if (direction.objective === 'instagram_traffic' && !instagramUrl.trim()) {
-      setError('Введите Instagram URL');
-      return;
-    }
+      if (direction.objective === 'instagram_traffic' && !instagramUrl.trim()) {
+        setError('Введите Instagram URL');
+        return;
+      }
 
-    if (direction.objective === 'site_leads' && !siteUrl.trim()) {
-      setError('Введите URL сайта');
-      return;
+      if (direction.objective === 'site_leads' && !siteUrl.trim()) {
+        setError('Введите URL сайта');
+        return;
+      }
     }
 
     // lead_forms валидация не нужна - lead_form_id уже выбран при создании direction
@@ -272,15 +324,23 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
       // Обновляем основную информацию направления + CAPI settings
       await onSubmit({
         name: name.trim(),
-        daily_budget_cents: Math.round(budgetValue * 100),
-        target_cpl_cents: Math.round(cplValue * 100),
+        ...(isTikTok
+          ? {
+              tiktok_daily_budget: Math.round(tiktokBudgetValue),
+              ...(tiktokTargetCplValue !== null && { tiktok_target_cpl_kzt: tiktokTargetCplValue }),
+            }
+          : {
+              daily_budget_cents: Math.round(budgetValue * 100),
+              target_cpl_cents: Math.round(cplValue * 100),
+              whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
+              ...(direction.objective === 'whatsapp_conversions' && { optimization_level: optimizationLevel }),
+              capiSettings: {
+                capi_enabled: capiEnabled && !!capiPixelId, // CAPI требует пиксель
+                capi_source: capiEnabled && capiPixelId ? capiSource : null,
+                pixel_id: capiEnabled ? capiPixelId || null : null,
+              },
+            }),
         is_active: isActive,
-        whatsapp_phone_number: whatsappPhoneNumber.trim() || null,
-        capiSettings: {
-          capi_enabled: capiEnabled && !!capiPixelId, // CAPI требует пиксель
-          capi_source: capiEnabled && capiPixelId ? capiSource : null,
-          pixel_id: capiEnabled ? capiPixelId || null : null,
-        },
       });
 
       // Обновляем или создаём настройки рекламы
@@ -290,22 +350,22 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
         age_max: ageMax,
         gender,
         description: description.trim(),
-        ...(direction.objective === 'whatsapp' && {
+        ...(!isTikTok && direction.objective === 'whatsapp' && {
           client_question: clientQuestion.trim(),
           // Сохраняем pixel_id для CAPI
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
-        ...(direction.objective === 'instagram_traffic' && {
+        ...(!isTikTok && direction.objective === 'instagram_traffic' && {
           instagram_url: instagramUrl.trim(),
           // Сохраняем pixel_id для CAPI
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
         }),
-        ...(direction.objective === 'site_leads' && {
+        ...(!isTikTok && direction.objective === 'site_leads' && {
           site_url: siteUrl.trim(),
           pixel_id: pixelId || null,
           utm_tag: utmTag.trim() || DEFAULT_UTM,
         }),
-        ...(direction.objective === 'lead_forms' && {
+        ...(!isTikTok && direction.objective === 'lead_forms' && {
           site_url: siteUrl.trim() || null,
           // Сохраняем pixel_id для CAPI
           ...(capiEnabled && capiPixelId && { pixel_id: capiPixelId }),
@@ -398,58 +458,113 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 <div className="space-y-2">
                   <Label>Тип кампании</Label>
                   <div className="text-sm text-muted-foreground">
-                    {OBJECTIVE_DESCRIPTIONS[direction.objective]}
+                    {isTikTok
+                      ? TIKTOK_OBJECTIVE_DESCRIPTIONS[direction.tiktok_objective || 'traffic']
+                      : OBJECTIVE_DESCRIPTIONS[direction.objective]}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     ⚠️ Тип кампании нельзя изменить
                   </p>
                 </div>
 
-                {/* Суточный бюджет */}
-                <div className="space-y-2">
-                  <Label htmlFor="edit-daily-budget">
-                    Суточный бюджет <span className="text-red-500">*</span>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="edit-daily-budget"
-                      type="number"
-                      min="5"
-                      step="1"
-                      value={dailyBudget}
-                      onChange={(e) => setDailyBudget(e.target.value)}
-                      disabled={isSubmitting}
-                      className="flex-1"
-                    />
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">
-                      $ / день
-                    </span>
+                {/* Суточный бюджет Instagram */}
+                {!isTikTok && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-daily-budget">
+                      Суточный бюджет <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="edit-daily-budget"
+                        type="number"
+                        min="5"
+                        step="1"
+                        value={dailyBudget}
+                        onChange={(e) => setDailyBudget(e.target.value)}
+                        disabled={isSubmitting}
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">
+                        $ / день
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Целевая стоимость (CPL для лидов, CPC для трафика) */}
-                <div className="space-y-2">
-                  <Label htmlFor="edit-target-cpl">
-                    {direction?.objective === 'instagram_traffic'
-                      ? 'Целевая стоимость перехода (CPC)'
-                      : 'Целевая стоимость заявки (CPL)'} <span className="text-red-500">*</span>
-                  </Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      id="edit-target-cpl"
-                      type="number"
-                      min={direction?.objective === 'instagram_traffic' ? '0.1' : '0.5'}
-                      step="0.01"
-                      value={targetCpl}
-                      onChange={(e) => setTargetCpl(e.target.value)}
-                      disabled={isSubmitting}
-                      className="flex-1"
-                    />
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">
-                      {direction?.objective === 'instagram_traffic' ? '$ / переход' : '$ / заявка'}
-                    </span>
+                {/* Суточный бюджет TikTok */}
+                {isTikTok && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-tiktok-daily-budget">
+                      Суточный бюджет TikTok <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="edit-tiktok-daily-budget"
+                        type="number"
+                        min={TIKTOK_MIN_DAILY_BUDGET.toString()}
+                        step="1"
+                        value={tiktokDailyBudget}
+                        onChange={(e) => setTikTokDailyBudget(e.target.value)}
+                        disabled={isSubmitting}
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">
+                        KZT / день
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Целевая стоимость Instagram */}
+                {!isTikTok && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-target-cpl">
+                      {direction?.objective === 'instagram_traffic'
+                        ? 'Целевая стоимость перехода (CPC)'
+                        : 'Целевая стоимость заявки (CPL)'} <span className="text-red-500">*</span>
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="edit-target-cpl"
+                        type="number"
+                        min={direction?.objective === 'instagram_traffic' ? '0.1' : '0.5'}
+                        step="0.01"
+                        value={targetCpl}
+                        onChange={(e) => setTargetCpl(e.target.value)}
+                        disabled={isSubmitting}
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">
+                        {direction?.objective === 'instagram_traffic' ? '$ / переход' : '$ / заявка'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Целевая стоимость TikTok */}
+                {isTikTok && (
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-tiktok-target-cpl">
+                      Целевая стоимость TikTok (опционально)
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="edit-tiktok-target-cpl"
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="1500"
+                        value={tiktokTargetCpl}
+                        onChange={(e) => setTikTokTargetCpl(e.target.value)}
+                        disabled={isSubmitting}
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">
+                        KZT
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Separator />
@@ -613,7 +728,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               <Separator />
 
               {/* СЕКЦИЯ 4: Специфичные настройки в зависимости от цели */}
-              {direction.objective === 'whatsapp' && (
+              {!isTikTok && direction.objective === 'whatsapp' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">💬 WhatsApp</h3>
                   
@@ -653,7 +768,75 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 </div>
               )}
 
-              {direction.objective === 'instagram_traffic' && (
+              {!isTikTok && direction.objective === 'whatsapp_conversions' && (
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-sm">📊 WhatsApp-конверсии (CAPI)</h3>
+
+                  <div className="space-y-2">
+                    <Label>
+                      Уровень оптимизации <span className="text-red-500">*</span>
+                    </Label>
+                    <RadioGroup
+                      value={optimizationLevel}
+                      onValueChange={(value) => setOptimizationLevel(value as OptimizationLevel)}
+                      disabled={isSubmitting}
+                    >
+                      <div className="flex items-start space-x-2">
+                        <RadioGroupItem value="level_1" id="edit-opt-level-1" />
+                        <div>
+                          <Label htmlFor="edit-opt-level-1" className="font-normal cursor-pointer">
+                            Level 1: Интерес
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            ViewContent — 3+ сообщения от клиента
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-start space-x-2">
+                        <RadioGroupItem value="level_2" id="edit-opt-level-2" />
+                        <div>
+                          <Label htmlFor="edit-opt-level-2" className="font-normal cursor-pointer">
+                            Level 2: Квалификация
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            CompleteRegistration — клиент квалифицирован
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-start space-x-2">
+                        <RadioGroupItem value="level_3" id="edit-opt-level-3" />
+                        <div>
+                          <Label htmlFor="edit-opt-level-3" className="font-normal cursor-pointer">
+                            Level 3: Запись/Покупка
+                          </Label>
+                          <p className="text-xs text-muted-foreground">
+                            Purchase — клиент записался или купил
+                          </p>
+                        </div>
+                      </div>
+                    </RadioGroup>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-wa-conv-number">
+                      WhatsApp номер (опционально)
+                    </Label>
+                    <Input
+                      id="edit-wa-conv-number"
+                      value={whatsappPhoneNumber}
+                      onChange={(e) => setWhatsappPhoneNumber(e.target.value)}
+                      placeholder="+77001234567"
+                      disabled={isSubmitting}
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Международный формат: +[код страны][номер]. Если не указан - будет использован дефолтный из Facebook.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!isTikTok && direction.objective === 'instagram_traffic' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">📱 Instagram</h3>
                   
@@ -673,7 +856,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 </div>
               )}
 
-              {direction.objective === 'site_leads' && (
+              {!isTikTok && direction.objective === 'site_leads' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">🌐 Лиды на сайте</h3>
                   
@@ -745,7 +928,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
                 </div>
               )}
 
-              {direction.objective === 'lead_forms' && (
+              {!isTikTok && direction.objective === 'lead_forms' && (
                 <div className="space-y-4">
                   <h3 className="font-semibold text-sm">📝 Лид-формы</h3>
 
@@ -769,7 +952,7 @@ export const EditDirectionDialog: React.FC<EditDirectionDialogProps> = ({
               )}
 
               {/* СЕКЦИЯ: Meta CAPI */}
-              {direction.objective !== 'site_leads' && (
+              {!isTikTok && direction.objective !== 'site_leads' && (
                 <div className="space-y-4">
                   <Separator />
                   <div className="flex items-center justify-between">

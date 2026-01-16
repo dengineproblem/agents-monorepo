@@ -500,7 +500,10 @@ const TIKTOK_ALLOWED_TYPES = new Set([
   'TikTok.Direction.CreateAdGroupWithCreatives'
 ]);
 
-const TIKTOK_MIN_DAILY_BUDGET_USD = Number(process.env.TIKTOK_MIN_DAILY_BUDGET_USD || 20);
+const TIKTOK_MIN_DAILY_BUDGET_KZT = Number(process.env.TIKTOK_MIN_DAILY_BUDGET_KZT || 2500);
+const TIKTOK_MIN_DAILY_BUDGET_USD = process.env.TIKTOK_MIN_DAILY_BUDGET_USD
+  ? Number(process.env.TIKTOK_MIN_DAILY_BUDGET_USD)
+  : null;
 const TIKTOK_MAX_DAILY_BUDGET_KZT = Number(process.env.TIKTOK_MAX_DAILY_BUDGET_KZT || 100000000);
 const TIKTOK_DEFAULT_CPL_KZT = Number(process.env.TIKTOK_DEFAULT_CPL_KZT || 5000);
 
@@ -2044,7 +2047,7 @@ const TIKTOK_SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyRe
   'ОБЩИЙ КОНТЕКСТ',
   '- Ты — таргетолог-агент, управляющий рекламой в TikTok Ads.',
   '- Бюджеты и CPL считаем в тенге (KZT).',
-  minBudgetKzt ? `- Минимальный дневной бюджет TikTok: ${minBudgetKzt} ₸` : '- Минимальный дневной бюджет TikTok: 20 USD в эквиваленте KZT.',
+  minBudgetKzt ? `- Минимальный дневной бюджет TikTok: ${minBudgetKzt} ₸` : `- Минимальный дневной бюджет TikTok: ${TIKTOK_MIN_DAILY_BUDGET_KZT} ₸.`,
   '',
   '📊 НАПРАВЛЕНИЯ (КРИТИЧНО!)',
   '- Каждое направление = отдельная TikTok Campaign (tiktok_campaign_id).',
@@ -2053,8 +2056,9 @@ const TIKTOK_SYSTEM_PROMPT = (clientPrompt, reportOnlyMode = false, reportOnlyRe
   '- Сумма бюджетов активных AdGroups не должна превышать дневной бюджет направления.',
   '',
   'ЦЕЛИ И ЛИДЫ:',
-  '- lead_generation / conversions → лиды считаем по conversions.',
-  '- traffic → лиды считаем по clicks (стоимость действия = CPC).',
+  '- lead_generation / conversions (Leadform / Website Conversions) → лиды считаем по conversions.',
+  '- traffic (Traffic Clicky) → лиды считаем по clicks (стоимость действия = CPC).',
+  '- Качество лидов для TikTok пока не рассчитывается — укажи это текстом, без числовых значений.',
   '',
   'РАЗРЕШЕННЫЕ ДЕЙСТВИЯ:',
   '- TikTok.GetCampaignStatus',
@@ -4150,7 +4154,9 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
     }
 
     const usdRate = await getUsdToKzt();
-    const minBudgetKzt = convertUsdToKzt(TIKTOK_MIN_DAILY_BUDGET_USD, usdRate);
+    const minBudgetKzt = Number.isFinite(TIKTOK_MIN_DAILY_BUDGET_USD) && TIKTOK_MIN_DAILY_BUDGET_USD > 0
+      ? convertUsdToKzt(TIKTOK_MIN_DAILY_BUDGET_USD, usdRate)
+      : TIKTOK_MIN_DAILY_BUDGET_KZT;
     const budgetBounds = { minBudget: minBudgetKzt, maxBudget: TIKTOK_MAX_DAILY_BUDGET_KZT };
 
     let advertiserInfo = null;
@@ -4587,7 +4593,7 @@ fastify.post('/api/brain/run-tiktok', async (request, reply) => {
           spend_kzt: Math.round(c.spend || 0),
           leads: c.leads || 0
         })),
-        report_template: '📅 Дата отчета: <YYYY-MM-DD>\\n\\n🏢 Статус рекламного кабинета: <Активен|Неактивен>\\n\\n📈 Общая сводка:\\n- Общие затраты по всем кампаниям: <amount> ₸\\n- Общее количество полученных лидов/кликов: <int>\\n- Средняя стоимость действия: <amount> ₸\\n\\n📊 Сводка по отдельным кампаниям:\\n<n>. Кампания \"<name>\" (ID: <id>)\\n   - Статус: <Активна|Неактивна>\\n   - Затраты: <amount> ₸\\n   - Лидов/кликов: <int>\\n   - CPL/СРА: <amount> ₸\\n\\n📊 Качество лидов:\\n- <описание>\\n\\n✅ Выполненные действия:\\n1. Кампания \"<name>\":\\n   - <краткая причина/действие>\\n\\n📊 Аналитика в динамике:\\n- <наблюдение 1>\\n- <наблюдение 2>\\n\\nДля дальнейшей оптимизации обращаем внимание на:\\n- <рекомендация 1>\\n- <рекомендация 2>'
+        report_template: '📅 Дата отчета: <YYYY-MM-DD>\\n\\n🏢 Статус рекламного кабинета: <Активен|Неактивен>\\n\\n📈 Общая сводка:\\n- Общие затраты по всем кампаниям: <amount> ₸\\n- Общее количество полученных лидов/кликов: <int>\\n- Средняя стоимость действия: <amount> ₸\\n\\n📊 Сводка по отдельным кампаниям:\\n<n>. Кампания \"<name>\" (ID: <id>)\\n   - Статус: <Активна|Неактивна>\\n   - Затраты: <amount> ₸\\n   - Лидов/кликов: <int>\\n   - CPL/СРА: <amount> ₸\\n\\n📊 Качество лидов:\\n- Качество лидов для TikTok пока не рассчитывается.\\n\\n✅ Выполненные действия:\\n1. Кампания \"<name>\":\\n   - <краткая причина/действие>\\n\\n📊 Аналитика в динамике:\\n- <наблюдение 1>\\n- <наблюдение 2>\\n\\nДля дальнейшей оптимизации обращаем внимание на:\\n- <рекомендация 1>\\n- <рекомендация 2>'
       },
       action_history: []
     };

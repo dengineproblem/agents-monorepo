@@ -41,7 +41,7 @@ interface CreativeTexts {
 
 const CreativeGeneration = () => {
   const location = useLocation();
-  const { currentAdAccountId, multiAccountEnabled } = useAppContext();
+  const { currentAdAccountId, multiAccountEnabled, platform } = useAppContext();
 
   // В мультиаккаунтном режиме генерации безлимитные
   // ВАЖНО: проверяем флаг multiAccountEnabled, а НЕ наличие currentAdAccountId!
@@ -113,7 +113,8 @@ const CreativeGeneration = () => {
   const [showCompetitorRef, setShowCompetitorRef] = useState(false);
 
   // Загрузка направлений (с фильтрацией по аккаунту для multi-account режима)
-  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId);
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
+  const { directions, loading: directionsLoading } = useDirections(userId, currentAdAccountId, directionsPlatform);
 
   // Автосохранение черновика
   const {

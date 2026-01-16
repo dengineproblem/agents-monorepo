@@ -18,6 +18,7 @@ interface SummaryStatsProps {
 const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   const { t } = useTranslation();
   const { campaignStats, loading, error, platform, dateRange, currentAdAccountId } = useAppContext();
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
 
   // State for AmoCRM qualified leads
   const [amocrmQualifiedLeads, setAmocrmQualifiedLeads] = useState<number | null>(null);
@@ -26,12 +27,13 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
   // Загружаем направления для проверки, есть ли WhatsApp кампании
   const storedUser = localStorage.getItem('user');
   const userAccountId = storedUser ? JSON.parse(storedUser).id : null;
-  const { directions } = useDirections(userAccountId, currentAdAccountId);
+  const { directions } = useDirections(userAccountId, currentAdAccountId, directionsPlatform);
 
   // Проверяем, есть ли хотя бы одно WhatsApp направление
   const hasWhatsAppDirections = useMemo(() => {
+    if (platform === 'tiktok') return false;
     return directions.some(d => d.objective === 'whatsapp');
-  }, [directions]);
+  }, [directions, platform]);
 
   // Load AmoCRM qualified leads data when date range changes
   useEffect(() => {
@@ -170,7 +172,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
             tooltipKey={TooltipKeys.DASHBOARD_SPEND}
           />
           <StatCard
-            title={platform === 'tiktok' ? 'Переходы в WhatsApp' : t('stats.totalLeads')}
+            title={platform === 'tiktok' ? 'Лиды/клики' : t('stats.totalLeads')}
             value={formatNumber(stats.totalLeads)}
             icon={<Target className="w-4 h-4 text-blue-600 dark:text-gray-500/70" />}
             loading={loading}
@@ -215,7 +217,7 @@ const SummaryStats: React.FC<SummaryStatsProps> = ({ showTitle = false }) => {
         tooltipKey={TooltipKeys.DASHBOARD_SPEND}
       />
       <StatCard
-        title={platform === 'tiktok' ? 'Переходы в WhatsApp' : t('stats.totalLeads')}
+        title={platform === 'tiktok' ? 'Лиды/клики' : t('stats.totalLeads')}
         value={formatNumber(stats.totalLeads)}
         icon={<Target className="w-4 h-4 text-blue-600 dark:text-blue-500/70" />}
         loading={loading}

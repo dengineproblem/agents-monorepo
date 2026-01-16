@@ -1173,6 +1173,7 @@ const MultiAccountDashboard: React.FC = () => {
         onApprove={optimization.approveSelected}
         onReject={optimization.reject}
         isExecuting={optimization.state.isExecuting}
+        progressMessage={optimization.state.progressMessage}
       />
     </div>
   );
