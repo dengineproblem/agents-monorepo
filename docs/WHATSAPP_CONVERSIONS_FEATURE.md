@@ -119,12 +119,14 @@ Content-Type: application/json
 |------|-----------|
 | `migrations/154_add_whatsapp_conversions_objective.sql` | Миграция БД |
 | `services/frontend/src/types/direction.ts` | TypeScript типы |
-| `services/agent-service/src/lib/campaignBuilder.ts` | `getCustomEventType()`, switch cases |
+| `services/agent-service/src/lib/campaignBuilder.ts` | `getCustomEventType()`, `createAdSetInCampaign()` с objective |
 | `services/agent-service/src/routes/directions.ts` | Валидация, INSERT/UPDATE |
-| `services/agent-service/src/routes/campaignBuilder.ts` | promoted_object для новой цели |
+| `services/agent-service/src/routes/campaignBuilder.ts` | promoted_object + передача objective в createAdSetInCampaign |
+| `services/agent-service/src/workflows/createAdSetInDirection.ts` | promoted_object для whatsapp_conversions (Brain workflow) |
 | `services/agent-service/src/routes/tusUpload.ts` | Условная передача `instagramId` |
 | `services/agent-service/src/adapters/facebook.ts` | Опциональный `instagramId` |
 | `services/frontend/src/components/profile/CreateDirectionDialog.tsx` | UI создания, чекбокс Instagram |
+| `services/frontend/src/components/profile/DirectionsCard.tsx` | Передача `use_instagram` в API |
 | `services/frontend/src/components/profile/EditDirectionDialog.tsx` | UI редактирования |
 
 ## Логирование
@@ -140,7 +142,7 @@ Content-Type: application/json
 ├── fb_campaign_id
 └── capi_source
 
-Формируем promoted_object для WhatsApp-конверсий (CAPI)
+Формируем promoted_object для WhatsApp-конверсий (CAPI) - manual launch
 ├── directionId
 ├── directionName
 ├── objective: whatsapp_conversions
@@ -149,6 +151,38 @@ Content-Type: application/json
 ├── pixel_id
 ├── page_id
 └── has_whatsapp_number
+
+WhatsApp-conversions: setting destination_type=WHATSAPP for CAPI optimization
+├── campaignId
+├── name
+├── objective: whatsapp_conversions
+├── optimization_goal: OFFSITE_CONVERSIONS
+├── destination_type: WHATSAPP
+├── promoted_object_pixel_id
+└── promoted_object_event_type
+
+WhatsApp-conversions ad set: promoted_object configured for CAPI optimization (Brain workflow)
+├── directionId
+├── directionName
+├── objective: whatsapp_conversions
+├── optimization_level
+├── pixel_id
+├── pixel_source: direction|defaultSettings
+├── custom_event_type
+├── page_id
+├── whatsapp_phone_number
+└── destination_type: WHATSAPP
+
+Final ad set parameters before Facebook API call
+├── campaignId
+├── name
+├── objective
+├── optimization_goal
+├── destination_type
+├── promoted_object
+├── pixel_id
+├── custom_event_type
+└── targeting_automation
 ```
 
 ## Требования
@@ -167,6 +201,46 @@ Content-Type: application/json
 WhatsApp-конверсии требуют настроенный Meta Pixel. Добавьте Pixel в настройках направления.
 ```
 
+## Исправленные баги (2026-01-16)
+
+### 1. Чекбокс use_instagram не сохранялся при создании направления
+
+**Проблема:** При создании направления через UI, чекбокс "Использовать Instagram аккаунт" игнорировался — в БД всегда записывалось `true`.
+
+**Причина:** В `DirectionsCard.tsx` поле `use_instagram` не передавалось в API payload.
+
+**Решение:** Добавлена передача поля в `handleCreate`:
+```typescript
+...(data.use_instagram !== undefined && { use_instagram: data.use_instagram }),
+```
+
+### 2. destination_type "сайт" вместо "WhatsApp"
+
+**Проблема:** При создании группы объявлений для `whatsapp_conversions` место получения конверсии устанавливалось как "сайт" вместо "WhatsApp".
+
+**Причина:**
+1. В `createAdSetInDirection.ts` отсутствовал блок для формирования `promoted_object` для `whatsapp_conversions`
+2. В `routes/campaignBuilder.ts` не передавался параметр `objective` в функцию `createAdSetInCampaign`
+
+**Решение:**
+1. Добавлен блок обработки `whatsapp_conversions` в `createAdSetInDirection.ts` с полным `promoted_object`
+2. Добавлена передача `objective: direction.objective` в обоих вызовах `createAdSetInCampaign` (auto-launch и manual launch)
+
+**Эталонные параметры Ad Set (из кампании 120237359222880784):**
+```json
+{
+  "optimization_goal": "OFFSITE_CONVERSIONS",
+  "billing_event": "IMPRESSIONS",
+  "destination_type": "WHATSAPP",
+  "promoted_object": {
+    "pixel_id": "4205947936322188",
+    "custom_event_type": "CONTENT_VIEW",
+    "page_id": "290307200829671",
+    "whatsapp_phone_number": "77077707066"
+  }
+}
+```
+
 ## Связанная документация
 
 - [META_CAPI_INTEGRATION.md](META_CAPI_INTEGRATION.md) — интеграция с Conversions API
@@ -175,3 +249,4 @@ WhatsApp-конверсии требуют настроенный Meta Pixel. Д
 ---
 
 *Создано: 2026-01-16*
+*Обновлено: 2026-01-16 — исправлены баги use_instagram и destination_type*

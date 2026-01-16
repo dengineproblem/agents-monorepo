@@ -14,6 +14,7 @@ import {
   getAvailableCreatives,
   getOptimizationGoal,
   getBillingEvent,
+  getCustomEventType,
   createAdSetInCampaign,
   createAdsInAdSet,
   type CampaignBuilderInput,
@@ -60,7 +61,7 @@ const autoLaunchRequestSchema = {
   properties: {
     user_account_id: { type: 'string', format: 'uuid' },
     userId: { type: 'string', format: 'uuid' }, // Алиас для обратной совместимости
-    objective: { type: 'string', enum: ['whatsapp', 'instagram_traffic', 'site_leads', 'lead_forms'] },
+    objective: { type: 'string', enum: ['whatsapp', 'whatsapp_conversions', 'instagram_traffic', 'site_leads', 'lead_forms'] },
     campaign_name: { type: 'string' },
     requested_budget_cents: { type: 'number', minimum: 500 }, // Минимум $5
     additional_context: { type: 'string' },
@@ -154,7 +155,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .from('account_directions')
           .select('*')
           .eq('user_account_id', user_account_id)
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .or('platform.eq.facebook,platform.is.null');
 
         // Если мультиаккаунт - фильтруем по account_id (UUID FK на ad_accounts.id)
         if (credentials.isMultiAccountMode && account_id) {
@@ -466,6 +468,45 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 page_id: credentials.fbPageId,
                 ...(whatsapp_phone_number && { whatsapp_phone_number })
               };
+            } else if (direction.objective === 'whatsapp_conversions') {
+              // WhatsApp-конверсии: CAPI оптимизация (OFFSITE_CONVERSIONS + WHATSAPP destination)
+              // ОБЯЗАТЕЛЬНО: pixel_id для CAPI событий
+              const pixelId = defaultSettings?.pixel_id;
+              if (!pixelId) {
+                log.warn({
+                  directionId: direction.id,
+                  directionName: direction.name,
+                  objective: direction.objective,
+                }, 'WhatsApp-конверсии требуют pixel_id, но он не настроен. Пропускаем направление.');
+                results.push({
+                  direction_id: direction.id,
+                  direction_name: direction.name,
+                  success: false,
+                  error: 'WhatsApp-конверсии требуют настроенный Meta Pixel',
+                });
+                continue;
+              }
+
+              const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || undefined;
+              const customEventType = getCustomEventType(direction.optimization_level);
+
+              log.info({
+                directionId: direction.id,
+                directionName: direction.name,
+                objective: direction.objective,
+                optimization_level: direction.optimization_level,
+                custom_event_type: customEventType,
+                pixel_id: pixelId,
+                page_id: credentials.fbPageId,
+                has_whatsapp_number: !!whatsapp_phone_number,
+              }, 'Формируем promoted_object для WhatsApp-конверсий (CAPI)');
+
+              promoted_object = {
+                pixel_id: pixelId,
+                custom_event_type: customEventType,
+                page_id: credentials.fbPageId,
+                ...(whatsapp_phone_number && { whatsapp_phone_number })
+              };
             } else if (direction.objective === 'instagram_traffic') {
               // Для Instagram ТОЛЬКО page_id (как в рабочем n8n workflow)
               // Ссылка уже в креативе в call_to_action
@@ -553,6 +594,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
                 billing_event,
                 promoted_object,
                 start_mode: (request.body as any)?.start_mode || 'midnight_almaty',
+                objective: direction.objective,
               });
 
               adsetId = adset.id;
@@ -767,6 +809,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .select('*')
           .eq('id', direction_id)
           .eq('user_account_id', user_account_id)
+          .or('platform.eq.facebook,platform.is.null')
           .eq('is_active', true)
           .single();
 
@@ -824,6 +867,42 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           // Если получим ошибку 2446885, createAdSetInCampaign автоматически повторит без номера
           const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || credentials.whatsappPhoneNumber || undefined;
           promoted_object = {
+            page_id: credentials.fbPageId,
+            ...(whatsapp_phone_number && { whatsapp_phone_number })
+          };
+        } else if (direction.objective === 'whatsapp_conversions') {
+          // WhatsApp-конверсии: CAPI оптимизация (OFFSITE_CONVERSIONS + WHATSAPP destination)
+          // ОБЯЗАТЕЛЬНО: pixel_id для CAPI событий
+          const pixelId = defaultSettings?.pixel_id;
+          if (!pixelId) {
+            log.error({
+              directionId: direction.id,
+              directionName: direction.name,
+              objective: direction.objective,
+            }, 'WhatsApp-конверсии требуют pixel_id, но он не настроен');
+            return reply.code(400).send({
+              success: false,
+              error: 'WhatsApp-конверсии требуют настроенный Meta Pixel. Добавьте Pixel в настройках направления.',
+            });
+          }
+
+          const whatsapp_phone_number = await getWhatsAppPhoneNumber(direction, user_account_id, supabase) || credentials.whatsappPhoneNumber || undefined;
+          const customEventType = getCustomEventType(direction.optimization_level);
+
+          log.info({
+            directionId: direction.id,
+            directionName: direction.name,
+            objective: direction.objective,
+            optimization_level: direction.optimization_level,
+            custom_event_type: customEventType,
+            pixel_id: pixelId,
+            page_id: credentials.fbPageId,
+            has_whatsapp_number: !!whatsapp_phone_number,
+          }, 'Формируем promoted_object для WhatsApp-конверсий (CAPI) - manual launch');
+
+          promoted_object = {
+            pixel_id: pixelId,
+            custom_event_type: customEventType,
             page_id: credentials.fbPageId,
             ...(whatsapp_phone_number && { whatsapp_phone_number })
           };
@@ -903,6 +982,7 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             billing_event,
             promoted_object,
             start_mode: start_mode || 'now', // Используем переданный режим или "Сейчас" по умолчанию
+            objective: direction.objective,
           });
 
           adsetId = adset.id;
@@ -1108,7 +1188,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
             .from('account_directions')
             .select('*')
             .eq('user_account_id', user_account_id)
-            .eq('is_active', true);
+            .eq('is_active', true)
+            .or('platform.eq.facebook,platform.is.null');
 
           if (directionsError) {
             log.error({ err: directionsError, userAccountId: user_account_id }, 'Failed to fetch active directions for pausing');
@@ -1159,7 +1240,8 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
           .select('*')
           .eq('user_account_id', user_account_id)
           .eq('is_active', true)
-          .eq('objective', objective);
+          .eq('objective', objective)
+          .or('platform.eq.facebook,platform.is.null');
 
         const hasDirections = activeDirections && activeDirections.length > 0;
 
@@ -1535,4 +1617,3 @@ export const campaignBuilderRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 };
-

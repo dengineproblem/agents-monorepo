@@ -72,17 +72,46 @@ const adSetsCache = new TTLCache<Array<{ adset_id: string; name?: string; status
 // TYPES
 // ========================================
 
-export type CampaignObjective = 'whatsapp' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
+export type CampaignObjective = 'whatsapp' | 'whatsapp_conversions' | 'instagram_traffic' | 'site_leads' | 'lead_forms';
 
 // Конвертация lowercase objective в формат для LLM
-export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'Instagram' | 'SiteLeads' | 'LeadForms' {
+export function objectiveToLLMFormat(objective: CampaignObjective): 'WhatsApp' | 'WhatsAppConversions' | 'Instagram' | 'SiteLeads' | 'LeadForms' {
   const mapping = {
     whatsapp: 'WhatsApp' as const,
+    whatsapp_conversions: 'WhatsAppConversions' as const,
     instagram_traffic: 'Instagram' as const,
     site_leads: 'SiteLeads' as const,
     lead_forms: 'LeadForms' as const,
   };
   return mapping[objective];
+}
+
+/**
+ * Маппинг optimization_level в custom_event_type для FB API (WhatsApp-конверсии)
+ *
+ * Соответствие уровней оптимизации и событий CAPI:
+ * - level_1: CONTENT_VIEW (ViewContent) — Интерес, 3+ сообщения от клиента
+ * - level_2: COMPLETE_REGISTRATION (CompleteRegistration) — Клиент квалифицирован
+ * - level_3: PURCHASE (Purchase) — Клиент записался или совершил покупку
+ *
+ * @param level - уровень оптимизации из направления (level_1, level_2, level_3)
+ * @returns custom_event_type для FB API promoted_object
+ */
+export function getCustomEventType(level: string | undefined): string {
+  const map: Record<string, string> = {
+    'level_1': 'CONTENT_VIEW',
+    'level_2': 'COMPLETE_REGISTRATION',
+    'level_3': 'PURCHASE'
+  };
+  const result = map[level || 'level_1'] || 'CONTENT_VIEW';
+
+  log.debug({
+    input_level: level,
+    resolved_level: level || 'level_1',
+    custom_event_type: result
+  }, 'getCustomEventType: маппинг optimization_level → custom_event_type');
+
+  return result;
 }
 
 export type AvailableCreative = {
@@ -1164,6 +1193,7 @@ export async function getAvailableCreatives(
     filteredCreatives = creatives.filter((c) => {
       switch (objective) {
         case 'whatsapp':
+        case 'whatsapp_conversions':
           return !!c.fb_creative_id_whatsapp;
         case 'instagram_traffic':
           return !!c.fb_creative_id_instagram_traffic;
@@ -1185,6 +1215,7 @@ export async function getAvailableCreatives(
   const fbCreativeIds = filteredCreatives.map((c) => {
     switch (objective) {
       case 'whatsapp':
+      case 'whatsapp_conversions':
         return c.fb_creative_id_whatsapp;
       case 'instagram_traffic':
         return c.fb_creative_id_instagram_traffic;
@@ -1220,6 +1251,7 @@ export async function getAvailableCreatives(
     let fbCreativeId: string | null = null;
     switch (objective) {
       case 'whatsapp':
+      case 'whatsapp_conversions':
         fbCreativeId = creative.fb_creative_id_whatsapp;
         break;
       case 'instagram_traffic':
@@ -2157,6 +2189,8 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
   switch (objective) {
     case 'whatsapp':
       return 'CONVERSATIONS';
+    case 'whatsapp_conversions':
+      return 'OFFSITE_CONVERSIONS';
     case 'instagram_traffic':
       return 'LINK_CLICKS';
     case 'site_leads':
@@ -2174,6 +2208,8 @@ export function getOptimizationGoal(objective: CampaignObjective): string {
 export function getBillingEvent(objective: CampaignObjective): string {
   switch (objective) {
     case 'whatsapp':
+      return 'IMPRESSIONS';
+    case 'whatsapp_conversions':
       return 'IMPRESSIONS';
     case 'instagram_traffic':
       return 'IMPRESSIONS';
@@ -2200,8 +2236,9 @@ export async function createAdSetInCampaign(params: {
   billing_event: string;
   promoted_object?: any;
   start_mode?: 'now' | 'midnight_almaty';
+  objective?: CampaignObjective; // Добавлен для различения whatsapp_conversions от site_leads
 }) {
-  const { campaignId, adAccountId, accessToken, name, dailyBudget, targeting, optimization_goal, billing_event, promoted_object } = params;
+  const { campaignId, adAccountId, accessToken, name, dailyBudget, targeting, optimization_goal, billing_event, promoted_object, objective } = params;
 
   const normalizedAdAccountId = adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`;
 
@@ -2251,14 +2288,28 @@ export async function createAdSetInCampaign(params: {
     body.destination_type = 'WHATSAPP';
   }
 
+  // WhatsApp-конверсии: OFFSITE_CONVERSIONS + destination WhatsApp
+  // Критично: без objective === 'whatsapp_conversions' будет fallback на WEBSITE
+  if (objective === 'whatsapp_conversions') {
+    body.destination_type = 'WHATSAPP';
+    log.info({
+      campaignId,
+      name,
+      objective,
+      optimization_goal,
+      destination_type: 'WHATSAPP',
+      promoted_object_pixel_id: promoted_object?.pixel_id,
+      promoted_object_event_type: promoted_object?.custom_event_type,
+    }, 'WhatsApp-conversions: setting destination_type=WHATSAPP for CAPI optimization');
+  }
+  // Для Site Leads (OFFSITE_CONVERSIONS без whatsapp_conversions) добавляем destination_type WEBSITE
+  else if (optimization_goal === 'OFFSITE_CONVERSIONS') {
+    body.destination_type = 'WEBSITE';
+  }
+
   // Для Instagram Profile добавляем destination_type (как в рабочем n8n workflow)
   if (optimization_goal === 'LINK_CLICKS' && promoted_object?.page_id && !promoted_object?.link) {
     body.destination_type = 'INSTAGRAM_PROFILE';
-  }
-
-  // Для Site Leads (OFFSITE_CONVERSIONS) добавляем destination_type
-  if (optimization_goal === 'OFFSITE_CONVERSIONS') {
-    body.destination_type = 'WEBSITE';
   }
 
   // Для Lead Forms (LEAD_GENERATION) - форма открывается в рекламе
@@ -2274,11 +2325,14 @@ export async function createAdSetInCampaign(params: {
   log.info({
     campaignId,
     name,
+    objective,
     optimization_goal,
     destination_type: body.destination_type,
     promoted_object: body.promoted_object,
     has_whatsapp_number: !!body.promoted_object?.whatsapp_phone_number,
     page_id: body.promoted_object?.page_id,
+    pixel_id: body.promoted_object?.pixel_id,
+    custom_event_type: body.promoted_object?.custom_event_type,
     targeting_automation: targeting?.targeting_automation,
     has_targeting_automation: !!targeting?.targeting_automation
   }, 'Final ad set parameters before Facebook API call');
@@ -2354,6 +2408,7 @@ export async function createAdSetInCampaign(params: {
 export function getCreativeIdForObjective(creative: AvailableCreative, objective: CampaignObjective): string | null {
   switch (objective) {
     case 'whatsapp':
+    case 'whatsapp_conversions':
       return creative.fb_creative_id_whatsapp;
     case 'instagram_traffic':
       return creative.fb_creative_id_instagram_traffic;

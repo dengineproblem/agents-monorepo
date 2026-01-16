@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase.js';
 import { createLogger, type AppLogger } from '../lib/logger.js';
 import { convertToFacebookTargeting } from '../lib/defaultSettings.js';
 import { saveAdCreativeMappingBatch } from '../lib/adCreativeMapping.js';
+import { getCustomEventType } from '../lib/campaignBuilder.js';
 import {
   getAvailableAdSet,
   activateAdSet,
@@ -172,6 +173,11 @@ export async function workflowCreateAdSetInDirection(
       optimization_goal = 'CONVERSATIONS';
       destination_type = 'WHATSAPP';
       break;
+    case 'whatsapp_conversions':
+      fb_objective = 'OUTCOME_SALES';
+      optimization_goal = 'OFFSITE_CONVERSIONS';
+      destination_type = 'WHATSAPP';
+      break;
     case 'instagram_traffic':
       fb_objective = 'OUTCOME_TRAFFIC';
       optimization_goal = 'LINK_CLICKS';
@@ -199,6 +205,7 @@ export async function workflowCreateAdSetInDirection(
     if (!fb_creative_id) {
       switch (direction.objective) {
         case 'whatsapp':
+        case 'whatsapp_conversions':
           fb_creative_id = creative.fb_creative_id_whatsapp;
           break;
         case 'instagram_traffic':
@@ -393,6 +400,49 @@ export async function workflowCreateAdSetInDirection(
       page_id: String(effective_page_id),
       ...(whatsapp_phone_number && { whatsapp_phone_number })
     };
+  }
+
+  // Для WhatsApp-конверсий (CAPI): promoted_object с pixel_id и custom_event_type
+  // Это критично для правильной оптимизации по CAPI событиям
+  if (direction.objective === 'whatsapp_conversions' && effective_page_id) {
+    adsetBody.destination_type = 'WHATSAPP';
+
+    const pixelId = direction.pixel_id || defaultSettings?.pixel_id;
+    if (!pixelId) {
+      log.error({
+        directionId: direction.id,
+        directionName: direction.name,
+        objective: direction.objective,
+        optimization_level: direction.optimization_level,
+      }, 'WhatsApp-conversions requires pixel_id but none configured');
+
+      throw new Error(
+        `Cannot create whatsapp_conversions adset: pixel_id not configured for direction "${direction.name}". ` +
+        `Please configure Meta Pixel in direction settings.`
+      );
+    }
+
+    const customEventType = getCustomEventType(direction.optimization_level);
+
+    adsetBody.promoted_object = {
+      pixel_id: String(pixelId),
+      custom_event_type: customEventType,
+      page_id: String(effective_page_id),
+      ...(whatsapp_phone_number && { whatsapp_phone_number })
+    };
+
+    log.info({
+      directionId: direction.id,
+      directionName: direction.name,
+      objective: direction.objective,
+      optimization_level: direction.optimization_level,
+      pixel_id: pixelId,
+      pixel_source: direction.pixel_id ? 'direction' : 'defaultSettings',
+      custom_event_type: customEventType,
+      page_id: effective_page_id,
+      whatsapp_phone_number: whatsapp_phone_number || null,
+      destination_type: 'WHATSAPP',
+    }, 'WhatsApp-conversions ad set: promoted_object configured for CAPI optimization');
   }
 
   // Для Site Leads добавляем destination_type и promoted_object с pixel_id

@@ -7,15 +7,16 @@ import { Label } from '@/components/ui/label';
 import { Plus, Target, Trash2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDirections } from '@/hooks/useDirections';
-import { CreateDirectionDialog, type DirectionCapiSettings } from './CreateDirectionDialog';
+import { CreateDirectionDialog, type CreateDirectionFormData } from './CreateDirectionDialog';
 import { EditDirectionDialog, type EditDirectionCapiSettings } from './EditDirectionDialog';
 import { DeleteDirectionAlert } from './DeleteDirectionAlert';
 import { DirectionAdSets } from '../DirectionAdSets';
 import { supabase } from '@/integrations/supabase/client';
 import type { Direction, CreateDefaultSettingsInput } from '@/types/direction';
-import { OBJECTIVE_LABELS } from '@/types/direction';
+import { getDirectionObjectiveLabel } from '@/types/direction';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TooltipKeys } from '@/content/tooltips';
+import { useAppContext } from '@/context/AppContext';
 
 interface DirectionsCardProps {
   userAccountId: string | null;
@@ -23,8 +24,10 @@ interface DirectionsCardProps {
 }
 
 const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountId }) => {
+  const { platform } = useAppContext();
+  const directionsPlatform = platform === 'tiktok' ? 'tiktok' : 'facebook';
   const { directions, loading, createDirection, updateDirection, deleteDirection } =
-    useDirections(userAccountId, accountId);
+    useDirections(userAccountId, accountId, directionsPlatform);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -59,35 +62,44 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
   }, [userAccountId, directions, loading]);
 
   // Обработчик создания направления
-  const handleCreate = async (data: {
-    name: string;
-    objective: 'whatsapp' | 'instagram_traffic' | 'site_leads';
-    daily_budget_cents: number;
-    target_cpl_cents: number;
-    whatsapp_phone_number?: string;
-    adSettings: CreateDefaultSettingsInput;
-    capiSettings?: DirectionCapiSettings;
-  }) => {
+  const handleCreate = async (data: CreateDirectionFormData) => {
     console.log('[DirectionsCard] Создание направления с настройками:', data);
 
-    // Подготовка default_settings для API (без direction_id, он добавится на бэкенде)
-    const { direction_id, campaign_goal, ...settingsData } = data.adSettings;
+    const stripSettings = (settings?: CreateDefaultSettingsInput) => {
+      if (!settings) return undefined;
+      const { direction_id, campaign_goal, ...rest } = settings;
+      return rest;
+    };
+
+    const sharedSettings = stripSettings(data.adSettings);
+    const facebookSettings = stripSettings(data.facebookAdSettings);
+    const tiktokSettings = stripSettings(data.tiktokAdSettings);
 
     // Создаём направление + настройки одним запросом
     const result = await createDirection({
       name: data.name,
-      objective: data.objective,
-      daily_budget_cents: data.daily_budget_cents,
-      target_cpl_cents: data.target_cpl_cents,
-      whatsapp_phone_number: data.whatsapp_phone_number, // Передаем WhatsApp номер
-      default_settings: settingsData, // Передаём настройки в том же запросе
-      // CAPI settings (direction-level)
-      capi_enabled: data.capiSettings?.capi_enabled,
-      capi_source: data.capiSettings?.capi_source,
-      capi_crm_type: data.capiSettings?.capi_crm_type,
-      capi_interest_fields: data.capiSettings?.capi_interest_fields,
-      capi_qualified_fields: data.capiSettings?.capi_qualified_fields,
-      capi_scheduled_fields: data.capiSettings?.capi_scheduled_fields,
+      platform: data.platform,
+      ...(data.objective && { objective: data.objective }),
+      ...(data.optimization_level && { optimization_level: data.optimization_level }),
+      ...(data.use_instagram !== undefined && { use_instagram: data.use_instagram }),
+      ...(data.daily_budget_cents !== undefined && { daily_budget_cents: data.daily_budget_cents }),
+      ...(data.target_cpl_cents !== undefined && { target_cpl_cents: data.target_cpl_cents }),
+      ...(data.whatsapp_phone_number && { whatsapp_phone_number: data.whatsapp_phone_number }),
+      ...(data.tiktok_objective && { tiktok_objective: data.tiktok_objective }),
+      ...(data.tiktok_daily_budget !== undefined && { tiktok_daily_budget: data.tiktok_daily_budget }),
+      ...(data.tiktok_target_cpl_kzt !== undefined && { tiktok_target_cpl_kzt: data.tiktok_target_cpl_kzt }),
+      ...(facebookSettings && { facebook_default_settings: facebookSettings }),
+      ...(tiktokSettings && { tiktok_default_settings: tiktokSettings }),
+      ...(sharedSettings && !facebookSettings && !tiktokSettings && { default_settings: sharedSettings }),
+      ...(data.capiSettings && {
+        // CAPI settings (direction-level)
+        capi_enabled: data.capiSettings.capi_enabled,
+        capi_source: data.capiSettings.capi_source,
+        capi_crm_type: data.capiSettings.capi_crm_type,
+        capi_interest_fields: data.capiSettings.capi_interest_fields,
+        capi_qualified_fields: data.capiSettings.capi_qualified_fields,
+        capi_scheduled_fields: data.capiSettings.capi_scheduled_fields,
+      }),
     });
 
     if (!result.success || !result.direction) {
@@ -97,7 +109,8 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
 
     // Проверяем, созданы ли настройки
     if (result.default_settings) {
-      toast.success('Направление и настройки успешно созданы!');
+      const createdCount = result.directions?.length || 1;
+      toast.success(createdCount > 1 ? `Создано направлений: ${createdCount}` : 'Направление и настройки успешно созданы!');
     } else {
       toast.success('Направление создано!');
     }
@@ -106,8 +119,10 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
   // Обработчик редактирования направления
   const handleEdit = async (data: {
     name: string;
-    daily_budget_cents: number;
-    target_cpl_cents: number;
+    daily_budget_cents?: number;
+    target_cpl_cents?: number;
+    tiktok_daily_budget?: number;
+    tiktok_target_cpl_kzt?: number;
     is_active: boolean;
     whatsapp_phone_number?: string | null;
     capiSettings?: EditDirectionCapiSettings;
@@ -117,10 +132,12 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
     // Подготавливаем данные для обновления, включая CAPI настройки
     const updatePayload = {
       name: data.name,
-      daily_budget_cents: data.daily_budget_cents,
-      target_cpl_cents: data.target_cpl_cents,
       is_active: data.is_active,
-      whatsapp_phone_number: data.whatsapp_phone_number,
+      ...(data.daily_budget_cents !== undefined && { daily_budget_cents: data.daily_budget_cents }),
+      ...(data.target_cpl_cents !== undefined && { target_cpl_cents: data.target_cpl_cents }),
+      ...(data.tiktok_daily_budget !== undefined && { tiktok_daily_budget: data.tiktok_daily_budget }),
+      ...(data.tiktok_target_cpl_kzt !== undefined && { tiktok_target_cpl_kzt: data.tiktok_target_cpl_kzt }),
+      ...(data.whatsapp_phone_number !== undefined && { whatsapp_phone_number: data.whatsapp_phone_number }),
       // CAPI settings
       ...(data.capiSettings && {
         capi_enabled: data.capiSettings.capi_enabled,
@@ -152,6 +169,34 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
       toast.error(result.error || 'Не удалось удалить направление');
       throw new Error(result.error);
     }
+  };
+
+  const formatUsd = (amount: number) => new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+
+  const formatKzt = (amount: number) => new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'KZT',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+
+  const getBudgetLine = (direction: Direction) => {
+    if (direction.platform === 'tiktok') {
+      const budgetLabel = direction.tiktok_daily_budget != null
+        ? formatKzt(direction.tiktok_daily_budget)
+        : '—';
+      const target = direction.tiktok_target_cpl_kzt ?? direction.tiktok_target_cpl;
+      const targetLabel = target != null ? formatKzt(target) : '—';
+      const objective = direction.tiktok_objective || 'traffic';
+      const targetSuffix = objective === 'traffic' ? 'клик' : 'лид';
+      return `${budgetLabel}/день • цель: ${targetLabel}/${targetSuffix}`;
+    }
+    return `${formatUsd(direction.daily_budget_cents / 100)}/день • ${formatUsd(direction.target_cpl_cents / 100)}/заявка`;
   };
 
   return (
@@ -215,14 +260,18 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
                           {direction.name}
                         </h3>
                         <span className="text-xs text-muted-foreground flex-shrink-0">
-                          ({OBJECTIVE_LABELS[direction.objective]})
+                          ({getDirectionObjectiveLabel(direction)})
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        ${(direction.daily_budget_cents / 100).toFixed(2)}/день •{' '}
-                        ${(direction.target_cpl_cents / 100).toFixed(2)}/заявка
+                        {getBudgetLine(direction)}
                       </div>
-                      {direction.fb_campaign_id && (
+                      {direction.platform === 'tiktok' && direction.tiktok_campaign_id && (
+                        <div className="text-xs text-muted-foreground font-mono">
+                          Campaign ID: {direction.tiktok_campaign_id}
+                        </div>
+                      )}
+                      {direction.platform !== 'tiktok' && direction.fb_campaign_id && (
                         <div className="text-xs text-muted-foreground font-mono">
                           Campaign ID: {direction.fb_campaign_id}
                         </div>
@@ -280,7 +329,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
                   </div>
                   
                   {/* Pre-created Ad Sets Management (только для use_existing режима) */}
-                  {adsetMode === 'use_existing' && userAccountId && (
+                  {platform !== 'tiktok' && adsetMode === 'use_existing' && userAccountId && (
                     <div className="mt-4 pt-4 border-t">
                       <DirectionAdSets 
                         directionId={direction.id} 
@@ -314,6 +363,7 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
         onOpenChange={setCreateDialogOpen}
         onSubmit={handleCreate}
         userAccountId={userAccountId || ''}
+        defaultPlatform={directionsPlatform}
       />
 
       <EditDirectionDialog
@@ -334,4 +384,3 @@ const DirectionsCard: React.FC<DirectionsCardProps> = ({ userAccountId, accountI
 };
 
 export default DirectionsCard;
-
