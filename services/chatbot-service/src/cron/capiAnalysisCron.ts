@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { createLogger } from '../lib/logger.js';
 import {
@@ -113,37 +114,46 @@ async function getDialogsForCapiAnalysis(): Promise<DialogForAnalysis[]> {
  * Uses processDialogForCapi from qualificationAgent which handles both WhatsApp and CRM sources
  */
 async function processDialogForCapiCron(
-  dialogInfo: DialogForAnalysis
+  dialogInfo: DialogForAnalysis,
+  correlationId: string
 ): Promise<{ processed: boolean; skipped: boolean; error?: string }> {
   const startTime = Date.now();
 
   try {
     log.info({
+      correlationId,
       dialogId: dialogInfo.id,
       contactPhone: dialogInfo.contact_phone,
       directionId: dialogInfo.direction_id,
       directionName: dialogInfo.direction_name,
       incomingCount: dialogInfo.incoming_count,
       lastMessage: dialogInfo.last_message,
+      action: 'capi_cron_dialog_start',
     }, 'Starting CAPI analysis for dialog');
 
     // Get full dialog data with messages
     const dialog = await getDialogForCapi(dialogInfo.instance_name, dialogInfo.contact_phone);
 
     if (!dialog) {
+      const durationMs = Date.now() - startTime;
       log.warn({
+        correlationId,
         dialogId: dialogInfo.id,
         contactPhone: dialogInfo.contact_phone,
         instanceName: dialogInfo.instance_name,
+        durationMs,
+        action: 'capi_cron_dialog_not_found',
       }, 'Dialog not found in getDialogForCapi - may have been deleted');
       return { processed: false, skipped: true, error: 'dialog_not_found' };
     }
 
     log.debug({
+      correlationId,
       dialogId: dialog.id,
       messagesCount: dialog.messages?.length || 0,
       hasCtwaClid: !!dialog.ctwa_clid,
       hasLeadId: !!dialog.lead_id,
+      action: 'capi_cron_dialog_loaded',
     }, 'Dialog data loaded, starting processDialogForCapi');
 
     // Use existing processDialogForCapi which handles:
@@ -151,15 +161,17 @@ async function processDialogForCapiCron(
     // - WhatsApp source: AI analysis via GPT-4o-mini
     // - CRM source: field matching from leads table
     // - Sending CAPI events atomically
-    await processDialogForCapi(dialog);
+    await processDialogForCapi(dialog, correlationId);
 
     const durationMs = Date.now() - startTime;
 
     log.info({
+      correlationId,
       dialogId: dialogInfo.id,
       contactPhone: dialogInfo.contact_phone,
       directionName: dialogInfo.direction_name,
       durationMs,
+      action: 'capi_cron_dialog_complete',
     }, 'CAPI analysis completed for dialog');
 
     return { processed: true, skipped: false };
@@ -168,12 +180,14 @@ async function processDialogForCapiCron(
     const durationMs = Date.now() - startTime;
 
     log.error({
+      correlationId,
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
       dialogId: dialogInfo.id,
       contactPhone: dialogInfo.contact_phone,
       directionId: dialogInfo.direction_id,
       durationMs,
+      action: 'capi_cron_dialog_error',
     }, 'Error processing dialog for CAPI cron');
 
     return { processed: false, skipped: false, error: errorMessage };
@@ -190,8 +204,15 @@ function sleep(ms: number): Promise<void> {
 /**
  * Core processing logic shared between scheduled and manual runs
  */
-async function processDialogsBatch(dialogs: DialogForAnalysis[]): Promise<CronStats> {
+async function processDialogsBatch(dialogs: DialogForAnalysis[]): Promise<CronStats & { batchCorrelationId: string }> {
+  const batchCorrelationId = randomUUID();
   const startTime = Date.now();
+
+  log.info({
+    batchCorrelationId,
+    dialogCount: dialogs.length,
+    action: 'capi_batch_start',
+  }, 'Starting CAPI batch processing');
 
   let processed = 0;
   let skipped = 0;
@@ -200,14 +221,19 @@ async function processDialogsBatch(dialogs: DialogForAnalysis[]): Promise<CronSt
   for (let i = 0; i < dialogs.length; i++) {
     const dialog = dialogs[i];
     const progress = `${i + 1}/${dialogs.length}`;
+    // Each dialog gets a unique correlationId derived from batch
+    const dialogCorrelationId = `${batchCorrelationId.slice(0, 8)}-${i + 1}`;
 
     log.debug({
+      batchCorrelationId,
+      dialogCorrelationId,
       dialogId: dialog.id,
       contactPhone: dialog.contact_phone,
       progress,
-    }, 'Processing dialog');
+      action: 'capi_batch_processing_dialog',
+    }, 'Processing dialog in batch');
 
-    const result = await processDialogForCapiCron(dialog);
+    const result = await processDialogForCapiCron(dialog, dialogCorrelationId);
 
     if (result.processed) processed++;
     if (result.skipped) skipped++;
@@ -221,7 +247,19 @@ async function processDialogsBatch(dialogs: DialogForAnalysis[]): Promise<CronSt
 
   const durationMs = Date.now() - startTime;
 
+  log.info({
+    batchCorrelationId,
+    found: dialogs.length,
+    processed,
+    skipped,
+    errors,
+    durationMs,
+    avgTimePerDialog: dialogs.length > 0 ? Math.round(durationMs / dialogs.length) : 0,
+    action: 'capi_batch_complete',
+  }, 'CAPI batch processing completed');
+
   return {
+    batchCorrelationId,
     found: dialogs.length,
     processed,
     skipped,

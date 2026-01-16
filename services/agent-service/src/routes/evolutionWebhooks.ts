@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabase.js';
 import { resolveCreativeAndDirection } from '../lib/creativeResolver.js';
 import { matchMessageToDirection } from '../lib/textMatcher.js';
@@ -558,16 +559,33 @@ async function sendCapiInterestEvent(
   instanceName: string,
   contactPhone: string
 ): Promise<void> {
+  const correlationId = randomUUID();
+  const startTime = Date.now();
+
+  app.log.info({
+    correlationId,
+    instanceName,
+    contactPhone,
+    action: 'capi_interest_start'
+  }, 'Starting CAPI Interest event request');
+
   try {
     const chatbotUrl = process.env.CHATBOT_SERVICE_URL || 'http://chatbot-service:8083';
 
     const response = await fetch(`${chatbotUrl}/capi/interest-event`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Correlation-ID': correlationId
+      },
       body: JSON.stringify({ instanceName, contactPhone })
     });
 
+    const durationMs = Date.now() - startTime;
+
     if (response.ok) {
+      const responseData = await response.json() as { success: boolean; eventId?: string };
+
       // Пометить что отправили
       await supabase
         .from('dialog_analysis')
@@ -575,13 +593,37 @@ async function sendCapiInterestEvent(
         .eq('instance_name', instanceName)
         .eq('contact_phone', contactPhone);
 
-      app.log.info({ instanceName, contactPhone }, 'CAPI Interest event sent successfully');
+      app.log.info({
+        correlationId,
+        instanceName,
+        contactPhone,
+        durationMs,
+        eventId: responseData.eventId,
+        action: 'capi_interest_success'
+      }, 'CAPI Interest event sent successfully');
     } else {
       const errorText = await response.text();
-      app.log.error({ status: response.status, error: errorText }, 'CAPI Interest event failed');
+      app.log.error({
+        correlationId,
+        instanceName,
+        contactPhone,
+        status: response.status,
+        error: errorText,
+        durationMs,
+        action: 'capi_interest_failed'
+      }, 'CAPI Interest event failed');
     }
   } catch (error: any) {
-    app.log.error({ error: error.message }, 'Failed to send CAPI Interest event');
+    const durationMs = Date.now() - startTime;
+    app.log.error({
+      correlationId,
+      instanceName,
+      contactPhone,
+      error: error.message,
+      stack: error.stack,
+      durationMs,
+      action: 'capi_interest_error'
+    }, 'Failed to send CAPI Interest event');
   }
 }
 

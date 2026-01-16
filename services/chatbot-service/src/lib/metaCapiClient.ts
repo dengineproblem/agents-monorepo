@@ -109,6 +109,9 @@ export interface CapiEventParams {
   // Optional event data
   eventSourceUrl?: string;
   customData?: Record<string, unknown>;
+
+  // Tracing
+  correlationId?: string;  // For cross-service tracing
 }
 
 export interface CapiResponse {
@@ -255,9 +258,13 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     directionId,
     eventSourceUrl,
     customData,
+    correlationId,
   } = params;
 
+  const requestStartedAt = new Date();
+
   log.info({
+    correlationId,
     pixelId,
     eventName,
     eventLevel,
@@ -265,29 +272,34 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     hasEmail: !!email,
     dialogAnalysisId,
     circuitBreakerState: circuitBreaker.getState(),
+    action: 'capi_send_start',
   }, 'Sending CAPI event');
 
   // Check circuit breaker
   if (circuitBreaker.isOpen()) {
     log.warn({
+      correlationId,
       pixelId,
       eventName,
       ...circuitBreaker.getState(),
+      action: 'capi_circuit_breaker_open',
     }, 'Circuit breaker is open, skipping CAPI event');
     return { success: false, error: 'Circuit breaker is open - too many recent failures' };
   }
 
   // Validate required params
   if (!pixelId || !accessToken) {
-    log.warn({ pixelId, hasAccessToken: !!accessToken }, 'Missing pixelId or accessToken, skipping CAPI event');
+    log.warn({ correlationId, pixelId, hasAccessToken: !!accessToken, action: 'capi_missing_params' }, 'Missing pixelId or accessToken, skipping CAPI event');
     return { success: false, error: 'Missing pixelId or accessToken' };
   }
 
   // Need at least one user identifier
   if (!phone && !email) {
-    log.warn({}, 'No user data (phone or email) provided, skipping CAPI event');
+    log.warn({ correlationId, action: 'capi_no_user_data' }, 'No user data (phone or email) provided, skipping CAPI event');
     return { success: false, error: 'No user data provided' };
   }
+
+  let retryCount = 0;
 
   try {
     // Generate unique event ID
@@ -337,8 +349,12 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       eventPayload.event_source_url = eventSourceUrl;
     }
 
+    // Request payload for logging (without access_token)
+    const requestPayload = { data: [eventPayload] };
+
     // Send to CAPI with retry and timeout
     const url = `${CAPI_BASE_URL}/${pixelId}/events`;
+    const fetchStartTime = Date.now();
 
     const response = await fetchWithRetry(url, {
       method: 'POST',
@@ -351,17 +367,22 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       }),
     });
 
+    const requestDurationMs = Date.now() - fetchStartTime;
     const responseData = await response.json() as MetaCapiResponse;
 
     if (!response.ok) {
       circuitBreaker.recordFailure();
 
       log.error({
+        correlationId,
         pixelId,
         eventName,
         status: response.status,
         error: responseData,
+        requestDurationMs,
+        retryCount,
         circuitBreakerState: circuitBreaker.getState(),
+        action: 'capi_send_failed',
       }, 'CAPI request failed');
 
       // Log to database with retry
@@ -380,6 +401,11 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
         capiStatus: 'error',
         capiError: JSON.stringify(responseData),
         capiResponse: responseData,
+        correlationId,
+        requestStartedAt,
+        requestDurationMs,
+        retryCount,
+        requestPayload,
       });
 
       return {
@@ -392,11 +418,15 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
     circuitBreaker.recordSuccess();
 
     log.info({
+      correlationId,
       pixelId,
       eventName,
       eventLevel,
       eventId,
       eventsReceived: responseData.events_received,
+      requestDurationMs,
+      retryCount,
+      action: 'capi_send_success',
     }, 'CAPI event sent successfully');
 
     // Log to database with retry
@@ -414,6 +444,11 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       contactPhone: phone,
       capiStatus: 'success',
       capiResponse: responseData,
+      correlationId,
+      requestStartedAt,
+      requestDurationMs,
+      retryCount,
+      requestPayload,
     });
 
     return {
@@ -424,15 +459,19 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
   } catch (error) {
     circuitBreaker.recordFailure();
 
+    const totalDurationMs = Date.now() - requestStartedAt.getTime();
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorName = error instanceof Error ? error.name : 'UnknownError';
 
     log.error({
+      correlationId,
       pixelId,
       eventName,
       error: errorMessage,
       errorName,
+      totalDurationMs,
       circuitBreakerState: circuitBreaker.getState(),
+      action: 'capi_send_error',
     }, 'Error sending CAPI event');
 
     // Log to database with retry
@@ -449,6 +488,10 @@ export async function sendCapiEvent(params: CapiEventParams): Promise<CapiRespon
       contactPhone: phone,
       capiStatus: 'error',
       capiError: `${errorName}: ${errorMessage}`,
+      correlationId,
+      requestStartedAt,
+      requestDurationMs: totalDurationMs,
+      retryCount,
     });
 
     return {
@@ -473,6 +516,12 @@ interface LogCapiEventParams {
   capiStatus: 'success' | 'error' | 'skipped';
   capiError?: string;
   capiResponse?: unknown;
+  // Tracing and timing
+  correlationId?: string;
+  requestStartedAt?: Date;
+  requestDurationMs?: number;
+  retryCount?: number;
+  requestPayload?: unknown;
 }
 
 /**
@@ -494,6 +543,12 @@ async function logCapiEventWithRetry(params: LogCapiEventParams, retries = 2): P
     capi_status: params.capiStatus,
     capi_error: params.capiError || null,
     capi_response: params.capiResponse || null,
+    // Tracing and timing fields
+    correlation_id: params.correlationId || null,
+    request_started_at: params.requestStartedAt?.toISOString() || null,
+    request_duration_ms: params.requestDurationMs ?? null,
+    retry_count: params.retryCount ?? 0,
+    request_payload: params.requestPayload || null,
   };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -509,11 +564,13 @@ async function logCapiEventWithRetry(params: LogCapiEventParams, retries = 2): P
           attempt: attempt + 1,
           eventName: params.eventName,
           eventLevel: params.eventLevel,
+          correlationId: params.correlationId,
         }, 'Failed to log CAPI event to database after retries');
       } else {
         log.warn({
           attempt: attempt + 1,
           eventName: params.eventName,
+          correlationId: params.correlationId,
         }, 'Failed to log CAPI event, retrying...');
         await new Promise(resolve => setTimeout(resolve, 500));
       }

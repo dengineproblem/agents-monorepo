@@ -311,26 +311,42 @@ function formatMessagesForAnalysis(
  * Analyze dialog and determine qualification level
  */
 export async function analyzeQualification(
-  dialog: DialogData
+  dialog: DialogData,
+  correlationId?: string
 ): Promise<QualificationResult | null> {
+  const analysisStartTime = Date.now();
+
   log.info({
+    correlationId,
     dialogId: dialog.id,
     contactPhone: dialog.contact_phone,
     messageCount: dialog.messages?.length || 0,
     incomingCount: dialog.incoming_count,
+    action: 'qualification_start',
   }, 'Starting qualification analysis');
 
   // Get qualification prompt (prompt2)
+  const promptStartTime = Date.now();
   const qualificationPrompt = await getQualificationPrompt(
     dialog.user_account_id,
     dialog.account_id
   );
+  const promptDurationMs = Date.now() - promptStartTime;
 
   if (!qualificationPrompt) {
     log.warn({
+      correlationId,
       dialogId: dialog.id,
       userAccountId: dialog.user_account_id,
+      promptDurationMs,
     }, 'No qualification prompt (prompt2) found, using default');
+  } else {
+    log.debug({
+      correlationId,
+      dialogId: dialog.id,
+      promptDurationMs,
+      action: 'qualification_prompt_loaded',
+    }, 'Qualification prompt loaded');
   }
 
   try {
@@ -362,6 +378,8 @@ ${formatMessagesForAnalysis(dialog.messages)}
 
 ВАЖНО: Возвращай ТОЛЬКО JSON, без дополнительного текста.`;
 
+    const openaiStartTime = Date.now();
+
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -373,28 +391,48 @@ ${formatMessagesForAnalysis(dialog.messages)}
       response_format: { type: 'json_object' },
     });
 
+    const openaiDurationMs = Date.now() - openaiStartTime;
+    const totalDurationMs = Date.now() - analysisStartTime;
+
     const content = response.choices[0]?.message?.content;
 
     if (!content) {
-      log.error({ dialogId: dialog.id }, 'OpenAI returned empty response');
+      log.error({
+        correlationId,
+        dialogId: dialog.id,
+        openaiDurationMs,
+        totalDurationMs,
+        action: 'qualification_empty_response',
+      }, 'OpenAI returned empty response');
       return null;
     }
 
     const result = JSON.parse(content) as QualificationResult;
 
     log.info({
+      correlationId,
       dialogId: dialog.id,
       isInterested: result.is_interested,
       isQualified: result.is_qualified,
       isScheduled: result.is_scheduled,
+      confidence: result.confidence,
       reasoning: result.reasoning,
+      openaiDurationMs,
+      totalDurationMs,
+      tokensUsed: response.usage?.total_tokens,
+      action: 'qualification_complete',
     }, 'Qualification analysis complete');
 
     return result;
   } catch (error) {
+    const totalDurationMs = Date.now() - analysisStartTime;
+
     log.error({
+      correlationId,
       error: error instanceof Error ? error.message : String(error),
       dialogId: dialog.id,
+      totalDurationMs,
+      action: 'qualification_error',
     }, 'Error in qualification analysis');
     return null;
   }
@@ -433,15 +471,18 @@ function getDefaultQualificationPrompt(): string {
  * Now uses direction-level CAPI settings to determine behavior
  */
 export async function processDialogForCapi(
-  dialog: DialogData
+  dialog: DialogData,
+  correlationId?: string
 ): Promise<void> {
   log.info({
+    correlationId,
     dialogId: dialog.id,
     contactPhone: dialog.contact_phone,
     directionId: dialog.direction_id,
     alreadySentInterest: dialog.capi_interest_sent,
     alreadySentQualified: dialog.capi_qualified_sent,
     alreadySentScheduled: dialog.capi_scheduled_sent,
+    action: 'process_dialog_for_capi_start',
   }, 'Processing dialog for CAPI');
 
   // Quick check: if all events already sent, skip
@@ -511,10 +552,10 @@ export async function processDialogForCapi(
     if (crmStatus.isScheduled) scheduledSource = crmStatus.source;
   } else {
     // WhatsApp mode: use LLM analysis
-    const llmResult = await analyzeQualification(dialog);
+    const llmResult = await analyzeQualification(dialog, correlationId);
 
     if (!llmResult) {
-      log.warn({ dialogId: dialog.id }, 'LLM qualification analysis failed');
+      log.warn({ correlationId, dialogId: dialog.id }, 'LLM qualification analysis failed');
     }
 
     const interestByCount = dialog.incoming_count >= INTEREST_MSG_THRESHOLD;
@@ -572,28 +613,34 @@ export async function processDialogForCapi(
   // Level 3: Schedule
   if (result.is_scheduled && !dialog.capi_scheduled_sent) {
     log.info({
+      correlationId,
       dialogId: dialog.id,
       source: scheduledSource,
+      action: 'capi_send_scheduled_start',
     }, 'Sending CAPI Schedule event');
-    await sendCapiEventForLevel(dialog, 3, pixelId, accessToken, result);
+    await sendCapiEventForLevel(dialog, 3, pixelId, accessToken, result, correlationId);
   }
 
   // Level 2: Qualified
   if (result.is_qualified && !dialog.capi_qualified_sent) {
     log.info({
+      correlationId,
       dialogId: dialog.id,
       source: qualifiedSource,
+      action: 'capi_send_qualified_start',
     }, 'Sending CAPI Qualified event');
-    await sendCapiEventForLevel(dialog, 2, pixelId, accessToken, result);
+    await sendCapiEventForLevel(dialog, 2, pixelId, accessToken, result, correlationId);
   }
 
   // Level 1: Interested
   if (result.is_interested && !dialog.capi_interest_sent) {
     log.info({
+      correlationId,
       dialogId: dialog.id,
       source: interestSource,
+      action: 'capi_send_interest_start',
     }, 'Sending CAPI Interest event');
-    await sendCapiEventForLevel(dialog, 1, pixelId, accessToken, result);
+    await sendCapiEventForLevel(dialog, 1, pixelId, accessToken, result, correlationId);
   }
 }
 
@@ -606,7 +653,8 @@ async function sendCapiEventForLevel(
   level: CapiEventLevel,
   pixelId: string,
   accessToken: string,
-  result?: QualificationResult
+  result?: QualificationResult,
+  correlationId?: string
 ): Promise<void> {
   const eventName = {
     1: CAPI_EVENTS.INTEREST,
@@ -635,10 +683,12 @@ async function sendCapiEventForLevel(
   };
 
   log.info({
+    correlationId,
     dialogId: dialog.id,
     level,
     eventName,
     pixelId,
+    action: 'capi_event_atomic_start',
   }, 'Sending CAPI event (atomic)');
 
   // Use atomic send to prevent duplicate events
@@ -654,20 +704,25 @@ async function sendCapiEventForLevel(
     userAccountId: dialog.user_account_id,
     directionId: dialog.direction_id,
     customData,
+    correlationId,
   });
 
   if (response.success) {
     log.info({
+      correlationId,
       dialogId: dialog.id,
       level,
       eventId: response.eventId,
+      action: 'capi_event_atomic_success',
     }, 'CAPI event sent successfully');
   } else {
     // Could be already sent (dedup) or actual error
     log.info({
+      correlationId,
       dialogId: dialog.id,
       level,
       error: response.error,
+      action: 'capi_event_atomic_skipped',
     }, 'CAPI event not sent');
   }
 }

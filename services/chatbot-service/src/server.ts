@@ -304,6 +304,10 @@ app.post('/capi/resend', async (request, reply) => {
 // Вызывается из agent-service когда лид достиг порога capi_msg_count
 // Qualified и Scheduled отправляются через AI анализ в processDialogForCapi
 app.post('/capi/interest-event', async (request, reply) => {
+  // Получаем correlationId из header или генерируем новый
+  const correlationId = (request.headers['x-correlation-id'] as string) || randomUUID();
+  const startTime = Date.now();
+
   try {
     const { instanceName, contactPhone } = request.body as {
       instanceName: string;
@@ -314,7 +318,12 @@ app.post('/capi/interest-event', async (request, reply) => {
       return reply.status(400).send({ error: 'Missing required fields: instanceName, contactPhone' });
     }
 
-    app.log.info({ instanceName, contactPhone }, 'Interest CAPI event request');
+    app.log.info({
+      correlationId,
+      instanceName,
+      contactPhone,
+      action: 'capi_interest_received'
+    }, 'Interest CAPI event request received');
 
     const { getDialogForCapi } = await import('./lib/qualificationAgent.js');
     const { getDirectionPixelInfo, sendCapiEventAtomic, CAPI_EVENTS } = await import('./lib/metaCapiClient.js');
@@ -323,18 +332,24 @@ app.post('/capi/interest-event', async (request, reply) => {
     const dialog = await getDialogForCapi(instanceName, contactPhone);
 
     if (!dialog) {
-      return reply.status(404).send({ error: 'Dialog not found' });
+      const durationMs = Date.now() - startTime;
+      app.log.warn({ correlationId, instanceName, contactPhone, durationMs, action: 'capi_interest_not_found' }, 'Dialog not found');
+      return reply.status(404).send({ error: 'Dialog not found', correlationId });
     }
 
     if (!dialog.direction_id) {
-      return reply.status(400).send({ error: 'No direction_id - cannot send CAPI' });
+      const durationMs = Date.now() - startTime;
+      app.log.warn({ correlationId, instanceName, contactPhone, durationMs, action: 'capi_interest_no_direction' }, 'No direction_id');
+      return reply.status(400).send({ error: 'No direction_id - cannot send CAPI', correlationId });
     }
 
     // Получить pixel и access_token
     const pixelInfo = await getDirectionPixelInfo(dialog.direction_id);
 
     if (!pixelInfo.pixelId || !pixelInfo.accessToken) {
-      return reply.status(400).send({ error: 'No pixel or access_token configured for direction' });
+      const durationMs = Date.now() - startTime;
+      app.log.warn({ correlationId, directionId: dialog.direction_id, durationMs, action: 'capi_interest_no_pixel' }, 'No pixel or access_token');
+      return reply.status(400).send({ error: 'No pixel or access_token configured for direction', correlationId });
     }
 
     // Получить lead_id для логов
@@ -357,29 +372,46 @@ app.post('/capi/interest-event', async (request, reply) => {
       leadId: leadRecord?.id,
       userAccountId: dialog.user_account_id,
       directionId: dialog.direction_id,
+      correlationId,  // Передаём для трассировки
     });
+
+    const durationMs = Date.now() - startTime;
 
     if (response.success) {
       app.log.info({
+        correlationId,
         contactPhone,
         dialogId: dialog.id,
         directionId: dialog.direction_id,
+        eventId: response.eventId,
+        durationMs,
+        action: 'capi_interest_success'
       }, 'Interest CAPI event (ViewContent) sent successfully');
 
-      return reply.send({ success: true, event: 'ViewContent', eventId: response.eventId });
+      return reply.send({ success: true, event: 'ViewContent', eventId: response.eventId, correlationId });
     } else {
       app.log.warn({
+        correlationId,
         contactPhone,
         dialogId: dialog.id,
         error: response.error,
+        durationMs,
+        action: 'capi_interest_skipped'
       }, 'Interest CAPI event failed or already sent');
 
-      return reply.status(200).send({ success: false, error: response.error });
+      return reply.status(200).send({ success: false, error: response.error, correlationId });
     }
 
   } catch (error: any) {
-    app.log.error({ error: error.message }, 'Error sending Interest CAPI event');
-    return reply.status(500).send({ error: error.message });
+    const durationMs = Date.now() - startTime;
+    app.log.error({
+      correlationId,
+      error: error.message,
+      stack: error.stack,
+      durationMs,
+      action: 'capi_interest_error'
+    }, 'Error sending Interest CAPI event');
+    return reply.status(500).send({ error: error.message, correlationId });
   }
 });
 
