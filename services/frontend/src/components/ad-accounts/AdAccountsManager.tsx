@@ -557,7 +557,7 @@ function AccountForm({ formData, setFormData, selectedAccountId }: AccountFormPr
 
       const state = btoa(JSON.stringify(statePayload));
       const appId = import.meta.env.VITE_TIKTOK_APP_ID || '7457939636746919942';
-      const redirectUri = encodeURIComponent(`${window.location.origin}/oauth/tiktok/callback`);
+      const redirectUri = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
 
       const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=${appId}&state=${state}&redirect_uri=${redirectUri}`;
 

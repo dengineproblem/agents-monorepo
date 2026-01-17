@@ -1312,7 +1312,7 @@ const Profile: React.FC = () => {
                     } catch {
                       state = encodeURIComponent(JSON.stringify(statePayload));
                     }
-                    const redirect = encodeURIComponent(`${window.location.origin}/oauth/tiktok/callback`);
+                    const redirect = encodeURIComponent('https://performanteaiagency.com/oauth/callback');
                     const authUrl = `https://business-api.tiktok.com/portal/auth?app_id=7527489318093668353&state=${state}&redirect_uri=${redirect}`;
                     window.open(authUrl, '_blank', 'noopener,noreferrer');
                   }
